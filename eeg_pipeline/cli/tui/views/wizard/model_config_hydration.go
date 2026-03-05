@@ -681,6 +681,252 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.behaviorFeatureRegistryClassifiersJSON = s
 			}
 		}},
+		// RNG seed from project config
+		{key: "project.random_state", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok && m.rngSeed == 0 {
+				m.rngSeed = n
+			}
+		}},
+		// Global permutations (statistics-level)
+		{key: "behavior_analysis.statistics.n_permutations", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.nPermutations = n
+			}
+		}},
+		// Output options
+		{key: "behavior_analysis.output.also_save_csv", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.alsoSaveCsv = b
+			}
+		}},
+		{key: "behavior_analysis.output.overwrite", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.behaviorOverwrite = b
+			}
+		}},
+		// Regression — full set
+		{key: "behavior_analysis.regression.outcome", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "predictor_residual":
+					m.regressionOutcome = 1
+				case "predictor":
+					m.regressionOutcome = 2
+				default:
+					m.regressionOutcome = 0
+				}
+			}
+		}},
+		{key: "behavior_analysis.regression.include_predictor", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludePredictor = b
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_control", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "outcome_hat":
+					m.regressionTempControl = 1
+				case "spline":
+					m.regressionTempControl = 2
+				default:
+					m.regressionTempControl = 0
+				}
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_spline.n_knots", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.regressionTempSplineKnots = n
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_spline.quantile_low", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.regressionTempSplineQlow = f
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_spline.quantile_high", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.regressionTempSplineQhigh = f
+			}
+		}},
+		{key: "behavior_analysis.regression.predictor_spline.min_samples", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.regressionTempSplineMinN = n
+			}
+		}},
+		{key: "behavior_analysis.regression.include_trial_order", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludeTrialOrder = b
+			}
+		}},
+		{key: "behavior_analysis.regression.include_prev_terms", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludePrev = b
+			}
+		}},
+		{key: "behavior_analysis.regression.include_run_block", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludeRunBlock = b
+			}
+		}},
+		{key: "behavior_analysis.regression.include_interaction", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionIncludeInteraction = b
+			}
+		}},
+		{key: "behavior_analysis.regression.standardize", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.regressionStandardize = b
+			}
+		}},
+		{key: "behavior_analysis.regression.min_samples", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.regressionMinSamples = n
+			}
+		}},
+		{key: "behavior_analysis.regression.max_features", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.regressionMaxFeatures = n
+			}
+		}},
+		// Condition — missing fields
+		{key: "behavior_analysis.condition.min_trials_per_condition", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.conditionMinTrials = n
+			}
+		}},
+		{key: "behavior_analysis.condition.effect_size_threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.conditionEffectThreshold = f
+			}
+		}},
+		// Temporal — full set
+		{key: "behavior_analysis.temporal.time_resolution_ms", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.temporalResolutionMs = n
+			}
+		}},
+		{key: "behavior_analysis.temporal.smooth_window_ms", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.temporalSmoothMs = n
+			}
+		}},
+		{key: "behavior_analysis.temporal.time_range_ms", apply: func(v interface{}) {
+			raw, ok := v.([]interface{})
+			if !ok || len(raw) != 2 {
+				return
+			}
+			if lo, ok := asInt(raw[0]); ok {
+				m.temporalTimeMinMs = lo
+			}
+			if hi, ok := asInt(raw[1]); ok {
+				m.temporalTimeMaxMs = hi
+			}
+		}},
+		{key: "behavior_analysis.temporal.split_by_condition", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalSplitByCondition = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.condition_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.temporalConditionColumn = strings.TrimSpace(s)
+			}
+		}},
+		{key: "behavior_analysis.temporal.condition_values", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.temporalConditionValues = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "behavior_analysis.temporal.include_roi_averages", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalIncludeROIAverages = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.include_tf_grid", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalIncludeTFGrid = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.features.power", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalFeaturePowerEnabled = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.features.itpc", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalFeatureITPCEnabled = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.features.erds", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalFeatureERDSEnabled = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.itpc.baseline_correction", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.temporalITPCBaselineCorrection = b
+			}
+		}},
+		{key: "behavior_analysis.temporal.itpc.baseline_window", apply: func(v interface{}) {
+			raw, ok := v.([]interface{})
+			if !ok || len(raw) != 2 {
+				return
+			}
+			if lo, ok := asFloat(raw[0]); ok {
+				m.temporalITPCBaselineMin = lo
+			}
+			if hi, ok := asFloat(raw[1]); ok {
+				m.temporalITPCBaselineMax = hi
+			}
+		}},
+		{key: "behavior_analysis.temporal.erds.method", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				if strings.EqualFold(strings.TrimSpace(s), "zscore") {
+					m.temporalERDSMethod = 1
+				} else {
+					m.temporalERDSMethod = 0
+				}
+			}
+		}},
+		{key: "behavior_analysis.temporal.erds.baseline_window", apply: func(v interface{}) {
+			raw, ok := v.([]interface{})
+			if !ok || len(raw) != 2 {
+				return
+			}
+			if lo, ok := asFloat(raw[0]); ok {
+				m.temporalERDSBaselineMin = lo
+			}
+			if hi, ok := asFloat(raw[1]); ok {
+				m.temporalERDSBaselineMax = hi
+			}
+		}},
+		// Cluster — full set
+		{key: "behavior_analysis.cluster.forming_threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.clusterThreshold = f
+			}
+		}},
+		{key: "behavior_analysis.cluster.min_cluster_size", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterMinSize = n
+			}
+		}},
+		{key: "behavior_analysis.cluster.tail", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterTail = n
+			}
+		}},
+		{key: "behavior_analysis.cluster.condition_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.clusterConditionColumn = strings.TrimSpace(s)
+			}
+		}},
+		{key: "behavior_analysis.cluster.condition_values", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.clusterConditionValues = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
 		{key: "feature_engineering.sourcelocalization.subjects_dir", apply: func(v interface{}) {
 			if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
 				m.sourceLocSubjectsDir = s
