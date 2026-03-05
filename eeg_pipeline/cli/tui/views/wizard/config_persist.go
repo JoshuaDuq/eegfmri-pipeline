@@ -398,7 +398,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["conditionCompareColumn"] = m.conditionCompareColumn
 	cfg["conditionCompareValues"] = m.conditionCompareValues
 	cfg["conditionCompareLabels"] = m.conditionCompareLabels
-	cfg["conditionCompareWindows"] = m.conditionCompareWindows
 	cfg["conditionMinTrials"] = m.conditionMinTrials
 	cfg["conditionFailFast"] = m.conditionFailFast
 	cfg["conditionPrimaryUnit"] = m.conditionPrimaryUnit
@@ -480,7 +479,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["groupLevelControlRunEffects"] = m.groupLevelControlRunEffects
 	cfg["groupLevelMaxRunDummies"] = m.groupLevelMaxRunDummies
 	cfg["groupLevelAllowParametricFallback"] = m.groupLevelAllowParametricFallback
-
 	// Cluster tests
 	cfg["clusterThreshold"] = m.clusterThreshold
 	cfg["clusterMinSize"] = m.clusterMinSize
@@ -1547,7 +1545,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.conditionCompareColumn = getString("conditionCompareColumn", m.conditionCompareColumn)
 	m.conditionCompareValues = getString("conditionCompareValues", m.conditionCompareValues)
 	m.conditionCompareLabels = getString("conditionCompareLabels", m.conditionCompareLabels)
-	m.conditionCompareWindows = getString("conditionCompareWindows", m.conditionCompareWindows)
 	m.conditionMinTrials = getInt("conditionMinTrials", m.conditionMinTrials)
 	m.conditionFailFast = getBool("conditionFailFast", m.conditionFailFast)
 	m.conditionPrimaryUnit = getInt("conditionPrimaryUnit", m.conditionPrimaryUnit)

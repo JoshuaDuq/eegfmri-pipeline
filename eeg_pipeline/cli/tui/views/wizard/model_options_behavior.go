@@ -18,12 +18,10 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 	needsInferenceSettings := hasSelectedComputation(
 		"correlations", "multilevel_correlations", "predictor_residual",
-		"regression",
-		"condition", "temporal", "cluster",
+		"regression", "condition", "temporal", "cluster",
 	)
 
 	// ── Execution ─────────────────────────────────────────────────────────────
-	// RNG, parallelism, global thresholds — always relevant when any computation is selected.
 	if hasAnyComputation {
 		options = append(options, optBehaviorGroupGeneral)
 		if m.behaviorGroupGeneralExpanded {
@@ -32,8 +30,6 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// ── Inference & Shared Settings ───────────────────────────────────────────
-	// Correlation method, FDR, permutations, covariates, run adjustment, feature QC.
-	// Centralised so users configure shared inference settings once, not per-analysis.
 	if needsInferenceSettings {
 		options = append(options, optBehaviorGroupStats)
 		if m.behaviorGroupStatsExpanded {
@@ -45,7 +41,6 @@ func (m Model) getBehaviorOptions() []optionType {
 			options = append(options, optPredictorType)
 			// Canonical behavior columns used across analyses
 			options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
-			// Bootstrap — correlations
 			if hasSelectedComputation("correlations") {
 				options = append(options, optBootstrap)
 			}
@@ -74,7 +69,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optBehaviorFeatureRegistryPatternsJSON,
 				optBehaviorFeatureRegistryClassifiersJSON,
 			)
-			// Shared covariate controls
 			if hasSelectedComputation("regression", "correlations") {
 				options = append(options, optBehaviorSubCovariates, optControlTemp, optControlOrder)
 			}
@@ -98,22 +92,10 @@ func (m Model) getBehaviorOptions() []optionType {
 					optComputeBayesFactors,
 				)
 			}
-			// Feature QC
-			if hasSelectedComputation("correlations", "multilevel_correlations") {
-				options = append(options, optBehaviorSubFeatureQC, optFeatureQCEnabled)
-				if m.featureQCEnabled {
-					options = append(options,
-						optFeatureQCMaxMissingPct,
-						optFeatureQCMinVariance,
-						optFeatureQCCheckWithinRunVariance,
-					)
-				}
-			}
-
 		}
 	}
 
-	// Trial table section - only show if trial_table computation is selected
+	// Trial table
 	if m.isComputationSelected("trial_table") {
 		options = append(options, optBehaviorGroupTrialTable)
 		if m.behaviorGroupTrialTableExpanded {
@@ -151,7 +133,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Correlations section
+	// Correlations
 	if m.isComputationSelected("correlations") || m.isComputationSelected("multilevel_correlations") {
 		options = append(options, optBehaviorGroupCorrelations)
 		if m.behaviorGroupCorrelationsExpanded {
@@ -189,7 +171,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Regression section
+	// Regression
 	if m.isComputationSelected("regression") {
 		options = append(options, optBehaviorGroupRegression)
 		if m.behaviorGroupRegressionExpanded {
@@ -223,7 +205,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Condition section
+	// Condition
 	if m.isComputationSelected("condition") {
 		options = append(options, optBehaviorGroupCondition)
 		if m.behaviorGroupConditionExpanded {
@@ -231,12 +213,9 @@ func (m Model) getBehaviorOptions() []optionType {
 				optConditionCompareColumn,
 				optConditionCompareValues,
 				optConditionCompareLabels,
-				optConditionCompareWindows,
 				optConditionFeatures,
 				optConditionMinTrials,
 				optConditionPrimaryUnit,
-				optConditionWindowPrimaryUnit,
-				optConditionWindowMinSamples,
 				optConditionPermutationPrimary,
 				optConditionFailFast,
 				optConditionEffectThreshold,
@@ -245,7 +224,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Temporal section
+	// Temporal
 	if m.isComputationSelected("temporal") {
 		options = append(options, optBehaviorGroupTemporal)
 		if m.behaviorGroupTemporalExpanded {
@@ -265,7 +244,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTemporalIncludeROIAverages,
 				optTemporalIncludeTFGrid,
 			)
-			// Show ITPC-specific options when 'itpc' is selected in step 3 (feature selection)
 			if m.featureFileSelected["itpc"] {
 				options = append(options,
 					optBehaviorSubITPC,
@@ -274,7 +252,6 @@ func (m Model) getBehaviorOptions() []optionType {
 					optTemporalITPCBaselineMax,
 				)
 			}
-			// Show ERDS-specific options when 'erds' is selected in step 3 (feature selection)
 			if m.featureFileSelected["erds"] {
 				options = append(options,
 					optBehaviorSubERDS,
@@ -286,12 +263,11 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Cluster section
+	// Cluster
 	if m.isComputationSelected("cluster") {
 		options = append(options, optBehaviorGroupCluster)
 		if m.behaviorGroupClusterExpanded {
-			options = append(
-				options,
+			options = append(options,
 				optClusterThreshold,
 				optClusterMinSize,
 				optClusterTail,
@@ -302,7 +278,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Report section
+	// Report
 	if m.isComputationSelected("report") {
 		options = append(options, optBehaviorGroupReport)
 		if m.behaviorGroupReportExpanded {
@@ -319,7 +295,6 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// ── Advanced (Global Validation + System IO) ───────────────────────────────
-	// Rarely-touched settings merged into one group to reduce clutter.
 	if needsInferenceSettings {
 		options = append(options, optBehaviorGroupAdvanced)
 		if m.behaviorGroupAdvancedExpanded {

@@ -399,11 +399,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.conditionCompareColumn = strings.TrimSpace(s)
 			}
 		}},
-		{key: "behavior_analysis.condition.compare_windows", apply: func(v interface{}) {
-			if spec, ok := asListSpec(v); ok {
-				m.conditionCompareWindows = strings.Join(splitLooseList(spec), " ")
-			}
-		}},
 		{key: "behavior_analysis.condition.fail_fast", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.conditionFailFast = b
