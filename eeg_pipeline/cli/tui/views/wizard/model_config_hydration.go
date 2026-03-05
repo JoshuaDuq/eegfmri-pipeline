@@ -543,26 +543,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.featureSummariesEnabled = b
 			}
 		}},
-		{key: "behavior_analysis.feature_qc.enabled", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.featureQCEnabled = b
-			}
-		}},
-		{key: "behavior_analysis.feature_qc.max_missing_pct", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.featureQCMaxMissingPct = f
-			}
-		}},
-		{key: "behavior_analysis.feature_qc.min_variance", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.featureQCMinVariance = f
-			}
-		}},
-		{key: "behavior_analysis.feature_qc.check_within_run_variance", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.featureQCCheckWithinRunVariance = b
-			}
-		}},
 		{key: "behavior_analysis.predictor_residual.enabled", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.predictorResidualEnabled = b

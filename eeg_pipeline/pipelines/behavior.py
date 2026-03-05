@@ -31,7 +31,7 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     format_correlation_method_label,
     normalize_robust_correlation_method,
 )
-from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
+from eeg_pipeline.utils.analysis.stats.base import get_subject_seed
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.analysis.behavior.stage_catalog import (
@@ -51,10 +51,7 @@ SIGNIFICANCE_THRESHOLD = 0.05
 
 BEHAVIOR_COMPUTATION_FLAGS = list(COMPUTATION_TO_PIPELINE_ATTR)
 
-# Bundled computation aliases for cleaner TUI/CLI
-BEHAVIOR_COMPUTATION_BUNDLES = {
-    "validation": ["consistency", "influence"],
-}
+BEHAVIOR_COMPUTATION_BUNDLES: dict[str, list[str]] = {}
 
 
 def _resolve_behavior_computation_flags(
@@ -107,7 +104,6 @@ class BehaviorPipelineConfig:
     control_predictor: bool = True
     control_trial_order: bool = True
     compute_change_scores: bool = True
-    compute_predictor_sensitivity: bool = True
     compute_reliability: bool = False
     compute_bayes_factors: bool = False
     compute_loso_stability: bool = True
@@ -118,16 +114,8 @@ class BehaviorPipelineConfig:
     
     # Computation flags
     run_trial_table: bool = True
-    run_lag_features: bool = True
     run_predictor_residual: bool = True
-    run_predictor_models: bool = True
-    run_feature_qc: bool = False
     run_regression: bool = False
-    run_models: bool = False
-    run_stability: bool = True
-    run_icc: bool = True
-    run_consistency: bool = True
-    run_influence: bool = True
     run_validation: bool = True
     run_report: bool = True
     run_correlations: bool = True
@@ -135,10 +123,7 @@ class BehaviorPipelineConfig:
     run_condition_comparison: bool = True
     run_temporal_correlations: bool = True
     run_cluster_tests: bool = False
-    run_mediation: bool = False
-    run_moderation: bool = False
-    run_mixed_effects: bool = False
-    
+
     # General stats
     fdr_alpha: float = 0.05
     n_permutations: int = 0
@@ -156,19 +141,6 @@ class BehaviorPipelineConfig:
     cluster_min_size: int = 2
     cluster_tail: int = 0
     
-    # Mediation-specific
-    mediation_n_bootstrap: int = 1000
-    mediation_min_effect: float = 0.05
-    mediation_max_mediators: Optional[int] = 20  # None means unlimited
-    
-    # Moderation-specific
-    moderation_max_features: Optional[int] = 50  # None means unlimited
-    moderation_min_samples: int = 15
-    
-    # Mixed effects-specific
-    mixed_effects_type: str = "intercept"
-    mixed_effects_max_features: int = 50
-    
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
         method = resolve_correlation_method(config, default="spearman")
@@ -184,7 +156,6 @@ class BehaviorPipelineConfig:
             control_predictor=bool(get_config_value(config, "behavior_analysis.predictor_control_enabled", True)),
             control_trial_order=bool(get_config_value(config, "behavior_analysis.control_trial_order", True)),
             compute_change_scores=bool(get_config_value(config, "behavior_analysis.correlations.compute_change_scores", True)),
-            compute_predictor_sensitivity=bool(get_config_value(config, "behavior_analysis.predictor_sensitivity.enabled", True)),
             compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
             compute_bayes_factors=bool(get_config_value(config, "behavior_analysis.correlations.compute_bayes_factors", False)),
             compute_loso_stability=bool(get_config_value(config, "behavior_analysis.correlations.loso_stability", True)),
@@ -199,31 +170,14 @@ class BehaviorPipelineConfig:
             method_label=method_label,
             correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_predictor"]),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
-            run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
             run_predictor_residual=bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)),
-            run_predictor_models=bool(get_config_value(config, "behavior_analysis.predictor_models.enabled", True)),
-            run_feature_qc=bool(get_config_value(config, "behavior_analysis.feature_qc.enabled", False)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
-            run_models=bool(get_config_value(config, "behavior_analysis.models.enabled", False)),
-            run_stability=bool(get_config_value(config, "behavior_analysis.stability.enabled", True)),
-            run_icc=bool(
-                get_config_value(
-                    config,
-                    "behavior_analysis.icc.enabled",
-                    get_config_value(config, "behavior_analysis.stability.enabled", True),
-                )
-            ),
-            run_consistency=bool(get_config_value(config, "behavior_analysis.consistency.enabled", True)),
-            run_influence=bool(get_config_value(config, "behavior_analysis.influence.enabled", True)),
             run_validation=bool(get_config_value(config, "behavior_analysis.validation.enabled", True)),
             run_report=bool(get_config_value(config, "behavior_analysis.report.enabled", True)),
             run_correlations=bool(get_config_value(config, "behavior_analysis.correlations.enabled", True)),
             run_condition_comparison=bool(get_config_value(config, "behavior_analysis.condition.enabled", True)),
             run_temporal_correlations=bool(get_config_value(config, "behavior_analysis.temporal.enabled", True)),
             run_cluster_tests=bool(get_config_value(config, "behavior_analysis.cluster.enabled", False)),
-            run_mediation=bool(get_config_value(config, "behavior_analysis.mediation.enabled", False)),
-            run_moderation=bool(get_config_value(config, "behavior_analysis.moderation.enabled", False)),
-            run_mixed_effects=bool(get_config_value(config, "behavior_analysis.mixed_effects.enabled", False)),
             fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
             n_permutations=int(
                 get_config_value(
@@ -242,16 +196,6 @@ class BehaviorPipelineConfig:
             cluster_threshold=float(get_config_value(config, "behavior_analysis.cluster.forming_threshold", 0.05)),
             cluster_min_size=int(get_config_value(config, "behavior_analysis.cluster.min_cluster_size", 2)),
             cluster_tail=int(get_config_value(config, "behavior_analysis.cluster.tail", 0)),
-            # Mediation-specific
-            mediation_n_bootstrap=int(get_config_value(config, "behavior_analysis.mediation.n_bootstrap", 1000)),
-            mediation_min_effect=float(get_config_value(config, "behavior_analysis.mediation.min_effect_size", 0.05)),
-            mediation_max_mediators=_get_optional_int(config, "behavior_analysis.mediation.max_mediators", None),
-            # Moderation-specific
-            moderation_max_features=_get_optional_int(config, "behavior_analysis.moderation.max_features", None),
-            moderation_min_samples=int(get_config_value(config, "behavior_analysis.moderation.min_samples", 15)),
-            # Mixed effects-specific
-            mixed_effects_type=str(get_config_value(config, "behavior_analysis.mixed_effects.random_effects", "intercept")),
-            mixed_effects_max_features=int(get_config_value(config, "behavior_analysis.mixed_effects.max_features", 50)),
         )
 
 
@@ -279,16 +223,8 @@ class BehaviorPipelineResults:
     trial_table_path: Optional[str] = None
     report_path: Optional[str] = None
     regression: Optional[pd.DataFrame] = None
-    models: Optional[pd.DataFrame] = None
-    stability: Optional[pd.DataFrame] = None
-    consistency: Optional[pd.DataFrame] = None
-    influence: Optional[pd.DataFrame] = None
     correlations: Optional[pd.DataFrame] = None
-    predictor_sensitivity: Optional[pd.DataFrame] = None
     condition_effects: Optional[pd.DataFrame] = None
-    mediation: Optional[pd.DataFrame] = None
-    moderation: Optional[pd.DataFrame] = None
-    mixed_effects: Optional[pd.DataFrame] = None
     cluster: Optional[Dict[str, Any]] = None
     temporal: Optional[Dict[str, Any]] = None
     tf: Optional[Dict[str, Any]] = None
@@ -318,21 +254,6 @@ class BehaviorPipelineResults:
             n_sig_controlled += _count_significant(p_primary)
             n_sig_fdr += _count_significant(p_fdr)
         
-        if self.predictor_sensitivity is not None and not self.predictor_sensitivity.empty:
-            df = self.predictor_sensitivity
-            n_total += len(df)
-            summary["n_predictor_sensitivity_features"] = len(df)
-            
-            p_psi = _extract_p_value_column(df, ["p_psi"], ["p_value"])
-            p_primary = _extract_p_value_column(df, ["p_primary"], [])
-            p_fdr = _extract_p_value_column(df, ["q_global"], ["q_value"])
-            
-            n_sig_psi_raw = _count_significant(p_psi)
-            n_sig_raw += n_sig_psi_raw
-            summary["n_sig_psi_raw"] = n_sig_psi_raw
-            n_sig_controlled += _count_significant(p_primary)
-            n_sig_fdr += _count_significant(p_fdr)
-
         if self.condition_effects is not None and not self.condition_effects.empty:
             df = self.condition_effects
             n_total += len(df)
@@ -367,47 +288,6 @@ class BehaviorPipelineResults:
                 
             if "hedges_g" in df.columns:
                 summary["n_large_effects"] = int((df["hedges_g"].abs() >= 0.8).sum())
-
-        if self.mediation is not None and not self.mediation.empty:
-            df = self.mediation
-            n_total += len(df)
-            summary["n_mediation_mediators"] = len(df)
-            
-            p_raw = _extract_p_value_column(df, ["sobel_p"], ["p_value"])
-            p_primary = _extract_p_value_column(df, ["p_primary"], [])
-            p_fdr = _extract_p_value_column(df, ["q_global"], [])
-            
-            n_sig_raw += _count_significant(p_raw)
-            n_sig_controlled += _count_significant(p_primary)
-            n_sig_fdr += _count_significant(p_fdr)
-
-        if self.moderation is not None and not self.moderation.empty:
-            df = self.moderation
-            n_total += len(df)
-            summary["n_moderation_features"] = len(df)
-            
-            p_raw = _extract_p_value_column(df, ["p_interaction"], ["p_value"])
-            p_primary = _extract_p_value_column(df, ["p_primary"], [])
-            p_fdr = _extract_p_value_column(df, ["q_global"], ["p_fdr"])
-            
-            n_sig_raw += _count_significant(p_raw)
-            n_sig_controlled += _count_significant(p_primary)
-            if p_fdr is not None:
-                p_fdr_numeric = pd.to_numeric(p_fdr, errors="coerce")
-                n_sig_fdr += _count_significant(p_fdr_numeric)
-
-        if self.mixed_effects is not None and not self.mixed_effects.empty:
-            df = self.mixed_effects
-            n_total += len(df)
-            summary["n_mixed_effects_features"] = len(df)
-            
-            p_raw = _extract_p_value_column(df, ["fixed_p"], ["p_value"])
-            p_primary = _extract_p_value_column(df, ["p_primary"], ["fixed_p"])
-            p_fdr = _extract_p_value_column(df, ["q_global"], ["fixed_p_fdr"])
-            
-            n_sig_raw += _count_significant(p_raw)
-            n_sig_controlled += _count_significant(p_primary)
-            n_sig_fdr += _count_significant(p_fdr)
 
         if self.tf is not None:
             n_tests = self.tf.get("n_tests", 0)
@@ -580,9 +460,6 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_condition_comparison = False
             self.pipeline_config.run_temporal_correlations = False
             self.pipeline_config.run_cluster_tests = False
-            self.pipeline_config.run_mediation = False
-            self.pipeline_config.run_moderation = False
-            self.pipeline_config.run_mixed_effects = False
         
         # Run all stages via DAG executor (step 2)
         start_time = time.perf_counter()
@@ -651,8 +528,6 @@ class BehaviorPipeline(PipelineBase):
         subjects : List[str]
             List of subject IDs to include
         **kwargs : dict
-            run_mixed_effects : bool, default False
-                Run mixed-effects models (only runs if explicitly requested)
             run_multilevel_correlations : bool, default False
                 Run multilevel correlations with block-restricted permutations (opt-in)
             output_dir : Path, optional
@@ -668,16 +543,11 @@ class BehaviorPipeline(PipelineBase):
         )
         from eeg_pipeline.infra.paths import ensure_dir
         
-        run_mixed_effects = kwargs.get("run_mixed_effects")
-        if run_mixed_effects is None:
-            run_mixed_effects = getattr(self.pipeline_config, "run_mixed_effects", False)
-        
         run_multilevel_correlations = kwargs.get("run_multilevel_correlations")
         if run_multilevel_correlations is None:
             run_multilevel_correlations = getattr(self.pipeline_config, "run_multilevel_correlations", False)
-        
-        # Only run group-level analysis if at least one computation is enabled
-        if not run_mixed_effects and not run_multilevel_correlations:
+
+        if not run_multilevel_correlations:
             return None
         
         output_dir = kwargs.get("output_dir")
@@ -696,7 +566,7 @@ class BehaviorPipeline(PipelineBase):
             deriv_root=self.deriv_root,
             config=self.config,
             logger=self.logger,
-            run_mixed_effects=run_mixed_effects,
+            run_mixed_effects=False,
             run_multilevel_correlations=run_multilevel_correlations,
             output_dir=output_dir,
         )

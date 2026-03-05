@@ -41,13 +41,11 @@ class StageRegistry:
     RESOURCE_EFFECT_SIZES = "effect_sizes"
     RESOURCE_PVALUES = "pvalues"
     RESOURCE_CORRELATIONS = "correlations"
-    RESOURCE_CONDITION_EFFECTS = "condition_effects"
 
     GROUP_DATA_PREP = "data_prep"
     GROUP_CORRELATIONS = "correlations"
     GROUP_CONDITION = "condition"
     GROUP_TEMPORAL = "temporal"
-    GROUP_ADVANCED = "advanced"
     GROUP_VALIDATION = "validation"
     GROUP_EXPORT = "export"
 
@@ -195,18 +193,9 @@ class _ResultsFromOutputs:
 
     def __init__(self, outputs: Dict[str, Any]):
         self.correlations = outputs.get("correlate_fdr")
-        self.predictor_sensitivity = outputs.get("predictor_sensitivity")
         self.condition_effects = outputs.get("condition_column")
         self.condition_effects_window = outputs.get("condition_window")
-        self.mediation = outputs.get("mediation")
-        self.moderation = outputs.get("moderation")
-        self.mixed_effects = outputs.get("mixed_effects")
         self.regression = outputs.get("regression")
-        self.models = outputs.get("models")
-        self.stability = outputs.get("stability")
-        self.icc = outputs.get("icc")
-        self.consistency = outputs.get("consistency")
-        self.influence = outputs.get("influence")
         self.trial_table_path = outputs.get("trial_table")
         self.report_path = outputs.get("report")
         self.subject = None

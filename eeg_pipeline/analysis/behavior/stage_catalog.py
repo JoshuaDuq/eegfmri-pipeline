@@ -28,14 +28,8 @@ class StageSpecDefinition:
 # Ordered rules to preserve stage execution ordering from config flags.
 PIPELINE_STAGE_RULES: Tuple[PipelineStageRule, ...] = (
     PipelineStageRule("run_trial_table", ("trial_table",), default=True),
-    PipelineStageRule("run_lag_features", ("lag_features",)),
     PipelineStageRule("run_predictor_residual", ("predictor_residual",)),
-    PipelineStageRule("run_predictor_models", ("predictor_models",)),
-    PipelineStageRule("run_feature_qc", ("feature_qc",)),
     PipelineStageRule("run_regression", ("regression",)),
-    PipelineStageRule("run_models", ("models",)),
-    PipelineStageRule("run_stability", ("stability",)),
-    PipelineStageRule("run_icc", ("icc",)),
     PipelineStageRule(
         "run_correlations",
         (
@@ -47,15 +41,9 @@ PIPELINE_STAGE_RULES: Tuple[PipelineStageRule, ...] = (
         ),
         default=True,
     ),
-    PipelineStageRule("compute_predictor_sensitivity", ("predictor_sensitivity",)),
-    PipelineStageRule("run_consistency", ("consistency",)),
-    PipelineStageRule("run_influence", ("influence",)),
-    PipelineStageRule("run_condition_comparison", ("condition_column", "condition_window")),
+    PipelineStageRule("run_condition_comparison", ("condition_column",)),
     PipelineStageRule("run_temporal_correlations", ("temporal_tfr", "temporal_stats")),
     PipelineStageRule("run_cluster_tests", ("cluster",)),
-    PipelineStageRule("run_mediation", ("mediation",)),
-    PipelineStageRule("run_moderation", ("moderation",)),
-    PipelineStageRule("run_mixed_effects", ("mixed_effects",)),
     PipelineStageRule("run_validation", ("hierarchical_fdr_summary",), default=True),
     PipelineStageRule("run_report", ("report",)),
 )
@@ -64,24 +52,13 @@ PIPELINE_STAGE_RULES: Tuple[PipelineStageRule, ...] = (
 # Keep this mapping as the single source for --computations overrides.
 COMPUTATION_TO_PIPELINE_ATTR = {
     "trial_table": "run_trial_table",
-    "lag_features": "run_lag_features",
     "predictor_residual": "run_predictor_residual",
-    "predictor_models": "run_predictor_models",
     "regression": "run_regression",
-    "models": "run_models",
-    "stability": "run_stability",
-    "icc": "run_icc",
-    "consistency": "run_consistency",
-    "influence": "run_influence",
     "report": "run_report",
     "correlations": "run_correlations",
-    "predictor_sensitivity": "compute_predictor_sensitivity",
     "condition": "run_condition_comparison",
     "temporal": "run_temporal_correlations",
     "cluster": "run_cluster_tests",
-    "mediation": "run_mediation",
-    "moderation": "run_moderation",
-    "mixed_effects": "run_mixed_effects",
     "multilevel_correlations": "run_multilevel_correlations",
 }
 
@@ -103,35 +80,11 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         group="data_prep",
     ),
     StageSpecDefinition(
-        name="lag_features",
-        description="Add lag/delta features",
-        requires=("trial_table",),
-        produces=("lag_features",),
-        config_key="behavior_analysis.lag_features.enabled",
-        group="data_prep",
-    ),
-    StageSpecDefinition(
         name="predictor_residual",
         description="Compute predictor residual",
         requires=("trial_table", "predictor", "outcome"),
         produces=("predictor_residual",),
         config_key="behavior_analysis.predictor_residual.enabled",
-        group="data_prep",
-    ),
-    StageSpecDefinition(
-        name="predictor_models",
-        description="Compare predictor-outcome models",
-        requires=("trial_table", "predictor", "outcome"),
-        produces=("predictor_models",),
-        config_key="behavior_analysis.predictor_models.enabled",
-        group="data_prep",
-    ),
-    StageSpecDefinition(
-        name="feature_qc",
-        description="Screen feature quality",
-        requires=("trial_table",),
-        produces=("feature_qc",),
-        config_key="behavior_analysis.feature_qc.enabled",
         group="data_prep",
     ),
     StageSpecDefinition(
@@ -175,14 +128,6 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         group="correlations",
     ),
     StageSpecDefinition(
-        name="predictor_sensitivity",
-        description="Predictor sensitivity correlations",
-        requires=("trial_table", "predictor", "outcome"),
-        produces=("predictor_sensitivity",),
-        config_key="behavior_analysis.predictor_sensitivity.enabled",
-        group="correlations",
-    ),
-    StageSpecDefinition(
         name="regression",
         description="Trialwise regression",
         requires=("trial_table",),
@@ -191,59 +136,11 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         group="correlations",
     ),
     StageSpecDefinition(
-        name="models",
-        description="Fit model families",
-        requires=("trial_table",),
-        produces=("models",),
-        config_key="behavior_analysis.models.enabled",
-        group="correlations",
-    ),
-    StageSpecDefinition(
-        name="stability",
-        description="Groupwise stability",
-        requires=("trial_table",),
-        produces=("stability",),
-        config_key="behavior_analysis.stability.enabled",
-        group="correlations",
-    ),
-    StageSpecDefinition(
-        name="icc",
-        description="Run-to-run feature reliability",
-        requires=("trial_table",),
-        produces=("icc",),
-        config_key="behavior_analysis.icc.enabled",
-        group="correlations",
-    ),
-    StageSpecDefinition(
-        name="consistency",
-        description="Effect direction consistency",
-        requires=("correlations",),
-        produces=("consistency",),
-        config_key="behavior_analysis.consistency.enabled",
-        group="validation",
-    ),
-    StageSpecDefinition(
-        name="influence",
-        description="Influence diagnostics",
-        requires=("trial_table", "correlations"),
-        produces=("influence",),
-        config_key="behavior_analysis.influence.enabled",
-        group="validation",
-    ),
-    StageSpecDefinition(
         name="condition_column",
         description="Column-based condition contrast",
         requires=("trial_table",),
         produces=("condition_effects",),
         config_key="behavior_analysis.condition.enabled",
-        group="condition",
-    ),
-    StageSpecDefinition(
-        name="condition_window",
-        description="Window-based condition contrast",
-        requires=("trial_table",),
-        produces=("window_effects",),
-        config_key="behavior_analysis.condition.compare_windows",
         group="condition",
     ),
     StageSpecDefinition(
@@ -269,30 +166,6 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         produces=("cluster_results",),
         config_key="behavior_analysis.cluster.enabled",
         group="temporal",
-    ),
-    StageSpecDefinition(
-        name="mediation",
-        description="Mediation analysis",
-        requires=("trial_table", "predictor", "outcome"),
-        produces=("mediation",),
-        config_key="behavior_analysis.mediation.enabled",
-        group="advanced",
-    ),
-    StageSpecDefinition(
-        name="moderation",
-        description="Moderation analysis",
-        requires=("trial_table", "predictor", "outcome"),
-        produces=("moderation",),
-        config_key="behavior_analysis.moderation.enabled",
-        group="advanced",
-    ),
-    StageSpecDefinition(
-        name="mixed_effects",
-        description="Mixed-effects models (group-level)",
-        requires=("trial_table",),
-        produces=("mixed_effects",),
-        config_key="behavior_analysis.mixed_effects.enabled",
-        group="advanced",
     ),
     StageSpecDefinition(
         name="hierarchical_fdr_summary",
@@ -345,6 +218,3 @@ def apply_computation_flags_impl(
         if computation_name in computation_flags:
             setattr(pipeline_config, attr_name, bool(computation_flags[computation_name]))
 
-    # Preserve established behavior where requesting stability also enables ICC.
-    if bool(computation_flags.get("stability", False)):
-        setattr(pipeline_config, "run_icc", True)

@@ -65,28 +65,17 @@ type FeatureCategory struct {
 var behaviorComputations = []Computation{
 	// Data Preparation
 	{"trial_table", "Trial Table", "Build canonical per-trial analysis table", "DataPrep"},
-	{"lag_features", "Lag Features", "Add temporal dynamics (prev_*, delta_*) for habituation", "DataPrep"},
-	{"predictor_residual", "Residual + Diagnostics", "Compute residualized outcome and predictor model diagnostics", "DataPrep"},
+	{"predictor_residual", "Residual", "Compute residualized outcome (outcome - f(predictor))", "DataPrep"},
 
 	// Core Analyses
 	{"correlations", "Correlations", "EEG-outcome correlations with bootstrap CIs", "Core"},
 	{"multilevel_correlations", "Group Multilevel Correlations", "Group-level correlations with block-restricted permutations", "Core"},
-	{"regression", "Regression", "Feature regression with optional permutation + model sensitivity", "Core"},
-	{"models", "Model Families", "Per-feature model families (OLS/robust/quantile/logit)", "Core"},
+	{"regression", "Regression", "Trialwise feature regression with permutation inference", "Core"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., condition A vs condition B)", "Core"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis", "Core"},
-	{"predictor_sensitivity", "Predictor Sensitivity", "Individual sensitivity (predictor→outcome slope)", "Core"},
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests", "Core"},
 
-	// Advanced/Causal Analyses
-	{"mediation", "Mediation Analysis", "Path analysis: does EEG mediate predictor→outcome?", "Advanced"},
-	{"moderation", "Moderation Analysis", "Does EEG moderate the predictor→outcome effect?", "Advanced"},
-	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling (group-level)", "Advanced"},
-
-	// Quality & Validation
-	{"stability", "Stability (Run/Block)", "Within-subject stability diagnostics", "Quality"},
-	{"icc", "Reliability (ICC)", "Run-to-run feature reliability", "Quality"},
-	{"validation", "Validation", "Effect consistency + influence diagnostics", "Quality"},
+	// Quality & Output
 	{"report", "Subject Report", "Single-subject summary report", "Quality"},
 }
 

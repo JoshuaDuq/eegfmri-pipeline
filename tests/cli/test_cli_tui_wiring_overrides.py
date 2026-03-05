@@ -213,14 +213,6 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "--correlations-prefer-predictor-residual",
                 "--correlations-permutations",
                 "111",
-                "--predictor-sensitivity-primary-unit",
-                "run_mean",
-                "--predictor-sensitivity-permutations",
-                "250",
-                "--no-predictor-sensitivity-permutation-primary",
-                "--models-primary-unit",
-                "run_mean",
-                "--models-force-trial-iid-asymptotic",
                 "--condition-primary-unit",
                 "run_mean",
                 "--condition-window-min-samples",
@@ -232,9 +224,6 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "run_mean",
                 "--temporal-correction-method",
                 "cluster",
-                "--no-mediation-permutation-primary",
-                "--no-moderation-permutation-primary",
-                "--no-mixed-include-predictor",
                 "--cluster-correction-enabled",
                 "--cluster-correction-alpha",
                 "0.01",
@@ -295,19 +284,11 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("behavior_analysis.correlations.min_runs"), 5)
         self.assertTrue(config.get("behavior_analysis.correlations.prefer_predictor_residual", False))
         self.assertEqual(config.get("behavior_analysis.correlations.permutation.n_permutations"), 111)
-        self.assertEqual(config.get("behavior_analysis.predictor_sensitivity.primary_unit"), "run_mean")
-        self.assertEqual(config.get("behavior_analysis.predictor_sensitivity.n_permutations"), 250)
-        self.assertEqual(config.get("behavior_analysis.predictor_sensitivity.p_primary_mode"), "asymptotic")
-        self.assertEqual(config.get("behavior_analysis.models.primary_unit"), "run_mean")
-        self.assertTrue(config.get("behavior_analysis.models.force_trial_iid_asymptotic", False))
         self.assertEqual(config.get("behavior_analysis.condition.primary_unit"), "run_mean")
         self.assertEqual(config.get("behavior_analysis.condition.window_comparison.min_samples"), 14)
         self.assertEqual(config.get("behavior_analysis.condition.compare_labels"), ["low", "high"])
         self.assertEqual(config.get("behavior_analysis.regression.primary_unit"), "run_mean")
         self.assertEqual(config.get("behavior_analysis.temporal.correction_method"), "cluster")
-        self.assertEqual(config.get("behavior_analysis.mediation.p_primary_mode"), "asymptotic")
-        self.assertEqual(config.get("behavior_analysis.moderation.p_primary_mode"), "asymptotic")
-        self.assertFalse(config.get("behavior_analysis.mixed_effects.include_predictor", True))
         self.assertTrue(config.get("behavior_analysis.cluster_correction.enabled", False))
         self.assertEqual(config.get("behavior_analysis.cluster_correction.alpha"), 0.01)
         self.assertEqual(config.get("behavior_analysis.cluster_correction.min_cluster_size"), 4)

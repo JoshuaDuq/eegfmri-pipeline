@@ -9,20 +9,11 @@ import pandas as pd
 _STAGE_TO_ATTR_MAP = {
     "trial_table": "trial_table_path",
     "correlate_fdr": "correlations",
-    "predictor_sensitivity": "predictor_sensitivity",
     "regression": "regression",
-    "models": "models",
-    "stability": "stability",
-    "consistency": "consistency",
-    "influence": "influence",
     "condition_column": "condition_effects",
-    "condition_window": "condition_effects_window",
     "temporal_tfr": "tf",
     "temporal_stats": "temporal",
     "cluster": "cluster",
-    "mediation": "mediation",
-    "moderation": "moderation",
-    "mixed_effects": "mixed_effects",
     "report": "report_path",
 }
 

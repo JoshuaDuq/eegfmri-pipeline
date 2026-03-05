@@ -35,24 +35,13 @@ FREQUENCY_BANDS: List[str] = [
 
 BEHAVIOR_COMPUTATIONS: List[str] = [
     "trial_table",
-    "lag_features",
     "predictor_residual",
-    "predictor_models",
     "regression",
-    "models",
-    "stability",
-    "icc",
-    "consistency",
-    "influence",
     "report",
     "correlations",
-    "predictor_sensitivity",
     "condition",
     "temporal",
     "cluster",
-    "mediation",
-    "moderation",
-    "mixed_effects",
 ]
 
 
@@ -74,8 +63,6 @@ FEATURE_VISUALIZE_CATEGORIES: List[str] = [
 
 BEHAVIOR_VISUALIZE_CATEGORIES: List[str] = [
     "psychometrics",
-    "predictor_models",
-    "stability",
     "power",
     "aperiodic",
     "connectivity",

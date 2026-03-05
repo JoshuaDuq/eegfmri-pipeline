@@ -177,43 +177,16 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     stats_dir = features_path.parent / "stats"
     computation_patterns = {
         "trial_table": ["trial_table*/*/trials_*.tsv", "trial_table*/*/trials_*.parquet"],
-        "lag_features": ["lag_features*/*/trials_with_lags*.tsv", "lag_features*/*/*.metadata.json"],
         "predictor_residual": ["predictor_residual*/*/trials_with_residual*.tsv", "predictor_residual*/*/*.metadata.json"],
-        "predictor_models": [
-            "predictor_models*/*/model_comparison*.parquet",
-            "predictor_models*/*/model_comparison*.tsv",
-            "predictor_models*/*/breakpoint_candidates*.parquet",
-            "predictor_models*/*/breakpoint_candidates*.tsv",
-        ],
         "regression": [
             "trialwise_regression*/*/regression_feature_effects*.parquet",
             "trialwise_regression*/*/regression_feature_effects*.tsv",
-        ],
-        "models": [
-            "feature_models*/*/models_feature_effects*.parquet",
-            "feature_models*/*/models_feature_effects*.tsv",
-        ],
-        "stability": [
-            "stability_groupwise*/*/stability_groupwise*.parquet",
-            "stability_groupwise*/*/stability_groupwise*.tsv",
-        ],
-        "consistency": [
-            "consistency_summary*/*/consistency_summary*.parquet",
-            "consistency_summary*/*/consistency_summary*.tsv",
-        ],
-        "influence": [
-            "influence_diagnostics*/*/influence_diagnostics*.parquet",
-            "influence_diagnostics*/*/influence_diagnostics*.tsv",
         ],
         "report": ["subject_report*/*/subject_report*.md", "subject_report*/*/subject_report*.html"],
         "correlations": [
             "correlations*/*/correlations*.parquet",
             "correlations*/*/correlations*.tsv",
             "*_topomap_*_correlations_*.tsv",
-        ],
-        "predictor_sensitivity": [
-            "predictor_sensitivity*/*/predictor_sensitivity*.parquet",
-            "predictor_sensitivity*/*/predictor_sensitivity*.tsv",
         ],
         "condition": [
             "condition_effects*/*/condition_effects*.parquet",
@@ -231,9 +204,6 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
             "temporal_correlations*/*/temporal_correlations_by_condition*.npz",
         ],
         "cluster": ["cluster*/*/cluster_results_*.tsv", "cluster*/*/null_distribution_*.json"],
-        "mediation": ["mediation*/*/mediation*.tsv", "mediation*/*/mediation*.parquet"],
-        "moderation": ["moderation*/*/moderation_results*.tsv", "moderation*/*/moderation_results*.parquet"],
-        "mixed_effects": ["mixed_effects*/*/mixed_effects*.tsv", "mixed_effects*/*/mixed_effects*.parquet"],
     }
     
     for comp, patterns in computation_patterns.items():

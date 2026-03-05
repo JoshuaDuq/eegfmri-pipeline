@@ -18,20 +18,12 @@ Modules:
     - roi: ROI statistics
     - permutation: Permutation tests
     - partial: Partial correlation
-    - mediation: Mediation analysis
-    - moderation: Moderation analysis
-    - reliability: Reliability and ICC
     - paired_comparisons: Paired comparison tests
     - feature_models: Feature-level regression models
     - trialwise_regression: Trial-wise regression
     - temporal: Temporal correlation analysis
-    - stability: Stability analysis
-    - consistency: Consistency checks
-    - influence: Influence diagnostics
     - splines: Spline fitting
-    - predictor_models: Predictor-outcome models
     - predictor_residual: Predictor residual computation
-    - mixed_effects: Mixed effects models
 """
 
 from .base import (
@@ -134,24 +126,6 @@ from .partial import (
 
 from .paired_comparisons import compute_paired_cohens_d
 
-from .mediation import (
-    MediationResult,
-    compute_mediation_paths,
-    bootstrap_indirect_effect,
-    run_full_mediation_analysis,
-    analyze_mediation_for_features,
-)
-
-from .moderation import (
-    ModerationResult,
-    compute_moderation_effect,
-    run_moderation_analysis,
-)
-
-from .reliability import (
-    compute_icc,
-)
-
 from .validation import validate_baseline_window_pre_stimulus
 
 
@@ -234,18 +208,6 @@ __all__ = [
     "compute_partial_residuals",
     "compute_partial_correlation_with_covariates",
     "compute_partial_correlations_with_cov_predictor",
-    # Reliability and validity
-    "compute_icc",
     # Paired Comparisons
     "compute_paired_cohens_d",
-    # Mediation
-    "MediationResult",
-    "compute_mediation_paths",
-    "bootstrap_indirect_effect",
-    "run_full_mediation_analysis",
-    "analyze_mediation_for_features",
-    # Moderation
-    "ModerationResult",
-    "compute_moderation_effect",
-    "run_moderation_analysis",
 ]

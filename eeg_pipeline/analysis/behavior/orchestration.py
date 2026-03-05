@@ -15,11 +15,7 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.analysis.behavior.result_types import (
-    FeatureQCResult,
     GroupLevelResult,
-    MixedEffectsResult,
-    PredictorBreakpointResult,
-    PredictorModelComparisonResult,
     TrialTableResult,
 )
 from eeg_pipeline.analysis.behavior.result_cache import BehaviorResultCache
@@ -34,13 +30,10 @@ from eeg_pipeline.analysis.behavior import (
     stage_runners as _stage_runners,
 )
 from eeg_pipeline.analysis.behavior.stages import (
-    advanced as _stages_advanced,
     condition as _stages_condition,
     correlate as _stages_correlate,
-    diagnostics as _stages_diagnostics,
     export as _stages_export,
     fdr as _stages_fdr,
-    feature_qc as _stages_feature_qc,
     metadata as _stages_metadata,
     models as _stages_models,
     report as _stages_report,
@@ -127,29 +120,6 @@ def _get_runtime(ctx: Any) -> BehaviorOrchestrationRuntime:
 
 def _get_cache(ctx: Any) -> BehaviorResultCache:
     return _get_runtime(ctx).cache
-
-
-###################################################################
-# Feature QC Screen Stage
-###################################################################
-
-
-def stage_feature_qc_screen(
-    ctx: BehaviorContext,
-    config: Any,
-) -> FeatureQCResult:
-    return _stages_feature_qc.stage_feature_qc_screen_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        feature_column_prefixes=FEATURE_COLUMN_PREFIXES,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
-        max_missing_pct_default=MAX_MISSING_PCT_DEFAULT,
-        min_variance_threshold=MIN_VARIANCE_THRESHOLD,
-    )
 
 
 ###################################################################
@@ -508,18 +478,6 @@ def _sanitize_permutation_groups(
     return groups_array
 
 
-def stage_predictor_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    return _stages_correlate.stage_predictor_sensitivity_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=_get_feature_columns,
-        sanitize_permutation_groups_fn=_sanitize_permutation_groups,
-        compute_unified_fdr_fn=_compute_unified_fdr,
-        unified_fdr_family_columns=UNIFIED_FDR_FAMILY_COLUMNS,
-    )
-
 
 
 def _feature_suffix_from_context(ctx: BehaviorContext) -> str:
@@ -619,26 +577,6 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     )
 
 
-def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
-    cache = _get_cache(ctx)
-    out_path = _stages_trial_table.stage_lag_features_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
-        write_metadata_file_fn=_write_metadata_file,
-        set_trial_table_cache_fn=lambda df: setattr(cache, "_trial_table_df", df),
-    )
-    if out_path is not None and out_path.exists():
-        from eeg_pipeline.infra.tsv import read_table
-
-        cache._trial_table_df = read_table(out_path)
-    return out_path
-
-
 def stage_predictor_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     cache = _get_cache(ctx)
     out_path = _stages_trial_table.stage_predictor_residual_impl(
@@ -659,54 +597,6 @@ def stage_predictor_residual(ctx: BehaviorContext, config: Any) -> Optional[Path
     return out_path
 
 
-def compute_predictor_model_comparison(
-    predictor: pd.Series,
-    outcome: pd.Series,
-    config: Any,
-) -> PredictorModelComparisonResult:
-    """Compare predictor→outcome model fits (linear vs polynomial vs spline)."""
-    return _stages_models.compute_predictor_model_comparison_impl(predictor, outcome, config)
-
-
-def compute_predictor_breakpoints(
-    predictor: pd.Series,
-    outcome: pd.Series,
-    config: Any,
-) -> PredictorBreakpointResult:
-    """Detect threshold predictor values where sensitivity changes."""
-    return _stages_models.compute_predictor_breakpoints_impl(predictor, outcome, config)
-
-
-def write_predictor_models(
-    ctx: BehaviorContext,
-    model_comparison: Optional[PredictorModelComparisonResult],
-    breakpoint: Optional[PredictorBreakpointResult],
-) -> Path:
-    """Write predictor model results to disk."""
-    return _stages_models.write_predictor_models_impl(
-        ctx,
-        model_comparison,
-        breakpoint,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
-    )
-
-
-def stage_predictor_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
-    """Compare predictor→outcome model fits and test for breakpoints (composed)."""
-    return _stages_models.stage_predictor_models_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        compute_predictor_model_comparison_fn=compute_predictor_model_comparison,
-        compute_predictor_breakpoints_fn=compute_predictor_breakpoints,
-        write_predictor_models_fn=write_predictor_models,
-    )
-
-
 def _load_trial_table_df(ctx: BehaviorContext) -> Optional[pd.DataFrame]:
     """Load trial table with caching."""
     return _get_cache(ctx).get_trial_table(ctx)
@@ -725,83 +615,6 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         attach_predictor_metadata_fn=_attach_predictor_metadata,
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_stats_table_fn=_write_stats_table,
-    )
-
-
-def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    return _stages_models.stage_models_impl(
-        ctx,
-        config,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
-        check_early_exit_conditions_fn=_check_early_exit_conditions,
-        attach_predictor_metadata_fn=_attach_predictor_metadata,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        write_stats_table_fn=_write_stats_table,
-    )
-
-
-def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Assess within-subject run/block stability of feature→outcome associations (non-gating)."""
-    return _stages_diagnostics.stage_stability_impl(
-        ctx,
-        config,
-        build_output_filename_fn=_build_output_filename,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
-        check_early_exit_conditions_fn=_check_early_exit_conditions,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        write_stats_table_fn=_write_stats_table,
-    )
-
-
-def stage_icc(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Assess within-subject run-to-run reliability (ICC) of EEG features."""
-    return _stages_diagnostics.stage_icc_impl(
-        ctx,
-        config,
-        build_output_filename_fn=_build_output_filename,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
-        check_early_exit_conditions_fn=_check_early_exit_conditions,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        write_stats_table_fn=_write_stats_table,
-        write_metadata_file_fn=_write_metadata_file,
-    )
-
-
-def stage_consistency(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataFrame:
-    """Merge correlations/regression/models and flag effect-direction contradictions (non-gating)."""
-    return _stages_diagnostics.stage_consistency_impl(
-        ctx,
-        config,
-        results,
-        build_output_filename_fn=_build_output_filename,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        write_stats_table_fn=_write_stats_table,
-        write_metadata_file_fn=_write_metadata_file,
-    )
-
-
-def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataFrame:
-    """Compute leverage/Cook's summaries for top effects (non-gating)."""
-    return _stages_diagnostics.stage_influence_impl(
-        ctx,
-        config,
-        results,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=lambda df, context: _get_feature_columns(df, context),
-        check_early_exit_conditions_fn=_check_early_exit_conditions,
-        attach_predictor_metadata_fn=_attach_predictor_metadata,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        build_output_filename_fn=_build_output_filename,
-        write_stats_table_fn=_write_stats_table,
-        write_metadata_file_fn=_write_metadata_file,
     )
 
 
@@ -941,60 +754,6 @@ def _compute_pairwise_effect_sizes(
     return mean_diff, std_diff, cohens_d, hedges_g, hedges_correction
 
 
-def stage_condition_window(
-    ctx: BehaviorContext,
-    config: Any,
-    df_trials: Optional[pd.DataFrame] = None,
-    feature_cols: Optional[List[str]] = None,
-    compare_windows: Optional[List[str]] = None,
-) -> pd.DataFrame:
-    """Run window-based condition comparison (e.g., baseline vs active).
-    
-    Single responsibility: Window contrast comparison.
-    """
-
-    return _stages_condition.stage_condition_window_impl(
-        ctx,
-        config,
-        df_trials=df_trials,
-        feature_cols=feature_cols,
-        compare_windows=compare_windows,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=_get_feature_columns,
-        check_early_exit_conditions_fn=_check_early_exit_conditions,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        resolve_condition_compare_column_fn=_resolve_condition_compare_column,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        run_window_comparison_fn=_run_window_comparison,
-        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
-    )
-
-
-def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Backward-compatible condition stage (column + optional window + optional multigroup).
-    
-    The pipeline wrapper historically called a single stage and expected a DataFrame.
-    Internally, we keep single-responsibility sub-stages:
-    - stage_condition_column (2-group comparison)
-    - stage_condition_window (paired window comparison)
-    - stage_condition_multigroup (3+ group comparison)
-    """
-    cache = _get_cache(ctx)
-    return _stages_condition.stage_condition_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_filtered_feature_cols_fn=lambda df, context: cache.get_filtered_feature_cols(
-            [c for c in df.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)],
-            context,
-            "condition",
-        ),
-        stage_condition_multigroup_fn=stage_condition_multigroup,
-        stage_condition_column_fn=stage_condition_column,
-        stage_condition_window_fn=stage_condition_window,
-    )
 
 
 def stage_condition_multigroup(
@@ -1096,33 +855,6 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
 
 
 ###################################################################
-# Advanced Stage - Single Responsibility Components
-###################################################################
-
-
-def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Run mediation analysis: test if neural features mediate the predictor→outcome relationship."""
-    cache = _get_cache(ctx)
-    return _stages_advanced.stage_mediation_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=_get_feature_columns,
-        check_early_exit_conditions_fn=_check_early_exit_conditions,
-        sanitize_permutation_groups_fn=_sanitize_permutation_groups,
-        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(str(feature_name), cfg),
-        compute_unified_fdr_fn=_compute_unified_fdr,
-        unified_fdr_family_columns=UNIFIED_FDR_FAMILY_COLUMNS,
-    )
-
-
-def stage_mixed_effects(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Run mixed-effects analysis."""
-    return _stages_advanced.stage_mixed_effects_impl(ctx, config)
-
-
-###################################################################
 # Group-Level Analysis (Multi-Subject)
 ###################################################################
 
@@ -1210,31 +942,6 @@ def run_group_level_analysis(
         run_multilevel_correlations_fn=run_group_level_correlations,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
         also_save_csv_from_config_fn=_also_save_csv_from_config,
-    )
-
-
-def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
-    """Run moderation analysis: test if neural features moderate the predictor→outcome relationship.
-
-    Model: outcome = b0 + b1*predictor + b2*feature + b3*(predictor*feature) + error
-
-    If b3 is significant, the feature moderates how predictor affects the outcome.
-    """
-    cache = _get_cache(ctx)
-    return _stages_advanced.stage_moderation_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        get_feature_columns_fn=_get_feature_columns,
-        check_early_exit_conditions_fn=_check_early_exit_conditions,
-        sanitize_permutation_groups_fn=_sanitize_permutation_groups,
-        feature_type_resolver_fn=lambda feature_name, cfg: cache.get_feature_type(str(feature_name), cfg),
-        compute_unified_fdr_fn=_compute_unified_fdr,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
-        unified_fdr_family_columns=UNIFIED_FDR_FAMILY_COLUMNS,
     )
 
 
