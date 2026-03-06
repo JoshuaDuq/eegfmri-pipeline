@@ -406,12 +406,12 @@ def get_config_value(config: Any, key: str, default: Any) -> Any:
     """
     if config is None:
         return default
-    
-    if hasattr(config, "get"):
-        return config.get(key, default)
-    
+
     if isinstance(config, dict):
         return get_nested_value(config, key, default)
+
+    if hasattr(config, "get"):
+        return config.get(key, default)
     
     return default
 

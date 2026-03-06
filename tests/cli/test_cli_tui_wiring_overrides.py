@@ -166,7 +166,7 @@ class TestFeaturesTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("feature_engineering.itpc.min_segment_sec"), 1.25)
         self.assertEqual(config.get("feature_engineering.itpc.min_cycles_at_fmin"), 3.5)
         self.assertFalse(config.get("feature_engineering.microstates.assign_from_gfp_peaks", True))
-        self.assertEqual(config.get("feature_engineering.erds.condition_marker_bands"), ["alpha"])
+        self.assertEqual(config.get("feature_engineering.erds.laterality_marker_bands"), ["alpha"])
         self.assertEqual(config.get("feature_engineering.erds.laterality_columns"), ["stim_side"])
         self.assertEqual(config.get("feature_engineering.erds.onset_min_threshold_percent"), 12.5)
         self.assertEqual(config.get("feature_engineering.spatial_transform_per_family.connectivity"), "csd")
@@ -207,7 +207,6 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "--no-group-level-control-run-effects",
                 "--group-level-max-run-dummies",
                 "15",
-                "--group-level-allow-parametric-fallback",
                 "--correlations-min-runs",
                 "5",
                 "--correlations-prefer-predictor-residual",

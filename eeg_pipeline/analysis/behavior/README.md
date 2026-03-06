@@ -143,6 +143,11 @@ The following require an explicit i.i.d. override for trial-level inference:
 Temporal trial-level inference (`temporal_stats`) requires cluster correction with
 valid group labels when `allow_iid_trials = false`.
 
+Requested run adjustment is treated as part of the analysis design, not an optional
+best-effort covariate. If the run column is missing or would require more dummy
+terms than allowed by `behavior_analysis.run_adjustment.max_dummies`, the pipeline
+raises instead of silently dropping the control.
+
 ### 4.2 Predictor Control
 
 Partial correlation and residualization paths are both available for controlling the
@@ -349,7 +354,9 @@ both using $(N_{\text{extreme}} + 1) / (n_\text{perm} + 1)$.
 #### 5.7.2 Multi-Group (condition flow, 3+ groups)
 
 When the condition column has 3+ levels, the pipeline runs a multigroup comparison
-(via the same condition stage; not a separate DAG node). Pairwise tests only (no omnibus):
+(via the same condition stage; not a separate DAG node). For 3+ observed levels,
+`behavior_analysis.condition.compare_values` must be set explicitly; the pipeline
+does not auto-select an arbitrary two-level subset. Pairwise tests only (no omnibus):
 
 - Unpaired: Mann–Whitney U.
 - Paired run-level: Wilcoxon signed-rank.

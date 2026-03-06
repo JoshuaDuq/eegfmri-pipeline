@@ -906,7 +906,7 @@ class TestFmriCompletion(unittest.TestCase):
 
             # missing paths.bids_fmri_root
             p.config = DotConfig({"fmri_preprocessing": {"engine": "docker", "fmriprep": {}}})
-            with self.assertRaises(ValueError):
+            with self.assertRaises(FileNotFoundError):
                 p.process_subject("0001", task="", dry_run=True)
 
             # invalid engine

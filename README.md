@@ -88,7 +88,7 @@ cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 
 ```bash
 python -m venv .venv311
-source .venv/bin/activate
+source .venv311/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -388,7 +388,7 @@ conditions). All stages operate on a trial table with explicit column semantics.
 | `compute` | Run behavioral analysis stages and save numerical outputs |
 | `visualize` | Generate standardized plots from previously computed results |
 
-For all 22 stage definitions, the pipeline DAG, statistical safeguards, and
+For all 17 stage definitions, the pipeline DAG, statistical safeguards, and
 configuration details, see
 [eeg_pipeline/analysis/behavior/README.md](eeg_pipeline/analysis/behavior/README.md).
 
@@ -889,14 +889,14 @@ For the full list of CV-safety guardrails, see the features README.
 | **NiBabel** | ≥ 3.2.0 | NIfTI/CIFTI I/O |
 | **scikit-learn** | ≥ 1.0.0 | Machine learning models |
 | **SHAP** | ≥ 0.40.0 | Feature importance |
-| **PyTorch** | 2.7.1 | Deep learning (EEGNet CNN) |
-| **NetworkX** | 3.5 | Graph-theoretic connectivity metrics |
-| **bctpy** | 0.6.1 | Brain Connectivity Toolbox |
+| **PyTorch** | ≥ 2.7.1 | Deep learning (EEGNet CNN) |
+| **NetworkX** | ≥ 3.5 | Graph-theoretic connectivity metrics |
+| **bctpy** | ≥ 0.6.1 | Brain Connectivity Toolbox |
 | **statsmodels** | ≥ 0.13.0 | Statistical models, FDR correction |
 | **antropy** | ≥ 0.1.9 | Complexity measures |
 | **NumPy** | ≥ 1.24, < 2.0 | Array computation |
-| **SciPy** | 1.15.3 | Scientific computing |
-| **pandas** | 2.3.0 | Data manipulation |
+| **SciPy** | ≥ 1.15.3 | Scientific computing |
+| **pandas** | ≥ 2.3.0 | Data manipulation |
 
 `pyproject.toml` is the single source of truth for dependencies.
 `requirements.txt` installs `-e ".[ml]"`.

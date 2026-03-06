@@ -143,6 +143,20 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         df_trials = pd.DataFrame({"binary_outcome": [0, 1]})
         self.assertEqual(_resolve_condition_compare_column(df_trials, cfg), "binary_outcome")
 
+    def test_split_by_condition_requires_explicit_compare_values_for_multilevel_column(self):
+        from eeg_pipeline.utils.analysis.stats.effect_size import split_by_condition
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {"condition": {"compare_column": "pain_level"}},
+                "event_columns": {"binary_outcome": ["pain_level"]},
+            }
+        )
+        df_trials = pd.DataFrame({"pain_level": [0, 1, 2, 1]})
+
+        with self.assertRaises(ValueError):
+            split_by_condition(df_trials, cfg, Mock())
+
     def test_condition_run_mean_aggregation_and_min_samples_forwarded(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_column
 
@@ -684,6 +698,121 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 SimpleNamespace(control_predictor=True, control_trial_order=True),
             )
         self.assertIsNone(design)
+
+    def test_correlate_design_does_not_force_run_adjustment_when_disabled(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "run_adjustment": {
+                        "enabled": False,
+                        "include_in_correlations": True,
+                        "column": "run_id",
+                    },
+                    "correlations": {"targets": ["rating"]},
+                    "statistics": {"allow_iid_trials": True},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 50, 8),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            design = stage_correlate_design(
+                ctx,
+                SimpleNamespace(control_predictor=False, control_trial_order=False),
+            )
+
+        self.assertIsNotNone(design)
+        self.assertFalse(bool(design.run_adjust_in_correlations))
+
+    def test_correlate_design_requires_run_column_when_run_adjustment_enabled(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "run_adjustment": {
+                        "enabled": True,
+                        "include_in_correlations": True,
+                        "column": "run_id",
+                    },
+                    "correlations": {"targets": ["rating"]},
+                    "statistics": {"allow_iid_trials": True},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 50, 8),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            with self.assertRaises(ValueError):
+                stage_correlate_design(
+                    ctx,
+                    SimpleNamespace(control_predictor=False, control_trial_order=False),
+                )
+
+    def test_correlate_design_rejects_excessive_run_dummy_expansion(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "run_adjustment": {
+                        "enabled": True,
+                        "include_in_correlations": True,
+                        "column": "run_id",
+                        "max_dummies": 2,
+                    },
+                    "correlations": {"targets": ["rating"]},
+                    "statistics": {"allow_iid_trials": True},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": np.arange(1, 9),
+                "rating": np.linspace(10, 50, 8),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            with self.assertRaises(ValueError):
+                stage_correlate_design(
+                    ctx,
+                    SimpleNamespace(control_predictor=False, control_trial_order=False),
+                )
 
     def test_correlate_design_requires_positive_permutation_count_in_non_iid_trial_mode(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
@@ -1835,6 +1964,39 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertAlmostEqual(float(out.iloc[0]["icc"]), 0.75, places=12)
         self.assertEqual(ctx.data_qc["icc_reliability"]["status"], "ok")
 
+    def test_icc_stage_rejects_unstable_trial_alignment_across_runs(self):
+        from eeg_pipeline.analysis.behavior import orchestration as orch
+
+        ctx = self._ctx(
+            DotConfig(
+                {
+                    "behavior_analysis": {
+                        "run_adjustment": {"column": "run_id"},
+                        "condition": {"compare_column": ""},
+                        "icc": {"enabled": True},
+                    },
+                    "event_columns": {
+                        "predictor": ["temperature"],
+                        "outcome": ["rating"],
+                        "binary_outcome": ["binary_outcome"],
+                    },
+                }
+            )
+        )
+        runtime = orch.create_behavior_runtime()
+        setattr(ctx, "_behavior_runtime", runtime)
+        runtime.cache._trial_table_df = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "trial_index_within_group": [0, 1, 0, 1],
+                "temperature": [44.0, 45.0, 45.0, 44.0],
+                "power_alpha": [0.1, 0.3, 0.2, 0.4],
+            }
+        )
+
+        with self.assertRaises(ValueError):
+            orch.stage_icc(ctx, SimpleNamespace(method_label="spearman"))
+
     def test_paired_condition_permutation_does_not_use_unpaired_label_shuffle(self):
         from eeg_pipeline.utils.parallel import _compute_single_condition_effect
 
@@ -2158,8 +2320,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         from eeg_pipeline.utils.analysis.stats.partial import compute_partial_corr
 
         cov = pd.DataFrame({"trial_index": [1, 2, 3, 4, 5, 6]}, dtype=float)
-        x = pd.Series([0.5, 1.2, 1.9, 2.4, 3.1, 3.8], dtype=float)
-        y = pd.Series([1.0, 1.8, 2.2, 2.9, 3.3, 4.1], dtype=float)
+        x = pd.Series([0.5, 1.2, 1.9, 2.4, 3.8, 3.1], dtype=float)
+        y = pd.Series([1.0, 1.8, 2.9, 2.2, 3.3, 4.1], dtype=float)
 
         state = _build_subject_partial_permutation_state(x, y, cov, method="spearman")
 

@@ -493,7 +493,10 @@ def split_by_condition(
     
     If compare_values is not specified:
     - Uses [1, 0] when a binary-coded condition column is detected.
-    - Otherwise auto-selects the first two observed condition values.
+    - Uses the two observed condition values only when exactly two non-missing
+      levels are present.
+    - Raises when >2 levels are present, because an arbitrary two-level subset
+      is not a scientifically valid default.
     Returns (group1_mask, group2_mask, n_group1, n_group2).
     """
     condition_column = _get_condition_column(events_df, config)
@@ -508,6 +511,11 @@ def split_by_condition(
     )
     
     if compare_values and len(compare_values) >= 2:
+        if len(compare_values) > 2:
+            raise ValueError(
+                "split_by_condition() only supports binary contrasts. "
+                "Received >2 compare_values; use the multigroup condition stage instead."
+            )
         value1, value2 = compare_values[0], compare_values[1]
         logger.info(
             f"Using user-specified condition values: {value1} vs {value2} "
@@ -533,14 +541,14 @@ def split_by_condition(
         float(v)
         for v in pd.Series(condition_numeric).dropna().unique().tolist()
     }
-    if {0.0, 1.0}.issubset(numeric_values):
+    if numeric_values and numeric_values.issubset({0.0, 1.0}):
         return _split_by_binary_outcome(condition_series, condition_column, logger)
 
     unique_values = [v for v in pd.Series(condition_series).dropna().unique().tolist()]
-    if len(unique_values) >= 2:
+    if len(unique_values) == 2:
         value1, value2 = unique_values[0], unique_values[1]
         logger.info(
-            "Auto-selected condition values (no compare_values set): %s vs %s (column: %s)",
+            "Using observed binary condition values: %s vs %s (column: %s)",
             value1,
             value2,
             condition_column,
@@ -554,6 +562,12 @@ def split_by_condition(
         n_group1 = int(mask1.sum())
         n_group2 = int(mask2.sum())
         return mask1.to_numpy(), mask2.to_numpy(), n_group1, n_group2
+    if len(unique_values) > 2:
+        raise ValueError(
+            f"Condition column '{condition_column}' has {len(unique_values)} observed values "
+            f"({unique_values}) but behavior_analysis.condition.compare_values is not set. "
+            "Specify an explicit binary contrast or use the multigroup condition stage."
+        )
 
     return _split_by_binary_outcome(condition_series, condition_column, logger)
 

@@ -111,11 +111,18 @@ def build_behavior_qc_impl(
             resolved_condition_col = get_binary_outcome_column_from_config(ctx.config, ctx.aligned_events)
 
         if condition_enabled and resolved_condition_col is not None:
-            cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(
-                ctx.aligned_events,
-                ctx.config,
-                ctx.logger,
-            )
+            try:
+                cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(
+                    ctx.aligned_events,
+                    ctx.config,
+                    ctx.logger,
+                )
+            except ValueError as exc:
+                qc["contrast"] = {
+                    "status": "skipped",
+                    "reason": str(exc),
+                }
+                cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = np.array([]), np.array([]), 0, 0
         else:
             cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = np.array([]), np.array([]), 0, 0
 

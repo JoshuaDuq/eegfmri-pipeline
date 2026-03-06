@@ -313,6 +313,10 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             def get_intent():
                 return (0, (), "")
 
+            @staticmethod
+            def get_vox2ras_tkr():
+                return np.eye(4, dtype=float)
+
         class _FakeImg:
             def __init__(self, data: np.ndarray, affine: np.ndarray):
                 self._data = np.asarray(data, dtype=np.float32)
@@ -420,6 +424,8 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             eloreta_loose=0.2,
             eloreta_depth=0.8,
             eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=False,
         )
 
         ctx = SimpleNamespace(
@@ -500,6 +506,8 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             eloreta_loose=0.2,
             eloreta_depth=0.8,
             eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=False,
         )
 
         ctx = SimpleNamespace(
@@ -582,6 +590,8 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             eloreta_loose=0.2,
             eloreta_depth=0.8,
             eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=False,
         )
 
         ctx = SimpleNamespace(
@@ -749,6 +759,8 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             eloreta_loose=0.2,
             eloreta_depth=0.8,
             eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=False,
         )
 
         ctx = SimpleNamespace(

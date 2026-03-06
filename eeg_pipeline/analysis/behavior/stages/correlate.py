@@ -132,9 +132,10 @@ def stage_correlate_design_impl(
             f"Run-level correlations requested (primary_unit={primary_unit!r}) "
             f"but run column '{run_col}' is missing from the trial table."
         )
-    run_adjust_in_correlations = bool(
-        get_config_value(ctx.config, "behavior_analysis.run_adjustment.include_in_correlations", run_adjust_enabled)
+    include_run_adjustment = bool(
+        get_config_value(ctx.config, "behavior_analysis.run_adjustment.include_in_correlations", True)
     )
+    run_adjust_in_correlations = bool(run_adjust_enabled and include_run_adjustment)
     max_run_dummies = get_config_int(ctx.config, "behavior_analysis.run_adjustment.max_dummies", 20)
 
     cov_parts = []
@@ -143,18 +144,29 @@ def stage_correlate_design_impl(
             if c in df_trials.columns:
                 cov_parts.append(pd.DataFrame({c: pd.to_numeric(df_trials[c], errors="coerce")}, index=df_trials.index))
                 break
-    if run_adjust_in_correlations and run_col in df_trials.columns:
+    if run_adjust_in_correlations:
+        if run_col not in df_trials.columns:
+            raise ValueError(
+                "Correlations design requested run adjustment, but the run column "
+                f"'{run_col}' is missing from the trial table."
+            )
         run_s = df_trials[run_col]
         n_levels = int(pd.Series(run_s).nunique(dropna=True))
         if n_levels > 1 and n_levels <= max(1, max_run_dummies + 1):
             run_dum = pd.get_dummies(run_s.astype("category"), prefix=run_col, drop_first=True)
             cov_parts.append(run_dum)
         elif n_levels > max_run_dummies + 1:
-            ctx.logger.warning(
-                "Correlations design: run adjustment requested but %s has %d levels (> max %d dummies); skipping.",
+            raise ValueError(
+                "Correlations design requested run adjustment, but "
+                f"'{run_col}' has {n_levels} levels (> max {max_run_dummies + 1} supported levels "
+                f"for dummy encoding with max_dummies={max_run_dummies}). "
+                "Increase behavior_analysis.run_adjustment.max_dummies, use run-level aggregation, "
+                "or disable run adjustment explicitly."
+            )
+        if n_levels <= 1:
+            ctx.logger.info(
+                "Correlations design: run adjustment requested but '%s' has <=1 non-missing level; no run dummies added.",
                 run_col,
-                n_levels,
-                max_run_dummies,
             )
     cov_df = pd.concat(cov_parts, axis=1) if cov_parts else None
 

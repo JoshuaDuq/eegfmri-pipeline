@@ -159,6 +159,11 @@ def run_group_level_correlations_impl(
         return pd.DataFrame()
     predictor_column = resolve_predictor_column(combined, config) or "predictor"
     block_col = _resolve_group_level_block_column(combined, config)
+    if control_run_effects and block_col is None:
+        raise ValueError(
+            "Group-level correlations requested run adjustment, but no run/block column "
+            "could be resolved from the combined trial tables."
+        )
 
     feature_cols = [c for c in combined.columns if str(c).startswith(tuple(feature_prefixes))]
     outcome = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
@@ -233,13 +238,25 @@ def run_group_level_correlations_impl(
                         cov_df["trial_index"] = pd.to_numeric(subj_df.loc[x_valid.index, trial_col], errors="coerce")
                         break
 
-            if control_run_effects and block_col is not None and block_col in subj_df.columns:
+            if control_run_effects:
+                if block_col not in subj_df.columns:
+                    raise ValueError(
+                        f"Group-level correlations requested run adjustment, but subject '{subj}' "
+                        f"is missing run column '{block_col}'."
+                    )
                 block_sub_s = subj_df.loc[x_valid.index, block_col]
                 n_levels = int(pd.Series(block_sub_s).nunique(dropna=True))
                 max_levels = max(1, int(max_run_dummies)) + 1
                 if n_levels > 1 and n_levels <= max_levels:
                     run_dummies = pd.get_dummies(block_sub_s.astype("category"), prefix=str(block_col), drop_first=True)
                     cov_df = pd.concat([cov_df, run_dummies], axis=1)
+                elif n_levels > max_levels:
+                    raise ValueError(
+                        "Group-level correlations requested run adjustment, but "
+                        f"subject '{subj}' has {n_levels} levels in '{block_col}' "
+                        f"(> max {max_levels} supported levels for dummy encoding with "
+                        f"max_run_dummies={max_run_dummies})."
+                    )
 
             if cov_df is not None and not cov_df.empty:
                 cov_df = cov_df.apply(pd.to_numeric, errors="coerce")
@@ -502,10 +519,12 @@ def run_group_level_analysis_impl(
         control_trial_order = bool(
             gl_corr_cfg.get("control_trial_order", get_config_bool(config, "behavior_analysis.control_trial_order", True))
         )
+        run_adjust_enabled = get_config_bool(config, "behavior_analysis.run_adjustment.enabled", False)
         control_run_effects = bool(
             gl_corr_cfg.get(
                 "control_run_effects",
-                get_config_bool(config, "behavior_analysis.run_adjustment.include_in_correlations", False),
+                run_adjust_enabled
+                and get_config_bool(config, "behavior_analysis.run_adjustment.include_in_correlations", True),
             )
         )
         max_run_dummies = int(

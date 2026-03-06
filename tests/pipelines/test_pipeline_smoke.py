@@ -128,7 +128,7 @@ class TestAllPipelines(unittest.TestCase):
         with patch.object(
             PreprocessingPipeline,
             "_extract_preprocessing_params",
-            return_value=("task", "ica", True, 2, progress),
+            return_value=("task", "ica", True, True, 2, progress),
         ), patch.object(
             PreprocessingPipeline,
             "_get_steps_for_mode",
@@ -184,7 +184,7 @@ class TestAllPipelines(unittest.TestCase):
 
         pipeline = object.__new__(BehaviorPipeline)
         pipeline.pipeline_config = SimpleNamespace(
-            run_multilevel_correlations=False,
+            run_multilevel_correlations=True,
         )
         pipeline.deriv_root = Path(tempfile.mkdtemp()) / "derivatives"
         pipeline.deriv_root.mkdir(parents=True, exist_ok=True)

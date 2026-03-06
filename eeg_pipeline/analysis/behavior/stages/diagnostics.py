@@ -3,9 +3,88 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.config.loader import get_config_value
+
+
+def _normalize_alignment_values(values: pd.Series) -> pd.Series:
+    """Normalize task-identity values before cross-run consistency checks."""
+    numeric_values = pd.to_numeric(values, errors="coerce")
+    if numeric_values.notna().sum() == values.notna().sum():
+        return pd.Series(
+            np.round(numeric_values.to_numpy(dtype=float), decimals=8),
+            index=values.index,
+            dtype=float,
+        )
+    normalized = values.astype("string").str.strip().str.lower()
+    return normalized.where(values.notna(), pd.NA)
+
+
+def _resolve_icc_alignment_columns(df_trials: pd.DataFrame, config: Any) -> List[str]:
+    """Resolve design columns that should be stable for trial-position ICC."""
+    from eeg_pipeline.utils.data.columns import (
+        get_binary_outcome_column_from_config,
+        resolve_predictor_column,
+    )
+
+    compare_column = str(
+        get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
+    ).strip()
+    if not compare_column:
+        compare_column = str(get_binary_outcome_column_from_config(config, df_trials) or "").strip()
+
+    predictor_column = str(resolve_predictor_column(df_trials, config) or "").strip()
+
+    candidates = [compare_column, predictor_column, "trial_type"]
+    resolved: List[str] = []
+    for column in candidates:
+        if column and column in df_trials.columns and column not in resolved:
+            resolved.append(column)
+    return resolved
+
+
+def _validate_icc_alignment_design(
+    df_trials: pd.DataFrame,
+    *,
+    run_col: str,
+    trial_col: str,
+    alignment_columns: List[str],
+) -> None:
+    """Reject ICC designs where trial positions do not represent the same task unit across runs."""
+    for column in alignment_columns:
+        observed = df_trials[[run_col, trial_col, column]].dropna()
+        if observed.empty:
+            continue
+
+        within_cell_unique = observed.groupby([run_col, trial_col], dropna=True)[column].nunique(dropna=True)
+        ambiguous_cells = within_cell_unique[within_cell_unique > 1]
+        if not ambiguous_cells.empty:
+            raise ValueError(
+                f"ICC alignment is invalid because '{column}' is not unique within "
+                f"({run_col}, {trial_col}) for {int(len(ambiguous_cells))} cells."
+            )
+
+        normalized = observed.groupby([trial_col, run_col], dropna=True)[column].first().reset_index()
+        normalized["__value__"] = _normalize_alignment_values(normalized[column])
+        across_run_unique = normalized.groupby(trial_col, dropna=True)["__value__"].nunique(dropna=True)
+        inconsistent_trials = across_run_unique[across_run_unique > 1]
+        if inconsistent_trials.empty:
+            continue
+
+        example_trial = inconsistent_trials.index[0]
+        example_rows = normalized.loc[normalized[trial_col] == example_trial, [run_col, column]]
+        example_pairs = ", ".join(
+            f"{run_col}={row[run_col]} -> {column}={row[column]}"
+            for _, row in example_rows.iterrows()
+        )
+        raise ValueError(
+            f"ICC alignment is invalid because '{column}' changes across runs for the same '{trial_col}' "
+            f"({int(len(inconsistent_trials))} inconsistent trial positions; example {trial_col}={example_trial}: "
+            f"{example_pairs}). Use a stable repeated-measures key before computing ICC."
+        )
+
 
 def stage_icc_impl(
     ctx: Any,
@@ -46,7 +125,7 @@ def stage_icc_impl(
         df_trials,
         feature_cols,
         min_features=1,
-        min_trials=10,
+        min_trials=1,
     )
     if should_skip:
         ctx.logger.info(f"ICC: skipping due to {skip_reason}")
@@ -61,7 +140,16 @@ def stage_icc_impl(
     if not trial_col:
         ctx.logger.warning("ICC: no intra-run trial column available to align trials across runs; skipping.")
         return pd.DataFrame()
-        
+
+    alignment_columns = _resolve_icc_alignment_columns(df_trials, ctx.config)
+    if alignment_columns:
+        _validate_icc_alignment_design(
+            df_trials,
+            run_col=run_col,
+            trial_col=trial_col,
+            alignment_columns=alignment_columns,
+        )
+
     records = []
     
     unique_runs = df_trials[run_col].dropna().unique()

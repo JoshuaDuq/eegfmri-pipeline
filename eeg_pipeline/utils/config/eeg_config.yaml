@@ -646,8 +646,8 @@ behavior_analysis:
   run_adjustment:
     enabled: false
     column: "run_id"                 # e.g., "run_id", "run", "block"
-    include_in_correlations: true    # add run dummies to partial correlations
-    max_dummies: 20                  # bounds dummy explosion for categorical run IDs
+    include_in_correlations: true    # when enabled=true, add run dummies to partial correlations
+    max_dummies: 20                  # fail if run dummy expansion would exceed this limit
 
   # Canonical per-trial table export (clean events.tsv + feature columns)
   trial_table:
@@ -766,7 +766,7 @@ behavior_analysis:
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
     compare_column: ""          # Column to split by (empty = use event_columns.binary_outcome)
-    compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
+    compare_values: []           # Explicit values to compare. Leave empty only for binary columns with exactly 2 observed levels.
     compare_labels: null         # Optional labels for compare_values (same length)
     primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
     overwrite: true

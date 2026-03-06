@@ -252,6 +252,8 @@ class TestScientificValidityGuards(unittest.TestCase):
             eloreta_loose=0.2,
             eloreta_depth=0.8,
             eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=False,
         )
 
         ctx = SimpleNamespace(

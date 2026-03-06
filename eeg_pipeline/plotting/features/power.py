@@ -2094,8 +2094,8 @@ def plot_band_power_topomaps_window_contrast(
             for coll in ax.collections:
                 if isinstance(coll, mpl_collections.PathCollection):
                     coll.set_visible(False)
-        except Exception:
-            pass
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
+            logger.warning("Opacity masking failed for band=%s: %s", band, exc)
         plt.colorbar(im, ax=ax, shrink=0.6, label="Δ power")
 
         band_color = get_band_color(band, config)
@@ -2224,7 +2224,7 @@ def plot_band_power_topomaps_group_condition_contrast(
                 else:
                     try:
                         p = float(wilcoxon(diffs, zero_method="wilcox", alternative="two-sided").pvalue)
-                    except Exception:
+                    except ValueError:
                         p = 1.0
             tests.append((band, ch_name, p))
 
@@ -2316,8 +2316,8 @@ def plot_band_power_topomaps_group_condition_contrast(
             for coll in ax.collections:
                 if isinstance(coll, matplotlib.collections.PathCollection):
                     coll.set_visible(False)
-        except Exception:
-            pass
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
+            logger.warning("Opacity masking failed for band=%s: %s", band, exc)
         plt.colorbar(im, ax=ax, shrink=0.6, label="Δ power")
 
         band_color = get_band_color(band, config)

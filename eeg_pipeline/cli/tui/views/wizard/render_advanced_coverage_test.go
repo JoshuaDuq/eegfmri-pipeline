@@ -162,7 +162,7 @@ func TestPlottingPerPlotFieldsAreRendered(t *testing.T) {
 // used by advanced config renderers never exceeds the lines actually available
 // after accounting for the fixed overhead (step header + info hint).
 func TestAdvancedConfigScrollWindowFitsContentFrame(t *testing.T) {
-	pipelines := []types.PipelineType{
+	pipelines := []types.Pipeline{
 		types.PipelineBehavior,
 		types.PipelineFeatures,
 		types.PipelineML,

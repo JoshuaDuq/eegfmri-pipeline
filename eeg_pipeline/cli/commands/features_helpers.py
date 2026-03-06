@@ -698,6 +698,10 @@ def _apply_erds_overrides(args: argparse.Namespace, config: Any) -> None:
         erds_cfg["min_baseline_power"] = args.erds_min_baseline_power
     if getattr(args, "erds_min_active_power", None) is not None:
         erds_cfg["min_active_power"] = args.erds_min_active_power
+    if getattr(args, "erds_min_segment_sec", None) is not None:
+        erds_cfg["min_segment_sec"] = args.erds_min_segment_sec
+    if getattr(args, "erds_bands", None) is not None:
+        erds_cfg["bands"] = list(args.erds_bands)
     if getattr(args, "erds_onset_threshold_sigma", None) is not None:
         erds_cfg["onset_threshold_sigma"] = args.erds_onset_threshold_sigma
     if getattr(args, "erds_onset_min_duration_ms", None) is not None:
