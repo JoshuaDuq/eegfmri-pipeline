@@ -201,13 +201,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		totalLines += len(m.GetDiscoveredColumnValues(m.sourceLocContrastCondition))
 	}
 
-	effectiveHeight := m.height
-	if effectiveHeight <= 0 {
-		effectiveHeight = defaultTerminalHeight
-	}
-
 	startLine, endLine, showScrollIndicators := calculateScrollWindow(
-		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
+		totalLines, m.advancedOffset, m.availableAdvancedContentHeight())
 
 	// Show scroll indicator for items above
 	if showScrollIndicators && startLine > 0 {

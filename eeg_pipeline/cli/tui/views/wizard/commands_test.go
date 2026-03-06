@@ -163,6 +163,40 @@ func TestBuildBehaviorAdvancedArgs_UsesSingleExplicitCorrelationTargetColumn(t *
 	}
 }
 
+func TestNextCorrelationType_CyclesSupportedValues(t *testing.T) {
+	if got := nextCorrelationType(""); got != "partial_cov_predictor" {
+		t.Fatalf("expected empty value to reset to default, got %q", got)
+	}
+	if got := nextCorrelationType("partial_cov_predictor"); got != "raw" {
+		t.Fatalf("expected partial_cov_predictor to cycle to raw, got %q", got)
+	}
+	if got := nextCorrelationType("run_mean"); got != "partial_cov_predictor" {
+		t.Fatalf("expected run_mean to wrap to partial_cov_predictor, got %q", got)
+	}
+	if got := nextCorrelationType("partial_cov_temp"); got != "partial_cov_predictor" {
+		t.Fatalf("expected invalid value to reset to partial_cov_predictor, got %q", got)
+	}
+}
+
+func TestValidate_RejectsInvalidCorrelationTypeSelection(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.subjects = []types.SubjectStatus{{
+		ID:          "sub-01",
+		HasFeatures: true,
+	}}
+	m.subjectSelected = map[string]bool{"sub-01": true}
+	m.featureFileSelected = map[string]bool{"power": true}
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "correlations"
+	}
+	m.correlationsTypesSpec = "partial_cov_temp"
+
+	errors := m.validate()
+	if !containsString(errors, "Invalid correlation type selection: partial_cov_temp") {
+		t.Fatalf("expected invalid correlation type error, got %#v", errors)
+	}
+}
+
 func TestBuildBehaviorAdvancedArgs_EmitsEmptyCorrelationTargetColumn(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 
@@ -611,31 +645,31 @@ func TestApplyConfigKeys_HydratesMLSettingsIncludingCNN(t *testing.T) {
 func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	m.ApplyConfigKeys(map[string]interface{}{
-		"behavior_analysis.statistics.correlation_method":                                 "pearson",
-		"behavior_analysis.robust_correlation":                                            "winsorized",
-		"behavior_analysis.bootstrap":                                                     1500.0,
-		"behavior_analysis.statistics.default_n_bootstrap":                                2500.0,
-		"behavior_analysis.statistics.predictor_control":                                  "linear",
-		"behavior_analysis.permutation.scheme":                                            "circular_shift",
-		"behavior_analysis.permutation.group_column_preference":                           []interface{}{"run_id", "block"},
-		"behavior_analysis.features.exclude_non_trialwise_features":                       false,
-		"behavior_analysis.correlations.min_runs":                                         6.0,
-		"behavior_analysis.correlations.target_column":                                    "custom_rating",
-		"behavior_analysis.correlations.prefer_predictor_residual":                        true,
-		"behavior_analysis.correlations.permutation.n_permutations":                       77.0,
-		"behavior_analysis.condition.primary_unit":                                        "run_mean",
-		"behavior_analysis.condition.compare_labels":                                      []interface{}{"low", "high"},
-		"behavior_analysis.regression.primary_unit":                                       "run_mean",
-		"behavior_analysis.temporal.correction_method":                                    "cluster",
-		"behavior_analysis.cluster_correction.enabled":                                    true,
-		"behavior_analysis.cluster_correction.alpha":                                      0.01,
-		"behavior_analysis.cluster_correction.min_cluster_size":                           4.0,
-		"behavior_analysis.cluster_correction.tail":                                       -1.0,
-		"validation.min_epochs":                                                           30.0,
-		"validation.min_channels":                                                         16.0,
-		"validation.max_amplitude_uv":                                                     400.0,
-		"io.constants.temperature_range":                                                  []interface{}{35.0, 55.0},
-		"io.constants.max_missing_channels_fraction":                                      0.2,
+		"behavior_analysis.statistics.correlation_method":           "pearson",
+		"behavior_analysis.robust_correlation":                      "winsorized",
+		"behavior_analysis.bootstrap":                               1500.0,
+		"behavior_analysis.statistics.default_n_bootstrap":          2500.0,
+		"behavior_analysis.statistics.predictor_control":            "linear",
+		"behavior_analysis.permutation.scheme":                      "circular_shift",
+		"behavior_analysis.permutation.group_column_preference":     []interface{}{"run_id", "block"},
+		"behavior_analysis.features.exclude_non_trialwise_features": false,
+		"behavior_analysis.correlations.min_runs":                   6.0,
+		"behavior_analysis.correlations.target_column":              "custom_rating",
+		"behavior_analysis.correlations.prefer_predictor_residual":  true,
+		"behavior_analysis.correlations.permutation.n_permutations": 77.0,
+		"behavior_analysis.condition.primary_unit":                  "run_mean",
+		"behavior_analysis.condition.compare_labels":                []interface{}{"low", "high"},
+		"behavior_analysis.regression.primary_unit":                 "run_mean",
+		"behavior_analysis.temporal.correction_method":              "cluster",
+		"behavior_analysis.cluster_correction.enabled":              true,
+		"behavior_analysis.cluster_correction.alpha":                0.01,
+		"behavior_analysis.cluster_correction.min_cluster_size":     4.0,
+		"behavior_analysis.cluster_correction.tail":                 -1.0,
+		"validation.min_epochs":                                     30.0,
+		"validation.min_channels":                                   16.0,
+		"validation.max_amplitude_uv":                               400.0,
+		"io.constants.temperature_range":                            []interface{}{35.0, 55.0},
+		"io.constants.max_missing_channels_fraction":                0.2,
 	})
 
 	if m.correlationMethod != "pearson" {

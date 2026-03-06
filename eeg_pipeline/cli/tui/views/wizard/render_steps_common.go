@@ -13,12 +13,10 @@ import (
 const (
 	defaultLabelWidth     = 22
 	defaultLabelWidthWide = 30
-	configOverhead        = 17
 )
 
 // calculateScrollWindow returns the visible line range for scrolling.
-func calculateScrollWindow(totalLines, offset, effectiveHeight, overhead int) (startLine, endLine int, showIndicators bool) {
-	maxLines := effectiveHeight - overhead
+func calculateScrollWindow(totalLines, offset, maxLines int) (startLine, endLine int, showIndicators bool) {
 	if maxLines < minVisibleLines {
 		maxLines = minVisibleLines
 	}

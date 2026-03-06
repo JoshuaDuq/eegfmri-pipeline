@@ -1899,7 +1899,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startTextEdit(textFieldCorrelationsPowerSegment)
 		m.useDefaultAdvanced = false
 	case optCorrelationsTypes:
-		m.startTextEdit(textFieldCorrelationsTypes)
+		m.correlationsTypesSpec = nextCorrelationType(m.correlationsTypesSpec)
 		m.useDefaultAdvanced = false
 	case optCorrelationsFeatures:
 		m.startTextEdit(textFieldCorrelationsFeatures)

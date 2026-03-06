@@ -10,6 +10,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type footerHint struct {
+	key      string
+	label    string
+	compact  string
+	priority int
+}
+
 const (
 	narrowWidthThreshold  = 100
 	shortHeightThreshold  = 25
@@ -59,10 +66,7 @@ func (m Model) View() string {
 
 	header := m.renderHeader(innerW)
 	footer := m.renderFooter(innerW)
-	headerH := strings.Count(header, "\n") + headerSpacingLines
-	footerH := strings.Count(footer, "\n") + footerSpacingLines
-
-	mainH := max(containerH-containerPadV*2-containerBorder-headerH-footerH, minMainContentHeight)
+	mainH := m.mainContentHeight(innerW, containerH, header, footer)
 	mainContent := m.renderMainContent(h < shortHeightThreshold)
 	mainContent = normalizeContentFrame(mainContent, innerW, mainH)
 
@@ -78,6 +82,25 @@ func (m Model) View() string {
 		Render(innerView)
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, container)
+}
+
+func (m Model) mainContentHeight(contentWidth, containerHeight int, header, footer string) int {
+	headerH := strings.Count(header, "\n") + headerSpacingLines
+	footerH := strings.Count(footer, "\n") + footerSpacingLines
+	return max(containerHeight-containerPadV*2-containerBorder-headerH-footerH, minMainContentHeight)
+}
+
+func (m Model) availableMainContentHeight() int {
+	w, h := m.effectiveDimensions()
+	containerW, containerH := m.containerDimensions(w, h)
+	innerW := containerW - containerPadH*2 - containerBorder
+	header := m.renderHeader(innerW)
+	footer := m.renderFooter(innerW)
+	return m.mainContentHeight(innerW, containerH, header, footer)
+}
+
+func (m Model) availableAdvancedContentHeight() int {
+	return max(m.availableMainContentHeight()-advancedContentOverhead, minVisibleLines)
 }
 
 func normalizeContentFrame(content string, width, height int) string {
@@ -330,31 +353,66 @@ func (m Model) buildBreadcrumbRow() string {
 }
 
 func (m Model) renderFooter(width int) string {
-	var hints []string
+	var hints []footerHint
 
 	switch {
 	case m.toastMessage != "":
 		return m.renderToast(width)
 	case m.editingText:
-		hints = []string{
-			styles.RenderKeyHint("Type", "Edit"),
-			styles.RenderKeyHint("Enter", "Save"),
-			styles.RenderKeyHint("Esc", "Cancel"),
+		hints = []footerHint{
+			{key: "Type", label: "Edit", compact: "Edit", priority: 0},
+			{key: "Enter", label: "Save", compact: "Save", priority: 0},
+			{key: "Esc", label: "Cancel", compact: "Cancel", priority: 0},
 		}
 	case m.editingNumber:
-		hints = []string{
-			styles.RenderKeyHint("Type", "Enter Number"),
-			styles.RenderKeyHint("Enter", "Save"),
-			styles.RenderKeyHint("Esc", "Cancel"),
+		hints = []footerHint{
+			{key: "Type", label: "Enter Number", compact: "Number", priority: 0},
+			{key: "Enter", label: "Save", compact: "Save", priority: 0},
+			{key: "Esc", label: "Cancel", compact: "Cancel", priority: 0},
 		}
 	default:
 		hints = m.getStepHints()
 	}
 
 	divider := styles.RenderDivider(width)
+	barContent := m.renderFooterHints(width, hints)
 	bar := styles.FooterStyle.Width(width).Align(lipgloss.Center).
-		Render(strings.Join(hints, styles.RenderFooterSeparator()))
+		Render(barContent)
 	return divider + "\n" + bar
+}
+
+func (m Model) renderFooterHints(width int, hints []footerHint) string {
+	if len(hints) == 0 {
+		return ""
+	}
+
+	render := func(useCompact bool, maxPriority int) string {
+		parts := make([]string, 0, len(hints))
+		for _, hint := range hints {
+			if hint.priority > maxPriority {
+				continue
+			}
+			label := hint.label
+			if useCompact && hint.compact != "" {
+				label = hint.compact
+			}
+			parts = append(parts, styles.RenderKeyHint(hint.key, label))
+		}
+		return strings.Join(parts, styles.RenderFooterSeparator())
+	}
+
+	if full := render(false, 2); lipgloss.Width(full) <= width {
+		return full
+	}
+	if compact := render(true, 2); lipgloss.Width(compact) <= width {
+		return compact
+	}
+	for maxPriority := 1; maxPriority >= 0; maxPriority-- {
+		if compact := render(true, maxPriority); compact != "" && lipgloss.Width(compact) <= width {
+			return compact
+		}
+	}
+	return render(true, 0)
 }
 
 func (m Model) renderToast(width int) string {
@@ -375,33 +433,33 @@ func (m Model) renderToast(width int) string {
 	return divider + "\n" + bar
 }
 
-func (m Model) getStepHints() []string {
+func (m Model) getStepHints() []footerHint {
 	switch m.CurrentStep {
 	case types.StepSelectMode:
-		return []string{
-			styles.RenderKeyHint("↑/↓", "Navigate"),
-			styles.RenderKeyHint("Enter", "Next"),
-			styles.RenderKeyHint("Esc", "Back"),
+		return []footerHint{
+			{key: "↑/↓", label: "Navigate", compact: "Nav", priority: 0},
+			{key: "Enter", label: "Next", compact: "Next", priority: 0},
+			{key: "Esc", label: "Back", compact: "Back", priority: 0},
 		}
 	case types.StepSelectComputations:
 		if m.Pipeline == types.PipelineBehavior {
-			return []string{
-				styles.RenderKeyHint("Space", "Toggle"),
-				styles.RenderKeyHint("A/N", "All/None"),
-				styles.RenderKeyHint("Q", "Quick"),
-				styles.RenderKeyHint("F", "Full"),
-				styles.RenderKeyHint("R", "Regress"),
-				styles.RenderKeyHint("T", "Temporal"),
-				styles.RenderKeyHint("Enter", "Next"),
+			return []footerHint{
+				{key: "Space", label: "Toggle", compact: "Toggle", priority: 0},
+				{key: "A/N", label: "All/None", compact: "All/None", priority: 1},
+				{key: "Q", label: "Quick", compact: "Quick", priority: 2},
+				{key: "F", label: "Full", compact: "Full", priority: 2},
+				{key: "R", label: "Regress", compact: "Regress", priority: 2},
+				{key: "T", label: "Temporal", compact: "Temp", priority: 2},
+				{key: "Enter", label: "Next", compact: "Next", priority: 0},
 			}
 		}
 		return m.standardSelectionHints()
 	case types.StepConfigureOptions:
 		if m.Pipeline == types.PipelineFeatures {
-			return []string{
-				styles.RenderKeyHint("Space", "Toggle"),
-				styles.RenderKeyHint("A/N", "All/None"),
-				styles.RenderKeyHint("Enter", "Next"),
+			return []footerHint{
+				{key: "Space", label: "Toggle", compact: "Toggle", priority: 0},
+				{key: "A/N", label: "All/None", compact: "All/None", priority: 1},
+				{key: "Enter", label: "Next", compact: "Next", priority: 0},
 			}
 		}
 		return m.standardSelectionHints()
@@ -411,64 +469,64 @@ func (m Model) getStepHints() []string {
 		return m.standardSelectionHints()
 	case types.StepPreprocessingFiltering, types.StepPreprocessingICA, types.StepPreprocessingEpochs:
 		if m.editingNumber || m.editingText {
-			return []string{
-				styles.RenderKeyHint("Type", "Enter Value"),
-				styles.RenderKeyHint("Enter", "Confirm"),
-				styles.RenderKeyHint("Esc", "Cancel"),
+			return []footerHint{
+				{key: "Type", label: "Enter Value", compact: "Value", priority: 0},
+				{key: "Enter", label: "Confirm", compact: "OK", priority: 0},
+				{key: "Esc", label: "Cancel", compact: "Cancel", priority: 0},
 			}
 		}
-		return []string{
-			styles.RenderKeyHint("↑/↓", "Navigate"),
-			styles.RenderKeyHint("Enter", "Edit"),
-			styles.RenderKeyHint("Space", "Toggle"),
-			styles.RenderKeyHint("Esc", "Back"),
+		return []footerHint{
+			{key: "↑/↓", label: "Navigate", compact: "Nav", priority: 0},
+			{key: "Enter", label: "Edit", compact: "Edit", priority: 0},
+			{key: "Space", label: "Toggle", compact: "Toggle", priority: 1},
+			{key: "Esc", label: "Back", compact: "Back", priority: 0},
 		}
 	case types.StepPlotConfig:
-		return []string{
-			styles.RenderKeyHint("Space", "Toggle/Cycle"),
-			styles.RenderKeyHint("↑/↓", "Navigate"),
-			styles.RenderKeyHint("Enter", "Next"),
-			styles.RenderKeyHint("Esc", "Back"),
+		return []footerHint{
+			{key: "Space", label: "Toggle/Cycle", compact: "Toggle", priority: 0},
+			{key: "↑/↓", label: "Navigate", compact: "Nav", priority: 0},
+			{key: "Enter", label: "Next", compact: "Next", priority: 0},
+			{key: "Esc", label: "Back", compact: "Back", priority: 0},
 		}
 	case types.StepTimeRange:
-		return []string{
-			styles.RenderKeyHint("+", "Add"),
-			styles.RenderKeyHint("D", "Delete"),
-			styles.RenderKeyHint("Space", "Edit"),
-			styles.RenderKeyHint("Enter", "Next"),
-			styles.RenderKeyHint("Esc", "Back"),
+		return []footerHint{
+			{key: "+", label: "Add", compact: "Add", priority: 1},
+			{key: "D", label: "Delete", compact: "Del", priority: 1},
+			{key: "Space", label: "Edit", compact: "Edit", priority: 0},
+			{key: "Enter", label: "Next", compact: "Next", priority: 0},
+			{key: "Esc", label: "Back", compact: "Back", priority: 0},
 		}
 	case types.StepAdvancedConfig:
 		if m.expandedOption >= 0 {
-			return []string{
-				styles.RenderKeyHint("Space", "Toggle Item"),
-				styles.RenderKeyHint("↑/↓", "Navigate"),
-				styles.RenderKeyHint("Esc", "Close List"),
+			return []footerHint{
+				{key: "Space", label: "Toggle Item", compact: "Toggle", priority: 0},
+				{key: "↑/↓", label: "Navigate", compact: "Nav", priority: 0},
+				{key: "Esc", label: "Close List", compact: "Close", priority: 0},
 			}
 		}
-		return []string{
-			styles.RenderKeyHint("Space", "Toggle/Expand"),
-			styles.RenderKeyHint("↑/↓", "Navigate"),
-			styles.RenderKeyHint("Enter", "Next"),
-			styles.RenderKeyHint("Esc", "Back"),
+		return []footerHint{
+			{key: "Space", label: "Toggle/Expand", compact: "Toggle", priority: 0},
+			{key: "↑/↓", label: "Navigate", compact: "Nav", priority: 0},
+			{key: "Enter", label: "Next", compact: "Next", priority: 0},
+			{key: "Esc", label: "Back", compact: "Back", priority: 0},
 		}
 	case types.StepSelectSubjects:
-		return []string{
-			styles.RenderKeyHint("Space", "Toggle"),
-			styles.RenderKeyHint("A/N", "All/None"),
-			styles.RenderKeyHint("Enter", "Next"),
+		return []footerHint{
+			{key: "Space", label: "Toggle", compact: "Toggle", priority: 0},
+			{key: "A/N", label: "All/None", compact: "All/None", priority: 1},
+			{key: "Enter", label: "Next", compact: "Next", priority: 0},
 		}
 	default:
-		return []string{}
+		return []footerHint{}
 	}
 }
 
-func (m Model) standardSelectionHints() []string {
-	return []string{
-		styles.RenderKeyHint("Space", "Toggle"),
-		styles.RenderKeyHint("A", "All"),
-		styles.RenderKeyHint("N", "None"),
-		styles.RenderKeyHint("Enter", "Next"),
-		styles.RenderKeyHint("Esc", "Back"),
+func (m Model) standardSelectionHints() []footerHint {
+	return []footerHint{
+		{key: "Space", label: "Toggle", compact: "Toggle", priority: 0},
+		{key: "A", label: "All", compact: "All", priority: 1},
+		{key: "N", label: "None", compact: "None", priority: 1},
+		{key: "Enter", label: "Next", compact: "Next", priority: 0},
+		{key: "Esc", label: "Back", compact: "Back", priority: 0},
 	}
 }

@@ -732,10 +732,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if strings.TrimSpace(val) == "" {
 				val = "(default: partial_cov_predictor)"
 			}
-			if m.editingText && m.editingTextField == textFieldCorrelationsTypes {
-				val = textDisplay
-			}
-			return "Correlation Types", val, "comma-separated: raw,partial_cov,partial_predictor,partial_cov_predictor,run_mean"
+			return "Correlation Types", val, "Space to cycle: partial_cov_predictor, raw, partial_cov, partial_predictor, run_mean"
 		case optCorrelationsUseCrossfitPredictorResidual:
 			return "Use residual_cv", m.boolToOnOff(m.correlationsUseCrossfitResidual), "requires residual crossfit"
 		case optCorrelationsPrimaryUnit:
@@ -1022,22 +1019,28 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		}
 	}
 
-	effectiveHeight := m.height
-	if effectiveHeight <= 0 {
-		effectiveHeight = defaultTerminalHeight
+	totalLines := 0
+	for _, opt := range options {
+		totalLines++
+		if m.shouldRenderExpandedListAfterOption(opt) {
+			totalLines += m.getExpandedListLength()
+		}
 	}
 
-	totalLines := len(options)
-	startIdx, endIdx, showScrollIndicators := calculateScrollWindow(
-		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
+	startLine, endLine, showScrollIndicators := calculateScrollWindow(
+		totalLines, m.advancedOffset, m.availableAdvancedContentHeight())
 
-	// Show scroll indicator for items above
-	if showScrollIndicators && startIdx > 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startIdx)) + "\n")
+	if showScrollIndicators && startLine > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startLine)) + "\n")
 	}
 
-	for i := startIdx; i < endIdx; i++ {
-		opt := options[i]
+	lineIdx := 0
+	for i, opt := range options {
+		if lineIdx >= endLine {
+			break
+		}
+
+		inRange := lineIdx >= startLine
 		isFocused := i == m.advancedCursor
 		label, value, hint := getOptionDisplay(opt)
 
@@ -1078,39 +1081,48 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 		}
 
-		if isSectionHeader {
-			line := cursor + labelStyle.Render(label) + "  " + hintStyle.Render(hint)
-			b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
-		} else {
-			styledLabel := labelStyle.Render(label + ":")
-			styledValue := valueStyle.Render(value)
-			styledHint := hintStyle.Render(hint)
-			b.WriteString(styles.RenderConfigLine(cursor, styledLabel, styledValue, styledHint, labelWidth, m.contentWidth) + "\n")
+		if inRange {
+			if isSectionHeader {
+				line := cursor + labelStyle.Render(label) + "  " + hintStyle.Render(hint)
+				b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
+			} else {
+				styledLabel := labelStyle.Render(label + ":")
+				styledValue := valueStyle.Render(value)
+				styledHint := hintStyle.Render(hint)
+				b.WriteString(styles.RenderConfigLine(cursor, styledLabel, styledValue, styledHint, labelWidth, m.contentWidth) + "\n")
+			}
 		}
+		lineIdx++
 
-		// Render expanded column/value list after the relevant option
 		if m.shouldRenderExpandedListAfterOption(opt) {
 			items := m.getExpandedListItems()
-			subIndent := "      " // 6 spaces for sub-items
+			subIndent := "    "
 			for j, item := range items {
-				isSubFocused := j == m.subCursor
-				isSelected := m.isExpandedItemSelected(j, item)
-
-				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
-
-				itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
-				if isSubFocused {
-					itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+				if lineIdx >= endLine {
+					break
 				}
 
-				b.WriteString(subIndent + checkbox + " " + itemStyle.Render(item) + "\n")
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+				if lineIdx >= startLine {
+					cursor := "  "
+					if isSubFocused {
+						cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
+					}
+					checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+					itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
+					if isSubFocused {
+						itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+					}
+					b.WriteString(subIndent + cursor + checkbox + " " + itemStyle.Render(item) + "\n")
+				}
+				lineIdx++
 			}
 		}
 	}
 
-	// Show scroll indicator for items below
-	if showScrollIndicators && endIdx < len(options) {
-		remaining := len(options) - endIdx
+	if showScrollIndicators && endLine < totalLines {
+		remaining := totalLines - endLine
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", remaining)) + "\n")
 	}
 

@@ -38,8 +38,9 @@ const (
 	numTimeRangeFields = 3
 
 	// Scroll offset calculation
-	minVisibleLines       = 8
-	defaultTerminalHeight = 40
+	minVisibleLines         = 8
+	defaultTerminalHeight   = 40
+	advancedContentOverhead = 5 // RenderStepHeader (3 lines) + trailing newline (1) + info hint line (1)
 
 	// Minimum buffer length for single character input
 	singleCharLength = 1

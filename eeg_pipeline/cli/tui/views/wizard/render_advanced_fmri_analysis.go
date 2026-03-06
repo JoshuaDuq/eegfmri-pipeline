@@ -239,12 +239,8 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			totalLines += m.getExpandedListLength()
 		}
 	}
-	effectiveHeight := m.height
-	if effectiveHeight <= 0 {
-		effectiveHeight = defaultTerminalHeight
-	}
 	startLine, endLine, showScrollIndicators := calculateScrollWindow(
-		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
+		totalLines, m.advancedOffset, m.availableAdvancedContentHeight())
 
 	if showScrollIndicators && startLine > 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more above", startLine)) + "\n")

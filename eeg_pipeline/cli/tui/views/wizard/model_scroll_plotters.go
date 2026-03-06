@@ -12,6 +12,34 @@ import (
 
 // Scroll calculations, plotting availability summaries, and plotter discovery.
 
+func (m Model) advancedRenderedLines(options []optionType, shouldRender func(optionType) bool) (totalLines, cursorLine int) {
+	lineIdx := 0
+	cursorLine = 0
+
+	for i, opt := range options {
+		if !shouldRender(opt) {
+			continue
+		}
+
+		if i == m.advancedCursor {
+			cursorLine = lineIdx
+			if m.shouldRenderExpandedListAfterOption(opt) && m.subCursor >= 0 {
+				maxSubCursor := m.getExpandedListLength() - 1
+				if maxSubCursor >= 0 {
+					cursorLine += 1 + min(m.subCursor, maxSubCursor)
+				}
+			}
+		}
+
+		lineIdx++
+		if m.shouldRenderExpandedListAfterOption(opt) {
+			lineIdx += m.getExpandedListLength()
+		}
+	}
+
+	return lineIdx, cursorLine
+}
+
 func (m *Model) UpdateComputationOffset() {
 	// Match overhead with renderComputationSelection (12 lines)
 	overheadLines := 12
@@ -31,18 +59,7 @@ func (m *Model) UpdateComputationOffset() {
 
 // UpdateAdvancedOffset calculates and updates the scrolling offset for advanced config lists.
 func (m *Model) UpdateAdvancedOffset() {
-	// Use a fallback height if terminal size not yet received
-	effectiveHeight := m.height
-	if effectiveHeight <= 0 {
-		effectiveHeight = defaultTerminalHeight
-	}
-
-	// Overhead must match each pipeline's render function.
-	overheadLines := configOverhead
-	maxLines := effectiveHeight - overheadLines
-	if maxLines < minVisibleLines {
-		maxLines = minVisibleLines
-	}
+	maxLines := m.availableAdvancedContentHeight()
 
 	totalLines := 0
 	cursorLine := 0
@@ -50,9 +67,7 @@ func (m *Model) UpdateAdvancedOffset() {
 	switch m.Pipeline {
 	case types.PipelineBehavior:
 		options := m.getBehaviorOptions()
-		totalLines = len(options)
-		// Note: expanded list items are rendered inline, so cursorLine stays as advancedCursor
-		cursorLine = m.advancedCursor
+		totalLines, cursorLine = m.advancedRenderedLines(options, func(optionType) bool { return true })
 
 	case types.PipelineFeatures:
 		options := m.getFeaturesOptions()
@@ -80,35 +95,19 @@ func (m *Model) UpdateAdvancedOffset() {
 
 	case types.PipelinePreprocessing:
 		options := m.getPreprocessingOptions()
-		totalLines = len(options)
-		cursorLine = m.advancedCursor
+		totalLines, cursorLine = m.advancedRenderedLines(options, func(optionType) bool { return true })
 
 	case types.PipelineFmri:
 		options := m.getFmriPreprocessingOptions()
-		totalLines = len(options)
-		cursorLine = m.advancedCursor
+		totalLines, cursorLine = m.advancedRenderedLines(options, func(optionType) bool { return true })
 
 	case types.PipelineFmriAnalysis:
 		options := m.getFmriAnalysisOptions()
-		totalLines = len(options)
-		cursorLine = m.advancedCursor
+		totalLines, cursorLine = m.advancedRenderedLines(options, func(optionType) bool { return true })
 
 	case types.PipelineML:
 		options := m.getMLOptions()
-		lineIdx := 0
-		for i, opt := range options {
-			if !isMLRenderedOption(opt) {
-				continue
-			}
-			if i == m.advancedCursor {
-				cursorLine = lineIdx
-			}
-			lineIdx++
-			if m.shouldRenderExpandedListAfterOption(opt) {
-				lineIdx += m.getExpandedListLength()
-			}
-		}
-		totalLines = lineIdx
+		totalLines, cursorLine = m.advancedRenderedLines(options, isMLRenderedOption)
 
 	default:
 		totalLines = 0

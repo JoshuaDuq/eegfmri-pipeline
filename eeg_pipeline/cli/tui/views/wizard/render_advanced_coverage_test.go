@@ -88,6 +88,38 @@ func TestBehaviorAdvancedConfigRendersMaximalState(t *testing.T) {
 	}
 }
 
+func TestBehaviorAdvancedConfigScrollsExpandedLists(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.height = 22
+	for i := range m.computations {
+		m.computationSelected[i] = true
+	}
+	m.behaviorGroupGeneralExpanded = true
+	m.behaviorGroupStatsExpanded = true
+	m.expandedOption = expandedBehaviorOutcomeColumn
+	m.subCursor = 6
+	m.discoveredColumns = []string{"col1", "col2", "col3", "col4", "col5", "col6", "col7", "col8"}
+	for i, opt := range m.getBehaviorOptions() {
+		if opt == optBehaviorOutcomeColumn {
+			m.advancedCursor = i
+			break
+		}
+	}
+
+	m.UpdateAdvancedOffset()
+	if m.advancedOffset == 0 {
+		t.Fatalf("expected advanced offset to move for expanded list, got 0")
+	}
+
+	rendered := m.renderBehaviorAdvancedConfig()
+	if !strings.Contains(rendered, "col6") {
+		t.Fatalf("expected scrolled behavior config to include focused expanded-list item:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "› □ col6") {
+		t.Fatalf("expected focused expanded-list item to show a visible cursor:\n%s", rendered)
+	}
+}
+
 func TestPlottingGlobalOptionsAreRendered(t *testing.T) {
 	m := New(types.PipelinePlotting, ".")
 	m.plotGroupDefaultsExpanded = true
@@ -122,6 +154,38 @@ func TestPlottingPerPlotFieldsAreRendered(t *testing.T) {
 			if strings.Contains(rendered, "Unknown plot field") {
 				t.Fatalf("plot %q field %v is not rendered: %s", plot.ID, field, rendered)
 			}
+		}
+	}
+}
+
+// TestAdvancedConfigScrollWindowFitsContentFrame verifies that the scroll window
+// used by advanced config renderers never exceeds the lines actually available
+// after accounting for the fixed overhead (step header + info hint).
+func TestAdvancedConfigScrollWindowFitsContentFrame(t *testing.T) {
+	pipelines := []types.PipelineType{
+		types.PipelineBehavior,
+		types.PipelineFeatures,
+		types.PipelineML,
+		types.PipelinePreprocessing,
+		types.PipelineFmri,
+		types.PipelineFmriAnalysis,
+	}
+
+	for _, pipeline := range pipelines {
+		m := New(pipeline, ".")
+		m.width = 120
+		m.height = 40
+
+		windowSize := m.availableAdvancedContentHeight()
+		frameSize := m.availableMainContentHeight()
+
+		if windowSize >= frameSize {
+			t.Errorf("pipeline %v: scroll window (%d) >= content frame (%d); overhead not subtracted",
+				pipeline, windowSize, frameSize)
+		}
+		if frameSize-windowSize != advancedContentOverhead {
+			t.Errorf("pipeline %v: expected overhead=%d, got frame-window=%d",
+				pipeline, advancedContentOverhead, frameSize-windowSize)
 		}
 	}
 }

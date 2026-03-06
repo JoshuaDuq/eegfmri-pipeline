@@ -157,13 +157,8 @@ func (m Model) renderMLAdvancedConfig() string {
 		}
 	}
 
-	effectiveHeight := m.height
-	if effectiveHeight <= 0 {
-		effectiveHeight = defaultTerminalHeight
-	}
-
 	startLine, endLine, showScrollIndicators := calculateScrollWindow(
-		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
+		totalLines, m.advancedOffset, m.availableAdvancedContentHeight())
 	if showScrollIndicators && startLine > 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startLine)) + "\n")
 	}

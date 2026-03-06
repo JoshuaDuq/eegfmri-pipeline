@@ -801,6 +801,16 @@ func (m *Model) validate() []string {
 		if featureFileCount == 0 {
 			errors = append(errors, "No feature files selected")
 		}
+
+		if invalid := invalidCorrelationTypes(m.correlationsTypesSpec); len(invalid) > 0 {
+			errors = append(
+				errors,
+				fmt.Sprintf(
+					"Invalid correlation type selection: %s",
+					strings.Join(invalid, ", "),
+				),
+			)
+		}
 	}
 
 	if m.Pipeline == types.PipelinePlotting {

@@ -7,6 +7,53 @@ import (
 
 // Behavior pipeline advanced argument builder.
 
+var allowedCorrelationTypes = map[string]struct{}{
+	"raw":                   {},
+	"partial_cov":           {},
+	"partial_predictor":     {},
+	"partial_cov_predictor": {},
+	"run_mean":              {},
+}
+
+var orderedCorrelationTypes = []string{
+	"partial_cov_predictor",
+	"raw",
+	"partial_cov",
+	"partial_predictor",
+	"run_mean",
+}
+
+func invalidCorrelationTypes(spec string) []string {
+	correlationTypes := splitCSVList(spec)
+	if len(correlationTypes) == 0 {
+		return nil
+	}
+
+	invalid := make([]string, 0)
+	for _, correlationType := range correlationTypes {
+		if _, ok := allowedCorrelationTypes[correlationType]; ok {
+			continue
+		}
+		invalid = append(invalid, correlationType)
+	}
+	return invalid
+}
+
+func nextCorrelationType(current string) string {
+	current = strings.TrimSpace(current)
+	if current == "" {
+		return orderedCorrelationTypes[0]
+	}
+
+	for idx, correlationType := range orderedCorrelationTypes {
+		if correlationType != current {
+			continue
+		}
+		return orderedCorrelationTypes[(idx+1)%len(orderedCorrelationTypes)]
+	}
+	return orderedCorrelationTypes[0]
+}
+
 func (m Model) buildBehaviorAdvancedArgs() []string {
 	var args []string
 	appendBoolPair := func(enabled bool, onFlag, offFlag string) {
