@@ -289,8 +289,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "LOSO Stability", m.boolToOnOff(m.behaviorComputeLosoStability), "leave-one-out stability"
 		case optComputeBayesFactors:
 			return "Bayes Factors", m.boolToOnOff(m.behaviorComputeBayesFactors), "optional BF reporting"
-		case optBehaviorValidateOnly:
-			return "Validate Only", m.boolToOnOff(m.behaviorValidateOnly), "load and validate without statistics"
 
 		// Trial table
 		case optTrialTableFormat:

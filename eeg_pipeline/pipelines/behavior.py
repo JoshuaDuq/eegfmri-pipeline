@@ -399,8 +399,6 @@ class BehaviorPipeline(PipelineBase):
         
         task = task or self.config.get("project.task", "task")
         progress = ensure_progress_reporter(kwargs.get("progress"))
-        validate_only = bool(kwargs.get("validate_only", False))
-        
         stats_dir = deriv_stats_path(self.deriv_root, subject)
         ensure_dir(stats_dir)
         
@@ -465,16 +463,6 @@ class BehaviorPipeline(PipelineBase):
         setattr(ctx, "_behavior_runtime", create_behavior_runtime())
         
         results = BehaviorPipelineResults(subject=subject)
-        
-        # Handle validate_only mode
-        if validate_only:
-            logger.info("Validation-only mode: running minimal stages.")
-            ctx.data_qc["validate_only"] = True
-            # Override config to only run load + trial_table + export
-            self.pipeline_config.run_correlations = False
-            self.pipeline_config.run_condition_comparison = False
-            self.pipeline_config.run_temporal_correlations = False
-            self.pipeline_config.run_cluster_tests = False
         
         # Run all stages via DAG executor (step 2)
         start_time = time.perf_counter()
@@ -558,7 +546,10 @@ class BehaviorPipeline(PipelineBase):
         
         run_multilevel_correlations = kwargs.get("run_multilevel_correlations")
         if run_multilevel_correlations is None:
-            run_multilevel_correlations = getattr(self.pipeline_config, "run_multilevel_correlations", False)
+            pipeline_flag = bool(
+                getattr(self.pipeline_config, "run_multilevel_correlations", False)
+            )
+            run_multilevel_correlations = not pipeline_flag
         
         # Only run group-level analysis if at least one computation is enabled
         if not run_multilevel_correlations:

@@ -363,7 +363,6 @@ const (
 	optComputeChangeScores
 	optComputeBayesFactors
 	optComputeLosoStability
-	optBehaviorValidateOnly
 	// Behavior options - Regression
 	optRegressionOutcome
 	optRegressionIncludePredictor

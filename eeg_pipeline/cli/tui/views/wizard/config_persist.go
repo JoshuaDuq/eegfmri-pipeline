@@ -1025,7 +1025,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["microstatesAssignFromGfpPeaks"] = m.microstatesAssignFromGfpPeaks
 
 	// Behavior Statistics
-	cfg["behaviorValidateOnly"] = m.behaviorValidateOnly
 	cfg["correlationsFeaturesSpec"] = m.correlationsFeaturesSpec
 	cfg["conditionFeaturesSpec"] = m.conditionFeaturesSpec
 	cfg["temporalFeaturesSpec"] = m.temporalFeaturesSpec
@@ -2185,7 +2184,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.microstatesAssignFromGfpPeaks = getBool("microstatesAssignFromGfpPeaks", m.microstatesAssignFromGfpPeaks)
 
 	// Behavior Statistics
-	m.behaviorValidateOnly = getBool("behaviorValidateOnly", m.behaviorValidateOnly)
 	m.correlationsFeaturesSpec = getString("correlationsFeaturesSpec", m.correlationsFeaturesSpec)
 	m.conditionFeaturesSpec = getString("conditionFeaturesSpec", m.conditionFeaturesSpec)
 	m.temporalFeaturesSpec = getString("temporalFeaturesSpec", m.temporalFeaturesSpec)

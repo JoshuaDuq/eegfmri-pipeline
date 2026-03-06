@@ -20,12 +20,25 @@ func (m Model) getBehaviorOptions() []optionType {
 		"correlations", "multilevel_correlations", "predictor_residual",
 		"regression", "condition", "temporal", "cluster",
 	)
+	needsPredictorType := hasSelectedComputation("correlations", "predictor_residual", "regression")
+	needsCanonicalColumns := hasSelectedComputation(
+		"correlations", "multilevel_correlations", "predictor_residual",
+		"regression", "condition", "temporal", "cluster",
+	)
+	needsPermutationSettings := hasSelectedComputation(
+		"correlations", "multilevel_correlations", "regression",
+		"condition", "temporal", "cluster",
+	)
+	needsFeatureRegistrySettings := hasSelectedComputation(
+		"correlations", "multilevel_correlations", "regression",
+		"condition", "temporal", "cluster", "icc", "report",
+	)
 
 	// ── Execution ─────────────────────────────────────────────────────────────
 	if hasAnyComputation {
 		options = append(options, optBehaviorGroupGeneral)
 		if m.behaviorGroupGeneralExpanded {
-			options = append(options, optRNGSeed, optBehaviorNJobs, optBehaviorMinSamples, optBehaviorValidateOnly)
+			options = append(options, optRNGSeed, optBehaviorNJobs, optBehaviorMinSamples)
 		}
 	}
 
@@ -37,10 +50,12 @@ func (m Model) getBehaviorOptions() []optionType {
 			if hasSelectedComputation("correlations") {
 				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
 			}
-			// Predictor variable type — gates curve-fitting analyses
-			options = append(options, optPredictorType)
-			// Canonical behavior columns used across analyses
-			options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
+			if needsPredictorType {
+				options = append(options, optPredictorType)
+			}
+			if needsCanonicalColumns {
+				options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
+			}
 			if hasSelectedComputation("correlations") {
 				options = append(options, optBootstrap)
 			}
@@ -52,28 +67,40 @@ func (m Model) getBehaviorOptions() []optionType {
 			if hasSelectedComputation("cluster", "temporal", "regression", "correlations") {
 				options = append(options, optNPerm)
 			}
-			// Shared statistics settings
-			options = append(options,
-				optBehaviorStatsTempControl,
-				optBehaviorStatsAllowIIDTrials,
-				optBehaviorStatsHierarchicalFDR,
-				optBehaviorStatsComputeReliability,
-				optStatisticsAlpha,
-				optBehaviorPermScheme,
-				optBehaviorPermGroupColumnPreference,
-				optBehaviorExcludeNonTrialwiseFeatures,
-				optBehaviorSubFeatureRegistry,
-				optBehaviorFeatureRegistryFilesJSON,
-				optBehaviorFeatureRegistrySourceToTypeJSON,
-				optBehaviorFeatureRegistryTypeHierarchyJSON,
-				optBehaviorFeatureRegistryPatternsJSON,
-				optBehaviorFeatureRegistryClassifiersJSON,
-			)
+			if hasSelectedComputation("correlations", "regression") {
+				options = append(options, optBehaviorStatsTempControl)
+			}
+			if hasSelectedComputation("correlations", "regression", "condition", "temporal", "cluster") {
+				options = append(options, optBehaviorStatsAllowIIDTrials)
+			}
+			if hasSelectedComputation("correlations", "regression", "condition", "temporal", "cluster") {
+				options = append(options, optBehaviorStatsHierarchicalFDR)
+			}
+			if hasSelectedComputation("correlations") {
+				options = append(options, optBehaviorStatsComputeReliability)
+			}
+			if hasSelectedComputation("correlations", "regression", "condition", "temporal", "cluster") {
+				options = append(options, optStatisticsAlpha)
+			}
+			if needsPermutationSettings {
+				options = append(options, optBehaviorPermScheme, optBehaviorPermGroupColumnPreference)
+			}
+			if needsFeatureRegistrySettings {
+				options = append(options,
+					optBehaviorExcludeNonTrialwiseFeatures,
+					optBehaviorSubFeatureRegistry,
+					optBehaviorFeatureRegistryFilesJSON,
+					optBehaviorFeatureRegistrySourceToTypeJSON,
+					optBehaviorFeatureRegistryTypeHierarchyJSON,
+					optBehaviorFeatureRegistryPatternsJSON,
+					optBehaviorFeatureRegistryClassifiersJSON,
+				)
+			}
 			if hasSelectedComputation("regression", "correlations") {
 				options = append(options, optBehaviorSubCovariates, optControlTemp, optControlOrder)
 			}
 			// Run adjustment
-			if hasSelectedComputation("trial_table", "correlations") {
+			if hasSelectedComputation("correlations") {
 				options = append(options, optBehaviorSubRunAdjustment, optRunAdjustmentEnabled)
 				if m.runAdjustmentEnabled {
 					options = append(options,
@@ -155,9 +182,9 @@ func (m Model) getBehaviorOptions() []optionType {
 					)
 				}
 			}
-			options = append(options, optBehaviorSubMultilevel, optCorrelationsMultilevel)
 			if m.isComputationSelected("multilevel_correlations") {
 				options = append(options,
+					optBehaviorSubMultilevel,
 					optGroupLevelBlockPermutation,
 					optGroupLevelTarget,
 					optGroupLevelControlPredictor,

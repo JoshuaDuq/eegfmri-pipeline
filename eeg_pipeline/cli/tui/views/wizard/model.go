@@ -1845,7 +1845,6 @@ type Model struct {
 	behaviorComputeChangeScores  bool
 	behaviorComputeBayesFactors  bool
 	behaviorComputeLosoStability bool
-	behaviorValidateOnly         bool
 
 	// Run adjustment (subject-level; optional)
 	runAdjustmentEnabled               bool
@@ -2725,7 +2724,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorComputeChangeScores:        true,
 		behaviorComputeBayesFactors:        false,
 		behaviorComputeLosoStability:       true,
-		behaviorValidateOnly:               false,
 		behaviorOverwrite:                  true, // Default: overwrite existing outputs
 		runAdjustmentEnabled:               false,
 		runAdjustmentColumn:                "run_id",

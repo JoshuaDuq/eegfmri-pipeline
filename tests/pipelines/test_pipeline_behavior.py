@@ -210,7 +210,7 @@ class TestBehaviorGapfill(unittest.TestCase):
                 )
             self.assertEqual(p.name, "behavior_analysis")
 
-        def test_behavior_process_subject_validate_only_and_cluster_logs(self):
+        def test_behavior_process_subject_cluster_logs(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
 
             p = object.__new__(BehaviorPipeline)
@@ -260,7 +260,7 @@ class TestBehaviorGapfill(unittest.TestCase):
             ), patch(
                 "eeg_pipeline.pipelines.behavior._write_analysis_metadata_impl"
             ):
-                p.process_subject("0001", validate_only=True)
+                p.process_subject("0001")
 
         def test_behavior_process_subject_cluster_output_log_lines(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig, BehaviorPipelineResults

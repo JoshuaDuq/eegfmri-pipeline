@@ -300,6 +300,26 @@ func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForPainResidualOnly(t *test
 	}
 }
 
+func TestGetBehaviorOptions_CorrelationsOnlyHidesMultilevelControls(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "correlations"
+	}
+	m.behaviorGroupCorrelationsExpanded = true
+
+	opts := m.getBehaviorOptions()
+
+	if hasOption(opts, optBehaviorSubMultilevel) {
+		t.Fatalf("did not expect multilevel subsection for correlations-only selection")
+	}
+	if hasOption(opts, optCorrelationsMultilevel) {
+		t.Fatalf("did not expect multilevel computation toggle in correlations-only advanced config")
+	}
+	if hasOption(opts, optGroupLevelBlockPermutation) {
+		t.Fatalf("did not expect group-level controls for correlations-only selection")
+	}
+}
+
 func TestGetPreprocessingOptions_HidesAlignmentAndEventMappingRows(t *testing.T) {
 	m := Model{modeIndex: 0}
 

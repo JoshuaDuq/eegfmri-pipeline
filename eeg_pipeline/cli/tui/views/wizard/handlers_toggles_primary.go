@@ -1776,9 +1776,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optComputeBayesFactors:
 		m.behaviorComputeBayesFactors = !m.behaviorComputeBayesFactors
 		m.useDefaultAdvanced = false
-	case optBehaviorValidateOnly:
-		m.behaviorValidateOnly = !m.behaviorValidateOnly
-		m.useDefaultAdvanced = false
 
 	// Trial table / residual options
 	case optTrialTableFormat:

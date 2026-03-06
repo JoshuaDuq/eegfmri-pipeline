@@ -2118,11 +2118,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 			}
 		}},
 		// Supplemental behavior hydration for configurable fields.
-		{key: "behavior_analysis.validate_only", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.behaviorValidateOnly = b
-			}
-		}},
 		{key: "behavior_analysis.feature_categories", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
 				joined := strings.Join(splitLooseList(spec), ",")

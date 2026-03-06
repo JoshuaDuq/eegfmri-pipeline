@@ -143,9 +143,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	appendBoolPair(m.behaviorComputeChangeScores, "--compute-change-scores", "--no-compute-change-scores")
 	appendBoolPair(m.behaviorComputeBayesFactors, "--compute-bayes-factors", "--no-compute-bayes-factors")
-	if m.behaviorValidateOnly {
-		args = append(args, "--validate-only")
-	}
 
 	// Output options
 	if m.behaviorOverwrite {
@@ -154,7 +151,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--no-overwrite")
 	}
 
-	// Trial table / predictor residual
+	// Trial table
 	if m.isComputationSelected("trial_table") {
 		formats := []string{"parquet", "tsv"}
 		if m.trialTableFormat >= 0 && m.trialTableFormat < len(formats) && m.trialTableFormat != 0 {
@@ -168,7 +165,10 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.trialOrderMaxMissingFraction != 0.1 {
 			args = append(args, "--trial-order-max-missing-fraction", fmt.Sprintf("%.3f", m.trialOrderMaxMissingFraction))
 		}
+	}
 
+	// Predictor residual
+	if m.isComputationSelected("predictor_residual") {
 		appendBoolPair(m.predictorResidualEnabled, "--predictor-residual", "--no-predictor-residual")
 		if m.predictorResidualEnabled {
 			methods := []string{"spline", "poly"}

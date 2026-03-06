@@ -1107,6 +1107,39 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	}
 }
 
+func TestBuildBehaviorAdvancedArgs_PredictorResidualIsIndependentFromTrialTable(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		m.computationSelected[i] = comp.Key == "predictor_residual"
+	}
+	m.predictorResidualMinSamples = 14
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if !containsString(args, "--predictor-residual") {
+		t.Fatalf("expected --predictor-residual when predictor_residual computation is selected, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--predictor-residual-min-samples", "14"}) {
+		t.Fatalf("expected predictor residual args without trial_table selection, got: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_TrialTableOnlyOmitsPredictorResidualFlags(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		m.computationSelected[i] = comp.Key == "trial_table"
+	}
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if containsString(args, "--predictor-residual") || containsString(args, "--no-predictor-residual") {
+		t.Fatalf("did not expect predictor residual flags for trial_table-only selection: %#v", args)
+	}
+	if containsString(args, "--predictor-residual-crossfit") || containsString(args, "--no-predictor-residual-crossfit") {
+		t.Fatalf("did not expect predictor residual crossfit flags for trial_table-only selection: %#v", args)
+	}
+}
+
 func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelFlags(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
@@ -1252,7 +1285,7 @@ func TestBuildCommand_BehaviorComputeIncludesSelectedBands(t *testing.T) {
 	}
 }
 
-func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing.T) {
+func TestBuildBehaviorAdvancedArgs_EmitsFeatureFilters(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i, comp := range m.computations {
 		switch comp.Key {
@@ -1261,16 +1294,12 @@ func TestBuildBehaviorAdvancedArgs_EmitsValidateOnlyAndFeatureFilters(t *testing
 		}
 	}
 
-	m.behaviorValidateOnly = true
 	m.correlationsFeaturesSpec = "power,connectivity"
 	m.conditionFeaturesSpec = "spectral"
 	m.temporalFeaturesSpec = "power,erds"
 	m.clusterFeaturesSpec = "connectivity"
 
 	args := m.buildBehaviorAdvancedArgs()
-	if !containsString(args, "--validate-only") {
-		t.Fatalf("expected --validate-only in args, got: %#v", args)
-	}
 	if !containsSubsequence(args, []string{"--correlations-features", "power", "connectivity"}) {
 		t.Fatalf("expected --correlations-features power connectivity in args, got: %#v", args)
 	}

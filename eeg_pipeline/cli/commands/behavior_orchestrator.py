@@ -80,7 +80,6 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             subjects=subjects,
             task=task,
             bands=getattr(args, "bands", None),
-            validate_only=bool(getattr(args, "validate_only", False)),
             progress=progress,
         )
     elif args.mode == "visualize":

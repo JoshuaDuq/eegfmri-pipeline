@@ -156,11 +156,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--predictor-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), dest="predictor_range", help="Valid predictor range (e.g. 0.0 1.0)")
     compute_group.add_argument("--max-missing-channels-fraction", type=float, default=None, help="Max fraction of missing channels allowed")
     compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
-    compute_group.add_argument(
-        "--validate-only",
-        action="store_true",
-        help="Load and validate data only (no statistics). Still writes metadata and outputs manifest.",
-    )
     compute_group.add_argument("--cluster-correction-enabled", action="store_true", default=None, dest="cluster_correction_enabled")
     compute_group.add_argument("--no-cluster-correction-enabled", action="store_false", dest="cluster_correction_enabled")
     compute_group.add_argument("--cluster-correction-alpha", type=float, default=None)

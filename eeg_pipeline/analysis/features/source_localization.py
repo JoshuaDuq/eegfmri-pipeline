@@ -3052,7 +3052,22 @@ def extract_source_connectivity_features(
                 orthogonalize="pairwise",
                 verbose=False,
             )
-            con_tensor = con.get_data(output="dense")[:, :, :, 0]
+            con_data = np.asarray(con.get_data(output="dense"), dtype=float)
+            if con_data.ndim == 4:
+                con_tensor = con_data[:, :, :, 0]
+            elif con_data.ndim == 3:
+                if con_data.shape[0] == n_epochs:
+                    con_tensor = con_data
+                else:
+                    con_tensor = np.broadcast_to(
+                        con_data[:, :, 0],
+                        (n_epochs, n_rois_band, n_rois_band),
+                    )
+            else:
+                raise ValueError(
+                    "Envelope correlation returned an unexpected tensor shape "
+                    f"{con_data.shape!r}; expected 3D or 4D dense output."
+                )
             triu_idx = np.triu_indices(n_rois_band, k=1)
 
             col_name = f"src_{src_cfg.method}_{band}_aec_global"

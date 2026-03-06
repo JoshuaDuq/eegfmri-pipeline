@@ -153,7 +153,7 @@ class FmriPreprocessingPipeline(PipelineBase):
         try:
             fmri_root = self.config.get("paths.bids_fmri_root")
             if not fmri_root:
-                raise ValueError("Missing required config value: paths.bids_fmri_root")
+                raise FileNotFoundError("Missing required config value: paths.bids_fmri_root")
 
             engine = self.config.get("fmri_preprocessing.engine", "docker")
             if engine not in {"docker", "apptainer"}:
