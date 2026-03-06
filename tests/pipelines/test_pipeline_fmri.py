@@ -916,6 +916,15 @@ class TestFmriCompletion(unittest.TestCase):
 
             bids = tmp / "bids"
             bids.mkdir(parents=True, exist_ok=True)
+            license_file = tmp / "license.txt"
+            license_file.write_text("x", encoding="utf-8")
             p.config = DotConfig({"paths": {"bids_fmri_root": str(bids)}, "fmri_preprocessing": {"engine": "docker", "fmriprep": {}}})
-            with self.assertRaises(ValueError):
+            with patch(
+                "fmri_pipeline.pipelines.fmri_preprocessing._resolve_fs_license_path",
+                return_value=license_file,
+            ), patch(
+                "fmri_pipeline.pipelines.fmri_preprocessing._require_executable"
+            ):
                 p.process_subject("0001", task="", dry_run=True)
+
+            self.assertTrue(p.logger.info.called)
