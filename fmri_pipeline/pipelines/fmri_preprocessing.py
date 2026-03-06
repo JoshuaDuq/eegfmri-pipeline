@@ -167,6 +167,11 @@ class FmriPreprocessingPipeline(PipelineBase):
             bids_dir = Path(str(fmri_root)).expanduser().resolve()
             if not bids_dir.exists():
                 raise FileNotFoundError(f"fMRI BIDS root does not exist: {bids_dir}")
+            subject_dir = bids_dir / subj_label
+            if not subject_dir.is_dir():
+                raise ValueError(
+                    f"Subject directory not found in fMRI BIDS root: {subject_dir}"
+                )
             bids_mount_root, bids_mount_tmp = _resolve_bids_mount_root(
                 bids_dir, self.logger
             )
