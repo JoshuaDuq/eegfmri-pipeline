@@ -3,7 +3,7 @@ Internal Regression Utilities
 ==============================
 
 Shared internal utilities for OLS regression, HC3 standard errors, and R² computation.
-These are private helpers used by feature_models and trialwise_regression.
+These are private helpers used by trialwise_regression.
 """
 
 from __future__ import annotations
@@ -250,7 +250,7 @@ def _build_predictor_covariates(
 ) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
     """Build predictor-related covariates based on control strategy.
 
-    Used by trialwise_regression, feature_models, and influence modules.
+    Used by trialwise_regression and related regression helpers.
 
     Parameters
     ----------

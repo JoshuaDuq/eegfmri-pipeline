@@ -520,8 +520,6 @@ def _process_single_subject(
     
     available_bands = []
     has_stats = False
-    has_preprocessing = False
-
     # Detect source data
     has_source_data = False
     if source_root:
@@ -557,7 +555,6 @@ def _process_single_subject(
             for pattern in PREPROCESSING_EEG_PATTERNS:
                 if any(eeg_prep_dir.glob(pattern)):
                     has_derivatives = True
-                    has_preprocessing = True
                     break
         
         # Check for fMRI preprocessing
@@ -596,7 +593,6 @@ def _process_single_subject(
         "has_bids": has_bids,
         "has_derivatives": has_derivatives,
         "has_epochs": has_epochs,
-        "has_preprocessing": has_preprocessing,
         "has_features": has_features,
         "has_stats": has_stats,
         "epoch_metadata": metadata,

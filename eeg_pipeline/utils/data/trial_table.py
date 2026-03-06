@@ -385,69 +385,6 @@ def build_subject_trial_table(ctx: Any) -> TrialTableBuildResult:
     return TrialTableBuildResult(df=df, metadata=meta)
 
 
-def _compute_lag_and_delta_for_group(
-    group: pd.DataFrame,
-    predictor_col: str,
-    outcome_col: str,
-    has_predictor: bool,
-    has_outcome: bool,
-) -> pd.DataFrame:
-    """Compute lagged and delta features for a single group."""
-    result = group.copy()
-    if has_predictor:
-        predictor = pd.to_numeric(result[predictor_col], errors="coerce")
-        result["prev_predictor"] = predictor.shift(1)
-        result["delta_predictor"] = predictor - predictor.shift(1)
-    if has_outcome:
-        outcome = pd.to_numeric(result[outcome_col], errors="coerce")
-        result["prev_outcome"] = outcome.shift(1)
-        result["delta_outcome"] = outcome - outcome.shift(1)
-    result["trial_index_within_group"] = np.arange(len(result), dtype=int)
-    return result
-
-
-def add_lag_and_delta_features(
-    df: pd.DataFrame,
-    *,
-    predictor_col: str = "predictor",
-    outcome_col: str = "outcome",
-    group_columns: Optional[List[str]] = None,
-) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Add lagged and delta variables (prev_*, delta_*) within runs/blocks if available."""
-    result_df = df.copy()
-
-    default_group_columns = ["run_id", "run", "block"]
-    candidate_columns = group_columns or default_group_columns
-    available_group_columns = [
-        col for col in candidate_columns if col in result_df.columns
-    ]
-    meta: Dict[str, Any] = {"group_columns": available_group_columns}
-
-    if "epoch" in result_df.columns:
-        result_df = result_df.sort_values("epoch", kind="stable").reset_index(drop=True)
-
-    has_predictor = predictor_col in result_df.columns
-    has_outcome = outcome_col in result_df.columns
-    if not has_predictor and not has_outcome:
-        meta["status"] = "skipped_no_columns"
-        return result_df, meta
-
-    def apply_to_group(group: pd.DataFrame) -> pd.DataFrame:
-        return _compute_lag_and_delta_for_group(
-            group, predictor_col, outcome_col, has_predictor, has_outcome
-        )
-
-    if available_group_columns:
-        result_df = result_df.groupby(
-            available_group_columns, dropna=False, sort=False, group_keys=False
-        ).apply(apply_to_group)
-    else:
-        result_df = apply_to_group(result_df)
-
-    meta["status"] = "ok"
-    return result_df.reset_index(drop=True), meta
-
-
 def add_predictor_residual(
     df: pd.DataFrame,
     config: Any,
@@ -660,7 +597,6 @@ __all__ = [
     "select_preferred_trial_tables",
     "find_trial_table_path",
     "merge_trial_tables",
-    "add_lag_and_delta_features",
     "add_predictor_residual",
     "save_trial_table",
 ]

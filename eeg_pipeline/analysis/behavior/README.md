@@ -9,7 +9,6 @@ The current behavior DAG includes:
 
 - `load`
 - `trial_table`
-- `lag_features`
 - `predictor_residual`
 - `correlate_design`
 - `correlate_effect_sizes`

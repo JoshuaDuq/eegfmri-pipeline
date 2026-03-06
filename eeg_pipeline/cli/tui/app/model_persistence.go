@@ -9,18 +9,6 @@ import (
 	"github.com/eeg-pipeline/tui/views/wizard"
 )
 
-var legacyDefaultROISignature = []ROIState{
-	{Key: "Frontal", Channels: "Fp1,Fp2,Fpz,AF3,AF4,AF7,AF8,F1,F2,F3,F4,F5,F6,F7,F8"},
-	{Key: "Sensorimotor_Right", Channels: "FC2,FC4,FC6,C2,C4,C6,CP2,CP4,CP6"},
-	{Key: "Sensorimotor_Left", Channels: "FC1,FC3,FC5,C1,C3,C5,CP1,CP3,CP5"},
-	{Key: "Temporal_Right", Channels: "FT8,FT10,T8,TP8,TP10"},
-	{Key: "Temporal_Left", Channels: "FT7,FT9,T7,TP7,TP9"},
-	{Key: "ParOccipital_Right", Channels: "P2,P4,P6,P8,PO4,PO8,O2"},
-	{Key: "ParOccipital_Left", Channels: "P1,P3,P5,P7,PO3,PO7,O1"},
-	{Key: "ParOccipital_Midline", Channels: "Pz,POz,Oz"},
-	{Key: "Midline_FrontalCentral", Channels: "Fz,Cz,CPz"},
-}
-
 var retiredBadROIChannels = map[string]bool{
 	"AF4": true,
 	"C4":  true,
@@ -71,21 +59,6 @@ func findRepoRootFromPath(startPath string) string {
 func isValidRepoRoot(path string) bool {
 	_, err := os.Stat(filepath.Join(path, "eeg_pipeline"))
 	return err == nil
-}
-
-func isLegacyDefaultROICache(rois []ROIState) bool {
-	if len(rois) != len(legacyDefaultROISignature) {
-		return false
-	}
-	for i := range legacyDefaultROISignature {
-		if rois[i].Key != legacyDefaultROISignature[i].Key {
-			return false
-		}
-		if rois[i].Channels != legacyDefaultROISignature[i].Channels {
-			return false
-		}
-	}
-	return true
 }
 
 func sanitizeCachedROIs(rois []ROIState) ([]ROIState, bool) {
@@ -207,8 +180,8 @@ func (m *Model) restoreWizardConfig() {
 			m.persistentState.ROICacheVersion = roiCacheVersionCurrent
 			m.saveState()
 		}
-		if isLegacyDefaultROICache(m.persistentState.ROIs) {
-			// Auto-migrate old default ROI cache entries to current defaults.
+		sanitizedROIs, changed := sanitizeCachedROIs(m.persistentState.ROIs)
+		if len(sanitizedROIs) == 0 {
 			currentROIs := m.wizard.GetROIs()
 			m.persistentState.ROIs = make([]ROIState, len(currentROIs))
 			for i, r := range currentROIs {
@@ -221,42 +194,24 @@ func (m *Model) restoreWizardConfig() {
 			m.persistentState.ROISelected = m.wizard.GetROISelected()
 			m.persistentState.ROICacheVersion = roiCacheVersionCurrent
 			m.saveState()
-		} else {
-			sanitizedROIs, changed := sanitizeCachedROIs(m.persistentState.ROIs)
-			if len(sanitizedROIs) == 0 {
-				currentROIs := m.wizard.GetROIs()
-				m.persistentState.ROIs = make([]ROIState, len(currentROIs))
-				for i, r := range currentROIs {
-					m.persistentState.ROIs[i] = ROIState{
-						Key:      r.Key,
-						Name:     r.Name,
-						Channels: r.Channels,
-					}
-				}
-				m.persistentState.ROISelected = m.wizard.GetROISelected()
-				m.persistentState.ROICacheVersion = roiCacheVersionCurrent
-				m.saveState()
-			} else {
-				if changed {
-					m.persistentState.ROIs = sanitizedROIs
-					if len(m.persistentState.ROISelected) > len(sanitizedROIs) {
-						m.persistentState.ROISelected = m.persistentState.ROISelected[:len(sanitizedROIs)]
-					}
-					m.persistentState.ROICacheVersion = roiCacheVersionCurrent
-					m.saveState()
-				}
+		} else if changed {
+			m.persistentState.ROIs = sanitizedROIs
+			if len(m.persistentState.ROISelected) > len(sanitizedROIs) {
+				m.persistentState.ROISelected = m.persistentState.ROISelected[:len(sanitizedROIs)]
 			}
-
-			rois := make([]wizard.ROIDefinition, len(m.persistentState.ROIs))
-			for i, r := range m.persistentState.ROIs {
-				rois[i] = wizard.ROIDefinition{
-					Key:      r.Key,
-					Name:     r.Name,
-					Channels: r.Channels,
-				}
-			}
-			m.wizard.SetROIs(rois, m.persistentState.ROISelected)
+			m.persistentState.ROICacheVersion = roiCacheVersionCurrent
+			m.saveState()
 		}
+
+		rois := make([]wizard.ROIDefinition, len(m.persistentState.ROIs))
+		for i, r := range m.persistentState.ROIs {
+			rois[i] = wizard.ROIDefinition{
+				Key:      r.Key,
+				Name:     r.Name,
+				Channels: r.Channels,
+			}
+		}
+		m.wizard.SetROIs(rois, m.persistentState.ROISelected)
 	}
 
 	// Restore spatial selection

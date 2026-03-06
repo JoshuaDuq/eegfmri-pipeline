@@ -343,22 +343,12 @@ const (
 	optConditionFeatures
 	// Behavior options - Trial table / residual
 	optTrialTableFormat
-	optTrialTableAddLagFeatures
 	optTrialOrderMaxMissingFraction
-	optFeatureSummariesEnabled
 	optPredictorResidualEnabled
 	optPredictorResidualMethod
 	optPredictorResidualPolyDegree
 	optPredictorResidualSplineDfCandidates
-	optPredictorResidualModelCompare
-	optPredictorResidualModelComparePolyDegrees
 	optPredictorResidualMinSamples
-	optPredictorResidualModelCompareMinSamples
-	optPredictorResidualBreakpoint
-	optPredictorResidualBreakpointCandidates
-	optPredictorResidualBreakpointMinSamples
-	optPredictorResidualBreakpointQlow
-	optPredictorResidualBreakpointQhigh
 	optPredictorResidualCrossfitEnabled
 	optPredictorResidualCrossfitGroupColumn
 	optPredictorResidualCrossfitNSplits
@@ -411,7 +401,6 @@ const (
 	optGroupLevelControlTrialOrder
 	optGroupLevelControlRunEffects
 	optGroupLevelMaxRunDummies
-	optGroupLevelAllowParametricFallback
 	// Behavior options - Temporal
 	optTemporalResolutionMs
 	optTemporalCorrectionMethod
@@ -914,7 +903,7 @@ const (
 	optSystemStrictMode
 	optLoggingLevel
 
-	// === Missing config keys (YAML → TUI gap) ===
+	// === Additional config keys surfaced in TUI ===
 
 	// EEG Preprocessing: ecg_channels, autoreject_n_interpolate
 	optPrepEcgChannels

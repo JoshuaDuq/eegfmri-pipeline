@@ -196,7 +196,6 @@ _GENERAL_OVERRIDE_RULES = (
 
 _TRIAL_TABLE_OVERRIDE_RULES = (
     ConfigOverrideRule("trial_table_format", "behavior_analysis.trial_table.format", _to_lower_stripped),
-    ConfigOverrideRule("trial_table_add_lag_features", "behavior_analysis.trial_table.add_lag_features", _to_bool),
     ConfigOverrideRule(
         "trial_table_disallow_positional_alignment",
         "behavior_analysis.trial_table.disallow_positional_alignment",
@@ -207,7 +206,6 @@ _TRIAL_TABLE_OVERRIDE_RULES = (
         "behavior_analysis.trial_order.max_missing_fraction",
         _to_float,
     ),
-    ConfigOverrideRule("feature_summaries_enabled", "behavior_analysis.feature_summaries.enabled", _to_bool),
 )
 
 _PREDICTOR_RESIDUAL_OVERRIDE_RULES = (
@@ -341,11 +339,6 @@ _GROUP_LEVEL_OVERRIDE_RULES = (
         "behavior_analysis.group_level.multilevel_correlations.max_run_dummies",
         _to_int,
     ),
-    ConfigOverrideRule(
-        "group_level_allow_parametric_fallback",
-        "behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback",
-        _to_bool,
-    ),
 )
 
 _REPORT_OVERRIDE_RULES = (
@@ -467,7 +460,7 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     if getattr(args, "predictor_range", None) is not None:
         _set_nested_config_value(
             config,
-            "io.constants.predictor_range",
+            "io.constants.temperature_range",
             [float(args.predictor_range[0]), float(args.predictor_range[1])],
         )
     if getattr(args, "max_missing_channels_fraction", None) is not None:

@@ -130,8 +130,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.predictorResidualCrossfitGroupColumn
 	case textFieldPredictorResidualSplineDfCandidates:
 		return m.predictorResidualSplineDfCandidates
-	case textFieldPredictorResidualModelComparePolyDegrees:
-		return m.predictorResidualModelComparePolyDegrees
 	case textFieldClusterConditionColumn:
 		return m.clusterConditionColumn
 	case textFieldClusterConditionValues:
@@ -550,8 +548,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.predictorResidualCrossfitGroupColumn = strings.TrimSpace(value)
 	case textFieldPredictorResidualSplineDfCandidates:
 		m.predictorResidualSplineDfCandidates = strings.Join(strings.Fields(value), "")
-	case textFieldPredictorResidualModelComparePolyDegrees:
-		m.predictorResidualModelComparePolyDegrees = strings.Join(strings.Fields(value), "")
 	case textFieldClusterConditionColumn:
 		m.clusterConditionColumn = strings.TrimSpace(value)
 	case textFieldClusterConditionValues:

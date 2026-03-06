@@ -19,7 +19,6 @@ Modules:
     - permutation: Permutation tests
     - partial: Partial correlation
     - paired_comparisons: Paired comparison tests
-    - feature_models: Feature-level regression models
     - trialwise_regression: Trial-wise regression
     - temporal: Temporal correlation analysis
     - splines: Spline fitting

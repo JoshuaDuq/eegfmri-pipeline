@@ -10,6 +10,7 @@ _STAGE_TO_ATTR_MAP = {
     "trial_table": "trial_table_path",
     "correlate_fdr": "correlations",
     "regression": "regression",
+    "icc": "icc",
     "condition_column": "condition_effects",
     "temporal_tfr": "tf",
     "temporal_stats": "temporal",

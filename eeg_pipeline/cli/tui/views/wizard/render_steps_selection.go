@@ -670,6 +670,12 @@ func (m Model) renderSubjectSelection() string {
 	b.WriteString("\n\n")
 
 	if len(filteredSubjects) == 0 {
+		if m.subjectLoadError != "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Error).Render("  Subject discovery failed"))
+			b.WriteString("\n")
+			b.WriteString(dimStyle.Render("  " + m.subjectLoadError))
+			return b.String()
+		}
 		if m.subjectFilter != "" {
 			b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  No subjects match filter"))
 		} else {

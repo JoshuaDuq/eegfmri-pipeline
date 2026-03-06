@@ -309,7 +309,7 @@ eeg-pipeline preprocessing epochs --subject 0001 \
 eeg-pipeline preprocessing full --subject 0001 --no-icalabel
 ```
 
-Full pipeline steps, CLI options, and configuration reference:
+Full pipeline steps, CLI options, and configuration details:
 [eeg_pipeline/preprocessing/README.md](eeg_pipeline/preprocessing/README.md)
 
 ---
@@ -346,7 +346,7 @@ Each feature family produces one row per trial with clearly documented columns.
 | `sourcelocalization` | Source-space features from LCMV beamformer or eLORETA solutions |
 
 All feature computations are configurable through the TUI or YAML.
-For exact formulas and configuration reference, see
+For exact formulas and configuration details, see
 [eeg_pipeline/analysis/features/README.md](eeg_pipeline/analysis/features/README.md).
 
 ```bash
@@ -389,7 +389,7 @@ conditions). All stages operate on a trial table with explicit column semantics.
 | `visualize` | Generate standardized plots from previously computed results |
 
 For all 22 stage definitions, the pipeline DAG, statistical safeguards, and
-configuration reference, see
+configuration details, see
 [eeg_pipeline/analysis/behavior/README.md](eeg_pipeline/analysis/behavior/README.md).
 
 ```bash
@@ -432,7 +432,7 @@ Trial-level predictive modeling with leave-one-subject-out (LOSO) cross-validati
 | `shap` | SHAP-based feature importance |
 | `permutation` | Permutation-based feature importance |
 
-For the full architecture, CV schemes, evaluation metrics, and configuration reference,
+For the full architecture, CV schemes, evaluation metrics, and configuration details,
 see [eeg_pipeline/analysis/machine_learning/README.md](eeg_pipeline/analysis/machine_learning/README.md).
 
 ```bash

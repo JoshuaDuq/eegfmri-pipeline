@@ -31,10 +31,9 @@ OUTPUT_KIND_PATTERNS = [
     ("corr_stats_", "correlations"),
     ("correlations", "correlations"),
     ("condition_effects", "condition_effects"),
+    ("icc_reliability", "icc_reliability"),
     ("regression_feature_effects", "trialwise_regression"),
-    ("trials_with_lags", "lag_features"),
     ("trials_with_residual", "predictor_residual"),
-    ("lag_features", "lag_features"),
     ("predictor_residual", "predictor_residual"),
     ("trials", "trial_table"),
     ("normalized_results", "normalized"),
@@ -66,6 +65,14 @@ def count_rows(path: Path) -> Optional[int]:
         return sum(1 for _ in f)
 
 
+def _append_existing_output(saved: List[Path], out_dir: Path, filename: str) -> None:
+    for suffix in (".parquet", ".tsv", ".csv"):
+        path = out_dir / f"{filename}{suffix}"
+        if path.exists():
+            saved.append(path)
+            return
+
+
 def stage_export_impl(
     ctx: Any,
     pipeline_config: Any,
@@ -91,12 +98,15 @@ def stage_export_impl(
         filename = build_output_filename_fn(ctx, pipeline_config, "condition_effects")
         saved.append(write_stats_table_fn(ctx, results.condition_effects, out_dir / f"{filename}.tsv"))
 
+    if is_valid_df(getattr(results, "icc", None)):
+        out_dir = get_stats_subfolder_fn(ctx, "icc_reliability")
+        filename = build_output_filename_fn(ctx, pipeline_config, "icc_reliability")
+        _append_existing_output(saved, out_dir, filename)
+
     if is_valid_df(getattr(results, "regression", None)):
         out_dir = get_stats_subfolder_fn(ctx, "trialwise_regression")
         filename = build_output_filename_fn(ctx, pipeline_config, "regression_feature_effects")
-        path = out_dir / f"{filename}.tsv"
-        if path.exists():
-            saved.append(path)
+        _append_existing_output(saved, out_dir, filename)
 
     return saved
 

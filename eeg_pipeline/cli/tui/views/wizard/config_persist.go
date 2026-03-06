@@ -478,7 +478,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["groupLevelControlTrialOrder"] = m.groupLevelControlTrialOrder
 	cfg["groupLevelControlRunEffects"] = m.groupLevelControlRunEffects
 	cfg["groupLevelMaxRunDummies"] = m.groupLevelMaxRunDummies
-	cfg["groupLevelAllowParametricFallback"] = m.groupLevelAllowParametricFallback
 	// Cluster tests
 	cfg["clusterThreshold"] = m.clusterThreshold
 	cfg["clusterMinSize"] = m.clusterMinSize
@@ -886,7 +885,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["systemStrictMode"] = m.systemStrictMode
 	cfg["loggingLevel"] = m.loggingLevel
 
-	// === Missing config keys (YAML → TUI gap) ===
+	// === Additional config keys surfaced in TUI ===
 
 	// ML Preprocessing
 	cfg["mlImputer"] = m.mlImputer
@@ -1628,8 +1627,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.groupLevelControlTrialOrder = getBool("groupLevelControlTrialOrder", m.groupLevelControlTrialOrder)
 	m.groupLevelControlRunEffects = getBool("groupLevelControlRunEffects", m.groupLevelControlRunEffects)
 	m.groupLevelMaxRunDummies = getInt("groupLevelMaxRunDummies", m.groupLevelMaxRunDummies)
-	m.groupLevelAllowParametricFallback = getBool("groupLevelAllowParametricFallback", m.groupLevelAllowParametricFallback)
-
 	// Cluster tests
 	m.clusterThreshold = getFloat("clusterThreshold", m.clusterThreshold)
 	m.clusterMinSize = getInt("clusterMinSize", m.clusterMinSize)
@@ -2045,7 +2042,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.systemStrictMode = getBool("systemStrictMode", m.systemStrictMode)
 	m.loggingLevel = getInt("loggingLevel", m.loggingLevel)
 
-	// === Missing config keys (YAML → TUI gap) ===
+	// === Additional config keys surfaced in TUI ===
 
 	// ML Preprocessing
 	m.mlImputer = getInt("mlImputer", m.mlImputer)

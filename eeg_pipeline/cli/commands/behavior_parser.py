@@ -221,8 +221,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         action="store_false",
         dest="trial_table_disallow_positional_alignment",
     )
-    trial_table_group.add_argument("--feature-summaries", action="store_true", default=None, dest="feature_summaries_enabled")
-    trial_table_group.add_argument("--no-feature-summaries", action="store_false", dest="feature_summaries_enabled")
     trial_table_group.add_argument(
         "--trial-order-max-missing-fraction",
         type=float,
@@ -398,19 +396,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="group_level_max_run_dummies",
         help="Maximum run dummy columns for multilevel group-level controls",
     )
-    correlations_group.add_argument(
-        "--group-level-allow-parametric-fallback",
-        action="store_true",
-        default=None,
-        dest="group_level_allow_parametric_fallback",
-        help="Allow parametric fallback when permutation testing is unavailable in multilevel correlations",
-    )
-    correlations_group.add_argument(
-        "--no-group-level-allow-parametric-fallback",
-        action="store_false",
-        dest="group_level_allow_parametric_fallback",
-    )
-
     report_group = parser.add_argument_group("Report options")
     report_group.add_argument("--report-top-n", type=int, default=None, help="Top N rows per analysis table in subject_report*.md")
 

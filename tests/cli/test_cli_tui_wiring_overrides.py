@@ -276,9 +276,6 @@ class TestBehaviorTUIWiring(unittest.TestCase):
             config.get("behavior_analysis.group_level.multilevel_correlations.max_run_dummies"),
             15,
         )
-        self.assertTrue(
-            config.get("behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback", False)
-        )
         self.assertEqual(config.get("behavior_analysis.correlations.min_runs"), 5)
         self.assertTrue(config.get("behavior_analysis.correlations.prefer_predictor_residual", False))
         self.assertEqual(config.get("behavior_analysis.correlations.permutation.n_permutations"), 111)

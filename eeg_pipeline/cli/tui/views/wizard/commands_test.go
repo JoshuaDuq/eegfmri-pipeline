@@ -88,6 +88,58 @@ func TestBuildBehaviorAdvancedArgs_OmitsDeprecatedTfHeatmapFlags(t *testing.T) {
 	}
 }
 
+func TestNew_BehaviorPipelineDefaultsSelectConfiguredComputations(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+
+	selected := m.SelectedComputations()
+	expected := []string{
+		"condition",
+		"correlations",
+		"icc",
+		"predictor_residual",
+		"report",
+		"temporal",
+		"trial_table",
+	}
+	for _, computation := range expected {
+		if !containsString(selected, computation) {
+			t.Fatalf("expected default behavior computations to include %q, got %#v", computation, selected)
+		}
+	}
+}
+
+func TestNew_BehaviorPipelineDefaultsMatchBehaviorConfigContract(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+
+	if m.trialTableFormat != 0 {
+		t.Fatalf("expected trialTableFormat default parquet (0), got %d", m.trialTableFormat)
+	}
+	if !m.predictorResidualCrossfitEnabled {
+		t.Fatal("expected predictorResidualCrossfitEnabled default true")
+	}
+	if !m.correlationsPreferPredictorResidual {
+		t.Fatal("expected correlationsPreferPredictorResidual default true")
+	}
+	if !m.correlationsUseCrossfitResidual {
+		t.Fatal("expected correlationsUseCrossfitResidual default true")
+	}
+	if m.correlationsMinRuns != 5 {
+		t.Fatalf("expected correlationsMinRuns default 5, got %d", m.correlationsMinRuns)
+	}
+	if m.correlationsPermutations != 1000 {
+		t.Fatalf("expected correlationsPermutations default 1000, got %d", m.correlationsPermutations)
+	}
+	if !m.correlationsPermutationPrimary {
+		t.Fatal("expected correlationsPermutationPrimary default true")
+	}
+	if m.conditionPrimaryUnit != 1 {
+		t.Fatalf("expected conditionPrimaryUnit default run_mean (1), got %d", m.conditionPrimaryUnit)
+	}
+	if m.temporalCorrectionMethod != 1 {
+		t.Fatalf("expected temporalCorrectionMethod default cluster (1), got %d", m.temporalCorrectionMethod)
+	}
+}
+
 func TestBuildBehaviorAdvancedArgs_UsesSingleExplicitCorrelationTargetColumn(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 
@@ -571,7 +623,6 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"behavior_analysis.correlations.target_column":                                    "custom_rating",
 		"behavior_analysis.correlations.prefer_predictor_residual":                        true,
 		"behavior_analysis.correlations.permutation.n_permutations":                       77.0,
-		"behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback": true,
 		"behavior_analysis.condition.primary_unit":                                        "run_mean",
 		"behavior_analysis.condition.compare_labels":                                      []interface{}{"low", "high"},
 		"behavior_analysis.regression.primary_unit":                                       "run_mean",
@@ -583,7 +634,7 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"validation.min_epochs":                                                           30.0,
 		"validation.min_channels":                                                         16.0,
 		"validation.max_amplitude_uv":                                                     400.0,
-		"io.constants.predictor_range":                                                    []interface{}{35.0, 55.0},
+		"io.constants.temperature_range":                                                  []interface{}{35.0, 55.0},
 		"io.constants.max_missing_channels_fraction":                                      0.2,
 	})
 
@@ -622,9 +673,6 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	}
 	if m.correlationsTargetColumn != "custom_rating" {
 		t.Fatalf("unexpected correlationsTargetColumn: %q", m.correlationsTargetColumn)
-	}
-	if !m.groupLevelAllowParametricFallback {
-		t.Fatalf("expected groupLevelAllowParametricFallback=true")
 	}
 	if m.conditionPrimaryUnit != 1 {
 		t.Fatalf("expected conditionPrimaryUnit=1 (run_mean), got %d", m.conditionPrimaryUnit)
@@ -1040,8 +1088,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelFlags(t *testing.T) {
 	m.groupLevelControlTrialOrder = false
 	m.groupLevelControlRunEffects = false
 	m.groupLevelMaxRunDummies = 12
-	m.groupLevelAllowParametricFallback = true
-
 	args := m.buildBehaviorAdvancedArgs()
 
 	if !containsSubsequence(args, []string{"--group-level-target", "predictor_residual"}) {
@@ -1058,9 +1104,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsGroupLevelFlags(t *testing.T) {
 	}
 	if !containsSubsequence(args, []string{"--group-level-max-run-dummies", "12"}) {
 		t.Fatalf("expected --group-level-max-run-dummies 12 in args, got: %#v", args)
-	}
-	if !containsString(args, "--group-level-allow-parametric-fallback") {
-		t.Fatalf("expected --group-level-allow-parametric-fallback in args, got: %#v", args)
 	}
 }
 

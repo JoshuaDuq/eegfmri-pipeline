@@ -44,7 +44,6 @@ class TestBehaviorStageCatalog(unittest.TestCase):
     def test_apply_computation_flags_updates_pipeline_config(self):
         cfg = SimpleNamespace(
             run_trial_table=False,
-            run_lag_features=False,
             run_predictor_residual=False,
             run_regression=False,
             run_icc=False,

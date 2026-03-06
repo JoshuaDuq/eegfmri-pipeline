@@ -717,10 +717,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--no-iaf-allow-all-channels-fallback")
 		}
 		rois := splitCSVList(strings.TrimSpace(m.iafRoisSpec))
-		if len(rois) == 0 {
-			// Backward-compatible fallback for older saved states.
-			rois = m.SelectedROIs()
-		}
 		if len(rois) > 0 {
 			args = append(args, "--iaf-rois")
 			args = append(args, rois...)

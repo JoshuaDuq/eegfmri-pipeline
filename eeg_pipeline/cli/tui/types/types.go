@@ -23,35 +23,35 @@ type TimeRange struct {
 
 // pipelineNames maps pipeline types to their display names
 var pipelineNames = [pipelineCount]string{
-	PipelinePreprocessing:     "Preprocessing",
-	PipelineFeatures:          "Features",
-	PipelineBehavior:          "Behavior",
-	PipelineML:                "Machine Learning",
-	PipelinePlotting:          "Plotting",
-	PipelineFmri:              "fMRI",
-	PipelineFmriAnalysis:      "fMRI Analysis",
+	PipelinePreprocessing: "Preprocessing",
+	PipelineFeatures:      "Features",
+	PipelineBehavior:      "Behavior",
+	PipelineML:            "Machine Learning",
+	PipelinePlotting:      "Plotting",
+	PipelineFmri:          "fMRI",
+	PipelineFmriAnalysis:  "fMRI Analysis",
 }
 
 // pipelineCommands maps pipeline types to their CLI subcommand names
 var pipelineCommands = [pipelineCount]string{
-	PipelinePreprocessing:     "preprocessing",
-	PipelineFeatures:          "features",
-	PipelineBehavior:          "behavior",
-	PipelineML:                "ml",
-	PipelinePlotting:          "plotting",
-	PipelineFmri:              "fmri",
-	PipelineFmriAnalysis:      "fmri-analysis",
+	PipelinePreprocessing: "preprocessing",
+	PipelineFeatures:      "features",
+	PipelineBehavior:      "behavior",
+	PipelineML:            "ml",
+	PipelinePlotting:      "plotting",
+	PipelineFmri:          "fmri",
+	PipelineFmriAnalysis:  "fmri-analysis",
 }
 
 // pipelineDescriptions maps pipeline types to their descriptions
 var pipelineDescriptions = [pipelineCount]string{
-	PipelinePreprocessing:     "Bad channels, ICA, epochs",
-	PipelineFeatures:          "Extract EEG features (power, connectivity...)",
-	PipelineBehavior:          "EEG-behavior analysis",
-	PipelineML:                "Machine learning: LOSO regression & time generalization",
-	PipelinePlotting:          "Generate curated visualization suites",
-	PipelineFmri:              "Preprocess fMRI (fMRIPrep-style)",
-	PipelineFmriAnalysis:      "First-level contrasts + trial-wise signatures",
+	PipelinePreprocessing: "Bad channels, ICA, epochs",
+	PipelineFeatures:      "Extract EEG features (power, connectivity...)",
+	PipelineBehavior:      "EEG-behavior analysis",
+	PipelineML:            "Machine learning: LOSO regression & time generalization",
+	PipelinePlotting:      "Generate curated visualization suites",
+	PipelineFmri:          "Preprocess fMRI (fMRIPrep-style)",
+	PipelineFmriAnalysis:  "First-level contrasts + trial-wise signatures",
 }
 
 // String returns the display name for the pipeline
@@ -163,10 +163,9 @@ type SubjectStatus struct {
 	HasSourceData       bool
 	HasBids             bool
 	HasDerivatives      bool
-	HasEpochs           bool // Deprecated: kept for backward compatibility
-	HasPreprocessing    bool // Deprecated: kept for backward compatibility
-	HasFeatures         bool // Deprecated: kept for backward compatibility
-	HasStats            bool // Deprecated: kept for backward compatibility
+	HasEpochs           bool
+	HasFeatures         bool
+	HasStats            bool
 	AvailableBands      []string
 	FeatureAvailability *FeatureAvailability
 	EpochMetadata       map[string]float64 `json:"epoch_metadata"`

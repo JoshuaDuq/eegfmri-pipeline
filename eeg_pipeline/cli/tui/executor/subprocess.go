@@ -2,6 +2,7 @@ package executor
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -730,5 +731,19 @@ func runPythonJSONCommand(repoRoot string, args []string) ([]byte, error) {
 	cmd := exec.Command(pyCmd, args...)
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-	return cmd.Output()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		stderrText := strings.TrimSpace(stderr.String())
+		if stderrText != "" {
+			return nil, fmt.Errorf("%s", stderrText)
+		}
+		return nil, err
+	}
+
+	return stdout.Bytes(), nil
 }

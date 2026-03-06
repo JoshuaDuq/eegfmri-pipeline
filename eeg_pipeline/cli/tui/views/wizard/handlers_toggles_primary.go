@@ -1784,17 +1784,11 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optTrialTableFormat:
 		m.trialTableFormat = (m.trialTableFormat + 1) % 2
 		m.useDefaultAdvanced = false
-	case optTrialTableAddLagFeatures:
-		m.trialTableAddLagFeatures = !m.trialTableAddLagFeatures
-		m.useDefaultAdvanced = false
 	case optBehaviorTrialTableDisallowPositionalAlignment:
 		m.trialTableDisallowPositionalAlignment = !m.trialTableDisallowPositionalAlignment
 		m.useDefaultAdvanced = false
 	case optTrialOrderMaxMissingFraction:
 		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optFeatureSummariesEnabled:
-		m.featureSummariesEnabled = !m.featureSummariesEnabled
 		m.useDefaultAdvanced = false
 	case optPredictorResidualEnabled:
 		m.predictorResidualEnabled = !m.predictorResidualEnabled
@@ -1808,19 +1802,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optPredictorResidualSplineDfCandidates:
 		m.startTextEdit(textFieldPredictorResidualSplineDfCandidates)
 		m.useDefaultAdvanced = false
-	case optPredictorResidualModelCompare:
-		m.predictorResidualModelCompareEnabled = !m.predictorResidualModelCompareEnabled
-		m.useDefaultAdvanced = false
-	case optPredictorResidualModelComparePolyDegrees:
-		m.startTextEdit(textFieldPredictorResidualModelComparePolyDegrees)
-		m.useDefaultAdvanced = false
-	case optPredictorResidualMinSamples, optPredictorResidualModelCompareMinSamples:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optPredictorResidualBreakpoint:
-		m.predictorResidualBreakpointEnabled = !m.predictorResidualBreakpointEnabled
-		m.useDefaultAdvanced = false
-	case optPredictorResidualBreakpointCandidates, optPredictorResidualBreakpointMinSamples, optPredictorResidualBreakpointQlow, optPredictorResidualBreakpointQhigh:
+	case optPredictorResidualMinSamples:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPredictorResidualCrossfitEnabled:
@@ -1954,10 +1936,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optGroupLevelMaxRunDummies:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optGroupLevelAllowParametricFallback:
-		m.groupLevelAllowParametricFallback = !m.groupLevelAllowParametricFallback
-		m.useDefaultAdvanced = false
-
 	// Temporal
 	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs:
 		m.startNumberEdit()

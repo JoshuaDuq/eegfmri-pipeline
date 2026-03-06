@@ -86,6 +86,7 @@ class TestBehaviorDeep(unittest.TestCase):
                 correlations=pd.DataFrame({"p_raw": [0.01, 0.2], "p_primary": [0.04, 0.6], "q_global": [0.03, 0.2]}),
                 condition_effects=pd.DataFrame({"p_value": [0.02], "q_global": [0.03]}),
                 regression=pd.DataFrame({"p_primary": [0.01], "q_global": [0.04], "hedges_g": [0.9]}),
+                icc=pd.DataFrame({"feature": ["power_alpha"], "icc": [0.72]}),
                 tf={"n_tests": 2, "n_sig_raw": 1, "n_sig_fdr": 1},
                 temporal={"n_tests": 3, "n_sig_raw": 2, "n_sig_fdr": 1},
                 cluster={"alpha": {"cluster_records": [{"q_global": 0.04}, {"p_value": 0.2}]}} ,
@@ -95,6 +96,7 @@ class TestBehaviorDeep(unittest.TestCase):
             self.assertGreater(summary["n_sig_raw"], 0)
             self.assertGreater(summary["n_sig_fdr"], 0)
             self.assertEqual(summary["n_clusters"], 2)
+            self.assertEqual(summary["n_icc_features"], 1)
 
         def test_behavior_process_subject_failure_path(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline

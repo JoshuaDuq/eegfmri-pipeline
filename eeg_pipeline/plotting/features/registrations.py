@@ -7,6 +7,7 @@ Each function registers with VisualizationRegistry to be called during feature v
 from __future__ import annotations
 
 import fnmatch
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -955,4 +956,3 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
                 config=ctx.config,
                 logger=ctx.logger,
             )
-

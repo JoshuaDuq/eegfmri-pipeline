@@ -65,7 +65,6 @@ type FeatureCategory struct {
 var behaviorComputations = []Computation{
 	// Data Preparation
 	{"trial_table", "Trial Table", "Build canonical per-trial analysis table", "DataPrep"},
-	{"lag_features", "Lag Features", "Add temporal dynamics (prev_*, delta_*) for habituation", "DataPrep"},
 	{"predictor_residual", "Residual + Diagnostics", "Compute residualized outcome and predictor model diagnostics", "DataPrep"},
 
 	// Core Analyses
@@ -678,7 +677,6 @@ const (
 	textFieldSourceLocFmriPhaseScopeValue
 	textFieldSourceLocFmriStimPhasesToModel
 	textFieldPredictorResidualSplineDfCandidates
-	textFieldPredictorResidualModelComparePolyDegrees
 	// Plotting advanced config text fields
 	textFieldPlotBboxInches
 	textFieldPlotFontFamily
@@ -1407,6 +1405,7 @@ type Model struct {
 	subjectSelected           map[string]bool
 	subjectCursor             int
 	subjectsLoading           bool
+	subjectLoadError          string
 	subjectFilter             string
 	filteringSubject          bool
 	availableWindows          []string
@@ -1873,27 +1872,16 @@ type Model struct {
 
 	// Trial table / predictor residual config (subject-level)
 	trialTableFormat                      int // 0=parquet, 1=tsv
-	trialTableAddLagFeatures              bool
 	trialTableDisallowPositionalAlignment bool
 
 	// Trial order validation (used when controlTrialOrder=true)
 	trialOrderMaxMissingFraction float64
 
-	featureSummariesEnabled bool
-
-	predictorResidualEnabled                 bool
-	predictorResidualMethod                  int // 0=spline, 1=poly
-	predictorResidualPolyDegree              int
-	predictorResidualSplineDfCandidates      string // Comma-separated list (e.g., "3,4,5")
-	predictorResidualModelCompareEnabled     bool
-	predictorResidualModelComparePolyDegrees string // Comma-separated list (e.g., "2,3")
-	predictorResidualMinSamples              int
-	predictorResidualModelCompareMinSamples  int
-	predictorResidualBreakpointEnabled       bool
-	predictorResidualBreakpointCandidates    int
-	predictorResidualBreakpointMinSamples    int
-	predictorResidualBreakpointQlow          float64
-	predictorResidualBreakpointQhigh         float64
+	predictorResidualEnabled            bool
+	predictorResidualMethod             int // 0=spline, 1=poly
+	predictorResidualPolyDegree         int
+	predictorResidualSplineDfCandidates string // Comma-separated list (e.g., "3,4,5")
+	predictorResidualMinSamples         int
 
 	// Predictor residual cross-fit (out-of-run prediction)
 	predictorResidualCrossfitEnabled     bool
@@ -1937,7 +1925,6 @@ type Model struct {
 	groupLevelControlTrialOrder         bool
 	groupLevelControlRunEffects         bool
 	groupLevelMaxRunDummies             int
-	groupLevelAllowParametricFallback   bool
 
 	// Report
 	reportTopN int
@@ -2744,30 +2731,20 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		runAdjustmentIncludeInCorrelations: true,
 		runAdjustmentMaxDummies:            20,
 
-		trialTableFormat:                      1,
-		trialTableAddLagFeatures:              true,
+		trialTableFormat:                      0,
 		trialTableDisallowPositionalAlignment: false,
 		trialOrderMaxMissingFraction:          0.1,
 
-		featureSummariesEnabled:                  true,
-		predictorResidualEnabled:                 true,
-		predictorResidualMethod:                  0,
-		predictorResidualPolyDegree:              2,
-		predictorResidualSplineDfCandidates:      "3,4,5",
-		predictorResidualModelCompareEnabled:     true,
-		predictorResidualModelComparePolyDegrees: "2,3",
-		predictorResidualMinSamples:              10,
-		predictorResidualModelCompareMinSamples:  10,
-		predictorResidualBreakpointEnabled:       true,
-		predictorResidualBreakpointCandidates:    15,
-		predictorResidualBreakpointMinSamples:    12,
-		predictorResidualBreakpointQlow:          0.15,
-		predictorResidualBreakpointQhigh:         0.85,
-		predictorResidualCrossfitEnabled:         false,
-		predictorResidualCrossfitGroupColumn:     "",
-		predictorResidualCrossfitNSplits:         5,
-		predictorResidualCrossfitMethod:          0,
-		predictorResidualCrossfitSplineKnots:     5,
+		predictorResidualEnabled:             true,
+		predictorResidualMethod:              0,
+		predictorResidualPolyDegree:          2,
+		predictorResidualSplineDfCandidates:  "3,4,5",
+		predictorResidualMinSamples:          10,
+		predictorResidualCrossfitEnabled:     true,
+		predictorResidualCrossfitGroupColumn: "",
+		predictorResidualCrossfitNSplits:     5,
+		predictorResidualCrossfitMethod:      0,
+		predictorResidualCrossfitSplineKnots: 5,
 
 		regressionOutcome:            0,
 		regressionIncludePredictor:   true,
@@ -2787,12 +2764,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionMaxFeatures:        0,
 
 		correlationsTypesSpec:               "partial_cov_predictor",
-		correlationsUseCrossfitResidual:     false,
+		correlationsUseCrossfitResidual:     true,
 		correlationsPrimaryUnit:             0,
-		correlationsMinRuns:                 3,
-		correlationsPreferPredictorResidual: false,
-		correlationsPermutations:            0,
-		correlationsPermutationPrimary:      false,
+		correlationsMinRuns:                 5,
+		correlationsPreferPredictorResidual: true,
+		correlationsPermutations:            1000,
+		correlationsPermutationPrimary:      true,
 		correlationsPowerSegment:            "",
 		correlationsFeaturesSpec:            "",
 		groupLevelBlockPermutation:          true,
@@ -2801,10 +2778,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		groupLevelControlTrialOrder:         true,
 		groupLevelControlRunEffects:         false,
 		groupLevelMaxRunDummies:             20,
-		groupLevelAllowParametricFallback:   false,
 		reportTopN:                          15,
 		temporalResolutionMs:                50,
-		temporalCorrectionMethod:            0,
+		temporalCorrectionMethod:            1,
 		temporalSmoothMs:                    100,
 		temporalTimeMinMs:                   -200,
 		temporalTimeMaxMs:                   1000,
@@ -2833,7 +2809,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionEffectThreshold:    0.5,
 		conditionFailFast:           true,
 		conditionPermutationPrimary: false,
-		conditionPrimaryUnit:        0,
+		conditionPrimaryUnit:        1,
 		conditionCompareLabels:      "",
 		conditionMinTrials:          0,
 		conditionFeaturesSpec:       "",
@@ -3218,20 +3194,20 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Default selections organized by analysis purpose
 		defaultComps := map[string]bool{
 			// Data Preparation
-			"trial_table":        false,
-			"lag_features":       false,
-			"predictor_residual": false,
+			"trial_table":        true,
+			"predictor_residual": true,
 
 			// Core Analyses
-			"correlations":            false,
+			"correlations":            true,
 			"multilevel_correlations": false,
 			"regression":              false,
-			"condition":               false,
-			"temporal":                false,
+			"condition":               true,
+			"temporal":                true,
 			"cluster":                 false,
 
-			// Reporting
-			"report": false,
+			// Quality & Reporting
+			"icc":    true,
+			"report": true,
 		}
 		for i, c := range behaviorComputations {
 			m.computationSelected[i] = defaultComps[c.Key]

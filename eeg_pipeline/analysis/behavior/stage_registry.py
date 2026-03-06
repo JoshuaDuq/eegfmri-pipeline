@@ -220,6 +220,9 @@ class _ResultsFromOutputs:
                 n_sig_raw = int((self.correlations["p_raw"] < 0.05).sum())
             if "p_fdr" in self.correlations.columns:
                 n_sig_fdr = int((self.correlations["p_fdr"] < 0.05).sum())
+        if self.icc is not None and hasattr(self.icc, "empty") and not self.icc.empty:
+            summary["n_icc_features"] = len(self.icc)
+            n_total += len(self.icc)
 
         summary["n_features"] = n_total
         summary["n_significant_raw"] = n_sig_raw

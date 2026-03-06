@@ -28,7 +28,6 @@ class StageSpecDefinition:
 # Ordered rules to preserve stage execution ordering from config flags.
 PIPELINE_STAGE_RULES: Tuple[PipelineStageRule, ...] = (
     PipelineStageRule("run_trial_table", ("trial_table",), default=True),
-    PipelineStageRule("run_lag_features", ("lag_features",)),
     PipelineStageRule("run_predictor_residual", ("predictor_residual",)),
     PipelineStageRule("run_regression", ("regression",)),
     PipelineStageRule("run_icc", ("icc",)),
@@ -54,7 +53,6 @@ PIPELINE_STAGE_RULES: Tuple[PipelineStageRule, ...] = (
 # Keep this mapping as the single source for --computations overrides.
 COMPUTATION_TO_PIPELINE_ATTR = {
     "trial_table": "run_trial_table",
-    "lag_features": "run_lag_features",
     "predictor_residual": "run_predictor_residual",
     "regression": "run_regression",
     "icc": "run_icc",
@@ -81,14 +79,6 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         requires=("features",),
         produces=("trial_table",),
         config_key="behavior_analysis.trial_table.enabled",
-        group="data_prep",
-    ),
-    StageSpecDefinition(
-        name="lag_features",
-        description="Add lag/delta features",
-        requires=("trial_table",),
-        produces=("lag_features",),
-        config_key="behavior_analysis.lag_features.enabled",
         group="data_prep",
     ),
     StageSpecDefinition(

@@ -5,12 +5,94 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from eeg_pipeline.analysis.behavior.result_types import GroupLevelResult
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_float, get_config_int, get_config_value
 from eeg_pipeline.utils.data.columns import resolve_outcome_column, resolve_predictor_column
+
+
+_PARTIAL_DESIGN_CONDITION_THRESHOLD = 1e10
+
+
+def _resolve_group_level_block_column(df: pd.DataFrame, config: Any) -> Optional[str]:
+    configured_run_col = str(
+        get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id"
+    ).strip()
+    candidates: List[str] = []
+    for candidate in (configured_run_col, "block", "run_id", "run", "session"):
+        normalized = str(candidate).strip()
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    for candidate in candidates:
+        if candidate in df.columns:
+            return candidate
+    return None
+
+
+def _build_subject_partial_permutation_state(
+    x: pd.Series,
+    y: pd.Series,
+    cov_df: pd.DataFrame,
+    method: str,
+) -> Optional[Dict[str, Any]]:
+    aligned = pd.concat([x.rename("x"), y.rename("y"), cov_df], axis=1).dropna()
+    if len(aligned) < max(3, cov_df.shape[1] + 3):
+        return None
+
+    x_values = aligned["x"].to_numpy(dtype=float)
+    y_values = aligned["y"].to_numpy(dtype=float)
+    z_values = aligned[cov_df.columns].to_numpy(dtype=float)
+    method_normalized = str(method or "spearman").strip().lower()
+    if method_normalized == "spearman":
+        x_values = stats.rankdata(x_values)
+        y_values = stats.rankdata(y_values)
+        z_values = np.column_stack(
+            [stats.rankdata(z_values[:, idx]) for idx in range(z_values.shape[1])]
+        )
+
+    design = np.column_stack([np.ones(len(aligned), dtype=float), z_values])
+    if np.linalg.matrix_rank(design) < design.shape[1]:
+        return None
+
+    condition_number = np.linalg.cond(design)
+    if not np.isfinite(condition_number) or condition_number > _PARTIAL_DESIGN_CONDITION_THRESHOLD:
+        return None
+
+    beta_x = np.linalg.lstsq(design, x_values, rcond=None)[0]
+    beta_y = np.linalg.lstsq(design, y_values, rcond=None)[0]
+    x_residuals = x_values - design @ beta_x
+    y_residuals = y_values - design @ beta_y
+    y_fitted = design @ beta_y
+    r_observed, _ = compute_correlation(x_residuals, y_residuals, method="pearson")
+    if not np.isfinite(r_observed):
+        return None
+
+    return {
+        "index": aligned.index,
+        "design": design,
+        "x_residuals": x_residuals,
+        "y_residuals": y_residuals,
+        "y_fitted": y_fitted,
+        "r_observed": float(r_observed),
+    }
+
+
+def _compute_permuted_subject_partial_r(
+    partial_state: Dict[str, Any],
+    permuted_indices: np.ndarray,
+) -> float:
+    design = np.asarray(partial_state["design"], dtype=float)
+    x_residuals = np.asarray(partial_state["x_residuals"], dtype=float)
+    y_residuals = np.asarray(partial_state["y_residuals"], dtype=float)
+    y_fitted = np.asarray(partial_state["y_fitted"], dtype=float)
+    y_permuted = y_fitted + y_residuals[np.asarray(permuted_indices, dtype=int)]
+    beta_y_perm = np.linalg.lstsq(design, y_permuted, rcond=None)[0]
+    y_permuted_residuals = y_permuted - design @ beta_y_perm
+    r_permuted, _ = compute_correlation(x_residuals, y_permuted_residuals, method="pearson")
+    return float(r_permuted) if np.isfinite(r_permuted) else np.nan
 
 
 def run_group_level_correlations_impl(
@@ -37,7 +119,6 @@ def run_group_level_correlations_impl(
     from eeg_pipeline.infra.paths import deriv_stats_path
     from eeg_pipeline.infra.tsv import read_table
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
-    from eeg_pipeline.utils.analysis.stats.partial import compute_partial_corr
     from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
 
     feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
@@ -77,12 +158,7 @@ def run_group_level_correlations_impl(
         logger.warning("Multilevel correlations: target column '%s' not found.", target_column)
         return pd.DataFrame()
     predictor_column = resolve_predictor_column(combined, config) or "predictor"
-
-    block_col = None
-    for cand in ("block", "run_id", "run", "session"):
-        if cand in combined.columns:
-            block_col = cand
-            break
+    block_col = _resolve_group_level_block_column(combined, config)
 
     feature_cols = [c for c in combined.columns if str(c).startswith(tuple(feature_prefixes))]
     outcome = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
@@ -110,14 +186,6 @@ def run_group_level_correlations_impl(
     except (TypeError, ValueError):
         seed_int = None
     rng = np.random.default_rng(seed_int)
-    allow_parametric_fallback = bool(
-        get_config_value(
-            config,
-            "behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback",
-            False,
-        )
-    )
-
     records: List[Dict[str, Any]] = []
     for feat in feature_cols:
         feat_type = feature_type_resolver(str(feat), config)
@@ -209,13 +277,17 @@ def run_group_level_correlations_impl(
                 continue
 
             if cov_final is not None and not cov_final.empty:
-                r_sub, _p_unused, _n_used = compute_partial_corr(
+                partial_state = _build_subject_partial_permutation_state(
                     x_final,
                     y_final,
                     cov_final,
-                    method=correlation_method,
+                    correlation_method,
                 )
+                if partial_state is None:
+                    continue
+                r_sub = float(partial_state["r_observed"])
                 uses_partial = True
+                analysis_index = partial_state["index"]
             else:
                 r_sub, _ = compute_correlation(
                     x_final.to_numpy(dtype=float),
@@ -223,6 +295,8 @@ def run_group_level_correlations_impl(
                     method=correlation_method,
                 )
                 uses_partial = False
+                partial_state = None
+                analysis_index = x_final.index
 
             if not np.isfinite(r_sub):
                 continue
@@ -231,8 +305,7 @@ def run_group_level_correlations_impl(
             block_sub = None
             can_block_permute = False
             if block_all is not None:
-                block_sub_full = block_all[idx][valid_xy]
-                block_sub = np.asarray(block_sub_full, dtype=object)[valid_final]
+                block_sub = np.asarray(subj_df.loc[analysis_index, block_col], dtype=object)
                 if use_block_permutation and block_sub.size > 0:
                     _, counts = np.unique(block_sub, return_counts=True)
                     can_block_permute = bool(np.all(counts >= 2))
@@ -243,6 +316,7 @@ def run_group_level_correlations_impl(
                     "x_vals": x_final.to_numpy(dtype=float),
                     "y_vals": y_final.to_numpy(dtype=float),
                     "cov_df": cov_final.reset_index(drop=True) if cov_final is not None else None,
+                    "partial_state": partial_state,
                     "uses_partial": uses_partial,
                     "r_obs": float(r_sub),
                     "n_obs": int(len(x_final)),
@@ -292,16 +366,17 @@ def run_group_level_correlations_impl(
                         else:
                             perm_idx = rng.permutation(len(y_vals))
 
-                        y_perm = y_vals[perm_idx]
-                        cov_df_perm = payload.get("cov_df")
-                        if payload.get("uses_partial", False) and isinstance(cov_df_perm, pd.DataFrame) and not cov_df_perm.empty:
-                            r_perm_sub, _p_unused, _n_used = compute_partial_corr(
-                                pd.Series(x_vals),
-                                pd.Series(y_perm),
-                                cov_df_perm,
-                                method=correlation_method,
+                        if payload.get("uses_partial", False):
+                            partial_state = payload.get("partial_state")
+                            if not isinstance(partial_state, dict):
+                                permutation_failed = True
+                                break
+                            r_perm_sub = _compute_permuted_subject_partial_r(
+                                partial_state,
+                                perm_idx,
                             )
                         else:
+                            y_perm = y_vals[perm_idx]
                             r_perm_sub, _ = compute_correlation(
                                 x_vals,
                                 y_perm,
@@ -379,10 +454,7 @@ def run_group_level_correlations_impl(
     results_df["p_primary"] = results_df["p_perm"].copy()
     results_df["p_primary_kind"] = "p_perm"
     missing_perm = results_df["p_primary"].isna()
-    if allow_parametric_fallback and missing_perm.any() and "p_parametric" in results_df.columns:
-        results_df.loc[missing_perm, "p_primary"] = results_df.loc[missing_perm, "p_parametric"]
-        results_df.loc[missing_perm, "p_primary_kind"] = "p_parametric"
-    elif missing_perm.any():
+    if missing_perm.any():
         results_df.loc[missing_perm, "p_primary_kind"] = "perm_missing_required"
 
     return hierarchical_fdr(

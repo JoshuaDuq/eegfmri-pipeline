@@ -1,7 +1,7 @@
 from .alignment import get_aligned_events
 from .behavior import (
     load_behavior_stats_files,
-    load_stats_file_with_fallbacks,
+    load_stats_file,
 )
 from .covariates import (
     _pick_first_column,
@@ -45,7 +45,7 @@ __all__ = [
     "load_behavior_stats_files",
     "load_epochs_for_analysis",
     "load_feature_bundle",
-    "load_stats_file_with_fallbacks",
+    "load_stats_file",
     "load_subject_scatter_data",
     "normalize_string",
     "parse_subject_args",

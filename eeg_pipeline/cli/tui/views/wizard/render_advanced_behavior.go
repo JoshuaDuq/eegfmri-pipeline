@@ -299,8 +299,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "tsv"
 			}
 			return "Trial Table Format", v, "parquet recommended"
-		case optTrialTableAddLagFeatures:
-			return "Lag/Delta Columns", m.boolToOnOff(m.trialTableAddLagFeatures), "prev_* and delta_*"
 		case optBehaviorTrialTableDisallowPositionalAlignment:
 			return "Disallow Positional Align", m.boolToOnOff(m.trialTableDisallowPositionalAlignment), "fail if fallback positional alignment is needed"
 		case optTrialOrderMaxMissingFraction:
@@ -312,9 +310,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Trial Order Max Missing", val, "disable control if missing > threshold"
-		case optFeatureSummariesEnabled:
-			return "Feature Summaries", m.boolToOnOff(m.featureSummariesEnabled), "per-feature descriptive stats in output"
-
 		// Predictor residual
 		case optPredictorResidualEnabled:
 			return "Residual", m.boolToOnOff(m.predictorResidualEnabled), "outcome - f(predictor)"
@@ -345,49 +340,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Residual Min Samples", val, "minimum rows for fit"
-		case optPredictorResidualModelCompare:
-			return "Predictor Model Compare", m.boolToOnOff(m.predictorResidualModelCompareEnabled), "non-gating diagnostics"
-		case optPredictorResidualModelComparePolyDegrees:
-			val := m.predictorResidualModelComparePolyDegrees
-			if val == "" {
-				val = "(none)"
-			}
-			if m.editingText && m.editingTextField == textFieldPredictorResidualModelComparePolyDegrees {
-				val = textDisplay
-			}
-			return "Model Compare Poly Deg", val, "comma-separated (e.g., 2,3)"
-		case optPredictorResidualModelCompareMinSamples:
-			val := fmt.Sprintf("%d", m.predictorResidualModelCompareMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualModelCompareMinSamples) {
-				val = numberDisplay
-			}
-			return "Model Compare Min N", val, "minimum rows for comparison"
-		case optPredictorResidualBreakpoint:
-			return "Breakpoint Test", m.boolToOnOff(m.predictorResidualBreakpointEnabled), "single-hinge model"
-		case optPredictorResidualBreakpointCandidates:
-			val := fmt.Sprintf("%d", m.predictorResidualBreakpointCandidates)
-			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualBreakpointCandidates) {
-				val = numberDisplay
-			}
-			return "Breakpoint Candidates", val, "grid size"
-		case optPredictorResidualBreakpointMinSamples:
-			val := fmt.Sprintf("%d", m.predictorResidualBreakpointMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualBreakpointMinSamples) {
-				val = numberDisplay
-			}
-			return "Breakpoint Min N", val, "minimum rows for hinge test"
-		case optPredictorResidualBreakpointQlow:
-			val := fmt.Sprintf("%.2f", m.predictorResidualBreakpointQlow)
-			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualBreakpointQlow) {
-				val = numberDisplay
-			}
-			return "Breakpoint Q Low", val, "quantile bound"
-		case optPredictorResidualBreakpointQhigh:
-			val := fmt.Sprintf("%.2f", m.predictorResidualBreakpointQhigh)
-			if m.editingNumber && m.isCurrentlyEditing(optPredictorResidualBreakpointQhigh) {
-				val = numberDisplay
-			}
-			return "Breakpoint Q High", val, "quantile bound"
 		case optPredictorResidualCrossfitEnabled:
 			if !m.predictorResidualEnabled {
 				return "Residual Crossfit", "N/A", "enable Residual"
@@ -891,12 +843,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Max Run Dummies", val, "skip run effects if too many levels"
-		case optGroupLevelAllowParametricFallback:
-			if !m.isComputationSelected("multilevel_correlations") {
-				return "Allow Parametric Fallback", "N/A", "enable Group Multilevel Correlations"
-			}
-			return "Allow Parametric Fallback", m.boolToOnOff(m.groupLevelAllowParametricFallback), "fallback when permutation is unavailable"
-
 		// Cluster
 		case optClusterThreshold:
 			val := fmt.Sprintf("%.4f", m.clusterThreshold)
@@ -1072,7 +1018,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Max Missing Channels Frac", val, "skip trial if more channels are NaN"
 
 		default:
-			return "", "", ""
+			panic(fmt.Sprintf("unhandled behavior advanced option: %d", opt))
 		}
 	}
 

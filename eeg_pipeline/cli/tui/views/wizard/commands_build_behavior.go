@@ -121,7 +121,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.trialOrderMaxMissingFraction != 0.1 {
 			args = append(args, "--trial-order-max-missing-fraction", fmt.Sprintf("%.3f", m.trialOrderMaxMissingFraction))
 		}
-		appendBoolPair(m.featureSummariesEnabled, "--feature-summaries", "--no-feature-summaries")
 
 		appendBoolPair(m.predictorResidualEnabled, "--predictor-residual", "--no-predictor-residual")
 		if m.predictorResidualEnabled {
@@ -288,11 +287,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.groupLevelMaxRunDummies != 20 {
 			args = append(args, "--group-level-max-run-dummies", fmt.Sprintf("%d", m.groupLevelMaxRunDummies))
 		}
-		appendBoolPair(
-			m.groupLevelAllowParametricFallback,
-			"--group-level-allow-parametric-fallback",
-			"--no-group-level-allow-parametric-fallback",
-		)
 	}
 
 	// Report

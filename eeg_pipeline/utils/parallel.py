@@ -20,8 +20,6 @@ _MIN_PARALLEL_JOBS = 1
 _DEFAULT_CPU_RESERVE = 1
 _MIN_FEATURES_FOR_PARALLEL_CONDITION = 10
 _MIN_FEATURES_FOR_PARALLEL_REGRESSION = 10
-_MIN_FEATURES_FOR_PARALLEL_STABILITY = 10
-_MIN_FEATURES_FOR_PARALLEL_INFLUENCE = 5
 _MIN_FEATURE_TYPES_FOR_PARALLEL = 2
 _NUMERIC_TOLERANCE = 1e-12
 _MIN_FEATURES_FOR_BATCH_CONDITION = 100  # Use vectorized batch for 100+ features
@@ -525,31 +523,9 @@ def parallel_regression_features(
     return _parallel_features_generic(feature_args, process_func, n_jobs, min_features_for_parallel)
 
 
-def parallel_stability_features(
-    feature_args: List[Tuple[Any, ...]],
-    process_func: Callable[..., Optional[Dict[str, Any]]],
-    n_jobs: int = -1,
-    min_features_for_parallel: int = _MIN_FEATURES_FOR_PARALLEL_STABILITY,
-) -> List[Dict[str, Any]]:
-    """Compute stability for multiple features in parallel."""
-    return _parallel_features_generic(feature_args, process_func, n_jobs, min_features_for_parallel)
-
-
-def parallel_influence_features(
-    feature_args: List[Tuple[Any, ...]],
-    process_func: Callable[..., Optional[Dict[str, Any]]],
-    n_jobs: int = -1,
-    min_features_for_parallel: int = _MIN_FEATURES_FOR_PARALLEL_INFLUENCE,
-) -> List[Dict[str, Any]]:
-    """Compute influence diagnostics for multiple features in parallel."""
-    return _parallel_features_generic(feature_args, process_func, n_jobs, min_features_for_parallel)
-
-
 __all__ = [
     "get_n_jobs",
     "parallel_condition_effects",
     "parallel_feature_types",
     "parallel_regression_features",
-    "parallel_stability_features",
-    "parallel_influence_features",
 ]

@@ -129,7 +129,12 @@ def _resolve_feature_filename(
     return f"features_{family}.parquet"
 
 
-def _resolve_feature_path(features_dir: Path, family: str, filename: str) -> Path:
+def _resolve_feature_path(
+    features_dir: Path,
+    family: str,
+    filename: str,
+    config: Any,
+) -> Path:
     """Resolve a feature table path (handles sourcelocalization subfolders)."""
     if family.startswith("pac"):
         # pac variants (pac_trials, pac_time) live in the shared "pac/" folder.
@@ -720,7 +725,7 @@ def _load_subject_feature_table(
             continue
 
         filename = _resolve_feature_filename(fam, config)
-        path = _resolve_feature_path(features_dir, fam, filename)
+        path = _resolve_feature_path(features_dir, fam, filename, config)
         if not path.exists():
             logger.warning("Missing feature table for %s (%s): %s", subject_bids, fam, path)
             continue

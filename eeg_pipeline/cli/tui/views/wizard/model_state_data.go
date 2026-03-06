@@ -12,6 +12,7 @@ import (
 func (m *Model) SetSubjects(subjects []types.SubjectStatus) {
 	m.subjects = subjects
 	m.subjectsLoading = false
+	m.subjectLoadError = ""
 	for _, s := range subjects {
 		m.subjectSelected[s.ID] = true
 	}
@@ -85,6 +86,24 @@ func (m *Model) updateComputationAvailability() {
 
 func (m *Model) SetSubjectsLoading() {
 	m.subjectsLoading = true
+	m.subjectLoadError = ""
+}
+
+func (m *Model) SetSubjectLoadError(message string) {
+	m.subjects = nil
+	m.subjectSelected = make(map[string]bool)
+	m.subjectsLoading = false
+	m.subjectLoadError = strings.TrimSpace(message)
+	m.subjectCursor = 0
+	m.featureAvailability = make(map[string]bool)
+	m.featureLastModified = make(map[string]string)
+	m.computationAvailability = make(map[string]bool)
+	m.computationLastModified = make(map[string]string)
+	m.availableWindows = nil
+	m.availableColumns = nil
+	m.availableWindowsByFeature = make(map[string][]string)
+	m.availableChannels = nil
+	m.unavailableChannels = nil
 }
 
 func (m *Model) SetTimeRanges(ranges []types.TimeRange) {

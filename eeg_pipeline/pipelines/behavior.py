@@ -31,7 +31,7 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     format_correlation_method_label,
     normalize_robust_correlation_method,
 )
-from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
+from eeg_pipeline.utils.analysis.stats.base import get_subject_seed
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.analysis.behavior.stage_catalog import (
@@ -115,7 +115,6 @@ class BehaviorPipelineConfig:
     
     # Computation flags
     run_trial_table: bool = True
-    run_lag_features: bool = True
     run_predictor_residual: bool = True
     run_regression: bool = False
     run_icc: bool = True
@@ -173,7 +172,6 @@ class BehaviorPipelineConfig:
             method_label=method_label,
             correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_predictor"]),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
-            run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
             run_predictor_residual=bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
             run_icc=bool(
@@ -234,6 +232,7 @@ class BehaviorPipelineResults:
     trial_table_path: Optional[str] = None
     report_path: Optional[str] = None
     regression: Optional[pd.DataFrame] = None
+    icc: Optional[pd.DataFrame] = None
     correlations: Optional[pd.DataFrame] = None
     condition_effects: Optional[pd.DataFrame] = None
     cluster: Optional[Dict[str, Any]] = None
@@ -299,6 +298,11 @@ class BehaviorPipelineResults:
                 
             if "hedges_g" in df.columns:
                 summary["n_large_effects"] = int((df["hedges_g"].abs() >= 0.8).sum())
+
+        if self.icc is not None and not self.icc.empty:
+            df = self.icc
+            n_total += len(df)
+            summary["n_icc_features"] = len(df)
 
         if self.tf is not None:
             n_tests = self.tf.get("n_tests", 0)

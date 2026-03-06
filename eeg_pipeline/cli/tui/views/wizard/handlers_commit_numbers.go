@@ -1113,18 +1113,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 1 {
 			m.predictorResidualPolyDegree = int(val)
 		}
-	case optPredictorResidualBreakpointCandidates:
-		if val >= 5 {
-			m.predictorResidualBreakpointCandidates = int(val)
-		}
-	case optPredictorResidualBreakpointQlow:
-		if val > 0 && val < 1 {
-			m.predictorResidualBreakpointQlow = val
-		}
-	case optPredictorResidualBreakpointQhigh:
-		if val > 0 && val < 1 {
-			m.predictorResidualBreakpointQhigh = val
-		}
 	case optPredictorResidualCrossfitNSplits:
 		if val >= 2 {
 			m.predictorResidualCrossfitNSplits = int(val)
@@ -1136,14 +1124,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optPredictorResidualMinSamples:
 		if val >= 1 {
 			m.predictorResidualMinSamples = int(val)
-		}
-	case optPredictorResidualModelCompareMinSamples:
-		if val >= 1 {
-			m.predictorResidualModelCompareMinSamples = int(val)
-		}
-	case optPredictorResidualBreakpointMinSamples:
-		if val >= 1 {
-			m.predictorResidualBreakpointMinSamples = int(val)
 		}
 
 	// Regression

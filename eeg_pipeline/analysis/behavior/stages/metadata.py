@@ -7,6 +7,9 @@ from typing import Any, Callable, Dict, Optional
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
+
 
 def compute_series_statistics(series: pd.Series) -> Dict[str, Any]:
     """Compute basic statistics for a numeric series."""
@@ -95,7 +98,27 @@ def build_behavior_qc_impl(
     if ctx.aligned_events is not None and outcome_series is not None:
         from eeg_pipeline.analysis.behavior.api import split_by_condition
 
-        cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(ctx.aligned_events, ctx.config, ctx.logger)
+        compare_col = str(
+            get_config_value(ctx.config, "behavior_analysis.condition.compare_column", "") or ""
+        ).strip()
+        condition_enabled = bool(
+            get_config_value(ctx.config, "behavior_analysis.condition.enabled", True)
+        )
+        resolved_condition_col = (
+            compare_col if compare_col and compare_col in ctx.aligned_events.columns else None
+        )
+        if resolved_condition_col is None:
+            resolved_condition_col = get_binary_outcome_column_from_config(ctx.config, ctx.aligned_events)
+
+        if condition_enabled and resolved_condition_col is not None:
+            cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(
+                ctx.aligned_events,
+                ctx.config,
+                ctx.logger,
+            )
+        else:
+            cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = np.array([]), np.array([]), 0, 0
+
         if int(n_condition_a) > 0 or int(n_condition_b) > 0:
             s = pd.to_numeric(outcome_series, errors="coerce")
             cond_a_outcomes = s[cond_a_mask] if len(cond_a_mask) == len(s) else pd.Series(dtype=float)

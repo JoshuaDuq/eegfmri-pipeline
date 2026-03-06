@@ -16,7 +16,7 @@ import (
 func (m Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
 		m.execution.AddOutput("Error loading subjects: " + msg.Error.Error())
-		m.wizard.SetSubjects(nil)
+		m.wizard.SetSubjectLoadError(msg.Error.Error())
 		return m, nil
 	}
 
@@ -77,7 +77,6 @@ func (m *Model) convertSubjects(sourceSubjects []messages.SubjectInfo) []types.S
 			HasBids:             s.HasBids,
 			HasDerivatives:      s.HasDerivatives,
 			HasEpochs:           s.HasEpochs,
-			HasPreprocessing:    s.HasPreprocessing,
 			HasFeatures:         s.HasFeatures,
 			HasStats:            s.HasStats,
 			AvailableBands:      s.AvailableBands,

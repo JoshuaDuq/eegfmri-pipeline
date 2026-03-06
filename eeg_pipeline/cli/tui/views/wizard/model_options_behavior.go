@@ -103,7 +103,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTrialTableFormat,
 				optBehaviorTrialTableDisallowPositionalAlignment,
 				optTrialOrderMaxMissingFraction,
-				optFeatureSummariesEnabled,
 			)
 		}
 	}
@@ -165,7 +164,6 @@ func (m Model) getBehaviorOptions() []optionType {
 					optGroupLevelControlTrialOrder,
 					optGroupLevelControlRunEffects,
 					optGroupLevelMaxRunDummies,
-					optGroupLevelAllowParametricFallback,
 				)
 			}
 		}

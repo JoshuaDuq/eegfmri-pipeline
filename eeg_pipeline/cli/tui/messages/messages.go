@@ -62,10 +62,9 @@ type SubjectInfo struct {
 	HasSourceData       bool                 `json:"has_source_data"`
 	HasBids             bool                 `json:"has_bids"`
 	HasDerivatives      bool                 `json:"has_derivatives"`
-	HasEpochs           bool                 `json:"has_epochs"`        // Deprecated: kept for backward compatibility
-	HasPreprocessing    bool                 `json:"has_preprocessing"` // Deprecated: kept for backward compatibility
-	HasFeatures         bool                 `json:"has_features"`      // Deprecated: kept for backward compatibility
-	HasStats            bool                 `json:"has_stats"`         // Deprecated: kept for backward compatibility
+	HasEpochs           bool                 `json:"has_epochs"`
+	HasFeatures         bool                 `json:"has_features"`
+	HasStats            bool                 `json:"has_stats"`
 	AvailableBands      []string             `json:"available_bands,omitempty"`
 	FeatureAvailability *FeatureAvailability `json:"feature_availability,omitempty"`
 	EpochMetadata       map[string]float64   `json:"epoch_metadata,omitempty"`

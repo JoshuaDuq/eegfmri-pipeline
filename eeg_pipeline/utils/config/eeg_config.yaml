@@ -82,6 +82,8 @@ rois: &roi_definitions
 # 3. CORE PROCESSING PIPELINE
 ###################################################################
 event_columns:
+  predictor: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
+  outcome: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
   # Optional: restrict strict event validation to these logical groups.
   # Keep as ["rating"] for paradigm-agnostic use; add "temperature"/"binary_outcome"
   # when those analyses are required.
@@ -621,17 +623,17 @@ feature_engineering:
 
 # 4.4 Behavioral Correlation
 behavior_analysis:
+  predictor_type: "continuous"  # "continuous" | "binary" | "categorical"
   # Canonical behavior columns used across stages. If empty, auto-resolve from
   # event_columns.* aliases and existing trial-table columns.
   predictor_column: ""   # e.g., stimulus intensity / dose / temperature
   outcome_column: ""     # e.g., rating / arousal / detection score
+  predictor_control_enabled: true  # Partial-out predictor in correlations
 
   # Optional robust estimator for correlations:
   # - null/"none": standard Spearman/Pearson
   # - "percentage_bend" | "winsorized" | "shepherd"
   robust_correlation: null
-  pooling_strategy: "within_subject_centered"
-  control_temperature: true
   control_trial_order: true
   bootstrap: 1000
   n_jobs: -1
@@ -651,7 +653,6 @@ behavior_analysis:
   trial_table:
     enabled: true
     format: "parquet"   # "parquet" (default, recommended) or "tsv"
-    add_lag_features: true
     # If true, fail when feature/event alignment can only be verified by positional
     # row order (no shared event keys like epoch/trial_index available).
     disallow_positional_alignment: false
@@ -660,11 +661,6 @@ behavior_analysis:
   trial_order:
     max_missing_fraction: 0.1
 
-  # Lag features: temporal dynamics (prev_*, delta_*) for habituation analyses
-  lag_features:
-    enabled: true
-    group_columns: []  # Empty = auto-detect from run_adjustment.column, run_id, run, block
-  
   # Pain residual = rating - f(temperature) for "pain beyond stimulus intensity"
   predictor_residual:
     enabled: true
@@ -684,10 +680,10 @@ behavior_analysis:
   regression:
     enabled: false
     primary_unit: "trial"            # "trial" | "run_mean"
-    outcome: "rating"              # "rating" | "predictor_residual" | "temperature"
-    include_temperature: true
-    temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
-    temperature_spline:
+    outcome: "outcome"               # "outcome" | "predictor_residual" | "predictor"
+    include_predictor: true
+    predictor_control: "linear"      # "linear" | "outcome_hat" | "spline"
+    predictor_spline:
       n_knots: 4
       quantile_low: 0.05
       quantile_high: 0.95
@@ -705,6 +701,9 @@ behavior_analysis:
   report:
     enabled: true
     top_n: 15
+
+  validation:
+    enabled: true
   
   # Output options
   output:
@@ -733,7 +732,7 @@ behavior_analysis:
     hierarchical_fdr: true
     # Temperature control used in partial correlations / permutation tests for correlations.
     # "spline" uses a restricted cubic spline basis (linear regression on nonlinear terms).
-    temperature_control: "spline"  # "linear" | "spline"
+    predictor_control: "spline"  # "linear" | "spline"
     # If false, trial-level tests require permutation or aggregation.
     # Set true only if you explicitly accept i.i.d. trial assumptions.
     allow_iid_trials: false
@@ -745,7 +744,9 @@ behavior_analysis:
   # Correlations computation
   correlations:
     enabled: true
-    types: ["partial_cov_temp"]
+    types: ["partial_cov_predictor"]
+    target_column: ""                 # Empty = auto-resolve from event_columns.outcome
+    power_segment_preference: ""      # Empty = default/auto segment selection
     targets: ["rating", "temperature", "predictor_residual"]
     compute_change_scores: true
     loso_stability: true
@@ -812,12 +813,24 @@ behavior_analysis:
     tail: 0  # 0=two-tailed, 1=upper, -1=lower
     condition_column: ""         # Column to split by (empty = use event_columns.binary_outcome)
     condition_values: []         # Exactly 2 values to compare (default [0, 1] if empty)
+
+  cluster_correction:
+    enabled: false
+    n_permutations: 1000
+    alpha: 0.05
+    forming_threshold: 0.05
+    min_cluster_size: 2
+    tail: 0
   
   # Group-level analysis controls
   group_level:
     block_permutation: true
     multilevel_correlations:
-      allow_parametric_fallback: false  # If false, missing permutation p-values remain NaN (strict non-i.i.d)
+      target: "outcome"
+      control_predictor: false
+      control_trial_order: false
+      control_run_effects: false
+      max_run_dummies: 20
   
   min_samples:
     channel: 10

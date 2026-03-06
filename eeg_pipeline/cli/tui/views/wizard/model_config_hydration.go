@@ -379,11 +379,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.groupLevelMaxRunDummies = n
 			}
 		}},
-		{key: "behavior_analysis.group_level.multilevel_correlations.allow_parametric_fallback", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.groupLevelAllowParametricFallback = b
-			}
-		}},
 		{key: "behavior_analysis.condition.compare_values", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
 				m.conditionCompareValues = strings.Join(splitLooseList(spec), ",")
@@ -470,19 +465,9 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
-		{key: "behavior_analysis.trial_table.add_lag_features", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.trialTableAddLagFeatures = b
-			}
-		}},
 		{key: "behavior_analysis.trial_order.max_missing_fraction", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
 				m.trialOrderMaxMissingFraction = f
-			}
-		}},
-		{key: "behavior_analysis.feature_summaries.enabled", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.featureSummariesEnabled = b
 			}
 		}},
 		{key: "behavior_analysis.predictor_residual.enabled", apply: func(v interface{}) {
@@ -636,7 +621,7 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.validationMaxAmplitudeUv = f
 			}
 		}},
-		{key: "io.constants.predictor_range", apply: func(v interface{}) {
+		{key: "io.constants.temperature_range", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
 				m.ioPredictorRange = strings.Join(splitLooseList(spec), ",")
 			}

@@ -627,7 +627,7 @@ func (m Model) renderRow(row plottingAdvancedRow, plotByID map[string]PlotItem, 
 	case plottingRowOption:
 		return m.renderOption(row.opt, labelWidth, focused)
 	default:
-		return []renderLine{{text: fmt.Sprintf("Unknown row kind: %d", row.kind)}}
+		panic(fmt.Sprintf("unhandled plotting row kind: %d", row.kind))
 	}
 }
 
@@ -1064,7 +1064,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		}
 		return lines
 	default:
-		return []renderLine{{text: fmt.Sprintf("Unknown plot field: %d", row.plotField)}}
+		panic(fmt.Sprintf("unhandled plotting field: %d", row.plotField))
 	}
 }
 
@@ -1721,9 +1721,7 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 		return []renderLine{m.renderValueLine(opt, "overwrite", val, "overwrite existing plot files", focused, labelWidth)}
 
 	default:
-		// Fallback: keep UI robust even if new options are added without
-		// wiring; still show a line so the list remains navigable.
-		return []renderLine{m.renderValueLine(opt, fmt.Sprintf("opt_%d", opt), "(unwired)", "Space to edit (TODO)", focused, labelWidth)}
+		panic(fmt.Sprintf("unhandled plotting option: %d", opt))
 	}
 }
 

@@ -576,26 +576,6 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     )
 
 
-def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
-    cache = _get_cache(ctx)
-    out_path = _stages_trial_table.stage_lag_features_impl(
-        ctx,
-        config,
-        load_trial_table_df_fn=_load_trial_table_df,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
-        write_metadata_file_fn=_write_metadata_file,
-        set_trial_table_cache_fn=lambda df: setattr(cache, "_trial_table_df", df),
-    )
-    if out_path is not None and out_path.exists():
-        from eeg_pipeline.infra.tsv import read_table
-
-        cache._trial_table_df = read_table(out_path)
-    return out_path
-
-
 def stage_predictor_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     cache = _get_cache(ctx)
     out_path = _stages_trial_table.stage_predictor_residual_impl(

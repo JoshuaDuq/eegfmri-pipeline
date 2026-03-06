@@ -9,9 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import logging
+import matplotlib.pyplot as plt
+from matplotlib import collections as mpl_collections
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
 import mne
 from mne.viz import plot_topomap
@@ -2091,7 +2092,7 @@ def plot_band_power_topomaps_window_contrast(
             
             # Ensure dots are hidden if using opacity
             for coll in ax.collections:
-                if isinstance(coll, matplotlib.collections.PathCollection):
+                if isinstance(coll, mpl_collections.PathCollection):
                     coll.set_visible(False)
         except Exception:
             pass

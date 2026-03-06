@@ -97,6 +97,240 @@ def _to_numpy_array(y: Any) -> np.ndarray:
     return y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
 
 
+def _resolve_temporal_groups(
+    events: pd.DataFrame,
+    n_trials: int,
+    config: Any,
+) -> Optional[np.ndarray]:
+    run_col = str(
+        get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id"
+    ).strip()
+    if not run_col or run_col not in events.columns:
+        return None
+    return events[run_col].to_numpy()[:n_trials]
+
+
+def _prepare_temporal_covariates(
+    cov_df: Optional[pd.DataFrame],
+    idx: np.ndarray,
+    config: Any,
+) -> Tuple[Optional[np.ndarray], Optional[List[str]], int]:
+    cov_vals = None
+    cov_cols: Optional[List[str]] = None
+    if cov_df is not None and not cov_df.empty:
+        cov_subset = cov_df.iloc[idx].apply(pd.to_numeric, errors="coerce")
+        cov_vals = cov_subset.to_numpy(dtype=float)
+        cov_cols = list(cov_subset.columns)
+
+    req_samples = int(MIN_OBSERVATIONS_FOR_CORRELATION)
+    if cov_vals is not None and cov_vals.shape[1] > 0:
+        min_samples_per_cov = int(
+            get_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate", 5)
+        )
+        partial_corr_base = int(
+            get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5)
+        )
+        req_samples = max(
+            req_samples,
+            int(cov_vals.shape[1]) * int(min_samples_per_cov) + int(partial_corr_base),
+        )
+
+    return cov_vals, cov_cols, req_samples
+
+
+def _compute_metric_records_with_cluster(
+    *,
+    band_metrics: List[Tuple[str, List[Optional[np.ndarray]]]],
+    y_condition: np.ndarray,
+    ch_names: List[str],
+    win_s: np.ndarray,
+    win_e: np.ndarray,
+    condition_name: str,
+    feature_name: str,
+    use_spearman: bool,
+    logger: logging.Logger,
+    config: Any,
+    cov_vals: Optional[np.ndarray],
+    cov_cols: Optional[List[str]],
+    groups: Optional[np.ndarray],
+    req_samples: int,
+) -> List[Dict[str, Any]]:
+    method = "spearman" if use_spearman else "pearson"
+    method_label = format_correlation_method_label(method, None)
+    corr_fn = spearmanr if use_spearman else pearsonr
+    n_windows = int(len(win_s))
+    n_trials = int(len(y_condition))
+    n_channels = int(len(ch_names))
+    n_cov = int(cov_vals.shape[1]) if cov_vals is not None else 0
+
+    n_cluster_perm = int(
+        get_config_value(config, "behavior_analysis.cluster.n_permutations", None)
+        or get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 0)
+    )
+    cluster_alpha = float(
+        get_config_value(config, "behavior_analysis.cluster.alpha", None)
+        or get_config_value(
+            config,
+            "behavior_analysis.cluster_correction.alpha",
+            get_config_value(config, "statistics.sig_alpha", 0.05),
+        )
+    )
+    cluster_forming_threshold = (
+        get_config_value(config, "behavior_analysis.cluster.forming_threshold", None)
+        or get_config_value(config, "behavior_analysis.cluster_correction.cluster_forming_threshold", None)
+        or get_config_value(config, "behavior_analysis.cluster_correction.forming_threshold", None)
+    )
+    if cluster_forming_threshold is not None:
+        try:
+            threshold_float = float(cluster_forming_threshold)
+            if threshold_float < 1.0:
+                logger.warning(
+                    "%s temporal: cluster_forming_threshold=%.4g looks like a p-value/r threshold; deriving threshold by permutation instead.",
+                    feature_name.upper(),
+                    threshold_float,
+                )
+                cluster_forming_threshold = None
+        except (TypeError, ValueError):
+            cluster_forming_threshold = None
+
+    cluster_rng = np.random.default_rng(
+        int(get_config_value(config, "project.random_state", 42))
+    )
+    records: List[Dict[str, Any]] = []
+
+    for band_name, window_metrics in band_metrics:
+        if len(window_metrics) != n_windows:
+            raise ValueError(
+                f"{feature_name} temporal: expected {n_windows} windows for band '{band_name}', got {len(window_metrics)}."
+            )
+
+        band_corrs = np.full((n_windows, n_channels), np.nan, dtype=float)
+        band_pvals = np.full((n_windows, n_channels), np.nan, dtype=float)
+        band_n = np.zeros((n_windows, n_channels), dtype=int)
+        band_data = np.full((n_windows, n_channels, n_trials), np.nan, dtype=float)
+
+        for window_idx, metric_matrix in enumerate(window_metrics):
+            if metric_matrix is None:
+                continue
+            if metric_matrix.shape != (n_trials, n_channels):
+                raise ValueError(
+                    f"{feature_name} temporal: expected metric shape {(n_trials, n_channels)} "
+                    f"for band '{band_name}' window {window_idx}, got {metric_matrix.shape}."
+                )
+
+            band_data[window_idx] = metric_matrix.T
+            for channel_idx in range(n_channels):
+                channel_vals = metric_matrix[:, channel_idx]
+                valid = np.isfinite(channel_vals) & np.isfinite(y_condition)
+                if cov_vals is not None:
+                    valid &= np.all(np.isfinite(cov_vals), axis=1)
+
+                n_obs = int(valid.sum())
+                if n_obs < req_samples:
+                    continue
+                if np.std(channel_vals[valid]) < MIN_VARIANCE_THRESHOLD:
+                    continue
+
+                if cov_vals is not None and cov_vals.shape[1] > 0:
+                    r, p, n_out = compute_partial_corr(
+                        pd.Series(channel_vals[valid]),
+                        pd.Series(y_condition[valid]),
+                        pd.DataFrame(cov_vals[valid], columns=cov_cols),
+                        method=method,
+                    )
+                    if int(n_out) < req_samples:
+                        continue
+                    n_obs = int(n_out)
+                else:
+                    r, p = corr_fn(channel_vals[valid], y_condition[valid])
+
+                if not (np.isfinite(r) and np.isfinite(p)):
+                    continue
+
+                band_corrs[window_idx, channel_idx] = float(r)
+                band_pvals[window_idx, channel_idx] = float(p)
+                band_n[window_idx, channel_idx] = n_obs
+
+        p_cluster = np.full((n_windows, n_channels), np.nan, dtype=float)
+        cluster_ids = np.zeros((n_windows, n_channels), dtype=int)
+        cluster_sig = np.zeros((n_windows, n_channels), dtype=bool)
+
+        if n_cluster_perm > 0:
+            for channel_idx in range(n_channels):
+                informative_bins = [
+                    (window_idx, 0)
+                    for window_idx in range(n_windows)
+                    if np.isfinite(band_corrs[window_idx, channel_idx])
+                    and np.isfinite(band_pvals[window_idx, channel_idx])
+                ]
+                if not informative_bins:
+                    continue
+
+                channel_t = np.full((n_windows,), np.nan, dtype=float)
+                for window_idx, _ in informative_bins:
+                    r_val = float(band_corrs[window_idx, channel_idx])
+                    n_obs = int(band_n[window_idx, channel_idx])
+                    dof = n_obs - n_cov - 2
+                    if np.isfinite(r_val) and dof > 0 and abs(r_val) < 1.0:
+                        denominator = max(MIN_DENOMINATOR_THRESHOLD, 1.0 - r_val**2)
+                        channel_t[window_idx] = r_val * np.sqrt(float(dof) / denominator)
+
+                labels, p_corr, sig_mask, _records, _perm_max, _threshold = compute_cluster_correction_2d(
+                    correlations=channel_t[:, None],
+                    p_values=band_pvals[:, channel_idx][:, None],
+                    bin_data=band_data[:, channel_idx, :][:, None, :],
+                    informative_bins=informative_bins,
+                    y_array=y_condition,
+                    cluster_alpha=cluster_alpha,
+                    n_cluster_perm=n_cluster_perm,
+                    alpha=cluster_alpha,
+                    min_valid_points=req_samples,
+                    use_spearman=use_spearman,
+                    cluster_rng=cluster_rng,
+                    covariates_matrix=cov_vals,
+                    groups=groups,
+                    cluster_forming_threshold=cluster_forming_threshold,
+                    config=config,
+                )
+                p_cluster[:, channel_idx] = p_corr[:, 0].astype(float)
+                cluster_ids[:, channel_idx] = labels[:, 0].astype(int)
+                cluster_sig[:, channel_idx] = sig_mask[:, 0].astype(bool)
+
+        for window_idx in range(n_windows):
+            for channel_idx in range(n_channels):
+                if not (
+                    np.isfinite(band_corrs[window_idx, channel_idx])
+                    and np.isfinite(band_pvals[window_idx, channel_idx])
+                ):
+                    continue
+                records.append(
+                    {
+                        "condition": condition_name,
+                        "feature": feature_name,
+                        "band": band_name,
+                        "time_start": float(win_s[window_idx]),
+                        "time_end": float(win_e[window_idx]),
+                        "channel": ch_names[channel_idx],
+                        "r": float(band_corrs[window_idx, channel_idx]),
+                        "beta_std": float(band_corrs[window_idx, channel_idx]),
+                        "beta_kind": "standardized",
+                        "p": float(band_pvals[window_idx, channel_idx]),
+                        "p_cluster": (
+                            float(p_cluster[window_idx, channel_idx])
+                            if np.isfinite(p_cluster[window_idx, channel_idx])
+                            else np.nan
+                        ),
+                        "cluster_id": int(cluster_ids[window_idx, channel_idx]),
+                        "cluster_significant": bool(cluster_sig[window_idx, channel_idx]),
+                        "n": int(band_n[window_idx, channel_idx]),
+                        "method": method,
+                        "method_label": method_label,
+                    }
+                )
+
+    return records
+
+
 def _compute_single_bin_correlation(
     freq_idx: int,
     time_idx: int,
@@ -1527,6 +1761,7 @@ def _run_itpc_temporal_by_condition_core(
     
     y_arr = _to_numpy_array(y)
     n = compute_aligned_data_length(tfr_complex, events)
+    groups_all = _resolve_temporal_groups(events, n, config)
     
     condition_values, condition_vec = _determine_condition_values(
         events, n, temporal_cfg, config, logger, analysis_name="ITPC temporal"
@@ -1545,9 +1780,6 @@ def _run_itpc_temporal_by_condition_core(
     else:
         bands = all_bands
     
-    corr_fn = spearmanr if use_spearman else pearsonr
-    method = "spearman" if use_spearman else "pearson"
-    
     out_dir = stats_dir
     ensure_dir(out_dir)
     
@@ -1564,87 +1796,57 @@ def _run_itpc_temporal_by_condition_core(
             continue
         
         idx = np.where(mask)[0]
-        
         safe_name = str(cond_val).replace(" ", "_").replace("/", "_")
-        tfr_c = tfr_data[idx]
         y_c = y_arr[mask]
-        
-        band_names = list(bands.keys())
-        n_ch, n_b, n_w = len(ch_names), len(band_names), len(win_s)
-        
-        corrs = np.full((n_b, n_w, n_ch), np.nan)
-        pvals = np.full_like(corrs, np.nan)
-        n_valid = np.zeros_like(corrs, dtype=int)
-        
-        for band_idx, (band_name, (fmin, fmax_band)) in enumerate(bands.items()):
+        tfr_c = tfr_data[idx]
+        groups_c = groups_all[mask] if groups_all is not None else None
+        cov_vals, cov_cols, req_samples = _prepare_temporal_covariates(cov_df, idx, config)
+
+        band_metrics: List[Tuple[str, List[Optional[np.ndarray]]]] = []
+        for band_name, (fmin, fmax_band) in bands.items():
             fmax_effective = min(fmax_band, fmax)
             if fmin >= fmax_effective:
                 continue
-            
-            for window_idx, (t0, t1) in enumerate(zip(win_s, win_e)):
+            baseline_itpc = None
+            if baseline_correction and baseline_window:
+                baseline_itpc = _extract_trial_itpc(
+                    tfr_c,
+                    fmin,
+                    fmax_effective,
+                    baseline_window[0],
+                    baseline_window[1],
+                    times,
+                    freqs,
+                )
+            window_metrics: List[Optional[np.ndarray]] = []
+            for t0, t1 in zip(win_s, win_e):
                 trial_itpc = _extract_trial_itpc(
                     tfr_c, fmin, fmax_effective, t0, t1, times, freqs
                 )
                 if trial_itpc is None:
+                    window_metrics.append(None)
                     continue
-                
-                if baseline_correction and baseline_window:
-                    baseline_itpc = _extract_trial_itpc(
-                        tfr_c,
-                        fmin,
-                        fmax_effective,
-                        baseline_window[0],
-                        baseline_window[1],
-                        times,
-                        freqs,
-                    )
-                    if baseline_itpc is not None:
-                        trial_itpc = trial_itpc - baseline_itpc
-                
-                for channel_idx in range(n_ch):
-                    channel_vals = trial_itpc[:, channel_idx]
-                    valid = np.isfinite(channel_vals) & np.isfinite(y_c)
-                    n_obs = int(valid.sum())
-                    
-                    if n_obs < MIN_OBSERVATIONS_FOR_CORRELATION:
-                        continue
-                    
-                    if np.std(channel_vals[valid]) < MIN_VARIANCE_THRESHOLD:
-                        continue
-                    
-                    try:
-                        r, p = corr_fn(channel_vals[valid], y_c[valid])
-                        if np.isfinite(r) and np.isfinite(p):
-                            corrs[band_idx, window_idx, channel_idx] = float(r)
-                            pvals[band_idx, window_idx, channel_idx] = float(p)
-                            n_valid[band_idx, window_idx, channel_idx] = n_obs
-                    except (ValueError, RuntimeWarning):
-                        pass
-        
-        cond_records = []
-        for band_idx, band_name in enumerate(band_names):
-            for window_idx in range(n_w):
-                for channel_idx in range(n_ch):
-                    r = corrs[band_idx, window_idx, channel_idx]
-                    p = pvals[band_idx, window_idx, channel_idx]
-                    if not np.isfinite(r) or not np.isfinite(p):
-                        continue
-                    cond_records.append({
-                        "condition": safe_name,
-                        "feature": "itpc",
-                        "band": band_name,
-                        "time_start": float(win_s[window_idx]),
-                        "time_end": float(win_e[window_idx]),
-                        "channel": ch_names[channel_idx],
-                        "r": float(r),
-                        "beta_std": float(r),
-                        "beta_kind": "standardized",
-                        "p": float(p),
-                        "n": int(n_valid[band_idx, window_idx, channel_idx]),
-                        "method": method,
-                        "method_label": format_correlation_method_label(method, None),
-                    })
-        
+                if baseline_itpc is not None:
+                    trial_itpc = trial_itpc - baseline_itpc
+                window_metrics.append(trial_itpc)
+            band_metrics.append((band_name, window_metrics))
+
+        cond_records = _compute_metric_records_with_cluster(
+            band_metrics=band_metrics,
+            y_condition=y_c,
+            ch_names=ch_names,
+            win_s=win_s,
+            win_e=win_e,
+            condition_name=safe_name,
+            feature_name="itpc",
+            use_spearman=use_spearman,
+            logger=logger,
+            config=config,
+            cov_vals=cov_vals,
+            cov_cols=cov_cols,
+            groups=groups_c,
+            req_samples=req_samples,
+        )
         all_tsv_records.extend(cond_records)
         logger.info(f"Computed ITPC temporal for condition '{safe_name}': {len(cond_records)} tests")
     
@@ -1802,6 +2004,7 @@ def _run_erds_temporal_by_condition_core(
     
     y_arr = _to_numpy_array(y)
     n = compute_aligned_data_length(tfr, events)
+    groups_all = _resolve_temporal_groups(events, n, config)
     
     condition_values, condition_vec = _determine_condition_values(
         events, n, temporal_cfg, config, logger, analysis_name="ERDS temporal"
@@ -1819,9 +2022,6 @@ def _run_erds_temporal_by_condition_core(
     else:
         bands = all_bands
     
-    corr_fn = spearmanr if use_spearman else pearsonr
-    corr_method = "spearman" if use_spearman else "pearson"
-    
     out_dir = stats_dir
     ensure_dir(out_dir)
     
@@ -1837,20 +2037,16 @@ def _run_erds_temporal_by_condition_core(
         safe_name = str(cond_val).replace(" ", "_").replace("/", "_")
         tfr_c = tfr_data[idx]
         y_c = y_arr[mask]
-        
-        band_names = list(bands.keys())
-        n_ch, n_b, n_w = len(ch_names), len(band_names), len(win_s)
-        
-        corrs = np.full((n_b, n_w, n_ch), np.nan)
-        pvals = np.full_like(corrs, np.nan)
-        n_valid = np.zeros_like(corrs, dtype=int)
-        
-        for band_idx, (band_name, (fmin, fmax_band)) in enumerate(bands.items()):
+        groups_c = groups_all[mask] if groups_all is not None else None
+        cov_vals, cov_cols, req_samples = _prepare_temporal_covariates(cov_df, idx, config)
+
+        band_metrics: List[Tuple[str, List[Optional[np.ndarray]]]] = []
+        for band_name, (fmin, fmax_band) in bands.items():
             fmax_effective = min(fmax_band, fmax)
             if fmin >= fmax_effective:
                 continue
-            
-            for window_idx, (t0, t1) in enumerate(zip(win_s, win_e)):
+            window_metrics: List[Optional[np.ndarray]] = []
+            for t0, t1 in zip(win_s, win_e):
                 trial_erds = _extract_trial_erds(
                     tfr_c,
                     fmin,
@@ -1864,49 +2060,27 @@ def _run_erds_temporal_by_condition_core(
                     method,
                 )
                 if trial_erds is None:
+                    window_metrics.append(None)
                     continue
-                
-                for channel_idx in range(n_ch):
-                    channel_vals = trial_erds[:, channel_idx]
-                    valid = np.isfinite(channel_vals) & np.isfinite(y_c)
-                    n_obs = int(valid.sum())
-                    if (
-                        n_obs < MIN_OBSERVATIONS_FOR_CORRELATION
-                        or np.std(channel_vals[valid]) < MIN_VARIANCE_THRESHOLD
-                    ):
-                        continue
-                    try:
-                        r, p = corr_fn(channel_vals[valid], y_c[valid])
-                        if np.isfinite(r) and np.isfinite(p):
-                            corrs[band_idx, window_idx, channel_idx] = float(r)
-                            pvals[band_idx, window_idx, channel_idx] = float(p)
-                            n_valid[band_idx, window_idx, channel_idx] = n_obs
-                    except (ValueError, RuntimeWarning):
-                        pass
-        
-        cond_records = []
-        for band_idx, band_name in enumerate(band_names):
-            for window_idx in range(n_w):
-                for channel_idx in range(n_ch):
-                    r = corrs[band_idx, window_idx, channel_idx]
-                    p = pvals[band_idx, window_idx, channel_idx]
-                    if not np.isfinite(r) or not np.isfinite(p):
-                        continue
-                    cond_records.append({
-                        "condition": safe_name,
-                        "feature": "erds",
-                        "band": band_name,
-                        "time_start": float(win_s[window_idx]),
-                        "time_end": float(win_e[window_idx]),
-                        "channel": ch_names[channel_idx],
-                        "r": float(r),
-                        "beta_std": float(r),
-                        "beta_kind": "standardized",
-                        "p": float(p),
-                        "n": int(n_valid[band_idx, window_idx, channel_idx]),
-                        "method": corr_method,
-                        "method_label": format_correlation_method_label(corr_method, None),
-                    })
+                window_metrics.append(trial_erds)
+            band_metrics.append((band_name, window_metrics))
+
+        cond_records = _compute_metric_records_with_cluster(
+            band_metrics=band_metrics,
+            y_condition=y_c,
+            ch_names=ch_names,
+            win_s=win_s,
+            win_e=win_e,
+            condition_name=safe_name,
+            feature_name="erds",
+            use_spearman=use_spearman,
+            logger=logger,
+            config=config,
+            cov_vals=cov_vals,
+            cov_cols=cov_cols,
+            groups=groups_c,
+            req_samples=req_samples,
+        )
         all_tsv_records.extend(cond_records)
         logger.info(f"Computed ERDS temporal for condition '{safe_name}': {len(cond_records)} tests")
     

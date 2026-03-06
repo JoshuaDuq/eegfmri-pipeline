@@ -1152,7 +1152,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriMinClusterVox) {
 				value = m.numberBuffer + "█"
 			}
-			hint = "legacy; used only when Min Volume=0"
+			hint = "used only when Min Volume=0"
 		case optSourceLocFmriMaxClusters:
 			label = "fMRI Max Clusters"
 			value = fmt.Sprintf("%d", m.sourceLocFmriMaxClusters)
@@ -1908,6 +1908,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Min Duration"
 			value = burstMinDurVal
 			hint = "minimum length"
+		case optBurstMinCycles:
+			label = "Min Cycles"
+			value = fmt.Sprintf("%.1f", m.burstMinCycles)
+			if m.editingNumber && m.isCurrentlyEditing(optBurstMinCycles) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum oscillatory cycles"
 		case optBurstBands:
 			label = "Burst bands"
 			value = burstBandsVal
@@ -2624,9 +2631,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = val
 
 		default:
-			label = "Unknown"
-			value = ""
-			hint = ""
+			panic(fmt.Sprintf("unhandled features advanced option: %d", opt))
 		}
 
 		if lineIdx >= startLine && lineIdx < endLine {
