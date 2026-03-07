@@ -38,7 +38,6 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "predictor_residual",
     "regression",
     "icc",
-    "report",
     "correlations",
     "condition",
     "temporal",

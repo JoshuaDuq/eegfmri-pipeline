@@ -30,7 +30,6 @@ class TestBehaviorStageCatalog(unittest.TestCase):
             run_trial_table=False,
             run_correlations=False,
             run_validation=False,
-            run_report=True,
             run_cluster_tests=True,
         )
         stages = config_to_stage_names_impl(cfg)
@@ -38,7 +37,6 @@ class TestBehaviorStageCatalog(unittest.TestCase):
         self.assertNotIn("trial_table", stages)
         self.assertNotIn("correlate_design", stages)
         self.assertNotIn("hierarchical_fdr_summary", stages)
-        self.assertIn("report", stages)
         self.assertIn("cluster", stages)
 
     def test_apply_computation_flags_updates_pipeline_config(self):
@@ -47,7 +45,6 @@ class TestBehaviorStageCatalog(unittest.TestCase):
             run_predictor_residual=False,
             run_regression=False,
             run_icc=False,
-            run_report=False,
             run_correlations=False,
             run_multilevel_correlations=False,
             run_condition_comparison=False,
@@ -55,13 +52,11 @@ class TestBehaviorStageCatalog(unittest.TestCase):
             run_cluster_tests=False,
         )
         flags = {name: False for name in COMPUTATION_TO_PIPELINE_ATTR}
-        flags["report"] = True
         flags["icc"] = False
         flags["multilevel_correlations"] = True
 
         apply_computation_flags_impl(cfg, flags)
 
-        self.assertTrue(cfg.run_report)
         self.assertFalse(cfg.run_icc)
         self.assertTrue(cfg.run_multilevel_correlations)
 

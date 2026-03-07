@@ -133,6 +133,51 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertNotIn("correlate_pvalues", plan["resolved"])
         self.assertIn("correlate_primary_selection", plan["resolved"])
 
+    def test_run_behavior_stages_respects_pipeline_computation_override(self):
+        from eeg_pipeline.analysis.behavior.stage_catalog import config_to_stage_names_impl
+        from eeg_pipeline.analysis.behavior.stage_execution import run_behavior_stages_impl
+
+        ctx = self._ctx(
+            DotConfig(
+                {
+                    "behavior_analysis": {
+                        "regression": {"enabled": False},
+                    }
+                }
+            )
+        )
+        pipeline_config = SimpleNamespace(
+            run_trial_table=False,
+            run_predictor_residual=False,
+            run_regression=True,
+            run_icc=False,
+            run_validation=False,
+            run_correlations=False,
+            run_condition_comparison=False,
+            run_temporal_correlations=False,
+            run_cluster_tests=False,
+        )
+        captured = {}
+
+        def _run_selected_stages(ctx_arg, config_arg, stages, results, progress, **kwargs):
+            captured["ctx"] = ctx_arg
+            captured["config"] = config_arg
+            captured["stages"] = stages
+            captured["filter_disabled_stages"] = kwargs["filter_disabled_stages"]
+            return {}
+
+        run_behavior_stages_impl(
+            ctx=ctx,
+            pipeline_config=pipeline_config,
+            config_to_stage_names_fn=config_to_stage_names_impl,
+            run_selected_stages_fn=_run_selected_stages,
+        )
+
+        self.assertIs(captured["ctx"], ctx)
+        self.assertIs(captured["config"], pipeline_config)
+        self.assertIn("regression", captured["stages"])
+        self.assertFalse(captured["filter_disabled_stages"])
+
     def test_resolve_condition_compare_column_uses_pain_mapping(self):
         from eeg_pipeline.analysis.behavior.orchestration import _resolve_condition_compare_column
 
@@ -409,6 +454,59 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertEqual(str(out.iloc[0]["condition_value1"]), "1")
         self.assertEqual(str(out.iloc[0]["condition_value2"]), "0")
+
+    def test_behavior_qc_condition_summary_respects_run_mean_unit(self):
+        from eeg_pipeline.analysis.behavior.stages.metadata import build_behavior_qc_impl
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "compare_column": "pain_binary_coded",
+                        "compare_values": [0.0, 1.0],
+                        "primary_unit": "run_mean",
+                    }
+                }
+            }
+        )
+        aligned_events = pd.DataFrame(
+            {
+                "run_id": [1, 1, 1, 1, 2, 2, 2, 2],
+                "pain_binary_coded": [0, 0, 0, 1, 0, 1, 1, 1],
+                "outcome": [1.0, 2.0, 3.0, 4.0, 9.0, 10.0, 11.0, 12.0],
+            }
+        )
+        ctx = SimpleNamespace(
+            subject="0001",
+            task="task",
+            n_trials=len(aligned_events),
+            has_predictor=False,
+            predictor_column=None,
+            predictor_series=None,
+            group_column="run_id",
+            data_qc={},
+            aligned_events=aligned_events,
+            config=cfg,
+            logger=Mock(),
+            covariates_df=None,
+            iter_feature_tables=lambda: [],
+            _find_outcome_column=lambda: "outcome",
+        )
+
+        qc = build_behavior_qc_impl(
+            ctx,
+            compute_series_statistics_fn=lambda series: {"n_non_nan": int(series.notna().sum())},
+            compute_correlation_fn=lambda *_args, **_kwargs: (0.0, 1.0),
+        )
+
+        self.assertEqual(qc["contrast"]["status"], "ok")
+        self.assertEqual(qc["contrast"]["condition_value1"], "0.0")
+        self.assertEqual(qc["contrast"]["condition_value2"], "1.0")
+        self.assertEqual(qc["contrast"]["n_condition_a"], 2)
+        self.assertEqual(qc["contrast"]["n_condition_b"], 2)
+        self.assertAlmostEqual(qc["contrast"]["mean_outcome_condition_a"], 5.5)
+        self.assertAlmostEqual(qc["contrast"]["mean_outcome_condition_b"], 7.5)
+        ctx.logger.info.assert_not_called()
 
     def test_group_trial_table_discovery_finds_canonical_all_trials(self):
         from eeg_pipeline.analysis.behavior.orchestration import _find_trial_table_path
@@ -777,6 +875,21 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         cfg = DotConfig({"behavior_analysis": {"validation": {"enabled": False}}})
         parsed = BehaviorPipelineConfig.from_config(cfg)
         self.assertFalse(parsed.run_validation)
+
+    def test_behavior_pipeline_config_parses_multilevel_correlations_flag(self):
+        from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "group_level": {
+                        "multilevel_correlations": {"enabled": True},
+                    }
+                }
+            }
+        )
+        parsed = BehaviorPipelineConfig.from_config(cfg)
+        self.assertTrue(parsed.run_multilevel_correlations)
 
     def test_behavior_pipeline_config_uses_canonical_correlation_method_key(self):
         from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
@@ -2957,7 +3070,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 {
                     "behavior_analysis": {
                         "run_adjustment": {"column": "run_id"},
-                        "icc": {"enabled": True},
+                        "icc": {"enabled": True, "unit_columns": ["trial_position"]},
                     }
                 }
             )
@@ -2987,8 +3100,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(list(out["feature"]), ["power_alpha"])
         self.assertAlmostEqual(float(out.iloc[0]["icc"]), 0.75, places=12)
         self.assertEqual(ctx.data_qc["icc_reliability"]["status"], "ok")
+        self.assertEqual(ctx.data_qc["icc_reliability"]["alignment_strategy"], "trial_position")
 
-    def test_icc_stage_rejects_unstable_trial_alignment_across_runs(self):
+    def test_icc_stage_uses_task_identity_columns_when_they_define_repeated_units(self):
         from eeg_pipeline.analysis.behavior import orchestration as orch
 
         ctx = self._ctx(
@@ -2997,7 +3111,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                     "behavior_analysis": {
                         "run_adjustment": {"column": "run_id"},
                         "condition": {"compare_column": ""},
-                        "icc": {"enabled": True},
+                        "icc": {"enabled": True, "unit_columns": ["predictor"]},
                     },
                     "event_columns": {
                         "predictor": ["temperature"],
@@ -3018,8 +3132,67 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             }
         )
 
-        with self.assertRaises(ValueError):
-            orch.stage_icc(ctx, SimpleNamespace(method_label="spearman"))
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.reliability.compute_icc",
+            return_value=(0.75, 0.60, 0.85),
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+            side_effect=lambda _ctx, df, path: path,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
+            return_value=None,
+        ):
+            out = orch.stage_icc(ctx, SimpleNamespace(method_label="spearman"))
+
+        self.assertEqual(list(out["feature"]), ["power_alpha"])
+        self.assertEqual(ctx.data_qc["icc_reliability"]["alignment_strategy"], "task_identity")
+        self.assertEqual(ctx.data_qc["icc_reliability"]["unit_columns"], ["temperature"])
+
+    def test_icc_stage_uses_task_identity_columns_even_when_units_repeat_within_runs(self):
+        from eeg_pipeline.analysis.behavior import orchestration as orch
+
+        ctx = self._ctx(
+            DotConfig(
+                {
+                    "behavior_analysis": {
+                        "run_adjustment": {"column": "run_id"},
+                        "condition": {"compare_column": ""},
+                        "icc": {"enabled": True, "unit_columns": ["predictor"]},
+                    },
+                    "event_columns": {
+                        "predictor": ["temperature"],
+                        "outcome": ["rating"],
+                        "binary_outcome": ["binary_outcome"],
+                    },
+                }
+            )
+        )
+        runtime = orch.create_behavior_runtime()
+        setattr(ctx, "_behavior_runtime", runtime)
+        runtime.cache._trial_table_df = pd.DataFrame(
+            {
+                "run_id": [1, 1, 1, 2, 2, 2],
+                "trial_index_within_group": [0, 1, 2, 0, 1, 2],
+                "temperature": [44.0, 44.0, 45.0, 45.0, 44.0, 44.0],
+                "power_alpha": [0.1, 0.3, 0.5, 0.2, 0.4, 0.6],
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.reliability.compute_icc",
+            return_value=(0.75, 0.60, 0.85),
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+            side_effect=lambda _ctx, df, path: path,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_metadata_file",
+            return_value=None,
+        ):
+            out = orch.stage_icc(ctx, SimpleNamespace(method_label="spearman"))
+
+        self.assertEqual(list(out["feature"]), ["power_alpha"])
+        self.assertEqual(ctx.data_qc["icc_reliability"]["alignment_strategy"], "task_identity")
+        self.assertEqual(ctx.data_qc["icc_reliability"]["unit_columns"], ["temperature"])
 
     def test_paired_condition_permutation_does_not_use_unpaired_label_shuffle(self):
         from eeg_pipeline.utils.parallel import _compute_single_condition_effect
@@ -3192,51 +3365,6 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 df_trials=df_trials,
                 feature_cols=["power_alpha"],
             )
-
-    def test_subject_report_reads_parquet_tables_and_filters_to_reportable_effects(self):
-        from eeg_pipeline.analysis.behavior.stages.report import stage_report_impl
-
-        ctx = self._ctx(DotConfig({"behavior_analysis": {"report": {"top_n": 5}}}))
-        condition_dir = ctx.stats_dir / "condition_effects"
-        condition_dir.mkdir(parents=True, exist_ok=True)
-        condition_path = condition_dir / "condition_effects_column.parquet"
-        condition_path.write_bytes(b"PAR1")
-
-        def _get_stats_dir(_ctx, kind):
-            out_dir = _ctx.stats_dir / kind
-            out_dir.mkdir(parents=True, exist_ok=True)
-            return out_dir
-
-        condition_df = pd.DataFrame(
-            {
-                "feature": ["power_big", "power_small"],
-                "hedges_g": [1.2, 0.1],
-                "reportable_effect": [True, False],
-                "p_primary": [0.01, 0.02],
-            }
-        )
-
-        with patch("eeg_pipeline.infra.tsv.read_table", return_value=condition_df):
-            report_path = stage_report_impl(
-                ctx,
-                SimpleNamespace(
-                    method="spearman",
-                    method_label="spearman",
-                    control_predictor=True,
-                    control_trial_order=True,
-                    fdr_alpha=0.05,
-                ),
-                feature_suffix_from_context_fn=lambda _ctx: "",
-                get_config_int_fn=lambda _cfg, _key, default: default,
-                load_trial_table_df_fn=lambda _ctx: pd.DataFrame({"power_alpha": [0.1], "rating": [10.0]}),
-                get_stats_subfolder_fn=_get_stats_dir,
-                feature_prefixes=("power_",),
-            )
-
-        text = report_path.read_text(encoding="utf-8")
-        self.assertIn("condition_effects_column.parquet", text)
-        self.assertIn("power_big", text)
-        self.assertNotIn("power_small", text)
 
     def test_temporal_stats_requires_cluster_correction_when_iid_disallowed(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats

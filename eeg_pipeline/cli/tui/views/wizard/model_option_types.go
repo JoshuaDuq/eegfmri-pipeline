@@ -34,8 +34,9 @@ const (
 	optBehaviorGroupTrialTable
 	optBehaviorGroupPredictorResidual
 	optBehaviorGroupCorrelations
+	optBehaviorGroupGroupLevel
+	optBehaviorGroupICC
 	optBehaviorGroupRegression
-	optBehaviorGroupReport
 	optBehaviorGroupCondition
 	optBehaviorGroupTemporal
 	optBehaviorGroupCluster
@@ -43,7 +44,10 @@ const (
 	optBehaviorGroupStats
 	optBehaviorGroupAdvanced
 	// Behavior sub-section headers (non-collapsible, visual separators within expanded groups)
+	optBehaviorSubDataMapping
 	optBehaviorSubCorrelationSettings
+	optBehaviorSubStatisticalInference
+	optBehaviorSubPermutations
 	optBehaviorSubCovariates
 	optBehaviorSubRunAdjustment
 	optBehaviorSubCorrelationsExtra
@@ -380,8 +384,6 @@ const (
 	optRegressionPrimaryUnit
 	optRegressionPermutations
 	optRegressionMaxFeatures
-	// Behavior options - Report
-	optReportTopN
 	// Behavior options - Correlations / predictor sensitivity
 	optCorrelationsTypes
 	optCorrelationsUseCrossfitPredictorResidual
@@ -1047,24 +1049,11 @@ const (
 	optBehaviorPermScheme
 	optBehaviorPermGroupColumnPreference
 	optBehaviorExcludeNonTrialwiseFeatures
+	optICCUnitColumns
 	optStatisticsAlpha
 	optBehaviorFeatureRegistryFilesJSON
 	optBehaviorFeatureRegistrySourceToTypeJSON
 	optBehaviorFeatureRegistryTypeHierarchyJSON
 	optBehaviorFeatureRegistryPatternsJSON
 	optBehaviorFeatureRegistryClassifiersJSON
-
-	// Global Statistics & Validation
-	optGlobalNBootstrap
-	optClusterCorrectionEnabled
-	optClusterCorrectionAlpha
-	optClusterCorrectionMinClusterSize
-	optClusterCorrectionTail
-	optValidationMinEpochs
-	optValidationMinChannels
-	optValidationMaxAmplitudeUv
-
-	// System / IO
-	optIOPredictorRange
-	optIOMaxMissingChannelsFraction
 )

@@ -182,7 +182,6 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
             "trialwise_regression*/*/regression_feature_effects*.parquet",
             "trialwise_regression*/*/regression_feature_effects*.tsv",
         ],
-        "report": ["subject_report*/*/subject_report*.md", "subject_report*/*/subject_report*.html"],
         "correlations": [
             "correlations*/*/correlations*.parquet",
             "correlations*/*/correlations*.tsv",

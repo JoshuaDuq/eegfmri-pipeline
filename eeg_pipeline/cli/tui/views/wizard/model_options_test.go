@@ -227,7 +227,7 @@ func TestGetFeaturesOptions_SpatialTransformPerFamilyOptionsAreCategoryScoped(t 
 func TestGetBehaviorOptions_HidesInferenceAndAdvancedForNonStatSelections(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {
-		m.computationSelected[i] = m.computations[i].Key == "report"
+		m.computationSelected[i] = m.computations[i].Key == "icc"
 	}
 
 	opts := m.getBehaviorOptions()
@@ -237,37 +237,63 @@ func TestGetBehaviorOptions_HidesInferenceAndAdvancedForNonStatSelections(t *tes
 	}
 }
 
-func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForStatSelections(t *testing.T) {
+func TestGetBehaviorOptions_ShowsSharedSettingsForStatSelections(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {
 		m.computationSelected[i] = m.computations[i].Key == "correlations"
 	}
 
-	// Group headers should appear when collapsed
 	opts := m.getBehaviorOptions()
 	if !hasOption(opts, optBehaviorGroupStats) {
-		t.Fatalf("expected Inference & Shared Settings group header for correlations selection")
+		t.Fatalf("expected shared settings group header for correlations selection")
 	}
-	if !hasOption(opts, optBehaviorGroupAdvanced) {
-		t.Fatalf("expected Advanced group header for correlations selection")
+	if hasOption(opts, optBehaviorGroupAdvanced) {
+		t.Fatalf("did not expect validation/io group header for correlations selection")
 	}
 
-	// Child options should appear when groups are expanded
 	m.behaviorGroupStatsExpanded = true
-	m.behaviorGroupAdvancedExpanded = true
 	opts = m.getBehaviorOptions()
 
 	if !hasOption(opts, optBehaviorStatsPredictorControl) {
 		t.Fatalf("expected inference stats options for correlations selection")
 	}
-	if !hasOption(opts, optGlobalNBootstrap) {
-		t.Fatalf("expected global stats options for correlations selection")
+	if !hasOption(opts, optBehaviorSubDataMapping) {
+		t.Fatalf("expected data mapping subsection for correlations selection")
 	}
-	if !hasOption(opts, optValidationMinEpochs) {
-		t.Fatalf("expected validation options for correlations selection")
+	if !hasOption(opts, optBehaviorSubStatisticalInference) {
+		t.Fatalf("expected statistical inference subsection for correlations selection")
 	}
-	if !hasOption(opts, optIOPredictorRange) {
-		t.Fatalf("expected system/io options for correlations selection")
+	if !hasOption(opts, optBehaviorSubPermutations) {
+		t.Fatalf("expected permutations subsection for correlations selection")
+	}
+}
+
+func TestGetBehaviorOptions_PlacesComputationSectionsBeforeSharedSettings(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		key := m.computations[i].Key
+		m.computationSelected[i] = key == "correlations" || key == "regression"
+	}
+
+	opts := m.getBehaviorOptions()
+
+	indexOf := func(target optionType) int {
+		for i, opt := range opts {
+			if opt == target {
+				return i
+			}
+		}
+		return -1
+	}
+
+	corrIndex := indexOf(optBehaviorGroupCorrelations)
+	regIndex := indexOf(optBehaviorGroupRegression)
+	sharedIndex := indexOf(optBehaviorGroupStats)
+	if corrIndex == -1 || regIndex == -1 || sharedIndex == -1 {
+		t.Fatalf("expected correlations, regression, and shared settings sections")
+	}
+	if sharedIndex < corrIndex || sharedIndex < regIndex {
+		t.Fatalf("expected shared settings to appear after computation-specific sections")
 	}
 }
 
@@ -284,7 +310,7 @@ func TestGetBehaviorOptions_HidesInferenceAndAdvancedForTrialTableOnly(t *testin
 	}
 }
 
-func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForPainResidualOnly(t *testing.T) {
+func TestGetBehaviorOptions_PredictorResidualOnlyUsesSharedSettingsNotValidation(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {
 		m.computationSelected[i] = m.computations[i].Key == "predictor_residual"
@@ -293,10 +319,10 @@ func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForPainResidualOnly(t *test
 	opts := m.getBehaviorOptions()
 
 	if !hasOption(opts, optBehaviorGroupStats) {
-		t.Fatalf("expected inference/shared settings group header for predictor_residual-only selection")
+		t.Fatalf("expected shared settings group header for predictor_residual-only selection")
 	}
-	if !hasOption(opts, optBehaviorGroupAdvanced) {
-		t.Fatalf("expected advanced group header for predictor_residual-only selection")
+	if hasOption(opts, optBehaviorGroupAdvanced) {
+		t.Fatalf("did not expect validation/io group header for predictor_residual-only selection")
 	}
 }
 
@@ -317,6 +343,60 @@ func TestGetBehaviorOptions_CorrelationsOnlyHidesMultilevelControls(t *testing.T
 	}
 	if hasOption(opts, optGroupLevelBlockPermutation) {
 		t.Fatalf("did not expect group-level controls for correlations-only selection")
+	}
+}
+
+func TestGetBehaviorOptions_MultilevelOnlyUsesDedicatedGroupLevelSection(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "multilevel_correlations"
+	}
+	m.behaviorGroupGroupLevelExpanded = true
+
+	opts := m.getBehaviorOptions()
+
+	if !hasOption(opts, optBehaviorGroupGroupLevel) {
+		t.Fatalf("expected dedicated group-level section for multilevel correlations")
+	}
+	if hasOption(opts, optBehaviorGroupCorrelations) {
+		t.Fatalf("did not expect subject-level correlations section for multilevel-only selection")
+	}
+	if hasOption(opts, optBehaviorGroupStats) || hasOption(opts, optBehaviorGroupAdvanced) {
+		t.Fatalf("did not expect shared settings or validation/io sections for multilevel-only selection")
+	}
+	if !hasOption(opts, optGroupLevelBlockPermutation) {
+		t.Fatalf("expected group-level controls in dedicated section")
+	}
+}
+
+func TestGetBehaviorOptions_TemporalOnlyHidesOutcomePredictorMapping(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "temporal"
+	}
+	m.behaviorGroupStatsExpanded = true
+
+	opts := m.getBehaviorOptions()
+
+	if hasOption(opts, optBehaviorOutcomeColumn) || hasOption(opts, optBehaviorPredictorColumn) {
+		t.Fatalf("did not expect shared outcome/predictor mapping for temporal-only selection")
+	}
+}
+
+func TestGetBehaviorOptions_RegressionOnlyHidesCorrelationSpecificGlobalControls(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i := range m.computations {
+		m.computationSelected[i] = m.computations[i].Key == "regression"
+	}
+	m.behaviorGroupStatsExpanded = true
+
+	opts := m.getBehaviorOptions()
+
+	if hasOption(opts, optNPerm) {
+		t.Fatalf("did not expect global permutation budget for regression-only selection")
+	}
+	if hasOption(opts, optBehaviorStatsPredictorControl) {
+		t.Fatalf("did not expect correlation-only predictor-control mode for regression-only selection")
 	}
 }
 

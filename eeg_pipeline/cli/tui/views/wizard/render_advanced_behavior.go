@@ -71,13 +71,13 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.behaviorGroupGeneralExpanded {
 				label = "▾ Execution"
 			}
-			return label, "", "RNG · jobs · thresholds"
+			return label, "", "runtime defaults"
 		case optBehaviorGroupTrialTable:
 			label := "▸ Trial Table"
 			if m.behaviorGroupTrialTableExpanded {
 				label = "▾ Trial Table"
 			}
-			return label, "", "format · lag features · validation"
+			return label, "", "format · alignment · trial-order QC"
 		case optBehaviorGroupPredictorResidual:
 			label := "▸ Residual Modeling"
 			if m.behaviorGroupPredictorResidualExpanded {
@@ -89,19 +89,25 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.behaviorGroupCorrelationsExpanded {
 				label = "▾ Correlations"
 			}
-			return label, "", "target · features · types · multilevel"
+			return label, "", "subject-level target · features · types"
+		case optBehaviorGroupGroupLevel:
+			label := "▸ Group-Level"
+			if m.behaviorGroupGroupLevelExpanded {
+				label = "▾ Group-Level"
+			}
+			return label, "", "cross-subject target · controls · block perms"
+		case optBehaviorGroupICC:
+			label := "▸ ICC"
+			if m.behaviorGroupICCExpanded {
+				label = "▾ ICC"
+			}
+			return label, "", "repeated unit definition across runs"
 		case optBehaviorGroupRegression:
 			label := "▸ Regression"
 			if m.behaviorGroupRegressionExpanded {
 				label = "▾ Regression"
 			}
 			return label, "", "outcome · covariates · model families"
-		case optBehaviorGroupReport:
-			label := "▸ Report"
-			if m.behaviorGroupReportExpanded {
-				label = "▾ Report"
-			}
-			return label, "", "top-N features to summarise"
 		case optBehaviorGroupCondition:
 			label := "▸ Condition"
 			if m.behaviorGroupConditionExpanded {
@@ -121,20 +127,26 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return label, "", "threshold · min size · tail · features"
 		case optBehaviorGroupStats:
-			label := "▸ Inference & Shared Settings"
+			label := "▸ Shared Settings"
 			if m.behaviorGroupStatsExpanded {
-				label = "▾ Inference & Shared Settings"
+				label = "▾ Shared Settings"
 			}
-			return label, "", "corr method · FDR · perms · covariates"
+			return label, "", "columns · inference · filtering"
 		case optBehaviorGroupAdvanced:
-			label := "▸ Advanced"
+			label := "▸ Validation & IO"
 			if m.behaviorGroupAdvancedExpanded {
-				label = "▾ Advanced"
+				label = "▾ Validation & IO"
 			}
-			return label, "", "global validation · system IO"
+			return label, "", "QC gates · cluster correction · input ranges"
 		// Behavior sub-section headers (non-collapsible visual separators)
+		case optBehaviorSubDataMapping:
+			return "  ── Data Mapping", "", ""
 		case optBehaviorSubCorrelationSettings:
 			return "  ── Correlation Settings", "", ""
+		case optBehaviorSubStatisticalInference:
+			return "  ── Statistical Inference", "", ""
+		case optBehaviorSubPermutations:
+			return "  ── Permutations", "", ""
 		case optBehaviorSubCovariates:
 			return "  ── Covariates", "", ""
 		case optBehaviorSubRunAdjustment:
@@ -166,7 +178,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optBehaviorSubMultilevel:
 			return "  ── Group-Level", "", ""
 		case optBehaviorSubFeatureRegistry:
-			return "  ── Feature Registry", "", ""
+			return "  ── Feature Filtering & Registry", "", ""
 		case optPredictorType:
 			types := []string{"continuous", "binary", "categorical"}
 			v := "continuous"
@@ -717,13 +729,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "TF Time Res", val, "temporal resolution"
 
 		// Report
-		case optReportTopN:
-			val := fmt.Sprintf("%d", m.reportTopN)
-			if m.editingNumber && m.isCurrentlyEditing(optReportTopN) {
-				val = numberDisplay
-			}
-			return "Top N Rows", val, "per TSV in report"
-
 		// Correlations
 		case optCorrelationsTypes:
 			val := m.correlationsTypesSpec
@@ -941,6 +946,15 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Perm Group Column", val, "preferred grouping column"
 		case optBehaviorExcludeNonTrialwiseFeatures:
 			return "Exclude Non-Trialwise", m.boolToOnOff(m.behaviorExcludeNonTrialwiseFeatures), "skip features without trial-level resolution"
+		case optICCUnitColumns:
+			val := m.iccUnitColumns
+			if strings.TrimSpace(val) == "" {
+				val = "(required)"
+			}
+			if m.editingText && m.editingTextField == textFieldICCUnitColumns {
+				val = textDisplay
+			}
+			return "ICC Unit Columns", val, "aliases or columns: predictor, condition, trial_type, trial_position"
 		case optBehaviorFeatureRegistryFilesJSON:
 			return "Registry Files JSON", jsonDisplay(m.behaviorFeatureRegistryFilesJSON, textFieldBehaviorFeatureRegistryFilesJSON), "JSON object for behavior_analysis.feature_registry.files"
 		case optBehaviorFeatureRegistrySourceToTypeJSON:
@@ -951,66 +965,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Registry Patterns JSON", jsonDisplay(m.behaviorFeatureRegistryPatternsJSON, textFieldBehaviorFeatureRegistryPatternsJSON), "JSON object for feature_patterns"
 		case optBehaviorFeatureRegistryClassifiersJSON:
 			return "Registry Classifiers JSON", jsonDisplay(m.behaviorFeatureRegistryClassifiersJSON, textFieldBehaviorFeatureRegistryClassifiersJSON), "JSON array for feature_classifiers"
-
-		// Global Statistics & Validation
-		case optGlobalNBootstrap:
-			val := fmt.Sprintf("%d", m.globalNBootstrap)
-			if m.editingNumber && m.isCurrentlyEditing(optGlobalNBootstrap) {
-				val = m.numberBuffer + "█"
-			}
-			return "Global N Bootstrap", val, "CI bootstrap iterations (0=disabled)"
-		case optClusterCorrectionEnabled:
-			return "Cluster Correction", m.boolToOnOff(m.clusterCorrectionEnabled), "spatial cluster correction across features"
-		case optClusterCorrectionAlpha:
-			val := fmt.Sprintf("%.4f", m.clusterCorrectionAlpha)
-			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionAlpha) {
-				val = m.numberBuffer + "█"
-			}
-			return "Cluster Corr Alpha", val, "cluster-forming p-value threshold"
-		case optClusterCorrectionMinClusterSize:
-			val := fmt.Sprintf("%d", m.clusterCorrectionMinClusterSize)
-			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionMinClusterSize) {
-				val = m.numberBuffer + "█"
-			}
-			return "Cluster Min Size", val, "minimum cluster size"
-		case optClusterCorrectionTail:
-			tails := []string{"two-tailed", "upper", "lower"}
-			return "Cluster Corr Tail", tails[m.clusterCorrectionTailGlobal%len(tails)], "tail direction"
-		case optValidationMinEpochs:
-			val := fmt.Sprintf("%d", m.validationMinEpochs)
-			if m.editingNumber && m.isCurrentlyEditing(optValidationMinEpochs) {
-				val = m.numberBuffer + "█"
-			}
-			return "Validation Min Epochs", val, "reject subjects with fewer epochs"
-		case optValidationMinChannels:
-			val := fmt.Sprintf("%d", m.validationMinChannels)
-			if m.editingNumber && m.isCurrentlyEditing(optValidationMinChannels) {
-				val = m.numberBuffer + "█"
-			}
-			return "Validation Min Channels", val, "reject subjects with fewer channels"
-		case optValidationMaxAmplitudeUv:
-			val := fmt.Sprintf("%.1f", m.validationMaxAmplitudeUv)
-			if m.editingNumber && m.isCurrentlyEditing(optValidationMaxAmplitudeUv) {
-				val = m.numberBuffer + "█"
-			}
-			return "Max Amplitude (µV)", val, "amplitude rejection threshold"
-
-		// System / IO
-		case optIOPredictorRange:
-			val := m.ioPredictorRange
-			if strings.TrimSpace(val) == "" {
-				val = "(default)"
-			}
-			if m.editingText && m.editingTextField == textFieldIOPredictorRange {
-				val = textDisplay
-			}
-			return "Predictor Range", val, "e.g. 32.0,50.0"
-		case optIOMaxMissingChannelsFraction:
-			val := fmt.Sprintf("%.2f", m.ioMaxMissingChannelsFraction)
-			if m.editingNumber && m.isCurrentlyEditing(optIOMaxMissingChannelsFraction) {
-				val = m.numberBuffer + "█"
-			}
-			return "Max Missing Channels Frac", val, "skip trial if more channels are NaN"
 
 		default:
 			panic(fmt.Sprintf("unhandled behavior advanced option: %d", opt))
@@ -1044,7 +998,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		// Check if this is a collapsible group header or a non-collapsible sub-header
 		isGroupHeader := opt >= optBehaviorGroupGeneral && opt <= optBehaviorGroupAdvanced
-		isSubHeader := opt >= optBehaviorSubCorrelationSettings && opt <= optBehaviorSubFeatureRegistry
+		isSubHeader := opt >= optBehaviorSubDataMapping && opt <= optBehaviorSubFeatureRegistry
 		isSectionHeader := isGroupHeader || isSubHeader
 
 		var labelStyle, valueStyle lipgloss.Style

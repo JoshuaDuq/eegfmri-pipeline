@@ -16,109 +16,33 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 		return false
 	}
-	needsInferenceSettings := hasSelectedComputation(
-		"correlations", "multilevel_correlations", "predictor_residual",
-		"regression", "condition", "temporal", "cluster",
-	)
-	needsPredictorType := hasSelectedComputation("correlations", "predictor_residual", "regression")
-	needsCanonicalColumns := hasSelectedComputation(
-		"correlations", "multilevel_correlations", "predictor_residual",
-		"regression", "condition", "temporal", "cluster",
-	)
-	needsPermutationSettings := hasSelectedComputation(
-		"correlations", "multilevel_correlations", "regression",
-		"condition", "temporal", "cluster",
-	)
-	needsFeatureRegistrySettings := hasSelectedComputation(
-		"correlations", "multilevel_correlations", "regression",
-		"condition", "temporal", "cluster", "icc", "report",
-	)
+	hasCorrelations := hasSelectedComputation("correlations")
+	hasMultilevel := hasSelectedComputation("multilevel_correlations")
+	hasICC := hasSelectedComputation("icc")
+	hasPredictorResidual := hasSelectedComputation("predictor_residual")
+	hasRegression := hasSelectedComputation("regression")
+	hasCondition := hasSelectedComputation("condition")
+	hasTemporal := hasSelectedComputation("temporal")
+	hasCluster := hasSelectedComputation("cluster")
+
+	needsSharedAnalysisSettings := hasCorrelations ||
+		hasPredictorResidual ||
+		hasRegression ||
+		hasCondition ||
+		hasTemporal ||
+		hasCluster
+	needsPredictorType := hasCorrelations || hasPredictorResidual || hasRegression
+	needsOutcomePredictorColumns := hasCorrelations || hasPredictorResidual || hasRegression
+	needsSharedInferenceControls := hasCorrelations || hasRegression || hasCondition || hasTemporal || hasCluster
+	needsGlobalPermutationBudget := hasCorrelations || hasCondition || hasTemporal || hasCluster
+	needsPermutationSettings := hasCorrelations || hasRegression || hasCondition || hasTemporal || hasCluster
+	needsFeatureRegistrySettings := hasCorrelations || hasMultilevel || hasRegression || hasCondition || hasTemporal || hasCluster
 
 	// ── Execution ─────────────────────────────────────────────────────────────
 	if hasAnyComputation {
 		options = append(options, optBehaviorGroupGeneral)
 		if m.behaviorGroupGeneralExpanded {
 			options = append(options, optRNGSeed, optBehaviorNJobs, optBehaviorMinSamples)
-		}
-	}
-
-	// ── Inference & Shared Settings ───────────────────────────────────────────
-	if needsInferenceSettings {
-		options = append(options, optBehaviorGroupStats)
-		if m.behaviorGroupStatsExpanded {
-			// Correlation method — only when correlations selected
-			if hasSelectedComputation("correlations") {
-				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
-			}
-			if needsPredictorType {
-				options = append(options, optPredictorType)
-			}
-			if needsCanonicalColumns {
-				options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
-			}
-			if hasSelectedComputation("correlations") {
-				options = append(options, optBootstrap)
-			}
-			// FDR alpha — any analysis with multiple comparisons
-			if hasSelectedComputation("correlations", "condition", "temporal", "cluster", "regression") {
-				options = append(options, optFDRAlpha)
-			}
-			// Global permutations
-			if hasSelectedComputation("cluster", "temporal", "regression", "correlations") {
-				options = append(options, optNPerm)
-			}
-			if hasSelectedComputation("correlations", "regression") {
-				options = append(options, optBehaviorStatsPredictorControl)
-			}
-			if hasSelectedComputation("correlations", "regression", "condition", "temporal", "cluster") {
-				options = append(options, optBehaviorStatsAllowIIDTrials)
-			}
-			if hasSelectedComputation("correlations", "regression", "condition", "temporal", "cluster") {
-				options = append(options, optBehaviorStatsHierarchicalFDR)
-			}
-			if hasSelectedComputation("correlations") {
-				options = append(options, optBehaviorStatsComputeReliability)
-			}
-			if hasSelectedComputation("correlations", "regression", "condition", "temporal", "cluster") {
-				options = append(options, optStatisticsAlpha)
-			}
-			if needsPermutationSettings {
-				options = append(options, optBehaviorPermScheme, optBehaviorPermGroupColumnPreference)
-			}
-			if needsFeatureRegistrySettings {
-				options = append(options,
-					optBehaviorExcludeNonTrialwiseFeatures,
-					optBehaviorSubFeatureRegistry,
-					optBehaviorFeatureRegistryFilesJSON,
-					optBehaviorFeatureRegistrySourceToTypeJSON,
-					optBehaviorFeatureRegistryTypeHierarchyJSON,
-					optBehaviorFeatureRegistryPatternsJSON,
-					optBehaviorFeatureRegistryClassifiersJSON,
-				)
-			}
-			if hasSelectedComputation("regression", "correlations") {
-				options = append(options, optBehaviorSubCovariates, optControlTemp, optControlOrder)
-			}
-			// Run adjustment
-			if hasSelectedComputation("correlations") {
-				options = append(options, optBehaviorSubRunAdjustment, optRunAdjustmentEnabled)
-				if m.runAdjustmentEnabled {
-					options = append(options,
-						optRunAdjustmentColumn,
-						optRunAdjustmentIncludeInCorrelations,
-						optRunAdjustmentMaxDummies,
-					)
-				}
-			}
-			// Correlations extras (change scores, LOSO, Bayes)
-			if m.isComputationSelected("correlations") {
-				options = append(options,
-					optBehaviorSubCorrelationsExtra,
-					optComputeChangeScores,
-					optComputeLosoStability,
-					optComputeBayesFactors,
-				)
-			}
 		}
 	}
 
@@ -160,39 +84,48 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// Correlations
-	if m.isComputationSelected("correlations") || m.isComputationSelected("multilevel_correlations") {
+	if m.isComputationSelected("correlations") {
 		options = append(options, optBehaviorGroupCorrelations)
 		if m.behaviorGroupCorrelationsExpanded {
-			if m.isComputationSelected("correlations") {
+			options = append(options,
+				optCorrelationsTargetColumn,
+				optCorrelationsPowerSegment,
+				optCorrelationsFeatures,
+				optCorrelationsTypes,
+				optCorrelationsPrimaryUnit,
+				optCorrelationsMinRuns,
+				optCorrelationsPermutations,
+				optCorrelationsPermutationPrimary,
+			)
+			// Predictor-residual preference only meaningful for continuous predictors.
+			if m.predictorType == 0 {
 				options = append(options,
-					optCorrelationsTargetColumn,
-					optCorrelationsPowerSegment,
-					optCorrelationsFeatures,
-					optCorrelationsTypes,
-					optCorrelationsPrimaryUnit,
-					optCorrelationsMinRuns,
-					optCorrelationsPermutations,
-					optCorrelationsPermutationPrimary,
-				)
-				// Predictor-residual preference only meaningful for continuous predictors.
-				if m.predictorType == 0 {
-					options = append(options,
-						optCorrelationsPreferPredictorResidual,
-						optCorrelationsUseCrossfitPredictorResidual,
-					)
-				}
-			}
-			if m.isComputationSelected("multilevel_correlations") {
-				options = append(options,
-					optBehaviorSubMultilevel,
-					optGroupLevelBlockPermutation,
-					optGroupLevelTarget,
-					optGroupLevelControlPredictor,
-					optGroupLevelControlTrialOrder,
-					optGroupLevelControlRunEffects,
-					optGroupLevelMaxRunDummies,
+					optCorrelationsPreferPredictorResidual,
+					optCorrelationsUseCrossfitPredictorResidual,
 				)
 			}
+		}
+	}
+
+	if m.isComputationSelected("multilevel_correlations") {
+		options = append(options, optBehaviorGroupGroupLevel)
+		if m.behaviorGroupGroupLevelExpanded {
+			options = append(options,
+				optBehaviorSubMultilevel,
+				optGroupLevelBlockPermutation,
+				optGroupLevelTarget,
+				optGroupLevelControlPredictor,
+				optGroupLevelControlTrialOrder,
+				optGroupLevelControlRunEffects,
+				optGroupLevelMaxRunDummies,
+			)
+		}
+	}
+
+	if hasICC {
+		options = append(options, optBehaviorGroupICC)
+		if m.behaviorGroupICCExpanded {
+			options = append(options, optICCUnitColumns)
 		}
 	}
 
@@ -304,10 +237,76 @@ func (m Model) getBehaviorOptions() []optionType {
 	}
 
 	// Report
-	if m.isComputationSelected("report") {
-		options = append(options, optBehaviorGroupReport)
-		if m.behaviorGroupReportExpanded {
-			options = append(options, optReportTopN)
+	// ── Shared Analysis Settings ──────────────────────────────────────────────
+	if needsSharedAnalysisSettings {
+		options = append(options, optBehaviorGroupStats)
+		if m.behaviorGroupStatsExpanded {
+			if needsPredictorType || needsOutcomePredictorColumns {
+				options = append(options, optBehaviorSubDataMapping)
+			}
+			if needsPredictorType {
+				options = append(options, optPredictorType)
+			}
+			if needsOutcomePredictorColumns {
+				options = append(options, optBehaviorOutcomeColumn, optBehaviorPredictorColumn)
+			}
+
+			if hasCorrelations || needsSharedInferenceControls {
+				options = append(options, optBehaviorSubStatisticalInference)
+			}
+			if hasCorrelations {
+				options = append(options, optBehaviorSubCorrelationSettings, optCorrMethod, optRobustCorrelation)
+				options = append(options, optBootstrap, optBehaviorStatsPredictorControl, optBehaviorStatsComputeReliability)
+			}
+			if needsSharedInferenceControls {
+				options = append(options,
+					optFDRAlpha,
+					optBehaviorStatsAllowIIDTrials,
+					optBehaviorStatsHierarchicalFDR,
+					optStatisticsAlpha,
+				)
+			}
+
+			if needsPermutationSettings || needsGlobalPermutationBudget {
+				options = append(options, optBehaviorSubPermutations)
+			}
+			if needsGlobalPermutationBudget {
+				options = append(options, optNPerm)
+			}
+			if needsPermutationSettings {
+				options = append(options, optBehaviorPermScheme, optBehaviorPermGroupColumnPreference)
+			}
+
+			if needsFeatureRegistrySettings {
+				options = append(options,
+					optBehaviorSubFeatureRegistry,
+					optBehaviorExcludeNonTrialwiseFeatures,
+					optBehaviorFeatureRegistryFilesJSON,
+					optBehaviorFeatureRegistrySourceToTypeJSON,
+					optBehaviorFeatureRegistryTypeHierarchyJSON,
+					optBehaviorFeatureRegistryPatternsJSON,
+					optBehaviorFeatureRegistryClassifiersJSON,
+				)
+			}
+			if hasCorrelations || hasRegression {
+				options = append(options, optBehaviorSubCovariates, optControlTemp, optControlOrder)
+			}
+			if hasCorrelations {
+				options = append(options, optBehaviorSubRunAdjustment, optRunAdjustmentEnabled)
+				if m.runAdjustmentEnabled {
+					options = append(options,
+						optRunAdjustmentColumn,
+						optRunAdjustmentIncludeInCorrelations,
+						optRunAdjustmentMaxDummies,
+					)
+				}
+				options = append(options,
+					optBehaviorSubCorrelationsExtra,
+					optComputeChangeScores,
+					optComputeLosoStability,
+					optComputeBayesFactors,
+				)
+			}
 		}
 	}
 
@@ -316,31 +315,6 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupOutput)
 		if m.behaviorGroupOutputExpanded {
 			options = append(options, optAlsoSaveCsv, optBehaviorOverwrite)
-		}
-	}
-
-	// ── Advanced (Global Validation + System IO) ───────────────────────────────
-	if needsInferenceSettings {
-		options = append(options, optBehaviorGroupAdvanced)
-		if m.behaviorGroupAdvancedExpanded {
-			options = append(options,
-				optGlobalNBootstrap,
-				optClusterCorrectionEnabled,
-			)
-			if m.clusterCorrectionEnabled {
-				options = append(options,
-					optClusterCorrectionAlpha,
-					optClusterCorrectionMinClusterSize,
-					optClusterCorrectionTail,
-				)
-			}
-			options = append(options,
-				optValidationMinEpochs,
-				optValidationMinChannels,
-				optValidationMaxAmplitudeUv,
-				optIOPredictorRange,
-				optIOMaxMissingChannelsFraction,
-			)
 		}
 	}
 

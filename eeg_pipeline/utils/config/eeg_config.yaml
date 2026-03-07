@@ -697,11 +697,6 @@ behavior_analysis:
     n_permutations: 0
     max_features: null
 
-  # Single-subject report (non-gating; summarizes outputs and diagnostics)
-  report:
-    enabled: true
-    top_n: 15
-
   validation:
     enabled: true
   
@@ -826,11 +821,17 @@ behavior_analysis:
   group_level:
     block_permutation: true
     multilevel_correlations:
+      enabled: false
       target: "outcome"
       control_predictor: false
       control_trial_order: false
       control_run_effects: false
       max_run_dummies: 20
+
+  # Run-to-run reliability
+  icc:
+    enabled: true
+    unit_columns: ["predictor"]  # aliases: predictor | condition | trial_type | trial_position | explicit columns
   
   min_samples:
     channel: 10

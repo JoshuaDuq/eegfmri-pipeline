@@ -54,7 +54,7 @@ type Computation struct {
 	Key         string
 	Name        string
 	Description string
-	Group       string // Core, Advanced, DataPrep, Quality
+	Group       string // Core, Group, Advanced, DataPrep, Quality
 }
 
 type FeatureCategory struct {
@@ -70,15 +70,16 @@ var behaviorComputations = []Computation{
 
 	// Core Analyses
 	{"correlations", "Correlations", "EEG-outcome correlations with bootstrap CIs", "Core"},
-	{"multilevel_correlations", "Group Multilevel Correlations", "Group-level correlations with block-restricted permutations", "Core"},
 	{"regression", "Regression", "Feature regression with optional permutation inference", "Core"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., condition A vs condition B)", "Core"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis", "Core"},
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests", "Core"},
 
+	// Group-level Analyses
+	{"multilevel_correlations", "Group Multilevel Correlations", "Cross-subject correlations using saved trial tables", "Group"},
+
 	// Quality & Validation
 	{"icc", "Reliability (ICC)", "Run-to-run feature reliability", "Quality"},
-	{"report", "Subject Report", "Single-subject summary report", "Quality"},
 }
 
 type FrequencyBand struct {
@@ -408,7 +409,6 @@ var computationApplicableFeatures = map[string][]string{
 	// Quality & Validation analyses
 	"regression": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 	"icc":        {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
-	"report":     {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "microstates", "erds", "spectral"},
 }
 
 type PlotItem struct {
@@ -778,14 +778,12 @@ const (
 
 	// Behavior Statistics text fields
 	textFieldBehaviorPermGroupColumnPreference
+	textFieldICCUnitColumns
 	textFieldBehaviorFeatureRegistryFilesJSON
 	textFieldBehaviorFeatureRegistrySourceToTypeJSON
 	textFieldBehaviorFeatureRegistryTypeHierarchyJSON
 	textFieldBehaviorFeatureRegistryPatternsJSON
 	textFieldBehaviorFeatureRegistryClassifiersJSON
-
-	// System / IO text fields
-	textFieldIOPredictorRange
 
 	// Preprocessing advanced config text fields
 	textFieldIcaLabelsToKeep
@@ -1861,8 +1859,9 @@ type Model struct {
 	behaviorGroupTrialTableExpanded        bool
 	behaviorGroupPredictorResidualExpanded bool
 	behaviorGroupCorrelationsExpanded      bool
+	behaviorGroupGroupLevelExpanded        bool
+	behaviorGroupICCExpanded               bool
 	behaviorGroupRegressionExpanded        bool
-	behaviorGroupReportExpanded            bool
 	behaviorGroupConditionExpanded         bool
 	behaviorGroupTemporalExpanded          bool
 	behaviorGroupClusterExpanded           bool
@@ -1925,9 +1924,6 @@ type Model struct {
 	groupLevelControlTrialOrder         bool
 	groupLevelControlRunEffects         bool
 	groupLevelMaxRunDummies             int
-
-	// Report
-	reportTopN int
 
 	// Temporal
 	temporalResolutionMs       int
@@ -2213,25 +2209,12 @@ type Model struct {
 	behaviorPermScheme                     int     // 0: circular_shift, 1: shuffle
 	behaviorPermGroupColumnPreference      string  // Group column preference order (comma-separated)
 	behaviorExcludeNonTrialwiseFeatures    bool    // Drop broadcast features
+	iccUnitColumns                         string  // Repeated-measures unit columns (comma-separated)
 	behaviorFeatureRegistryFilesJSON       string  // behavior_analysis.feature_registry.files JSON
 	behaviorFeatureRegistrySourceJSON      string  // behavior_analysis.feature_registry.source_to_feature_type JSON
 	behaviorFeatureRegistryHierarchyJSON   string  // behavior_analysis.feature_registry.feature_type_hierarchy JSON
 	behaviorFeatureRegistryPatternsJSON    string  // behavior_analysis.feature_registry.feature_patterns JSON
 	behaviorFeatureRegistryClassifiersJSON string  // behavior_analysis.feature_registry.feature_classifiers JSON
-
-	// Global Statistics & Validation
-	globalNBootstrap                int     // Global bootstrap count
-	clusterCorrectionEnabled        bool    // Global cluster correction enabled
-	clusterCorrectionAlpha          float64 // Cluster correction alpha
-	clusterCorrectionMinClusterSize int     // Min cluster size
-	clusterCorrectionTailGlobal     int     // 0: two-tailed, 1: upper, -1: lower
-	validationMinEpochs             int     // Min epochs for validation
-	validationMinChannels           int     // Min channels
-	validationMaxAmplitudeUv        float64 // Max amplitude threshold
-
-	// System / IO
-	ioPredictorRange             string  // Valid predictor range (e.g., "35.0,55.0")
-	ioMaxMissingChannelsFraction float64 // Max missing channels fraction
 
 	// TFR parameters (for features pipeline)
 	tfrFreqMin       float64 // Min frequency for TFR
@@ -2777,7 +2760,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		groupLevelControlTrialOrder:         true,
 		groupLevelControlRunEffects:         false,
 		groupLevelMaxRunDummies:             20,
-		reportTopN:                          15,
 		temporalResolutionMs:                50,
 		temporalCorrectionMethod:            1,
 		temporalSmoothMs:                    100,
@@ -3011,25 +2993,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorPermScheme:                     0, // 0: circular_shift
 		behaviorPermGroupColumnPreference:      "run_id,block",
 		behaviorExcludeNonTrialwiseFeatures:    true,
+		iccUnitColumns:                         "predictor",
 		behaviorFeatureRegistryFilesJSON:       "",
 		behaviorFeatureRegistrySourceJSON:      "",
 		behaviorFeatureRegistryHierarchyJSON:   "",
 		behaviorFeatureRegistryPatternsJSON:    "",
 		behaviorFeatureRegistryClassifiersJSON: "",
-
-		// Global Statistics & Validation defaults
-		globalNBootstrap:                1000,
-		clusterCorrectionEnabled:        false,
-		clusterCorrectionAlpha:          0.05,
-		clusterCorrectionMinClusterSize: 2,
-		clusterCorrectionTailGlobal:     0, // two-tailed
-		validationMinEpochs:             5,
-		validationMinChannels:           10,
-		validationMaxAmplitudeUv:        500.0,
-
-		// System / IO defaults
-		ioPredictorRange:             "35.0,55.0",
-		ioMaxMissingChannelsFraction: 0.3,
 
 		// TFR defaults (from config)
 		tfrFreqMin:       1.0,
@@ -3204,9 +3173,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"temporal":                true,
 			"cluster":                 false,
 
-			// Quality & Reporting
-			"icc":    true,
-			"report": true,
+			// Quality
+			"icc": true,
 		}
 		for i, c := range behaviorComputations {
 			m.computationSelected[i] = defaultComps[c.Key]

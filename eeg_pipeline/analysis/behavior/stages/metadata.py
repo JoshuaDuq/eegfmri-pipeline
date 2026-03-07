@@ -38,6 +38,109 @@ def compute_series_statistics(series: pd.Series) -> Dict[str, Any]:
     }
 
 
+def _resolve_condition_qc_column(ctx: Any) -> Optional[str]:
+    compare_col = str(
+        get_config_value(ctx.config, "behavior_analysis.condition.compare_column", "") or ""
+    ).strip()
+    if compare_col and ctx.aligned_events is not None and compare_col in ctx.aligned_events.columns:
+        return compare_col
+    if ctx.aligned_events is None:
+        return None
+    return get_binary_outcome_column_from_config(ctx.config, ctx.aligned_events)
+
+
+def _matches_condition_value(series: pd.Series, value: Any) -> pd.Series:
+    numeric_series = pd.to_numeric(series, errors="coerce")
+    numeric_value = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.notna(numeric_value):
+        return numeric_series == numeric_value
+    return series.astype(str).str.strip().str.lower() == str(value).strip().lower()
+
+
+def _resolve_condition_qc_values(condition_series: pd.Series, config: Any) -> tuple[str, str, pd.Series, pd.Series]:
+    compare_values = get_config_value(config, "behavior_analysis.condition.compare_values", None)
+    if compare_values and len(compare_values) >= 2:
+        if len(compare_values) > 2:
+            raise ValueError(
+                "Condition QC only supports binary contrasts. "
+                "Received >2 compare_values; use the multigroup condition stage instead."
+            )
+        value1, value2 = compare_values[0], compare_values[1]
+        return (
+            str(value1),
+            str(value2),
+            _matches_condition_value(condition_series, value1),
+            _matches_condition_value(condition_series, value2),
+        )
+
+    numeric_values = {
+        float(value)
+        for value in pd.to_numeric(condition_series, errors="coerce").dropna().unique().tolist()
+    }
+    if numeric_values and numeric_values.issubset({0.0, 1.0}):
+        return (
+            "1",
+            "0",
+            _matches_condition_value(condition_series, 1),
+            _matches_condition_value(condition_series, 0),
+        )
+
+    unique_values = [value for value in pd.Series(condition_series).dropna().unique().tolist()]
+    if len(unique_values) == 2:
+        value1, value2 = unique_values[0], unique_values[1]
+        return (
+            str(value1),
+            str(value2),
+            _matches_condition_value(condition_series, value1),
+            _matches_condition_value(condition_series, value2),
+        )
+    if len(unique_values) > 2:
+        raise ValueError(
+            f"Condition column has {len(unique_values)} observed values "
+            f"({unique_values}) but behavior_analysis.condition.compare_values is not set. "
+            "Specify an explicit binary contrast or use the multigroup condition stage."
+        )
+
+    empty_mask = pd.Series(False, index=condition_series.index, dtype=bool)
+    return "1", "0", empty_mask, empty_mask
+
+
+def _build_condition_qc_frame(
+    ctx: Any,
+    outcome_col: str,
+    condition_col: str,
+) -> Optional[pd.DataFrame]:
+    if ctx.aligned_events is None:
+        return None
+
+    required_columns = [outcome_col, condition_col]
+    run_col = str(
+        get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id"
+    ).strip()
+    primary_unit = str(
+        get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial") or "trial"
+    ).strip().lower()
+
+    if primary_unit in {"run", "run_mean", "runmean", "run_level"} and run_col in ctx.aligned_events.columns:
+        required_columns.append(run_col)
+
+    frame = ctx.aligned_events[required_columns].copy()
+    frame[outcome_col] = pd.to_numeric(frame[outcome_col], errors="coerce")
+    frame = frame.dropna(subset=[condition_col, outcome_col])
+    if frame.empty:
+        return frame
+
+    if run_col in frame.columns:
+        aggregated = (
+            frame.groupby([run_col, condition_col], dropna=True)[outcome_col]
+            .mean()
+            .reset_index()
+        )
+        return aggregated
+
+    return frame
+
+
 def summarize_covariates_qc_impl(ctx: Any) -> Dict[str, Any]:
     cov = ctx.covariates_df
     if cov is None or cov.empty:
@@ -96,52 +199,42 @@ def build_behavior_qc_impl(
             }
 
     if ctx.aligned_events is not None and outcome_series is not None:
-        from eeg_pipeline.analysis.behavior.api import split_by_condition
-
-        compare_col = str(
-            get_config_value(ctx.config, "behavior_analysis.condition.compare_column", "") or ""
-        ).strip()
         condition_enabled = bool(
             get_config_value(ctx.config, "behavior_analysis.condition.enabled", True)
         )
-        resolved_condition_col = (
-            compare_col if compare_col and compare_col in ctx.aligned_events.columns else None
-        )
-        if resolved_condition_col is None:
-            resolved_condition_col = get_binary_outcome_column_from_config(ctx.config, ctx.aligned_events)
-
+        resolved_condition_col = _resolve_condition_qc_column(ctx)
         if condition_enabled and resolved_condition_col is not None:
             try:
-                cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = split_by_condition(
-                    ctx.aligned_events,
-                    ctx.config,
-                    ctx.logger,
-                )
+                qc_frame = _build_condition_qc_frame(ctx, outcome_col, resolved_condition_col)
+                if qc_frame is not None and not qc_frame.empty:
+                    value1, value2, cond_a_mask, cond_b_mask = _resolve_condition_qc_values(
+                        qc_frame[resolved_condition_col],
+                        ctx.config,
+                    )
+                    cond_a_outcomes = qc_frame.loc[cond_a_mask, outcome_col]
+                    cond_b_outcomes = qc_frame.loc[cond_b_mask, outcome_col]
+                    n_condition_a = int(cond_a_mask.sum())
+                    n_condition_b = int(cond_b_mask.sum())
+                    if n_condition_a > 0 or n_condition_b > 0:
+                        qc["contrast"] = {
+                            "status": "ok",
+                            "condition_value1": value1,
+                            "condition_value2": value2,
+                            "n_condition_a": n_condition_a,
+                            "n_condition_b": n_condition_b,
+                            "mean_outcome_condition_a": float(cond_a_outcomes.mean()) if cond_a_outcomes.notna().any() else np.nan,
+                            "mean_outcome_condition_b": float(cond_b_outcomes.mean()) if cond_b_outcomes.notna().any() else np.nan,
+                            "mean_outcome_difference_a_minus_b": (
+                                float(cond_a_outcomes.mean() - cond_b_outcomes.mean())
+                                if cond_a_outcomes.notna().any() and cond_b_outcomes.notna().any()
+                                else np.nan
+                            ),
+                        }
             except ValueError as exc:
                 qc["contrast"] = {
                     "status": "skipped",
                     "reason": str(exc),
                 }
-                cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = np.array([]), np.array([]), 0, 0
-        else:
-            cond_a_mask, cond_b_mask, n_condition_a, n_condition_b = np.array([]), np.array([]), 0, 0
-
-        if int(n_condition_a) > 0 or int(n_condition_b) > 0:
-            s = pd.to_numeric(outcome_series, errors="coerce")
-            cond_a_outcomes = s[cond_a_mask] if len(cond_a_mask) == len(s) else pd.Series(dtype=float)
-            cond_b_outcomes = s[cond_b_mask] if len(cond_b_mask) == len(s) else pd.Series(dtype=float)
-            qc["contrast"] = {
-                "status": "ok",
-                "n_condition_a": int(n_condition_a),
-                "n_condition_b": int(n_condition_b),
-                "mean_outcome_condition_a": float(cond_a_outcomes.mean()) if cond_a_outcomes.notna().any() else np.nan,
-                "mean_outcome_condition_b": float(cond_b_outcomes.mean()) if cond_b_outcomes.notna().any() else np.nan,
-                "mean_outcome_difference_a_minus_b": (
-                    float(cond_a_outcomes.mean() - cond_b_outcomes.mean())
-                    if cond_a_outcomes.notna().any() and cond_b_outcomes.notna().any()
-                    else np.nan
-                ),
-            }
 
     if ctx.covariates_df is not None and not ctx.covariates_df.empty:
         cov = ctx.covariates_df

@@ -70,7 +70,6 @@ func TestBehaviorAdvancedConfigRendersMaximalState(t *testing.T) {
 	m.behaviorGroupConditionExpanded = true
 	m.behaviorGroupTemporalExpanded = true
 	m.behaviorGroupClusterExpanded = true
-	m.behaviorGroupReportExpanded = true
 	m.behaviorGroupOutputExpanded = true
 	m.behaviorGroupAdvancedExpanded = true
 	m.runAdjustmentEnabled = true
@@ -78,7 +77,6 @@ func TestBehaviorAdvancedConfigRendersMaximalState(t *testing.T) {
 	m.predictorResidualCrossfitEnabled = true
 	m.predictorType = 0
 	m.regressionPredictorControl = 2
-	m.clusterCorrectionEnabled = true
 	m.featureFileSelected["itpc"] = true
 	m.featureFileSelected["erds"] = true
 

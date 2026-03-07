@@ -423,11 +423,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
-		{key: "behavior_analysis.report.top_n", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.reportTopN = n
-			}
-		}},
 		{key: "behavior_analysis.regression.primary_unit", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				if strings.EqualFold(s, "run_mean") || strings.EqualFold(s, "run") {
@@ -574,61 +569,9 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.behaviorExcludeNonTrialwiseFeatures = b
 			}
 		}},
-		{key: "behavior_analysis.statistics.default_n_bootstrap", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.globalNBootstrap = n
-			}
-		}},
-		{key: "behavior_analysis.cluster_correction.enabled", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.clusterCorrectionEnabled = b
-			}
-		}},
-		{key: "behavior_analysis.cluster_correction.alpha", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.clusterCorrectionAlpha = f
-			}
-		}},
-		{key: "behavior_analysis.cluster_correction.min_cluster_size", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.clusterCorrectionMinClusterSize = n
-			}
-		}},
-		{key: "behavior_analysis.cluster_correction.tail", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				switch n {
-				case 1:
-					m.clusterCorrectionTailGlobal = 1
-				case -1:
-					m.clusterCorrectionTailGlobal = 2
-				default:
-					m.clusterCorrectionTailGlobal = 0
-				}
-			}
-		}},
-		{key: "validation.min_epochs", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.validationMinEpochs = n
-			}
-		}},
-		{key: "validation.min_channels", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.validationMinChannels = n
-			}
-		}},
-		{key: "validation.max_amplitude_uv", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.validationMaxAmplitudeUv = f
-			}
-		}},
-		{key: "io.constants.temperature_range", apply: func(v interface{}) {
+		{key: "behavior_analysis.icc.unit_columns", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
-				m.ioPredictorRange = strings.Join(splitLooseList(spec), ",")
-			}
-		}},
-		{key: "io.constants.max_missing_channels_fraction", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.ioMaxMissingChannelsFraction = f
+				m.iccUnitColumns = strings.Join(splitLooseList(spec), ",")
 			}
 		}},
 		{key: "behavior_analysis.trial_table.disallow_positional_alignment", apply: func(v interface{}) {

@@ -20,10 +20,9 @@ def build_stage_runners_impl(
     stage_temporal_stats_fn: Callable[[Any], Any],
     stage_cluster_fn: Callable[[Any, Any], Any],
     stage_hierarchical_fdr_summary_fn: Callable[[Any, Any], Any],
-    stage_report_fn: Callable[[Any, Any], Any],
     stage_export_fn: Callable[[Any, Any, Any], Any],
     build_results_from_outputs_fn: Callable[[Dict[str, Any]], Any],
-    ) -> Dict[str, Callable[[Any, Any, Dict[str, Any]], Any]]:
+) -> Dict[str, Callable[[Any, Any, Dict[str, Any]], Any]]:
     """Return data-driven stage runner mapping."""
     return {
         "load": lambda ctx, config, outputs: stage_load_fn(ctx),
@@ -56,7 +55,6 @@ def build_stage_runners_impl(
         "temporal_stats": lambda ctx, config, outputs: stage_temporal_stats_fn(ctx),
         "cluster": lambda ctx, config, outputs: stage_cluster_fn(ctx, config),
         "hierarchical_fdr_summary": lambda ctx, config, outputs: stage_hierarchical_fdr_summary_fn(ctx, config),
-        "report": lambda ctx, config, outputs: stage_report_fn(ctx, config),
         "export": lambda ctx, config, outputs: stage_export_fn(ctx, config, build_results_from_outputs_fn(outputs)),
     }
 
@@ -83,7 +81,6 @@ def build_stage_runners_from_namespace_impl(
         stage_temporal_stats_fn=ns["stage_temporal_stats"],
         stage_cluster_fn=ns["stage_cluster"],
         stage_hierarchical_fdr_summary_fn=ns["stage_hierarchical_fdr_summary"],
-        stage_report_fn=ns["stage_report"],
         stage_export_fn=ns["stage_export"],
         build_results_from_outputs_fn=build_results_from_outputs_fn,
     )

@@ -1037,25 +1037,12 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["behaviorPermScheme"] = m.behaviorPermScheme
 	cfg["behaviorPermGroupColumnPreference"] = m.behaviorPermGroupColumnPreference
 	cfg["behaviorExcludeNonTrialwiseFeatures"] = m.behaviorExcludeNonTrialwiseFeatures
+	cfg["iccUnitColumns"] = m.iccUnitColumns
 	cfg["behaviorFeatureRegistryFilesJSON"] = m.behaviorFeatureRegistryFilesJSON
 	cfg["behaviorFeatureRegistrySourceJSON"] = m.behaviorFeatureRegistrySourceJSON
 	cfg["behaviorFeatureRegistryHierarchyJSON"] = m.behaviorFeatureRegistryHierarchyJSON
 	cfg["behaviorFeatureRegistryPatternsJSON"] = m.behaviorFeatureRegistryPatternsJSON
 	cfg["behaviorFeatureRegistryClassifiersJSON"] = m.behaviorFeatureRegistryClassifiersJSON
-
-	// Global Statistics & Validation
-	cfg["globalNBootstrap"] = m.globalNBootstrap
-	cfg["clusterCorrectionEnabled"] = m.clusterCorrectionEnabled
-	cfg["clusterCorrectionAlpha"] = m.clusterCorrectionAlpha
-	cfg["clusterCorrectionMinClusterSize"] = m.clusterCorrectionMinClusterSize
-	cfg["clusterCorrectionTailGlobal"] = m.clusterCorrectionTailGlobal
-	cfg["validationMinEpochs"] = m.validationMinEpochs
-	cfg["validationMinChannels"] = m.validationMinChannels
-	cfg["validationMaxAmplitudeUv"] = m.validationMaxAmplitudeUv
-
-	// System / IO
-	cfg["ioPredictorRange"] = m.ioPredictorRange
-	cfg["ioMaxMissingChannelsFraction"] = m.ioMaxMissingChannelsFraction
 
 	return cfg
 }
@@ -2196,25 +2183,13 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.behaviorPermScheme = getInt("behaviorPermScheme", m.behaviorPermScheme)
 	m.behaviorPermGroupColumnPreference = getString("behaviorPermGroupColumnPreference", m.behaviorPermGroupColumnPreference)
 	m.behaviorExcludeNonTrialwiseFeatures = getBool("behaviorExcludeNonTrialwiseFeatures", m.behaviorExcludeNonTrialwiseFeatures)
+	m.iccUnitColumns = getString("iccUnitColumns", m.iccUnitColumns)
 	m.behaviorFeatureRegistryFilesJSON = getString("behaviorFeatureRegistryFilesJSON", m.behaviorFeatureRegistryFilesJSON)
 	m.behaviorFeatureRegistrySourceJSON = getString("behaviorFeatureRegistrySourceJSON", m.behaviorFeatureRegistrySourceJSON)
 	m.behaviorFeatureRegistryHierarchyJSON = getString("behaviorFeatureRegistryHierarchyJSON", m.behaviorFeatureRegistryHierarchyJSON)
 	m.behaviorFeatureRegistryPatternsJSON = getString("behaviorFeatureRegistryPatternsJSON", m.behaviorFeatureRegistryPatternsJSON)
 	m.behaviorFeatureRegistryClassifiersJSON = getString("behaviorFeatureRegistryClassifiersJSON", m.behaviorFeatureRegistryClassifiersJSON)
 
-	// Global Statistics & Validation
-	m.globalNBootstrap = getInt("globalNBootstrap", m.globalNBootstrap)
-	m.clusterCorrectionEnabled = getBool("clusterCorrectionEnabled", m.clusterCorrectionEnabled)
-	m.clusterCorrectionAlpha = getFloat("clusterCorrectionAlpha", m.clusterCorrectionAlpha)
-	m.clusterCorrectionMinClusterSize = getInt("clusterCorrectionMinClusterSize", m.clusterCorrectionMinClusterSize)
-	m.clusterCorrectionTailGlobal = getInt("clusterCorrectionTailGlobal", m.clusterCorrectionTailGlobal)
-	m.validationMinEpochs = getInt("validationMinEpochs", m.validationMinEpochs)
-	m.validationMinChannels = getInt("validationMinChannels", m.validationMinChannels)
-	m.validationMaxAmplitudeUv = getFloat("validationMaxAmplitudeUv", m.validationMaxAmplitudeUv)
-
-	// System / IO
-	m.ioPredictorRange = getString("ioPredictorRange", m.ioPredictorRange)
-	m.ioMaxMissingChannelsFraction = getFloat("ioMaxMissingChannelsFraction", m.ioMaxMissingChannelsFraction)
 }
 
 // mapToIntList converts a map[int]bool to a slice of ints (only selected keys).

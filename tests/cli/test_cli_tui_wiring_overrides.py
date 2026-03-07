@@ -183,8 +183,6 @@ class TestBehaviorTUIWiring(unittest.TestCase):
             [
                 "behavior",
                 "compute",
-                "--global-n-bootstrap",
-                "2500",
                 "--predictor-column",
                 "stim_temp",
                 "--outcome-column",
@@ -221,25 +219,14 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "run_mean",
                 "--temporal-correction-method",
                 "cluster",
-                "--cluster-correction-enabled",
-                "--cluster-correction-alpha",
-                "0.01",
-                "--cluster-correction-min-cluster-size",
-                "4",
-                "--cluster-correction-tail",
-                "1",
-                "--validation-min-epochs",
-                "30",
-                "--validation-min-channels",
-                "16",
-                "--validation-max-amplitude-uv",
-                "400",
+                "--icc-unit-columns",
+                "predictor",
+                "trial_type",
             ]
         )
         config = ConfigDict({"project": {"task": "task"}})
         _configure_behavior_compute_mode(args, config)
 
-        self.assertEqual(config.get("behavior_analysis.statistics.default_n_bootstrap"), 2500)
         self.assertEqual(config.get("behavior_analysis.predictor_column"), "stim_temp")
         self.assertEqual(config.get("behavior_analysis.outcome_column"), "vas_custom")
         self.assertEqual(config.get("behavior_analysis.permutation.scheme"), "circular_shift")
@@ -282,13 +269,7 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("behavior_analysis.condition.compare_labels"), ["low", "high"])
         self.assertEqual(config.get("behavior_analysis.regression.primary_unit"), "run_mean")
         self.assertEqual(config.get("behavior_analysis.temporal.correction_method"), "cluster")
-        self.assertTrue(config.get("behavior_analysis.cluster_correction.enabled", False))
-        self.assertEqual(config.get("behavior_analysis.cluster_correction.alpha"), 0.01)
-        self.assertEqual(config.get("behavior_analysis.cluster_correction.min_cluster_size"), 4)
-        self.assertEqual(config.get("behavior_analysis.cluster_correction.tail"), 1)
-        self.assertEqual(config.get("validation.min_epochs"), 30)
-        self.assertEqual(config.get("validation.min_channels"), 16)
-        self.assertEqual(config.get("validation.max_amplitude_uv"), 400.0)
+        self.assertEqual(config.get("behavior_analysis.icc.unit_columns"), ["predictor", "trial_type"])
 
     def test_correlations_target_column_sets_single_target_list(self):
         parser = argparse.ArgumentParser()

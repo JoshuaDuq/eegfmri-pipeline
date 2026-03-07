@@ -46,7 +46,6 @@ PIPELINE_STAGE_RULES: Tuple[PipelineStageRule, ...] = (
     PipelineStageRule("run_temporal_correlations", ("temporal_tfr", "temporal_stats")),
     PipelineStageRule("run_cluster_tests", ("cluster",)),
     PipelineStageRule("run_validation", ("hierarchical_fdr_summary",), default=True),
-    PipelineStageRule("run_report", ("report",)),
 )
 
 
@@ -56,7 +55,6 @@ COMPUTATION_TO_PIPELINE_ATTR = {
     "predictor_residual": "run_predictor_residual",
     "regression": "run_regression",
     "icc": "run_icc",
-    "report": "run_report",
     "correlations": "run_correlations",
     "condition": "run_condition_comparison",
     "temporal": "run_temporal_correlations",
@@ -184,14 +182,6 @@ STAGE_SPEC_DEFINITIONS: Tuple[StageSpecDefinition, ...] = (
         produces=("hierarchical_fdr_summary",),
         config_key="behavior_analysis.validation.enabled",
         group="validation",
-    ),
-    StageSpecDefinition(
-        name="report",
-        description="Generate subject report",
-        requires=(),
-        produces=("report",),
-        config_key="behavior_analysis.report.enabled",
-        group="export",
     ),
     StageSpecDefinition(
         name="export",

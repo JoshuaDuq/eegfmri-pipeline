@@ -184,12 +184,14 @@ class TestAllPipelines(unittest.TestCase):
 
         pipeline = object.__new__(BehaviorPipeline)
         pipeline.pipeline_config = SimpleNamespace(
-            run_multilevel_correlations=True,
+            run_multilevel_correlations=False,
         )
         pipeline.deriv_root = Path(tempfile.mkdtemp()) / "derivatives"
         pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
         pipeline.config = DotConfig({})
         pipeline.logger = Mock()
+        pipeline.feature_files = []
+        pipeline.feature_categories = []
 
         result = pipeline.run_group_level(["0001", "0002"])
         self.assertIsNone(result)
@@ -197,8 +199,8 @@ class TestAllPipelines(unittest.TestCase):
     def test_behavior_flag_resolution_and_optional_int(self):
         from eeg_pipeline.pipelines.behavior import _resolve_behavior_computation_flags, _get_optional_int
 
-        flags = _resolve_behavior_computation_flags(["validation", "report", "unknown"], logger=Mock())
-        self.assertTrue(flags["report"])
+        flags = _resolve_behavior_computation_flags(["validation", "icc", "unknown"], logger=Mock())
+        self.assertTrue(flags["icc"])
         self.assertFalse(flags["regression"])
 
         cfg = DotConfig({"a": {"b": "7"}, "x": {"y": None}})
@@ -210,17 +212,22 @@ class TestAllPipelines(unittest.TestCase):
 
         pipeline = object.__new__(BehaviorPipeline)
         pipeline.pipeline_config = SimpleNamespace(
-            run_multilevel_correlations=False,
+            run_multilevel_correlations=True,
         )
         pipeline.deriv_root = Path(tempfile.mkdtemp()) / "derivatives"
         pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
         pipeline.config = DotConfig({})
         pipeline.logger = Mock()
+        pipeline.feature_files = []
+        pipeline.feature_categories = []
 
         fake_result = SimpleNamespace(multilevel_correlations=None)
         with patch(
             "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
             return_value=fake_result,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
+            return_value=Path("/tmp/trials.parquet"),
         ):
             out = pipeline.run_group_level(["0001", "0002"])
         self.assertIs(out, fake_result)

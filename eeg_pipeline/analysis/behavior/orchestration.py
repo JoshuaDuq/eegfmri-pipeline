@@ -37,7 +37,6 @@ from eeg_pipeline.analysis.behavior.stages import (
     fdr as _stages_fdr,
     metadata as _stages_metadata,
     models as _stages_models,
-    report as _stages_report,
     temporal as _stages_temporal,
     trial_table as _stages_trial_table,
 )
@@ -135,6 +134,7 @@ def run_selected_stages(
     results: Optional[Any] = None,
     progress: Optional[Any] = None,
     dry_run: bool = False,
+    filter_disabled_stages: bool = True,
 ) -> Dict[str, Any]:
     runtime = _get_runtime(ctx)
     return _stage_execution.run_selected_stages_impl(
@@ -149,6 +149,7 @@ def run_selected_stages(
         results=results,
         progress=progress,
         dry_run=dry_run,
+        filter_disabled_stages=filter_disabled_stages,
     )
 
 
@@ -917,23 +918,6 @@ def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.Data
         get_stats_subfolder_fn=_get_stats_subfolder,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
     )
-
-
-
-
-def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Path:
-    """Write a single-subject, self-diagnosing Markdown report (fail-fast)."""
-    return _stages_report.stage_report_impl(
-        ctx,
-        pipeline_config,
-        feature_suffix_from_context_fn=_feature_suffix_from_context,
-        get_config_int_fn=get_config_int,
-        load_trial_table_df_fn=_load_trial_table_df,
-        get_stats_subfolder_fn=_get_stats_subfolder,
-        feature_prefixes=FEATURE_COLUMN_PREFIXES,
-    )
-
-
 def _build_output_filename(
     ctx: BehaviorContext,
     pipeline_config: Any,

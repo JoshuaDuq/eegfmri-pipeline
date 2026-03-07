@@ -63,7 +63,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--robust-correlation", choices=["none", "percentage_bend", "winsorized", "shepherd"], default=None)
     compute_group.add_argument("--bootstrap", type=int, default=None)
     compute_group.add_argument("--n-perm", type=int, default=None)
-    compute_group.add_argument("--global-n-bootstrap", type=int, default=None)
     compute_group.add_argument("--perm-scheme", choices=["shuffle", "circular_shift"], default=None)
     compute_group.add_argument("--rng-seed", type=int, default=None)
     compute_group.add_argument("--n-jobs", type=int, default=None)
@@ -153,17 +152,18 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="JSON array for behavior_analysis.feature_registry.feature_classifiers",
     )
-    compute_group.add_argument("--predictor-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), dest="predictor_range", help="Valid predictor range (e.g. 0.0 1.0)")
-    compute_group.add_argument("--max-missing-channels-fraction", type=float, default=None, help="Max fraction of missing channels allowed")
     compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
-    compute_group.add_argument("--cluster-correction-enabled", action="store_true", default=None, dest="cluster_correction_enabled")
-    compute_group.add_argument("--no-cluster-correction-enabled", action="store_false", dest="cluster_correction_enabled")
-    compute_group.add_argument("--cluster-correction-alpha", type=float, default=None)
-    compute_group.add_argument("--cluster-correction-min-cluster-size", type=int, default=None)
-    compute_group.add_argument("--cluster-correction-tail", type=int, choices=[-1, 0, 1], default=None)
-    compute_group.add_argument("--validation-min-epochs", type=int, default=None)
-    compute_group.add_argument("--validation-min-channels", type=int, default=None)
-    compute_group.add_argument("--validation-max-amplitude-uv", type=float, default=None)
+    compute_group.add_argument(
+        "--icc-unit-columns",
+        nargs="+",
+        default=None,
+        metavar="COL",
+        dest="icc_unit_columns",
+        help=(
+            "Repeated-measures unit columns for ICC. "
+            "Supports aliases: predictor, condition, trial_type, trial_position."
+        ),
+    )
     
     feature_choices = [
         "power", "connectivity", "directedconnectivity", "sourcelocalization",
@@ -391,9 +391,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="group_level_max_run_dummies",
         help="Maximum run dummy columns for multilevel group-level controls",
     )
-    report_group = parser.add_argument_group("Report options")
-    report_group.add_argument("--report-top-n", type=int, default=None, help="Top N rows per analysis table in subject_report*.md")
-
     temporal_group = parser.add_argument_group("Temporal options")
     temporal_group.add_argument(
         "--temporal-target-column",

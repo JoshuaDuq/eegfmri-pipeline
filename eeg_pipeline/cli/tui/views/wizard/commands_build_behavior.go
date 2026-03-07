@@ -336,11 +336,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 	}
 
-	// Report
-	if m.isComputationSelected("report") && m.reportTopN != 15 {
-		args = append(args, "--report-top-n", fmt.Sprintf("%d", m.reportTopN))
-	}
-
 	// Condition
 	if m.isComputationSelected("condition") {
 		appendFeatureSpec("--condition-features", m.conditionFeaturesSpec)
@@ -526,6 +521,10 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		"--exclude-non-trialwise-features",
 		"--no-exclude-non-trialwise-features",
 	)
+	if m.isComputationSelected("icc") && strings.TrimSpace(m.iccUnitColumns) != "" {
+		args = append(args, "--icc-unit-columns")
+		args = append(args, splitLooseList(m.iccUnitColumns)...)
+	}
 	if strings.TrimSpace(m.behaviorFeatureRegistryFilesJSON) != "" {
 		args = append(args, "--feature-registry-files-json", strings.TrimSpace(m.behaviorFeatureRegistryFilesJSON))
 	}
@@ -540,44 +539,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 	if strings.TrimSpace(m.behaviorFeatureRegistryClassifiersJSON) != "" {
 		args = append(args, "--feature-registry-classifiers-json", strings.TrimSpace(m.behaviorFeatureRegistryClassifiersJSON))
-	}
-
-	// Global Statistics & Validation
-	if m.globalNBootstrap != 1000 {
-		args = append(args, "--global-n-bootstrap", fmt.Sprintf("%d", m.globalNBootstrap))
-	}
-	if m.clusterCorrectionEnabled {
-		args = append(args, "--cluster-correction-enabled")
-		if m.clusterCorrectionAlpha != 0.05 {
-			args = append(args, "--cluster-correction-alpha", fmt.Sprintf("%.4f", m.clusterCorrectionAlpha))
-		}
-		if m.clusterCorrectionMinClusterSize != 2 {
-			args = append(args, "--cluster-correction-min-cluster-size", fmt.Sprintf("%d", m.clusterCorrectionMinClusterSize))
-		}
-		tails := []string{"0", "1", "-1"}
-		if m.clusterCorrectionTailGlobal != 0 {
-			args = append(args, "--cluster-correction-tail", tails[m.clusterCorrectionTailGlobal%len(tails)])
-		}
-	} else {
-		args = append(args, "--no-cluster-correction-enabled")
-	}
-	if m.validationMinEpochs != 5 {
-		args = append(args, "--validation-min-epochs", fmt.Sprintf("%d", m.validationMinEpochs))
-	}
-	if m.validationMinChannels != 10 {
-		args = append(args, "--validation-min-channels", fmt.Sprintf("%d", m.validationMinChannels))
-	}
-	if m.validationMaxAmplitudeUv != 500.0 {
-		args = append(args, "--validation-max-amplitude-uv", fmt.Sprintf("%.1f", m.validationMaxAmplitudeUv))
-	}
-
-	// System / IO
-	if strings.TrimSpace(m.ioPredictorRange) != "" {
-		args = append(args, "--predictor-range")
-		args = append(args, splitCSVList(m.ioPredictorRange)...)
-	}
-	if m.ioMaxMissingChannelsFraction != 0.1 {
-		args = append(args, "--max-missing-channels-fraction", fmt.Sprintf("%.3f", m.ioMaxMissingChannelsFraction))
 	}
 
 	return args

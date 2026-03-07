@@ -199,7 +199,6 @@ class _ResultsFromOutputs:
         self.regression = outputs.get("regression")
         self.icc = outputs.get("icc")
         self.trial_table_path = outputs.get("trial_table")
-        self.report_path = outputs.get("report")
         self.subject = None
         self.summary = {}
 
@@ -207,8 +206,6 @@ class _ResultsFromOutputs:
         summary = {}
         if self.trial_table_path:
             summary["trial_table_path"] = str(self.trial_table_path)
-        if self.report_path:
-            summary["report_path"] = str(self.report_path)
 
         n_total = 0
         n_sig_raw = 0

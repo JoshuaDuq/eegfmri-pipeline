@@ -76,11 +76,11 @@ func (m Model) GetFilteredSubjectCount() (filtered, total, valid int) {
 func (m *Model) getBehaviorPresetComputations(presetKey string) []string {
 	switch presetKey {
 	case "quick":
-		return []string{"correlations", "report"}
+		return []string{"correlations"}
 	case "regression":
-		return []string{"regression", "report"}
+		return []string{"regression"}
 	case "temporal":
-		return []string{"temporal", "cluster", "report"}
+		return []string{"temporal", "cluster"}
 	case "full":
 		return []string{}
 	default:

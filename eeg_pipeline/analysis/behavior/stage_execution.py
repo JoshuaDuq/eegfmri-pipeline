@@ -15,7 +15,6 @@ _STAGE_TO_ATTR_MAP = {
     "temporal_tfr": "tf",
     "temporal_stats": "temporal",
     "cluster": "cluster",
-    "report": "report_path",
 }
 
 
@@ -67,15 +66,21 @@ def run_selected_stages_impl(
     results: Optional[Any] = None,
     progress: Optional[Any] = None,
     dry_run: bool = False,
+    filter_disabled_stages: bool = True,
 ) -> Dict[str, Any]:
     """Execute selected stages in dependency order using the stage registry."""
     resolved = stage_registry.auto_resolve_stages(selected_stages)
 
-    enabled_stages = [s for s in resolved if is_stage_enabled_by_config_fn(s, ctx.config)]
+    enabled_stages = resolved
+    if filter_disabled_stages:
+        enabled_stages = [s for s in resolved if is_stage_enabled_by_config_fn(s, ctx.config)]
 
-    skipped = set(resolved) - set(enabled_stages)
-    if skipped:
-        ctx.logger.info("Auto-skipped stages (disabled by config): %s", ", ".join(skipped))
+        skipped = [stage for stage in resolved if stage not in enabled_stages]
+        if skipped:
+            ctx.logger.info(
+                "Auto-skipped stages (disabled by config): %s",
+                ", ".join(skipped),
+            )
 
     ctx.logger.info("Running %d stages: %s", len(enabled_stages), ", ".join(enabled_stages))
 
@@ -134,4 +139,11 @@ def run_behavior_stages_impl(
 ) -> Dict[str, Any]:
     """Run behavior pipeline stages based on pipeline config."""
     stages = config_to_stage_names_fn(pipeline_config)
-    return run_selected_stages_fn(ctx, pipeline_config, stages, results, progress)
+    return run_selected_stages_fn(
+        ctx,
+        pipeline_config,
+        stages,
+        results,
+        progress,
+        filter_disabled_stages=False,
+    )

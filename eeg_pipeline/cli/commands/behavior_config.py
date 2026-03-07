@@ -125,7 +125,6 @@ def _has_any_arg(args: argparse.Namespace, arg_names: Sequence[str]) -> bool:
 _GENERAL_OVERRIDE_RULES = (
     ConfigOverrideRule("correlation_method", "behavior_analysis.statistics.correlation_method", str),
     ConfigOverrideRule("bootstrap", "behavior_analysis.bootstrap", _to_int),
-    ConfigOverrideRule("global_n_bootstrap", "behavior_analysis.statistics.default_n_bootstrap", _to_int),
     ConfigOverrideRule("perm_scheme", "behavior_analysis.permutation.scheme", _to_lower_stripped),
     ConfigOverrideRule("n_jobs", "behavior_analysis.n_jobs", _to_int),
     ConfigOverrideRule("min_samples", "behavior_analysis.min_samples.default", _to_int),
@@ -181,17 +180,7 @@ _GENERAL_OVERRIDE_RULES = (
     ConfigOverrideRule("compute_change_scores", "behavior_analysis.correlations.compute_change_scores", _to_bool),
     ConfigOverrideRule("loso_stability", "behavior_analysis.correlations.loso_stability", _to_bool),
     ConfigOverrideRule("compute_bayes_factors", "behavior_analysis.correlations.compute_bayes_factors", _to_bool),
-    ConfigOverrideRule("cluster_correction_enabled", "behavior_analysis.cluster_correction.enabled", _to_bool),
-    ConfigOverrideRule("cluster_correction_alpha", "behavior_analysis.cluster_correction.alpha", _to_float),
-    ConfigOverrideRule(
-        "cluster_correction_min_cluster_size",
-        "behavior_analysis.cluster_correction.min_cluster_size",
-        _to_int,
-    ),
-    ConfigOverrideRule("cluster_correction_tail", "behavior_analysis.cluster_correction.tail", _to_int),
-    ConfigOverrideRule("validation_min_epochs", "validation.min_epochs", _to_int),
-    ConfigOverrideRule("validation_min_channels", "validation.min_channels", _to_int),
-    ConfigOverrideRule("validation_max_amplitude_uv", "validation.max_amplitude_uv", _to_float),
+    ConfigOverrideRule("icc_unit_columns", "behavior_analysis.icc.unit_columns", _to_stripped_list),
 )
 
 _TRIAL_TABLE_OVERRIDE_RULES = (
@@ -341,10 +330,6 @@ _GROUP_LEVEL_OVERRIDE_RULES = (
     ),
 )
 
-_REPORT_OVERRIDE_RULES = (
-    ConfigOverrideRule("report_top_n", "behavior_analysis.report.top_n", _to_int),
-)
-
 _CONDITION_OVERRIDE_RULES = (
     ConfigOverrideRule("condition_fail_fast", "behavior_analysis.condition.fail_fast", _to_bool),
     ConfigOverrideRule("condition_effect_threshold", "behavior_analysis.condition.effect_size_threshold", _to_float),
@@ -457,19 +442,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
                 [p.strip() for p in parts if p.strip()],
             )
 
-    if getattr(args, "predictor_range", None) is not None:
-        _set_nested_config_value(
-            config,
-            "io.constants.temperature_range",
-            [float(args.predictor_range[0]), float(args.predictor_range[1])],
-        )
-    if getattr(args, "max_missing_channels_fraction", None) is not None:
-        _set_nested_config_value(
-            config,
-            "io.constants.max_missing_channels_fraction",
-            float(args.max_missing_channels_fraction),
-        )
-
     _apply_override_rules(args, config, _TRIAL_TABLE_OVERRIDE_RULES)
     _apply_override_rules(args, config, _PREDICTOR_RESIDUAL_OVERRIDE_RULES)
 
@@ -506,8 +478,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
             "behavior_analysis.group_level.multilevel_correlations.block_permutation",
             enabled,
         )
-
-    _apply_override_rules(args, config, _REPORT_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _CONDITION_OVERRIDE_RULES)
     if getattr(args, "condition_permutation_primary", None) is not None:

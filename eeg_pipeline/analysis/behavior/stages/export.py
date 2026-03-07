@@ -41,7 +41,6 @@ OUTPUT_KIND_PATTERNS = [
     ("paired_comparisons", "paired_comparisons"),
     ("summary", "summary"),
     ("analysis_metadata", "analysis_metadata"),
-    ("subject_report", "subject_report"),
     ("tf_grid", "time_frequency"),
     ("temporal_correlations", "temporal_correlations"),
     ("hierarchical_fdr_summary", "fdr"),

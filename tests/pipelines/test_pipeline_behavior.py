@@ -100,6 +100,25 @@ class TestBehaviorDeep(unittest.TestCase):
             self.assertEqual(summary["n_clusters"], 2)
             self.assertEqual(summary["n_icc_features"], 1)
 
+        def test_behavior_results_summary_counts_nested_temporal_outputs(self):
+            from eeg_pipeline.pipelines.behavior import BehaviorPipelineResults
+
+            res = BehaviorPipelineResults(
+                subject="0001",
+                temporal={
+                    "power": {"n_tests": 7, "n_sig_raw": 3, "n_sig_fdr": 1},
+                    "itpc": None,
+                    "erds": {"n_tests": 5, "n_sig_raw": 2, "n_sig_fdr": 0},
+                },
+            )
+
+            summary = res.to_summary()
+
+            self.assertEqual(summary["n_temporal_tests"], 12)
+            self.assertEqual(summary["n_features"], 12)
+            self.assertEqual(summary["n_sig_raw"], 5)
+            self.assertEqual(summary["n_sig_fdr"], 1)
+
         def test_behavior_process_subject_failure_path(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 
@@ -156,15 +175,44 @@ class TestBehaviorCompletion(unittest.TestCase):
             cfg = DotConfig({})
             pcfg = BehaviorPipelineConfig()
             with patch("eeg_pipeline.pipelines.behavior.PipelineBase.__init__", lambda self, name, config=None: (setattr(self, "config", config or cfg), setattr(self, "logger", Mock()), setattr(self, "deriv_root", Path(tempfile.mkdtemp())))):
-                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, computations=["report"])
-            self.assertTrue(b.pipeline_config.run_report)
+                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, computations=["icc"])
+            self.assertTrue(b.pipeline_config.run_icc)
 
             fake_result = SimpleNamespace(
                     multilevel_correlations=pd.DataFrame({"q_within_family": [0.01, 0.2]}),
                 )
-            with patch("eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis", return_value=fake_result):
+            with patch(
+                "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
+                return_value=fake_result,
+            ), patch(
+                "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
+                return_value=Path("/tmp/trials.parquet"),
+            ):
                 out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
             self.assertIs(out, fake_result)
+
+        def test_behavior_group_level_skips_by_default_when_not_selected(self):
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
+
+            cfg = DotConfig({})
+            pcfg = BehaviorPipelineConfig(run_multilevel_correlations=False)
+            with patch(
+                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+                lambda self, name, config=None: (
+                    setattr(self, "config", config or cfg),
+                    setattr(self, "logger", Mock()),
+                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+                ),
+            ):
+                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg)
+
+            with patch(
+                "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
+            ) as run_group_level_analysis_mock:
+                out = b.run_group_level(["0001", "0002"])
+
+            self.assertIsNone(out)
+            run_group_level_analysis_mock.assert_not_called()
 
         def test_behavior_group_level_forwards_feature_file_selection(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
@@ -187,6 +235,12 @@ class TestBehaviorCompletion(unittest.TestCase):
 
             fake_result = SimpleNamespace(multilevel_correlations=None)
             with patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ), patch(
+                "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
+                return_value=Path("/tmp/trials_power.parquet"),
+            ), patch(
                 "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
                 return_value=fake_result,
             ) as run_group_level_analysis_mock:
@@ -197,6 +251,42 @@ class TestBehaviorCompletion(unittest.TestCase):
                 run_group_level_analysis_mock.call_args.kwargs["feature_files"],
                 ["power"],
             )
+
+        def test_behavior_group_level_requires_existing_trial_tables(self):
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
+
+            cfg = DotConfig({})
+            pcfg = BehaviorPipelineConfig(run_multilevel_correlations=True)
+            with patch(
+                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+                lambda self, name, config=None: (
+                    setattr(self, "config", config or cfg),
+                    setattr(self, "logger", Mock()),
+                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+                ),
+            ):
+                b = BehaviorPipeline(
+                    config=cfg,
+                    pipeline_config=pcfg,
+                    feature_files=["power"],
+                )
+
+            with patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ), patch(
+                "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
+                return_value=None,
+            ), patch(
+                "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
+            ) as run_group_level_analysis_mock:
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "Group-level multilevel_correlations requires saved trial tables",
+                ):
+                    b.run_group_level(["0001", "0002"])
+
+            run_group_level_analysis_mock.assert_not_called()
 
 class TestBehaviorGapfill(unittest.TestCase):
         def test_behavior_helpers_and_init_logging(self):
@@ -221,10 +311,9 @@ class TestBehaviorGapfill(unittest.TestCase):
             self.assertIsNone(_extract_p_value_column(df, ["p"], ["q"]))
             self.assertEqual(_count_significant(None), 0)
 
-            s = BehaviorPipelineResults(subject="0001", trial_table_path="/a", report_path="/b")
+            s = BehaviorPipelineResults(subject="0001", trial_table_path="/a")
             out = s.to_summary()
             self.assertEqual(out["trial_table_path"], "/a")
-            self.assertEqual(out["report_path"], "/b")
 
             with patch(
                 "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
@@ -238,7 +327,7 @@ class TestBehaviorGapfill(unittest.TestCase):
                 p = BehaviorPipeline(
                     config=DotConfig({}),
                     pipeline_config=BehaviorPipelineConfig(),
-                    computations=["report"],
+                    computations=["icc"],
                     feature_categories=["power"],
                     computation_features={"regression": ["power_alpha"]},
                 )

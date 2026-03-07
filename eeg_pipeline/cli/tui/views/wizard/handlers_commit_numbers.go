@@ -1156,10 +1156,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 			m.regressionMaxFeatures = int(val)
 		}
 	// Report / temporal
-	case optReportTopN:
-		if val >= 1 {
-			m.reportTopN = int(val)
-		}
 	case optTemporalResolutionMs:
 		if val >= 1 {
 			m.temporalResolutionMs = int(val)
@@ -1201,38 +1197,9 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 	case optConditionEffectThreshold:
 		m.conditionEffectThreshold = val
-	// Global Statistics & Validation
-	case optGlobalNBootstrap:
-		if val >= 0 {
-			m.globalNBootstrap = int(val)
-		}
 	case optStatisticsAlpha:
 		if val > 0 && val <= 1 {
 			m.statisticsAlpha = val
-		}
-	case optClusterCorrectionAlpha:
-		if val > 0 && val <= 1 {
-			m.clusterCorrectionAlpha = val
-		}
-	case optClusterCorrectionMinClusterSize:
-		if val >= 1 {
-			m.clusterCorrectionMinClusterSize = int(val)
-		}
-	case optValidationMinEpochs:
-		if val >= 0 {
-			m.validationMinEpochs = int(val)
-		}
-	case optValidationMinChannels:
-		if val >= 0 {
-			m.validationMinChannels = int(val)
-		}
-	case optValidationMaxAmplitudeUv:
-		if val > 0 {
-			m.validationMaxAmplitudeUv = val
-		}
-	case optIOMaxMissingChannelsFraction:
-		if val >= 0 && val <= 1 {
-			m.ioMaxMissingChannelsFraction = val
 		}
 	}
 }

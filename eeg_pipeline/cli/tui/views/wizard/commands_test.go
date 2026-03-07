@@ -97,7 +97,6 @@ func TestNew_BehaviorPipelineDefaultsSelectConfiguredComputations(t *testing.T) 
 		"correlations",
 		"icc",
 		"predictor_residual",
-		"report",
 		"temporal",
 		"trial_table",
 	}
@@ -648,11 +647,11 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"behavior_analysis.statistics.correlation_method":           "pearson",
 		"behavior_analysis.robust_correlation":                      "winsorized",
 		"behavior_analysis.bootstrap":                               1500.0,
-		"behavior_analysis.statistics.default_n_bootstrap":          2500.0,
 		"behavior_analysis.statistics.predictor_control":            "linear",
 		"behavior_analysis.permutation.scheme":                      "circular_shift",
 		"behavior_analysis.permutation.group_column_preference":     []interface{}{"run_id", "block"},
 		"behavior_analysis.features.exclude_non_trialwise_features": false,
+		"behavior_analysis.icc.unit_columns":                        []interface{}{"predictor", "trial_type"},
 		"behavior_analysis.correlations.min_runs":                   6.0,
 		"behavior_analysis.correlations.target_column":              "custom_rating",
 		"behavior_analysis.correlations.prefer_predictor_residual":  true,
@@ -661,15 +660,6 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 		"behavior_analysis.condition.compare_labels":                []interface{}{"low", "high"},
 		"behavior_analysis.regression.primary_unit":                 "run_mean",
 		"behavior_analysis.temporal.correction_method":              "cluster",
-		"behavior_analysis.cluster_correction.enabled":              true,
-		"behavior_analysis.cluster_correction.alpha":                0.01,
-		"behavior_analysis.cluster_correction.min_cluster_size":     4.0,
-		"behavior_analysis.cluster_correction.tail":                 -1.0,
-		"validation.min_epochs":                                     30.0,
-		"validation.min_channels":                                   16.0,
-		"validation.max_amplitude_uv":                               400.0,
-		"io.constants.temperature_range":                            []interface{}{35.0, 55.0},
-		"io.constants.max_missing_channels_fraction":                0.2,
 	})
 
 	if m.correlationMethod != "pearson" {
@@ -680,9 +670,6 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	}
 	if m.bootstrapSamples != 1500 {
 		t.Fatalf("expected bootstrapSamples=1500, got %d", m.bootstrapSamples)
-	}
-	if m.globalNBootstrap != 2500 {
-		t.Fatalf("expected globalNBootstrap=2500, got %d", m.globalNBootstrap)
 	}
 	if m.behaviorStatsPredictorControl != 1 {
 		t.Fatalf("expected behaviorStatsPredictorControl=1 (linear), got %d", m.behaviorStatsPredictorControl)
@@ -695,6 +682,9 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	}
 	if m.behaviorExcludeNonTrialwiseFeatures {
 		t.Fatalf("expected behaviorExcludeNonTrialwiseFeatures=false")
+	}
+	if m.iccUnitColumns != "predictor,trial_type" {
+		t.Fatalf("unexpected iccUnitColumns: %q", m.iccUnitColumns)
 	}
 	if m.correlationsMinRuns != 6 {
 		t.Fatalf("expected correlationsMinRuns=6, got %d", m.correlationsMinRuns)
@@ -719,33 +709,6 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	}
 	if m.temporalCorrectionMethod != 1 {
 		t.Fatalf("expected temporalCorrectionMethod=1 (cluster), got %d", m.temporalCorrectionMethod)
-	}
-	if !m.clusterCorrectionEnabled {
-		t.Fatalf("expected clusterCorrectionEnabled=true")
-	}
-	if m.clusterCorrectionAlpha != 0.01 {
-		t.Fatalf("expected clusterCorrectionAlpha=0.01, got %v", m.clusterCorrectionAlpha)
-	}
-	if m.clusterCorrectionMinClusterSize != 4 {
-		t.Fatalf("expected clusterCorrectionMinClusterSize=4, got %d", m.clusterCorrectionMinClusterSize)
-	}
-	if m.clusterCorrectionTailGlobal != 2 {
-		t.Fatalf("expected clusterCorrectionTailGlobal=2 (-1), got %d", m.clusterCorrectionTailGlobal)
-	}
-	if m.validationMinEpochs != 30 {
-		t.Fatalf("expected validationMinEpochs=30, got %d", m.validationMinEpochs)
-	}
-	if m.validationMinChannels != 16 {
-		t.Fatalf("expected validationMinChannels=16, got %d", m.validationMinChannels)
-	}
-	if m.validationMaxAmplitudeUv != 400.0 {
-		t.Fatalf("expected validationMaxAmplitudeUv=400.0, got %v", m.validationMaxAmplitudeUv)
-	}
-	if m.ioPredictorRange != "35,55" {
-		t.Fatalf("unexpected ioPredictorRange: %q", m.ioPredictorRange)
-	}
-	if m.ioMaxMissingChannelsFraction != 0.2 {
-		t.Fatalf("expected ioMaxMissingChannelsFraction=0.2, got %v", m.ioMaxMissingChannelsFraction)
 	}
 }
 
@@ -1240,7 +1203,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 	m.behaviorStatsHierarchicalFDR = false
 	m.behaviorStatsComputeReliability = false
 	m.behaviorExcludeNonTrialwiseFeatures = false
-	m.clusterCorrectionEnabled = false
 
 	args := m.buildBehaviorAdvancedArgs()
 
@@ -1255,7 +1217,6 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 		"--no-stats-hierarchical-fdr",
 		"--no-stats-compute-reliability",
 		"--no-exclude-non-trialwise-features",
-		"--no-cluster-correction-enabled",
 	}
 	for _, flag := range expectedFlags {
 		if !containsString(args, flag) {
@@ -1311,6 +1272,21 @@ func TestBuildBehaviorAdvancedArgs_EmitsFeatureFilters(t *testing.T) {
 	}
 	if !containsSubsequence(args, []string{"--cluster-features", "connectivity"}) {
 		t.Fatalf("expected --cluster-features connectivity in args, got: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsICCUnitColumns(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		if comp.Key == "icc" {
+			m.computationSelected[i] = true
+		}
+	}
+	m.iccUnitColumns = "predictor,trial_type"
+
+	args := m.buildBehaviorAdvancedArgs()
+	if !containsSubsequence(args, []string{"--icc-unit-columns", "predictor", "trial_type"}) {
+		t.Fatalf("expected --icc-unit-columns predictor trial_type in args, got: %#v", args)
 	}
 }
 

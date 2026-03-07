@@ -23,7 +23,7 @@ def _normalize_alignment_values(values: pd.Series) -> pd.Series:
 
 
 def _resolve_icc_alignment_columns(df_trials: pd.DataFrame, config: Any) -> List[str]:
-    """Resolve design columns that should be stable for trial-position ICC."""
+    """Resolve task-identity columns used to validate trial-position ICC."""
     from eeg_pipeline.utils.data.columns import (
         get_binary_outcome_column_from_config,
         resolve_predictor_column,
@@ -45,6 +45,87 @@ def _resolve_icc_alignment_columns(df_trials: pd.DataFrame, config: Any) -> List
     return resolved
 
 
+def _resolve_configured_icc_unit_columns(
+    df_trials: pd.DataFrame,
+    *,
+    config: Any,
+    trial_col: Optional[str],
+) -> List[str]:
+    """Resolve configured ICC unit columns from aliases or explicit column names."""
+    from eeg_pipeline.utils.data.columns import (
+        get_binary_outcome_column_from_config,
+        resolve_predictor_column,
+    )
+
+    compare_column = str(
+        get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
+    ).strip()
+    if not compare_column:
+        compare_column = str(
+            get_binary_outcome_column_from_config(config, df_trials) or ""
+        ).strip()
+
+    predictor_column = str(resolve_predictor_column(df_trials, config) or "").strip()
+    configured_specs = get_config_value(
+        config,
+        "behavior_analysis.icc.unit_columns",
+        ["predictor"],
+    )
+    unit_specs = [str(spec).strip() for spec in (configured_specs or [])]
+    if not unit_specs:
+        raise ValueError("behavior_analysis.icc.unit_columns must not be empty.")
+
+    alias_map = {
+        "predictor": predictor_column,
+        "condition": compare_column,
+        "trial_type": "trial_type",
+        "trial_position": trial_col or "",
+    }
+    resolved: List[str] = []
+    unresolved: List[str] = []
+    for spec in unit_specs:
+        token = spec.strip()
+        if not token:
+            raise ValueError("behavior_analysis.icc.unit_columns contains a blank entry.")
+
+        actual_column = alias_map.get(token.lower(), token)
+        if not actual_column or actual_column not in df_trials.columns:
+            unresolved.append(token)
+            continue
+        if actual_column not in resolved:
+            resolved.append(actual_column)
+
+    if unresolved:
+        raise ValueError(
+            "ICC unit column resolution failed for: "
+            f"{', '.join(unresolved)}. Configure behavior_analysis.icc.unit_columns "
+            "with resolvable columns or aliases."
+        )
+    return resolved
+
+
+def _select_icc_unit_columns(
+    df_trials: pd.DataFrame,
+    *,
+    config: Any,
+    trial_col: Optional[str],
+) -> Tuple[List[str], List[str], str]:
+    """Choose the repeated-measures unit used to align runs for ICC."""
+    unit_columns = _resolve_configured_icc_unit_columns(
+        df_trials,
+        config=config,
+        trial_col=trial_col,
+    )
+    if trial_col and unit_columns == [trial_col]:
+        alignment_columns = [
+            column
+            for column in _resolve_icc_alignment_columns(df_trials, config)
+            if column not in unit_columns
+        ]
+        return unit_columns, alignment_columns, "trial_position"
+    return unit_columns, [], "task_identity"
+
+
 def _validate_icc_alignment_design(
     df_trials: pd.DataFrame,
     *,
@@ -58,7 +139,10 @@ def _validate_icc_alignment_design(
         if observed.empty:
             continue
 
-        within_cell_unique = observed.groupby([run_col, trial_col], dropna=True)[column].nunique(dropna=True)
+        within_cell_unique = observed.groupby(
+            [run_col, trial_col],
+            dropna=True,
+        )[column].nunique(dropna=True)
         ambiguous_cells = within_cell_unique[within_cell_unique > 1]
         if not ambiguous_cells.empty:
             raise ValueError(
@@ -109,7 +193,10 @@ def stage_icc_impl(
         ctx.logger.warning("ICC: trial table missing; skipping.")
         return pd.DataFrame()
 
-    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    run_col = str(
+        get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id")
+        or "run_id"
+    ).strip()
     if run_col not in df_trials.columns:
         if "run" in df_trials.columns:
             run_col = "run"
@@ -132,22 +219,34 @@ def stage_icc_impl(
         return pd.DataFrame()
 
     trial_col = None
-    for cand in ("trial_index_within_group", "trial_in_run", "trial", "trial_number", "trial_index"):
+    for cand in (
+        "trial_index_within_group",
+        "trial_in_run",
+        "trial",
+        "trial_number",
+        "trial_index",
+    ):
         if cand in df_trials.columns:
             trial_col = cand
             break
 
-    if not trial_col:
-        ctx.logger.warning("ICC: no intra-run trial column available to align trials across runs; skipping.")
-        return pd.DataFrame()
-
-    alignment_columns = _resolve_icc_alignment_columns(df_trials, ctx.config)
-    if alignment_columns:
+    unit_columns, alignment_columns, alignment_strategy = _select_icc_unit_columns(
+        df_trials,
+        config=ctx.config,
+        trial_col=trial_col,
+    )
+    if alignment_strategy == "trial_position" and alignment_columns:
         _validate_icc_alignment_design(
             df_trials,
             run_col=run_col,
-            trial_col=trial_col,
+            trial_col=unit_columns[0],
             alignment_columns=alignment_columns,
+        )
+        ctx.logger.info("ICC: aligning runs by trial position '%s'.", unit_columns[0])
+    elif alignment_strategy == "task_identity":
+        ctx.logger.info(
+            "ICC: aligning runs by task identity columns: %s",
+            ", ".join(unit_columns),
         )
 
     records = []
@@ -160,27 +259,32 @@ def stage_icc_impl(
     for feat in feature_cols:
         if feat not in df_trials.columns:
             continue
-            
-        feat_df = df_trials[[trial_col, run_col, feat]].dropna()
+
+        feat_df = df_trials[[*unit_columns, run_col, feat]].dropna()
         if feat_df.empty:
             continue
-            
-        pivoted = feat_df.pivot_table(index=trial_col, columns=run_col, values=feat, aggfunc="mean")
+
+        pivoted = feat_df.pivot_table(
+            index=unit_columns,
+            columns=run_col,
+            values=feat,
+            aggfunc="mean",
+        )
         valid_pivoted = pivoted.dropna()
-        
+
         if len(valid_pivoted) < 2:
             continue
-            
+
         data = valid_pivoted.to_numpy()
         icc_val, ci_low, ci_high = compute_icc(data, icc_type="ICC(3,1)")
-        
+
         records.append({
             "feature": feat,
             "icc": float(icc_val),
-            "ci_lower_95": float(ci_low) if not pd.isna(ci_low) else float('nan'),
-            "ci_upper_95": float(ci_high) if not pd.isna(ci_high) else float('nan'),
+            "ci_lower_95": float(ci_low) if not pd.isna(ci_low) else float("nan"),
+            "ci_upper_95": float(ci_high) if not pd.isna(ci_high) else float("nan"),
             "n_trials_aligned": int(len(valid_pivoted)),
-            "n_runs": int(data.shape[1])
+            "n_runs": int(data.shape[1]),
         })
 
     out_df = pd.DataFrame(records)
@@ -188,9 +292,11 @@ def stage_icc_impl(
         "status": "ok" if not out_df.empty else "empty",
         "icc_type": "ICC(3,1)",
         "run_col": run_col,
-        "trial_col": trial_col
+        "trial_col": trial_col,
+        "unit_columns": list(unit_columns),
+        "alignment_strategy": alignment_strategy,
     }
-    
+
     ctx.data_qc["icc_reliability"] = meta
 
     out_dir = get_stats_subfolder_fn(ctx, "icc_reliability")

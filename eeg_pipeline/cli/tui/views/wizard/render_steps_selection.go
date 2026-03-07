@@ -52,15 +52,16 @@ func (m Model) renderComputationSelection() string {
 	b.WriteString("\n\n")
 
 	groups := map[string][]Computation{
-		"DataPrep": {}, "Core": {}, "Advanced": {}, "Quality": {},
+		"DataPrep": {}, "Core": {}, "Group": {}, "Advanced": {}, "Quality": {},
 	}
 	groupNames := map[string]string{
 		"DataPrep": "Data preparation",
 		"Core":     "Core analyses",
+		"Group":    "Group-level analyses",
 		"Advanced": "Advanced / causal analyses",
 		"Quality":  "Quality & validation",
 	}
-	groupOrder := []string{"DataPrep", "Core", "Advanced", "Quality"}
+	groupOrder := []string{"DataPrep", "Core", "Group", "Advanced", "Quality"}
 
 	for _, comp := range m.computations {
 		if comp.Group != "" {

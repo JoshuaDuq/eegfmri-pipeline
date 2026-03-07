@@ -398,6 +398,8 @@ func (m Model) getTextFieldValue(field textField) string {
 	// Behavior Statistics text fields
 	case textFieldBehaviorPermGroupColumnPreference:
 		return m.behaviorPermGroupColumnPreference
+	case textFieldICCUnitColumns:
+		return m.iccUnitColumns
 	case textFieldBehaviorFeatureRegistryFilesJSON:
 		return m.behaviorFeatureRegistryFilesJSON
 	case textFieldBehaviorFeatureRegistrySourceToTypeJSON:
@@ -408,9 +410,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.behaviorFeatureRegistryPatternsJSON
 	case textFieldBehaviorFeatureRegistryClassifiersJSON:
 		return m.behaviorFeatureRegistryClassifiersJSON
-	// System / IO text fields
-	case textFieldIOPredictorRange:
-		return m.ioPredictorRange
 	// Preprocessing text fields
 	case textFieldIcaLabelsToKeep:
 		return m.icaLabelsToKeep
@@ -830,6 +829,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 	// Behavior Statistics text fields
 	case textFieldBehaviorPermGroupColumnPreference:
 		m.behaviorPermGroupColumnPreference = strings.Join(splitLooseList(value), ",")
+	case textFieldICCUnitColumns:
+		m.iccUnitColumns = strings.Join(splitLooseList(value), ",")
 	case textFieldBehaviorFeatureRegistryFilesJSON:
 		m.behaviorFeatureRegistryFilesJSON = strings.TrimSpace(value)
 	case textFieldBehaviorFeatureRegistrySourceToTypeJSON:
@@ -840,9 +841,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.behaviorFeatureRegistryPatternsJSON = strings.TrimSpace(value)
 	case textFieldBehaviorFeatureRegistryClassifiersJSON:
 		m.behaviorFeatureRegistryClassifiersJSON = strings.TrimSpace(value)
-	// System / IO text fields
-	case textFieldIOPredictorRange:
-		m.ioPredictorRange = strings.Join(splitLooseList(value), ",")
 	// Preprocessing text fields
 	case textFieldIcaLabelsToKeep:
 		m.icaLabelsToKeep = strings.Join(strings.Fields(value), "")

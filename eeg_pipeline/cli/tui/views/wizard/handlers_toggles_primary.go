@@ -1655,12 +1655,14 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startTextEdit(textFieldConfigSetOverrides)
 		m.useDefaultAdvanced = false
 	// Behavior sub-section headers are non-interactive visual separators
-	case optBehaviorSubCorrelationSettings, optBehaviorSubCovariates, optBehaviorSubRunAdjustment,
+	case optBehaviorSubDataMapping, optBehaviorSubCorrelationSettings,
+		optBehaviorSubStatisticalInference, optBehaviorSubPermutations,
+		optBehaviorSubCovariates, optBehaviorSubRunAdjustment,
 		optBehaviorSubCorrelationsExtra, optBehaviorSubOutcome,
 		optBehaviorSubOutcomes, optBehaviorSubModelFamilies, optBehaviorSubInference,
 		optBehaviorSubDiagnostics, optBehaviorSubFitting, optBehaviorSubCrossfit,
 		optBehaviorSubTimeWindow, optBehaviorSubFeatures, optBehaviorSubITPC,
-		optBehaviorSubERDS, optBehaviorSubMultilevel:
+		optBehaviorSubERDS, optBehaviorSubMultilevel, optBehaviorSubFeatureRegistry:
 		// no-op: sub-headers are visual separators only
 	// Behavior section header toggles
 	case optBehaviorGroupGeneral:
@@ -1675,11 +1677,14 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupCorrelations:
 		m.behaviorGroupCorrelationsExpanded = !m.behaviorGroupCorrelationsExpanded
 		m.useDefaultAdvanced = false
+	case optBehaviorGroupGroupLevel:
+		m.behaviorGroupGroupLevelExpanded = !m.behaviorGroupGroupLevelExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupICC:
+		m.behaviorGroupICCExpanded = !m.behaviorGroupICCExpanded
+		m.useDefaultAdvanced = false
 	case optBehaviorGroupRegression:
 		m.behaviorGroupRegressionExpanded = !m.behaviorGroupRegressionExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupReport:
-		m.behaviorGroupReportExpanded = !m.behaviorGroupReportExpanded
 		m.useDefaultAdvanced = false
 	case optBehaviorGroupCondition:
 		m.behaviorGroupConditionExpanded = !m.behaviorGroupConditionExpanded
@@ -1861,10 +1866,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Report
-	case optReportTopN:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-
 	// Correlations
 	case optCorrelationsUseCrossfitPredictorResidual:
 		m.correlationsUseCrossfitResidual = !m.correlationsUseCrossfitResidual
@@ -2147,6 +2148,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorExcludeNonTrialwiseFeatures:
 		m.behaviorExcludeNonTrialwiseFeatures = !m.behaviorExcludeNonTrialwiseFeatures
 		m.useDefaultAdvanced = false
+	case optICCUnitColumns:
+		m.startTextEdit(textFieldICCUnitColumns)
+		m.useDefaultAdvanced = false
 	case optBehaviorFeatureRegistryFilesJSON:
 		m.startTextEdit(textFieldBehaviorFeatureRegistryFilesJSON)
 		m.useDefaultAdvanced = false
@@ -2161,29 +2165,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optBehaviorFeatureRegistryClassifiersJSON:
 		m.startTextEdit(textFieldBehaviorFeatureRegistryClassifiersJSON)
-		m.useDefaultAdvanced = false
-	// Global Statistics & Validation
-	case optGlobalNBootstrap:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optClusterCorrectionEnabled:
-		m.clusterCorrectionEnabled = !m.clusterCorrectionEnabled
-		m.useDefaultAdvanced = false
-	case optClusterCorrectionAlpha, optClusterCorrectionMinClusterSize:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optClusterCorrectionTail:
-		m.clusterCorrectionTailGlobal = (m.clusterCorrectionTailGlobal + 1) % 3
-		m.useDefaultAdvanced = false
-	case optValidationMinEpochs, optValidationMinChannels, optValidationMaxAmplitudeUv:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	// System / IO
-	case optIOPredictorRange:
-		m.startTextEdit(textFieldIOPredictorRange)
-		m.useDefaultAdvanced = false
-	case optIOMaxMissingChannelsFraction:
-		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	}
 

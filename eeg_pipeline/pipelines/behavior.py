@@ -119,7 +119,6 @@ class BehaviorPipelineConfig:
     run_regression: bool = False
     run_icc: bool = True
     run_validation: bool = True
-    run_report: bool = True
     run_correlations: bool = True
     run_multilevel_correlations: bool = False
     run_condition_comparison: bool = True
@@ -182,8 +181,14 @@ class BehaviorPipelineConfig:
                 )
             ),
             run_validation=bool(get_config_value(config, "behavior_analysis.validation.enabled", True)),
-            run_report=bool(get_config_value(config, "behavior_analysis.report.enabled", True)),
             run_correlations=bool(get_config_value(config, "behavior_analysis.correlations.enabled", True)),
+            run_multilevel_correlations=bool(
+                get_config_value(
+                    config,
+                    "behavior_analysis.group_level.multilevel_correlations.enabled",
+                    False,
+                )
+            ),
             run_condition_comparison=bool(get_config_value(config, "behavior_analysis.condition.enabled", True)),
             run_temporal_correlations=bool(get_config_value(config, "behavior_analysis.temporal.enabled", True)),
             run_cluster_tests=bool(get_config_value(config, "behavior_analysis.cluster.enabled", False)),
@@ -226,11 +231,34 @@ def _count_significant(p_values: Optional[pd.Series], threshold: float = SIGNIFI
     return int((p_values.fillna(1.0) < threshold).sum())
 
 
+def _summarize_nested_result_counts(result: Optional[Dict[str, Any]]) -> tuple[int, int, int]:
+    """Summarize n_tests/raw/fdr counts from flat or nested behavior result dicts."""
+    if not isinstance(result, dict) or not result:
+        return 0, 0, 0
+
+    if "n_tests" in result:
+        return (
+            int(result.get("n_tests", 0) or 0),
+            int(result.get("n_sig_raw", 0) or 0),
+            int(result.get("n_sig_fdr", 0) or 0),
+        )
+
+    n_tests = 0
+    n_sig_raw = 0
+    n_sig_fdr = 0
+    for value in result.values():
+        if not isinstance(value, dict):
+            continue
+        n_tests += int(value.get("n_tests", 0) or 0)
+        n_sig_raw += int(value.get("n_sig_raw", 0) or 0)
+        n_sig_fdr += int(value.get("n_sig_fdr", 0) or 0)
+    return n_tests, n_sig_raw, n_sig_fdr
+
+
 @dataclass
 class BehaviorPipelineResults:
     subject: str
     trial_table_path: Optional[str] = None
-    report_path: Optional[str] = None
     regression: Optional[pd.DataFrame] = None
     icc: Optional[pd.DataFrame] = None
     correlations: Optional[pd.DataFrame] = None
@@ -244,9 +272,7 @@ class BehaviorPipelineResults:
         summary = {"subject": self.subject}
         if self.trial_table_path:
             summary["trial_table_path"] = self.trial_table_path
-        if self.report_path:
-            summary["report_path"] = self.report_path
-        
+
         n_total = 0
         n_sig_raw = 0
         n_sig_controlled = 0
@@ -305,17 +331,17 @@ class BehaviorPipelineResults:
             summary["n_icc_features"] = len(df)
 
         if self.tf is not None:
-            n_tests = self.tf.get("n_tests", 0)
+            n_tests, tf_sig_raw, tf_sig_fdr = _summarize_nested_result_counts(self.tf)
             n_total += n_tests
-            n_sig_raw += self.tf.get("n_sig_raw", 0)
-            n_sig_fdr += self.tf.get("n_sig_fdr", 0)
+            n_sig_raw += tf_sig_raw
+            n_sig_fdr += tf_sig_fdr
             summary["n_tf_tests"] = n_tests
 
         if self.temporal is not None:
-            n_tests = self.temporal.get("n_tests", 0)
+            n_tests, temporal_sig_raw, temporal_sig_fdr = _summarize_nested_result_counts(self.temporal)
             n_total += n_tests
-            n_sig_raw += self.temporal.get("n_sig_raw", 0)
-            n_sig_fdr += self.temporal.get("n_sig_fdr", 0)
+            n_sig_raw += temporal_sig_raw
+            n_sig_fdr += temporal_sig_fdr
             summary["n_temporal_tests"] = n_tests
 
         if self.cluster is not None:
@@ -516,9 +542,9 @@ class BehaviorPipeline(PipelineBase):
     
     def run_group_level(self, subjects: List[str], **kwargs) -> Any:
         """Run group-level behavior analysis across multiple subjects.
-        
-        Implements multi-subject analyses including:
-        - Multilevel correlations with block-restricted permutations
+
+        Group-level computations are independent from subject-level ones.
+        They run only when explicitly requested via pipeline config or kwargs.
         
         Parameters
         ----------
@@ -538,19 +564,49 @@ class BehaviorPipeline(PipelineBase):
         from eeg_pipeline.analysis.behavior.orchestration import (
             run_group_level_analysis,
         )
-        from eeg_pipeline.infra.paths import ensure_dir
+        from eeg_pipeline.analysis.behavior.trial_table_helpers import find_trial_table_path
+        from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
         
         run_multilevel_correlations = kwargs.get("run_multilevel_correlations")
         if run_multilevel_correlations is None:
-            pipeline_flag = bool(
+            run_multilevel_correlations = bool(
                 getattr(self.pipeline_config, "run_multilevel_correlations", False)
             )
-            run_multilevel_correlations = not pipeline_flag
-        
-        # Only run group-level analysis if at least one computation is enabled
+
         if not run_multilevel_correlations:
+            self.logger.info(
+                "Group-level behavior analysis skipped: no group-level computations selected."
+            )
             return None
-        
+
+        selected_feature_files = self.feature_files or self.feature_categories
+        available_subjects: List[str] = []
+        missing_trial_tables: List[str] = []
+        for subject in subjects:
+            stats_dir = deriv_stats_path(self.deriv_root, subject)
+            trial_table_path = find_trial_table_path(
+                stats_dir,
+                feature_files=selected_feature_files,
+            )
+            if trial_table_path is None:
+                missing_trial_tables.append(subject)
+                continue
+            available_subjects.append(subject)
+
+        if len(available_subjects) < 2:
+            feature_scope = ", ".join(selected_feature_files) if selected_feature_files else "all"
+            missing_subjects = ", ".join(missing_trial_tables) if missing_trial_tables else "none"
+            raise ValueError(
+                "Group-level multilevel_correlations requires saved trial tables for at least 2 subjects. "
+                f"Feature selection: {feature_scope}. Missing trial tables for: {missing_subjects}. "
+                "Run the subject-level trial_table computation first."
+            )
+        if missing_trial_tables:
+            self.logger.warning(
+                "Group-level multilevel_correlations: excluding subjects without trial tables: %s",
+                ", ".join(missing_trial_tables),
+            )
+
         output_dir = kwargs.get("output_dir")
         if output_dir is None:
             output_dir = self.deriv_root / "group" / "stats" / "behavior"
@@ -560,16 +616,16 @@ class BehaviorPipeline(PipelineBase):
         self.logger.info("="*60)
         self.logger.info("Group-Level Behavior Analysis")
         self.logger.info("="*60)
-        self.logger.info("Subjects (%d): %s", len(subjects), ", ".join(subjects))
-        
+        self.logger.info("Subjects (%d): %s", len(available_subjects), ", ".join(available_subjects))
+
         result = run_group_level_analysis(
-            subjects=subjects,
+            subjects=available_subjects,
             deriv_root=self.deriv_root,
             config=self.config,
             logger=self.logger,
             run_multilevel_correlations=run_multilevel_correlations,
             output_dir=output_dir,
-            feature_files=self.feature_files or self.feature_categories,
+            feature_files=selected_feature_files,
         )
         
         if result.multilevel_correlations is not None and not result.multilevel_correlations.empty:

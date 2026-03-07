@@ -268,7 +268,7 @@ class TestFeatureHelpers(unittest.TestCase):
         self.assertIn("FeaturePipeline", p.__all__)
         self.assertIn("alpha", constants.FREQUENCY_BANDS)
         self.assertIn("power", constants.FEATURE_CATEGORIES)
-        self.assertIn("report", constants.BEHAVIOR_COMPUTATIONS)
+        self.assertNotIn("report", constants.BEHAVIOR_COMPUTATIONS)
 
     def test_feature_pipeline_process_subject_happy_path(self):
         from eeg_pipeline.pipelines.features import FeaturePipeline
