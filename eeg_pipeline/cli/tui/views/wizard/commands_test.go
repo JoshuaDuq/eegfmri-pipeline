@@ -234,7 +234,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsCanonicalColumns(t *testing.T) {
 
 func TestBuildBehaviorAdvancedArgs_UsesStatsPredictorControlFlag(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
-	m.behaviorStatsTempControl = 1 // linear
+	m.behaviorStatsPredictorControl = 1 // linear
 
 	args := m.buildBehaviorAdvancedArgs()
 	if containsString(args, "--stats-temp-control") {
@@ -247,7 +247,7 @@ func TestBuildBehaviorAdvancedArgs_UsesStatsPredictorControlFlag(t *testing.T) {
 
 func TestBuildBehaviorAdvancedArgs_StatsPredictorNoneDisablesPredictorControl(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
-	m.behaviorStatsTempControl = 2 // none
+	m.behaviorStatsPredictorControl = 2 // none
 	m.controlPredictor = true
 
 	args := m.buildBehaviorAdvancedArgs()
@@ -684,8 +684,8 @@ func TestApplyConfigKeys_HydratesBehaviorSettings(t *testing.T) {
 	if m.globalNBootstrap != 2500 {
 		t.Fatalf("expected globalNBootstrap=2500, got %d", m.globalNBootstrap)
 	}
-	if m.behaviorStatsTempControl != 1 {
-		t.Fatalf("expected behaviorStatsTempControl=1 (linear), got %d", m.behaviorStatsTempControl)
+	if m.behaviorStatsPredictorControl != 1 {
+		t.Fatalf("expected behaviorStatsPredictorControl=1 (linear), got %d", m.behaviorStatsPredictorControl)
 	}
 	if m.behaviorPermScheme != 1 {
 		t.Fatalf("expected behaviorPermScheme=1 (circular_shift), got %d", m.behaviorPermScheme)
@@ -1082,8 +1082,8 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 
 	m.predictorResidualMinSamples = 14
 
-	m.regressionTempControl = 2
-	m.regressionTempSplineMinN = 18
+	m.regressionPredictorControl = 2
+	m.regressionPredictorSplineMinN = 18
 	m.regressionMinSamples = 22
 
 	m.behaviorMinSamples = 7

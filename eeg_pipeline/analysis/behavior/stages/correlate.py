@@ -9,6 +9,7 @@ import pandas as pd
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_targets
 from eeg_pipeline.utils.analysis.stats.correlation import normalize_robust_correlation_method
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_int, get_config_value
+from eeg_pipeline.utils.data.columns import resolve_outcome_column
 
 
 @dataclass
@@ -63,6 +64,23 @@ def _resolve_correlation_request(config: Any) -> CorrelationRequest:
         want_run_mean=("run_mean" in normalized_types)
         or primary_unit in {"run", "run_mean", "runmean", "run_level"},
     )
+
+
+def _resolve_default_target_columns(
+    df_trials: pd.DataFrame,
+    config: Any,
+) -> List[str]:
+    """Resolve paradigm-agnostic default targets for correlation analyses."""
+    targets: List[str] = []
+
+    outcome_column = resolve_outcome_column(df_trials, config)
+    if outcome_column:
+        targets.append(str(outcome_column))
+
+    if "predictor_residual" in df_trials.columns and "predictor_residual" not in targets:
+        targets.append("predictor_residual")
+
+    return targets
 
 
 def _select_requested_primary_measure(
@@ -257,10 +275,11 @@ def stage_correlate_design_impl(
     if explicit_target_column:
         targets = [explicit_target_column]
     else:
+        default_targets = _resolve_default_target_columns(df_trials, ctx.config)
         targets = resolve_correlation_targets(
             ctx.config,
             logger=ctx.logger,
-            default_targets=[],
+            default_targets=default_targets,
         )
         use_cv_resid = get_config_bool(
             ctx.config,

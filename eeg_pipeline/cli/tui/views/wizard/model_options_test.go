@@ -257,7 +257,7 @@ func TestGetBehaviorOptions_ShowsInferenceAndAdvancedForStatSelections(t *testin
 	m.behaviorGroupAdvancedExpanded = true
 	opts = m.getBehaviorOptions()
 
-	if !hasOption(opts, optBehaviorStatsTempControl) {
+	if !hasOption(opts, optBehaviorStatsPredictorControl) {
 		t.Fatalf("expected inference stats options for correlations selection")
 	}
 	if !hasOption(opts, optGlobalNBootstrap) {

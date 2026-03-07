@@ -374,9 +374,14 @@ align behavioral data with surviving trials.
 3. Use `epochs.selection` (MNE's record of kept epoch indices) to select surviving
    event rows.
 4. Write `*_proc-clean_events.tsv` alongside the clean epochs file with columns:
+   - `trial_id` — Canonical 0-based trial identifier for the kept clean-event rows.
    - `epoch_index` — 0-based index into the clean epochs object.
    - `event_index` — Original index within the condition-filtered event set.
    - All original event columns (onset, duration, trial_type, behavioral columns, …).
+
+`trial_id` is the canonical alignment contract for downstream trialwise artifacts.
+Behavior analysis and feature-table loading require it; they do not infer joins
+from paradigm-specific columns such as `trial_number`, `onset`, or `duration`.
 
 ### 10.2 Configuration
 

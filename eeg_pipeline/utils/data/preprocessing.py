@@ -570,6 +570,7 @@ def write_clean_events_tsv_for_epochs(
     n_epochs = len(epochs)
     if n_epochs == 0:
         kept = target.iloc[0:0].copy().reset_index(drop=True)
+        kept.insert(0, "trial_id", [])
         kept.insert(0, "epoch_index", [])
         kept.to_csv(out_path, sep="\t", index=False)
         ensure_events_sidecar(out_path, list(kept.columns))
@@ -595,6 +596,7 @@ def write_clean_events_tsv_for_epochs(
             f"epochs={n_epochs}, target_events={len(target)} and epochs.selection unavailable."
         )
 
+    kept.insert(0, "trial_id", range(len(kept)))
     kept.insert(0, "epoch_index", range(len(kept)))
 
     kept.to_csv(out_path, sep="\t", index=False)

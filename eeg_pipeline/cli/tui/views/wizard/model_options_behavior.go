@@ -68,7 +68,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				options = append(options, optNPerm)
 			}
 			if hasSelectedComputation("correlations", "regression") {
-				options = append(options, optBehaviorStatsTempControl)
+				options = append(options, optBehaviorStatsPredictorControl)
 			}
 			if hasSelectedComputation("correlations", "regression", "condition", "temporal", "cluster") {
 				options = append(options, optBehaviorStatsAllowIIDTrials)
@@ -204,14 +204,14 @@ func (m Model) getBehaviorOptions() []optionType {
 				optBehaviorSubOutcome,
 				optRegressionOutcome,
 				optRegressionIncludePredictor,
-				optRegressionTempControl,
+				optRegressionPredictorControl,
 			)
-			if m.predictorType == 0 && m.regressionTempControl == 2 {
+			if m.predictorType == 0 && m.regressionPredictorControl == 2 {
 				options = append(options,
-					optRegressionTempSplineKnots,
-					optRegressionTempSplineQlow,
-					optRegressionTempSplineQhigh,
-					optRegressionTempSplineMinN,
+					optRegressionPredictorSplineKnots,
+					optRegressionPredictorSplineQlow,
+					optRegressionPredictorSplineQhigh,
+					optRegressionPredictorSplineMinN,
 				)
 			}
 			options = append(options,

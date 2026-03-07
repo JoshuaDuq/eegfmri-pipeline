@@ -20,6 +20,10 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.data.columns import pick_target_column
+from eeg_pipeline.utils.data.feature_alignment import (
+    attach_feature_alignment_columns,
+    filter_feature_payload_columns,
+)
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.paths import (
     deriv_features_path,
@@ -441,11 +445,13 @@ def _save_feature_dataframe(
     feature_type: str = "Feature",
     suffix: Optional[str] = None,
     config: Optional[Any] = None,
-) -> None:
+    aligned_events: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
     """Save a feature dataframe with column assignment and logging."""
     from eeg_pipeline.utils.config.loader import get_config_value
     
     df = _assign_columns_safely(df, column_names, feature_type, logger)
+    df_to_save = attach_feature_alignment_columns(df, aligned_events)
     folder_name = _get_folder_for_feature(base_filename, config, df=df)
     filename = _build_filename(base_filename, suffix)
     file_path = features_dir / folder_name / filename
@@ -453,15 +459,16 @@ def _save_feature_dataframe(
     file_path.parent.mkdir(parents=True, exist_ok=True)
     
     logger.info("Saving %s: %s", feature_type, file_path)
-    write_parquet(df, file_path)
+    write_parquet(df_to_save, file_path)
     
     also_save_csv = bool(get_config_value(config, "feature_engineering.output.also_save_csv", False))
     if also_save_csv:
         from eeg_pipeline.infra.tsv import write_csv
         csv_filename = _build_filename(base_filename, suffix).replace(".parquet", ".csv")
         csv_path = features_dir / folder_name / csv_filename
-        write_csv(df, csv_path, index=False)
+        write_csv(df_to_save, csv_path, index=False)
         logger.info("Also saved %s as CSV: %s", feature_type, csv_path)
+    return df
 
 
 def _save_feature_metadata(
@@ -493,7 +500,7 @@ def _save_feature_metadata(
         metadata_path = metadata_dir / base_out.with_suffix(".json").name
 
         manifest = generate_manifest(
-            feature_columns=list(df.columns),
+            feature_columns=filter_feature_payload_columns(df.columns),
             config=config,
             subject=subject_str,
             task=config.get("project.task") if config is not None else None,
@@ -741,6 +748,7 @@ def save_all_features(
     source_contrast_cols: Optional[List[str]] = None,
     feature_qc: Optional[Dict[str, Any]] = None,
     suffix: Optional[str] = None,
+    aligned_events: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Save all feature dataframes to disk with validation and deduplication."""
     if logger is None:
@@ -803,7 +811,15 @@ def save_all_features(
     for df, cols, base_name, description in feature_save_configs:
         if df is not None and not df.empty:
             _save_feature_dataframe(
-                df, base_name, features_dir, logger, cols, description, suffix, config=config
+                df,
+                base_name,
+                features_dir,
+                logger,
+                cols,
+                description,
+                suffix,
+                config=config,
+                aligned_events=aligned_events,
             )
             _save_feature_metadata(
                 df, base_name, features_dir, config, logger, suffix
@@ -824,53 +840,54 @@ def save_all_features(
     also_save_csv = bool(get_config_value(config, "feature_engineering.output.also_save_csv", False))
     
     if not direct_df.empty:
-        folder_name = _get_folder_for_feature("features_power")
-        direct_filename = _build_filename("features_power", suffix)
-        direct_path = features_dir / folder_name / direct_filename
-        logger.info("Saving power features: %s", direct_path)
-        write_parquet(direct_df, direct_path)
-        if also_save_csv:
-            from eeg_pipeline.infra.tsv import write_csv
-            csv_path = features_dir / folder_name / direct_filename.replace(".parquet", ".csv")
-            write_csv(direct_df, csv_path, index=False)
-            logger.info("Also saved power features as CSV: %s", csv_path)
+        _save_feature_dataframe(
+            direct_df,
+            "features_power",
+            features_dir,
+            logger,
+            feature_type="power features",
+            suffix=suffix,
+            config=config,
+            aligned_events=aligned_events,
+        )
         _save_feature_metadata(
             direct_df, "features_power", features_dir, config, logger, suffix
         )
 
     if active_df is not None and not active_df.empty:
-        folder_name = _get_folder_for_feature("features_power_active")
-        active_filename = _build_filename("features_power_active", suffix)
-        active_path = features_dir / folder_name / active_filename
-        logger.info("Saving active-averaged EEG features: %s", active_path)
-        write_parquet(active_df, active_path)
-        if also_save_csv:
-            from eeg_pipeline.infra.tsv import write_csv
-            csv_path = features_dir / folder_name / active_filename.replace(".parquet", ".csv")
-            write_csv(active_df, csv_path, index=False)
-            logger.info("Also saved active-averaged features as CSV: %s", csv_path)
+        _save_feature_dataframe(
+            active_df,
+            "features_power_active",
+            features_dir,
+            logger,
+            feature_type="active-averaged EEG features",
+            suffix=suffix,
+            config=config,
+            aligned_events=aligned_events,
+        )
         _save_feature_metadata(
             active_df, "features_power_active", features_dir, config, logger, suffix
         )
 
     if conn_df is not None and not conn_df.empty:
         conn_df = _assign_columns_safely(conn_df, conn_cols, "Connectivity", logger)
+        conn_df_to_save = attach_feature_alignment_columns(conn_df, aligned_events)
         folder_name = _get_folder_for_feature("features_connectivity")
         conn_filename = _build_filename("features_connectivity", suffix)
         conn_path = features_dir / folder_name / conn_filename
         logger.info("Saving connectivity features: %s", conn_path)
         start_time = time.perf_counter()
-        write_parquet(conn_df, conn_path)
+        write_parquet(conn_df_to_save, conn_path)
         logger.info(
             "Saved connectivity parquet in %.2fs (rows=%d, cols=%d)",
             time.perf_counter() - start_time,
-            len(conn_df),
-            len(conn_df.columns),
+            len(conn_df_to_save),
+            len(conn_df_to_save.columns),
         )
         if also_save_csv:
             from eeg_pipeline.infra.tsv import write_csv
             csv_path = features_dir / folder_name / conn_filename.replace(".parquet", ".csv")
-            write_csv(conn_df, csv_path, index=False)
+            write_csv(conn_df_to_save, csv_path, index=False)
             logger.info("Also saved connectivity features as CSV: %s", csv_path)
         _save_feature_metadata(
             conn_df, "features_connectivity", features_dir, config, logger, suffix

@@ -860,6 +860,7 @@ def run_group_level_correlations(
     control_run_effects: bool = False,
     max_run_dummies: int = 20,
     random_state: Optional[int] = None,
+    feature_files: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Run multilevel correlations across subjects with block-aware permutations."""
     return _group_level.run_group_level_correlations_impl(
@@ -876,6 +877,7 @@ def run_group_level_correlations(
         control_run_effects=control_run_effects,
         max_run_dummies=max_run_dummies,
         random_state=random_state,
+        feature_files=feature_files,
         find_trial_table_path_fn=_find_trial_table_path,
         feature_prefixes=FEATURE_COLUMN_PREFIXES,
         feature_type_resolver=lambda feature_name, cfg: _infer_feature_type(str(feature_name), cfg),
@@ -890,6 +892,7 @@ def run_group_level_analysis(
     logger: Any,
     run_multilevel_correlations: bool = False,
     output_dir: Optional[Path] = None,
+    feature_files: Optional[List[str]] = None,
 ) -> GroupLevelResult:
     """Run all group-level analyses."""
     return _group_level.run_group_level_analysis_impl(
@@ -899,6 +902,7 @@ def run_group_level_analysis(
         logger=logger,
         run_multilevel_correlations=run_multilevel_correlations,
         output_dir=output_dir,
+        feature_files=feature_files,
         run_multilevel_correlations_fn=run_group_level_correlations,
         write_parquet_with_optional_csv_fn=_write_parquet_with_optional_csv,
         also_save_csv_from_config_fn=_also_save_csv_from_config,

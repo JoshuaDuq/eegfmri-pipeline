@@ -13,6 +13,7 @@ from typing import Optional
 import mne
 import pandas as pd
 
+from eeg_pipeline.utils.data.feature_alignment import require_trial_id_column
 
 
 def get_aligned_events(
@@ -92,6 +93,10 @@ def get_aligned_events(
         return None
 
     events_df = pd.read_csv(clean_events_path, sep="\t")
+    require_trial_id_column(
+        events_df,
+        context=f"Clean events.tsv for sub-{subject}, task-{task}",
+    )
     
     if len(events_df) != len(epochs):
         message = (

@@ -17,6 +17,7 @@ from eeg_pipeline.utils.data.columns import (
     resolve_outcome_column,
     resolve_predictor_column,
 )
+from eeg_pipeline.utils.data.feature_alignment import require_trial_id_column
 
 EEGConfig = ConfigDict
 
@@ -181,6 +182,10 @@ def load_epochs_for_analysis(
         return _handle_missing_events(epochs, align, subject, task, logger)
 
     events_df = pd.read_csv(clean_events_path, sep="\t")
+    require_trial_id_column(
+        events_df,
+        context=f"Clean events.tsv for sub-{subject}, task-{task}",
+    )
     
     logger.info(f"Loaded clean events.tsv: {len(events_df)} rows")
     

@@ -1127,21 +1127,21 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 
 	// Regression
-	case optRegressionTempSplineKnots:
+	case optRegressionPredictorSplineKnots:
 		if val >= 4 {
-			m.regressionTempSplineKnots = int(val)
+			m.regressionPredictorSplineKnots = int(val)
 		}
-	case optRegressionTempSplineQlow:
+	case optRegressionPredictorSplineQlow:
 		if val > 0 && val < 1 {
-			m.regressionTempSplineQlow = val
+			m.regressionPredictorSplineQlow = val
 		}
-	case optRegressionTempSplineQhigh:
+	case optRegressionPredictorSplineQhigh:
 		if val > 0 && val < 1 {
-			m.regressionTempSplineQhigh = val
+			m.regressionPredictorSplineQhigh = val
 		}
-	case optRegressionTempSplineMinN:
+	case optRegressionPredictorSplineMinN:
 		if val >= 1 {
-			m.regressionTempSplineMinN = int(val)
+			m.regressionPredictorSplineMinN = int(val)
 		}
 	case optRegressionPermutations:
 		if val >= 0 {

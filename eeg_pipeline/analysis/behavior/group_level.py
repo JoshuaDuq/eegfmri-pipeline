@@ -136,6 +136,7 @@ def run_group_level_correlations_impl(
     control_run_effects: bool = False,
     max_run_dummies: int = 20,
     random_state: Optional[int] = None,
+    feature_files: Optional[List[str]] = None,
     *,
     find_trial_table_path_fn: Callable[[Path, Optional[List[str]]], Optional[Path]],
     feature_prefixes: Sequence[str],
@@ -148,10 +149,13 @@ def run_group_level_correlations_impl(
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
     from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
 
-    feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
     if isinstance(feature_files, str):
         feature_files = [feature_files]
     elif feature_files is None:
+        feature_files = get_config_value(config, "behavior_analysis.feature_files", None)
+        if isinstance(feature_files, str):
+            feature_files = [feature_files]
+    if feature_files is None:
         feature_files = get_config_value(config, "behavior_analysis.feature_categories", None)
         if isinstance(feature_files, str):
             feature_files = [feature_files]
@@ -520,6 +524,7 @@ def run_group_level_analysis_impl(
     logger: Any,
     run_multilevel_correlations: bool = False,
     output_dir: Optional[Path] = None,
+    feature_files: Optional[List[str]] = None,
     *,
     run_multilevel_correlations_fn: Callable[..., pd.DataFrame],
     write_parquet_with_optional_csv_fn: Callable[[pd.DataFrame, Path, bool], None],
@@ -581,6 +586,7 @@ def run_group_level_analysis_impl(
             control_run_effects=control_run_effects,
             max_run_dummies=max_run_dummies,
             random_state=random_state,
+            feature_files=feature_files,
         )
 
         if output_dir and multilevel_df is not None and not multilevel_df.empty:

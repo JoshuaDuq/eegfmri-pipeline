@@ -404,10 +404,10 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Outcome", v, "dependent variable"
 		case optRegressionIncludePredictor:
 			return "Include Predictor", m.boolToOnOff(m.regressionIncludePredictor), "add predictor covariate"
-		case optRegressionTempControl:
+		case optRegressionPredictorControl:
 			v := "linear"
 			if m.predictorType == 0 {
-				switch m.regressionTempControl {
+				switch m.regressionPredictorControl {
 				case 1:
 					v = "outcome_hat"
 				case 2:
@@ -419,27 +419,27 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = "linear (continuous predictor required for outcome_hat/spline)"
 			}
 			return "Predictor Control", v, hint
-		case optRegressionTempSplineKnots:
-			val := fmt.Sprintf("%d", m.regressionTempSplineKnots)
-			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineKnots) {
+		case optRegressionPredictorSplineKnots:
+			val := fmt.Sprintf("%d", m.regressionPredictorSplineKnots)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionPredictorSplineKnots) {
 				val = numberDisplay
 			}
-			return "Temp Spline Knots", val, "restricted cubic (>=4)"
-		case optRegressionTempSplineQlow:
-			val := fmt.Sprintf("%.3f", m.regressionTempSplineQlow)
-			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineQlow) {
+			return "Predictor Spline Knots", val, "restricted cubic (>=4)"
+		case optRegressionPredictorSplineQlow:
+			val := fmt.Sprintf("%.3f", m.regressionPredictorSplineQlow)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionPredictorSplineQlow) {
 				val = numberDisplay
 			}
 			return "Spline Q Low", val, "knot quantile"
-		case optRegressionTempSplineQhigh:
-			val := fmt.Sprintf("%.3f", m.regressionTempSplineQhigh)
-			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineQhigh) {
+		case optRegressionPredictorSplineQhigh:
+			val := fmt.Sprintf("%.3f", m.regressionPredictorSplineQhigh)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionPredictorSplineQhigh) {
 				val = numberDisplay
 			}
 			return "Spline Q High", val, "knot quantile"
-		case optRegressionTempSplineMinN:
-			val := fmt.Sprintf("%d", m.regressionTempSplineMinN)
-			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineMinN) {
+		case optRegressionPredictorSplineMinN:
+			val := fmt.Sprintf("%d", m.regressionPredictorSplineMinN)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionPredictorSplineMinN) {
 				val = numberDisplay
 			}
 			return "Spline Min Samples", val, "minimum rows for spline basis"
@@ -912,9 +912,9 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Overwrite Outputs", m.boolToOnOff(m.behaviorOverwrite), "if off, append timestamp to output folders"
 
 		// Behavior Statistics
-		case optBehaviorStatsTempControl:
+		case optBehaviorStatsPredictorControl:
 			controls := []string{"spline", "linear", "none"}
-			return "Stats Predictor Control", controls[m.behaviorStatsTempControl%len(controls)], "global predictor covariate for all analyses"
+			return "Stats Predictor Control", controls[m.behaviorStatsPredictorControl%len(controls)], "global predictor covariate for all analyses"
 		case optBehaviorStatsAllowIIDTrials:
 			return "Allow IID Trials", m.boolToOnOff(m.behaviorStatsAllowIIDTrials), "use asymptotic p-values when N_trials is large"
 		case optBehaviorStatsHierarchicalFDR:

@@ -532,11 +532,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(s) {
 				case "linear":
-					m.behaviorStatsTempControl = 1
+					m.behaviorStatsPredictorControl = 1
 				case "none":
-					m.behaviorStatsTempControl = 2
+					m.behaviorStatsPredictorControl = 2
 				default:
-					m.behaviorStatsTempControl = 0
+					m.behaviorStatsPredictorControl = 0
 				}
 			}
 		}},
@@ -711,32 +711,32 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(strings.TrimSpace(s)) {
 				case "outcome_hat":
-					m.regressionTempControl = 1
+					m.regressionPredictorControl = 1
 				case "spline":
-					m.regressionTempControl = 2
+					m.regressionPredictorControl = 2
 				default:
-					m.regressionTempControl = 0
+					m.regressionPredictorControl = 0
 				}
 			}
 		}},
 		{key: "behavior_analysis.regression.predictor_spline.n_knots", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.regressionTempSplineKnots = n
+				m.regressionPredictorSplineKnots = n
 			}
 		}},
 		{key: "behavior_analysis.regression.predictor_spline.quantile_low", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
-				m.regressionTempSplineQlow = f
+				m.regressionPredictorSplineQlow = f
 			}
 		}},
 		{key: "behavior_analysis.regression.predictor_spline.quantile_high", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
-				m.regressionTempSplineQhigh = f
+				m.regressionPredictorSplineQhigh = f
 			}
 		}},
 		{key: "behavior_analysis.regression.predictor_spline.min_samples", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
-				m.regressionTempSplineMinN = n
+				m.regressionPredictorSplineMinN = n
 			}
 		}},
 		{key: "behavior_analysis.regression.include_trial_order", apply: func(v interface{}) {

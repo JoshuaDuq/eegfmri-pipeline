@@ -569,6 +569,7 @@ class BehaviorPipeline(PipelineBase):
             logger=self.logger,
             run_multilevel_correlations=run_multilevel_correlations,
             output_dir=output_dir,
+            feature_files=self.feature_files or self.feature_categories,
         )
         
         if result.multilevel_correlations is not None and not result.multilevel_correlations.empty:

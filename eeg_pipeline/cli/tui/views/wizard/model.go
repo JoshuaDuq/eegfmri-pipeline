@@ -1891,22 +1891,22 @@ type Model struct {
 	predictorResidualCrossfitSplineKnots int
 
 	// Regression
-	regressionOutcome            int // 0=rating, 1=predictor_residual, 2=predictor
-	regressionIncludePredictor   bool
-	regressionTempControl        int // 0=linear, 1=rating_hat, 2=spline
-	regressionTempSplineKnots    int
-	regressionTempSplineQlow     float64
-	regressionTempSplineQhigh    float64
-	regressionTempSplineMinN     int
-	regressionIncludeTrialOrder  bool
-	regressionIncludePrev        bool
-	regressionIncludeRunBlock    bool
-	regressionIncludeInteraction bool
-	regressionStandardize        bool
-	regressionMinSamples         int
-	regressionPrimaryUnit        int // 0=trial, 1=run_mean
-	regressionPermutations       int
-	regressionMaxFeatures        int // 0 = no limit
+	regressionOutcome              int // 0=rating, 1=predictor_residual, 2=predictor
+	regressionIncludePredictor     bool
+	regressionPredictorControl     int // 0=linear, 1=outcome_hat, 2=spline
+	regressionPredictorSplineKnots int
+	regressionPredictorSplineQlow  float64
+	regressionPredictorSplineQhigh float64
+	regressionPredictorSplineMinN  int
+	regressionIncludeTrialOrder    bool
+	regressionIncludePrev          bool
+	regressionIncludeRunBlock      bool
+	regressionIncludeInteraction   bool
+	regressionStandardize          bool
+	regressionMinSamples           int
+	regressionPrimaryUnit          int // 0=trial, 1=run_mean
+	regressionPermutations         int
+	regressionMaxFeatures          int // 0 = no limit
 
 	// Correlations (trial-table)
 	correlationsTypesSpec               string // Comma-separated list (e.g., "partial_cov_predictor,raw")
@@ -2205,7 +2205,7 @@ type Model struct {
 	microstatesAssignFromGfpPeaks bool // Assign states at GFP peaks then backfit
 
 	// Behavior Statistics
-	behaviorStatsTempControl               int     // 0: spline, 1: linear
+	behaviorStatsPredictorControl          int     // 0: spline, 1: linear
 	behaviorStatsAllowIIDTrials            bool    // Allow i.i.d. trial assumptions
 	behaviorStatsHierarchicalFDR           bool    // Hierarchical FDR correction
 	behaviorStatsComputeReliability        bool    // Compute reliability
@@ -2745,22 +2745,22 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		predictorResidualCrossfitMethod:      0,
 		predictorResidualCrossfitSplineKnots: 5,
 
-		regressionOutcome:            0,
-		regressionIncludePredictor:   true,
-		regressionTempControl:        0,
-		regressionTempSplineKnots:    4,
-		regressionTempSplineQlow:     0.05,
-		regressionTempSplineQhigh:    0.95,
-		regressionTempSplineMinN:     12,
-		regressionIncludeTrialOrder:  true,
-		regressionIncludePrev:        false,
-		regressionIncludeRunBlock:    true,
-		regressionIncludeInteraction: true,
-		regressionStandardize:        true,
-		regressionMinSamples:         15,
-		regressionPrimaryUnit:        0,
-		regressionPermutations:       0,
-		regressionMaxFeatures:        0,
+		regressionOutcome:              0,
+		regressionIncludePredictor:     true,
+		regressionPredictorControl:     0,
+		regressionPredictorSplineKnots: 4,
+		regressionPredictorSplineQlow:  0.05,
+		regressionPredictorSplineQhigh: 0.95,
+		regressionPredictorSplineMinN:  12,
+		regressionIncludeTrialOrder:    true,
+		regressionIncludePrev:          false,
+		regressionIncludeRunBlock:      true,
+		regressionIncludeInteraction:   true,
+		regressionStandardize:          true,
+		regressionMinSamples:           15,
+		regressionPrimaryUnit:          0,
+		regressionPermutations:         0,
+		regressionMaxFeatures:          0,
 
 		correlationsTypesSpec:               "partial_cov_predictor",
 		correlationsUseCrossfitResidual:     true,
@@ -3003,7 +3003,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		microstatesAssignFromGfpPeaks: true,
 
 		// Behavior Statistics defaults
-		behaviorStatsTempControl:               0, // 0: spline
+		behaviorStatsPredictorControl:          0, // 0: spline
 		behaviorStatsAllowIIDTrials:            false,
 		behaviorStatsHierarchicalFDR:           true,
 		behaviorStatsComputeReliability:        true,

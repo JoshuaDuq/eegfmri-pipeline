@@ -166,6 +166,38 @@ class TestBehaviorCompletion(unittest.TestCase):
                 out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
             self.assertIs(out, fake_result)
 
+        def test_behavior_group_level_forwards_feature_file_selection(self):
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
+
+            cfg = DotConfig({})
+            pcfg = BehaviorPipelineConfig()
+            with patch(
+                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+                lambda self, name, config=None: (
+                    setattr(self, "config", config or cfg),
+                    setattr(self, "logger", Mock()),
+                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+                ),
+            ):
+                b = BehaviorPipeline(
+                    config=cfg,
+                    pipeline_config=pcfg,
+                    feature_files=["power"],
+                )
+
+            fake_result = SimpleNamespace(multilevel_correlations=None)
+            with patch(
+                "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
+                return_value=fake_result,
+            ) as run_group_level_analysis_mock:
+                out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
+
+            self.assertIs(out, fake_result)
+            self.assertEqual(
+                run_group_level_analysis_mock.call_args.kwargs["feature_files"],
+                ["power"],
+            )
+
 class TestBehaviorGapfill(unittest.TestCase):
         def test_behavior_helpers_and_init_logging(self):
             from eeg_pipeline.pipelines.behavior import (

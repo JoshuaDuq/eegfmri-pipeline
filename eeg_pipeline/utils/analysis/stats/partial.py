@@ -87,11 +87,22 @@ def check_collinearity(
     n_columns = design_matrix.shape[1]
     if n_columns <= 1:
         return False, 0.0
-    
+
     try:
-        correlation_matrix = np.corrcoef(design_matrix.T)
+        column_std = np.nanstd(design_matrix, axis=0)
+        variable_mask = np.isfinite(column_std) & (column_std > 0.0)
+        variable_design = design_matrix[:, variable_mask]
+        if variable_design.shape[1] <= 1:
+            return False, 0.0
+
+        correlation_matrix = np.corrcoef(variable_design, rowvar=False)
         off_diagonal_mask = ~np.eye(correlation_matrix.shape[0], dtype=bool)
-        max_correlation = float(np.max(np.abs(correlation_matrix[off_diagonal_mask])))
+        off_diagonal_values = np.abs(correlation_matrix[off_diagonal_mask])
+        finite_off_diagonal = off_diagonal_values[np.isfinite(off_diagonal_values)]
+        if finite_off_diagonal.size == 0:
+            return False, 0.0
+
+        max_correlation = float(np.max(finite_off_diagonal))
         has_collinearity = max_correlation > threshold
         return has_collinearity, max_correlation
     except (ValueError, np.linalg.LinAlgError):
@@ -478,5 +489,4 @@ def compute_partial_correlations_with_cov_predictor(
         p_cov_predictor,
         n_cov_predictor,
     )
-
 

@@ -139,7 +139,7 @@ data/bids_output/eeg/
         ├── sub-XXXX_task-YYY_run-01_eeg.vhdr   (or .set, .edf, .fif)
         ├── sub-XXXX_task-YYY_run-01_eeg.vmrk
         ├── sub-XXXX_task-YYY_run-01_eeg.eeg
-        ├── sub-XXXX_task-YYY_run-01_events.tsv         # required for behavior/fMRI alignment
+        ├── sub-XXXX_task-YYY_run-01_events.tsv         # raw BIDS events; clean aligned events are written to derivatives
         ├── sub-XXXX_task-YYY_run-01_channels.tsv        # recommended
         └── sub-XXXX_task-YYY_run-01_electrodes.tsv      # recommended
 ```
@@ -148,6 +148,9 @@ data/bids_output/eeg/
 
 Behavior and ML workflows read trial-level predictors and outcomes from BIDS
 `*_events.tsv` files. Required columns: `onset`, `duration`, `trial_type`.
+After preprocessing, the pipeline writes `*_proc-clean_events.tsv` in derivatives
+with a canonical `trial_id` column. Trialwise feature tables and behavior
+analysis use `trial_id` as the only supported alignment contract.
 Include any study-specific columns you plan to model (e.g., ratings, stimulus
 parameters, binary outcome labels).
 
@@ -382,6 +385,8 @@ eeg-pipeline features visualize --subject 0001
 
 Statistical analyses linking EEG features to behavior (pain ratings, temperature,
 conditions). All stages operate on a trial table with explicit column semantics.
+The trialwise join contract is canonical `trial_id`, not inferred paradigm
+columns.
 
 | Mode | Description |
 |------|-------------|

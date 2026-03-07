@@ -108,6 +108,38 @@ class TestFeatureIoPacOutputs(unittest.TestCase):
         self.assertTrue(eloreta_path.exists())
         self.assertFalse(lcmv_path.exists())
 
+    def test_save_all_features_persists_trial_alignment_columns_for_trialwise_tables(self):
+        features_dir = Path(tempfile.mkdtemp())
+
+        pow_df = pd.DataFrame(
+            {"power_active_alpha_global_logratio_mean": [0.1, 0.2]}
+        )
+        aligned_events = pd.DataFrame(
+            {
+                "trial_id": [10, 11],
+            }
+        )
+
+        save_all_features(
+            pow_df=pow_df,
+            pow_cols=list(pow_df.columns),
+            baseline_df=pd.DataFrame(),
+            baseline_cols=[],
+            conn_df=None,
+            conn_cols=[],
+            aper_df=None,
+            aper_cols=[],
+            features_dir=features_dir,
+            config=DotConfig({}),
+            aligned_events=aligned_events,
+        )
+
+        power_path = features_dir / "power" / "features_power.parquet"
+        saved = read_table(power_path)
+
+        self.assertIn("trial_id", saved.columns)
+        self.assertIn("power_active_alpha_global_logratio_mean", saved.columns)
+
 
 if __name__ == "__main__":
     unittest.main()

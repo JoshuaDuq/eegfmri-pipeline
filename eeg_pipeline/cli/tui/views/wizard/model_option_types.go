@@ -366,11 +366,11 @@ const (
 	// Behavior options - Regression
 	optRegressionOutcome
 	optRegressionIncludePredictor
-	optRegressionTempControl
-	optRegressionTempSplineKnots
-	optRegressionTempSplineQlow
-	optRegressionTempSplineQhigh
-	optRegressionTempSplineMinN
+	optRegressionPredictorControl
+	optRegressionPredictorSplineKnots
+	optRegressionPredictorSplineQlow
+	optRegressionPredictorSplineQhigh
+	optRegressionPredictorSplineMinN
 	optRegressionIncludeTrialOrder
 	optRegressionIncludePrev
 	optRegressionIncludeRunBlock
@@ -1039,7 +1039,7 @@ const (
 	optMLTargetsStrictRegressionContinuous
 
 	// Behavior Statistics
-	optBehaviorStatsTempControl
+	optBehaviorStatsPredictorControl
 	optBehaviorStatsAllowIIDTrials
 	optBehaviorStatsHierarchicalFDR
 	optBehaviorStatsComputeReliability

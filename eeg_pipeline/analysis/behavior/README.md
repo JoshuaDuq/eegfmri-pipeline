@@ -207,8 +207,14 @@ execution (not as a separate DAG stage), via `stages/metadata.py`:
 **Module:** `stages/trial_table.py` → `trial_table_helpers.py`
 
 Constructs the canonical trial-level DataFrame by joining aligned behavioral
-events with all named feature tables on trial identifiers.
+events with all named feature tables on the canonical `trial_id` column.
 One row per trial; one column per behavioral or EEG-feature variable.
+
+Behavior loading is strict about this contract:
+- clean events must contain `trial_id`
+- saved trialwise feature tables must contain `trial_id`
+- row-order-only alignment is not considered valid scientific evidence of
+  correspondence
 
 ---
 

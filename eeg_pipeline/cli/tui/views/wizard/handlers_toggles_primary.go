@@ -1830,12 +1830,12 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRegressionIncludePredictor:
 		m.regressionIncludePredictor = !m.regressionIncludePredictor
 		m.useDefaultAdvanced = false
-	case optRegressionTempControl:
+	case optRegressionPredictorControl:
 		if m.predictorType == 0 {
-			m.regressionTempControl = (m.regressionTempControl + 1) % 3
+			m.regressionPredictorControl = (m.regressionPredictorControl + 1) % 3
 		}
 		m.useDefaultAdvanced = false
-	case optRegressionTempSplineKnots, optRegressionTempSplineQlow, optRegressionTempSplineQhigh, optRegressionTempSplineMinN:
+	case optRegressionPredictorSplineKnots, optRegressionPredictorSplineQlow, optRegressionPredictorSplineQhigh, optRegressionPredictorSplineMinN:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optRegressionIncludeTrialOrder:
@@ -2123,8 +2123,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Behavior Statistics
-	case optBehaviorStatsTempControl:
-		m.behaviorStatsTempControl = (m.behaviorStatsTempControl + 1) % 3
+	case optBehaviorStatsPredictorControl:
+		m.behaviorStatsPredictorControl = (m.behaviorStatsPredictorControl + 1) % 3
 		m.useDefaultAdvanced = false
 	case optBehaviorStatsAllowIIDTrials:
 		m.behaviorStatsAllowIIDTrials = !m.behaviorStatsAllowIIDTrials

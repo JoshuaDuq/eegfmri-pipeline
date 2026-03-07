@@ -18,6 +18,7 @@ from eeg_pipeline.utils.data.columns import (
     find_predictor_column_in_events,
     pick_target_column,
 )
+from eeg_pipeline.utils.data.feature_alignment import drop_feature_alignment_columns
 from eeg_pipeline.utils.data.source_localization_paths import (
     source_localization_candidate_paths,
 )
@@ -735,6 +736,15 @@ def _load_subject_feature_table(
         df = read_table(path)
         if df is None or df.empty:
             logger.warning("Empty feature table for %s (%s): %s", subject_bids, fam, path)
+            continue
+        df = drop_feature_alignment_columns(df)
+        if df.empty:
+            logger.warning(
+                "Feature table contains only alignment metadata for %s (%s): %s",
+                subject_bids,
+                fam,
+                path,
+            )
             continue
 
         if expected_n_rows is None:

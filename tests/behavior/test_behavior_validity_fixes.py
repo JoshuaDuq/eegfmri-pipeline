@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -2139,6 +2140,55 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(np.isnan(float(p_value)))
         self.assertEqual(int(n_obs), 0)
 
+    def test_check_collinearity_ignores_constant_intercept_without_runtime_warning(self):
+        from eeg_pipeline.utils.analysis.stats.partial import check_collinearity
+
+        design_matrix = np.column_stack(
+            [
+                np.ones(6, dtype=float),
+                np.arange(6, dtype=float),
+                np.arange(6, dtype=float) * 2.0,
+            ]
+        )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", RuntimeWarning)
+            has_collinearity, max_correlation = check_collinearity(design_matrix)
+
+        self.assertTrue(has_collinearity)
+        self.assertAlmostEqual(max_correlation, 1.0)
+        self.assertEqual(
+            [
+                warning
+                for warning in caught
+                if "invalid value encountered in divide" in str(warning.message)
+            ],
+            [],
+        )
+
+    def test_partial_correlation_does_not_emit_runtime_warning_for_intercept_column(self):
+        from eeg_pipeline.utils.analysis.stats.partial import partial_corr_xy_given_Z
+
+        x = pd.Series([0.2, 0.4, 0.8, 1.1, 1.5, 1.9], dtype=float)
+        y = pd.Series([2.1, 2.4, 2.9, 3.1, 3.7, 4.2], dtype=float)
+        z = pd.DataFrame({"run_order": [1, 2, 3, 4, 5, 6]}, dtype=float)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", RuntimeWarning)
+            r_value, p_value, n_obs = partial_corr_xy_given_Z(x, y, z, "pearson")
+
+        self.assertTrue(np.isfinite(float(r_value)))
+        self.assertTrue(np.isfinite(float(p_value)))
+        self.assertEqual(int(n_obs), 6)
+        self.assertEqual(
+            [
+                warning
+                for warning in caught
+                if "invalid value encountered in divide" in str(warning.message)
+            ],
+            [],
+        )
+
     def test_correlate_primary_selection_non_iid_overrides_asymptotic_to_permutation(self):
         from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
 
@@ -2753,7 +2803,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(ctx.covariates_df)
         self.assertIn("trial_index", list(ctx.covariates_df.columns))
 
-    def test_feature_table_alignment_reindexes_by_shared_epoch_key(self):
+    def test_feature_table_alignment_reindexes_by_trial_id(self):
         from eeg_pipeline.context.behavior import BehaviorContext
 
         ctx = BehaviorContext(
@@ -2764,11 +2814,11 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             deriv_root=Path(tempfile.mkdtemp()),
             stats_dir=Path(tempfile.mkdtemp()),
         )
-        ctx.aligned_events = pd.DataFrame({"epoch": [2, 1], "rating": [10.0, 20.0]})
+        ctx.aligned_events = pd.DataFrame({"trial_id": [2, 1], "rating": [10.0, 20.0]})
 
         feature_df = pd.DataFrame(
             {
-                "epoch": [1, 2],
+                "trial_id": [1, 2],
                 "power_alpha": [0.1, 0.9],
             }
         )
@@ -2782,9 +2832,11 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertIsNotNone(out)
         self.assertEqual([float(v) for v in out["power_alpha"].tolist()], [0.9, 0.1])
+        self.assertNotIn("trial_id", out.columns)
         self.assertEqual(report["power"]["status"], "reindexed_by_event_keys")
+        self.assertEqual(report["power"]["keys"], ["trial_id"])
 
-    def test_feature_table_alignment_disallows_positional_only_matching_by_default(self):
+    def test_feature_table_alignment_rejects_missing_trial_id_by_default(self):
         from eeg_pipeline.context.behavior import BehaviorContext
 
         ctx = BehaviorContext(
@@ -2795,7 +2847,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             deriv_root=Path(tempfile.mkdtemp()),
             stats_dir=Path(tempfile.mkdtemp()),
         )
-        ctx.aligned_events = pd.DataFrame({"rating": [10.0, 20.0]})
+        ctx.aligned_events = pd.DataFrame({"trial_id": [1, 2], "rating": [10.0, 20.0]})
 
         feature_df = pd.DataFrame({"power_alpha": [0.1, 0.9]})
         report = {}
@@ -2807,9 +2859,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
 
         self.assertIsNone(out)
-        self.assertEqual(report["power"]["reason"], "positional_alignment_disallowed")
+        self.assertEqual(report["power"]["reason"], "missing_trial_id")
 
-    def test_feature_table_alignment_can_disallow_positional_only_matching(self):
+    def test_feature_table_alignment_rejects_missing_trial_id_under_explicit_strict_config(self):
         from eeg_pipeline.context.behavior import BehaviorContext
 
         ctx = BehaviorContext(
@@ -2820,7 +2872,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             deriv_root=Path(tempfile.mkdtemp()),
             stats_dir=Path(tempfile.mkdtemp()),
         )
-        ctx.aligned_events = pd.DataFrame({"rating": [10.0, 20.0]})
+        ctx.aligned_events = pd.DataFrame({"trial_id": [1, 2], "rating": [10.0, 20.0]})
 
         feature_df = pd.DataFrame({"power_alpha": [0.1, 0.9]})
         report = {}
@@ -2832,7 +2884,70 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
 
         self.assertIsNone(out)
-        self.assertEqual(report["power"]["reason"], "positional_alignment_disallowed")
+        self.assertEqual(report["power"]["reason"], "missing_trial_id")
+
+    def test_feature_table_alignment_reindexes_by_trial_id_and_drops_key_columns(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="task",
+            config=DotConfig({}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+        )
+        ctx.aligned_events = pd.DataFrame(
+            {
+                "trial_id": [100, 101, 102],
+                "rating": [1.0, 2.0, 3.0],
+            }
+        )
+
+        feature_df = pd.DataFrame(
+            {
+                "trial_id": [102, 100, 101],
+                "power_alpha": [0.3, 0.1, 0.2],
+            }
+        )
+        report = {}
+        out = ctx._align_single_feature_table(
+            name="power",
+            df=feature_df,
+            base_index=ctx.aligned_events.index,
+            alignment_report=report,
+        )
+
+        self.assertIsNotNone(out)
+        self.assertListEqual(out["power_alpha"].tolist(), [0.1, 0.2, 0.3])
+        self.assertNotIn("trial_id", out.columns)
+        self.assertEqual(report["power"]["status"], "reindexed_by_event_keys")
+        self.assertEqual(report["power"]["keys"], ["trial_id"])
+
+    def test_feature_table_alignment_requires_trial_id(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="task",
+            config=DotConfig({}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+        )
+        ctx.aligned_events = pd.DataFrame({"trial_id": [1, 2], "rating": [10.0, 20.0]})
+
+        feature_df = pd.DataFrame({"power_alpha": [0.1, 0.9]})
+        report = {}
+        out = ctx._align_single_feature_table(
+            name="power",
+            df=feature_df,
+            base_index=ctx.aligned_events.index,
+            alignment_report=report,
+        )
+
+        self.assertIsNone(out)
+        self.assertEqual(report["power"]["reason"], "missing_trial_id")
 
     def test_icc_stage_updates_results_and_qc_metadata(self):
         from eeg_pipeline.analysis.behavior import orchestration as orch
@@ -3242,6 +3357,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(design)
         self.assertGreaterEqual(len(design.targets), 1)
         self.assertEqual(design.targets[0], "predictor_residual_cv")
+        self.assertIn("rating", design.targets)
+        self.assertNotIn("temperature", design.targets)
 
     def test_condition_multigroup_uses_unified_fdr_pipeline(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_multigroup

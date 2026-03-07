@@ -77,7 +77,7 @@ func TestBehaviorAdvancedConfigRendersMaximalState(t *testing.T) {
 	m.predictorResidualEnabled = true
 	m.predictorResidualCrossfitEnabled = true
 	m.predictorType = 0
-	m.regressionTempControl = 2
+	m.regressionPredictorControl = 2
 	m.clusterCorrectionEnabled = true
 	m.featureFileSelected["itpc"] = true
 	m.featureFileSelected["erds"] = true

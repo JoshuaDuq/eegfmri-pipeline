@@ -63,6 +63,10 @@ from eeg_pipeline.utils.data.feature_io import (
     save_all_features,
     save_dropped_trials_log,
 )
+from eeg_pipeline.utils.data.feature_alignment import (
+    attach_feature_alignment_columns,
+    filter_feature_payload_columns,
+)
 
 
 _ACCUMULATOR_EXTRAS = ["baseline", "pac_time", "sourcecontrast"]
@@ -528,6 +532,7 @@ def _save_merged_features(
     features_dir: Path,
     config: Any,
     logger: Any,
+    aligned_events: Optional[pd.DataFrame] = None,
 ) -> None:
     """Merge and save accumulated features from multiple time ranges."""
     from eeg_pipeline.utils.config.loader import get_config_value
@@ -569,12 +574,16 @@ def _save_merged_features(
             base_name = filename.replace(".parquet", "")
             folder = _get_folder_for_feature(base_name, config)
             save_path = features_dir / folder / filename
-            write_parquet(merged_df, save_path)
+            merged_df_to_save = attach_feature_alignment_columns(
+                merged_df,
+                aligned_events,
+            )
+            write_parquet(merged_df_to_save, save_path)
             if also_save_csv:
                 from eeg_pipeline.infra.tsv import write_csv
 
                 csv_path = save_path.with_suffix(".csv")
-                write_csv(merged_df, csv_path, index=False)
+                write_csv(merged_df_to_save, csv_path, index=False)
                 logger.info("Also saved merged %s as CSV: %s", base_name, csv_path)
             subject_str = (
                 features_dir.parts[-3].replace("sub-", "")
@@ -586,7 +595,7 @@ def _save_merged_features(
             meta_path = metadata_dir / filename.replace(".parquet", ".json")
             df_attrs = getattr(merged_df, "attrs", None) or {}
             manifest = generate_manifest(
-                feature_columns=list(merged_df.columns),
+                feature_columns=filter_feature_payload_columns(merged_df.columns),
                 config=config,
                 subject=subject_str,
                 task=config.get("project.task") if config is not None else None,
@@ -1075,6 +1084,7 @@ class FeaturePipeline(PipelineBase):
                 source_contrast_cols=unpacked["source_contrast_cols"],
                 feature_qc=feature_qc or None,
                 suffix=suffix,
+                aligned_events=aligned_events,
             )
 
             trial_table_suffix = suffix if len(time_ranges) > 1 else None
@@ -1155,8 +1165,13 @@ class FeaturePipeline(PipelineBase):
             self.logger.info(
                 "Merging features from all time ranges into consolidated default files..."
             )
-            _save_merged_features(accumulated_features, features_dir, self.config, self.logger)
-
+            _save_merged_features(
+                accumulated_features,
+                features_dir,
+                self.config,
+                self.logger,
+                aligned_events=aligned_events,
+            )
 
             merged_extraction_config = {
                 "cli_command": kwargs.get("cli_command"),

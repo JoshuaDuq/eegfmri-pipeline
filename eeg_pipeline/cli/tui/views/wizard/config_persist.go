@@ -447,11 +447,11 @@ func (m Model) ExportConfig() map[string]interface{} {
 	// Regression
 	cfg["regressionOutcome"] = m.regressionOutcome
 	cfg["regressionIncludePredictor"] = m.regressionIncludePredictor
-	cfg["regressionTempControl"] = m.regressionTempControl
-	cfg["regressionTempSplineKnots"] = m.regressionTempSplineKnots
-	cfg["regressionTempSplineQlow"] = m.regressionTempSplineQlow
-	cfg["regressionTempSplineQhigh"] = m.regressionTempSplineQhigh
-	cfg["regressionTempSplineMinN"] = m.regressionTempSplineMinN
+	cfg["regressionPredictorControl"] = m.regressionPredictorControl
+	cfg["regressionPredictorSplineKnots"] = m.regressionPredictorSplineKnots
+	cfg["regressionPredictorSplineQlow"] = m.regressionPredictorSplineQlow
+	cfg["regressionPredictorSplineQhigh"] = m.regressionPredictorSplineQhigh
+	cfg["regressionPredictorSplineMinN"] = m.regressionPredictorSplineMinN
 	cfg["regressionIncludeTrialOrder"] = m.regressionIncludeTrialOrder
 	cfg["regressionIncludePrev"] = m.regressionIncludePrev
 	cfg["regressionIncludeRunBlock"] = m.regressionIncludeRunBlock
@@ -1029,7 +1029,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["conditionFeaturesSpec"] = m.conditionFeaturesSpec
 	cfg["temporalFeaturesSpec"] = m.temporalFeaturesSpec
 	cfg["clusterFeaturesSpec"] = m.clusterFeaturesSpec
-	cfg["behaviorStatsTempControl"] = m.behaviorStatsTempControl
+	cfg["behaviorStatsPredictorControl"] = m.behaviorStatsPredictorControl
 	cfg["behaviorStatsAllowIIDTrials"] = m.behaviorStatsAllowIIDTrials
 	cfg["behaviorStatsHierarchicalFDR"] = m.behaviorStatsHierarchicalFDR
 	cfg["behaviorStatsComputeReliability"] = m.behaviorStatsComputeReliability
@@ -1595,11 +1595,11 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	// Regression
 	m.regressionOutcome = getInt("regressionOutcome", m.regressionOutcome)
 	m.regressionIncludePredictor = getBool("regressionIncludePredictor", m.regressionIncludePredictor)
-	m.regressionTempControl = getInt("regressionTempControl", m.regressionTempControl)
-	m.regressionTempSplineKnots = getInt("regressionTempSplineKnots", m.regressionTempSplineKnots)
-	m.regressionTempSplineQlow = getFloat("regressionTempSplineQlow", m.regressionTempSplineQlow)
-	m.regressionTempSplineQhigh = getFloat("regressionTempSplineQhigh", m.regressionTempSplineQhigh)
-	m.regressionTempSplineMinN = getInt("regressionTempSplineMinN", m.regressionTempSplineMinN)
+	m.regressionPredictorControl = getInt("regressionPredictorControl", m.regressionPredictorControl)
+	m.regressionPredictorSplineKnots = getInt("regressionPredictorSplineKnots", m.regressionPredictorSplineKnots)
+	m.regressionPredictorSplineQlow = getFloat("regressionPredictorSplineQlow", m.regressionPredictorSplineQlow)
+	m.regressionPredictorSplineQhigh = getFloat("regressionPredictorSplineQhigh", m.regressionPredictorSplineQhigh)
+	m.regressionPredictorSplineMinN = getInt("regressionPredictorSplineMinN", m.regressionPredictorSplineMinN)
 	m.regressionIncludeTrialOrder = getBool("regressionIncludeTrialOrder", m.regressionIncludeTrialOrder)
 	m.regressionIncludePrev = getBool("regressionIncludePrev", m.regressionIncludePrev)
 	m.regressionIncludeRunBlock = getBool("regressionIncludeRunBlock", m.regressionIncludeRunBlock)
@@ -2188,7 +2188,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.conditionFeaturesSpec = getString("conditionFeaturesSpec", m.conditionFeaturesSpec)
 	m.temporalFeaturesSpec = getString("temporalFeaturesSpec", m.temporalFeaturesSpec)
 	m.clusterFeaturesSpec = getString("clusterFeaturesSpec", m.clusterFeaturesSpec)
-	m.behaviorStatsTempControl = getInt("behaviorStatsTempControl", m.behaviorStatsTempControl)
+	m.behaviorStatsPredictorControl = getInt("behaviorStatsPredictorControl", m.behaviorStatsPredictorControl)
 	m.behaviorStatsAllowIIDTrials = getBool("behaviorStatsAllowIIDTrials", m.behaviorStatsAllowIIDTrials)
 	m.behaviorStatsHierarchicalFDR = getBool("behaviorStatsHierarchicalFDR", m.behaviorStatsHierarchicalFDR)
 	m.behaviorStatsComputeReliability = getBool("behaviorStatsComputeReliability", m.behaviorStatsComputeReliability)

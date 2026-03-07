@@ -654,7 +654,7 @@ behavior_analysis:
     enabled: true
     format: "parquet"   # "parquet" (default, recommended) or "tsv"
     # If true, fail when feature/event alignment can only be verified by positional
-    # row order (no shared event keys like epoch/trial_index available).
+    # row order (no canonical trial_id available).
     disallow_positional_alignment: true
 
   # Trial order validation (used when control_trial_order=true)
@@ -747,7 +747,7 @@ behavior_analysis:
     types: ["partial_cov_predictor"]
     target_column: ""                 # Empty = auto-resolve from event_columns.outcome
     power_segment_preference: ""      # Empty = default/auto segment selection
-    targets: ["rating", "temperature", "predictor_residual"]
+    targets: []                     # Empty = auto-resolve outcome column and optional residual target
     compute_change_scores: true
     loso_stability: true
     compute_bayes_factors: false

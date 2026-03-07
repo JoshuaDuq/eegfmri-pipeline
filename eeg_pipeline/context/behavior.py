@@ -27,6 +27,11 @@ from eeg_pipeline.utils.data.columns import (
     resolve_outcome_column,
     resolve_predictor_column,
 )
+from eeg_pipeline.utils.data.feature_alignment import (
+    TRIAL_ID_COLUMN,
+    drop_feature_alignment_columns,
+    require_trial_id_column,
+)
 
 
 ###################################################################
@@ -564,7 +569,7 @@ class BehaviorContext:
                 if strict_positional:
                     self.logger.error(
                         "Feature table '%s' for sub-%s is aligned by positional index only. "
-                        "Set explicit trial/event key columns (for example epoch or trial_index) "
+                        "Persist canonical trial_id in feature tables and clean events, "
                         "or disable behavior_analysis.trial_table.disallow_positional_alignment "
                         "to override.",
                         name,
@@ -585,19 +590,13 @@ class BehaviorContext:
                 alignment_report[name] = {"status": "aligned_by_position_only"}
             else:
                 alignment_report[name] = {"status": "aligned"}
-            return df
+            return drop_feature_alignment_columns(df)
 
         return self._reindex_feature_table(name, df, base_index, alignment_report)
 
     def _alignment_key_candidates(self) -> List[Tuple[str, ...]]:
         """Ordered key candidates for event-level row alignment checks."""
-        return [
-            ("epoch",),
-            ("trial_index",),
-            ("trial",),
-            ("trial_number",),
-            ("onset", "duration"),
-        ]
+        return [("trial_id",)]
 
     def _is_positional_range_index(self, left: pd.Index, right: pd.Index) -> bool:
         if not isinstance(left, pd.RangeIndex) or not isinstance(right, pd.RangeIndex):
@@ -635,6 +634,22 @@ class BehaviorContext:
         attempted = False
         errors: List[str] = []
         events = self.aligned_events
+        require_trial_id_column(
+            events,
+            context=f"Aligned events for sub-{self.subject}",
+        )
+        if TRIAL_ID_COLUMN not in df.columns:
+            alignment_report[name] = {
+                "status": "failed",
+                "reason": "missing_trial_id",
+            }
+            self.logger.error(
+                "Feature table '%s' for sub-%s is missing required canonical alignment column 'trial_id'. "
+                "Re-run feature extraction with current clean events.",
+                name,
+                self.subject,
+            )
+            return None, True
 
         for key_tuple in self._alignment_key_candidates():
             keys = [k for k in key_tuple if k in events.columns and k in df.columns]
@@ -652,6 +667,7 @@ class BehaviorContext:
             if feature_keys.equals(events_keys):
                 aligned_df = df.copy()
                 aligned_df.index = base_index
+                aligned_df = drop_feature_alignment_columns(aligned_df)
                 alignment_report[name] = {
                     "status": "aligned_by_event_keys",
                     "keys": keys,
@@ -671,6 +687,7 @@ class BehaviorContext:
             src_order = merged["__src_row__"].to_numpy(dtype=int)
             aligned_df = df.iloc[src_order].copy()
             aligned_df.index = base_index
+            aligned_df = drop_feature_alignment_columns(aligned_df)
             alignment_report[name] = {
                 "status": "reindexed_by_event_keys",
                 "keys": keys,
@@ -684,7 +701,7 @@ class BehaviorContext:
                 "details": errors[:3],
             }
             self.logger.error(
-                "Feature table '%s' for sub-%s could not be aligned by shared event keys. Details: %s",
+                "Feature table '%s' for sub-%s could not be aligned by canonical trial_id. Details: %s",
                 name,
                 self.subject,
                 "; ".join(errors[:3]) if errors else "unknown",
@@ -707,6 +724,7 @@ class BehaviorContext:
 
             if sorted_df_index.equals(sorted_base_index):
                 reindexed_df = df.loc[base_index]
+                reindexed_df = drop_feature_alignment_columns(reindexed_df)
                 alignment_report[name] = {"status": "reindexed_by_label"}
                 return reindexed_df
 

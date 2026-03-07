@@ -114,7 +114,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	effectivePredictorControl := m.controlPredictor
 	// "none" for stats predictor control implies disabling global predictor control.
-	if m.behaviorStatsTempControl == 2 {
+	if m.behaviorStatsPredictorControl == 2 {
 		effectivePredictorControl = false
 	}
 	appendBoolPair(effectivePredictorControl, "--predictor-control", "--no-predictor-control")
@@ -216,16 +216,16 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			"--regression-include-predictor",
 			"--no-regression-include-predictor",
 		)
-		tempCtrl := []string{"linear", "outcome_hat", "spline"}
-		if m.regressionTempControl >= 0 && m.regressionTempControl < len(tempCtrl) && m.regressionTempControl != 0 {
-			args = append(args, "--regression-predictor-control", tempCtrl[m.regressionTempControl])
+		predictorControls := []string{"linear", "outcome_hat", "spline"}
+		if m.regressionPredictorControl >= 0 && m.regressionPredictorControl < len(predictorControls) && m.regressionPredictorControl != 0 {
+			args = append(args, "--regression-predictor-control", predictorControls[m.regressionPredictorControl])
 		}
-		if m.regressionTempControl == 2 {
-			args = append(args, "--regression-predictor-spline-knots", fmt.Sprintf("%d", m.regressionTempSplineKnots))
-			args = append(args, "--regression-predictor-spline-quantile-low", fmt.Sprintf("%.3f", m.regressionTempSplineQlow))
-			args = append(args, "--regression-predictor-spline-quantile-high", fmt.Sprintf("%.3f", m.regressionTempSplineQhigh))
-			if m.regressionTempSplineMinN != 12 {
-				args = append(args, "--regression-predictor-spline-min-samples", fmt.Sprintf("%d", m.regressionTempSplineMinN))
+		if m.regressionPredictorControl == 2 {
+			args = append(args, "--regression-predictor-spline-knots", fmt.Sprintf("%d", m.regressionPredictorSplineKnots))
+			args = append(args, "--regression-predictor-spline-quantile-low", fmt.Sprintf("%.3f", m.regressionPredictorSplineQlow))
+			args = append(args, "--regression-predictor-spline-quantile-high", fmt.Sprintf("%.3f", m.regressionPredictorSplineQhigh))
+			if m.regressionPredictorSplineMinN != 12 {
+				args = append(args, "--regression-predictor-spline-min-samples", fmt.Sprintf("%d", m.regressionPredictorSplineMinN))
 			}
 		}
 		appendBoolPair(
@@ -492,9 +492,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	appendBoolPair(m.alsoSaveCsv, "--also-save-csv", "--no-also-save-csv")
 
 	// Behavior Statistics
-	tempControls := []string{"spline", "linear", "none"}
-	if m.behaviorStatsTempControl >= 0 && m.behaviorStatsTempControl < len(tempControls) && m.behaviorStatsTempControl != 2 {
-		args = append(args, "--stats-predictor-control", tempControls[m.behaviorStatsTempControl])
+	predictorControls := []string{"spline", "linear", "none"}
+	if m.behaviorStatsPredictorControl >= 0 && m.behaviorStatsPredictorControl < len(predictorControls) && m.behaviorStatsPredictorControl != 2 {
+		args = append(args, "--stats-predictor-control", predictorControls[m.behaviorStatsPredictorControl])
 	}
 	appendBoolPair(
 		m.behaviorStatsAllowIIDTrials,

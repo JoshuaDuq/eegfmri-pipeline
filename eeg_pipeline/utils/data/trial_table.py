@@ -16,6 +16,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.utils.data.feature_alignment import drop_feature_alignment_columns
+
 
 @dataclass
 class TrialTableBuildResult:
@@ -254,6 +256,9 @@ def combine_feature_tables(
 
     for name, df in feature_tables:
         if not _is_dataframe_valid(df):
+            continue
+        df = drop_feature_alignment_columns(df)
+        if df.empty:
             continue
 
         if base_index is None:
