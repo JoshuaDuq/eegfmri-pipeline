@@ -676,6 +676,25 @@ def _compute_p_primary_columns(
     return p_raw, pd.Series("asymptotic", index=df.index)
 
 
+def _annotate_condition_effect_reportability(
+    df: pd.DataFrame,
+    config: Optional[Any],
+) -> Tuple[pd.DataFrame, float]:
+    """Annotate condition-effect results with the configured reporting threshold."""
+    threshold = float(
+        get_config_value(
+            config,
+            "behavior_analysis.condition.effect_size_threshold",
+            0.5,
+        )
+    )
+    hedges = pd.to_numeric(df.get("hedges_g", np.nan), errors="coerce")
+    annotated = df.copy()
+    annotated["effect_size_threshold"] = threshold
+    annotated["reportable_effect"] = hedges.abs().ge(threshold).fillna(False).astype(bool)
+    return annotated, threshold
+
+
 def compute_condition_effects(
     features_df: pd.DataFrame,
     cond_a_mask: np.ndarray,
@@ -771,20 +790,16 @@ def compute_condition_effects(
     p_primary_values = pd.to_numeric(df["p_primary"], errors="coerce").values
     df["q_value"] = fdr_bh(p_primary_values, alpha=fdr_alpha, config=config)
     df["significant_fdr"] = df["q_value"] < fdr_alpha
+    df, effect_threshold = _annotate_condition_effect_reportability(df, config)
 
     df = df.sort_values("hedges_g", key=abs, ascending=False)
 
     if logger:
         n_significant = df["significant_fdr"].sum()
-        effect_threshold = float(
-            get_config_value(
-                config, "behavior_analysis.condition.effect_size_threshold", 0.8
-            )
-        )
-        n_large_effect = (df["hedges_g"].abs() >= effect_threshold).sum()
+        n_reportable = int(df["reportable_effect"].sum())
         logger.info(
             f"Condition effects summary: {n_significant}/{len(df)} FDR significant, "
-            f"{n_large_effect} large effects (|g|≥{effect_threshold:.3g})"
+            f"{n_reportable} reportable effects (|g|≥{effect_threshold:.3g})"
         )
 
     return df
@@ -931,6 +946,7 @@ def compute_multigroup_condition_effects(
     p_values = pd.to_numeric(df["p_value"], errors="coerce").values
     df["q_value"] = fdr_bh(p_values, alpha=fdr_alpha, config=config)
     df["significant_fdr"] = df["q_value"] < fdr_alpha
+    df, effect_threshold = _annotate_condition_effect_reportability(df, config)
     
     df["comparison_type"] = "multigroup"
     df["analysis_kind"] = "condition_multigroup"
@@ -940,8 +956,10 @@ def compute_multigroup_condition_effects(
     if logger:
         n_significant = df["significant_fdr"].sum()
         n_tests = len(df)
+        n_reportable = int(df["reportable_effect"].sum())
         logger.info(
-            f"Multi-group condition effects: {n_significant}/{n_tests} FDR significant"
+            f"Multi-group condition effects: {n_significant}/{n_tests} FDR significant, "
+            f"{n_reportable} reportable effects (|g|≥{effect_threshold:.3g})"
         )
     
     return df

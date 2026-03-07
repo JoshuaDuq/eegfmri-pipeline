@@ -119,9 +119,11 @@ def compute_trial_table_input_hash(ctx: BehaviorContext) -> str:
                 index=True,
             ).to_numpy(dtype=np.uint64)
             events_hash = hashlib.sha256(events_hash_raw.tobytes()).hexdigest()
-        except Exception:
-            cols = ",".join(str(c) for c in events.columns)
-            events_hash = f"fallback:{len(events)}:{events.shape[1]}:{cols}"
+        except Exception as exc:
+            raise RuntimeError(
+                "Trial-table input hashing failed for aligned_events. "
+                "Refusing coarse fallback because it can silently reuse stale trial tables."
+            ) from exc
         parts.append(f"events_hash={events_hash}")
     else:
         parts.append("events_hash=none")

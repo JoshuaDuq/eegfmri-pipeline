@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_bool, get_config_value
+from eeg_pipeline.utils.config.loader import get_config_bool, get_config_int, get_config_value
 
 
 def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
@@ -73,10 +73,17 @@ def stage_condition_column_impl(
     primary_unit = str(get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial")).strip().lower()
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
     perm_enabled = get_config_bool(ctx.config, "behavior_analysis.condition.permutation.enabled", False)
-    if primary_unit in {"trial", "trialwise"} and not perm_enabled and not allow_iid_trials:
+    n_perm = get_config_int(
+        ctx.config,
+        "behavior_analysis.condition.permutation.n_permutations",
+        get_config_int(ctx.config, "behavior_analysis.statistics.n_permutations", 0),
+    )
+    if primary_unit in {"trial", "trialwise"} and (not perm_enabled or n_perm <= 0) and not allow_iid_trials:
         raise ValueError(
             "Trial-level condition comparisons require a valid non-i.i.d inference method. "
-            "Enable permutation testing (behavior_analysis.condition.permutation.enabled=true) "
+            "Enable permutation testing with a positive permutation count "
+            "(behavior_analysis.condition.permutation.enabled=true and "
+            "behavior_analysis.condition.permutation.n_permutations>0) "
             "or use run-level aggregation (behavior_analysis.condition.primary_unit=run_mean). "
             "Set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
         )

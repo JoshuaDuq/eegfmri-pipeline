@@ -30,8 +30,10 @@ def stage_report_impl(
     if df_trials is not None and not df_trials.empty:
         n_features = int(sum(1 for c in df_trials.columns if str(c).startswith(tuple(feature_prefixes))))
 
-    def _read_tsv(path: Path) -> pd.DataFrame:
-        return pd.read_csv(path, sep="\t")
+    def _read_table(path: Path) -> pd.DataFrame:
+        from eeg_pipeline.infra.tsv import read_table
+
+        return read_table(path)
 
     def _sig_counts(df: pd.DataFrame) -> Dict[str, Any]:
         out: Dict[str, Any] = {"n": int(len(df))}
@@ -39,19 +41,37 @@ def stage_report_impl(
             if col in df.columns:
                 vals = pd.to_numeric(df[col], errors="coerce")
                 out[f"n_sig_{col}"] = int((vals < alpha).sum()) if vals.notna().any() else 0
+        if "reportable_effect" in df.columns:
+            reportable = df["reportable_effect"].fillna(False).astype(bool)
+            out["n_reportable_effect"] = int(reportable.sum())
         return out
 
     def _top_rows(df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
+        if "reportable_effect" in out.columns:
+            reportable = out["reportable_effect"].fillna(False).astype(bool)
+            out = out.loc[reportable]
+            if out.empty:
+                return out
         pcols = [c for c in ["q_global", "p_fdr", "p_primary"] if c in df.columns]
         if not pcols:
-            return df.head(0)
+            return out.head(0)
         pcol = pcols[0]
-        out = df.copy()
         out[pcol] = pd.to_numeric(out[pcol], errors="coerce")
         out = out.sort_values(pcol, ascending=True)
         keep = [
             c
-            for c in ["feature", "target", "r_primary", "beta_feature", "hedges_g", "p_primary", "p_fdr", "q_global"]
+            for c in [
+                "feature",
+                "target",
+                "r_primary",
+                "beta_feature",
+                "hedges_g",
+                "reportable_effect",
+                "p_primary",
+                "p_fdr",
+                "q_global",
+            ]
             if c in out.columns
         ]
         return out[keep].head(max(1, int(top_n))) if keep else out.head(0)
@@ -103,12 +123,12 @@ def stage_report_impl(
     lines.append(f"- Predictor column: `{predictor_col or 'auto'}`")
     lines.append(f"- Global FDR alpha: `{alpha}`")
 
-    tsvs = [p for p in files if p.suffix == ".tsv"]
-    if tsvs:
+    table_paths = [p for p in files if p.suffix in {".tsv", ".parquet"}]
+    if table_paths:
         lines.append("")
         lines.append("## Outputs")
-        for p in tsvs:
-            df = _read_tsv(p)
+        for p in table_paths:
+            df = _read_table(p)
             if df.empty:
                 lines.append(f"- `{p.name}`: (empty)")
                 continue
@@ -117,6 +137,8 @@ def stage_report_impl(
             for k in ["n_sig_q_global", "n_sig_p_fdr", "n_sig_p_primary"]:
                 if k in counts:
                     sig_bits.append(f"{k}={counts[k]}")
+            if "n_reportable_effect" in counts:
+                sig_bits.append(f"n_reportable_effect={counts['n_reportable_effect']}")
             sig_str = ", ".join(sig_bits) if sig_bits else "no p-columns"
             lines.append(f"- `{p.name}`: n={counts['n']}, {sig_str}")
 

@@ -558,7 +558,7 @@ class BehaviorContext:
                     get_config_bool(
                         self.config,
                         "behavior_analysis.trial_table.disallow_positional_alignment",
-                        False,
+                        True,
                     )
                 )
                 if strict_positional:

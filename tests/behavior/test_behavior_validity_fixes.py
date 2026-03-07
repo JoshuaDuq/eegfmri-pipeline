@@ -619,6 +619,47 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
         self.assertEqual(str(out.iloc[0]["p_primary_source"]), "perm_missing_required")
 
+    def test_condition_effects_mark_reportable_effects_from_threshold(self):
+        from eeg_pipeline.utils.analysis.stats.effect_size import compute_condition_effects
+
+        features = pd.DataFrame(
+            {
+                "power_big": [1.0, 2.0, 10.0, 11.0],
+                "power_small": [1.0, 2.0, 1.1, 2.1],
+            }
+        )
+        cond_a_mask = np.array([True, True, False, False], dtype=bool)
+        cond_b_mask = ~cond_a_mask
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "effect_size_threshold": 0.5,
+                        "permutation": {"enabled": False},
+                    }
+                }
+            }
+        )
+
+        out = compute_condition_effects(
+            features_df=features,
+            cond_a_mask=cond_a_mask,
+            cond_b_mask=cond_b_mask,
+            min_samples=2,
+            fdr_alpha=0.05,
+            n_jobs=1,
+            config=cfg,
+            groups=None,
+        )
+
+        self.assertFalse(out.empty)
+        self.assertIn("reportable_effect", out.columns)
+        self.assertIn("effect_size_threshold", out.columns)
+        by_feature = out.set_index("feature")
+        self.assertTrue(bool(by_feature.loc["power_big", "reportable_effect"]))
+        self.assertFalse(bool(by_feature.loc["power_small", "reportable_effect"]))
+        self.assertAlmostEqual(float(by_feature.loc["power_big", "effect_size_threshold"]), 0.5, places=12)
+
     def test_permutation_groups_with_singletons_raise_by_default(self):
         from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
 
@@ -1465,6 +1506,17 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             resolved = stage_trial_table(ctx, SimpleNamespace())
         self.assertEqual(resolved, out_path)
+
+    def test_trial_table_input_hash_raises_when_event_hashing_fails(self):
+        from eeg_pipeline.analysis.behavior.trial_table_helpers import compute_trial_table_input_hash
+
+        ctx = self._ctx(DotConfig({}))
+        ctx.aligned_events = pd.DataFrame({"epoch": [1, 2], "rating": [10.0, 20.0]})
+        ctx.iter_feature_tables = lambda: []
+
+        with patch("pandas.util.hash_pandas_object", side_effect=TypeError("hash failed")):
+            with self.assertRaises(RuntimeError):
+                compute_trial_table_input_hash(ctx)
 
     def test_trial_table_contract_validation_rejects_schema_mismatch(self):
         from eeg_pipeline.analysis.behavior.orchestration import create_behavior_runtime
@@ -2732,6 +2784,31 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual([float(v) for v in out["power_alpha"].tolist()], [0.9, 0.1])
         self.assertEqual(report["power"]["status"], "reindexed_by_event_keys")
 
+    def test_feature_table_alignment_disallows_positional_only_matching_by_default(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="task",
+            config=DotConfig({}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+        )
+        ctx.aligned_events = pd.DataFrame({"rating": [10.0, 20.0]})
+
+        feature_df = pd.DataFrame({"power_alpha": [0.1, 0.9]})
+        report = {}
+        out = ctx._align_single_feature_table(
+            name="power",
+            df=feature_df,
+            base_index=ctx.aligned_events.index,
+            alignment_report=report,
+        )
+
+        self.assertIsNone(out)
+        self.assertEqual(report["power"]["reason"], "positional_alignment_disallowed")
+
     def test_feature_table_alignment_can_disallow_positional_only_matching(self):
         from eeg_pipeline.context.behavior import BehaviorContext
 
@@ -2857,6 +2934,66 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(bool(out["paired_test"]))
         self.assertTrue(np.isfinite(float(out["p_perm"])))
 
+    def test_group_correlations_use_configured_permutation_scheme(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        df_a = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, 24),
+                "power_alpha": np.linspace(0.1, 1.2, 24),
+                "run_id": np.repeat([1, 2, 3], 8),
+            }
+        )
+        df_b = pd.DataFrame(
+            {
+                "rating": np.linspace(12, 72, 24),
+                "power_alpha": np.linspace(0.2, 1.3, 24),
+                "run_id": np.repeat([1, 2, 3], 8),
+            }
+        )
+        captured_schemes = []
+
+        def _perm(n, rng, groups=None, scheme="shuffle", strict=True):
+            captured_schemes.append(str(scheme))
+            return np.arange(n, dtype=int)
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df_a, df_b],
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.permutation.permute_within_groups",
+            side_effect=_perm,
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+            side_effect=lambda df, **_kwargs: df,
+        ):
+            out = run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=DotConfig(
+                    {
+                        "behavior_analysis": {
+                            "permutation": {"scheme": "circular_shift"},
+                        }
+                    }
+                ),
+                logger=Mock(),
+                use_block_permutation=True,
+                n_perm=2,
+                target_col="rating",
+            )
+
+        self.assertFalse(out.empty)
+        self.assertTrue(captured_schemes)
+        self.assertEqual(set(captured_schemes), {"circular_shift"})
+        self.assertEqual(str(out.iloc[0]["permutation_scheme"]), "circular_shift")
+
     def test_group_correlations_block_permutation_failure_sets_nan_instead_of_fallback(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
 
@@ -2906,6 +3043,85 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
         self.assertEqual(str(out.iloc[0]["p_primary_kind"]), "perm_missing_required")
         self.assertIn("failed", str(out.iloc[0]["permutation_method"]))
+
+    def test_condition_stage_requires_positive_trialwise_permutation_count_in_non_iid_mode(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_condition_column
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "compare_column": "binary_outcome",
+                        "primary_unit": "trial",
+                        "compare_values": [1, 0],
+                        "permutation": {"enabled": True, "n_permutations": 0},
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                    "run_adjustment": {"column": "run_id"},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "binary_outcome": [1, 0, 1, 0],
+                "power_alpha": [0.2, 0.4, 0.8, 1.0],
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "positive permutation count"):
+            stage_condition_column(
+                ctx,
+                SimpleNamespace(fdr_alpha=0.05, n_jobs=1, min_samples=2),
+                df_trials=df_trials,
+                feature_cols=["power_alpha"],
+            )
+
+    def test_subject_report_reads_parquet_tables_and_filters_to_reportable_effects(self):
+        from eeg_pipeline.analysis.behavior.stages.report import stage_report_impl
+
+        ctx = self._ctx(DotConfig({"behavior_analysis": {"report": {"top_n": 5}}}))
+        condition_dir = ctx.stats_dir / "condition_effects"
+        condition_dir.mkdir(parents=True, exist_ok=True)
+        condition_path = condition_dir / "condition_effects_column.parquet"
+        condition_path.write_bytes(b"PAR1")
+
+        def _get_stats_dir(_ctx, kind):
+            out_dir = _ctx.stats_dir / kind
+            out_dir.mkdir(parents=True, exist_ok=True)
+            return out_dir
+
+        condition_df = pd.DataFrame(
+            {
+                "feature": ["power_big", "power_small"],
+                "hedges_g": [1.2, 0.1],
+                "reportable_effect": [True, False],
+                "p_primary": [0.01, 0.02],
+            }
+        )
+
+        with patch("eeg_pipeline.infra.tsv.read_table", return_value=condition_df):
+            report_path = stage_report_impl(
+                ctx,
+                SimpleNamespace(
+                    method="spearman",
+                    method_label="spearman",
+                    control_predictor=True,
+                    control_trial_order=True,
+                    fdr_alpha=0.05,
+                ),
+                feature_suffix_from_context_fn=lambda _ctx: "",
+                get_config_int_fn=lambda _cfg, _key, default: default,
+                load_trial_table_df_fn=lambda _ctx: pd.DataFrame({"power_alpha": [0.1], "rating": [10.0]}),
+                get_stats_subfolder_fn=_get_stats_dir,
+                feature_prefixes=("power_",),
+            )
+
+        text = report_path.read_text(encoding="utf-8")
+        self.assertIn("condition_effects_column.parquet", text)
+        self.assertIn("power_big", text)
+        self.assertNotIn("power_small", text)
 
     def test_temporal_stats_requires_cluster_correction_when_iid_disallowed(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats

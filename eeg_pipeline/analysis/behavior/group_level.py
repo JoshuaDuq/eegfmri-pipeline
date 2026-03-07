@@ -17,6 +17,20 @@ from eeg_pipeline.utils.data.columns import resolve_outcome_column, resolve_pred
 _PARTIAL_DESIGN_CONDITION_THRESHOLD = 1e10
 
 
+def _resolve_group_level_permutation_scheme(config: Any) -> str:
+    """Resolve the configured permutation scheme for group-level inference."""
+    scheme = str(
+        get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")
+        or "shuffle"
+    ).strip().lower()
+    if scheme not in {"shuffle", "circular_shift"}:
+        raise ValueError(
+            "Unsupported behavior_analysis.permutation.scheme for group-level correlations: "
+            f"{scheme!r}. Expected 'shuffle' or 'circular_shift'."
+        )
+    return scheme
+
+
 def _resolve_group_level_block_column(df: pd.DataFrame, config: Any) -> Optional[str]:
     configured_run_col = str(
         get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id"
@@ -164,6 +178,7 @@ def run_group_level_correlations_impl(
 
     combined = pd.concat(all_trials, ignore_index=True)
     correlation_method = resolve_correlation_method(config, logger=logger, default="spearman")
+    permutation_scheme = _resolve_group_level_permutation_scheme(config)
 
     target_column = _resolve_group_level_target_column(combined, config, target_col)
     if target_column is None or target_column not in combined.columns:
@@ -381,19 +396,21 @@ def run_group_level_correlations_impl(
                             if not payload.get("can_block_permute", False) or payload.get("block_sub") is None:
                                 permutation_failed = True
                                 break
-                            try:
-                                perm_idx = permute_within_groups(
-                                    len(y_vals),
-                                    rng,
-                                    np.asarray(payload["block_sub"], dtype=object),
-                                    scheme="shuffle",
-                                    strict=True,
-                                )
-                            except ValueError:
-                                permutation_failed = True
-                                break
+                            groups_for_perm = np.asarray(payload["block_sub"], dtype=object)
                         else:
-                            perm_idx = rng.permutation(len(y_vals))
+                            groups_for_perm = None
+
+                        try:
+                            perm_idx = permute_within_groups(
+                                len(y_vals),
+                                rng,
+                                groups_for_perm,
+                                scheme=permutation_scheme,
+                                strict=True,
+                            )
+                        except ValueError:
+                            permutation_failed = True
+                            break
 
                         if payload.get("uses_partial", False):
                             partial_state = payload.get("partial_state")
@@ -469,6 +486,7 @@ def run_group_level_correlations_impl(
                 "ci_lower_2_5": ci_lower,
                 "ci_upper_97_5": ci_upper,
                 "permutation_method": perm_method,
+                "permutation_scheme": permutation_scheme if int(n_perm) > 0 else None,
                 "n_perm_requested": int(n_perm),
                 "n_perm_effective": n_perm_effective,
                 "n_perm": n_perm_effective,

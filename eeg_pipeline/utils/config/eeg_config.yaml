@@ -655,7 +655,7 @@ behavior_analysis:
     format: "parquet"   # "parquet" (default, recommended) or "tsv"
     # If true, fail when feature/event alignment can only be verified by positional
     # row order (no shared event keys like epoch/trial_index available).
-    disallow_positional_alignment: false
+    disallow_positional_alignment: true
 
   # Trial order validation (used when control_trial_order=true)
   trial_order:
@@ -764,7 +764,7 @@ behavior_analysis:
   condition:
     enabled: true
     fail_fast: true
-    effect_size_threshold: 0.5  # Minimum Cohen's d to report
+    effect_size_threshold: 0.5  # Minimum |Hedges' g| flagged as reportable/highlighted in condition reports
     compare_column: ""          # Column to split by (empty = use event_columns.binary_outcome)
     compare_values: []           # Explicit values to compare. Leave empty only for binary columns with exactly 2 observed levels.
     compare_labels: null         # Optional labels for compare_values (same length)
