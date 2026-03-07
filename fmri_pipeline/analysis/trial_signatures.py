@@ -16,6 +16,8 @@ from fmri_pipeline.utils.bold_discovery import (
     discover_fmriprep_preproc_bold as _discover_fmriprep_preproc_bold,
     get_tr_from_bold as _get_tr_from_bold,
     select_confounds as _select_confounds,
+    select_consistent_run_source,
+    validate_design_matrices as _validate_design_matrices,
 )
 from fmri_pipeline.utils.text import safe_slug as _safe_slug
 
@@ -188,7 +190,7 @@ class TrialInfo:
     run: int
     run_label: str
     trial_index: int
-    condition: str  # "A" | "B"
+    condition: str  # "A" | "B" | signature group label
     regressor: str
     onset: float
     duration: float
@@ -273,6 +275,7 @@ def _discover_runs(
     runs: Optional[List[int]],
     input_source: str,
     fmriprep_space: Optional[str],
+    require_fmriprep: bool,
 ) -> List[Tuple[int, Path, Path, Optional[Path]]]:
     """
     Return list of (run_num, bold_path, events_path, confounds_path).
@@ -305,6 +308,21 @@ def _discover_runs(
     if not run_nums:
         raise FileNotFoundError(f"No runs found for subject {subject}, task {task} in {func_dir}")
 
+    selected_input_source = str(input_source or "bids_raw").strip().lower()
+    preproc_by_run: Dict[int, Optional[Path]] = {}
+    if selected_input_source == "fmriprep" and bids_derivatives is not None:
+        selected_input_source, preproc_by_run = select_consistent_run_source(
+            run_numbers=run_nums,
+            discover_preproc_bold=lambda run_num: _discover_fmriprep_preproc_bold(
+                bids_derivatives=bids_derivatives,
+                subject=sub_label,
+                task=task,
+                run_num=run_num,
+                space=fmriprep_space,
+            ),
+            require_fmriprep=require_fmriprep,
+        )
+
     out: List[Tuple[int, Path, Path, Optional[Path]]] = []
     for run_num in run_nums:
         events_patterns = [
@@ -322,22 +340,15 @@ def _discover_runs(
         bold_path: Optional[Path] = None
         confounds_path: Optional[Path] = None
 
-        if input_source == "fmriprep" and bids_derivatives is not None:
-            bold_path = _discover_fmriprep_preproc_bold(
-                bids_derivatives=bids_derivatives,
-                subject=sub_label,
-                task=task,
-                run_num=run_num,
-                space=fmriprep_space,
-            )
+        if selected_input_source == "fmriprep":
+            bold_path = preproc_by_run.get(int(run_num))
             confounds_path = _discover_confounds(
                 bids_derivatives=bids_derivatives,
                 sub_label=sub_label,
                 task=task,
                 run_num=run_num,
             )
-
-        if bold_path is None:
+        else:
             raw_patterns = [
                 f"{sub_label}_task-{task}_run-{run_num:02d}_bold.nii.gz",
                 f"{sub_label}_task-{task}_run-{run_num}_bold.nii.gz",
@@ -428,6 +439,14 @@ def _extract_trials_for_run(
 
         mask_a = scope_mask & (events_df[col_a] == val_a)
         mask_b = scope_mask & (events_df[col_b] == val_b)
+        overlap_mask = mask_a & mask_b
+        overlap_count = int(overlap_mask.sum())
+        if overlap_count > 0:
+            raise ValueError(
+                f"Condition definitions overlap for {overlap_count} event(s): "
+                f"{col_a}={cfg.condition_a_value!r} and {col_b}={cfg.condition_b_value!r} "
+                "select the same rows. Trial conditions must be mutually exclusive."
+            )
         sel_mask = mask_a | mask_b
 
         selected = events_df.loc[sel_mask].copy()
@@ -565,14 +584,33 @@ def _contrast_vector_for_column(columns: Sequence[str], col: str) -> Any:
     return vec
 
 
-def _fixed_effects_combine_effects(
+def _contrast_vector_for_columns(columns: Sequence[str], cols: Sequence[str]) -> Any:
+    import numpy as np  # type: ignore
+
+    if not cols:
+        raise ValueError("At least one design-matrix column is required.")
+
+    index_by_name = {str(name): idx for idx, name in enumerate(columns)}
+    vec = np.zeros(len(columns), dtype=float)
+    for col in cols:
+        key = str(col)
+        if key not in index_by_name:
+            raise KeyError(f"Column not found in design matrix: {col}")
+        vec[int(index_by_name[key])] = 1.0
+    vec /= float(len(cols))
+    return vec
+
+
+def _combine_effect_images(
     *,
     effects: Sequence[Any],
     variances: Optional[Sequence[Any]],
     method: str,
 ) -> Any:
     """
-    Combine effect images using either simple mean or inverse-variance weighting.
+    Combine a set of effect images using either a simple mean or inverse-variance weighting.
+
+    The caller is responsible for ensuring these inputs are suitable to combine.
     """
     import numpy as np  # type: ignore
     import nibabel as nib  # type: ignore
@@ -670,8 +708,12 @@ def run_trial_signature_extraction_for_subject(
         runs=cfg.runs,
         input_source=cfg.input_source,
         fmriprep_space=cfg.fmriprep_space,
+        require_fmriprep=cfg.require_fmriprep,
     )
 
+    condition_map_inference = (
+        "run_level_fixed_effects" if cfg.method == "beta-series" else "descriptive_trial_summary"
+    )
     provenance = {
         "subject": sub_label,
         "task": cfg.task,
@@ -679,6 +721,7 @@ def run_trial_signature_extraction_for_subject(
         "cfg": asdict(cfg),
         "signature_root": str(signature_root) if signature_root else None,
         "n_runs": len(runs),
+        "condition_map_inference": condition_map_inference,
     }
     phase_column_name = str(cfg.condition_scope_phase_column or "stim_phase").strip() or "stim_phase"
 
@@ -736,9 +779,15 @@ def run_trial_signature_extraction_for_subject(
         if cfg.method == "beta-series":
             flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
             flm.fit(bold_path, events=modeled_events, confounds=confounds)
+            _validate_design_matrices(
+                flm,
+                context=f"Trial-wise beta-series GLM ({bold_path.name})",
+                min_residual_dof=1,
+            )
 
             dm = flm.design_matrices_[0]
             dm_cols = list(getattr(dm, "columns", []))
+            run_regressors_by_condition: Dict[str, List[str]] = {}
 
             for t in trials:
                 trial_infos.append(t)
@@ -767,11 +816,7 @@ def run_trial_signature_extraction_for_subject(
                 except Exception:
                     var_img = None
 
-                _append_group(group_effects, t.condition, beta_img)
-                _append_group_by_run(group_effects_by_run, run_num, t.condition, beta_img)
-                if var_img is not None:
-                    _append_group(group_vars, t.condition, var_img)
-                    _append_group_by_run(group_vars_by_run, run_num, t.condition, var_img)
+                run_regressors_by_condition.setdefault(str(t.condition), []).append(str(t.regressor))
 
                 if cfg.write_trial_betas:
                     p = out_dir / "trial_betas" / t.run_label / f"{sub_label}_task-{cfg.task}_{t.run_label}_{t.regressor}_beta.nii.gz"
@@ -815,6 +860,20 @@ def run_trial_signature_extraction_for_subject(
                             }
                         )
 
+            for condition, regressors in sorted(run_regressors_by_condition.items()):
+                run_contrast = _contrast_vector_for_columns(dm_cols, regressors)
+                run_effect_img = flm.compute_contrast(run_contrast, output_type="effect_size")
+                _append_group(group_effects, condition, run_effect_img)
+                _append_group_by_run(group_effects_by_run, run_num, condition, run_effect_img)
+
+                try:
+                    run_var_img = flm.compute_contrast(run_contrast, output_type="effect_variance")
+                except Exception:
+                    run_var_img = None
+                if run_var_img is not None:
+                    _append_group(group_vars, condition, run_var_img)
+                    _append_group_by_run(group_vars_by_run, run_num, condition, run_var_img)
+
         else:
             # LSS: one model per trial within each run
             # Build the run-level trial list once, then fit per-trial models.
@@ -840,6 +899,14 @@ def run_trial_signature_extraction_for_subject(
                 lss_events = _build_lss_events(trial=t, all_trials=trials, original_events_df=events_df, cfg=cfg)
                 flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
                 flm.fit(bold_path, events=lss_events, confounds=confounds)
+                _validate_design_matrices(
+                    flm,
+                    context=(
+                        f"Trial-wise LSS GLM ({bold_path.name}, {t.run_label}, "
+                        f"trial {t.trial_index:03d})"
+                    ),
+                    min_residual_dof=1,
+                )
 
                 dm = flm.design_matrices_[0]
                 dm_cols = list(getattr(dm, "columns", []))
@@ -903,7 +970,7 @@ def run_trial_signature_extraction_for_subject(
     _write_tsv(out_dir / "trials.tsv", trial_rows_out)
     _write_tsv(out_dir / "signatures" / "trial_signature_expression.tsv", trial_sig_rows)
 
-    # Condition/group averages (fixed-effects) + signatures
+    # Condition/group summary maps + signatures
     cond_rows: List[Dict[str, Any]] = []
     group_rows: List[Dict[str, Any]] = []
 
@@ -923,7 +990,7 @@ def run_trial_signature_extraction_for_subject(
             a_img = None
             b_img = None
             if cond_a_effects:
-                a_img = _fixed_effects_combine_effects(
+                a_img = _combine_effect_images(
                     effects=cond_a_effects,
                     variances=cond_a_vars if cond_a_vars else None,
                     method=cfg.fixed_effects_weighting,
@@ -931,7 +998,7 @@ def run_trial_signature_extraction_for_subject(
                 if cfg.write_condition_betas:
                     nib.save(a_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_beta.nii.gz"))
             if cond_b_effects:
-                b_img = _fixed_effects_combine_effects(
+                b_img = _combine_effect_images(
                     effects=cond_b_effects,
                     variances=cond_b_vars if cond_b_vars else None,
                     method=cfg.fixed_effects_weighting,
@@ -976,6 +1043,7 @@ def run_trial_signature_extraction_for_subject(
                                 "subject": sub_label,
                                 "task": cfg.task,
                                 "method": cfg.method,
+                                "map_inference": condition_map_inference,
                                 "map": label,
                                 "signature": s.name,
                                 "dot": f"{s.dot:.8g}",
@@ -1026,7 +1094,7 @@ def run_trial_signature_extraction_for_subject(
             for scope, run_label, run_num, group, effects, variances in _iter_group_sets():
                 if not effects:
                     continue
-                img = _fixed_effects_combine_effects(
+                img = _combine_effect_images(
                     effects=effects,
                     variances=variances if variances else None,
                     method=cfg.fixed_effects_weighting,
@@ -1061,6 +1129,7 @@ def run_trial_signature_extraction_for_subject(
                                 "subject": sub_label,
                                 "task": cfg.task,
                                 "method": cfg.method,
+                                "map_inference": condition_map_inference,
                                 "scope": scope,
                                 "run": run_label,
                                 "run_num": "" if run_num is None else int(run_num),

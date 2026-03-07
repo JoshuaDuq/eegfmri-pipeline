@@ -9,8 +9,9 @@ Outputs are written under:
 
 from __future__ import annotations
 
+import copy
 import hashlib
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -277,8 +278,7 @@ class FmriAnalysisPipeline(PipelineBase):
                                 **{**asdict(contrast_cfg), "fmriprep_space": "MNI152NLin2009cAsym"}
                             )
                         else:
-                            # Best-effort: reuse the cfg and override fmriprep_space when it's attribute-like.
-                            cfg_mni = contrast_cfg
+                            cfg_mni = replace(contrast_cfg) if is_dataclass(contrast_cfg) else copy.deepcopy(contrast_cfg)
                             if hasattr(cfg_mni, "fmriprep_space"):
                                 setattr(cfg_mni, "fmriprep_space", "MNI152NLin2009cAsym")
 

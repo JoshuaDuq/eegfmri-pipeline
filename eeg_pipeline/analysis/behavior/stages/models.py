@@ -25,10 +25,6 @@ def stage_regression_impl(
 ) -> pd.DataFrame:
     """Trialwise regression stage with optional run-level aggregation."""
     from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
-    from eeg_pipeline.utils.data.columns import (
-        resolve_outcome_column,
-        resolve_predictor_column,
-    )
 
     suffix = feature_suffix_from_context_fn(ctx)
     method_label = getattr(config, "method_label", "")
@@ -39,27 +35,34 @@ def stage_regression_impl(
         ctx.logger.warning("Regression: trial table missing; skipping.")
         return pd.DataFrame()
 
-    feature_cols = get_feature_columns_fn(df_trials, ctx)
-    should_skip, skip_reason = check_early_exit_conditions_fn(
-        df_trials,
-        feature_cols,
-        min_features=1,
-        min_trials=10,
-    )
-    if should_skip:
-        ctx.logger.info("Regression: skipping due to %s", skip_reason)
-        return pd.DataFrame()
-
     primary_unit = str(get_config_value(ctx.config, "behavior_analysis.regression.primary_unit", "trial")).strip().lower()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
     n_perm = get_config_int(ctx.config, "behavior_analysis.regression.n_permutations", 0)
+    include_run_block = get_config_bool(ctx.config, "behavior_analysis.regression.include_run_block", True)
+
+    feature_cols = get_feature_columns_fn(df_trials, ctx)
+    min_observations = 2 if use_run_unit else 10
+    should_skip, skip_reason = check_early_exit_conditions_fn(
+        df_trials,
+        feature_cols,
+        min_features=1,
+        min_trials=min_observations,
+    )
+    if should_skip:
+        ctx.logger.info("Regression: skipping due to %s", skip_reason)
+        return pd.DataFrame()
 
     if use_run_unit and run_col not in df_trials.columns:
         raise ValueError(
             f"Run-level regression requested (primary_unit={primary_unit!r}) "
             f"but run column '{run_col}' is missing from trial table."
+        )
+    if use_run_unit and include_run_block:
+        raise ValueError(
+            "Run-level regression cannot include run/block adjustment because run is the analysis unit. "
+            "Disable behavior_analysis.regression.include_run_block for run-level regression."
         )
     if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and n_perm <= 0:
         raise ValueError(
@@ -70,39 +73,36 @@ def stage_regression_impl(
         )
 
     if use_run_unit and run_col in df_trials.columns:
-        ctx.logger.info("Regression: aggregating to run-level (primary_unit=%s)", primary_unit)
-        outcome_column = resolve_outcome_column(df_trials, ctx.config) or "outcome"
-        predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
-        agg_cols = [
-            c
-            for c in (
-                feature_cols
-                + [outcome_column, predictor_column]
-            )
-            if c in df_trials.columns
-        ]
-        df_trials = df_trials.groupby(run_col)[agg_cols].mean().reset_index()
-        ctx.logger.info("  Run-level: %d observations", len(df_trials))
+        ctx.logger.info(
+            "Regression: using feature-specific run-level aggregation (primary_unit=%s)",
+            primary_unit,
+        )
 
     groups = None
-    if getattr(ctx, "group_ids", None) is not None:
-        groups_candidate = np.asarray(ctx.group_ids)
-        if len(groups_candidate) == len(df_trials):
-            groups = groups_candidate
-        else:
-            ctx.logger.warning(
-                "Regression: ignoring ctx.group_ids length=%d because current data has %d rows.",
-                len(groups_candidate),
-                len(df_trials),
+    if use_run_unit:
+        if n_perm > 0:
+            ctx.logger.info(
+                "Regression: run-level aggregation uses ungrouped permutation across runs."
             )
-    if groups is None:
-        if run_col in df_trials.columns:
-            groups = df_trials[run_col].to_numpy()
-        elif "block" in df_trials.columns:
-            groups = df_trials["block"].to_numpy()
-        elif "run" in df_trials.columns:
-            groups = df_trials["run"].to_numpy()
-    groups = sanitize_permutation_groups_fn(groups, ctx.logger, "Regression")
+    else:
+        if getattr(ctx, "group_ids", None) is not None:
+            groups_candidate = np.asarray(ctx.group_ids)
+            if len(groups_candidate) == len(df_trials):
+                groups = groups_candidate
+            else:
+                ctx.logger.warning(
+                    "Regression: ignoring ctx.group_ids length=%d because current data has %d rows.",
+                    len(groups_candidate),
+                    len(df_trials),
+                )
+        if groups is None:
+            if run_col in df_trials.columns:
+                groups = df_trials[run_col].to_numpy()
+            elif "block" in df_trials.columns:
+                groups = df_trials["block"].to_numpy()
+            elif "run" in df_trials.columns:
+                groups = df_trials["run"].to_numpy()
+        groups = sanitize_permutation_groups_fn(groups, ctx.logger, "Regression")
     if primary_unit in {"trial", "trialwise"} and not allow_iid_trials and groups is None:
         raise ValueError(
             "Trial-level regression with permutation inference requires grouped labels. "

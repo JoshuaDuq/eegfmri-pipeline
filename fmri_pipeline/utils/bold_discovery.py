@@ -6,8 +6,9 @@ import inspect
 import json
 import logging
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 
 from fmri_pipeline.analysis.confounds_selection import select_fmriprep_confounds_columns
@@ -83,6 +84,46 @@ def discover_fmriprep_preproc_bold(
     return None
 
 
+def select_consistent_run_source(
+    *,
+    run_numbers: Sequence[int],
+    discover_preproc_bold: Callable[[int], Optional[Path]],
+    require_fmriprep: bool,
+) -> Tuple[str, Dict[int, Optional[Path]]]:
+    """
+    Resolve one BOLD source for all requested runs.
+
+    Returns ``("fmriprep", paths_by_run)`` when every run has a preprocessed file.
+    Returns ``("bids_raw", paths_by_run)`` only when no run has a preprocessed file and
+    raw BIDS is therefore the sole consistent source.
+    Raises when preprocessed availability is mixed across runs.
+    """
+    preproc_by_run = {
+        int(run_num): discover_preproc_bold(int(run_num))
+        for run_num in run_numbers
+    }
+    found_runs = [run_num for run_num, path in preproc_by_run.items() if path is not None]
+    missing_runs = [run_num for run_num, path in preproc_by_run.items() if path is None]
+
+    if not missing_runs:
+        return "fmriprep", preproc_by_run
+
+    if found_runs:
+        raise FileNotFoundError(
+            "fMRIPrep availability is inconsistent across runs. "
+            f"Preprocessed BOLD exists for runs {sorted(found_runs)} but is missing for runs {sorted(missing_runs)}. "
+            "Use one consistent source for all runs."
+        )
+
+    if require_fmriprep:
+        raise FileNotFoundError(
+            "Requested fMRIPrep input, but no preprocessed BOLD files were found for "
+            f"runs {sorted(int(run_num) for run_num in run_numbers)}."
+        )
+
+    return "bids_raw", preproc_by_run
+
+
 def discover_brain_mask_for_bold(bold_path: Path) -> Optional[Path]:
     """Discover a matching fMRIPrep brain mask for a BOLD image."""
     name = bold_path.name
@@ -130,7 +171,7 @@ def build_first_level_model(
         drift_model=getattr(cfg, "drift_model", None),
         high_pass=high_pass,
         noise_model="ar1",
-        standardize=True,
+        standardize=False,
         signal_scaling=0,
         minimize_memory=False,
     )
@@ -152,6 +193,44 @@ def build_first_level_model(
         kwargs["mask_img"] = mask_img
 
     return FirstLevelModel(**kwargs)
+
+
+def validate_design_matrices(
+    flm: Any,
+    *,
+    context: str,
+    min_residual_dof: int = 1,
+) -> None:
+    """Fail fast when nilearn produced a rank-deficient or overfit design."""
+    design_mats = getattr(flm, "design_matrices_", None)
+    if not isinstance(design_mats, list) or not design_mats:
+        raise ValueError(f"{context}: nilearn did not expose any fitted design matrices.")
+
+    min_residual_dof = max(int(min_residual_dof), 0)
+
+    for run_idx, design_matrix in enumerate(design_mats, start=1):
+        values = np.asarray(design_matrix, dtype=float)
+        if values.ndim != 2 or values.size == 0:
+            raise ValueError(f"{context}: run {run_idx} design matrix is empty.")
+        if not np.isfinite(values).all():
+            raise ValueError(f"{context}: run {run_idx} design matrix contains non-finite values.")
+
+        n_frames, n_regressors = values.shape
+        rank = int(np.linalg.matrix_rank(values))
+        residual_dof = int(n_frames - rank)
+
+        if rank < n_regressors:
+            raise ValueError(
+                f"{context}: run {run_idx} design matrix is rank-deficient "
+                f"(rank={rank}, regressors={n_regressors}, frames={n_frames}). "
+                "Reduce overlapping regressors, trial count, or nuisance regressors."
+            )
+        if residual_dof < min_residual_dof:
+            raise ValueError(
+                f"{context}: run {run_idx} has insufficient residual degrees of freedom "
+                f"(frames={n_frames}, rank={rank}, residual_dof={residual_dof}). "
+                "Reduce nuisance regressors or modeled events."
+            )
 
 
 def coerce_condition_value(value: Any, series: Any) -> Any:

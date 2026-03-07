@@ -338,8 +338,8 @@ def _compute_batch_permutation_pvalues(
 ) -> np.ndarray:
     """Compute permutation p-values for all features using vectorized operations.
 
-    Uses matrix operations to compute all permutations for all features at once,
-    which is much faster than per-feature permutation loops.
+    Features are grouped by identical finite-row patterns so each permutation null
+    matches the exact rows used by that feature's observed statistic.
     """
     import warnings
 
@@ -353,52 +353,79 @@ def _compute_batch_permutation_pvalues(
         return np.full(n_features, np.nan)
 
     valid_data = data_matrix[valid_indices, :]
-    valid_labels = cond_a_mask[valid_indices]  # True = condition A
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        cond_a_means_obs = np.nanmean(valid_data[valid_labels, :], axis=0)
-        cond_b_means_obs = np.nanmean(valid_data[~valid_labels, :], axis=0)
-        observed_diff = np.abs(cond_a_means_obs - cond_b_means_obs)
-
-    n_exceeded = np.ones(n_features)  # Start at 1 for observed
-
+    valid_labels = cond_a_mask[valid_indices].astype(bool, copy=False)
+    valid_groups = groups[valid_indices] if groups is not None else None
     rng = np.random.default_rng(base_seed)
     log_interval = max(1, n_perm // 10)
     scheme = str(scheme or "shuffle").strip().lower()
+    p_values = np.full(n_features, np.nan, dtype=float)
+    finite_patterns: Dict[bytes, Tuple[np.ndarray, List[int]]] = {}
 
-    for perm_i in range(n_perm):
-        if logger and perm_i > 0 and perm_i % log_interval == 0:
-            logger.debug(f"  Permutation {perm_i}/{n_perm}")
+    finite_matrix = np.isfinite(valid_data)
+    for column_index in range(n_features):
+        finite_mask = finite_matrix[:, column_index]
+        if not finite_mask.any():
+            continue
+        pattern_key = finite_mask.tobytes()
+        if pattern_key not in finite_patterns:
+            finite_patterns[pattern_key] = (finite_mask, [column_index])
+        else:
+            finite_patterns[pattern_key][1].append(column_index)
 
-        from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+    from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
 
-        valid_groups = groups[valid_indices] if groups is not None else None
-        try:
-            perm_indices = permute_within_groups(
-                n_valid,
-                rng,
-                valid_groups,
-                scheme=scheme,
-                strict=True,
-            )
-        except ValueError:
-            if logger:
-                logger.warning(
-                    "Condition permutation: grouped permutation invalid after masking; returning NaN permutation p-values."
-                )
-            return np.full(n_features, np.nan)
-        perm_labels = valid_labels[perm_indices]
+    for finite_mask, column_indices in finite_patterns.values():
+        pattern_labels = valid_labels[finite_mask]
+        if pattern_labels.size < 4:
+            continue
+        if not pattern_labels.any() or not (~pattern_labels).any():
+            continue
+
+        pattern_data = valid_data[np.ix_(finite_mask, column_indices)]
+        pattern_groups = valid_groups[finite_mask] if valid_groups is not None else None
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
-            perm_cond_a_means = np.nanmean(valid_data[perm_labels, :], axis=0)
-            perm_cond_b_means = np.nanmean(valid_data[~perm_labels, :], axis=0)
-            perm_diff = np.abs(perm_cond_a_means - perm_cond_b_means)
+            observed_cond_a = np.mean(pattern_data[pattern_labels, :], axis=0)
+            observed_cond_b = np.mean(pattern_data[~pattern_labels, :], axis=0)
+            observed_diff = np.abs(observed_cond_a - observed_cond_b)
 
-        n_exceeded += (perm_diff >= observed_diff - _NUMERIC_TOLERANCE).astype(float)
+        n_exceeded = np.ones(len(column_indices), dtype=float)
+        permutation_failed = False
+        for perm_i in range(n_perm):
+            if logger and perm_i > 0 and perm_i % log_interval == 0:
+                logger.debug(f"  Permutation {perm_i}/{n_perm}")
+            try:
+                perm_indices = permute_within_groups(
+                    int(pattern_labels.size),
+                    rng,
+                    pattern_groups,
+                    scheme=scheme,
+                    strict=True,
+                )
+            except ValueError:
+                permutation_failed = True
+                if logger:
+                    logger.warning(
+                        "Condition permutation: grouped permutation invalid for %d features after finite-row subsetting; "
+                        "returning NaN permutation p-values for those features.",
+                        len(column_indices),
+                    )
+                break
 
-    return n_exceeded / (n_perm + 1)
+            perm_labels = pattern_labels[perm_indices]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                perm_cond_a = np.mean(pattern_data[perm_labels, :], axis=0)
+                perm_cond_b = np.mean(pattern_data[~perm_labels, :], axis=0)
+                perm_diff = np.abs(perm_cond_a - perm_cond_b)
+
+            n_exceeded += (perm_diff >= observed_diff - _NUMERIC_TOLERANCE).astype(float)
+
+        if not permutation_failed:
+            p_values[np.asarray(column_indices, dtype=int)] = n_exceeded / (n_perm + 1)
+
+    return p_values
 
 
 def _get_condition_column(
@@ -477,6 +504,50 @@ def _split_by_binary_outcome(
         n_condition_a,
         n_condition_b,
     )
+
+
+def resolve_binary_condition_values(
+    events_df: pd.DataFrame,
+    config: Any,
+) -> Tuple[str, str]:
+    """Resolve the reported condition-A/condition-B labels for a binary contrast."""
+    condition_column = _get_condition_column(events_df, config)
+    if condition_column is None or condition_column not in events_df.columns:
+        raise ValueError("Condition column not found in events")
+
+    compare_values = get_config_value(
+        config,
+        "behavior_analysis.condition.compare_values",
+        None,
+    )
+    if compare_values and len(compare_values) >= 2:
+        if len(compare_values) > 2:
+            raise ValueError(
+                "resolve_binary_condition_values() only supports binary contrasts. "
+                "Received >2 compare_values; use the multigroup condition stage instead."
+            )
+        return str(compare_values[0]), str(compare_values[1])
+
+    condition_series = events_df[condition_column]
+    condition_numeric = pd.to_numeric(condition_series, errors="coerce")
+    numeric_values = {
+        float(value)
+        for value in pd.Series(condition_numeric).dropna().unique().tolist()
+    }
+    if numeric_values and numeric_values.issubset({0.0, 1.0}):
+        return "1", "0"
+
+    unique_values = [value for value in pd.Series(condition_series).dropna().unique().tolist()]
+    if len(unique_values) == 2:
+        return str(unique_values[0]), str(unique_values[1])
+    if len(unique_values) > 2:
+        raise ValueError(
+            f"Condition column '{condition_column}' has {len(unique_values)} observed values "
+            f"({unique_values}) but behavior_analysis.condition.compare_values is not set. "
+            "Specify an explicit binary contrast or use the multigroup condition stage."
+        )
+
+    return "1", "0"
 
 
 def split_by_condition(

@@ -506,10 +506,15 @@ def _compute_combined_covariates_predictor_pvalue(
     
     x_subset = x_aligned.reindex(combined_covariates.index)
     y_subset = y_aligned.reindex(combined_covariates.index)
-    
+
     if x_subset.empty or y_subset.empty:
         return np.nan
-    
+
+    groups_subset = None
+    if groups is not None:
+        groups_subset = _align_groups_to_dataframe(groups, x_aligned.index)
+        groups_subset = groups_subset.reindex(combined_covariates.index)
+
     try:
         return perm_pval_partial_freedman_lane(
             x_subset,
@@ -518,7 +523,7 @@ def _compute_combined_covariates_predictor_pvalue(
             method,
             n_perm,
             rng,
-            groups=groups,
+            groups=groups_subset,
             config=config,
             scheme=_get_permutation_scheme(config),
         )

@@ -73,6 +73,8 @@ class TestBehaviorDeep(unittest.TestCase):
             ), patch(
                 "eeg_pipeline.pipelines.behavior.get_behavior_output_dir",
                 side_effect=lambda *a, **k: outdir,
+            ), patch(
+                "eeg_pipeline.pipelines.behavior._write_analysis_metadata_impl",
             ):
                 out = p.process_subject("0001")
             self.assertEqual(out.subject, "0001")
@@ -143,8 +145,8 @@ class TestBehaviorDeep(unittest.TestCase):
                     "eeg_pipeline.analysis.behavior.orchestration": fake_orch,
                 },
             ):
-                out = p.process_subject("0001")
-            self.assertEqual(out.subject, "0001")
+                with self.assertRaises(RuntimeError):
+                    p.process_subject("0001")
 
 class TestBehaviorCompletion(unittest.TestCase):
         def test_behavior_init_and_group_level_logging_branches(self):

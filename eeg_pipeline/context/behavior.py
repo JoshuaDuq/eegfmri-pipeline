@@ -198,28 +198,21 @@ class BehaviorContext:
         return self.covariates_df is not None and not self.covariates_df.empty
 
     def load_data(self) -> bool:
-        """Load all features. Returns True if successful."""
+        """Load all required behavior-analysis inputs."""
         if self._data_loaded:
             return self.aligned_events is not None
 
         self.logger.info("Loading data...")
-        try:
-            if not self._load_epochs():
-                return False
-            if not self._load_features():
-                return False
-            if not self._validate_alignment():
-                return False
-            self._build_covariates()
-            self._extract_group_ids()
-            self._data_loaded = True
-            return True
-        except (FileNotFoundError, ValueError) as e:
-            self.logger.error(f"Data loading failed: {e}")
-            return False
-        except Exception as e:
-            self.logger.error(f"Unexpected error during data loading: {e}")
-            raise
+        if not self._load_epochs():
+            raise RuntimeError("Failed to load epochs or aligned events.")
+        if not self._load_features():
+            raise RuntimeError("Failed to load feature tables.")
+        if not self._validate_alignment():
+            raise RuntimeError("Behavior feature/event alignment validation failed.")
+        self._build_covariates()
+        self._extract_group_ids()
+        self._data_loaded = True
+        return True
 
     def _load_epochs(self) -> bool:
         """Load epochs and aligned events."""

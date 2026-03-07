@@ -474,24 +474,20 @@ class BehaviorPipeline(PipelineBase):
                 progress=progress,
             )
         except Exception as exc:
-            logger.error("Pipeline failed: %s", exc)
             progress.error("pipeline_failed", str(exc))
             progress.subject_done(f"sub-{subject}", success=False)
-            return results
+            raise
         
         elapsed = time.perf_counter() - start_time
         logger.info("Stage execution completed in %.1fs", elapsed)
         
         # Persist metadata (step 3)
         outputs_manifest_path = write_outputs_manifest(ctx, self.pipeline_config, results, {})
-        try:
-            _write_analysis_metadata_impl(
-                ctx, self.pipeline_config, results,
-                stage_metrics={},
-                outputs_manifest=outputs_manifest_path,
-            )
-        except Exception as e:
-            logger.warning("Failed to write analysis metadata: %s", e)
+        _write_analysis_metadata_impl(
+            ctx, self.pipeline_config, results,
+            stage_metrics={},
+            outputs_manifest=outputs_manifest_path,
+        )
         
         summary = results.to_summary()
         summary_dir = get_behavior_output_dir(ctx, "summary", ensure=True)

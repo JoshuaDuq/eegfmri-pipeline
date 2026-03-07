@@ -26,6 +26,183 @@ class CorrelateDesign:
     groups_for_perm: Optional[pd.Series]
 
 
+@dataclass(frozen=True)
+class CorrelationRequest:
+    """Requested correlation outputs and primary analysis unit."""
+
+    want_raw: bool
+    want_partial_cov: bool
+    want_partial_predictor: bool
+    want_partial_cov_predictor: bool
+    want_run_mean: bool
+
+
+def _resolve_correlation_request(config: Any) -> CorrelationRequest:
+    """Resolve requested correlation outputs from configuration."""
+    correlation_types = get_config_value(
+        config,
+        "behavior_analysis.correlations.types",
+        ["partial_cov_predictor"],
+    )
+    if not isinstance(correlation_types, (list, tuple)):
+        correlation_types = [correlation_types]
+
+    normalized_types = {
+        str(item).strip().lower()
+        for item in correlation_types
+        if str(item).strip()
+    }
+    primary_unit = str(
+        get_config_value(config, "behavior_analysis.correlations.primary_unit", "trial") or "trial"
+    ).strip().lower()
+    return CorrelationRequest(
+        want_raw="raw" in normalized_types,
+        want_partial_cov="partial_cov" in normalized_types,
+        want_partial_predictor="partial_predictor" in normalized_types,
+        want_partial_cov_predictor="partial_cov_predictor" in normalized_types,
+        want_run_mean=("run_mean" in normalized_types)
+        or primary_unit in {"run", "run_mean", "runmean", "run_level"},
+    )
+
+
+def _select_requested_primary_measure(
+    *,
+    request: CorrelationRequest,
+    design: CorrelateDesign,
+    target: str,
+    run_mean: bool,
+) -> tuple[str, str, str]:
+    """Select the configured primary measure without downgrading estimands."""
+    requested_trial_measures: List[tuple[bool, tuple[str, str, str]]] = [
+        (
+            request.want_partial_cov_predictor,
+            (
+                "p_partial_cov_predictor",
+                "r_partial_cov_predictor",
+                "partial_cov_predictor",
+            ),
+        ),
+        (
+            request.want_partial_predictor,
+            (
+                "p_partial_predictor",
+                "r_partial_predictor",
+                "partial_predictor",
+            ),
+        ),
+        (
+            request.want_partial_cov,
+            (
+                "p_partial_cov",
+                "r_partial_cov",
+                "partial_cov",
+            ),
+        ),
+        (
+            request.want_raw,
+            (
+                "p_raw",
+                "r_raw",
+                "raw",
+            ),
+        ),
+    ]
+
+    for is_requested, keys in requested_trial_measures:
+        if not is_requested:
+            continue
+        if run_mean:
+            p_key, r_key, source = keys
+            if p_key == "p_raw":
+                return "p_run_mean", "r_run_mean", "run_mean"
+            return (
+                f"p_run_mean_{source}",
+                f"r_run_mean_{source}",
+                f"run_mean_{source}",
+            )
+        return keys
+
+    if run_mean and request.want_run_mean:
+        return "p_run_mean", "r_run_mean", "run_mean"
+
+    raise ValueError(
+        "Correlations primary selection requires at least one requested non-run_mean "
+        "correlation type."
+    )
+
+
+def _drop_constant_covariates(cov_df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """Drop empty or constant covariates after run-level aggregation."""
+    if cov_df is None or cov_df.empty:
+        return None
+
+    normalized = cov_df.apply(pd.to_numeric, errors="coerce")
+    normalized = normalized.replace([np.inf, -np.inf], np.nan)
+    normalized = normalized.dropna(axis=1, how="all")
+    if normalized.empty:
+        return None
+
+    varying_columns = [
+        column
+        for column in normalized.columns
+        if int(normalized[column].nunique(dropna=True)) > 1
+    ]
+    if not varying_columns:
+        return None
+    return normalized[varying_columns]
+
+
+def _build_run_mean_design(
+    *,
+    df_trials: pd.DataFrame,
+    x: pd.Series,
+    y: pd.Series,
+    cov_df: Optional[pd.DataFrame],
+    predictor_series: Optional[pd.Series],
+    predictor_column: str,
+    target: str,
+    run_col: str,
+    run_adjust_in_correlations: bool,
+) -> tuple[pd.Series, pd.Series, Optional[pd.DataFrame], Optional[pd.Series]]:
+    """Aggregate trialwise inputs to run means without changing the estimand."""
+    if run_adjust_in_correlations:
+        raise ValueError(
+            "Run-level correlations cannot include run adjustment because run is the analysis unit."
+        )
+
+    data: Dict[str, Any] = {
+        run_col: df_trials[run_col],
+        "__x": pd.to_numeric(x, errors="coerce"),
+        "__y": pd.to_numeric(y, errors="coerce"),
+    }
+    covariate_columns: List[str] = []
+    if cov_df is not None and not cov_df.empty:
+        for column in cov_df.columns:
+            column_name = str(column)
+            data[column_name] = pd.to_numeric(cov_df[column], errors="coerce")
+            covariate_columns.append(column_name)
+
+    predictor_key = "__predictor"
+    include_predictor = predictor_series is not None and target != predictor_column
+    if include_predictor:
+        data[predictor_key] = pd.to_numeric(predictor_series, errors="coerce")
+
+    run_df = pd.DataFrame(data)
+    complete_case_columns = ["__x", "__y", *covariate_columns]
+    if include_predictor:
+        complete_case_columns.append(predictor_key)
+    run_df = run_df.dropna(subset=[run_col, *complete_case_columns])
+    run_means = run_df.groupby(run_col, dropna=True).mean(numeric_only=True)
+    x_run = pd.to_numeric(run_means["__x"], errors="coerce")
+    y_run = pd.to_numeric(run_means["__y"], errors="coerce")
+    cov_run = _drop_constant_covariates(run_means[covariate_columns]) if covariate_columns else None
+    predictor_run = None
+    if include_predictor and predictor_key in run_means.columns:
+        predictor_run = pd.to_numeric(run_means[predictor_key], errors="coerce")
+
+    return x_run, y_run, cov_run, predictor_run
+
+
 def stage_correlate_design_impl(
     ctx: Any,
     config: Any,
@@ -136,6 +313,11 @@ def stage_correlate_design_impl(
         get_config_value(ctx.config, "behavior_analysis.run_adjustment.include_in_correlations", True)
     )
     run_adjust_in_correlations = bool(run_adjust_enabled and include_run_adjustment)
+    if primary_unit in {"run", "run_mean", "runmean", "run_level"} and run_adjust_in_correlations:
+        raise ValueError(
+            "Run-level correlations cannot include run adjustment because run is the analysis unit. "
+            "Disable behavior_analysis.run_adjustment.include_in_correlations or switch to trial-level inference."
+        )
     max_run_dummies = get_config_int(ctx.config, "behavior_analysis.run_adjustment.max_dummies", 20)
 
     cov_parts = []
@@ -310,7 +492,7 @@ def _compute_single_effect_size(
             config=config,
         )
 
-        if want_partial_cov or want_partial_cov_predictor:
+        if want_partial_cov:
             rec.update(
                 {
                     "r_partial_cov": r_pc,
@@ -319,7 +501,7 @@ def _compute_single_effect_size(
                 }
             )
 
-        if want_partial_predictor or want_partial_cov_predictor:
+        if want_partial_predictor:
             rec.update(
                 {
                     "r_partial_predictor": r_pt,
@@ -338,11 +520,20 @@ def _compute_single_effect_size(
             )
 
     if want_run_mean and run_col in df_trials.columns:
-        df_run = pd.DataFrame({run_col: df_trials[run_col], "x": x, "y": y})
-        run_means = df_run.groupby(run_col, dropna=True)[["x", "y"]].mean(numeric_only=True)
+        x_run, y_run, cov_run, predictor_run = _build_run_mean_design(
+            df_trials=df_trials,
+            x=x,
+            y=y,
+            cov_df=cov_df,
+            predictor_series=temp_for_partial,
+            predictor_column=predictor_column,
+            target=target,
+            run_col=run_col,
+            run_adjust_in_correlations=run_adjust_in_correlations,
+        )
         r_run, p_run, n_run = safe_correlation(
-            run_means["x"].to_numpy(dtype=float),
-            run_means["y"].to_numpy(dtype=float),
+            x_run.to_numpy(dtype=float),
+            y_run.to_numpy(dtype=float),
             method,
             min_samples=max(int(run_min_samples), 3),
             robust_method=None,
@@ -354,6 +545,52 @@ def _compute_single_effect_size(
                 "p_run_mean": float(p_run) if np.isfinite(p_run) else np.nan,
             }
         )
+        if want_partial_cov or want_partial_predictor or want_partial_cov_predictor:
+            (
+                r_pc_run,
+                p_pc_run,
+                n_pc_run,
+                r_pt_run,
+                p_pt_run,
+                n_pt_run,
+                r_pct_run,
+                p_pct_run,
+                n_pct_run,
+            ) = compute_partial_correlations_with_cov_predictor(
+                roi_values=x_run,
+                target_values=y_run,
+                covariates_df=cov_run,
+                predictor_series=predictor_run,
+                method=method,
+                context="run_mean",
+                logger=None,
+                min_samples=max(int(run_min_samples), 3),
+                config=config,
+            )
+            if want_partial_cov:
+                rec.update(
+                    {
+                        "r_run_mean_partial_cov": r_pc_run,
+                        "p_run_mean_partial_cov": p_pc_run,
+                        "n_run_mean_partial_cov": n_pc_run,
+                    }
+                )
+            if want_partial_predictor:
+                rec.update(
+                    {
+                        "r_run_mean_partial_predictor": r_pt_run,
+                        "p_run_mean_partial_predictor": p_pt_run,
+                        "n_run_mean_partial_predictor": n_pt_run,
+                    }
+                )
+            if want_partial_cov_predictor:
+                rec.update(
+                    {
+                        "r_run_mean_partial_cov_predictor": r_pct_run,
+                        "p_run_mean_partial_cov_predictor": p_pct_run,
+                        "n_run_mean_partial_cov_predictor": n_pct_run,
+                    }
+                )
 
     return rec
 
@@ -384,24 +621,7 @@ def stage_correlate_effect_sizes_impl(
         max(int(min_samples), 3),
     )
 
-    correlation_types = get_config_value(
-        ctx.config,
-        "behavior_analysis.correlations.types",
-        ["partial_cov_predictor"],
-    )
-    if not isinstance(correlation_types, (list, tuple)):
-        correlation_types = [correlation_types]
-
-    want_raw = "raw" in correlation_types
-    want_partial_cov = "partial_cov" in correlation_types
-    want_partial_predictor = "partial_predictor" in correlation_types
-    want_partial_cov_predictor = "partial_cov_predictor" in correlation_types
-    primary_unit = str(
-        get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial") or "trial"
-    ).strip().lower()
-    want_run_mean = ("run_mean" in correlation_types) or (
-        primary_unit in {"run", "run_mean", "runmean", "run_level"}
-    )
+    request = _resolve_correlation_request(ctx.config)
 
     has_covariate_controls = design.cov_df is not None and not design.cov_df.empty
     has_predictor_control = bool(
@@ -410,20 +630,28 @@ def stage_correlate_effect_sizes_impl(
     )
 
     if robust_method not in (None, "", False):
-        if has_covariate_controls or has_predictor_control:
+        requested_partial_controls = (
+            request.want_partial_cov
+            or request.want_partial_predictor
+            or request.want_partial_cov_predictor
+        )
+        if requested_partial_controls and (has_covariate_controls or has_predictor_control):
             raise ValueError(
                 "Correlations: robust correlation with covariate/predictor controls is not supported. "
                 "Disable robust correlation or run without partial controls to avoid confounded primary effects."
             )
-        if want_partial_cov or want_partial_predictor or want_partial_cov_predictor:
+        if request.want_partial_cov or request.want_partial_predictor or request.want_partial_cov_predictor:
             ctx.logger.info(
                 "Correlations: robust_method=%s disables partial correlations; using raw only.",
                 robust_method,
             )
-        want_raw = True
-        want_partial_cov = False
-        want_partial_predictor = False
-        want_partial_cov_predictor = False
+        request = CorrelationRequest(
+            want_raw=True,
+            want_partial_cov=False,
+            want_partial_predictor=False,
+            want_partial_cov_predictor=False,
+            want_run_mean=request.want_run_mean,
+        )
 
     tasks = [(feat, target) for target in design.targets for feat in design.feature_cols]
     n_tasks = len(tasks)
@@ -455,11 +683,11 @@ def stage_correlate_effect_sizes_impl(
                 method_label=method_label,
                 min_samples=min_samples,
                 run_min_samples=run_min_samples,
-                want_raw=want_raw,
-                want_partial_cov=want_partial_cov,
-                want_partial_predictor=want_partial_predictor,
-                want_partial_cov_predictor=want_partial_cov_predictor,
-                want_run_mean=want_run_mean,
+                want_raw=request.want_raw,
+                want_partial_cov=request.want_partial_cov,
+                want_partial_predictor=request.want_partial_predictor,
+                want_partial_cov_predictor=request.want_partial_cov_predictor,
+                want_run_mean=request.want_run_mean,
                 config=ctx.config,
                 feature_type_resolver_fn=feature_type_resolver_fn,
                 feature_band_resolver_fn=feature_band_resolver_fn,
@@ -482,11 +710,11 @@ def stage_correlate_effect_sizes_impl(
                 method_label=method_label,
                 min_samples=min_samples,
                 run_min_samples=run_min_samples,
-                want_raw=want_raw,
-                want_partial_cov=want_partial_cov,
-                want_partial_predictor=want_partial_predictor,
-                want_partial_cov_predictor=want_partial_cov_predictor,
-                want_run_mean=want_run_mean,
+                want_raw=request.want_raw,
+                want_partial_cov=request.want_partial_cov,
+                want_partial_predictor=request.want_partial_predictor,
+                want_partial_cov_predictor=request.want_partial_cov_predictor,
+                want_run_mean=request.want_run_mean,
                 config=ctx.config,
                 feature_type_resolver_fn=feature_type_resolver_fn,
                 feature_band_resolver_fn=feature_band_resolver_fn,
@@ -610,9 +838,22 @@ def _compute_single_pvalue(
             {
                 "n_permutations": int(n_perm),
                 "p_perm_raw": float(p_perm) if np.isfinite(p_perm) else np.nan,
-                "p_perm_partial_cov": float(p_perm_cov) if np.isfinite(p_perm_cov) else np.nan,
-                "p_perm_partial_predictor": float(p_perm_temp) if np.isfinite(p_perm_temp) else np.nan,
-                "p_perm_partial_cov_predictor": float(p_perm_cov_predictor) if np.isfinite(p_perm_cov_predictor) else np.nan,
+                "p_perm_partial_cov": (
+                    float(p_perm_cov)
+                    if "p_partial_cov" in rec and np.isfinite(p_perm_cov)
+                    else np.nan
+                ),
+                "p_perm_partial_predictor": (
+                    float(p_perm_temp)
+                    if "p_partial_predictor" in rec and np.isfinite(p_perm_temp)
+                    else np.nan
+                ),
+                "p_perm_partial_cov_predictor": (
+                    float(p_perm_cov_predictor)
+                    if "p_partial_cov_predictor" in rec
+                    and np.isfinite(p_perm_cov_predictor)
+                    else np.nan
+                ),
             }
         )
 
@@ -742,6 +983,7 @@ def stage_correlate_primary_selection_impl(
     primary_unit = str(get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial")).strip().lower()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    request = _resolve_correlation_request(ctx.config)
     if (not use_run_unit) and (not allow_iid_trials):
         if p_primary_mode not in {"perm", "permutation"}:
             ctx.logger.warning(
@@ -760,14 +1002,18 @@ def stage_correlate_primary_selection_impl(
 
         robust_method = rec.get("robust_method", None)
         if use_run_unit:
-            p_kind = "p_run_mean"
-            p_primary = rec.get("p_run_mean", np.nan)
-            r_primary = rec.get("r_run_mean", np.nan)
-            src = "run_mean"
+            p_kind, r_kind, src = _select_requested_primary_measure(
+                request=request,
+                design=design,
+                target=str(target),
+                run_mean=True,
+            )
+            p_primary = rec.get(p_kind, np.nan)
+            r_primary = rec.get(r_kind, np.nan)
             if not (pd.notna(p_primary) and np.isfinite(float(p_primary))):
                 p_primary = np.nan
                 r_primary = np.nan
-                src = "run_mean_missing"
+                src = f"{src}_missing"
         elif robust_method not in (None, "", False):
             p_kind = "p_raw"
             p_primary = rec.get("p_raw", np.nan)
@@ -784,28 +1030,14 @@ def stage_correlate_primary_selection_impl(
                     p_primary = np.nan
                     src = "perm_missing_required"
         else:
-            want_partial_cov = design.cov_df is not None and not design.cov_df.empty
-            want_partial_predictor = (
-                bool(getattr(config, "control_predictor", True))
-                and target != design.predictor_column
-                and design.predictor_series is not None
+            p_kind, r_kind, src = _select_requested_primary_measure(
+                request=request,
+                design=design,
+                target=str(target),
+                run_mean=False,
             )
-
-            if want_partial_predictor and want_partial_cov:
-                p_kind = "p_partial_cov_predictor"
-                p_primary = rec.get("p_partial_cov_predictor", np.nan)
-                r_primary = rec.get("r_partial_cov_predictor", np.nan)
-                src = "partial_cov_predictor"
-            elif want_partial_predictor:
-                p_kind = "p_partial_predictor"
-                p_primary = rec.get("p_partial_predictor", np.nan)
-                r_primary = rec.get("r_partial_predictor", np.nan)
-                src = "partial_predictor"
-            elif want_partial_cov:
-                p_kind = "p_partial_cov"
-                p_primary = rec.get("p_partial_cov", np.nan)
-                r_primary = rec.get("r_partial_cov", np.nan)
-                src = "partial_cov"
+            p_primary = rec.get(p_kind, np.nan)
+            r_primary = rec.get(r_kind, np.nan)
 
             if p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}:
                 perm_map = {

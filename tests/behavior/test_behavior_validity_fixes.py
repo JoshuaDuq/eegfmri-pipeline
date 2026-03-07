@@ -57,6 +57,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                         "run_adjustment": {"column": "run_id"},
                         "predictor_residual": {
                             "enabled": True,
+                            "method": "poly",
                             "min_samples": 3,
                             "crossfit": {"enabled": False},
                         },
@@ -354,6 +355,60 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertEqual(str(captured.get("p_primary_mode")), "perm")
 
+    def test_condition_column_reports_binary_values_in_split_order(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_condition_column
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {
+                        "compare_column": "",
+                        "primary_unit": "trial",
+                        "compare_values": [],
+                    },
+                    "statistics": {"allow_iid_trials": True},
+                    "run_adjustment": {"column": "run_id"},
+                },
+                "event_columns": {"binary_outcome": ["binary_outcome"]},
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "binary_outcome": [0, 1, 0, 1],
+                "power_alpha": [0.2, 0.5, 0.3, 0.7],
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.api.compute_condition_effects",
+            return_value=pd.DataFrame(
+                {
+                    "feature": ["power_alpha"],
+                    "hedges_g": [0.6],
+                    "p_value": [0.2],
+                    "p_primary": [0.2],
+                }
+            ),
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._compute_unified_fdr",
+            side_effect=lambda _ctx, _cfg, df, **_kw: df,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_parquet_with_optional_csv",
+            return_value=None,
+        ):
+            out = stage_condition_column(
+                ctx,
+                SimpleNamespace(fdr_alpha=0.05, n_jobs=1, min_samples=2),
+                df_trials=df_trials,
+                feature_cols=["power_alpha"],
+            )
+
+        self.assertFalse(out.empty)
+        self.assertEqual(str(out.iloc[0]["condition_value1"]), "1")
+        self.assertEqual(str(out.iloc[0]["condition_value2"]), "0")
+
     def test_group_trial_table_discovery_finds_canonical_all_trials(self):
         from eeg_pipeline.analysis.behavior.orchestration import _find_trial_table_path
 
@@ -589,6 +644,91 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         self.assertEqual(sorted(idx.tolist()), [0, 1, 2, 3])
 
+    def test_combined_partial_permutation_reindexes_groups_to_complete_case_subset(self):
+        from eeg_pipeline.utils.analysis.stats.permutation import (
+            _compute_combined_covariates_predictor_pvalue,
+        )
+
+        index = pd.Index(["a", "b", "c", "d"])
+        x = pd.Series([0.1, 0.2, 0.3, 0.4], index=index)
+        y = pd.Series([1.0, 2.0, 3.0, 4.0], index=index)
+        covariates = pd.DataFrame({"trial_index": [1.0, 2.0, np.nan, 4.0]}, index=index)
+        predictor = pd.Series([44.0, 45.0, 46.0, 47.0], index=index)
+        groups = np.array([10, 10, 20, 20], dtype=int)
+        captured = {}
+
+        def _fake_perm(x_sub, y_sub, z_sub, method, n_perm, rng, *, groups, config, scheme):
+            captured["x_index"] = list(x_sub.index)
+            captured["groups"] = groups
+            return 0.25
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.permutation._build_predictor_covariates",
+            return_value=pd.DataFrame({"predictor": predictor}, index=index),
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.permutation.perm_pval_partial_freedman_lane",
+            side_effect=_fake_perm,
+        ):
+            out = _compute_combined_covariates_predictor_pvalue(
+                x_aligned=x,
+                y_aligned=y,
+                covariates_df=covariates,
+                predictor_series=predictor,
+                method="pearson",
+                n_perm=10,
+                n_eff=3,
+                rng=np.random.default_rng(0),
+                min_samples=3,
+                config=DotConfig({}),
+                groups=groups,
+            )
+
+        self.assertAlmostEqual(float(out), 0.25, places=12)
+        self.assertEqual(captured["x_index"], ["a", "b", "d"])
+        self.assertEqual(list(captured["groups"].index), ["a", "b", "d"])
+        self.assertEqual(captured["groups"].tolist(), [10, 10, 20])
+
+    def test_batch_condition_permutation_uses_feature_specific_finite_rows(self):
+        from eeg_pipeline.utils.analysis.stats.effect_size import (
+            _compute_batch_permutation_pvalues,
+        )
+
+        data_matrix = np.array(
+            [
+                [1.0, 1.0],
+                [2.0, 2.0],
+                [3.0, 3.0],
+                [4.0, 4.0],
+                [5.0, np.nan],
+            ],
+            dtype=float,
+        )
+        cond_a_mask = np.array([True, True, False, False, False], dtype=bool)
+        cond_b_mask = ~cond_a_mask
+        calls = []
+
+        def _perm(n, rng, groups=None, scheme="shuffle", strict=True):
+            calls.append(int(n))
+            return np.arange(n, dtype=int)
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.permutation.permute_within_groups",
+            side_effect=_perm,
+        ):
+            out = _compute_batch_permutation_pvalues(
+                data_matrix=data_matrix,
+                cond_a_mask=cond_a_mask,
+                cond_b_mask=cond_b_mask,
+                n_perm=1,
+                base_seed=1,
+                groups=None,
+                scheme="shuffle",
+                logger=None,
+            )
+
+        self.assertEqual(out.shape, (2,))
+        self.assertEqual(sorted(calls), [4, 5])
+
     def test_behavior_pipeline_config_parses_run_validation_flag(self):
         from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
 
@@ -623,6 +763,257 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             BehaviorPipelineConfig.from_config(cfg)
+
+    def test_trialwise_regression_resolves_alias_columns_and_predictor_interaction(self):
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import (
+            run_trialwise_feature_regressions,
+        )
+
+        rng = np.random.default_rng(0)
+        n_trials = 30
+        temperature = np.tile(np.linspace(-1.0, 1.0, 10), 3)
+        power = np.repeat(np.array([-1.0, 0.0, 1.0]), 10) + rng.normal(scale=0.05, size=n_trials)
+        rating = (
+            0.8 * temperature
+            + 0.6 * power
+            + 1.5 * temperature * power
+            + rng.normal(scale=0.02, size=n_trials)
+        )
+        df_trials = pd.DataFrame(
+            {
+                "rating": rating,
+                "temperature": temperature,
+                "power_alpha": power,
+                "run_id": np.repeat([1, 2, 3], 10),
+            }
+        )
+        cfg = DotConfig(
+            {
+                "event_columns": {
+                    "outcome": ["rating"],
+                    "predictor": ["temperature"],
+                },
+                "behavior_analysis": {
+                    "regression": {
+                        "outcome": "outcome",
+                        "include_predictor": True,
+                        "predictor_control": "linear",
+                        "include_trial_order": False,
+                        "include_run_block": False,
+                        "include_interaction": True,
+                        "min_samples": 10,
+                        "n_permutations": 0,
+                    },
+                    "n_jobs": 1,
+                },
+            }
+        )
+
+        out, meta = run_trialwise_feature_regressions(
+            df_trials,
+            feature_cols=["power_alpha"],
+            config=cfg,
+        )
+
+        self.assertEqual(meta["outcome"], "rating")
+        self.assertEqual(meta["predictor_column"], "temperature")
+        self.assertFalse(out.empty)
+        self.assertEqual(str(out.iloc[0]["target"]), "rating")
+        self.assertTrue(np.isfinite(float(out.iloc[0]["beta_interaction"])))
+
+    def test_stage_regression_run_mean_rejects_run_block_covariate(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_regression
+
+        cfg = DotConfig(
+            {
+                "event_columns": {
+                    "outcome": ["rating"],
+                    "predictor": ["temperature"],
+                },
+                "behavior_analysis": {
+                    "regression": {
+                        "primary_unit": "run_mean",
+                        "include_run_block": True,
+                    },
+                    "run_adjustment": {"column": "run_id"},
+                },
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "rating": [10.0, 12.0, 20.0, 22.0],
+                "temperature": [44.0, 44.5, 45.0, 45.5],
+                "power_alpha": [0.1, 0.2, 0.3, 0.4],
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            with self.assertRaises(ValueError):
+                stage_regression(
+                    ctx,
+                    SimpleNamespace(method_label="", min_samples=2),
+                )
+
+    def test_stage_regression_run_mean_uses_ungrouped_permutation(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_regression
+
+        cfg = DotConfig(
+            {
+                "event_columns": {
+                    "outcome": ["rating"],
+                    "predictor": ["temperature"],
+                },
+                "behavior_analysis": {
+                    "regression": {
+                        "primary_unit": "run_mean",
+                        "include_run_block": False,
+                        "n_permutations": 12,
+                    },
+                    "run_adjustment": {"column": "run_id"},
+                },
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2, 3, 3],
+                "rating": [10.0, 12.0, 20.0, 22.0, 30.0, 32.0],
+                "temperature": [44.0, 44.5, 45.0, 45.5, 46.0, 46.5],
+                "power_alpha": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            }
+        )
+        captured = {}
+
+        def _fake_regression(
+            trial_df,
+            *,
+            feature_cols,
+            config,
+            groups_for_permutation,
+            strict_permutation_primary,
+        ):
+            captured["n_rows"] = len(trial_df)
+            captured["feature_cols"] = list(feature_cols)
+            captured["groups"] = groups_for_permutation
+            captured["strict_permutation_primary"] = strict_permutation_primary
+            return (
+                pd.DataFrame(
+                    {
+                        "feature": ["power_alpha"],
+                        "target": ["rating"],
+                        "p_primary": [0.1],
+                    }
+                ),
+                {"status": "ok", "predictor_control": "linear"},
+            )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.trialwise_regression.run_trialwise_feature_regressions",
+            side_effect=_fake_regression,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._write_stats_table",
+            return_value=Path("/tmp/regression.parquet"),
+        ):
+            out = stage_regression(
+                ctx,
+                SimpleNamespace(method_label="", min_samples=2),
+            )
+
+        self.assertEqual(captured["n_rows"], 6)
+        self.assertEqual(captured["feature_cols"], ["power_alpha"])
+        self.assertIsNone(captured["groups"])
+        self.assertFalse(bool(captured["strict_permutation_primary"]))
+        self.assertFalse(out.empty)
+
+    def test_run_level_regression_aggregation_uses_complete_case_trials(self):
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import (
+            _aggregate_feature_to_run_level,
+        )
+
+        trial_df = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "rating": [10.0, 20.0, 30.0, 40.0],
+                "temperature": [44.0, 45.0, 46.0, 47.0],
+                "power_alpha": [0.2, np.nan, 0.4, 0.6],
+                "trial_index": [1.0, 2.0, 1.0, 2.0],
+            }
+        )
+
+        aggregated = _aggregate_feature_to_run_level(
+            trial_df,
+            run_col="run_id",
+            outcome_column="rating",
+            predictor_column="temperature",
+            feature_column="power_alpha",
+            base_covariate_columns=["trial_index"],
+        )
+
+        self.assertEqual(len(aggregated), 2)
+        self.assertAlmostEqual(float(aggregated.iloc[0]["rating"]), 10.0, places=12)
+        self.assertAlmostEqual(float(aggregated.iloc[0]["temperature"]), 44.0, places=12)
+        self.assertAlmostEqual(float(aggregated.iloc[0]["trial_index"]), 1.0, places=12)
+
+    def test_group_correlations_default_target_resolves_outcome_alias(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        df_a = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, 12),
+                "power_alpha": np.linspace(0.1, 1.2, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+        df_b = pd.DataFrame(
+            {
+                "rating": np.linspace(15, 75, 12),
+                "power_alpha": np.linspace(0.2, 1.3, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+        cfg = DotConfig({"event_columns": {"outcome": ["rating"]}})
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df_a, df_b],
+        ), patch(
+            "eeg_pipeline.analysis.behavior.group_level.compute_correlation",
+            return_value=(0.2, 0.5),
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+            side_effect=lambda df, **_kwargs: df,
+        ):
+            out = run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=cfg,
+                logger=Mock(),
+                use_block_permutation=False,
+                n_perm=0,
+            )
+
+        self.assertFalse(out.empty)
+        self.assertEqual(str(out.iloc[0]["target"]), "rating")
 
     def test_correlate_design_accepts_canonical_targets_key(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
@@ -774,6 +1165,74 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                     ctx,
                     SimpleNamespace(control_predictor=False, control_trial_order=False),
                 )
+
+    def test_correlate_design_rejects_run_adjustment_for_run_mean_primary_unit(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "run_adjustment": {
+                        "enabled": True,
+                        "include_in_correlations": True,
+                        "column": "run_id",
+                    },
+                    "correlations": {
+                        "targets": ["rating"],
+                        "primary_unit": "run_mean",
+                    },
+                    "statistics": {"allow_iid_trials": True},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        df_trials = pd.DataFrame(
+            {
+                "run_id": np.repeat([1, 2], 4),
+                "rating": np.linspace(10, 50, 8),
+                "power_alpha": np.linspace(0.1, 0.8, 8),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._load_trial_table_df",
+            return_value=df_trials,
+        ), patch(
+            "eeg_pipeline.analysis.behavior.orchestration._get_feature_columns",
+            return_value=["power_alpha"],
+        ):
+            with self.assertRaises(ValueError):
+                stage_correlate_design(
+                    ctx,
+                    SimpleNamespace(control_predictor=False, control_trial_order=False),
+                )
+
+    def test_build_run_mean_design_uses_complete_case_trials(self):
+        from eeg_pipeline.analysis.behavior.stages.correlate import _build_run_mean_design
+
+        df_trials = pd.DataFrame({"run_id": [1, 1, 2, 2]})
+        x = pd.Series([0.2, np.nan, 0.4, 0.6], index=df_trials.index)
+        y = pd.Series([10.0, 20.0, 30.0, 40.0], index=df_trials.index)
+        cov_df = pd.DataFrame({"trial_index": [1.0, 2.0, 1.0, 2.0]}, index=df_trials.index)
+        predictor = pd.Series([44.0, 45.0, 46.0, 47.0], index=df_trials.index)
+
+        x_run, y_run, cov_run, predictor_run = _build_run_mean_design(
+            df_trials=df_trials,
+            x=x,
+            y=y,
+            cov_df=cov_df,
+            predictor_series=predictor,
+            predictor_column="temperature",
+            target="rating",
+            run_col="run_id",
+            run_adjust_in_correlations=False,
+        )
+
+        self.assertEqual(len(x_run), 2)
+        self.assertAlmostEqual(float(x_run.iloc[0]), 0.2, places=12)
+        self.assertAlmostEqual(float(y_run.iloc[0]), 10.0, places=12)
+        self.assertAlmostEqual(float(cov_run.iloc[0]["trial_index"]), 1.0, places=12)
+        self.assertAlmostEqual(float(predictor_run.iloc[0]), 44.0, places=12)
 
     def test_correlate_design_rejects_excessive_run_dummy_expansion(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
@@ -1287,7 +1746,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(str(out[0]["p_kind_primary"]), "p_perm_raw")
         self.assertEqual(str(out[0]["p_primary_source"]), "raw_robust_perm")
 
-    def test_correlate_primary_selection_run_mean_precedes_robust_branch(self):
+    def test_correlate_primary_selection_run_mean_uses_controlled_estimand(self):
         from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
 
         cfg = DotConfig(
@@ -1305,8 +1764,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             df_trials=pd.DataFrame({"run_id": [1, 1, 2, 2]}),
             feature_cols=["power_alpha"],
             targets=["rating"],
-            cov_df=None,
-            predictor_series=None,
+            cov_df=pd.DataFrame({"trial_index": [0.0, 1.0, 0.0, 1.0]}),
+            predictor_series=pd.Series([44.0, 44.5, 45.0, 45.5]),
             predictor_column="temperature",
             run_col="run_id",
             run_adjust_in_correlations=False,
@@ -1320,7 +1779,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 "p_raw": 0.20,
                 "r_run_mean": 0.8,
                 "p_run_mean": 0.01,
-                "robust_method": "winsorized",
+                "r_run_mean_partial_cov_predictor": 0.6,
+                "p_run_mean_partial_cov_predictor": 0.03,
+                "robust_method": None,
             }
         ]
 
@@ -1331,9 +1792,300 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             records,
         )
         self.assertEqual(len(out), 1)
-        self.assertEqual(str(out[0]["p_kind_primary"]), "p_run_mean")
-        self.assertAlmostEqual(float(out[0]["p_primary"]), 0.01, places=12)
-        self.assertEqual(str(out[0]["p_primary_source"]), "run_mean")
+        self.assertEqual(str(out[0]["p_kind_primary"]), "p_run_mean_partial_cov_predictor")
+        self.assertAlmostEqual(float(out[0]["p_primary"]), 0.03, places=12)
+        self.assertEqual(str(out[0]["p_primary_source"]), "run_mean_partial_cov_predictor")
+
+    def test_correlate_primary_selection_honors_requested_raw_type(self):
+        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "correlations": {
+                        "types": ["raw"],
+                        "p_primary_mode": "perm_if_available",
+                    },
+                    "statistics": {"allow_iid_trials": False},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        design = CorrelateDesign(
+            df_trials=pd.DataFrame(
+                {
+                    "power_alpha": [0.2, 0.4, 0.6, 0.8],
+                    "rating": [10.0, 20.0, 30.0, 40.0],
+                    "temperature": [44.0, 44.5, 45.0, 45.5],
+                }
+            ),
+            feature_cols=["power_alpha"],
+            targets=["rating"],
+            cov_df=pd.DataFrame({"trial_index": [1.0, 2.0, 3.0, 4.0]}),
+            predictor_series=pd.Series([44.0, 44.5, 45.0, 45.5]),
+            predictor_column="temperature",
+            run_col="run_id",
+            run_adjust_in_correlations=False,
+            groups_for_perm=pd.Series([1, 1, 2, 2]),
+        )
+        out = stage_correlate_primary_selection(
+            ctx,
+            SimpleNamespace(control_predictor=True),
+            design,
+            [
+                {
+                    "feature": "power_alpha",
+                    "target": "rating",
+                    "r_raw": 0.5,
+                    "p_raw": 0.04,
+                    "p_perm_raw": 0.03,
+                    "robust_method": None,
+                }
+            ],
+        )
+
+        self.assertEqual(str(out[0]["p_kind_primary"]), "p_perm_raw")
+        self.assertAlmostEqual(float(out[0]["p_primary"]), 0.03, places=12)
+        self.assertEqual(str(out[0]["p_primary_source"]), "raw_perm")
+
+    def test_correlate_primary_selection_does_not_downgrade_combined_control_request(self):
+        from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "correlations": {
+                        "types": ["partial_cov_predictor", "raw"],
+                        "p_primary_mode": "perm_if_available",
+                    },
+                    "statistics": {"allow_iid_trials": True},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        design = CorrelateDesign(
+            df_trials=pd.DataFrame({"run_id": [1, 1, 2, 2]}),
+            feature_cols=["power_alpha"],
+            targets=["rating"],
+            cov_df=None,
+            predictor_series=pd.Series([44.0, 44.5, 45.0, 45.5]),
+            predictor_column="temperature",
+            run_col="run_id",
+            run_adjust_in_correlations=False,
+            groups_for_perm=None,
+        )
+
+        out = stage_correlate_primary_selection(
+            ctx,
+            SimpleNamespace(control_predictor=True),
+            design,
+            [
+                {
+                    "feature": "power_alpha",
+                    "target": "rating",
+                    "r_raw": 0.5,
+                    "p_raw": 0.04,
+                    "r_partial_predictor": 0.6,
+                    "p_partial_predictor": 0.02,
+                    "robust_method": None,
+                }
+            ],
+        )
+
+        self.assertEqual(str(out[0]["p_kind_primary"]), "p_partial_cov_predictor")
+        self.assertTrue(np.isnan(float(out[0]["p_primary"])))
+        self.assertTrue(np.isnan(float(out[0]["r_primary"])))
+        self.assertEqual(str(out[0]["p_primary_source"]), "partial_cov_predictor_missing")
+
+    def test_correlate_effect_sizes_allows_robust_raw_with_unrequested_controls(self):
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            CorrelateDesign,
+            stage_correlate_effect_sizes,
+        )
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "correlations": {"types": ["raw"]},
+                    "n_jobs": 1,
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        design = CorrelateDesign(
+            df_trials=pd.DataFrame(
+                {
+                    "power_alpha": [0.2, 0.4, 0.6, 0.8, 1.0],
+                    "rating": [1.0, 2.0, 3.0, 4.0, 5.0],
+                    "temperature": [44.0, 44.5, 45.0, 45.5, 46.0],
+                }
+            ),
+            feature_cols=["power_alpha"],
+            targets=["rating"],
+            cov_df=pd.DataFrame({"trial_index": [1.0, 2.0, 3.0, 4.0, 5.0]}),
+            predictor_series=pd.Series([44.0, 44.5, 45.0, 45.5, 46.0]),
+            predictor_column="temperature",
+            run_col="run_id",
+            run_adjust_in_correlations=False,
+            groups_for_perm=None,
+        )
+
+        out = stage_correlate_effect_sizes(
+            ctx,
+            SimpleNamespace(
+                method="spearman",
+                robust_method="winsorized",
+                method_label="spearman_winsorized",
+                min_samples=3,
+            ),
+            design,
+        )
+
+        self.assertEqual(len(out), 1)
+        self.assertTrue(np.isfinite(float(out[0]["r_raw"])))
+
+    def test_predictor_residual_spline_failure_surfaces_instead_of_falling_back(self):
+        from eeg_pipeline.utils.analysis.stats.predictor_residual import fit_predictor_outcome_curve
+
+        predictor = pd.Series(np.linspace(43.0, 46.0, 8))
+        outcome = pd.Series(np.linspace(10.0, 50.0, 8))
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "predictor_type": "continuous",
+                    "predictor_residual": {
+                        "method": "spline",
+                        "min_samples": 3,
+                    },
+                }
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.predictor_residual._fit_spline_model",
+            return_value=None,
+        ):
+            with self.assertRaises(ValueError):
+                fit_predictor_outcome_curve(predictor, outcome, config=cfg)
+
+    def test_predictor_residual_crossfit_uses_same_spline_estimator_path(self):
+        from eeg_pipeline.utils.analysis.stats.predictor_residual import (
+            crossfit_predictor_outcome_curve,
+        )
+
+        predictor = pd.Series(np.linspace(43.0, 46.5, 8))
+        outcome = pd.Series(np.linspace(10.0, 45.0, 8))
+        groups = pd.Series([1, 1, 1, 1, 2, 2, 2, 2])
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "predictor_type": "continuous",
+                    "predictor_residual": {
+                        "min_samples": 3,
+                        "crossfit": {
+                            "method": "spline",
+                            "n_splits": 2,
+                        },
+                    },
+                }
+            }
+        )
+        fit_calls = []
+
+        def _fake_fit(pred_values, out_values, _config):
+            fit_calls.append((len(pred_values), len(out_values)))
+            return object(), {"model": "spline", "status": "ok", "df": 3}
+
+        def _fake_predict(_model, pred_values):
+            return pd.Series(
+                np.full(len(pred_values), float(np.mean(pred_values))),
+                index=pred_values.index,
+                dtype=float,
+            )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.predictor_residual._fit_spline_model",
+            side_effect=_fake_fit,
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.predictor_residual._predict_spline_model",
+            side_effect=_fake_predict,
+        ):
+            prediction, residual, metadata = crossfit_predictor_outcome_curve(
+                predictor,
+                outcome,
+                groups,
+                config=cfg,
+                method="spline",
+            )
+
+        self.assertEqual(fit_calls, [(4, 4), (4, 4)])
+        self.assertEqual(str(metadata["status"]), "ok")
+        self.assertTrue(np.isfinite(prediction.to_numpy(dtype=float)).all())
+        self.assertTrue(np.isfinite(residual.to_numpy(dtype=float)).all())
+
+    def test_predictor_residual_crossfit_inherits_main_method_when_not_overridden(self):
+        from eeg_pipeline.utils.analysis.stats.predictor_residual import (
+            crossfit_predictor_outcome_curve,
+        )
+
+        predictor = pd.Series(np.linspace(43.0, 46.5, 8))
+        outcome = pd.Series(np.linspace(10.0, 45.0, 8))
+        groups = pd.Series([1, 1, 1, 1, 2, 2, 2, 2])
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "predictor_type": "continuous",
+                    "predictor_residual": {
+                        "method": "poly",
+                        "min_samples": 3,
+                        "crossfit": {
+                            "n_splits": 2,
+                        },
+                    },
+                }
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.predictor_residual._fit_polynomial_model",
+            return_value=(np.poly1d([1.0, 0.0]), {"model": "poly", "status": "ok"}),
+        ) as poly_fit, patch(
+            "eeg_pipeline.utils.analysis.stats.predictor_residual._predict_polynomial_model",
+            side_effect=lambda _model, pred_values: pd.Series(
+                np.zeros(len(pred_values)),
+                index=pred_values.index,
+                dtype=float,
+            ),
+        ):
+            prediction, residual, metadata = crossfit_predictor_outcome_curve(
+                predictor,
+                outcome,
+                groups,
+                config=cfg,
+            )
+
+        self.assertEqual(poly_fit.call_count, 2)
+        self.assertEqual(str(metadata["method"]), "poly")
+        self.assertEqual(str(metadata["status"]), "ok")
+        self.assertTrue(np.isfinite(prediction.to_numpy(dtype=float)).all())
+        self.assertTrue(np.isfinite(residual.to_numpy(dtype=float)).all())
+
+    def test_partial_correlation_returns_nan_for_rank_deficient_design(self):
+        from eeg_pipeline.utils.analysis.stats.partial import partial_corr_xy_given_Z
+
+        x = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+        y = pd.Series([2.0, 4.0, 6.0, 8.0, 10.0])
+        z = pd.DataFrame(
+            {
+                "z1": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "z2": [2.0, 4.0, 6.0, 8.0, 10.0],
+            }
+        )
+
+        r_value, p_value, n_obs = partial_corr_xy_given_Z(x, y, z, "pearson")
+        self.assertTrue(np.isnan(float(r_value)))
+        self.assertTrue(np.isnan(float(p_value)))
+        self.assertEqual(int(n_obs), 0)
 
     def test_correlate_primary_selection_non_iid_overrides_asymptotic_to_permutation(self):
         from eeg_pipeline.analysis.behavior.orchestration import CorrelateDesign, stage_correlate_primary_selection
@@ -1449,6 +2201,45 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertEqual(int(rec.get("n_runs", 0)), 4)
         self.assertTrue(np.isnan(float(rec.get("p_run_mean", np.nan))))
+
+    def test_correlate_effect_size_computes_run_mean_controlled_statistics(self):
+        from eeg_pipeline.analysis.behavior.orchestration import _compute_single_effect_size
+
+        df_trials = pd.DataFrame(
+            {
+                "run_id": np.repeat([1, 2, 3, 4, 5, 6], 2),
+                "power_alpha": np.linspace(0.2, 2.4, 12),
+                "rating": np.linspace(5.0, 60.0, 12),
+            }
+        )
+        cov_df = pd.DataFrame({"trial_drift": np.repeat(np.arange(6, dtype=float), 2)})
+        predictor = pd.Series(np.repeat([43.0, 44.5, 46.0, 45.0, 47.5, 49.0], 2))
+
+        rec = _compute_single_effect_size(
+            feat="power_alpha",
+            target="rating",
+            df_trials=df_trials,
+            cov_df=cov_df,
+            predictor_series=predictor,
+            predictor_column="temperature",
+            run_col="run_id",
+            run_adjust_in_correlations=False,
+            method="spearman",
+            robust_method=None,
+            method_label="spearman",
+            min_samples=2,
+            run_min_samples=3,
+            want_raw=True,
+            want_partial_cov=True,
+            want_partial_predictor=True,
+            want_partial_cov_predictor=True,
+            want_run_mean=True,
+            config=DotConfig({"behavior_analysis": {"statistics": {"predictor_control": "linear"}}}),
+        )
+
+        self.assertEqual(int(rec.get("n_runs", 0)), 6)
+        self.assertIn("p_run_mean_partial_cov_predictor", rec)
+        self.assertTrue(np.isfinite(float(rec.get("r_run_mean_partial_cov_predictor", np.nan))))
 
     def test_group_correlations_use_subject_balanced_estimator_under_trial_imbalance(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
@@ -1763,7 +2554,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         calls = []
 
-        def _perm(n, rng, groups):
+        def _perm(n, rng, groups, scheme="shuffle", strict=True):
             calls.append(int(n))
             return np.arange(n, dtype=int)
 
@@ -1793,10 +2584,51 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 beta_int=np.nan,
                 n_permutations=3,
                 rng_seed=1,
+                scheme="shuffle",
             )
 
         self.assertTrue(calls)
         self.assertTrue(all(n == int(valid_feat.sum()) for n in calls))
+
+    def test_regression_permutation_uses_configured_scheme(self):
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import _compute_permutation_pvalues
+
+        captured = {}
+
+        def _perm(n, rng, groups, scheme="shuffle", strict=True):
+            captured["scheme"] = scheme
+            return np.arange(n, dtype=int)
+
+        X = np.array([[1.0, 0.2], [1.0, -0.2]], dtype=float)
+        y_f = np.array([0.1, -0.1], dtype=float)
+        beta = np.array([0.0, 0.5], dtype=float)
+        y_hat_z = np.array([0.0, 0.0, 0.0, 0.0], dtype=float)
+        resid_z = np.array([0.2, -0.1, 0.3, -0.2], dtype=float)
+        valid_feat = np.array([True, False, True, False], dtype=bool)
+        groups_v = np.array([1, 1, 2, 2], dtype=int)
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.trialwise_regression.permute_within_groups",
+            side_effect=_perm,
+        ):
+            _compute_permutation_pvalues(
+                X=X,
+                y_f=y_f,
+                beta=beta,
+                y_hat_z=y_hat_z,
+                resid_z=resid_z,
+                valid_feat=valid_feat,
+                groups_v=groups_v,
+                names=["intercept", "feature"],
+                idx_feature=1,
+                beta_feature=0.5,
+                beta_int=np.nan,
+                n_permutations=1,
+                rng_seed=1,
+                scheme="circular_shift",
+            )
+
+        self.assertEqual(str(captured.get("scheme")), "circular_shift")
 
     def test_regression_strict_non_iid_marks_missing_when_permutation_unavailable(self):
         from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions

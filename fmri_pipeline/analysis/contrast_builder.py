@@ -13,6 +13,7 @@ Requirements:
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -23,13 +24,16 @@ import numpy as np
 import pandas as pd
 
 from fmri_pipeline.analysis.events_selection import normalize_trial_type_list
+from fmri_pipeline.analysis.constraint_masking import build_thresholded_constraint_mask
 from fmri_pipeline.utils.bold_discovery import (
     build_first_level_model as _build_first_level_model,
     coerce_condition_value as _coerce_condition_value,
     discover_brain_mask_for_bold as _discover_brain_mask_for_bold,
     discover_fmriprep_preproc_bold as _discover_fmriprep_preproc_bold,
     get_tr_from_bold as _get_tr_from_bold,
+    select_consistent_run_source,
     select_confound_columns as _select_confound_columns,
+    validate_design_matrices as _validate_design_matrices,
 )
 from fmri_pipeline.utils.text import safe_slug as _safe_slug
 from eeg_pipeline.utils.config.loader import get_config_value
@@ -91,6 +95,10 @@ class ContrastBuilderConfig:
     phase_scope_value: Optional[str] = None
 
 
+def _value_is_specified(value: Any) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
 def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
     """Generate hash from contrast config parameters to detect changes."""
     key_parts = [
@@ -123,18 +131,26 @@ def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
     return hashlib.md5(key.encode()).hexdigest()[:8]
 
 
+def load_contrast_config_section(config: Any) -> Dict[str, Any]:
+    """Resolve the configured contrast section with nested source-localization precedence."""
+    top_level = get_config_value(config, "fmri_contrast", {}) or {}
+    src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
+
+    if hasattr(config, "get"):
+        top_level = config.get("fmri_contrast", top_level) or top_level
+        src_cfg = config.get("feature_engineering.sourcelocalization", src_cfg) or src_cfg
+
+    top_level = top_level if isinstance(top_level, dict) else {}
+    nested_fmri = src_cfg.get("fmri", {}) if isinstance(src_cfg, dict) else {}
+    nested = nested_fmri.get("contrast", {}) if isinstance(nested_fmri, dict) else {}
+    nested = nested if isinstance(nested, dict) else {}
+
+    return copy.deepcopy(nested or top_level)
+
+
 def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     """Load contrast builder configuration from pipeline config."""
-    src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
-    fmri_cfg = {}
-    contrast_cfg = {}
-
-    if isinstance(src_cfg, dict):
-        fmri_cfg = src_cfg.get("fmri", {}) or {}
-        contrast_cfg = fmri_cfg.get("contrast", {}) or {}
-    elif hasattr(config, "get"):
-        fmri_cfg = config.get("feature_engineering.sourcelocalization.fmri", {}) or {}
-        contrast_cfg = fmri_cfg.get("contrast", {}) or {}
+    contrast_cfg = load_contrast_config_section(config)
 
     runs_raw = contrast_cfg.get("runs")
     runs = None
@@ -387,6 +403,21 @@ def discover_bold_runs(
             f"No runs found for subject {subject}, task {task} in {func_dir}"
         )
 
+    selected_input_source = str(getattr(cfg, "input_source", "bids_raw") or "bids_raw").strip().lower()
+    preproc_by_run: Dict[int, Optional[Path]] = {}
+    if bids_derivatives is not None and cfg is not None and selected_input_source == "fmriprep":
+        selected_input_source, preproc_by_run = select_consistent_run_source(
+            run_numbers=run_nums,
+            discover_preproc_bold=lambda run_num: _discover_fmriprep_preproc_bold(
+                bids_derivatives=bids_derivatives,
+                subject=subject,
+                task=task,
+                run_num=run_num,
+                space=cfg.fmriprep_space,
+            ),
+            require_fmriprep=bool(getattr(cfg, "require_fmriprep", False)),
+        )
+
     # Resolve events + BOLD for each run.
     for run_num in run_nums:
         events_patterns = [
@@ -409,16 +440,9 @@ def discover_bold_runs(
             continue
 
         bold_path = None
-        if bids_derivatives is not None and cfg is not None and cfg.input_source == "fmriprep":
-            bold_path = _discover_fmriprep_preproc_bold(
-                bids_derivatives=bids_derivatives,
-                subject=subject,
-                task=task,
-                run_num=run_num,
-                space=cfg.fmriprep_space,
-            )
-
-        if bold_path is None:
+        if selected_input_source == "fmriprep":
+            bold_path = preproc_by_run.get(int(run_num))
+        else:
             raw_patterns = [
                 f"{sub_label}_task-{task}_run-{run_num:02d}_bold.nii.gz",
                 f"{sub_label}_task-{task}_run-{run_num}_bold.nii.gz",
@@ -678,6 +702,14 @@ def _remap_events_by_condition_columns(
 
         val_b_typed = _coerce_condition_value(val_b, events_df[col_b])
         mask_b = scope_mask & (events_df[col_b] == val_b_typed)
+        overlap_mask = mask_a & mask_b
+        overlap_count = int(overlap_mask.sum())
+        if overlap_count > 0:
+            raise ValueError(
+                f"Condition definitions overlap for {overlap_count} event(s): "
+                f"{col_a}={val_a!r} and {col_b}={val_b!r} select the same rows. "
+                "Condition A and B must be mutually exclusive."
+            )
         cond_b_found = mask_b.any()
         cond_b_count = int(mask_b.sum())
 
@@ -776,6 +808,11 @@ def fit_first_level_glm(
     flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
 
     flm.fit(bold_path, events=events_df, confounds=confounds)
+    _validate_design_matrices(
+        flm,
+        context=f"First-level GLM ({bold_path.name})",
+        min_residual_dof=1,
+    )
 
     return flm, synthetic_labels
 
@@ -784,6 +821,7 @@ class MultiRunGLMResult:
     """Result from multi-run GLM fitting with run inclusion details."""
 
     flm: Any  # FirstLevelModel
+    mask_img: Optional[Any]
     synthetic_labels: List[str]
     all_conditions: List[str]
     confound_columns: List[str]
@@ -793,6 +831,26 @@ class MultiRunGLMResult:
     skipped_runs: List[Tuple[int, str]]  # (run_idx, reason)
     total_cond_a_events: int
     total_cond_b_events: int
+
+
+def _validate_consistent_trs(bold_paths: List[Path]) -> float:
+    if not bold_paths:
+        raise ValueError("Cannot validate TR consistency without any BOLD runs.")
+
+    trs = [_get_tr_from_bold(path) for path in bold_paths]
+    reference_tr = float(trs[0])
+    mismatches = [
+        f"{path.name}={tr:.6f}s"
+        for path, tr in zip(bold_paths, trs)
+        if not np.isclose(float(tr), reference_tr, rtol=0.0, atol=1e-6)
+    ]
+    if mismatches:
+        formatted = ", ".join(mismatches)
+        raise ValueError(
+            "All runs included in one multi-run first-level GLM must share the same TR. "
+            f"Reference TR={reference_tr:.6f}s; mismatched runs: {formatted}."
+        )
+    return reference_tr
 
 
 def fit_first_level_glm_multi_run(
@@ -816,9 +874,6 @@ def fit_first_level_glm_multi_run(
         raise ValueError("No BOLD runs provided.")
     if len(bold_paths) != len(events_paths) or len(bold_paths) != len(confounds_paths):
         raise ValueError("Mismatch between number of BOLD, events, and confounds inputs.")
-
-    tr = _get_tr_from_bold(bold_paths[0])
-    logger.info("Fitting multi-run GLM (%d runs, TR=%.2fs)", len(bold_paths), tr)
 
     required_cols = {"onset", "duration", "trial_type"}
 
@@ -872,7 +927,7 @@ def fit_first_level_glm_multi_run(
         remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=False)
 
         # Check if this run should be skipped due to missing conditions
-        needs_both = cfg.condition_b_column and cfg.condition_b_value
+        needs_both = bool(cfg.condition_b_column) and _value_is_specified(cfg.condition_b_value)
         run_valid = True
         skip_reason = ""
 
@@ -932,6 +987,9 @@ def fit_first_level_glm_multi_run(
             total_cond_a_events, total_cond_b_events
         )
 
+    tr = _validate_consistent_trs(valid_bold_paths)
+    logger.info("Fitting multi-run GLM (%d runs, TR=%.2fs)", len(valid_bold_paths), tr)
+
     # If fMRIPrep brain masks exist, use their intersection to stabilize masking.
     mask_img = None
     try:
@@ -979,9 +1037,15 @@ def fit_first_level_glm_multi_run(
         confounds_arg = valid_confounds_list
 
     flm.fit(valid_bold_paths, events=valid_events_list, confounds=confounds_arg)
+    _validate_design_matrices(
+        flm,
+        context="Multi-run first-level GLM",
+        min_residual_dof=1,
+    )
 
     return MultiRunGLMResult(
         flm=flm,
+        mask_img=mask_img,
         synthetic_labels=synthetic_labels,
         all_conditions=sorted(all_conditions),
         confound_columns=sorted(confound_columns),
@@ -1027,10 +1091,10 @@ def compute_contrast_map(
                 f"Unexpected number of synthetic labels: {synthetic_labels}"
             )
     else:
-        cond_a = cfg.condition_a_value or cfg.condition1
-        cond_b = cfg.condition_b_value or cfg.condition2
+        cond_a = cfg.condition_a_value if _value_is_specified(cfg.condition_a_value) else cfg.condition1
+        cond_b = cfg.condition_b_value if _value_is_specified(cfg.condition_b_value) else cfg.condition2
 
-        if cond_a and cond_b:
+        if _value_is_specified(cond_a) and _value_is_specified(cond_b):
             if cond_a not in available_conditions:
                 raise ValueError(
                     f"Condition A value '{cond_a}' not found in events. "
@@ -1042,7 +1106,7 @@ def compute_contrast_map(
                     f"Available: {available_conditions}"
                 )
             contrast_def = f"{cond_a} - {cond_b}"
-        elif cond_a:
+        elif _value_is_specified(cond_a):
             if cond_a not in available_conditions:
                 raise ValueError(
                     f"Condition A value '{cond_a}' not found in events. "
@@ -1338,6 +1402,155 @@ def _cluster_extent_mask_from_z_map(
     return nib.Nifti1Image(mask_u8, img.affine, img.header)
 
 
+def _contrast_sidecar_path(contrast_path: Path) -> Path:
+    return contrast_path.with_suffix("").with_suffix(".json")
+
+
+def _load_constraint_mask_spec(config: Any) -> Optional[Dict[str, Any]]:
+    src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
+    if not isinstance(src_cfg, dict):
+        return None
+
+    fmri_cfg = src_cfg.get("fmri", {}) or {}
+    if not isinstance(fmri_cfg, dict) or not bool(fmri_cfg.get("enabled", False)):
+        return None
+
+    threshold = float(fmri_cfg.get("threshold", 3.1))
+    if not np.isfinite(threshold) or threshold <= 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.threshold must be a finite float > 0."
+        )
+
+    tail = str(fmri_cfg.get("tail", "pos")).strip().lower()
+    if tail not in {"pos", "abs"}:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.tail must be one of {'pos','abs'}."
+        )
+
+    thresholding_cfg = fmri_cfg.get("thresholding", {}) or {}
+    threshold_mode = str(
+        thresholding_cfg.get("mode", fmri_cfg.get("threshold_mode", "z"))
+    ).strip().lower()
+    if threshold_mode not in {"z", "fdr"}:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.thresholding.mode must be one of {'z','fdr'}."
+        )
+
+    fdr_q = float(thresholding_cfg.get("fdr_q", 0.05))
+    if not np.isfinite(fdr_q) or not (0 < fdr_q < 1):
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.thresholding.fdr_q must be in (0, 1)."
+        )
+
+    cluster_min_voxels = int(fmri_cfg.get("cluster_min_voxels", 50))
+    if cluster_min_voxels < 1:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri.cluster_min_voxels must be >= 1."
+        )
+
+    cluster_min_volume_mm3 = fmri_cfg.get("cluster_min_volume_mm3")
+    if cluster_min_volume_mm3 is not None:
+        cluster_min_volume_mm3 = float(cluster_min_volume_mm3)
+        if not np.isfinite(cluster_min_volume_mm3) or cluster_min_volume_mm3 <= 0:
+            raise ValueError(
+                "feature_engineering.sourcelocalization.fmri.cluster_min_volume_mm3 must be > 0 when provided."
+            )
+
+    return {
+        "threshold": threshold,
+        "tail": tail,
+        "threshold_mode": threshold_mode,
+        "fdr_q": fdr_q,
+        "cluster_min_voxels": cluster_min_voxels,
+        "cluster_min_volume_mm3": cluster_min_volume_mm3,
+    }
+
+
+def _get_constraint_mask_hash(spec: Dict[str, Any], *, resample_to_freesurfer: bool) -> str:
+    cluster_volume = spec["cluster_min_volume_mm3"]
+    cluster_volume_token = "" if cluster_volume is None else f"{float(cluster_volume):.8g}"
+    key = (
+        f"{spec['threshold_mode']}|{spec['threshold']:.8g}|{spec['fdr_q']:.8g}|"
+        f"{spec['tail']}|{int(spec['cluster_min_voxels'])}|"
+        f"{cluster_volume_token}|"
+        f"{int(bool(resample_to_freesurfer))}"
+    )
+    return hashlib.md5(key.encode("utf-8")).hexdigest()[:8]
+
+
+def _constraint_mask_output_path(
+    *,
+    output_dir: Path,
+    sub_label: str,
+    contrast_name: str,
+    contrast_hash: str,
+    constraint_hash: str,
+) -> Path:
+    return output_dir / (
+        f"{sub_label}_{contrast_name}_constraint-mask_{contrast_hash}_{constraint_hash}.nii.gz"
+    )
+
+
+def _read_json_dict(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        import json
+
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _write_json_dict(path: Path, payload: Dict[str, Any]) -> None:
+    import json
+
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _resolve_constraint_mask_path(contrast_path: Path, config: Any) -> Optional[Path]:
+    spec = _load_constraint_mask_spec(config)
+    if spec is None:
+        return None
+
+    sidecar = _read_json_dict(_contrast_sidecar_path(contrast_path))
+    if sidecar is None:
+        return None
+
+    constraint_info = sidecar.get("constraint_mask")
+    if not isinstance(constraint_info, dict):
+        return None
+
+    contrast_cfg = load_contrast_config(config)
+    expected_hash = _get_constraint_mask_hash(
+        spec,
+        resample_to_freesurfer=bool(contrast_cfg.resample_to_freesurfer),
+    )
+    if str(constraint_info.get("hash", "")) != expected_hash:
+        return None
+
+    path_value = constraint_info.get("path")
+    if not path_value:
+        return None
+
+    candidate = Path(str(path_value)).expanduser()
+    if not candidate.exists():
+        return None
+    return candidate
+
+
+def _resolve_fmri_stats_artifact(contrast_path: Path, config: Any) -> Optional[Path]:
+    constraint_path = _resolve_constraint_mask_path(contrast_path, config)
+    if constraint_path is not None:
+        return constraint_path
+    if _load_constraint_mask_spec(config) is not None:
+        return None
+    if contrast_path.exists():
+        return contrast_path
+    return None
+
+
 ###################################################################
 # Main Entry Point
 ###################################################################
@@ -1383,7 +1596,7 @@ def build_fmri_contrast(
     if output_dir is None:
         output_dir = bids_derivatives / sub_label / "fmri_contrasts"
 
-    contrast_map, run_meta = build_contrast_from_runs(
+    contrast_map, run_meta, glm_result, _contrast_def, _output_type = build_contrast_from_runs_detailed(
         bids_fmri_root=bids_fmri_root,
         bids_derivatives=bids_derivatives,
         subject=subject,
@@ -1393,79 +1606,97 @@ def build_fmri_contrast(
     )
 
     fs_subject_dir = freesurfer_subjects_dir / sub_label
+    native_contrast_map = contrast_map
+    constraint_spec = _load_constraint_mask_spec(config)
+    constraint_mask_img = None
+    constraint_mask_path = None
+    constraint_mask_meta = None
+    contrast_hash = _get_contrast_hash(cfg)
+
+    if constraint_spec is not None and str(run_meta.get("output_type")) == "z_score":
+        constraint_mask_img = build_thresholded_constraint_mask(
+            native_contrast_map,
+            threshold_mode=str(constraint_spec["threshold_mode"]),
+            z_threshold=float(constraint_spec["threshold"]),
+            fdr_q=float(constraint_spec["fdr_q"]),
+            tail=str(constraint_spec["tail"]),
+            analysis_mask_img=glm_result.mask_img,
+            min_cluster_voxels=int(constraint_spec["cluster_min_voxels"]),
+            min_cluster_volume_mm3=constraint_spec["cluster_min_volume_mm3"],
+        )
+        if not np.any(np.asarray(constraint_mask_img.get_fdata(), dtype=np.uint8) > 0):
+            raise ValueError(
+                "fMRI constraint mask thresholding produced an empty mask in native GLM space. "
+                "Adjust feature_engineering.sourcelocalization.fmri threshold settings."
+            )
 
     if cfg.resample_to_freesurfer and fs_subject_dir.exists():
         contrast_map = resample_to_freesurfer(contrast_map, fs_subject_dir)
+        if constraint_mask_img is not None:
+            constraint_mask_img = resample_to_freesurfer(
+                constraint_mask_img,
+                fs_subject_dir,
+                interpolation="nearest",
+            )
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    contrast_hash = _get_contrast_hash(cfg)
     output_name = f"{sub_label}_{cfg.name}_{cfg.output_type}_{contrast_hash}.nii.gz"
     output_path = output_dir / output_name
 
     nib.save(contrast_map, str(output_path))
     logger.info("Saved contrast map to %s", output_path)
 
-    # Optional: create a cluster-extent thresholded mask for downstream constraints.
-    if cfg.cluster_correction and str(run_meta.get("output_type")) == "z_score":
-        try:
-            src_cfg = get_config_value(config, "feature_engineering.sourcelocalization", {}) or {}
-            fmri_cfg = src_cfg.get("fmri", {}) if isinstance(src_cfg, dict) else {}
-            tail = str(fmri_cfg.get("tail", "pos")).strip().lower()
-            min_cluster_voxels = int(fmri_cfg.get("cluster_min_voxels", 50))
-            min_cluster_volume_mm3 = fmri_cfg.get("cluster_min_volume_mm3", None)
-            try:
-                if min_cluster_volume_mm3 is not None:
-                    min_cluster_volume_mm3 = float(min_cluster_volume_mm3)
-                    if not np.isfinite(min_cluster_volume_mm3) or min_cluster_volume_mm3 <= 0:
-                        min_cluster_volume_mm3 = None
-            except Exception:
-                min_cluster_volume_mm3 = None
-        except Exception:
-            tail = "pos"
-            min_cluster_voxels = 50
-            min_cluster_volume_mm3 = None
-
-        try:
-            mask_img = _cluster_extent_mask_from_z_map(
-                contrast_map,
-                p_threshold=cfg.cluster_p_threshold,
-                tail=tail,
-                min_cluster_voxels=min_cluster_voxels,
-                min_cluster_volume_mm3=min_cluster_volume_mm3,
-            )
-            mask_name = f"{sub_label}_{cfg.name}_mask_cluster_{contrast_hash}.nii.gz"
-            mask_path = output_dir / mask_name
-            nib.save(mask_img, str(mask_path))
-            run_meta["cluster_mask_path"] = str(mask_path)
-        except Exception as exc:
-            logger.warning("Failed to create cluster mask (%s); continuing without it.", exc)
+    if constraint_mask_img is not None and constraint_spec is not None:
+        constraint_hash = _get_constraint_mask_hash(
+            constraint_spec,
+            resample_to_freesurfer=bool(cfg.resample_to_freesurfer and fs_subject_dir.exists()),
+        )
+        constraint_mask_path = _constraint_mask_output_path(
+            output_dir=output_dir,
+            sub_label=sub_label,
+            contrast_name=cfg.name,
+            contrast_hash=contrast_hash,
+            constraint_hash=constraint_hash,
+        )
+        nib.save(constraint_mask_img, str(constraint_mask_path))
+        constraint_mask_meta = {
+            "artifact_type": "fmri_constraint_mask",
+            "hash": constraint_hash,
+            "path": str(constraint_mask_path),
+            "source_contrast_path": str(output_path),
+            "threshold_mode": str(constraint_spec["threshold_mode"]),
+            "threshold": float(constraint_spec["threshold"]),
+            "fdr_q": float(constraint_spec["fdr_q"]),
+            "tail": str(constraint_spec["tail"]),
+            "cluster_min_voxels": int(constraint_spec["cluster_min_voxels"]),
+            "cluster_min_volume_mm3": constraint_spec["cluster_min_volume_mm3"],
+            "resample_to_freesurfer": bool(cfg.resample_to_freesurfer and fs_subject_dir.exists()),
+        }
+        _write_json_dict(_contrast_sidecar_path(constraint_mask_path), constraint_mask_meta)
+        run_meta["constraint_mask_path"] = str(constraint_mask_path)
 
     # Write a lightweight sidecar for reproducibility/debugging.
-    try:
-        import json
-
-        sidecar_path = output_path.with_suffix("").with_suffix(".json")
-        payload = {
-            "subject": sub_label,
-            "task": task,
-            "contrast_name": cfg.name,
-            "contrast_type": cfg.contrast_type,
-            "input_source": cfg.input_source,
-            "fmriprep_space": cfg.fmriprep_space,
-            "require_fmriprep": bool(cfg.require_fmriprep),
-            "hrf_model": cfg.hrf_model,
-            "drift_model": cfg.drift_model,
-            "high_pass_hz": cfg.high_pass_hz,
-            "output_type_requested": cfg.output_type,
-            "output_type_actual": run_meta.get("output_type"),
-            "contrast_def": run_meta.get("contrast_def"),
-            "runs": cfg.runs,
-            "run_inputs": run_meta,
-        }
-        sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
-    except Exception as exc:
-        logger.debug("Failed to write contrast sidecar JSON (%s)", exc)
+    sidecar_path = _contrast_sidecar_path(output_path)
+    payload = {
+        "subject": sub_label,
+        "task": task,
+        "contrast_name": cfg.name,
+        "contrast_type": cfg.contrast_type,
+        "input_source": cfg.input_source,
+        "fmriprep_space": cfg.fmriprep_space,
+        "require_fmriprep": bool(cfg.require_fmriprep),
+        "hrf_model": cfg.hrf_model,
+        "drift_model": cfg.drift_model,
+        "high_pass_hz": cfg.high_pass_hz,
+        "output_type_requested": cfg.output_type,
+        "output_type_actual": run_meta.get("output_type"),
+        "contrast_def": run_meta.get("contrast_def"),
+        "runs": cfg.runs,
+        "constraint_mask": constraint_mask_meta,
+        "run_inputs": run_meta,
+    }
+    _write_json_dict(sidecar_path, payload)
 
     return output_path
 
@@ -1518,10 +1749,16 @@ def ensure_fmri_stats_map(
     cached_path = output_dir / output_name
 
     if cached_path.exists():
-        logger.info("Using cached fMRI contrast map: %s", cached_path)
-        return cached_path
+        resolved_path = _resolve_fmri_stats_artifact(cached_path, config)
+        if resolved_path is not None:
+            logger.info("Using cached fMRI stats artifact: %s", resolved_path)
+            return resolved_path
+        logger.info(
+            "Cached contrast exists but its constraint-mask artifact is missing or stale. Rebuilding %s.",
+            cached_path,
+        )
 
-    return build_fmri_contrast(
+    built_path = build_fmri_contrast(
         bids_fmri_root=bids_fmri_root,
         bids_derivatives=bids_derivatives,
         freesurfer_subjects_dir=freesurfer_subjects_dir,
@@ -1530,3 +1767,7 @@ def ensure_fmri_stats_map(
         task=task,
         output_dir=output_dir,
     )
+    resolved_path = _resolve_fmri_stats_artifact(built_path, config)
+    if resolved_path is not None:
+        return resolved_path
+    return built_path

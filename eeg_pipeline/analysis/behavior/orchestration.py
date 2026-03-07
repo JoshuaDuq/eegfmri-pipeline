@@ -335,8 +335,7 @@ def add_change_scores(ctx: BehaviorContext) -> None:
 
 def stage_load(ctx: BehaviorContext) -> bool:
     if not ctx.load_data():
-        ctx.logger.warning("Failed to load data")
-        return False
+        raise RuntimeError("Behavior context did not load required inputs.")
 
     _get_cache(ctx).load_manifest(ctx)
 

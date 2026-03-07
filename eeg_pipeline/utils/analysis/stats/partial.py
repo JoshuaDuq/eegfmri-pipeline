@@ -199,6 +199,8 @@ def partial_corr_xy_given_Z(
     y: pd.Series,
     Z: pd.DataFrame,
     method: str,
+    logger: Optional[logging.Logger] = None,
+    config: Optional[Any] = None,
 ) -> Tuple[float, float, int]:
     """
     Partial correlation of x,y controlling for Z.
@@ -222,7 +224,15 @@ def partial_corr_xy_given_Z(
         y_vals = stats.rankdata(y_vals)
         z_vals = np.column_stack([stats.rankdata(z_vals[:, i]) for i in range(z_vals.shape[1])])
     
-    design_matrix = np.column_stack([np.ones(len(x_vals)), z_vals])
+    design_dataframe = pd.DataFrame(z_vals, columns=list(Z.columns), index=df.index)
+    design_matrix = _build_design_matrix(
+        design_dataframe,
+        list(Z.columns),
+        method,
+        logger=logger,
+    )
+    if design_matrix is None:
+        return np.nan, np.nan, 0
 
     try:
         beta_x, *_ = lstsq(design_matrix, x_vals)
@@ -370,6 +380,8 @@ def compute_partial_correlation_with_covariates(
         aligned_data["y"],
         aligned_data[covariates_df.columns],
         method,
+        logger=logger,
+        config=config,
     )
 
 
@@ -466,6 +478,5 @@ def compute_partial_correlations_with_cov_predictor(
         p_cov_predictor,
         n_cov_predictor,
     )
-
 
 

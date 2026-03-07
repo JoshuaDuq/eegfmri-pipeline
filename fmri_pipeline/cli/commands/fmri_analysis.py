@@ -87,8 +87,8 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
     contrast_group.add_argument(
         "--cond-a-column",
         type=str,
-        default="trial_type",
-        help="Events column for condition A selection (default: trial_type)",
+        default=None,
+        help="Events column for condition A selection (default from config if set, else trial_type)",
     )
     contrast_group.add_argument(
         "--cond-a-value",
@@ -99,8 +99,8 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
     contrast_group.add_argument(
         "--cond-b-column",
         type=str,
-        default="trial_type",
-        help="Events column for condition B selection (default: trial_type)",
+        default=None,
+        help="Events column for condition B selection (default from config if set, else trial_type)",
     )
     contrast_group.add_argument(
         "--cond-b-value",
@@ -160,7 +160,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--smoothing-fwhm",
         type=float,
         default=None,
-        help="Spatial smoothing kernel FWHM in mm (default: 5.0; set 0 to disable)",
+        help="Spatial smoothing kernel FWHM in mm (default from config if set; set 0 to disable)",
     )
     glm_group.add_argument(
         "--events-to-model",
@@ -515,7 +515,10 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--fixed-effects-weighting",
         choices=["variance", "mean"],
         default=None,
-        help="How to combine trial betas into condition-averaged beta maps (default: variance)",
+        help=(
+            "How to combine condition maps across inputs "
+            "(beta-series: across runs; LSS: descriptive trial summaries) (default: variance)"
+        ),
     )
     trial_group.add_argument(
         "--write-trial-betas",
@@ -576,7 +579,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help=(
             "Optional: events column to compute signature summaries for each selected value "
             "(e.g., temperature). When set together with --signature-group-values, the pipeline "
-            "will compute fixed-effects maps per value and write signatures/group_signature_expression.tsv."
+            "will compute condition summary maps per value and write signatures/group_signature_expression.tsv."
         ),
     )
     trial_group.add_argument(
@@ -645,7 +648,10 @@ def _map_task_to_fmri(task: str) -> str:
 
 
 def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: Any) -> None:
-    from fmri_pipeline.analysis.contrast_builder import ContrastBuilderConfig
+    from fmri_pipeline.analysis.contrast_builder import (
+        ContrastBuilderConfig,
+        load_contrast_config_section,
+    )
     from fmri_pipeline.analysis.plotting_config import build_fmri_plotting_config_from_args
     from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
     from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
@@ -687,82 +693,156 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
 
     mode = str(getattr(args, "mode", "first-level") or "first-level").strip().lower()
 
+    contrast_cfg_section = load_contrast_config_section(config)
+
+    def _cfg_value(*path: str) -> Any:
+        current: Any = contrast_cfg_section
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current[key]
+        return current
+
+    def _coalesce(*values: Any) -> Any:
+        for value in values:
+            if value is not None:
+                return value
+        return None
+
+    def _has_value(value: Any) -> bool:
+        return value is not None and str(value).strip() != ""
+
+    def _normalize_string_list(value: Any) -> list[str] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            items = [part.strip() for part in value.split(",") if part.strip()]
+            return items or None
+        if isinstance(value, (list, tuple, set)):
+            items = [str(part).strip() for part in value if str(part).strip()]
+            return items or None
+        item = str(value).strip()
+        return [item] if item else None
+
+    def _normalize_runs(value: Any) -> list[int] | None:
+        if value is None:
+            return None
+        items = _normalize_string_list(value)
+        if not items:
+            return None
+        return [int(item) for item in items]
+
     # Defaults are intentionally conservative and match analysis defaults.
-    input_source = str(args.input_source or "fmriprep").strip().lower()
+    input_source = str(_coalesce(args.input_source, _cfg_value("input_source"), "fmriprep")).strip().lower()
     if input_source not in {"fmriprep", "bids_raw"}:
         input_source = "fmriprep"
 
-    drift_model = args.drift_model
+    drift_model = _coalesce(args.drift_model, _cfg_value("drift_model"))
     if drift_model == "none":
         drift_model = None
 
-    low_pass_hz = args.low_pass_hz
+    low_pass_hz = _coalesce(args.low_pass_hz, _cfg_value("low_pass_hz"))
     if low_pass_hz is not None and low_pass_hz <= 0:
         low_pass_hz = None
 
-    # Default smoothing improves readability/reproducibility for typical 3T tasks.
-    # If the user explicitly sets 0, treat that as "disabled".
     if args.smoothing_fwhm is None:
-        smoothing_fwhm = 5.0
+        smoothing_fwhm = normalize_smoothing_fwhm(_cfg_value("smoothing_fwhm"))
     else:
         smoothing_fwhm = normalize_smoothing_fwhm(args.smoothing_fwhm)
 
-    contrast_name = str(args.contrast_name or "contrast").strip() or "contrast"
-    contrast_type = str(args.contrast_type or ("custom" if args.formula else "t-test")).strip()
+    formula = str(_coalesce(args.formula, _cfg_value("formula")) or "").strip() or None
+    contrast_name = str(_coalesce(args.contrast_name, _cfg_value("name"), "contrast")).strip() or "contrast"
+    contrast_type = str(
+        _coalesce(args.contrast_type, _cfg_value("type"), "custom" if formula else "t-test")
+    ).strip()
+    cond_a_column = str(
+        _coalesce(args.cond_a_column, _cfg_value("condition_a", "column"), "trial_type")
+    ).strip() or "trial_type"
+    cond_a_value = _coalesce(args.cond_a_value, _cfg_value("condition_a", "value"))
+    cond_b_column = str(
+        _coalesce(args.cond_b_column, _cfg_value("condition_b", "column"), "trial_type")
+    ).strip() or "trial_type"
+    cond_b_value = _coalesce(args.cond_b_value, _cfg_value("condition_b", "value"))
+    condition_scope_trial_types = _coalesce(
+        getattr(args, "condition_scope_trial_types", None),
+        _cfg_value("condition_scope_trial_types"),
+    )
+    condition_scope_column = str(
+        _coalesce(getattr(args, "condition_scope_column", None), _cfg_value("condition_scope_column"), "trial_type")
+    ).strip() or "trial_type"
 
-    if contrast_type == "custom" and not (args.formula and str(args.formula).strip()):
+    if contrast_type == "custom" and not formula:
         raise ValueError("contrast-type=custom requires --formula")
 
-    if contrast_type != "custom" and not (args.cond_a_value and str(args.cond_a_value).strip()):
+    if contrast_type != "custom" and not _has_value(cond_a_value):
         raise ValueError("Missing required --cond-a-value (or use --contrast-type custom --formula ...)")
     if mode in {"beta-series", "lss"}:
-        if not (args.cond_b_value and str(args.cond_b_value).strip()):
+        if not _has_value(cond_b_value):
             raise ValueError("Trial-wise modes require --cond-b-value (e.g., condition_a vs condition_b).")
 
-    confounds_strategy = str(args.confounds_strategy or "auto").strip().lower()
+    confounds_strategy = str(_coalesce(args.confounds_strategy, _cfg_value("confounds_strategy"), "auto")).strip().lower()
     if not confounds_strategy:
         confounds_strategy = "auto"
-    write_design_matrix = bool(args.write_design_matrix) if args.write_design_matrix is not None else False
+    if args.write_design_matrix is not None:
+        write_design_matrix = bool(args.write_design_matrix)
+    else:
+        write_design_matrix = bool(_coalesce(_cfg_value("write_design_matrix"), False))
 
     # Default fMRIPrep space differs by mode: first-level defaults to T1w, signature modes default to MNI.
     if args.fmriprep_space:
         fmriprep_space = str(args.fmriprep_space).strip()
     else:
-        fmriprep_space = "MNI152NLin2009cAsym" if mode in {"beta-series", "lss"} else "T1w"
+        fmriprep_space = "MNI152NLin2009cAsym" if mode in {"beta-series", "lss"} else str(
+            _coalesce(_cfg_value("fmriprep_space"), "T1w")
+        ).strip()
 
     if mode == "first-level":
         from fmri_pipeline.analysis.events_selection import normalize_trial_type_list
 
-        events_to_model = normalize_trial_type_list(args.events_to_model)
-        stim_phases_to_model = normalize_trial_type_list(getattr(args, "stim_phases_to_model", None))
-        phase_column = str(getattr(args, "phase_column", "") or "").strip() or "stim_phase"
-        phase_scope_column = str(getattr(args, "phase_scope_column", "") or "").strip() or "trial_type"
-        phase_scope_value = str(getattr(args, "phase_scope_value", "") or "").strip() or None
+        events_to_model = normalize_trial_type_list(_coalesce(args.events_to_model, _cfg_value("events_to_model")))
+        stim_phases_to_model = normalize_trial_type_list(
+            _coalesce(getattr(args, "stim_phases_to_model", None), _cfg_value("stim_phases_to_model"))
+        )
+        phase_column = str(_coalesce(getattr(args, "phase_column", None), _cfg_value("phase_column"), "stim_phase")).strip() or "stim_phase"
+        phase_scope_column = str(
+            _coalesce(getattr(args, "phase_scope_column", None), _cfg_value("phase_scope_column"), "trial_type")
+        ).strip() or "trial_type"
+        phase_scope_value = str(
+            _coalesce(getattr(args, "phase_scope_value", None), _cfg_value("phase_scope_value"), "")
+        ).strip() or None
         cfg = ContrastBuilderConfig(
             enabled=True,
             input_source=input_source,
             fmriprep_space=fmriprep_space,
-            require_fmriprep=bool(args.require_fmriprep) if args.require_fmriprep is not None else True,
+            require_fmriprep=(
+                bool(args.require_fmriprep)
+                if args.require_fmriprep is not None
+                else bool(_coalesce(_cfg_value("require_fmriprep"), True))
+            ),
             contrast_type=contrast_type,
             condition1=None,
             condition2=None,
-            condition_a_column=str(args.cond_a_column or "trial_type").strip(),
-            condition_a_value=str(args.cond_a_value).strip() if args.cond_a_value else None,
-            condition_b_column=str(args.cond_b_column or "trial_type").strip(),
-            condition_b_value=str(args.cond_b_value).strip() if args.cond_b_value else None,
-            condition_scope_trial_types=list(getattr(args, "condition_scope_trial_types", None) or ()) or None,
-            condition_scope_column=str(getattr(args, "condition_scope_column", "") or "").strip() or "trial_type",
-            formula=str(args.formula).strip() if args.formula else None,
+            condition_a_column=cond_a_column,
+            condition_a_value=str(cond_a_value).strip() if _has_value(cond_a_value) else None,
+            condition_b_column=cond_b_column,
+            condition_b_value=str(cond_b_value).strip() if _has_value(cond_b_value) else None,
+            condition_scope_trial_types=_normalize_string_list(condition_scope_trial_types),
+            condition_scope_column=condition_scope_column,
+            formula=formula,
             name=contrast_name,
-            runs=list(args.runs) if args.runs else None,
-            hrf_model=str(args.hrf_model or "spm").strip(),
+            runs=list(args.runs) if args.runs else _normalize_runs(_cfg_value("runs")),
+            hrf_model=str(_coalesce(args.hrf_model, _cfg_value("hrf_model"), "spm")).strip(),
             drift_model=str(drift_model).strip() if drift_model else None,
-            high_pass_hz=float(args.high_pass_hz) if args.high_pass_hz is not None else 0.008,
+            high_pass_hz=float(_coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)),
             low_pass_hz=float(low_pass_hz) if low_pass_hz is not None else None,
-            cluster_correction=False,
-            cluster_p_threshold=0.001,
-            output_type=str(args.output_type or "z-score").strip(),
-            resample_to_freesurfer=bool(args.resample_to_freesurfer) if args.resample_to_freesurfer is not None else False,
+            cluster_correction=bool(_coalesce(_cfg_value("cluster_correction"), True)),
+            cluster_p_threshold=float(_coalesce(_cfg_value("cluster_p_threshold"), 0.001)),
+            output_type=str(_coalesce(args.output_type, _cfg_value("output_type"), "z-score")).strip(),
+            resample_to_freesurfer=(
+                bool(args.resample_to_freesurfer)
+                if args.resample_to_freesurfer is not None
+                else bool(_coalesce(_cfg_value("resample_to_freesurfer"), True))
+            ),
             confounds_strategy=confounds_strategy,
             write_design_matrix=write_design_matrix,
             smoothing_fwhm=smoothing_fwhm,
@@ -781,17 +861,21 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         trial_cfg = TrialSignatureExtractionConfig(
             input_source=input_source,
             fmriprep_space=fmriprep_space,
-            require_fmriprep=bool(args.require_fmriprep) if args.require_fmriprep is not None else True,
-            runs=list(args.runs) if args.runs else None,
+            require_fmriprep=(
+                bool(args.require_fmriprep)
+                if args.require_fmriprep is not None
+                else bool(_coalesce(_cfg_value("require_fmriprep"), True))
+            ),
+            runs=list(args.runs) if args.runs else _normalize_runs(_cfg_value("runs")),
             task=fmri_task,
             name=contrast_name,
-            condition_a_column=str(args.cond_a_column or "trial_type").strip(),
-            condition_a_value=str(args.cond_a_value).strip(),
-            condition_b_column=str(args.cond_b_column or "trial_type").strip(),
-            condition_b_value=str(args.cond_b_value).strip(),
-            hrf_model=str(args.hrf_model or "spm").strip(),
+            condition_a_column=cond_a_column,
+            condition_a_value=str(cond_a_value).strip(),
+            condition_b_column=cond_b_column,
+            condition_b_value=str(cond_b_value).strip(),
+            hrf_model=str(_coalesce(args.hrf_model, _cfg_value("hrf_model"), "spm")).strip(),
             drift_model=str(drift_model).strip() if drift_model else None,
-            high_pass_hz=float(args.high_pass_hz) if args.high_pass_hz is not None else 0.008,
+            high_pass_hz=float(_coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)),
             low_pass_hz=float(low_pass_hz) if low_pass_hz is not None else None,
             smoothing_fwhm=smoothing_fwhm,
             confounds_strategy=confounds_strategy,
@@ -804,8 +888,8 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             condition_scope_phase_column=(
                 str(getattr(args, "signature_scope_phase_column", "") or "").strip() or "stim_phase"
             ),
-            condition_scope_trial_types=tuple(getattr(args, "signature_scope_trial_types", None) or ()) or None,
-            condition_scope_stim_phases=tuple(getattr(args, "signature_scope_stim_phases", None) or ()) or None,
+            condition_scope_trial_types=tuple(_normalize_string_list(getattr(args, "signature_scope_trial_types", None)) or ()) or None,
+            condition_scope_stim_phases=tuple(_normalize_string_list(getattr(args, "signature_scope_stim_phases", None)) or ()) or None,
             max_trials_per_run=int(args.max_trials_per_run) if args.max_trials_per_run else None,
             fixed_effects_weighting=fixed_weighting,
             signatures=tuple(args.signatures) if args.signatures else None,

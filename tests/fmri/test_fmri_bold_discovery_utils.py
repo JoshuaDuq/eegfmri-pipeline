@@ -8,13 +8,16 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from fmri_pipeline.utils.bold_discovery import (
     build_first_level_model,
     coerce_condition_value,
     discover_fmriprep_preproc_bold,
     get_tr_from_bold,
+    select_consistent_run_source,
     select_confounds,
+    validate_design_matrices,
 )
 
 
@@ -127,6 +130,8 @@ def test_build_first_level_model_coerces_and_filters_optional_float_settings() -
     assert model.params["low_pass"] == 0.12
     assert model.params["high_pass"] is None
     assert model.params["mask_img"] == "brain-mask"
+    assert model.params["standardize"] is False
+    assert model.params["signal_scaling"] == 0
 
 
 def test_coerce_condition_value_matches_series_dtype_best_effort() -> None:
@@ -141,3 +146,42 @@ def test_select_confounds_returns_empty_when_input_missing(tmp_path: Path) -> No
     confounds_df, columns = select_confounds(missing, strategy="auto")
     assert confounds_df is None
     assert columns == []
+
+
+def test_validate_design_matrices_rejects_rank_deficient_designs() -> None:
+    model = SimpleNamespace(
+        design_matrices_=[
+            pd.DataFrame(
+                {
+                    "intercept": [1.0, 1.0, 1.0],
+                    "duplicate": [1.0, 1.0, 1.0],
+                }
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="rank-deficient"):
+        validate_design_matrices(model, context="unit-test")
+
+
+def test_select_consistent_run_source_rejects_mixed_preproc_availability(tmp_path: Path) -> None:
+    preproc_run_1 = tmp_path / "run-01_desc-preproc_bold.nii.gz"
+    preproc_run_1.write_bytes(b"")
+
+    with pytest.raises(FileNotFoundError, match="inconsistent across runs"):
+        select_consistent_run_source(
+            run_numbers=[1, 2],
+            discover_preproc_bold=lambda run_num: preproc_run_1 if int(run_num) == 1 else None,
+            require_fmriprep=False,
+        )
+
+
+def test_select_consistent_run_source_uses_raw_only_when_no_preproc_exists() -> None:
+    source, preproc_by_run = select_consistent_run_source(
+        run_numbers=[1, 2],
+        discover_preproc_bold=lambda _run_num: None,
+        require_fmriprep=False,
+    )
+
+    assert source == "bids_raw"
+    assert preproc_by_run == {1: None, 2: None}

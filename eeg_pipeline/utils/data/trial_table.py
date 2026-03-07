@@ -411,7 +411,10 @@ def add_predictor_residual(
         meta["status"] = "skipped_missing_columns"
         return df, meta
 
-    from eeg_pipeline.utils.analysis.stats.predictor_residual import fit_predictor_outcome_curve
+    from eeg_pipeline.utils.analysis.stats.predictor_residual import (
+        crossfit_predictor_outcome_curve,
+        fit_predictor_outcome_curve,
+    )
 
     predictor = pd.to_numeric(df[predictor_col], errors="coerce")
     outcome = pd.to_numeric(df[outcome_col], errors="coerce")
@@ -444,9 +447,9 @@ def add_predictor_residual(
             )
         )
         method_raw = get_config_value(
-            config, "behavior_analysis.predictor_residual.crossfit.method", "spline"
+            config, "behavior_analysis.predictor_residual.crossfit.method", None
         )
-        method = str(method_raw).strip().lower()
+        method = None if method_raw in (None, "") else str(method_raw).strip().lower()
 
         meta["crossfit"] = {
             "enabled": True,
@@ -455,110 +458,18 @@ def add_predictor_residual(
             "method": method,
         }
 
-        groups = (
-            result[group_col] if group_col and group_col in result.columns else None
+        groups = result[group_col] if group_col and group_col in result.columns else None
+        prediction_cv, residual_cv, crossfit_meta = crossfit_predictor_outcome_curve(
+            predictor,
+            outcome,
+            groups,
+            config=config,
+            method=method,
         )
-        valid_mask = predictor.notna() & outcome.notna()
-        if groups is not None:
-            groups_series = pd.Series(groups, index=result.index)
-            valid_mask = valid_mask & groups_series.notna()
-
-        min_samples_required = int(
-            get_config_value(config, "behavior_analysis.predictor_residual.min_samples", 10)
-        )
-        n_valid_samples = int(valid_mask.sum())
-        if n_valid_samples < min_samples_required:
-            meta["crossfit"]["status"] = "skipped_insufficient_samples"
-        else:
-            try:
-                from sklearn.model_selection import GroupKFold
-            except ImportError as exc:
-                meta["crossfit"]["status"] = "skipped_missing_sklearn"
-                meta["crossfit"]["error"] = str(exc)
-            else:
-                valid_indices = result.index[valid_mask]
-                X = predictor.loc[valid_indices].to_numpy(dtype=float)[:, None]
-                y = outcome.loc[valid_indices].to_numpy(dtype=float)
-
-                if groups is None:
-                    meta["crossfit"]["status"] = "skipped_missing_groups"
-                else:
-                    group_values = (
-                        pd.Series(groups, index=result.index)
-                        .loc[valid_indices]
-                        .to_numpy()
-                    )
-                    unique_groups = pd.unique(group_values)
-                    unique_groups = unique_groups[~pd.isna(unique_groups)]
-                    n_groups = int(len(unique_groups))
-                    if n_groups < 2:
-                        meta["crossfit"]["status"] = "skipped_insufficient_groups"
-                    else:
-                        n_splits = max(2, min(n_splits_required, n_groups))
-                        model, model_params = _build_crossfit_model(config, method)
-                        meta["crossfit"].update(model_params)
-
-                        cv_predictions = np.full(len(valid_indices), np.nan, dtype=float)
-                        splitter = GroupKFold(n_splits=n_splits)
-                        for train_idx, test_idx in splitter.split(X, y, groups=group_values):
-                            model.fit(X[train_idx], y[train_idx])
-                            cv_predictions[test_idx] = model.predict(X[test_idx])
-
-                        prediction_full = pd.Series(np.nan, index=result.index, dtype=float)
-                        prediction_full.loc[valid_indices] = cv_predictions
-                        residual_full = pd.Series(np.nan, index=result.index, dtype=float)
-                        residual_full.loc[valid_indices] = y - cv_predictions
-
-                        result[f"{out_pred_col}_cv"] = prediction_full
-                        result[f"{out_resid_col}_cv"] = residual_full
-                        meta["crossfit"]["status"] = "ok"
-                        meta["crossfit"]["n_valid"] = int(n_valid_samples)
-                        meta["crossfit"]["n_groups"] = int(n_groups)
-                        meta["crossfit"]["n_splits"] = int(n_splits)
+        meta["crossfit"].update(crossfit_meta)
+        result[f"{out_pred_col}_cv"] = prediction_cv.reindex(result.index)
+        result[f"{out_resid_col}_cv"] = residual_cv.reindex(result.index)
     return result, meta
-
-
-def _build_crossfit_model(config: Any, method: str) -> Tuple[Any, Dict[str, Any]]:
-    """Build sklearn Pipeline model for crossfit based on method.
-    
-    Returns
-    -------
-    model : sklearn Pipeline
-        The configured model.
-    params : dict
-        Method-specific parameters for metadata.
-    """
-    from sklearn.pipeline import Pipeline
-    from sklearn.linear_model import Ridge
-    from sklearn.preprocessing import SplineTransformer, PolynomialFeatures
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    if method == "poly":
-        degree = int(
-            get_config_value(config, "behavior_analysis.predictor_residual.poly_degree", 2)
-        )
-        degree = max(1, min(degree, 5))
-        model = Pipeline(
-            [
-                ("poly", PolynomialFeatures(degree=degree, include_bias=False)),
-                ("ridge", Ridge(alpha=1.0)),
-            ]
-        )
-        return model, {"poly_degree": int(degree)}
-    else:
-        n_knots = int(
-            get_config_value(
-                config, "behavior_analysis.predictor_residual.crossfit.spline_n_knots", 5
-            )
-        )
-        n_knots = max(3, min(n_knots, 12))
-        model = Pipeline(
-            [
-                ("spline", SplineTransformer(n_knots=n_knots, degree=3, include_bias=False)),
-                ("ridge", Ridge(alpha=1.0)),
-            ]
-        )
-        return model, {"spline_n_knots": int(n_knots)}
 
 
 def save_trial_table(

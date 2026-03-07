@@ -57,6 +57,7 @@ class FMRIConstraintConfig:
     max_total_voxels: int
     random_seed: int
     output_space: str = "dual"  # "cluster" | "atlas" | "dual"
+    prethresholded_mask: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,24 @@ class FMRIVoxelSelection:
     dropped_unlabeled_voxels: int
     matched_reference_path: Path
     voxel_volume_mm3: Optional[float]
+
+
+def _is_prethresholded_fmri_mask(stats_map_path: Optional[Path]) -> bool:
+    if stats_map_path is None:
+        return False
+
+    sidecar = stats_map_path.with_suffix("").with_suffix(".json")
+    if not sidecar.exists():
+        return False
+
+    try:
+        payload = json.loads(sidecar.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+
+    return str(payload.get("artifact_type", "")).strip().lower() == "fmri_constraint_mask"
 
 
 def _load_fmri_constraint_config(
@@ -283,6 +302,8 @@ def _load_fmri_constraint_config(
             f"(got '{output_space}')."
         )
 
+    prethresholded_mask = _is_prethresholded_fmri_mask(stats_map_path)
+
     return FMRIConstraintConfig(
         enabled=enabled or (stats_map_path is not None),
         stats_map_path=stats_map_path,
@@ -301,6 +322,7 @@ def _load_fmri_constraint_config(
         max_total_voxels=max_total_voxels,
         random_seed=random_seed,
         output_space=output_space,
+        prethresholded_mask=prethresholded_mask,
     )
 
 ###################################################################
@@ -846,63 +868,70 @@ def _select_fmri_constrained_voxels(
     # volume provides the correct voxel → surface RAS mapping.
     vox2ras_tkr = np.asarray(ref_img.header.get_vox2ras_tkr(), dtype=float)
 
-    thr = float(cfg.threshold)
-    if not np.isfinite(thr) or thr <= 0:
-        raise ValueError(
-            "feature_engineering.sourcelocalization.fmri.threshold must be > 0 "
-            f"(got {thr})."
-        )
-
     analysis_voxels = _compute_fmri_analysis_voxel_mask(
         data,
         subject_ref_data=subject_ref_data,
     )
-    if str(cfg.threshold_mode).lower() == "fdr":
-        q = float(cfg.fdr_q)
-        if not (np.isfinite(q) and 0 < q < 1):
+    if cfg.prethresholded_mask:
+        mask = analysis_voxels & np.isfinite(data) & (data > 0)
+    else:
+        thr = float(cfg.threshold)
+        if not np.isfinite(thr) or thr <= 0:
             raise ValueError(
-                "feature_engineering.sourcelocalization.fmri.thresholding.fdr_q must be in (0, 1). "
-                f"(got {q})."
+                "feature_engineering.sourcelocalization.fmri.threshold must be > 0 "
+                f"(got {thr})."
             )
 
-        _assert_fdr_compatible_z_map(
-            stats_map_path=stats_map_path,
-            cfg=cfg,
-            nib=nib,
-            img=img,
-        )
+        if str(cfg.threshold_mode).lower() == "fdr":
+            q = float(cfg.fdr_q)
+            if not (np.isfinite(q) and 0 < q < 1):
+                raise ValueError(
+                    "feature_engineering.sourcelocalization.fmri.thresholding.fdr_q must be in (0, 1). "
+                    f"(got {q})."
+                )
 
-        zvals = data[analysis_voxels].astype(float, copy=False)
-        if cfg.tail == "abs":
-            pvals = 2.0 * (1.0 - stats.norm.cdf(np.abs(zvals)))
-        else:
-            pvals = 1.0 - stats.norm.cdf(zvals)
-        pvals = np.clip(pvals, 0.0, 1.0)
+            _assert_fdr_compatible_z_map(
+                stats_map_path=stats_map_path,
+                cfg=cfg,
+                nib=nib,
+                img=img,
+            )
 
-        order = np.argsort(pvals)
-        ranked = pvals[order]
-        n = int(ranked.size)
-        if n < 1:
-            raise ValueError("No finite voxels found in fMRI stats map.")
+            zvals = data[analysis_voxels].astype(float, copy=False)
+            if cfg.tail == "abs":
+                pvals = 2.0 * (1.0 - stats.norm.cdf(np.abs(zvals)))
+            else:
+                pvals = 1.0 - stats.norm.cdf(zvals)
+            pvals = np.clip(pvals, 0.0, 1.0)
 
-        bh_thresh = (q * (np.arange(1, n + 1, dtype=float) / float(n)))
-        below = ranked <= bh_thresh
-        if not np.any(below):
-            mask = np.zeros_like(data, dtype=bool)
+            order = np.argsort(pvals)
+            ranked = pvals[order]
+            n = int(ranked.size)
+            if n < 1:
+                raise ValueError("No finite voxels found in fMRI stats map.")
+
+            bh_thresh = (q * (np.arange(1, n + 1, dtype=float) / float(n)))
+            below = ranked <= bh_thresh
+            if not np.any(below):
+                mask = np.zeros_like(data, dtype=bool)
+            else:
+                k = int(np.max(np.where(below)[0]))
+                cutoff = float(ranked[k])
+                keep = pvals <= cutoff
+                mask = np.zeros_like(data, dtype=bool)
+                mask[analysis_voxels] = keep
         else:
-            k = int(np.max(np.where(below)[0]))
-            cutoff = float(ranked[k])
-            keep = pvals <= cutoff
-            mask = np.zeros_like(data, dtype=bool)
-            mask[analysis_voxels] = keep
-    else:
-        if cfg.tail == "abs":
-            mask = analysis_voxels & (np.abs(data) >= thr)
-        else:
-            mask = analysis_voxels & (data >= thr)
+            if cfg.tail == "abs":
+                mask = analysis_voxels & (np.abs(data) >= thr)
+            else:
+                mask = analysis_voxels & (data >= thr)
 
     if not np.any(mask):
-        # Log statistics about the contrast map to diagnose the issue
+        if cfg.prethresholded_mask:
+            raise ValueError(
+                "The prethresholded fMRI constraint mask contains no nonzero voxels on the subject MRI grid."
+            )
+
         finite_data = data[analysis_voxels]
         if logger is not None and len(finite_data) > 0:
             logger.warning(
@@ -926,17 +955,20 @@ def _select_fmri_constrained_voxels(
         if vox.size == 0:
             continue
         n_vox = int(vox.shape[0])
-        if cfg.cluster_min_volume_mm3 is not None and voxel_vol_mm3 is not None:
-            vol = float(n_vox) * float(voxel_vol_mm3)
-            if vol < float(cfg.cluster_min_volume_mm3):
-                continue
-        else:
-            if n_vox < int(cfg.cluster_min_voxels):
-                continue
+        if not cfg.prethresholded_mask:
+            if cfg.cluster_min_volume_mm3 is not None and voxel_vol_mm3 is not None:
+                vol = float(n_vox) * float(voxel_vol_mm3)
+                if vol < float(cfg.cluster_min_volume_mm3):
+                    continue
+            else:
+                if n_vox < int(cfg.cluster_min_voxels):
+                    continue
         peak_val = float(np.nanmax(np.abs(data[labeled == cluster_id])))
         clusters.append((cluster_id, n_vox, peak_val))
 
     if not clusters:
+        if cfg.prethresholded_mask:
+            raise ValueError("The prethresholded fMRI constraint mask contains no connected components.")
         if cfg.cluster_min_volume_mm3 is not None and voxel_vol_mm3 is not None:
             raise ValueError(
                 "All clusters were smaller than "

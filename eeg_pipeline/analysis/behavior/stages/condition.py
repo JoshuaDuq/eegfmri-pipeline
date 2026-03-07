@@ -58,6 +58,7 @@ def stage_condition_column_impl(
 ) -> pd.DataFrame:
     """Run column-based condition comparison."""
     from eeg_pipeline.analysis.behavior.api import compute_condition_effects, split_by_condition
+    from eeg_pipeline.utils.analysis.stats.effect_size import resolve_binary_condition_values
 
     compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
     use_multigroup = isinstance(compare_values, (list, tuple)) and len(compare_values) > 2
@@ -134,19 +135,10 @@ def stage_condition_column_impl(
             ctx.logger.warning(msg)
             return pd.DataFrame()
 
-        compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", None)
-        if compare_values and len(compare_values) >= 2:
-            condition_value1, condition_value2 = str(compare_values[0]), str(compare_values[1])
-        else:
-            if compare_col in df_trials.columns:
-                condition_series = df_trials[compare_col]
-                unique_vals = condition_series.dropna().unique()
-                if len(unique_vals) >= 2:
-                    condition_value1, condition_value2 = str(unique_vals[0]), str(unique_vals[1])
-                else:
-                    condition_value1, condition_value2 = "1", "0"
-            else:
-                condition_value1, condition_value2 = "1", "0"
+        condition_value1, condition_value2 = resolve_binary_condition_values(
+            df_trials,
+            ctx.config,
+        )
 
         features = df_trials[feature_cols].copy()
         groups = None

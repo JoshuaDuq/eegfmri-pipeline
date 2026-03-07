@@ -167,7 +167,10 @@ fmri_contrast:
     monkeypatch.setitem(
         sys.modules,
         "fmri_pipeline.analysis.contrast_builder",
-        types.SimpleNamespace(ContrastBuilderConfig=_ContrastBuilderConfig),
+        types.SimpleNamespace(
+            ContrastBuilderConfig=_ContrastBuilderConfig,
+            load_contrast_config_section=lambda config: config.get("fmri_contrast"),
+        ),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -209,3 +212,87 @@ fmri_contrast:
     run_fmri_analysis(args, [], config)
 
     assert _CaptureAnalysisPipeline.last_config.get("fmri_contrast.name") == "from_yaml"
+
+
+def test_run_fmri_analysis_uses_yaml_defaults_for_first_level_cfg(tmp_path, monkeypatch) -> None:
+    bids_root = tmp_path / "bids"
+    (bids_root / "sub-0001").mkdir(parents=True, exist_ok=True)
+
+    fmri_cfg = tmp_path / "fmri_config.yaml"
+    fmri_cfg.write_text(
+        f"""
+paths:
+  bids_fmri_root: "{bids_root}"
+  freesurfer_dir: "{tmp_path / 'fs'}"
+fmri_contrast:
+  name: "yaml-defaults"
+  condition_a:
+    column: "binary_outcome"
+    value: 1
+  condition_b:
+    column: "binary_outcome"
+    value: 0
+  smoothing_fwhm: 6.0
+  output_type: "t-stat"
+  resample_to_freesurfer: true
+  cluster_correction: true
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EEG_PIPELINE_FMRI_CONFIG", str(fmri_cfg))
+
+    monkeypatch.setitem(
+        sys.modules,
+        "fmri_pipeline.analysis.contrast_builder",
+        types.SimpleNamespace(
+            ContrastBuilderConfig=_ContrastBuilderConfig,
+            load_contrast_config_section=lambda config: config.get("fmri_contrast"),
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "fmri_pipeline.analysis.plotting_config",
+        types.SimpleNamespace(build_fmri_plotting_config_from_args=lambda **kwargs: types.SimpleNamespace(**kwargs)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "fmri_pipeline.analysis.smoothing",
+        types.SimpleNamespace(normalize_smoothing_fwhm=lambda value: value),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "fmri_pipeline.pipelines.fmri_analysis",
+        types.SimpleNamespace(FmriAnalysisPipeline=_CaptureAnalysisPipeline),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "fmri_pipeline.analysis.trial_signatures",
+        types.SimpleNamespace(TrialSignatureExtractionConfig=_TrialSignatureExtractionConfig),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "fmri_pipeline.pipelines.fmri_trial_signatures",
+        types.SimpleNamespace(FmriTrialSignaturePipeline=_CaptureTrialPipeline),
+    )
+
+    args = _build_args_for_fmri_analysis(
+        [
+            "fmri-analysis",
+            "first-level",
+            "--all-subjects",
+            "--dry-run",
+        ]
+    )
+    config = ConfigDict({"project": {"task": "task"}})
+    run_fmri_analysis(args, [], config)
+
+    contrast_cfg = _CaptureAnalysisPipeline.last_kwargs["contrast_cfg"]
+    assert contrast_cfg.name == "yaml-defaults"
+    assert contrast_cfg.condition_a_column == "binary_outcome"
+    assert contrast_cfg.condition_a_value == "1"
+    assert contrast_cfg.condition_b_value == "0"
+    assert contrast_cfg.smoothing_fwhm == 6.0
+    assert contrast_cfg.output_type == "t-stat"
+    assert contrast_cfg.resample_to_freesurfer is True
+    assert contrast_cfg.cluster_correction is True

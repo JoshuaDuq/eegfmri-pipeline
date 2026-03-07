@@ -17,7 +17,7 @@ _NoopProgress = NoopProgress
 
 
 class TestFmriAnalysisGapfill(unittest.TestCase):
-    def test_resample_success_and_mni_cached_and_mutated_cfg(self):
+    def test_resample_success_and_mni_cached_without_mutating_cfg(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
 
         tmp = Path(tempfile.mkdtemp())
@@ -92,7 +92,7 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             p.process_subject("0001", "task", contrast_cfg=cfg, plotting_cfg=PlotCfg(), dry_run=False)
             p.process_subject("0001", "task", contrast_cfg=cfg, plotting_cfg=PlotCfg(), dry_run=False)
 
-        self.assertEqual(cfg.fmriprep_space, "MNI152NLin2009cAsym")
+        self.assertEqual(cfg.fmriprep_space, "T1w")
         self.assertTrue(fake_builder.resample_to_freesurfer.called)
         self.assertGreaterEqual(out_mni_loads["count"], 1)
 

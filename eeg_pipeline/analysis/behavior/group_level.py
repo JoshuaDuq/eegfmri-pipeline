@@ -32,6 +32,19 @@ def _resolve_group_level_block_column(df: pd.DataFrame, config: Any) -> Optional
     return None
 
 
+def _resolve_group_level_target_column(
+    df: pd.DataFrame,
+    config: Any,
+    target_col: str,
+) -> Optional[str]:
+    requested = str(target_col or "").strip()
+    if requested and requested in df.columns:
+        return requested
+    if requested in {"", "outcome"}:
+        return resolve_outcome_column(df, config)
+    return requested or None
+
+
 def _build_subject_partial_permutation_state(
     x: pd.Series,
     y: pd.Series,
@@ -152,9 +165,8 @@ def run_group_level_correlations_impl(
     combined = pd.concat(all_trials, ignore_index=True)
     correlation_method = resolve_correlation_method(config, logger=logger, default="spearman")
 
-    resolved_target = resolve_outcome_column(combined, config) or "outcome"
-    target_column = str(target_col or resolved_target).strip() or resolved_target
-    if target_column not in combined.columns:
+    target_column = _resolve_group_level_target_column(combined, config, target_col)
+    if target_column is None or target_column not in combined.columns:
         logger.warning("Multilevel correlations: target column '%s' not found.", target_column)
         return pd.DataFrame()
     predictor_column = resolve_predictor_column(combined, config) or "predictor"
@@ -511,7 +523,7 @@ def run_group_level_analysis_impl(
         if not isinstance(gl_corr_cfg, dict):
             gl_corr_cfg = {}
 
-        default_target = str(get_config_value(config, "behavior_analysis.outcome_column", "") or "outcome").strip() or "outcome"
+        default_target = str(get_config_value(config, "behavior_analysis.outcome_column", "") or "").strip()
         target_col = str(gl_corr_cfg.get("target", default_target) or default_target).strip()
         control_predictor = bool(
             gl_corr_cfg.get("control_predictor", get_config_bool(config, "behavior_analysis.predictor_control_enabled", True))

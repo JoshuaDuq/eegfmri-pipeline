@@ -188,6 +188,62 @@ def _fit_reduced_model(
     return y_valid, Xz_valid, y_hat, resid, r2_reduced, valid_mask, Xz_names
 
 
+def _is_run_level_primary_unit(config: Any) -> bool:
+    """Return whether regression is configured to operate at the run level."""
+    primary_unit = str(
+        _get(config, "behavior_analysis.regression.primary_unit", "trial") or "trial"
+    ).strip().lower()
+    return primary_unit in {"run", "run_mean", "runmean", "run_level"}
+
+
+def _deduplicate_columns(columns: List[str]) -> List[str]:
+    """Return columns in original order without duplicates or empty names."""
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for column in columns:
+        name = str(column).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        ordered.append(name)
+    return ordered
+
+
+def _aggregate_feature_to_run_level(
+    trial_df: pd.DataFrame,
+    *,
+    run_col: str,
+    outcome_column: str,
+    predictor_column: Optional[str],
+    feature_column: str,
+    base_covariate_columns: List[str],
+) -> pd.DataFrame:
+    """Aggregate one feature and its design columns to run-level complete-case means."""
+    analysis_columns = _deduplicate_columns(
+        [outcome_column, feature_column, *(base_covariate_columns or [])]
+    )
+    if predictor_column:
+        analysis_columns = _deduplicate_columns([*analysis_columns, predictor_column])
+    available_columns = [column for column in analysis_columns if column in trial_df.columns]
+    if outcome_column not in available_columns or feature_column not in available_columns:
+        return pd.DataFrame()
+
+    run_level = trial_df[[run_col, *available_columns]].copy()
+    run_level = run_level.dropna(subset=[run_col])
+    for column in available_columns:
+        run_level[column] = pd.to_numeric(run_level[column], errors="coerce")
+    run_level = run_level.dropna(subset=available_columns)
+    if run_level.empty:
+        return pd.DataFrame()
+
+    aggregated = (
+        run_level.groupby(run_col, dropna=True)[available_columns]
+        .mean(numeric_only=True)
+        .reset_index(drop=True)
+    )
+    return aggregated
+
+
 @dataclass
 class TrialwiseRegressionConfig:
     outcome: str = "outcome"
@@ -200,6 +256,7 @@ class TrialwiseRegressionConfig:
     standardize: bool = True
     min_samples: int = 15
     n_permutations: int = 0
+    permutation_scheme: str = "shuffle"
     max_features: Optional[int] = None
     n_jobs: int = 1
 
@@ -218,6 +275,11 @@ class TrialwiseRegressionConfig:
         standardize = bool(_get(config, f"{base_path}.standardize", True))
         min_samples = int(_get(config, f"{base_path}.min_samples", 15))
         n_permutations = int(_get(config, f"{base_path}.n_permutations", 0))
+        permutation_scheme = str(
+            _get(config, "behavior_analysis.permutation.scheme", "shuffle")
+        ).strip().lower()
+        if permutation_scheme not in {"shuffle", "circular_shift"}:
+            permutation_scheme = "shuffle"
         max_features = _get(config, f"{base_path}.max_features", None)
         n_jobs = int(_get(config, "behavior_analysis.n_jobs", 1))
         
@@ -232,6 +294,7 @@ class TrialwiseRegressionConfig:
             standardize=standardize,
             min_samples=min_samples,
             n_permutations=n_permutations,
+            permutation_scheme=permutation_scheme,
             max_features=max_features,
             n_jobs=n_jobs,
         )
@@ -251,6 +314,7 @@ def _compute_permutation_pvalues(
     beta_int: float,
     n_permutations: int,
     rng_seed: int,
+    scheme: str,
 ) -> Tuple[float, float]:
     """Compute permutation p-values for feature and interaction terms.
     
@@ -284,6 +348,7 @@ def _compute_permutation_pvalues(
                 len(resid_f),
                 rng,
                 groups_f,
+                scheme=scheme,
             )
         except ValueError:
             return np.nan, np.nan
@@ -312,6 +377,7 @@ def _prepare_feature_and_interaction(
     trial_df: pd.DataFrame,
     valid_mask: np.ndarray,
     cfg: "TrialwiseRegressionConfig",
+    predictor_column: Optional[str],
 ) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
     """Extract and prepare feature values and optional interaction term.
     
@@ -324,8 +390,16 @@ def _prepare_feature_and_interaction(
     x = _zscore(x_raw) if cfg.standardize else x_raw
     
     x_int = None
-    if cfg.include_interaction and "predictor" in trial_df.columns and np.isfinite(x).any():
-        predictor = pd.to_numeric(trial_df["predictor"], errors="coerce").to_numpy(dtype=float)[valid_mask]
+    if (
+        cfg.include_interaction
+        and predictor_column
+        and predictor_column in trial_df.columns
+        and np.isfinite(x).any()
+    ):
+        predictor = pd.to_numeric(
+            trial_df[predictor_column],
+            errors="coerce",
+        ).to_numpy(dtype=float)[valid_mask]
         predictor_standardized = _zscore(predictor) if cfg.standardize else predictor
         x_int = x * predictor_standardized
     
@@ -395,12 +469,19 @@ def _process_single_regression_feature(
     r2_reduced: float,
     groups_v: Optional[np.ndarray],
     cfg: "TrialwiseRegressionConfig",
+    predictor_column: Optional[str],
     rng_seed: int,
     strict_permutation_primary: bool,
     out_col: str,
 ) -> Optional[Dict[str, Any]]:
     """Process a single feature for regression analysis."""
-    x, x_int, valid_feat = _prepare_feature_and_interaction(col, trial_df, valid_mask, cfg)
+    x, x_int, valid_feat = _prepare_feature_and_interaction(
+        col,
+        trial_df,
+        valid_mask,
+        cfg,
+        predictor_column,
+    )
     
     if int(valid_feat.sum()) < cfg.min_samples:
         return None
@@ -445,6 +526,7 @@ def _process_single_regression_feature(
         beta_int,
         cfg.n_permutations,
         rng_seed,
+        cfg.permutation_scheme,
     )
     if strict_permutation_primary:
         p_primary = p_perm_feature if np.isfinite(p_perm_feature) else np.nan
@@ -479,6 +561,73 @@ def _process_single_regression_feature(
     }
 
 
+def _process_single_run_level_regression_feature(
+    col: str,
+    trial_df: pd.DataFrame,
+    run_col: str,
+    out_col: str,
+    predictor_col: Optional[str],
+    base_covariate_columns: List[str],
+    cfg: "TrialwiseRegressionConfig",
+    config: Any,
+    rng_seed: int,
+    strict_permutation_primary: bool,
+) -> Optional[Dict[str, Any]]:
+    """Process one feature using feature-specific run-level aggregation."""
+    aggregated_df = _aggregate_feature_to_run_level(
+        trial_df,
+        run_col=run_col,
+        outcome_column=out_col,
+        predictor_column=predictor_col,
+        feature_column=col,
+        base_covariate_columns=base_covariate_columns,
+    )
+    if len(aggregated_df) < cfg.min_samples:
+        return None
+
+    temp_covariates, temp_design_df, _temp_meta = _build_temp_cov_shared(
+        trial_df=aggregated_df,
+        outcome=out_col,
+        predictor_control=cfg.predictor_control or "linear",
+        include_predictor=cfg.include_predictor,
+        config=config,
+        predictor_col=predictor_col,
+        key_prefix="behavior_analysis.regression.predictor_spline",
+    )
+    covariates = _deduplicate_columns(
+        temp_covariates
+        + _build_trial_order_covariates(aggregated_df, cfg)
+        + _build_previous_term_covariates(aggregated_df, cfg)
+    )
+    base = _prepare_base_dataframe(aggregated_df, out_col, covariates, temp_design_df)
+    y_v, Xz_v, y_hat_z, resid_z, r2_reduced, valid_mask, Xz_names = _fit_reduced_model(
+        base, out_col, covariates, cfg.min_samples
+    )
+    if y_v is None:
+        return None
+
+    record = _process_single_regression_feature(
+        col=col,
+        trial_df=aggregated_df,
+        valid_mask=valid_mask,
+        y_v=y_v,
+        Xz_v=Xz_v,
+        Xz_names=Xz_names,
+        y_hat_z=y_hat_z,
+        resid_z=resid_z,
+        r2_reduced=r2_reduced,
+        groups_v=None,
+        cfg=cfg,
+        predictor_column=predictor_col,
+        rng_seed=rng_seed,
+        strict_permutation_primary=strict_permutation_primary,
+        out_col=out_col,
+    )
+    if record is not None:
+        record["n_runs"] = int(len(y_v))
+    return record
+
+
 def run_trialwise_feature_regressions(
     trial_df: pd.DataFrame,
     *,
@@ -489,19 +638,48 @@ def run_trialwise_feature_regressions(
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Run per-feature regression on a subject's trial table."""
     cfg = TrialwiseRegressionConfig.from_config(config)
-    out_col = cfg.outcome
-    meta: Dict[str, Any] = {"outcome": out_col, "predictor_control": cfg.predictor_control}
+    requested_outcome = str(cfg.outcome or "").strip() or "outcome"
+    meta: Dict[str, Any] = {
+        "requested_outcome": requested_outcome,
+        "predictor_control": cfg.predictor_control,
+    }
 
-    if out_col not in trial_df.columns:
+    from eeg_pipeline.utils.data.columns import (
+        resolve_outcome_column,
+        resolve_predictor_column,
+    )
+
+    if requested_outcome == "outcome":
+        out_col = resolve_outcome_column(trial_df, config)
+    elif requested_outcome == "predictor":
+        out_col = resolve_predictor_column(trial_df, config)
+    elif requested_outcome in trial_df.columns:
+        out_col = requested_outcome
+    else:
+        out_col = None
+
+    if out_col is None or out_col not in trial_df.columns:
         return pd.DataFrame(), {"status": "missing_outcome", **meta}
+    meta["outcome"] = out_col
 
     y_all = pd.to_numeric(trial_df[out_col], errors="coerce")
     if y_all.notna().sum() < cfg.min_samples:
         return pd.DataFrame(), {"status": "insufficient_samples", "n_valid": int(y_all.notna().sum()), **meta}
 
-    from eeg_pipeline.utils.data.columns import resolve_predictor_column
-
-    predictor_col = resolve_predictor_column(trial_df, config) or "predictor"
+    predictor_col = resolve_predictor_column(trial_df, config)
+    if predictor_col is None and "predictor" in trial_df.columns:
+        predictor_col = "predictor"
+    meta["predictor_column"] = predictor_col
+    use_run_level = _is_run_level_primary_unit(config)
+    if use_run_level and cfg.include_run_block:
+        raise ValueError(
+            "Run-level regression cannot include run/block covariates because run is the analysis unit."
+        )
+    run_col = str(_get(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    if use_run_level and run_col not in trial_df.columns:
+        raise ValueError(
+            f"Run-level regression requires run column '{run_col}' in the trial table."
+        )
     temp_covariates, temp_design_df, temp_meta = _build_temp_cov_shared(
         trial_df=trial_df,
         outcome=out_col,
@@ -512,13 +690,75 @@ def run_trialwise_feature_regressions(
         key_prefix="behavior_analysis.regression.predictor_spline",
     )
     meta.update(temp_meta)
-    
-    covariates = (
+    covariates = _deduplicate_columns(
         temp_covariates
         + _build_trial_order_covariates(trial_df, cfg)
         + _build_previous_term_covariates(trial_df, cfg)
         + _build_run_block_covariates(trial_df, cfg, config)
     )
+
+    rng_seed = int(_get(config, "project.random_state", 42))
+    if use_run_level:
+        run_level_base_covariates = _deduplicate_columns(
+            _build_trial_order_covariates(trial_df, cfg)
+            + _build_previous_term_covariates(trial_df, cfg)
+        )
+        if "outcome_hat_from_predictor" in trial_df.columns:
+            run_level_base_covariates = _deduplicate_columns(
+                [*run_level_base_covariates, "outcome_hat_from_predictor"]
+            )
+        candidate_features = [column for column in feature_cols if column in trial_df.columns]
+        if cfg.max_features is not None:
+            try:
+                max_features = int(cfg.max_features)
+            except (ValueError, TypeError):
+                max_features = None
+            if max_features is not None and max_features > 0 and len(candidate_features) > max_features:
+                outcome_valid_mask = pd.to_numeric(trial_df[out_col], errors="coerce").notna().to_numpy()
+                candidate_features = _select_top_variance_features(
+                    trial_df,
+                    candidate_features,
+                    outcome_valid_mask,
+                    max_features,
+                )
+                meta["max_features_applied"] = max_features
+        if not candidate_features:
+            return pd.DataFrame(), {"status": "empty", **meta}
+
+        n_jobs_actual = get_n_jobs(config, cfg.n_jobs)
+        feature_args = [
+            (
+                col,
+                trial_df,
+                run_col,
+                out_col,
+                predictor_col,
+                run_level_base_covariates,
+                cfg,
+                config,
+                rng_seed + i,
+                strict_permutation_primary,
+            )
+            for i, col in enumerate(candidate_features)
+        ]
+        records = parallel_regression_features(
+            feature_args,
+            _process_single_run_level_regression_feature,
+            n_jobs=n_jobs_actual,
+            min_features_for_parallel=_MIN_FEATURES_FOR_PARALLEL,
+        )
+        if not records:
+            return pd.DataFrame(), {"status": "empty", **meta}
+
+        out = pd.DataFrame(records)
+        p_for_fdr = pd.to_numeric(out["p_primary"], errors="coerce").to_numpy()
+        fdr_alpha = float(_get(config, "behavior_analysis.statistics.fdr_alpha", 0.05))
+        out["p_fdr"] = fdr_bh(p_for_fdr, alpha=fdr_alpha, config=config)
+        meta["status"] = "ok"
+        meta["n_features_tested"] = int(len(out))
+        meta["covariates"] = run_level_base_covariates
+        meta["aggregation_unit"] = "run"
+        return out, meta
 
     base = _prepare_base_dataframe(trial_df, out_col, covariates, temp_design_df)
     
@@ -537,8 +777,6 @@ def run_trialwise_feature_regressions(
         groups_arr = np.asarray(groups_for_permutation)
         if groups_arr.shape[0] == len(trial_df):
             groups_v = groups_arr[valid_mask]
-
-    rng_seed = int(_get(config, "project.random_state", 42))
 
     candidates = _screen_feature_candidates(trial_df, feature_cols, valid_mask, cfg)
     
@@ -566,6 +804,7 @@ def run_trialwise_feature_regressions(
             r2_reduced,
             groups_v,
             cfg,
+            predictor_col,
             rng_seed + i,
             strict_permutation_primary,
             out_col,
