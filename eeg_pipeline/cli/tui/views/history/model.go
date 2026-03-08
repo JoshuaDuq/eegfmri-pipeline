@@ -65,7 +65,7 @@ type Model struct {
 ///////////////////////////////////////////////////////////////////
 
 func New(repoRoot string) Model {
-	historyPath := filepath.Join(repoRoot, "eeg_pipeline", "cli", "tui", ".cache", historyFileName)
+	historyPath := buildHistoryPath(repoRoot)
 	m := Model{
 		historyPath: historyPath,
 		loading:     true,
@@ -78,6 +78,10 @@ func New(repoRoot string) Model {
 ///////////////////////////////////////////////////////////////////
 // Persistence
 ///////////////////////////////////////////////////////////////////
+
+func buildHistoryPath(repoRoot string) string {
+	return filepath.Join(repoRoot, "eeg_pipeline", "cli", "tui", ".cache", historyFileName)
+}
 
 func loadHistory(path string) ([]ExecutionRecord, error) {
 	data, err := os.ReadFile(path)
@@ -94,6 +98,23 @@ func loadHistory(path string) ([]ExecutionRecord, error) {
 	}
 
 	return history.Executions, nil
+}
+
+func LoadRecentRecords(repoRoot string, limit int) ([]ExecutionRecord, error) {
+	records, err := loadHistory(buildHistoryPath(repoRoot))
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].StartTime.After(records[j].StartTime)
+	})
+
+	if limit > 0 && len(records) > limit {
+		records = records[:limit]
+	}
+
+	return records, nil
 }
 
 func saveHistory(path string, records []ExecutionRecord) error {
@@ -121,7 +142,7 @@ func saveHistory(path string, records []ExecutionRecord) error {
 
 // AddRecord adds a new execution record to history
 func AddRecord(repoRoot string, record ExecutionRecord) error {
-	historyPath := filepath.Join(repoRoot, "eeg_pipeline", "cli", "tui", ".cache", historyFileName)
+	historyPath := buildHistoryPath(repoRoot)
 
 	records, _ := loadHistory(historyPath)
 	records = append(records, record)
@@ -302,11 +323,11 @@ func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
 	return cursor + statusIcon + " " +
 		pipelineStyle.Render(record.Pipeline) +
 		modeStyle.Render(record.Mode) +
-		durationStyle.Render(formatDuration(record.Duration)) +
-		timeStyle.Render(formatTimeAgo(record.StartTime))
+		durationStyle.Render(FormatDurationSeconds(record.Duration)) +
+		timeStyle.Render(FormatTimeAgo(record.StartTime))
 }
 
-func formatDuration(secs float64) string {
+func FormatDurationSeconds(secs float64) string {
 	if secs < 60 {
 		return fmt.Sprintf("%.0fs", secs)
 	} else if secs < 3600 {
@@ -317,7 +338,7 @@ func formatDuration(secs float64) string {
 	return fmt.Sprintf("%dh", hours)
 }
 
-func formatTimeAgo(t time.Time) string {
+func FormatTimeAgo(t time.Time) string {
 	diff := time.Since(t)
 
 	if diff < time.Minute {

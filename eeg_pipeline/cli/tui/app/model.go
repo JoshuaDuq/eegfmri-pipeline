@@ -40,7 +40,7 @@ const (
 )
 
 const (
-	maxPipelineIndex = 5 // Maximum valid pipeline index (0-5 for 6 pipelines)
+	maxPipelineIndex = int(types.PipelineFmriAnalysis)
 	maxNavDepth      = 3 // Maximum depth to search for repo root
 )
 
@@ -105,6 +105,7 @@ type Model struct {
 	height   int
 	task     string
 	repoRoot string
+	config   messages.ConfigSummary
 
 	// Selected values
 	selectedPipeline types.Pipeline
@@ -131,6 +132,9 @@ func New() Model {
 	}
 
 	m.loadState()
+	m.syncMainMenuSessionData()
+	m.refreshMainMenuRecentRuns()
+	m.syncMainMenuConfigSummary()
 
 	// Restore last selected pipeline cursor position
 	if m.isValidPipelineIndex(m.persistentState.LastPipeline) {
@@ -324,8 +328,8 @@ func (m Model) View() string {
 		return "Initializing..."
 	}
 
-	// Check if terminal is too small to render properly
-	if styles.IsTerminalTooSmall(m.width, m.height) {
+	// Let execution degrade to a log-priority compact mode on small terminals.
+	if m.state != StateExecution && styles.IsTerminalTooSmall(m.width, m.height) {
 		return lipgloss.Place(
 			m.width, m.height,
 			lipgloss.Center, lipgloss.Center,

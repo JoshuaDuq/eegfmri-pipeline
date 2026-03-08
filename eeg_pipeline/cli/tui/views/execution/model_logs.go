@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eeg-pipeline/tui/styles"
@@ -16,70 +15,8 @@ import (
 func (m *Model) updateViewportSize() {
 	m.updateLayout()
 
-	reservedHeight := styles.ExecBaseReservedLines
-
-	// Metrics dashboard visible when terminal is tall enough and execution is active
-	showMetrics := m.height >= 30 && m.Status != StatusPending && m.Status != StatusCancelled
-	if showMetrics {
-		reservedHeight += styles.ExecMetricsDashboardLines
-	}
-
-	if m.copyMode {
-		reservedHeight += styles.ExecCopyModeBannerLines
-	}
-
-	if m.IsDone() {
-		reservedHeight += styles.ExecCompletionSummaryLines
-	}
-
-	if m.useTwoCol {
-		contentHeight := m.height - styles.ExecHeaderLines - styles.ExecFooterLines
-		if contentHeight < styles.MinLogHeight {
-			contentHeight = styles.MinLogHeight
-		}
-
-		logReserved := styles.ExecLogTitleLines + styles.ExecViewportBorderLines
-		if m.copyMode {
-			logReserved += styles.ExecCopyModeBannerLines
-		}
-
-		logHeight := contentHeight - logReserved
-		if logHeight < styles.MinLogHeight {
-			logHeight = styles.MinLogHeight
-		}
-		if logHeight > styles.MaxLogHeight {
-			logHeight = styles.MaxLogHeight
-		}
-
-		logWidth := m.leftWidth - 8
-		if logWidth < styles.MinLogWidth {
-			logWidth = styles.MinLogWidth
-		}
-		if logWidth > styles.MaxLogWidth {
-			logWidth = styles.MaxLogWidth
-		}
-
-		m.logViewport.Width = logWidth
-		m.logViewport.Height = logHeight
-		m.updateLogViewport()
-		return
-	}
-
-	logHeight := m.height - reservedHeight
-	if logHeight < styles.MinLogHeight {
-		logHeight = styles.MinLogHeight
-	}
-	if logHeight > styles.MaxLogHeight {
-		logHeight = styles.MaxLogHeight
-	}
-
-	logWidth := m.width - 8
-	if logWidth < styles.MinLogWidth {
-		logWidth = styles.MinLogWidth
-	}
-	if logWidth > styles.MaxLogWidth {
-		logWidth = styles.MaxLogWidth
-	}
+	logHeight := clampViewportDimension(m.height-m.stackedReservedHeight(), styles.MinLogHeight, styles.MaxLogHeight)
+	logWidth := clampViewportDimension(m.width-8, styles.MinLogWidth, styles.MaxLogWidth)
 
 	m.logViewport.Width = logWidth
 	m.logViewport.Height = logHeight
@@ -121,23 +58,10 @@ func (m *Model) processOutputLine(line string) {
 				if m.SubjectTotal == 0 && len(event.Subjects) > 0 {
 					m.SubjectTotal = len(event.Subjects)
 				}
+				m.resetSubjects(event.Subjects)
 				m.addLog(fmt.Sprintf("Starting: %d subjects", m.SubjectTotal))
 			case "subject_start":
-				if m.CurrentSubject != "" && !m.SubjectStartTime.IsZero() {
-					duration := time.Since(m.SubjectStartTime)
-					m.SubjectDurations = append(m.SubjectDurations, duration)
-					m.SubjectStatuses[m.CurrentSubject] = "done"
-				}
-
-				if m.SubjectCurrent < m.SubjectTotal || m.SubjectTotal == 0 {
-					m.SubjectCurrent++
-				}
-				m.CurrentSubject = event.Subject
-				m.SubjectStartTime = time.Now()
-				m.SubjectStatuses[event.Subject] = "running"
-				m.CurrentOperation = ""
-				m.OperationCurrent = 0
-				m.OperationTotal = 0
+				m.beginSubject(event.Subject)
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent-1) / float64(m.SubjectTotal))
 				}
@@ -169,19 +93,16 @@ func (m *Model) processOutputLine(line string) {
 					m.addLog(fmt.Sprintf("  → %s (%d/%d)", event.Step, event.Current, event.Total))
 				}
 			case "subject_done":
-				if m.CurrentSubject != "" && !m.SubjectStartTime.IsZero() {
-					duration := time.Since(m.SubjectStartTime)
-					m.SubjectDurations = append(m.SubjectDurations, duration)
-					m.SubjectStatuses[m.CurrentSubject] = "done"
-					m.calculateETA()
-				}
+				m.finishCurrentSubject(subjectDone)
+				m.calculateETA()
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent) / float64(m.SubjectTotal))
 				}
 			case "subject_failed":
-				if m.CurrentSubject != "" {
-					m.SubjectStatuses[m.CurrentSubject] = "failed"
-					m.FailedSubjects = append(m.FailedSubjects, m.CurrentSubject)
+				m.finishCurrentSubject(subjectFailed)
+				m.calculateETA()
+				if m.SubjectTotal > 0 {
+					m.Progress = clampProgress(float64(m.SubjectCurrent) / float64(m.SubjectTotal))
 				}
 			case "log":
 				m.addLog(event.Message)

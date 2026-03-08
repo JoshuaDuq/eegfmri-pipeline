@@ -12,6 +12,7 @@ import (
 
 func (m Model) renderBehaviorAdvancedConfig() string {
 	var b strings.Builder
+	b.WriteString("\n")
 
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 

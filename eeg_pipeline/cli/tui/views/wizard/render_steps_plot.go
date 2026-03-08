@@ -12,6 +12,7 @@ import (
 
 func (m Model) renderPlotSelection() string {
 	var b strings.Builder
+	b.WriteString("\n")
 
 	b.WriteString(styles.RenderStepHeader("Plots", m.contentWidth) + "\n")
 
@@ -103,9 +104,8 @@ func (m Model) renderPlotSelection() string {
 
 func (m Model) renderPlotConfig() string {
 	var b strings.Builder
-	b.WriteString(styles.RenderStepHeader("Plot output", m.contentWidth) + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Space: toggle/cycle") + "\n\n")
+	b.WriteString("\n")
+	b.WriteString(styles.RenderStepHeader("Plot output", m.contentWidth) + "\n\n")
 
 	options := m.getPlotConfigOptions()
 	labelWidth := 16
@@ -169,6 +169,7 @@ func (m Model) renderPlotConfig() string {
 
 func (m Model) renderTimeRange() string {
 	var b strings.Builder
+	b.WriteString("\n")
 	b.WriteString(styles.RenderStepHeader("Time range", m.contentWidth) + "\n")
 
 	var tmin, tmax float64
@@ -308,9 +309,8 @@ func (m Model) renderTimeRange() string {
 
 func (m Model) renderFeaturePlotterSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.RenderStepHeader("Feature plots", m.contentWidth) + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
-		Render("  Space: toggle  A/N: all/none") + "\n\n")
+	b.WriteString("\n")
+	b.WriteString(styles.RenderStepHeader("Feature plots", m.contentWidth) + "\n\n")
 
 	categories := m.selectedFeaturePlotterCategories()
 	if len(categories) == 0 {

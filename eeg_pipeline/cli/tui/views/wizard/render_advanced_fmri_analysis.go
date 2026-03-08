@@ -12,6 +12,7 @@ import (
 
 func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	var b strings.Builder
+	b.WriteString("\n")
 
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 

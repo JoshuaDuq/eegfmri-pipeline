@@ -28,6 +28,7 @@ import (
 // - `model_render.go`: status/metrics/log rendering.
 // - `model_resources.go`: runtime resource monitoring helpers.
 // - `model_layout.go`: shared layout/state helpers and clipboard copy.
+// - `model_subjects.go`: ordered subject tracking and subject-status helpers.
 
 ///////////////////////////////////////////////////////////////////
 // Types
@@ -81,6 +82,7 @@ type Model struct {
 	SubjectStartTime   time.Time         // When current subject started
 	SubjectDurations   []time.Duration   // History of completed subject durations
 	EstimatedRemaining time.Duration     // Calculated ETA
+	SubjectOrder       []string          // Ordered subject IDs as announced by the pipeline
 	SubjectStatuses    map[string]string // Per-subject status: "pending", "running", "done", "failed"
 	FailedSubjects     []string          // List of failed subject IDs
 
@@ -149,6 +151,7 @@ func New(command string) Model {
 		logViewport:      vp,
 		RepoRoot:         "",
 		SubjectDurations: []time.Duration{},
+		SubjectOrder:     []string{},
 		SubjectStatuses:  make(map[string]string),
 		FailedSubjects:   []string{},
 	}

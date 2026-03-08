@@ -16,5 +16,6 @@ var (
 	TextDim   = lipgloss.Color("#94A3B8") // Slate-400 — secondary text
 	BgDark    = lipgloss.Color("#0F172A") // Slate-900 — app background
 	Surface   = lipgloss.Color("#1E293B") // Slate-800 — card/panel background
+	Highlight = lipgloss.Color("#0F3D38") // Teal-950 — selected row background
 	Border    = lipgloss.Color("#334155") // Slate-700 — subtle borders
 )

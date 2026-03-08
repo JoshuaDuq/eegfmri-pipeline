@@ -45,35 +45,13 @@ func (m Model) View() string {
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n")
 
-	if m.useTwoCol {
-		sidebar := strings.Builder{}
-		if m.IsDone() {
-			sidebar.WriteString(m.renderCompletionSummary())
-		} else {
-			sidebar.WriteString(m.renderInfoPanel())
-			sidebar.WriteString("\n\n")
-			sidebar.WriteString(m.renderSidebarCard(m.renderProgressSection()))
-		}
+	// Log Section
+	b.WriteString(m.renderLogSection())
+	b.WriteString("\n")
 
-		logView := lipgloss.NewStyle().Width(m.leftWidth).Render(m.renderLogSection())
-		sidebarView := lipgloss.NewStyle().Width(m.rightWidth).Render(sidebar.String())
-		columns := lipgloss.JoinHorizontal(lipgloss.Top, logView, strings.Repeat(" ", m.columnGap), sidebarView)
-		b.WriteString(columns)
+	for _, section := range m.stackedSupplementarySections() {
+		b.WriteString(section)
 		b.WriteString("\n")
-	} else {
-		// Log Section
-		b.WriteString(m.renderLogSection())
-		b.WriteString("\n")
-
-		if m.IsDone() {
-			b.WriteString(m.renderCompletionSummary())
-			b.WriteString("\n")
-		} else {
-			b.WriteString(m.renderInfoPanel())
-			b.WriteString("\n")
-			b.WriteString(m.renderSidebarCard(m.renderProgressSection()))
-			b.WriteString("\n")
-		}
 	}
 
 	// Footer
@@ -285,6 +263,16 @@ func formatDuration(d time.Duration) string {
 
 // renderHeader renders the top title bar and colors it according to the current status.
 func (m Model) renderHeader() string {
+	if m.compactLogPriorityMode() {
+		title := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("Execution Log")
+		status := lipgloss.NewStyle().Foreground(styles.Muted).Render(m.Status.String())
+		width := m.width - 4
+		if width < 0 {
+			width = 0
+		}
+		return styles.TruncateLine(title+"  "+status, width)
+	}
+
 	title := "Pipeline Execution"
 
 	statusColor := styles.Border
@@ -382,12 +370,19 @@ func (m Model) renderProgressSection() string {
 	}
 	b.WriteString("  " + m.renderAnimatedProgressBar(m.Progress, barWidth) + "\n")
 
-	// Subject tracker: compact dot strip with counter
-	if m.SubjectTotal > 0 && m.SubjectCurrent > 0 {
-		b.WriteString(styles.TruncateLine("  "+m.renderSubjectTracker(iw-4), iw) + "\n")
+	if summary := m.renderSubjectSummary(iw - 4); summary != "" {
+		b.WriteString(styles.TruncateLine("  "+summary, iw) + "\n")
 	}
 
-	// Current step: inline subject → operation
+	if lane := m.renderSubjectLane(iw - 4); lane != "" {
+		b.WriteString(styles.TruncateLine("  "+lane, iw) + "\n")
+	}
+
+	if failures := m.renderFailureLane(iw - 4); failures != "" {
+		b.WriteString(styles.TruncateLine("  "+failures, iw) + "\n")
+	}
+
+	// Current step: inline subject -> operation
 	if m.CurrentSubject != "" || m.CurrentOperation != "" {
 		b.WriteString(styles.TruncateLine("  "+m.renderCurrentStep(iw-4), iw) + "\n")
 	}
@@ -398,59 +393,6 @@ func (m Model) renderProgressSection() string {
 	}
 
 	return b.String()
-}
-
-// renderSubjectTracker renders a compact subject progress line with dot indicators.
-func (m Model) renderSubjectTracker(maxWidth int) string {
-	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	pctStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-	subjectProgress := float64(m.SubjectCurrent) / float64(m.SubjectTotal)
-
-	// Dot strip: ●●●○○○ — cap at 20 dots for space
-	maxDots := m.SubjectTotal
-	if maxDots > 20 {
-		maxDots = 20
-	}
-	var dots strings.Builder
-	for i := 0; i < maxDots; i++ {
-		// Map dot index to subject index for >20 subjects
-		mappedIdx := i
-		if m.SubjectTotal > 20 {
-			mappedIdx = i * m.SubjectTotal / 20
-		}
-		switch {
-		case mappedIdx < m.SubjectCurrent-1:
-			// Completed
-			status, isFailed := m.SubjectStatuses[m.subjectIDForIndex(mappedIdx)]
-			if isFailed && status == "failed" {
-				dots.WriteString(lipgloss.NewStyle().Foreground(styles.Error).Render("●"))
-			} else {
-				dots.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("●"))
-			}
-		case mappedIdx == m.SubjectCurrent-1:
-			// Current (running)
-			dots.WriteString(lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("◉"))
-		default:
-			// Pending
-			dots.WriteString(lipgloss.NewStyle().Foreground(styles.Border).Render("○"))
-		}
-	}
-	if m.SubjectTotal > 20 {
-		dots.WriteString(dimStyle.Render(fmt.Sprintf(" +%d", m.SubjectTotal-20)))
-	}
-
-	counter := dimStyle.Render(fmt.Sprintf("%d/%d ", m.SubjectCurrent, m.SubjectTotal))
-	pct := pctStyle.Render(fmt.Sprintf("%.0f%%", subjectProgress*100))
-
-	return counter + dots.String() + " " + pct
-}
-
-// subjectIDForIndex returns the subject ID for a given 0-based index, or empty string.
-func (m Model) subjectIDForIndex(idx int) string {
-	// SubjectStatuses is keyed by subject ID; we don't have an ordered list,
-	// so return empty to skip failed-dot coloring when index can't be resolved.
-	return ""
 }
 
 // renderCurrentStep renders the active subject and operation on one compact line.
@@ -714,7 +656,25 @@ func (m Model) getDuration() time.Duration {
 func (m Model) renderFooter() string {
 	var hints []string
 
-	if m.copyMode {
+	if m.compactLogPriorityMode() {
+		if m.copyMode {
+			hints = []string{
+				styles.RenderKeyHint("Esc", "Exit Copy"),
+				styles.RenderKeyHint("C", "Copy"),
+			}
+		} else if m.IsDone() {
+			hints = []string{
+				styles.RenderKeyHint("Enter", "Menu"),
+				styles.RenderKeyHint("C", "Copy"),
+			}
+		} else {
+			hints = []string{
+				styles.RenderKeyHint("Ctrl+C", "Stop"),
+				styles.RenderKeyHint("C", "Copy"),
+				styles.RenderKeyHint("\u2191/\u2193", "Scroll"),
+			}
+		}
+	} else if m.copyMode {
 		hints = []string{
 			styles.RenderKeyHint("M/Esc", "Exit Copy Mode"),
 			styles.RenderKeyHint("C", "Copy All"),

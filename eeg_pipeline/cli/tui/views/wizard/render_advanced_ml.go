@@ -61,6 +61,7 @@ func isMLRenderedOption(opt optionType) bool {
 
 func (m Model) renderMLAdvancedConfig() string {
 	var b strings.Builder
+	b.WriteString("\n")
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)

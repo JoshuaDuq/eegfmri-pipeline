@@ -1,11 +1,13 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/types"
+	"github.com/eeg-pipeline/tui/views/execution"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
 	"github.com/eeg-pipeline/tui/views/wizard"
 )
@@ -85,5 +87,24 @@ func TestHandlePipelineSmokeUtilityOpensSelector(t *testing.T) {
 	}
 	if updated.state != StatePipelineSmoke {
 		t.Fatalf("expected state %v, got %v", StatePipelineSmoke, updated.state)
+	}
+}
+
+func TestView_ExecutionBypassesGlobalTooSmallScreen(t *testing.T) {
+	m := New()
+	m.state = StateExecution
+	m.width = 50
+	m.height = 16
+	m.execution = execution.New("echo test")
+	m.execution.SetSize(50, 16)
+	m.execution.AddOutput("[12:00:00] processing")
+	m.execution.SetStatus(execution.StatusRunning)
+
+	view := m.View()
+	if strings.Contains(view, "Terminal too small") {
+		t.Fatalf("expected execution view to render instead of global too-small screen\nview:\n%s", view)
+	}
+	if !strings.Contains(view, "processing") {
+		t.Fatalf("expected execution view to keep logs visible\nview:\n%s", view)
 	}
 }

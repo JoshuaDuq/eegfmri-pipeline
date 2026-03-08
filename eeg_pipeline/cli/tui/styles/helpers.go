@@ -145,13 +145,11 @@ func RenderFooterSeparator() string {
 }
 
 func RenderKeyHint(key, label string) string {
-	keyStyle := lipgloss.NewStyle().
-		Foreground(Text).
-		Background(Border).
-		Bold(true).
-		Padding(0, 1)
-	labelStyle := lipgloss.NewStyle().Foreground(TextDim)
-	return keyStyle.Render(key) + " " + labelStyle.Render(label)
+	return FooterKeyPrimaryStyle.Render(key) + " " + FooterLabelPrimaryStyle.Render(label)
+}
+
+func RenderKeyHintSecondary(key, label string) string {
+	return FooterKeySecondaryStyle.Render(key) + " " + FooterLabelSecondaryStyle.Render(label)
 }
 
 // RenderHeaderSeparator returns a styled horizontal line (e.g. for under titles).
@@ -195,11 +193,36 @@ func RenderSectionLabel(title string) string {
 	return bar + label
 }
 
+// RenderActiveSectionLabel renders an active section label with uppercase title and primary accent bar.
+func RenderActiveSectionLabel(title string) string {
+	bar := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(SectionIcon)
+	label := lipgloss.NewStyle().Bold(true).Foreground(Primary).Render(" " + strings.ToUpper(title))
+	return bar + label
+}
+
 // RenderDimSectionLabel renders a section label for inactive sections.
 func RenderDimSectionLabel(title string) string {
-	bar := lipgloss.NewStyle().Foreground(Border).Render(SectionIcon)
-	label := lipgloss.NewStyle().Bold(true).Foreground(TextDim).Render(" " + title)
+	bar := lipgloss.NewStyle().Foreground(Secondary).Render(SectionIcon)
+	label := lipgloss.NewStyle().Foreground(TextDim).Render(" " + title)
 	return bar + label
+}
+
+// RenderPreviewSubHeader renders a lightweight all-caps sub-section label for preview panes,
+// followed by a thin separator rule.
+func RenderPreviewSubHeader(title string) string {
+	bar := lipgloss.NewStyle().Foreground(Primary).Render(SectionIcon)
+	label := lipgloss.NewStyle().Foreground(TextDim).Bold(true).Render(" " + title)
+	return bar + label
+}
+
+// RenderPreviewSubHeaderWithRule renders a preview sub-header followed by a thin rule.
+func RenderPreviewSubHeaderWithRule(title string, width int) string {
+	header := RenderPreviewSubHeader(title)
+	if width <= 0 {
+		return header
+	}
+	rule := lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat(SectionDividerChar, width))
+	return header + "\n" + rule
 }
 
 // RenderSectionBlock renders a section label followed by a thin separator line.
@@ -271,28 +294,30 @@ func RenderConfigLine(cursor, label, value, hint string, labelWidth, maxWidth in
 	return TruncateLine(line, maxWidth)
 }
 
-// RenderStepHeader renders a step section title with a divider underneath.
+// RenderStepHeader renders a step section title with a primary accent bar and divider.
 func RenderStepHeader(title string, width int) string {
-	header := SectionTitleStyle.Render(title)
+	bar := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(SectionIcon)
+	header := bar + " " + lipgloss.NewStyle().Bold(true).Foreground(Text).Render(title)
 	if width > 0 {
 		return header + "\n" + RenderDivider(width)
 	}
 	return header
 }
 
-// RenderStatusCount renders "N of M selected" with a check/warning prefix.
+// RenderStatusCount renders a count badge + summary line.
 func RenderStatusCount(count, total int, noun string) string {
-	var icon string
+	var pillFg, pillBg lipgloss.Color
 	if count >= 1 {
-		icon = lipgloss.NewStyle().Foreground(Success).Render(CheckMark)
+		pillFg, pillBg = BgDark, Success
 	} else {
-		icon = lipgloss.NewStyle().Foreground(Warning).Render(WarningMark)
+		pillFg, pillBg = BgDark, Warning
 	}
-	summary := lipgloss.NewStyle().Foreground(TextDim).Render(
-		fmt.Sprintf(" %d of %d %s", count, total, noun))
-	result := icon + summary
+	pill := lipgloss.NewStyle().Foreground(pillFg).Background(pillBg).Bold(true).Padding(0, 1).
+		Render(fmt.Sprintf("%d/%d", count, total))
+	nounStyle := lipgloss.NewStyle().Foreground(TextDim)
+	result := pill + " " + nounStyle.Render(noun)
 	if count == 0 {
-		result += lipgloss.NewStyle().Foreground(Warning).Faint(true).Render(" -- select at least 1")
+		result += "  " + lipgloss.NewStyle().Foreground(Warning).Render("select at least 1")
 	}
 	return result
 }

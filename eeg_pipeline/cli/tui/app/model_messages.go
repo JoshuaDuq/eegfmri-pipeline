@@ -224,6 +224,8 @@ func (m Model) handleConfigLoaded(msg messages.ConfigLoadedMsg) (tea.Model, tea.
 		return m, nil
 	}
 
+	m.config = msg.Summary
+	m.syncMainMenuConfigSummary()
 	m.wizard.SetConfigSummary(msg.Summary)
 	if !m.shouldUpdateTask(msg.Summary.Task) {
 		return m, nil
@@ -260,7 +262,9 @@ func (m *Model) shouldUpdateTask(newTask string) bool {
 
 func (m *Model) updateTask(newTask string) {
 	m.task = newTask
+	m.config.Task = newTask
 	m.mainMenu.Task = m.task
+	m.syncMainMenuConfigSummary()
 	m.pipelineSmoke.SetTask(m.task)
 	m.wizard.SetTask(m.task)
 }

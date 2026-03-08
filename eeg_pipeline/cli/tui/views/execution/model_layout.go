@@ -12,6 +12,12 @@ import (
 
 // Layout sizing, lifecycle helpers, and clipboard export.
 
+const executionMinVisibleLogLines = 4
+
+func (m Model) compactLogPriorityMode() bool {
+	return m.width < styles.MinTerminalWidth || m.height < styles.MinTerminalHeight
+}
+
 func (m *Model) stopResourceMonitoringSafe() {
 	if m.stopResourceChan != nil {
 		select {
@@ -58,66 +64,96 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m *Model) updateLayout() {
-	const (
-		minTwoColWidth  = 120
-		minTwoColHeight = 28
-		minSidebarWidth = 44
-	)
-
-	useTwo := m.width >= minTwoColWidth && m.height >= minTwoColHeight
-	if !useTwo {
-		m.useTwoCol = false
-		m.leftWidth = m.width
-		m.rightWidth = 0
-		return
-	}
-
-	gap := m.columnGap
-	if gap <= 0 {
-		gap = 2
-	}
-
-	minLogWidth := styles.MinLogWidth + 8
-
-	available := m.width - gap
-	right := int(float64(available) * 0.38)
-	if right < minSidebarWidth {
-		right = minSidebarWidth
-	}
-	if right > available-minLogWidth {
-		right = available - minLogWidth
-	}
-	left := available - right
-	if left < minLogWidth || right < minSidebarWidth {
-		m.useTwoCol = false
-		m.leftWidth = m.width
-		m.rightWidth = 0
-		return
-	}
-
-	m.useTwoCol = true
-	m.leftWidth = left
-	m.rightWidth = right
+	m.useTwoCol = false
+	m.leftWidth = m.width
+	m.rightWidth = 0
 }
 
 func (m Model) contentWidth() int {
-	if m.useTwoCol {
-		return m.rightWidth
-	}
 	return m.width
 }
 
 func (m Model) panelWidth() int {
-	base := m.contentWidth()
-	if m.useTwoCol {
-		base -= 4
-	} else {
-		base -= 10
-	}
+	base := m.contentWidth() - 10
 	if base < 30 {
 		base = 30
 	}
 	return base
+}
+
+func renderedLineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+func clampViewportDimension(available, preferredMin, hardMax int) int {
+	if available < 1 {
+		return 1
+	}
+	if available > hardMax {
+		return hardMax
+	}
+	if available < preferredMin {
+		return available
+	}
+	return available
+}
+
+func (m Model) stackedReservedHeight() int {
+	reserved := renderedLineCount(m.renderHeader()) + renderedLineCount(m.renderFooter())
+	reserved += styles.ExecLogTitleLines + styles.ExecViewportBorderLines
+	if m.copyMode {
+		reserved += styles.ExecCopyModeBannerLines
+	}
+	for _, section := range m.stackedSupplementarySections() {
+		reserved += renderedLineCount(section)
+	}
+	return reserved
+}
+
+func (m Model) stackedSupplementarySections() []string {
+	if m.compactLogPriorityMode() {
+		return nil
+	}
+
+	available := m.height -
+		renderedLineCount(m.renderHeader()) -
+		renderedLineCount(m.renderFooter()) -
+		styles.ExecLogTitleLines -
+		styles.ExecViewportBorderLines -
+		executionMinVisibleLogLines - 1
+	if m.copyMode {
+		available -= styles.ExecCopyModeBannerLines
+	}
+	if available <= 0 {
+		return nil
+	}
+
+	if m.IsDone() {
+		summary := m.renderCompletionSummary()
+		if renderedLineCount(summary) <= available {
+			return []string{summary}
+		}
+		return nil
+	}
+
+	info := m.renderInfoPanel()
+	progress := m.renderSidebarCard(m.renderProgressSection())
+	infoLines := renderedLineCount(info)
+	progressLines := renderedLineCount(progress)
+
+	if infoLines+progressLines <= available {
+		return []string{info, progress}
+	}
+	if progressLines <= available {
+		return []string{progress}
+	}
+	if infoLines <= available {
+		return []string{info}
+	}
+	return nil
 }
 
 func (m Model) sidebarInnerWidth() int {

@@ -305,7 +305,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	prevStep := m.CurrentStep
 
 	// Per-step validation
-	errors := m.validateStep()
+	errors := m.validateCurrentStep()
 	if len(errors) > 0 {
 		m.validationErrors = errors
 		return m, nil
@@ -313,22 +313,9 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	m.validationErrors = nil // Clear if valid
 
 	if m.stepIndex < len(m.steps)-1 {
+		m.runStepExitHook(prevStep)
 		m.stepIndex++
 		m.CurrentStep = m.steps[m.stepIndex]
-
-		// Mode-dependent defaults (fMRI analysis)
-		if prevStep == types.StepSelectMode && m.Pipeline == types.PipelineFmriAnalysis {
-			mode := ""
-			if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
-				mode = m.modeOptions[m.modeIndex]
-			}
-			if mode == "trial-signatures" {
-				space := strings.TrimSpace(m.fmriAnalysisFmriprepSpace)
-				if space == "" || strings.EqualFold(space, "T1w") {
-					m.fmriAnalysisFmriprepSpace = "MNI152NLin2009cAsym"
-				}
-			}
-		}
 
 		for m.stepIndex < len(m.steps)-1 {
 			if !m.shouldSkipStep(m.CurrentStep) {
@@ -338,10 +325,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.CurrentStep = m.steps[m.stepIndex]
 		}
 
-		if m.CurrentStep == types.StepConfigureOptions {
-			m.updateFeatureAvailability()
-		}
-
+		m.runStepEnterHook(m.CurrentStep)
 		m.resetCursorsForStep()
 	} else {
 		m.validationErrors = m.validate()
@@ -372,112 +356,6 @@ func countSelectedStringItems(selected map[string]bool) int {
 		}
 	}
 	return count
-}
-
-func (m *Model) validateStep() []string {
-	var errors []string
-	switch m.CurrentStep {
-
-	case types.StepSelectSubjects:
-		selectedCount := countSelectedStringItems(m.subjectSelected)
-		validCount := 0
-		for subjID, selected := range m.subjectSelected {
-			if !selected {
-				continue
-			}
-			for _, s := range m.subjects {
-				if s.ID != subjID {
-					continue
-				}
-				valid, _ := m.Pipeline.ValidateSubject(s)
-				if m.Pipeline == types.PipelinePlotting {
-					valid, _ = m.validatePlottingSubject(s)
-				}
-				if valid {
-					validCount++
-				}
-				break
-			}
-		}
-		minRequired := minSubjectsRequired
-		if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
-			minRequired = minSubjectsForGroupCV
-		}
-		if m.Pipeline == types.PipelinePlotting && m.plottingScope == PlottingScopeGroup {
-			minRequired = minSubjectsForGroupCV
-		}
-		if selectedCount < minRequired {
-			errors = append(errors, fmt.Sprintf("Select at least %d subject(s)", minRequired))
-		}
-		if validCount < minRequired {
-			errors = append(errors, fmt.Sprintf("Select at least %d valid subject(s)", minRequired))
-		}
-	case types.StepSelectComputations:
-		totalCount := countSelectedItems(m.computationSelected)
-		if totalCount == 0 {
-			errors = append(errors, "Select at least one analysis to run")
-		}
-	case types.StepSelectFeatureFiles:
-		count := countSelectedStringItems(m.featureFileSelected)
-		if count == 0 {
-			errors = append(errors, "Select at least one feature file to load")
-		}
-	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		count := countSelectedItems(m.selected)
-		if count == 0 {
-			errors = append(errors, "Select at least one category")
-		}
-	case types.StepSelectBands:
-		count := countSelectedItems(m.bandSelected)
-		if count == 0 {
-			errors = append(errors, "Select at least one frequency band")
-		}
-	case types.StepSelectPlots:
-		count := m.countSelectedVisiblePlots()
-		if count == 0 {
-			errors = append(errors, "Select at least one plot to generate")
-		}
-	case types.StepSelectFeaturePlotters:
-		if len(m.selectedFeaturePlotterCategories()) == 0 {
-			break
-		}
-		if m.featurePlotters == nil && strings.TrimSpace(m.featurePlotterError) == "" {
-			errors = append(errors, "Feature plot list is still loading")
-			break
-		}
-		if m.featurePlotters == nil && strings.TrimSpace(m.featurePlotterError) != "" {
-			// If discovery failed, let the user proceed (defaults to running all plotters).
-			break
-		}
-		items := m.featurePlotterItems()
-		count := 0
-		for _, p := range items {
-			if m.featurePlotterSelected[p.ID] {
-				count++
-			}
-		}
-		if count == 0 {
-			errors = append(errors, "Select at least one feature plot")
-		}
-	case types.StepSelectSpatial:
-		count := countSelectedItems(m.spatialSelected)
-		if count == 0 {
-			errors = append(errors, "Select at least one spatial mode")
-		}
-	case types.StepSelectPreprocessingStages:
-		count := countSelectedItems(m.prepStageSelected)
-		if count == 0 {
-			errors = append(errors, "Select at least one preprocessing stage")
-		}
-	case types.StepTimeRange:
-		errors = m.validateTimeRanges()
-	case types.StepPlotConfig:
-		count := countSelectedStringItems(m.plotFormatSelected)
-		if count == 0 {
-			errors = append(errors, "Select at least one output format (PNG, SVG, or PDF)")
-		}
-	}
-	return errors
 }
 
 func (m *Model) handleSpace() {

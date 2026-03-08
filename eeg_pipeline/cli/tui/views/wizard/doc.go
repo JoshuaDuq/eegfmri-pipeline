@@ -6,6 +6,8 @@
 //   - model.go          — Model state, constants, data types (Computation, ROIDefinition, etc.)
 //   - render.go         — View entry: layout, header, footer, renderStepContent dispatch
 //   - handlers.go       — Input handling and step navigation
+//   - step_registry.go  — Step definitions: render/validate hooks and transition hooks
+//   - step_validation.go — Per-step validation routines
 //   - commands.go       — Command building for execution
 //   - config_persist.go — Save/load wizard config
 //   - presets.go        — Behavior presets and selection helpers

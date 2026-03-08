@@ -293,4 +293,5 @@ func (m *Model) saveWizardConfig() {
 	}
 	pipelineName := m.selectedPipeline.String()
 	m.persistentState.PipelineConfigs[pipelineName] = m.wizard.ExportConfig()
+	m.syncMainMenuSessionData()
 }

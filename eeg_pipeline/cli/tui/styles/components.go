@@ -17,7 +17,7 @@ var (
 	CardStyle = lipgloss.NewStyle().
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Border)
+			BorderForeground(Primary)
 
 	CardStyleFocused = lipgloss.NewStyle().
 				Padding(1, 2).
@@ -30,15 +30,18 @@ var (
 			Padding(1, 2)
 
 	FooterStyle = lipgloss.NewStyle().
-			Foreground(TextDim).
-			PaddingTop(1)
+			Foreground(TextDim)
 
 	PanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Border).
+			BorderForeground(Secondary).
 			Padding(1, 2)
 
-	HeaderLineStyle = lipgloss.NewStyle().Foreground(Border)
+	SelectedRowStyle = lipgloss.NewStyle().
+				Background(Highlight).
+				Foreground(Primary)
+
+	HeaderLineStyle = lipgloss.NewStyle().Foreground(Secondary)
 
 	SectionDividerStyle = lipgloss.NewStyle().Foreground(Border)
 
@@ -63,11 +66,22 @@ var (
 	BadgeSuccessStyle = newBadgeStyle(badgeDarkForeground, Success)
 	BadgeErrorStyle   = newBadgeStyle(badgeLightForeground, Error)
 	BadgeWarningStyle = newBadgeStyle(badgeDarkForeground, Warning)
-	BadgeAccentStyle  = newBadgeStyle(badgeDarkForeground, Accent)
-	BadgeMutedStyle   = newBadgeStyle(badgeLightForeground, Muted)
+	BadgeAccentStyle  = newBadgeStyle(badgeLightForeground, Accent)
+	BadgeMutedStyle   = newBadgeStyle(badgeLightForeground, Secondary)
+	BadgeTaskStyle    = lipgloss.NewStyle().Foreground(Accent).Bold(true)
+	InlineKindStyle   = lipgloss.NewStyle().Foreground(Muted)
+	PreviewBlockLabel = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	PreviewSepStyle   = lipgloss.NewStyle().Foreground(Border)
 )
 
 var (
 	ValidIndicatorStyle   = lipgloss.NewStyle().Foreground(Success)
 	InvalidIndicatorStyle = lipgloss.NewStyle().Foreground(Warning)
+)
+
+var (
+	FooterKeyPrimaryStyle     = lipgloss.NewStyle().Foreground(BgDark).Background(Primary).Bold(true).Padding(0, 1)
+	FooterKeySecondaryStyle   = lipgloss.NewStyle().Foreground(TextDim).Background(Surface).Padding(0, 1)
+	FooterLabelPrimaryStyle   = lipgloss.NewStyle().Foreground(Text)
+	FooterLabelSecondaryStyle = lipgloss.NewStyle().Foreground(Muted)
 )

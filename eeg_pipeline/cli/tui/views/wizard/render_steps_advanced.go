@@ -34,6 +34,7 @@ func (m Model) renderAdvancedConfig() string {
 
 func (m Model) renderDefaultAdvancedConfig() string {
 	var b strings.Builder
+	b.WriteString("\n")
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render("  No advanced options for this pipeline. Press Enter to continue.") + "\n")
 	return b.String()

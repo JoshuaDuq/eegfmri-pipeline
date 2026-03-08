@@ -34,7 +34,7 @@ const (
 
 	ExecHeaderLines            = 2
 	ExecInfoPanelLines         = 6
-	ExecProgressSectionLines   = 8
+	ExecProgressSectionLines   = 10
 	ExecLogTitleLines          = 2
 	ExecViewportBorderLines    = 2
 	ExecFooterLines            = 4
@@ -52,10 +52,10 @@ const (
 	CrossMark           = "✗"
 	PendingMark         = "○"
 	ActiveMark          = "●"
-	SelectedMark        = "›"
+	SelectedMark        = "▸"
 	BulletMark          = "·"
 	WarningMark         = "⚠"
-	FooterHintSeparator = "  ·  "
+	FooterHintSeparator = "  │  "
 
 	HeaderSeparatorChar = "━"
 	SectionDividerChar  = "─"

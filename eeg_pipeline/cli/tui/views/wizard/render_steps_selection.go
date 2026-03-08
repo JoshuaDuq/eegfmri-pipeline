@@ -13,7 +13,7 @@ import (
 
 func (m Model) renderModeSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.RenderStepHeader("Mode", m.contentWidth) + "\n")
+	b.WriteString("\n")
 
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 	for i, opt := range m.modeOptions {
@@ -39,7 +39,6 @@ func (m Model) renderModeSelection() string {
 
 func (m Model) renderComputationSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.RenderStepHeader("Computations", m.contentWidth) + "\n")
 
 	count := 0
 	for _, sel := range m.computationSelected {
@@ -48,7 +47,7 @@ func (m Model) renderComputationSelection() string {
 		}
 	}
 
-	b.WriteString(styles.RenderStatusCount(count, len(m.computations), "selected"))
+	b.WriteString("  " + styles.RenderStatusCount(count, len(m.computations), "selected"))
 	b.WriteString("\n\n")
 
 	groups := map[string][]Computation{
@@ -76,7 +75,7 @@ func (m Model) renderComputationSelection() string {
 			continue
 		}
 		b.WriteString("\n")
-		b.WriteString(styles.RenderDimSectionLabel(groupNames[groupKey]) + "\n")
+		b.WriteString(styles.RenderPreviewSubHeader(strings.ToUpper(groupNames[groupKey])) + "\n")
 
 		for _, comp := range groupComps {
 			idx := -1
@@ -125,12 +124,7 @@ func (m Model) renderComputationSelection() string {
 
 func (m Model) renderCategorySelection() string {
 	var b strings.Builder
-
-	title := "Feature categories"
-	if m.CurrentStep == types.StepSelectPlotCategories {
-		title = "Plot categories"
-	}
-	b.WriteString(styles.RenderStepHeader(title, m.contentWidth) + "\n")
+	b.WriteString("\n")
 
 	if m.CurrentStep == types.StepSelectPlotCategories {
 		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
@@ -148,7 +142,7 @@ func (m Model) renderCategorySelection() string {
 		}
 	}
 
-	b.WriteString(styles.RenderStatusCount(count, len(m.categories), "selected"))
+	b.WriteString("  " + styles.RenderStatusCount(count, len(m.categories), "selected"))
 	b.WriteString("\n\n")
 
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
@@ -221,18 +215,14 @@ func (m Model) renderGlobalStylingPanel() string {
 func (m Model) renderBandSelection() string {
 	var b strings.Builder
 
-	b.WriteString(styles.RenderStepHeader("Frequency bands", m.contentWidth) + "\n")
-
 	count := 0
 	for _, sel := range m.bandSelected {
 		if sel {
 			count++
 		}
 	}
-	b.WriteString(styles.RenderStatusCount(count, len(m.bands), "selected"))
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
-		Render("  Space: toggle  E: edit  +: add  D: delete") + "\n\n")
+	b.WriteString("  " + styles.RenderStatusCount(count, len(m.bands), "selected"))
+	b.WriteString("\n\n")
 
 	for i, band := range m.bands {
 		isSelected := m.bandSelected[i]
@@ -280,18 +270,14 @@ func (m Model) renderBandSelection() string {
 func (m Model) renderROISelection() string {
 	var b strings.Builder
 
-	b.WriteString(styles.RenderStepHeader("Regions of interest", m.contentWidth) + "\n")
-
 	count := 0
 	for _, sel := range m.roiSelected {
 		if sel {
 			count++
 		}
 	}
-	b.WriteString(styles.RenderStatusCount(count, len(m.rois), "selected"))
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
-		Render("  Space: toggle  E: edit  Left/Right: move caret  +: add  D: delete") + "\n\n")
+	b.WriteString("  " + styles.RenderStatusCount(count, len(m.rois), "selected"))
+	b.WriteString("\n\n")
 
 	for i, roi := range m.rois {
 		isSelected := m.roiSelected[i]
@@ -352,6 +338,29 @@ func (m Model) renderROISelection() string {
 	}
 
 	return b.String()
+}
+
+func (m Model) renderSubjectMarker(isSelected, isFocused bool) string {
+	switch {
+	case isFocused && isSelected:
+		return lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▶ ▣")
+	case isFocused:
+		return lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▶ □")
+	case isSelected:
+		return lipgloss.NewStyle().Foreground(styles.Success).Render("  ▣")
+	default:
+		return lipgloss.NewStyle().Foreground(styles.Muted).Render("  □")
+	}
+}
+
+func (m Model) buildSubjectStatusFlags(hasSource, hasBids, hasDerivatives bool) string {
+	flag := func(has bool, letter string) string {
+		if has {
+			return lipgloss.NewStyle().Foreground(styles.Success).Render(letter)
+		}
+		return lipgloss.NewStyle().Foreground(styles.Muted).Render("·")
+	}
+	return flag(hasSource, "S") + flag(hasBids, "B") + flag(hasDerivatives, "D")
 }
 
 func (m Model) computeChannelUsage() (used, unused []string) {
@@ -480,9 +489,7 @@ func (m Model) formatChannelList(channels []string, color lipgloss.Color) string
 
 func (m Model) renderSpatialSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.RenderStepHeader("Spatial aggregation", m.contentWidth) + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Select how to aggregate features spatially.") + "\n")
+	b.WriteString("\n")
 
 	count := 0
 	for _, sel := range m.spatialSelected {
@@ -490,7 +497,7 @@ func (m Model) renderSpatialSelection() string {
 			count++
 		}
 	}
-	b.WriteString(styles.RenderStatusCount(count, len(spatialModes), "selected") + "\n\n")
+	b.WriteString("  " + styles.RenderStatusCount(count, len(spatialModes), "selected") + "\n\n")
 
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 	for i, mode := range spatialModes {
@@ -514,14 +521,11 @@ func (m Model) renderSpatialSelection() string {
 
 func (m Model) renderFeatureFileSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.RenderStepHeader("Feature files", m.contentWidth) + "\n")
+	b.WriteString("\n")
 
 	applicableFeatures := m.GetApplicableFeatureFiles()
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
 	if len(applicableFeatures) < len(featureFileOptions) {
-		b.WriteString(hintStyle.Render("  Showing applicable features. Green = available, red = missing.") + "\n")
-	} else {
-		b.WriteString(hintStyle.Render("  Green = available, red = missing data.") + "\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  Showing applicable features only") + "\n")
 	}
 
 	count := 0
@@ -534,12 +538,12 @@ func (m Model) renderFeatureFileSelection() string {
 			availableCount++
 		}
 	}
-	b.WriteString(styles.RenderStatusCount(count, len(applicableFeatures), "selected"))
+	b.WriteString("  " + styles.RenderStatusCount(count, len(applicableFeatures), "selected"))
 	if m.featureAvailability != nil {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-			fmt.Sprintf(" | %d available", availableCount)))
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+			fmt.Sprintf("%d available", availableCount)))
 	}
-	b.WriteString("\n\n")
+	b.WriteString("\n\n\n")
 
 	displayCursor := m.featureFileCursor
 	if displayCursor >= len(applicableFeatures) {
@@ -585,8 +589,7 @@ func (m Model) renderFeatureFileSelection() string {
 
 func (m Model) renderSubjectSelection() string {
 	var b strings.Builder
-
-	b.WriteString(styles.RenderStepHeader("Subjects", m.contentWidth) + "\n")
+	b.WriteString("\n")
 
 	labelStyle := lipgloss.NewStyle().Foreground(styles.Text)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
@@ -661,14 +664,14 @@ func (m Model) renderSubjectSelection() string {
 		}
 	}
 
-	b.WriteString(styles.RenderStatusCount(validCount, len(m.subjects), "valid"))
+	b.WriteString("  " + styles.RenderStatusCount(validCount, len(m.subjects), "valid"))
 	if validCount < selectedCount {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf(" (%d invalid)", selectedCount-validCount)))
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("%d invalid", selectedCount-validCount)))
 	}
 	if m.subjectFilter != "" {
-		b.WriteString(dimStyle.Render(fmt.Sprintf(" | %d shown", len(filteredSubjects))))
+		b.WriteString("  " + dimStyle.Render(fmt.Sprintf("%d shown", len(filteredSubjects))))
 	}
-	b.WriteString("\n\n")
+	b.WriteString("\n\n\n")
 
 	if len(filteredSubjects) == 0 {
 		if m.subjectLoadError != "" {
@@ -702,39 +705,20 @@ func (m Model) renderSubjectSelection() string {
 		s := filteredSubjects[i]
 		isSelected := m.subjectSelected[s.ID]
 		isFocused := i == m.subjectCursor
-		cursor := "  "
-		if isFocused {
-			cursor = styles.RenderCursor()
-		}
-		checkbox := styles.RenderCheckbox(isSelected, isFocused)
+		marker := m.renderSubjectMarker(isSelected, isFocused)
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
 		if isFocused {
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		}
-		line := cursor + checkbox + " " + nameStyle.Render(s.ID)
+		line := marker + " " + nameStyle.Render(s.ID)
 
 		valid, reason := m.Pipeline.ValidateSubject(s)
 		if m.Pipeline == types.PipelinePlotting {
 			valid, reason = m.validatePlottingSubject(s)
 		}
 
-		var statusBadges []string
-		if s.HasSourceData {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("S"))
-		} else {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("\u00b7"))
-		}
-		if s.HasBids {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("B"))
-		} else {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("\u00b7"))
-		}
-		if s.HasDerivatives {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("D"))
-		} else {
-			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("\u00b7"))
-		}
-		line += bracketStyle.Render(" [") + strings.Join(statusBadges, "") + bracketStyle.Render("]")
+		statusLine := m.buildSubjectStatusFlags(s.HasSourceData, s.HasBids, s.HasDerivatives)
+		line += bracketStyle.Render(" [") + statusLine + bracketStyle.Render("]")
 		if !valid {
 			line += lipgloss.NewStyle().Foreground(styles.Warning).Render(" " + styles.WarningMark + " " + reason)
 		}
@@ -750,8 +734,8 @@ func (m Model) renderSubjectSelection() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(
 			fmt.Sprintf("  Showing %d-%d of %d  [↑↓ to scroll]", startIdx+1, endIdx, len(filteredSubjects))))
 	}
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
-		Render("  Legend: [S]=Source Data [B]=BIDS [D]=Derivatives"))
+	b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Muted).
+		Render("  S=Source  B=BIDS  D=Derivatives"))
 
 	return b.String()
 }

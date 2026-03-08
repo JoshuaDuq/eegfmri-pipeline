@@ -71,6 +71,7 @@ func (m Model) handleMainMenuUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	m.selectedPipeline = types.Pipeline(m.mainMenu.SelectedPipeline)
 	m.persistentState.LastPipeline = m.mainMenu.SelectedPipeline
+	m.syncMainMenuSessionData()
 	m.saveState()
 
 	m.wizard = wizard.New(m.selectedPipeline, m.repoRoot)
@@ -343,7 +344,10 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 		return m, nil
 	case StatePipelineSmoke:
 		return m.popState()
-	case StateDashboard, StateHistory:
+	case StateDashboard:
+		return m.popState()
+	case StateHistory:
+		m.refreshMainMenuRecentRuns()
 		return m.popState()
 	default:
 		return m.popState()
@@ -391,6 +395,8 @@ func (m *Model) recordExecutionToHistory() {
 		// History record cannot be saved - continue without it
 		return
 	}
+	m.syncMainMenuSessionData()
+	m.refreshMainMenuRecentRuns()
 
 	// Clear command to prevent duplicate recording
 	m.execCommand = ""
