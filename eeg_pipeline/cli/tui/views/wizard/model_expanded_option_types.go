@@ -75,4 +75,10 @@ const (
 	expandedSourceLocContrastValueB              = 69
 	expandedSourcePlotCondition                  = 70
 	expandedSourcePlotBands                      = 71
+	expandedFmriSecondLevelContrastNames         = 72
+	expandedFmriSecondLevelSubjectColumn         = 73
+	expandedFmriSecondLevelCovariateColumns      = 74
+	expandedFmriSecondLevelGroupColumn           = 75
+	expandedFmriSecondLevelGroupAValue           = 76
+	expandedFmriSecondLevelGroupBValue           = 77
 )

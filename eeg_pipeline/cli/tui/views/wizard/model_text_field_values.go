@@ -78,6 +78,30 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisSignatureDir
 	case textFieldFmriAnalysisSignatureMaps:
 		return m.fmriAnalysisSignatureMaps
+	case textFieldFmriSecondLevelInputRoot:
+		return m.fmriSecondLevelInputRoot
+	case textFieldFmriSecondLevelContrastNames:
+		return m.fmriSecondLevelContrastNames
+	case textFieldFmriSecondLevelConditionLabels:
+		return m.fmriSecondLevelConditionLabels
+	case textFieldFmriSecondLevelCovariatesFile:
+		return m.fmriSecondLevelCovariatesFile
+	case textFieldFmriSecondLevelSubjectColumn:
+		return m.fmriSecondLevelSubjectColumn
+	case textFieldFmriSecondLevelCovariateColumns:
+		return m.fmriSecondLevelCovariateColumns
+	case textFieldFmriSecondLevelGroupColumn:
+		return m.fmriSecondLevelGroupColumn
+	case textFieldFmriSecondLevelGroupAValue:
+		return m.fmriSecondLevelGroupAValue
+	case textFieldFmriSecondLevelGroupBValue:
+		return m.fmriSecondLevelGroupBValue
+	case textFieldFmriSecondLevelFormula:
+		return m.fmriSecondLevelFormula
+	case textFieldFmriSecondLevelOutputName:
+		return m.fmriSecondLevelOutputName
+	case textFieldFmriSecondLevelOutputDir:
+		return m.fmriSecondLevelOutputDir
 	case textFieldFmriTrialSigGroupColumn:
 		return m.fmriTrialSigGroupColumn
 	case textFieldFmriTrialSigGroupValues:
@@ -494,6 +518,34 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisSignatureDir = strings.TrimSpace(value)
 	case textFieldFmriAnalysisSignatureMaps:
 		m.fmriAnalysisSignatureMaps = strings.TrimSpace(value)
+	case textFieldFmriSecondLevelInputRoot:
+		m.fmriSecondLevelInputRoot = strings.TrimSpace(value)
+		m.fmriSecondLevelContrastDiscoveryKey = ""
+	case textFieldFmriSecondLevelContrastNames:
+		m.fmriSecondLevelContrastNames = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriSecondLevelConditionLabels:
+		m.fmriSecondLevelConditionLabels = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriSecondLevelCovariatesFile:
+		m.fmriSecondLevelCovariatesFile = strings.TrimSpace(value)
+		m.fmriSecondLevelCovariatesDiscoveryKey = ""
+	case textFieldFmriSecondLevelSubjectColumn:
+		m.fmriSecondLevelSubjectColumn = strings.TrimSpace(value)
+	case textFieldFmriSecondLevelCovariateColumns:
+		m.fmriSecondLevelCovariateColumns = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriSecondLevelGroupColumn:
+		m.fmriSecondLevelGroupColumn = strings.TrimSpace(value)
+		m.fmriSecondLevelGroupAValue = ""
+		m.fmriSecondLevelGroupBValue = ""
+	case textFieldFmriSecondLevelGroupAValue:
+		m.fmriSecondLevelGroupAValue = strings.TrimSpace(value)
+	case textFieldFmriSecondLevelGroupBValue:
+		m.fmriSecondLevelGroupBValue = strings.TrimSpace(value)
+	case textFieldFmriSecondLevelFormula:
+		m.fmriSecondLevelFormula = strings.TrimSpace(value)
+	case textFieldFmriSecondLevelOutputName:
+		m.fmriSecondLevelOutputName = strings.TrimSpace(value)
+	case textFieldFmriSecondLevelOutputDir:
+		m.fmriSecondLevelOutputDir = strings.TrimSpace(value)
 	case textFieldFmriTrialSigGroupColumn:
 		m.fmriTrialSigGroupColumn = strings.TrimSpace(value)
 		m.fmriTrialSigGroupValuesSpec = "" // Reset values when column changes

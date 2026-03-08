@@ -137,6 +137,59 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
 		mode = m.modeOptions[m.modeIndex]
 	}
+	if mode == "second-level" {
+		modelOptions := []string{"one-sample", "two-sample", "paired", "repeated-measures"}
+		ab.args = append(ab.args, "--group-model", modelOptions[m.fmriSecondLevelModelIndex%len(modelOptions)])
+		ab.addIfNonEmpty("--group-input-root", expandUserPath(strings.TrimSpace(m.fmriSecondLevelInputRoot)))
+
+		contrastNames := splitSpaceList(strings.TrimSpace(m.fmriSecondLevelContrastNames))
+		if len(contrastNames) > 0 {
+			ab.args = append(ab.args, "--group-contrast-names")
+			ab.args = append(ab.args, contrastNames...)
+		}
+
+		conditionLabels := splitSpaceList(strings.TrimSpace(m.fmriSecondLevelConditionLabels))
+		if len(conditionLabels) > 0 {
+			ab.args = append(ab.args, "--group-condition-labels")
+			ab.args = append(ab.args, conditionLabels...)
+		}
+
+		ab.addIfNonEmpty("--group-covariates-file", expandUserPath(strings.TrimSpace(m.fmriSecondLevelCovariatesFile)))
+		ab.addIfNonEmpty("--group-subject-column", strings.TrimSpace(m.fmriSecondLevelSubjectColumn))
+
+		covariateColumns := splitSpaceList(strings.TrimSpace(m.fmriSecondLevelCovariateColumns))
+		if len(covariateColumns) > 0 {
+			ab.args = append(ab.args, "--group-covariate-columns")
+			ab.args = append(ab.args, covariateColumns...)
+		}
+
+		ab.addIfNonEmpty("--group-column", strings.TrimSpace(m.fmriSecondLevelGroupColumn))
+		ab.addIfNonEmpty("--group-a-value", strings.TrimSpace(m.fmriSecondLevelGroupAValue))
+		ab.addIfNonEmpty("--group-b-value", strings.TrimSpace(m.fmriSecondLevelGroupBValue))
+		ab.addIfNonEmpty("--formula", strings.TrimSpace(m.fmriSecondLevelFormula))
+		ab.addIfNonEmpty("--contrast-name", strings.TrimSpace(m.fmriSecondLevelOutputName))
+		ab.addIfNonEmpty("--output-dir", expandUserPath(strings.TrimSpace(m.fmriSecondLevelOutputDir)))
+
+		if m.fmriSecondLevelWriteDesignMatrix {
+			ab.args = append(ab.args, "--write-design-matrix")
+		} else {
+			ab.args = append(ab.args, "--no-write-design-matrix")
+		}
+		if m.fmriSecondLevelPermutationEnabled {
+			ab.args = append(
+				ab.args,
+				"--group-permutation-inference",
+				"--group-n-permutations",
+				fmt.Sprintf("%d", m.fmriSecondLevelPermutationCount),
+			)
+			if !m.fmriSecondLevelTwoSided {
+				ab.args = append(ab.args, "--group-one-sided")
+			}
+		}
+
+		return ab.build()
+	}
+
 	isFirstLevel := mode == "first-level"
 	trialMethod := "beta-series"
 	if m.fmriTrialSigMethodIndex%2 == 1 {

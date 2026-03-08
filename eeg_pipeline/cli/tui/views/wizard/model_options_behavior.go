@@ -193,6 +193,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTemporalTimeMinMs,
 				optTemporalTimeMaxMs,
 				optTemporalSmoothMs,
+				optTemporalTopomapWindowMs,
 				optTemporalTargetColumn,
 				optBehaviorSubFeatures,
 				optTemporalFeatures,

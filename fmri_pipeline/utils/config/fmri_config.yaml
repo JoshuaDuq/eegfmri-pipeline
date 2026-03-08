@@ -15,10 +15,12 @@ paths:
 
   # Root directory for multivariate signature weight maps.
   # If null, falls back to <deriv_root>/../external (if it exists).
+  # If set explicitly, the directory must exist.
   signature_dir: null
 
   # Multivariate signature weight maps to compute at each contrast/beta map.
   # Each entry must have a unique "name" and a "path" relative to signature_dir.
+  # All configured signature files must exist; missing maps now error.
   # Leave empty ([]) to disable signature computation entirely.
   # Example (using two configured signatures):
   #   signature_maps:
@@ -143,7 +145,7 @@ fmri_contrast:
   require_fmriprep: true       # Fail if preproc BOLD is missing
   
   # Contrast type and conditions
-  type: "t-test"               # "t-test" | "paired-t-test" | "f-test" | "custom"
+  type: "t-test"               # "t-test" | "custom"
   
   # Condition A: column and value to select trials
   condition_a:
@@ -169,7 +171,8 @@ fmri_contrast:
   # Events column used for phase-level scoping.
   phase_column: "stim_phase"
 
-  # Optional: restrict which phase values are modeled when events.tsv includes `phase_column`.
+  # Optional: restrict which phase values are modeled using `phase_column`.
+  # If set, `phase_column` must exist in events.tsv.
   # If null, no phase scoping is applied.
   # Use ["all"] to disable scoping and model all phase values.
   stim_phases_to_model: null
@@ -178,6 +181,7 @@ fmri_contrast:
   phase_scope_column: "trial_type"
 
   # Optional: value in `phase_scope_column` that phase scoping is restricted to.
+  # If set, `phase_scope_column` must exist in events.tsv.
   # If null, phase scoping applies to all rows.
   phase_scope_value: null
 
@@ -186,7 +190,7 @@ fmri_contrast:
   
   # Contrast output
   name: "contrast"      # Output contrast name
-  runs: null                   # List of run numbers (null = auto-detect)
+  runs: null                   # List of run numbers (null = auto-detect; explicit requests must all resolve)
   
   # GLM settings
   hrf_model: "spm"             # "spm" | "flobs" | "fir"
@@ -194,13 +198,62 @@ fmri_contrast:
   high_pass_hz: 0.008          # High-pass filter (128s period)
   low_pass_hz: null            # Optional; avoid unless you know you need it
   
-  # Cluster correction (heuristic, not FWE-corrected)
-  cluster_correction: true
-  cluster_p_threshold: 0.001   # Cluster-forming voxelwise p-threshold
-  
   # Output format
   output_type: "z-score"       # "z-score" | "t-stat" | "cope" | "beta"
   resample_to_freesurfer: true # Auto-resample to FreeSurfer subject space
+
+###################################################################
+# fMRI Group-Level Analysis
+###################################################################
+
+fmri_group_level:
+  enabled: false
+  # "one-sample" | "two-sample" | "paired" | "repeated-measures"
+  model: "one-sample"
+  # First-level contrast names to consume.
+  # one-sample/two-sample: exactly 1
+  # paired: exactly 2 ordered as [A, B]
+  # repeated-measures: >=2
+  contrast_names: []
+  # Optional human-readable labels corresponding to contrast_names.
+  # Defaults to contrast_names when null.
+  condition_labels: null
+  # Optional root containing first-level outputs.
+  # Default: deriv_root
+  # Use this when first-level outputs were written to a shared custom output dir.
+  input_root: null
+  # Optional custom second-level contrast formula over the generated design matrix columns.
+  # Examples:
+  #   two-sample: "group_patient - group_control"
+  #   repeated-measures: "condition_high - condition_low"
+  # If null:
+  #   one-sample -> intercept
+  #   two-sample -> group_b - group_a
+  #   paired -> intercept on subject-wise (B - A) difference maps
+  #   repeated-measures -> omnibus F-test across conditions
+  formula: null
+  # Optional output label; defaults to a value derived from the design/formula.
+  output_name: null
+  output_dir: null
+  # Write second-level design matrix TSV/PNG into <output>/qc/.
+  write_design_matrix: true
+
+  # Subject-level TSV/CSV for group assignments and numeric covariates.
+  covariates_file: null
+  subject_column: "subject"
+  # Numeric nuisance covariates (centered before fitting).
+  # Supported for one-sample, two-sample, and paired designs.
+  covariate_columns: []
+
+  # Required for two-sample designs.
+  group_column: null
+  group_a_value: null
+  group_b_value: null
+
+  permutation:
+    enabled: false
+    n_permutations: 5000
+    two_sided: true
 
 
 ###################################################################

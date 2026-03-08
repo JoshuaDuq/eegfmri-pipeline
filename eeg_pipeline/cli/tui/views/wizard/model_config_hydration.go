@@ -739,6 +739,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.temporalSmoothMs = n
 			}
 		}},
+		{key: "behavior_analysis.temporal_correlation_topomaps.window_size_ms", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.temporalTopomapWindowMs = n
+			}
+		}},
 		{key: "behavior_analysis.temporal.time_range_ms", apply: func(v interface{}) {
 			raw, ok := v.([]interface{})
 			if !ok || len(raw) != 2 {
@@ -1149,12 +1154,8 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "feature_engineering.sourcelocalization.fmri.contrast.type", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(strings.TrimSpace(s)) {
-				case "paired-t-test":
-					m.sourceLocFmriContrastType = 1
-				case "f-test":
-					m.sourceLocFmriContrastType = 2
 				case "custom":
-					m.sourceLocFmriContrastType = 3
+					m.sourceLocFmriContrastType = 1
 				default:
 					m.sourceLocFmriContrastType = 0
 				}

@@ -65,8 +65,6 @@ class ContrastBuilderConfig:
     drift_model: Optional[str]
     high_pass_hz: float
     low_pass_hz: Optional[float]
-    cluster_correction: bool
-    cluster_p_threshold: float
     output_type: str
     resample_to_freesurfer: bool
     # Which events rows are eligible for condition remapping.
@@ -95,8 +93,93 @@ class ContrastBuilderConfig:
     phase_scope_value: Optional[str] = None
 
 
+SUPPORTED_CONTRAST_TYPES = frozenset({"custom", "t-test"})
+SUPPORTED_INPUT_SOURCES = frozenset({"bids_raw", "fmriprep"})
+OUTPUT_TYPE_MAP = {
+    "z-score": "z_score",
+    "z_score": "z_score",
+    "t-stat": "stat",
+    "t_stat": "stat",
+    "cope": "effect_size",
+    "beta": "effect_size",
+}
+LEGACY_CONDITION_KEY_MAP = {
+    "cond_a": "condition_a",
+    "cond_b": "condition_b",
+}
+REMOVED_CONTRAST_KEYS = frozenset({"cluster_correction", "cluster_p_threshold"})
+
+
 def _value_is_specified(value: Any) -> bool:
     return value is not None and str(value).strip() != ""
+
+
+def _normalize_contrast_type(raw_value: Any) -> str:
+    contrast_type = str(raw_value or "t-test").strip().lower()
+    if contrast_type not in SUPPORTED_CONTRAST_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_CONTRAST_TYPES))
+        raise ValueError(
+            f"Unsupported fmri_contrast.type {raw_value!r}. "
+            f"Supported values: {supported}."
+        )
+    return contrast_type
+
+
+def _normalize_input_source(raw_value: Any) -> str:
+    input_source = str(raw_value or "fmriprep").strip().lower()
+    if input_source not in SUPPORTED_INPUT_SOURCES:
+        supported = ", ".join(sorted(SUPPORTED_INPUT_SOURCES))
+        raise ValueError(
+            f"Unsupported fmri input_source {raw_value!r}. "
+            f"Supported values: {supported}."
+        )
+    return input_source
+
+
+def _normalize_requested_output_type(raw_value: Any) -> str:
+    output_type = str(raw_value or "z-score").strip().lower()
+    if output_type not in OUTPUT_TYPE_MAP:
+        supported = ", ".join(sorted(OUTPUT_TYPE_MAP))
+        raise ValueError(
+            f"Unsupported fmri output_type {raw_value!r}. "
+            f"Supported values: {supported}."
+        )
+    return output_type
+
+
+def _assert_constraint_mask_requires_z_output(
+    *,
+    output_type: Any,
+    constraint_spec: Optional[Dict[str, Any]],
+) -> None:
+    if constraint_spec is None:
+        return
+    normalized_output = OUTPUT_TYPE_MAP[_normalize_requested_output_type(output_type)]
+    if normalized_output != "z_score":
+        raise ValueError(
+            "feature_engineering.sourcelocalization.fmri thresholding requires "
+            "fmri_contrast.output_type='z-score' so the constraint mask is derived from z statistics."
+        )
+
+
+def validate_contrast_config_section(contrast_cfg: Dict[str, Any]) -> None:
+    """Reject misleading or unsupported contrast-section keys."""
+    legacy_keys = [key for key in LEGACY_CONDITION_KEY_MAP if key in contrast_cfg]
+    if legacy_keys:
+        key_map = ", ".join(f"{key}->{LEGACY_CONDITION_KEY_MAP[key]}" for key in sorted(legacy_keys))
+        raise ValueError(
+            "Use fmri_contrast.condition_a / fmri_contrast.condition_b keys. "
+            f"Legacy keys are unsupported: {key_map}."
+        )
+
+    removed_keys = [key for key in sorted(REMOVED_CONTRAST_KEYS) if key in contrast_cfg]
+    if removed_keys:
+        keys = ", ".join(removed_keys)
+        raise ValueError(
+            f"Contrast-level thresholding keys are unsupported: {keys}. "
+            "Thresholding belongs in plotting settings for visualization or in "
+            "feature_engineering.sourcelocalization.fmri for EEG constraint masks."
+        )
 
 
 def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
@@ -151,6 +234,7 @@ def load_contrast_config_section(config: Any) -> Dict[str, Any]:
 def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     """Load contrast builder configuration from pipeline config."""
     contrast_cfg = load_contrast_config_section(config)
+    validate_contrast_config_section(contrast_cfg)
 
     runs_raw = contrast_cfg.get("runs")
     runs = None
@@ -168,9 +252,9 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     if drift == "none":
         drift = None
 
-    input_source = str(contrast_cfg.get("input_source", "fmriprep")).strip().lower()
-    if input_source not in {"fmriprep", "bids_raw"}:
-        input_source = "fmriprep"
+    input_source = _normalize_input_source(contrast_cfg.get("input_source", "fmriprep"))
+
+    contrast_type = _normalize_contrast_type(contrast_cfg.get("type", "t-test"))
 
     fmriprep_space = contrast_cfg.get("fmriprep_space", "T1w")
     if fmriprep_space is not None:
@@ -201,12 +285,9 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     if confounds_strategy == "":
         confounds_strategy = "auto"
     write_design_matrix = bool(contrast_cfg.get("write_design_matrix", False))
-    try:
-        from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
+    from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
 
-        smoothing_fwhm = normalize_smoothing_fwhm(contrast_cfg.get("smoothing_fwhm"))
-    except Exception:
-        smoothing_fwhm = None
+    smoothing_fwhm = normalize_smoothing_fwhm(contrast_cfg.get("smoothing_fwhm"))
 
     events_to_model = normalize_trial_type_list(contrast_cfg.get("events_to_model"))
     stim_phases_to_model = normalize_trial_type_list(contrast_cfg.get("stim_phases_to_model"))
@@ -221,7 +302,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         input_source=input_source,
         fmriprep_space=fmriprep_space,
         require_fmriprep=bool(contrast_cfg.get("require_fmriprep", True)),
-        contrast_type=str(contrast_cfg.get("type", "t-test")),
+        contrast_type=contrast_type,
         # Legacy condition1/condition2 for backward compatibility
         condition1=contrast_cfg.get("condition1"),
         condition2=contrast_cfg.get("condition2"),
@@ -239,9 +320,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         drift_model=drift,
         high_pass_hz=float(contrast_cfg.get("high_pass_hz", 0.008)),
         low_pass_hz=contrast_cfg.get("low_pass_hz"),
-        cluster_correction=bool(contrast_cfg.get("cluster_correction", True)),
-        cluster_p_threshold=float(contrast_cfg.get("cluster_p_threshold", 0.001)),
-        output_type=str(contrast_cfg.get("output_type", "z_score")),
+        output_type=_normalize_requested_output_type(contrast_cfg.get("output_type", "z-score")),
         resample_to_freesurfer=bool(contrast_cfg.get("resample_to_freesurfer", True)),
         confounds_strategy=confounds_strategy,
         write_design_matrix=write_design_matrix,
@@ -273,9 +352,6 @@ def _apply_trial_phase_scoping(
     phase_column_name = str(phase_column or "").strip() or "stim_phase"
     phase_scope_column_name = str(phase_scope_column or "").strip() or "trial_type"
 
-    if phase_column_name not in events_df.columns:
-        return events_df
-
     raw = allowed_phases
     if raw is None:
         return events_df
@@ -285,6 +361,18 @@ def _apply_trial_phase_scoping(
     if "all" in set(allow_norm):
         return events_df
     allow = set(allow_norm)
+
+    if phase_column_name not in events_df.columns:
+        raise ValueError(
+            "stim_phases_to_model is set but events file has no "
+            f"'{phase_column_name}' column. Available columns: {list(events_df.columns)}"
+        )
+
+    if phase_scope_value is not None and phase_scope_column_name not in events_df.columns:
+        raise ValueError(
+            "phase_scope_value is set but events file has no "
+            f"'{phase_scope_column_name}' column. Available columns: {list(events_df.columns)}"
+        )
 
     phase_norm = events_df[phase_column_name].fillna("").astype(str).str.strip().str.lower()
     if phase_scope_value is not None and phase_scope_column_name in events_df.columns:
@@ -399,11 +487,16 @@ def discover_bold_runs(
         run_nums = [r for r in run_nums if r in {int(x) for x in runs}]
 
     if not run_nums:
+        if runs is not None:
+            requested = sorted({int(x) for x in runs})
+            raise FileNotFoundError(
+                f"None of the requested runs were found for subject {subject}, task {task}: {requested}"
+            )
         raise FileNotFoundError(
             f"No runs found for subject {subject}, task {task} in {func_dir}"
         )
 
-    selected_input_source = str(getattr(cfg, "input_source", "bids_raw") or "bids_raw").strip().lower()
+    selected_input_source = _normalize_input_source(getattr(cfg, "input_source", "bids_raw"))
     preproc_by_run: Dict[int, Optional[Path]] = {}
     if bids_derivatives is not None and cfg is not None and selected_input_source == "fmriprep":
         selected_input_source, preproc_by_run = select_consistent_run_source(
@@ -458,6 +551,16 @@ def discover_bold_runs(
             continue
 
         discovered.append((bold_path, events_file, int(run_num)))
+
+    if runs is not None:
+        requested_runs = {int(run_num) for run_num in runs}
+        discovered_runs = {int(run_num) for _bold_path, _events_path, run_num in discovered}
+        missing_runs = sorted(requested_runs - discovered_runs)
+        if missing_runs:
+            raise FileNotFoundError(
+                "Some requested runs could not be resolved to matching BOLD + events inputs: "
+                f"{missing_runs}."
+            )
 
     if not discovered:
         raise FileNotFoundError(
@@ -788,11 +891,23 @@ def fit_first_level_glm(
     synthetic_labels = remap_result.synthetic_labels
 
     confounds = None
-    if confounds_path is not None and confounds_path.exists():
+    confounds_strategy = str(getattr(cfg, "confounds_strategy", "auto") or "auto").strip().lower()
+    if confounds_strategy in {"", "default"}:
+        confounds_strategy = "auto"
+    if confounds_strategy not in {"none", "no", "off"}:
+        if confounds_path is None or not confounds_path.exists():
+            raise ValueError(
+                "Single-run first-level GLMs require confounds unless confounds_strategy is 'none'. "
+                f"Missing confounds for {bold_path.name}."
+            )
         confounds_df = pd.read_csv(confounds_path, sep="\t")
-        confounds = _select_confound_columns(confounds_df, getattr(cfg, "confounds_strategy", "auto"))
-        if confounds is not None:
-            logger.info("Using %d confound regressors", confounds.shape[1])
+        confounds = _select_confound_columns(confounds_df, confounds_strategy)
+        if confounds is None:
+            raise ValueError(
+                "No confound regressors were selected for the single-run first-level GLM. "
+                f"Strategy={confounds_strategy!r}, file={confounds_path}."
+            )
+        logger.info("Using %d confound regressors", confounds.shape[1])
 
     # Use a matching brain mask when available (best practice with fMRIPrep outputs).
     mask_img = None
@@ -1069,15 +1184,8 @@ def compute_contrast_map(
 
     Returns (contrast_map, contrast_def, output_type).
     """
-    output_map = {
-        "z-score": "z_score",
-        "z_score": "z_score",
-        "t-stat": "stat",
-        "t_stat": "stat",
-        "cope": "effect_size",
-        "beta": "effect_size",
-    }
-    output_type = output_map.get(cfg.output_type, "z_score")
+    requested_output_type = _normalize_requested_output_type(cfg.output_type)
+    output_type = OUTPUT_TYPE_MAP[requested_output_type]
 
     if cfg.contrast_type == "custom" and cfg.formula:
         contrast_def = cfg.formula
@@ -1325,83 +1433,6 @@ def resample_to_freesurfer(
     return resampled
 
 
-def _cluster_extent_mask_from_z_map(
-    z_img: "Nifti1Image",
-    *,
-    p_threshold: float,
-    tail: str,
-    min_cluster_voxels: int,
-    min_cluster_volume_mm3: Optional[float] = None,
-) -> "Nifti1Image":
-    """Create a cluster-extent thresholded mask from a z-stat image.
-
-    Notes
-    -----
-    This performs (1) voxelwise z-thresholding derived from `p_threshold`,
-    followed by (2) connected-component filtering by minimum cluster size.
-
-    This is a pragmatic heuristic for generating fMRI constraint masks and
-    should not be interpreted as cluster-level FWE correction.
-    """
-    import nibabel as nib
-    from scipy.ndimage import generate_binary_structure, label as cc_label
-    from scipy import stats as sps
-
-    tail = str(tail).strip().lower()
-    if tail not in {"pos", "abs"}:
-        tail = "pos"
-
-    try:
-        p_threshold = float(p_threshold)
-    except Exception:
-        p_threshold = 0.001
-    if not np.isfinite(p_threshold) or p_threshold <= 0 or p_threshold >= 1:
-        p_threshold = 0.001
-
-    p_use = p_threshold / 2.0 if tail == "abs" else p_threshold
-    z_thr = float(sps.norm.isf(p_use))
-
-    img = nib.load(str(z_img)) if isinstance(z_img, (str, Path)) else z_img
-    data = np.asarray(img.get_fdata(dtype=np.float32))
-
-    voxel_vol_mm3 = None
-    try:
-        zooms = img.header.get_zooms()
-        if len(zooms) >= 3:
-            voxel_vol_mm3 = float(abs(float(zooms[0]) * float(zooms[1]) * float(zooms[2])))
-            if not np.isfinite(voxel_vol_mm3) or voxel_vol_mm3 <= 0:
-                voxel_vol_mm3 = None
-    except Exception:
-        voxel_vol_mm3 = None
-
-    finite = np.isfinite(data)
-    if tail == "abs":
-        seed = finite & (np.abs(data) >= z_thr)
-    else:
-        seed = finite & (data >= z_thr)
-
-    if not np.any(seed):
-        mask = np.zeros_like(seed, dtype=np.uint8)
-        return nib.Nifti1Image(mask, img.affine, img.header)
-
-    structure = generate_binary_structure(3, 1)
-    labeled, n_clusters = cc_label(seed.astype(np.uint8), structure=structure)
-
-    keep = np.zeros_like(seed, dtype=bool)
-    for cluster_id in range(1, int(n_clusters) + 1):
-        vox = (labeled == cluster_id)
-        n_vox = int(np.sum(vox))
-        if min_cluster_volume_mm3 is not None and voxel_vol_mm3 is not None:
-            if (float(n_vox) * float(voxel_vol_mm3)) >= float(min_cluster_volume_mm3):
-                keep |= vox
-        else:
-            if n_vox >= int(min_cluster_voxels):
-                keep |= vox
-
-    mask_u8 = keep.astype(np.uint8)
-    return nib.Nifti1Image(mask_u8, img.affine, img.header)
-
-
 def _contrast_sidecar_path(contrast_path: Path) -> Path:
     return contrast_path.with_suffix("").with_suffix(".json")
 
@@ -1596,6 +1627,12 @@ def build_fmri_contrast(
     if output_dir is None:
         output_dir = bids_derivatives / sub_label / "fmri_contrasts"
 
+    constraint_spec = _load_constraint_mask_spec(config)
+    _assert_constraint_mask_requires_z_output(
+        output_type=cfg.output_type,
+        constraint_spec=constraint_spec,
+    )
+
     contrast_map, run_meta, glm_result, _contrast_def, _output_type = build_contrast_from_runs_detailed(
         bids_fmri_root=bids_fmri_root,
         bids_derivatives=bids_derivatives,
@@ -1607,7 +1644,6 @@ def build_fmri_contrast(
 
     fs_subject_dir = freesurfer_subjects_dir / sub_label
     native_contrast_map = contrast_map
-    constraint_spec = _load_constraint_mask_spec(config)
     constraint_mask_img = None
     constraint_mask_path = None
     constraint_mask_meta = None

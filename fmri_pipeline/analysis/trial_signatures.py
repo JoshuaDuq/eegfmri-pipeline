@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -22,6 +23,29 @@ from fmri_pipeline.utils.bold_discovery import (
 from fmri_pipeline.utils.text import safe_slug as _safe_slug
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_input_source(input_source: str) -> str:
+    normalized = str(input_source or "fmriprep").strip().lower()
+    if normalized not in {"fmriprep", "bids_raw"}:
+        raise ValueError(
+            f"input_source must be 'fmriprep' or 'bids_raw', got {input_source!r}."
+        )
+    return normalized
+
+
+def _normalize_optional_frequency(value: Any, *, field_name: str) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be numeric or null, got {value!r}.") from exc
+    if not math.isfinite(numeric_value):
+        raise ValueError(f"{field_name} must be finite when provided, got {value!r}.")
+    if numeric_value <= 0:
+        return None
+    return numeric_value
 
 
 @dataclass(frozen=True)
@@ -75,34 +99,38 @@ class TrialSignatureExtractionConfig:
     write_condition_betas: bool = True
 
     def normalized(self) -> "TrialSignatureExtractionConfig":
-        input_source = (self.input_source or "fmriprep").strip().lower()
-        if input_source not in {"fmriprep", "bids_raw"}:
-            input_source = "fmriprep"
+        input_source = _normalize_input_source(self.input_source)
 
         drift_model = (self.drift_model or "").strip().lower() or None
         if drift_model == "none":
             drift_model = None
 
-        low_pass_hz = self.low_pass_hz
-        try:
-            if low_pass_hz is not None and float(low_pass_hz) <= 0:
-                low_pass_hz = None
-        except Exception:
-            low_pass_hz = None
+        low_pass_hz = _normalize_optional_frequency(
+            self.low_pass_hz,
+            field_name="low_pass_hz",
+        )
 
         smoothing_fwhm = normalize_smoothing_fwhm(self.smoothing_fwhm)
 
         method = (self.method or "beta-series").strip().lower()
         if method not in {"beta-series", "lss"}:
-            method = "beta-series"
+            raise ValueError(
+                f"method must be 'beta-series' or 'lss', got {self.method!r}."
+            )
 
         lss_other = (self.lss_other_regressors or "per_condition").strip().lower().replace("-", "_")
         if lss_other not in {"per_condition", "all"}:
-            lss_other = "per_condition"
+            raise ValueError(
+                "lss_other_regressors must be 'per_condition' or 'all', "
+                f"got {self.lss_other_regressors!r}."
+            )
 
         weight = (self.fixed_effects_weighting or "variance").strip().lower()
         if weight not in {"variance", "mean"}:
-            weight = "variance"
+            raise ValueError(
+                "fixed_effects_weighting must be 'variance' or 'mean', "
+                f"got {self.fixed_effects_weighting!r}."
+            )
 
         def _norm_scope(values: Optional[Sequence[str]]) -> Optional[Tuple[str, ...]]:
             if not values:
@@ -159,7 +187,10 @@ class TrialSignatureExtractionConfig:
 
         group_scope = (self.signature_group_scope or "across_runs").strip().lower().replace("-", "_")
         if group_scope not in {"across_runs", "per_run"}:
-            group_scope = "across_runs"
+            raise ValueError(
+                "signature_group_scope must be 'across_runs' or 'per_run', "
+                f"got {self.signature_group_scope!r}."
+            )
 
         scope_trial_type_column = (self.condition_scope_trial_type_column or "").strip() or "trial_type"
         scope_phase_column = (self.condition_scope_phase_column or "").strip() or "stim_phase"
@@ -238,6 +269,13 @@ def _union_masks_to_target(mask_imgs: Sequence[Any], target_img: Any) -> Any:
     return nib.Nifti1Image(union.astype(np.uint8), ref.affine, ref.header)
 
 
+def _normalize_confounds_strategy(strategy: str) -> str:
+    normalized = str(strategy or "auto").strip().lower()
+    if normalized in {"", "default"}:
+        return "auto"
+    return normalized
+
+
 def _discover_confounds(
     *,
     bids_derivatives: Path,
@@ -306,9 +344,14 @@ def _discover_runs(
         run_nums = sorted(set(run_nums))
 
     if not run_nums:
+        if runs is not None:
+            requested = sorted({int(r) for r in runs})
+            raise FileNotFoundError(
+                f"None of the requested runs were found for subject {subject}, task {task}: {requested}"
+            )
         raise FileNotFoundError(f"No runs found for subject {subject}, task {task} in {func_dir}")
 
-    selected_input_source = str(input_source or "bids_raw").strip().lower()
+    selected_input_source = _normalize_input_source(input_source)
     preproc_by_run: Dict[int, Optional[Path]] = {}
     if selected_input_source == "fmriprep" and bids_derivatives is not None:
         selected_input_source, preproc_by_run = select_consistent_run_source(
@@ -359,6 +402,19 @@ def _discover_runs(
             continue
 
         out.append((int(run_num), bold_path, events_path, confounds_path))
+
+    if runs is not None:
+        requested_runs = {int(run_num) for run_num in runs}
+        discovered_runs = {
+            int(run_num)
+            for run_num, _bold_path, _events_path, _confounds_path in out
+        }
+        missing_runs = sorted(requested_runs - discovered_runs)
+        if missing_runs:
+            raise FileNotFoundError(
+                "Some requested runs could not be resolved to matching BOLD + events inputs: "
+                f"{missing_runs}."
+            )
 
     if not out:
         raise FileNotFoundError(f"No usable runs found for subject {subject}, task {task}")
@@ -530,6 +586,7 @@ def _build_lss_events(
     rows: List[Dict[str, Any]] = []
     # Target trial regressor
     rows.append({"onset": trial.onset, "duration": trial.duration, "trial_type": "target"})
+    grouping_enabled = bool(cfg.signature_group_column and cfg.signature_group_values)
 
     # Other selected trials
     others = [t for t in all_trials if not (t.run == trial.run and t.trial_index == trial.trial_index)]
@@ -538,11 +595,15 @@ def _build_lss_events(
             rows.append({"onset": t.onset, "duration": t.duration, "trial_type": "other_trials"})
     else:
         for t in others:
+            if grouping_enabled:
+                other_label = f"other_group_{_safe_slug(str(t.condition)).lower()}"
+            else:
+                other_label = "other_cond_a" if t.condition == "A" else "other_cond_b"
             rows.append(
                 {
                     "onset": t.onset,
                     "duration": t.duration,
-                    "trial_type": "other_cond_a" if t.condition == "A" else "other_cond_b",
+                    "trial_type": other_label,
                 }
             )
 
@@ -729,6 +790,7 @@ def run_trial_signature_extraction_for_subject(
     trial_rows_out: List[Dict[str, Any]] = []
     trial_sig_rows: List[Dict[str, Any]] = []
     run_brain_masks: List[Any] = []
+    confounds_strategy = _normalize_confounds_strategy(cfg.confounds_strategy)
 
     grouping_enabled = bool(cfg.signature_group_column and cfg.signature_group_values)
 
@@ -748,11 +810,6 @@ def run_trial_signature_extraction_for_subject(
         import nibabel as nib  # type: ignore
 
         events_df = pd.read_csv(events_path, sep="\t")
-        confounds, conf_cols = _select_confounds(
-            confounds_path,
-            cfg.confounds_strategy,
-            logger=logger,
-        )
 
         mask_img = None
         mask_path = _discover_brain_mask_for_bold(bold_path)
@@ -775,6 +832,26 @@ def run_trial_signature_extraction_for_subject(
         )
         if not trials:
             continue
+
+        confounds = None
+        conf_cols: List[str] = []
+        if confounds_strategy not in {"none", "no", "off"}:
+            if confounds_path is None or not confounds_path.exists():
+                raise ValueError(
+                    "Trial-wise fMRI GLMs require confounds for every included run unless "
+                    "confounds_strategy is 'none'. "
+                    f"Missing confounds for {bold_path.name}."
+                )
+            confounds, conf_cols = _select_confounds(
+                confounds_path,
+                confounds_strategy,
+                logger=logger,
+            )
+            if confounds is None or not conf_cols:
+                raise ValueError(
+                    "Trial-wise fMRI GLMs require at least one confound regressor for every "
+                    f"included run. Strategy={confounds_strategy!r}, file={confounds_path}."
+                )
 
         if cfg.method == "beta-series":
             flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)

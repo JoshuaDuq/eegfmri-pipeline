@@ -770,6 +770,15 @@ func (m *Model) validate() []string {
 	if m.Pipeline == types.PipelinePlotting && m.plottingScope == PlottingScopeGroup {
 		minRequired = minSubjectsForGroupCV
 	}
+	if m.Pipeline == types.PipelineFmriAnalysis {
+		mode := ""
+		if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+			mode = m.modeOptions[m.modeIndex]
+		}
+		if mode == "second-level" {
+			minRequired = minSubjectsForGroupCV
+		}
+	}
 
 	if selectedCount < minRequired {
 		errors = append(errors, fmt.Sprintf("Select at least %d subject(s)", minRequired))
@@ -827,6 +836,60 @@ func (m *Model) validate() []string {
 		mode := ""
 		if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
 			mode = m.modeOptions[m.modeIndex]
+		}
+		if mode == "second-level" {
+			contrastNames := strings.Fields(strings.TrimSpace(m.fmriSecondLevelContrastNames))
+			conditionLabels := strings.Fields(strings.TrimSpace(m.fmriSecondLevelConditionLabels))
+			modelIndex := m.fmriSecondLevelModelIndex % 4
+			model := []string{"one-sample", "two-sample", "paired", "repeated-measures"}[modelIndex]
+
+			if len(contrastNames) == 0 {
+				errors = append(errors, "fMRI second-level: at least one input contrast name is required")
+			}
+			if len(conditionLabels) > 0 && len(conditionLabels) != len(contrastNames) {
+				errors = append(errors, "fMRI second-level: condition labels must match the number of input contrast names")
+			}
+			switch model {
+			case "one-sample":
+				if len(contrastNames) != 1 {
+					errors = append(errors, "fMRI second-level: one-sample model requires exactly one input contrast")
+				}
+			case "two-sample":
+				if len(contrastNames) != 1 {
+					errors = append(errors, "fMRI second-level: two-sample model requires exactly one input contrast")
+				}
+				if strings.TrimSpace(m.fmriSecondLevelCovariatesFile) == "" {
+					errors = append(errors, "fMRI second-level: two-sample model requires a covariates file")
+				}
+				if strings.TrimSpace(m.fmriSecondLevelGroupColumn) == "" {
+					errors = append(errors, "fMRI second-level: two-sample model requires a group column")
+				}
+				if strings.TrimSpace(m.fmriSecondLevelGroupAValue) == "" || strings.TrimSpace(m.fmriSecondLevelGroupBValue) == "" {
+					errors = append(errors, "fMRI second-level: two-sample model requires both group A and group B values")
+				}
+				if strings.TrimSpace(m.fmriSecondLevelGroupAValue) != "" &&
+					strings.TrimSpace(m.fmriSecondLevelGroupAValue) == strings.TrimSpace(m.fmriSecondLevelGroupBValue) {
+					errors = append(errors, "fMRI second-level: group A and group B values must be different")
+				}
+			case "paired":
+				if len(contrastNames) != 2 {
+					errors = append(errors, "fMRI second-level: paired model requires exactly two input contrasts ordered as A B")
+				}
+			case "repeated-measures":
+				if len(contrastNames) < 2 {
+					errors = append(errors, "fMRI second-level: repeated-measures model requires at least two input contrasts")
+				}
+				if strings.TrimSpace(m.fmriSecondLevelCovariateColumns) != "" {
+					errors = append(errors, "fMRI second-level: repeated-measures model does not support subject-level covariates")
+				}
+			}
+			if strings.TrimSpace(m.fmriSecondLevelSubjectColumn) == "" {
+				errors = append(errors, "fMRI second-level: subject column must not be empty")
+			}
+			if m.fmriSecondLevelPermutationEnabled && m.fmriSecondLevelPermutationCount <= 0 {
+				errors = append(errors, "fMRI second-level: permutation count must be > 0 when permutation inference is enabled")
+			}
+			return errors
 		}
 		groupingEnabled := strings.TrimSpace(m.fmriTrialSigGroupColumn) != "" && strings.TrimSpace(m.fmriTrialSigGroupValuesSpec) != ""
 

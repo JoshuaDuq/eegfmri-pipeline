@@ -1736,6 +1736,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             {
                 "behavior_analysis": {
                     "temporal": {"correction_method": "cluster"},
+                    "cluster": {"n_permutations": 10},
                     "statistics": {"fdr_alpha": 0.05, "allow_iid_trials": True},
                 }
             }
@@ -1760,6 +1761,78 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "p_cluster"):
                 stage_temporal_stats(ctx)
+
+    def test_temporal_cluster_mode_requires_positive_permutation_count(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "temporal": {"correction_method": "cluster"},
+                    "cluster": {"n_permutations": 0},
+                    "statistics": {"fdr_alpha": 0.05, "allow_iid_trials": True},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        ctx.use_spearman = True
+        ctx.selected_feature_files = ["power"]
+
+        with patch("eeg_pipeline.analysis.behavior.api.compute_temporal_from_context") as compute_mock:
+            with self.assertRaisesRegex(ValueError, "n_permutations > 0"):
+                stage_temporal_stats(ctx)
+
+        compute_mock.assert_not_called()
+
+    def test_temporal_cluster_mode_explicit_zero_permutations_do_not_fallback_to_legacy_default(self):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "temporal": {"correction_method": "cluster"},
+                    "cluster": {"n_permutations": 0},
+                    "cluster_correction": {"n_permutations": 100},
+                    "statistics": {"fdr_alpha": 0.05, "allow_iid_trials": True},
+                }
+            }
+        )
+        ctx = self._ctx(cfg)
+        ctx.use_spearman = True
+        ctx.selected_feature_files = ["power"]
+
+        with patch("eeg_pipeline.analysis.behavior.api.compute_temporal_from_context") as compute_mock:
+            with self.assertRaisesRegex(ValueError, "n_permutations > 0"):
+                stage_temporal_stats(ctx)
+
+        compute_mock.assert_not_called()
+
+    def test_compute_temporal_from_context_rejects_target_equal_to_condition_column(self):
+        from eeg_pipeline.utils.analysis.stats.temporal import compute_temporal_from_context
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "temporal": {
+                        "split_by_condition": True,
+                        "target_column": "pain_binary_coded",
+                        "condition_column": "pain_binary_coded",
+                    }
+                },
+                "event_columns": {
+                    "outcome": ["pain_binary_coded"],
+                    "binary_outcome": ["pain_binary_coded"],
+                },
+            }
+        )
+        ctx = self._ctx(cfg)
+        ctx.aligned_events = pd.DataFrame({"pain_binary_coded": [0.0, 1.0, 0.0, 1.0]})
+        ctx.epochs = None
+        ctx.covariates_df = None
+        ctx.use_spearman = True
+
+        with self.assertRaisesRegex(ValueError, "cannot also be used as the split-by-condition column"):
+            compute_temporal_from_context(ctx)
 
     def test_temporal_stats_respects_temporal_feature_toggles(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_temporal_stats
@@ -2916,6 +2989,33 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(ctx.covariates_df)
         self.assertIn("trial_index", list(ctx.covariates_df.columns))
 
+    def test_trial_order_reuses_existing_equivalent_covariate(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="task",
+            config=DotConfig({"behavior_analysis": {"run_adjustment": {"column": "run_id"}}}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+            control_trial_order=True,
+        )
+        ctx.aligned_events = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "trial_number": [1, 2, 1, 2],
+            }
+        )
+        ctx.covariates_df = pd.DataFrame({"trial": [1.0, 2.0, 1.0, 2.0]})
+        ctx.data_qc = {}
+
+        ctx._setup_trial_order_covariate()
+
+        self.assertEqual(list(ctx.covariates_df.columns), ["trial"])
+        self.assertEqual(ctx.data_qc["trial_order"].get("existing_covariate_column"), "trial")
+        self.assertFalse(ctx.data_qc["trial_order"].get("added_trial_index_column"))
+
     def test_feature_table_alignment_reindexes_by_trial_id(self):
         from eeg_pipeline.context.behavior import BehaviorContext
 
@@ -3693,6 +3793,40 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(len(records), 2)
         self.assertTrue(all(np.isclose(float(record["p_cluster"]), 0.03) for record in records))
         self.assertTrue(all(bool(record["cluster_significant"]) for record in records))
+
+    def test_cluster_correction_marks_non_cluster_informative_bins_as_one(self):
+        from eeg_pipeline.utils.analysis.stats.cluster import compute_cluster_correction_2d
+
+        correlations = np.array([[0.2], [0.1]], dtype=float)
+        p_values = np.array([[0.4], [0.6]], dtype=float)
+        bin_data = np.ones((2, 1, 8), dtype=float)
+        informative_bins = [(0, 0), (1, 0)]
+        y_array = np.linspace(0.0, 1.0, 8, dtype=float)
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.cluster.compute_permutation_max_masses",
+            return_value=([1.5, 2.0, 2.5], 2.0),
+        ):
+            labels, p_corr, sig_mask, records, perm_max, threshold = compute_cluster_correction_2d(
+                correlations=correlations,
+                p_values=p_values,
+                bin_data=bin_data,
+                informative_bins=informative_bins,
+                y_array=y_array,
+                cluster_alpha=0.05,
+                n_cluster_perm=10,
+                alpha=0.05,
+                min_valid_points=4,
+                use_spearman=True,
+                cluster_rng=np.random.default_rng(0),
+            )
+
+        self.assertTrue(np.all(labels == 0))
+        self.assertTrue(np.allclose(p_corr, np.ones_like(p_corr)))
+        self.assertFalse(sig_mask.any())
+        self.assertEqual(records, [])
+        self.assertEqual(perm_max, [1.5, 2.0, 2.5])
+        self.assertAlmostEqual(float(threshold), 2.0, places=12)
 
 
 if __name__ == "__main__":

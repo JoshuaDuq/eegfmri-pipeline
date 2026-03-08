@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
+import re
 import unittest
 
 from eeg_pipeline.cli.commands.behavior_config import _configure_behavior_compute_mode
@@ -271,6 +273,48 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("behavior_analysis.temporal.correction_method"), "cluster")
         self.assertEqual(config.get("behavior_analysis.icc.unit_columns"), ["predictor", "trial_type"])
 
+    def test_behavior_parser_accepts_explicit_none_and_loso_disable(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_behavior(subparsers)
+        args = parser.parse_args(
+            [
+                "behavior",
+                "compute",
+                "--perm-scheme",
+                "shuffle",
+                "--stats-predictor-control",
+                "none",
+                "--no-loso-stability",
+            ]
+        )
+        config = ConfigDict({"project": {"task": "task"}})
+        _configure_behavior_compute_mode(args, config)
+
+        self.assertEqual(config.get("behavior_analysis.permutation.scheme"), "shuffle")
+        self.assertEqual(config.get("behavior_analysis.statistics.predictor_control"), "none")
+        self.assertFalse(config.get("behavior_analysis.correlations.loso_stability", True))
+
+    def test_behavior_parser_updates_temporal_topomap_window(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_behavior(subparsers)
+        args = parser.parse_args(
+            [
+                "behavior",
+                "compute",
+                "--temporal-topomap-window-ms",
+                "750",
+            ]
+        )
+        config = ConfigDict({"project": {"task": "task"}})
+        _configure_behavior_compute_mode(args, config)
+
+        self.assertEqual(
+            config.get("behavior_analysis.temporal_correlation_topomaps.window_size_ms"),
+            750,
+        )
+
     def test_correlations_target_column_sets_single_target_list(self):
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers(dest="command")
@@ -287,6 +331,37 @@ class TestBehaviorTUIWiring(unittest.TestCase):
         _configure_behavior_compute_mode(args, config)
 
         self.assertEqual(config.get("behavior_analysis.correlations.target_column"), "vas_custom")
+
+    def test_behavior_cli_override_paths_have_tui_hydration(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        config_text = (root / "eeg_pipeline/cli/commands/behavior_config.py").read_text()
+        hydration_text = (
+            root / "eeg_pipeline/cli/tui/views/wizard/model_config_hydration.go"
+        ).read_text()
+
+        override_paths = {
+            match[1]
+            for match in re.findall(
+                r'ConfigOverrideRule\("([^"]+)",\s*"([^"]+)"',
+                config_text,
+            )
+        }
+        hydration_paths = set(re.findall(r'\{key: "([^"]+)"', hydration_text))
+
+        missing_paths = []
+        for path in sorted(override_paths):
+            if not path.startswith("behavior_analysis."):
+                continue
+            if path in hydration_paths:
+                continue
+            if any(
+                hydration.startswith(path + ".") or path.startswith(hydration + ".")
+                for hydration in hydration_paths
+            ):
+                continue
+            missing_paths.append(path)
+
+        self.assertEqual(missing_paths, [])
 
 
 class TestMLTUIWiring(unittest.TestCase):

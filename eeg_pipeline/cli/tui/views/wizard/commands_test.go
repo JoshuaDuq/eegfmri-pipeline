@@ -253,8 +253,30 @@ func TestBuildBehaviorAdvancedArgs_StatsPredictorNoneDisablesPredictorControl(t 
 	if !containsString(args, "--no-predictor-control") {
 		t.Fatalf("expected --no-predictor-control when stats predictor control is none: %#v", args)
 	}
-	if containsString(args, "--stats-predictor-control") {
-		t.Fatalf("did not expect --stats-predictor-control when set to none: %#v", args)
+	if !containsSubsequence(args, []string{"--stats-predictor-control", "none"}) {
+		t.Fatalf("expected --stats-predictor-control none when set to none: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsLosoStabilityDisableFlag(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.behaviorComputeLosoStability = false
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if !containsString(args, "--no-loso-stability") {
+		t.Fatalf("expected --no-loso-stability in args: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsPermutationSchemeShuffle(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.behaviorPermScheme = 0
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--perm-scheme", "shuffle"}) {
+		t.Fatalf("expected --perm-scheme shuffle in args: %#v", args)
 	}
 }
 
@@ -467,6 +489,105 @@ func TestBuildFmriAnalysisAdvancedArgs_BetaSeriesEmitsSignatureGroupingFlags(t *
 	}
 	if v, ok := argValue(args, "--signature-group-scope"); !ok || v != "per-run" {
 		t.Fatalf("expected --signature-group-scope per-run, got: %#v", args)
+	}
+}
+
+func TestBuildFmriAnalysisAdvancedArgs_SecondLevelEmitsGroupFlags(t *testing.T) {
+	m := Model{}
+	m.modeOptions = []string{"first-level", "second-level", "trial-signatures"}
+	m.modeIndex = 1
+	m.fmriSecondLevelModelIndex = 1 // two-sample
+	m.fmriSecondLevelInputRoot = "/tmp/first-level"
+	m.fmriSecondLevelContrastNames = "pain"
+	m.fmriSecondLevelConditionLabels = "pain"
+	m.fmriSecondLevelCovariatesFile = "/tmp/groups.tsv"
+	m.fmriSecondLevelSubjectColumn = "participant_id"
+	m.fmriSecondLevelCovariateColumns = "age sex_code"
+	m.fmriSecondLevelGroupColumn = "group"
+	m.fmriSecondLevelGroupAValue = "control"
+	m.fmriSecondLevelGroupBValue = "patient"
+	m.fmriSecondLevelFormula = "group_patient - group_control"
+	m.fmriSecondLevelOutputName = "patient_minus_control"
+	m.fmriSecondLevelOutputDir = "/tmp/group-out"
+	m.fmriSecondLevelWriteDesignMatrix = false
+	m.fmriSecondLevelPermutationEnabled = true
+	m.fmriSecondLevelPermutationCount = 2500
+	m.fmriSecondLevelTwoSided = false
+
+	args := m.buildFmriAnalysisAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--group-model", "two-sample"}) {
+		t.Fatalf("expected --group-model two-sample, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-input-root", "/tmp/first-level"}) {
+		t.Fatalf("expected --group-input-root, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-contrast-names", "pain"}) {
+		t.Fatalf("expected --group-contrast-names pain, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-covariates-file", "/tmp/groups.tsv"}) {
+		t.Fatalf("expected --group-covariates-file, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-subject-column", "participant_id"}) {
+		t.Fatalf("expected --group-subject-column participant_id, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-covariate-columns", "age", "sex_code"}) {
+		t.Fatalf("expected --group-covariate-columns age sex_code, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-column", "group"}) {
+		t.Fatalf("expected --group-column group, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-a-value", "control"}) {
+		t.Fatalf("expected --group-a-value control, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-b-value", "patient"}) {
+		t.Fatalf("expected --group-b-value patient, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--formula", "group_patient - group_control"}) {
+		t.Fatalf("expected second-level --formula, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--contrast-name", "patient_minus_control"}) {
+		t.Fatalf("expected second-level --contrast-name, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--output-dir", "/tmp/group-out"}) {
+		t.Fatalf("expected second-level --output-dir, got: %#v", args)
+	}
+	if !containsString(args, "--no-write-design-matrix") {
+		t.Fatalf("expected --no-write-design-matrix, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--group-permutation-inference", "--group-n-permutations", "2500"}) {
+		t.Fatalf("expected permutation flags, got: %#v", args)
+	}
+	if !containsString(args, "--group-one-sided") {
+		t.Fatalf("expected --group-one-sided, got: %#v", args)
+	}
+}
+
+func TestValidate_FmriSecondLevelRequiresTwoSampleFields(t *testing.T) {
+	m := New(types.PipelineFmriAnalysis, ".")
+	m.modeIndex = 1 // second-level
+	m.subjects = []types.SubjectStatus{
+		{ID: "sub-01", HasFeatures: true},
+		{ID: "sub-02", HasFeatures: true},
+	}
+	m.subjectSelected = map[string]bool{"sub-01": true, "sub-02": true}
+	m.fmriSecondLevelModelIndex = 1 // two-sample
+	m.fmriSecondLevelContrastNames = "pain"
+	m.fmriSecondLevelCovariatesFile = ""
+	m.fmriSecondLevelGroupColumn = ""
+	m.fmriSecondLevelGroupAValue = ""
+	m.fmriSecondLevelGroupBValue = ""
+
+	errors := m.validate()
+
+	if !containsString(errors, "fMRI second-level: two-sample model requires a covariates file") {
+		t.Fatalf("expected missing covariates file error, got %#v", errors)
+	}
+	if !containsString(errors, "fMRI second-level: two-sample model requires a group column") {
+		t.Fatalf("expected missing group column error, got %#v", errors)
+	}
+	if !containsString(errors, "fMRI second-level: two-sample model requires both group A and group B values") {
+		t.Fatalf("expected missing group values error, got %#v", errors)
 	}
 }
 
@@ -1222,6 +1343,40 @@ func TestBuildBehaviorAdvancedArgs_EmitsExplicitBooleanDisableFlags(t *testing.T
 		if !containsString(args, flag) {
 			t.Fatalf("expected %s in args, got: %#v", flag, args)
 		}
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsTemporalCorrectionMethodFDR(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		if comp.Key == "temporal" {
+			m.computationSelected[i] = true
+		}
+	}
+
+	m.temporalCorrectionMethod = 0
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--temporal-correction-method", "fdr"}) {
+		t.Fatalf("expected --temporal-correction-method fdr in args, got: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsTemporalTopomapWindowOverride(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		if comp.Key == "temporal" {
+			m.computationSelected[i] = true
+		}
+	}
+
+	m.temporalTopomapWindowMs = 750
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--temporal-topomap-window-ms", "750"}) {
+		t.Fatalf("expected --temporal-topomap-window-ms 750 in args, got: %#v", args)
 	}
 }
 

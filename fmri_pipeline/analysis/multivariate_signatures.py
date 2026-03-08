@@ -26,18 +26,25 @@ def discover_signature_files(
     Each entry in ``signature_specs`` must have ``name`` and ``path`` keys,
     where ``path`` is relative to ``signature_root``.
 
-    Only signatures whose resolved paths exist on disk are returned.
+    Raises when any configured signature is malformed or missing on disk.
     """
     root = Path(signature_root).expanduser()
+    if not root.exists():
+        raise FileNotFoundError(f"Signature root does not exist: {root}")
     out: Dict[str, Path] = {}
     for spec in signature_specs:
         name = str(spec.get("name", "")).strip()
         rel_path = str(spec.get("path", "")).strip()
         if not name or not rel_path:
-            continue
+            raise ValueError("Each signature spec must define non-empty 'name' and 'path'.")
+        if name in out:
+            raise ValueError(f"Duplicate signature name: {name!r}")
         candidate = root / rel_path
-        if candidate.exists():
-            out[name] = candidate
+        if not candidate.exists():
+            raise FileNotFoundError(
+                f"Signature weight map not found for {name!r}: {candidate}"
+            )
+        out[name] = candidate
     return out
 
 
@@ -171,15 +178,21 @@ def compute_signature_expression(
         * resampling="image_to_weights" (default): resample the target image to each signature's grid.
         * resampling="weights_to_image": resample each signature's weights to the target image grid.
     """
-    nib = _maybe_import_nibabel()
-    if nib is None:
-        return []
-
     files = discover_signature_files(signature_root, signature_specs)
     if signatures:
-        files = {k: v for k, v in files.items() if k in set(signatures)}
+        requested = {str(name) for name in signatures}
+        missing = sorted(requested - set(files))
+        if missing:
+            raise FileNotFoundError(
+                f"Requested signatures were not found in signature_specs/signature_root: {missing}"
+            )
+        files = {k: v for k, v in files.items() if k in requested}
     if not files:
-        return []
+        raise ValueError("No signature files were resolved for signature expression.")
+
+    nib = _maybe_import_nibabel()
+    if nib is None:
+        raise RuntimeError("Signature expression requires nibabel to load NIfTI images.")
 
     resampling = str(resampling or "image_to_weights").strip().lower().replace("-", "_")
     if resampling not in {"image_to_weights", "weights_to_image"}:
@@ -268,7 +281,11 @@ def compute_signature_expression(
                 w_data = w_on_ref.get_fdata()
 
             if tuple(getattr(w_data, "shape", ())) != tuple(getattr(img_data, "shape", ())):
-                continue
+                raise ValueError(
+                    f"Resampled data grid mismatch for signature {name}: "
+                    f"image_shape={getattr(img_data, 'shape', None)} "
+                    f"weights_shape={getattr(w_data, 'shape', None)}"
+                )
 
             if mask_data is not None and tuple(getattr(mask_data, "shape", ())) != tuple(getattr(img_data, "shape", ())):
                 raise ValueError(
@@ -278,7 +295,9 @@ def compute_signature_expression(
 
             x_vec, w_vec = _flatten_masked_pairs(img_data=img_data, w_data=w_data, mask_data=mask_data)
             if not x_vec:
-                continue
+                raise ValueError(
+                    f"No overlapping finite voxels remained for signature {name} after masking/resampling."
+                )
 
             dot = _dot(x_vec, w_vec)
             nx = _norm(x_vec)
@@ -297,8 +316,8 @@ def compute_signature_expression(
                 )
             )
         except Exception as exc:
-            if isinstance(exc, ValueError) and "Mask grid mismatch" in str(exc):
-                raise
-            continue
+            raise ValueError(
+                f"Failed to compute signature expression for {name!r} using {w_path}."
+            ) from exc
 
     return results

@@ -142,6 +142,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	appendBoolPair(m.behaviorComputeChangeScores, "--compute-change-scores", "--no-compute-change-scores")
+	appendBoolPair(m.behaviorComputeLosoStability, "--loso-stability", "--no-loso-stability")
 	appendBoolPair(m.behaviorComputeBayesFactors, "--compute-bayes-factors", "--no-compute-bayes-factors")
 
 	// Output options
@@ -378,9 +379,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.temporalResolutionMs != 50 {
 			args = append(args, "--temporal-time-resolution-ms", fmt.Sprintf("%d", m.temporalResolutionMs))
 		}
+		temporalCorrectionMethod := "fdr"
 		if m.temporalCorrectionMethod == 1 {
-			args = append(args, "--temporal-correction-method", "cluster")
+			temporalCorrectionMethod = "cluster"
 		}
+		args = append(args, "--temporal-correction-method", temporalCorrectionMethod)
 		if m.temporalTimeMinMs != -200 {
 			args = append(args, "--temporal-time-min-ms", fmt.Sprintf("%d", m.temporalTimeMinMs))
 		}
@@ -389,6 +392,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if m.temporalSmoothMs != 100 {
 			args = append(args, "--temporal-smooth-window-ms", fmt.Sprintf("%d", m.temporalSmoothMs))
+		}
+		if m.temporalTopomapWindowMs != 500 {
+			args = append(args, "--temporal-topomap-window-ms", fmt.Sprintf("%d", m.temporalTopomapWindowMs))
 		}
 		if strings.TrimSpace(m.temporalTargetColumn) != "" {
 			args = append(args, "--temporal-target-column", strings.TrimSpace(m.temporalTargetColumn))
@@ -488,7 +494,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Behavior Statistics
 	predictorControls := []string{"spline", "linear", "none"}
-	if m.behaviorStatsPredictorControl >= 0 && m.behaviorStatsPredictorControl < len(predictorControls) && m.behaviorStatsPredictorControl != 2 {
+	if m.behaviorStatsPredictorControl >= 0 && m.behaviorStatsPredictorControl < len(predictorControls) {
 		args = append(args, "--stats-predictor-control", predictorControls[m.behaviorStatsPredictorControl])
 	}
 	appendBoolPair(
@@ -510,7 +516,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--statistics-alpha", fmt.Sprintf("%.4f", m.statisticsAlpha))
 	}
 	permSchemes := []string{"shuffle", "circular_shift"}
-	if m.behaviorPermScheme != 0 {
+	if m.behaviorPermScheme >= 0 && m.behaviorPermScheme < len(permSchemes) {
 		args = append(args, "--perm-scheme", permSchemes[m.behaviorPermScheme%len(permSchemes)])
 	}
 	if strings.TrimSpace(m.behaviorPermGroupColumnPreference) != "" {

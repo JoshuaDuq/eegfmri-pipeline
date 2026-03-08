@@ -351,16 +351,16 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 					args = append(args, "--source-fmri-output-space", outputSpaces[m.sourceLocFmriOutputSpace%len(outputSpaces)])
 				}
 
-				// fMRI contrast builder options
-				if m.sourceLocFmriContrastEnabled {
-					args = append(args, "--source-fmri-contrast-enabled")
-					contrastTypes := []string{"t-test", "paired-t-test", "f-test", "custom"}
-					args = append(args, "--source-fmri-contrast-type", contrastTypes[m.sourceLocFmriContrastType])
-					if m.sourceLocFmriContrastType == 3 { // custom formula
-						if strings.TrimSpace(m.sourceLocFmriContrastFormula) != "" {
-							args = append(args, "--source-fmri-contrast-formula", strings.TrimSpace(m.sourceLocFmriContrastFormula))
-						}
-					} else {
+					// fMRI contrast builder options
+					if m.sourceLocFmriContrastEnabled {
+						args = append(args, "--source-fmri-contrast-enabled")
+						contrastTypes := []string{"t-test", "custom"}
+						args = append(args, "--source-fmri-contrast-type", contrastTypes[m.sourceLocFmriContrastType])
+						if m.sourceLocFmriContrastType == 1 { // custom formula
+							if strings.TrimSpace(m.sourceLocFmriContrastFormula) != "" {
+								args = append(args, "--source-fmri-contrast-formula", strings.TrimSpace(m.sourceLocFmriContrastFormula))
+							}
+						} else {
 						condAColumn := m.resolveFmriConditionColumn(m.sourceLocFmriCondAColumn)
 						if condAColumn != "" {
 							args = append(args, "--source-fmri-cond-a-column", condAColumn)
@@ -416,19 +416,13 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 					if m.sourceLocFmriHighPassHz != 0.008 {
 						args = append(args, "--source-fmri-high-pass", fmt.Sprintf("%.4f", m.sourceLocFmriHighPassHz))
 					}
-					if m.sourceLocFmriLowPassHz > 0 {
-						args = append(args, "--source-fmri-low-pass", fmt.Sprintf("%.2f", m.sourceLocFmriLowPassHz))
-					}
-					if m.sourceLocFmriClusterCorrection {
-						args = append(args, "--source-fmri-cluster-correction")
-						if m.sourceLocFmriClusterPThreshold != 0.001 {
-							args = append(args, "--source-fmri-cluster-p-threshold", fmt.Sprintf("%.4f", m.sourceLocFmriClusterPThreshold))
+						if m.sourceLocFmriLowPassHz > 0 {
+							args = append(args, "--source-fmri-low-pass", fmt.Sprintf("%.2f", m.sourceLocFmriLowPassHz))
 						}
-					}
-					outputTypes := []string{"z-score", "t-stat", "cope", "beta"}
-					if m.sourceLocFmriOutputType != 0 {
-						args = append(args, "--source-fmri-output-type", outputTypes[m.sourceLocFmriOutputType])
-					}
+						outputTypes := []string{"z-score", "t-stat", "cope", "beta"}
+						if m.sourceLocFmriOutputType != 0 {
+							args = append(args, "--source-fmri-output-type", outputTypes[m.sourceLocFmriOutputType])
+						}
 					if !m.sourceLocFmriResampleToFS {
 						args = append(args, "--no-source-fmri-resample-to-fs")
 					} else {

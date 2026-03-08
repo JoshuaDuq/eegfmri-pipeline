@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -12,9 +13,6 @@ import numpy as np
 import pandas as pd
 
 from fmri_pipeline.analysis.confounds_selection import select_fmriprep_confounds_columns
-
-
-_LOGGER = logging.getLogger(__name__)
 
 
 def _subject_label(subject: str) -> str:
@@ -28,13 +26,19 @@ def _coerce_float(value: Any) -> Optional[float]:
         return None
 
 
-def _coerce_positive_float_attr(cfg: Any, attr_name: str, default: Any = None) -> Optional[float]:
+def _parse_optional_positive_float_attr(cfg: Any, attr_name: str, default: Any = None) -> Optional[float]:
     try:
         raw_value = getattr(cfg, attr_name, default)
     except Exception:
+        raw_value = default
+    if raw_value is None:
         return None
     coerced = _coerce_float(raw_value)
-    if coerced is None or coerced <= 0:
+    if coerced is None:
+        raise ValueError(f"{attr_name} must be numeric or null, got {raw_value!r}.")
+    if not math.isfinite(coerced):
+        raise ValueError(f"{attr_name} must be finite when provided, got {raw_value!r}.")
+    if coerced <= 0:
         return None
     return coerced
 
@@ -162,8 +166,8 @@ def build_first_level_model(
     """Create a nilearn FirstLevelModel with compatibility guards."""
     from nilearn.glm.first_level import FirstLevelModel  # type: ignore
 
-    low_pass = _coerce_positive_float_attr(cfg, "low_pass_hz")
-    high_pass = _coerce_positive_float_attr(cfg, "high_pass_hz", 0.0)
+    low_pass = _parse_optional_positive_float_attr(cfg, "low_pass_hz")
+    high_pass = _parse_optional_positive_float_attr(cfg, "high_pass_hz", 0.0)
 
     kwargs: dict[str, Any] = dict(
         t_r=float(tr),
@@ -176,15 +180,11 @@ def build_first_level_model(
         minimize_memory=False,
     )
 
-    try:
-        from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
+    from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
 
-        smoothing_fwhm = normalize_smoothing_fwhm(getattr(cfg, "smoothing_fwhm", None))
-        if smoothing_fwhm is not None:
-            kwargs["smoothing_fwhm"] = smoothing_fwhm
-    except Exception as exc:
-        if logger is not None:
-            logger.warning("Failed to normalize smoothing_fwhm; continuing without smoothing: %s", exc)
+    smoothing_fwhm = normalize_smoothing_fwhm(getattr(cfg, "smoothing_fwhm", None))
+    if smoothing_fwhm is not None:
+        kwargs["smoothing_fwhm"] = smoothing_fwhm
 
     sig = inspect.signature(FirstLevelModel)
     if "low_pass" in sig.parameters:
@@ -281,13 +281,8 @@ def select_confounds(
     if confounds_path is None or not confounds_path.exists():
         return None, []
 
-    use_logger = logger or _LOGGER
-    try:
-        confounds_df = pd.read_csv(confounds_path, sep="\t")
-        selected = select_confound_columns(confounds_df, strategy)
-        if selected is None:
-            return None, []
-        return selected, list(selected.columns)
-    except Exception as exc:
-        use_logger.warning("Failed to read/select confounds from %s (%s)", confounds_path, exc)
+    confounds_df = pd.read_csv(confounds_path, sep="\t")
+    selected = select_confound_columns(confounds_df, strategy)
+    if selected is None:
         return None, []
+    return selected, list(selected.columns)

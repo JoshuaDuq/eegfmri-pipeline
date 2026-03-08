@@ -598,6 +598,18 @@ const (
 	textFieldFmriAnalysisFreesurferDir
 	textFieldFmriAnalysisSignatureDir
 	textFieldFmriAnalysisSignatureMaps
+	textFieldFmriSecondLevelInputRoot
+	textFieldFmriSecondLevelContrastNames
+	textFieldFmriSecondLevelConditionLabels
+	textFieldFmriSecondLevelCovariatesFile
+	textFieldFmriSecondLevelSubjectColumn
+	textFieldFmriSecondLevelCovariateColumns
+	textFieldFmriSecondLevelGroupColumn
+	textFieldFmriSecondLevelGroupAValue
+	textFieldFmriSecondLevelGroupBValue
+	textFieldFmriSecondLevelFormula
+	textFieldFmriSecondLevelOutputName
+	textFieldFmriSecondLevelOutputDir
 	textFieldFmriTrialSigGroupColumn
 	textFieldFmriTrialSigGroupValues
 	textFieldFmriTrialSigScopeTrialTypeColumn
@@ -1145,6 +1157,30 @@ type Model struct {
 	fmriAnalysisPlotSignatures           bool
 	fmriAnalysisSignatureDir             string // optional override; empty => auto
 	fmriAnalysisSignatureMaps            string // "NAME:path NAME2:path2" format; empty => from config
+
+	// fMRI second-level group analysis configuration
+	fmriSecondLevelModelIndex          int    // 0: one-sample, 1: two-sample, 2: paired, 3: repeated-measures
+	fmriSecondLevelInputRoot           string // optional root containing first-level outputs
+	fmriSecondLevelContrastNames       string // space-separated first-level contrast names
+	fmriSecondLevelConditionLabels     string // optional space-separated labels aligned to contrast names
+	fmriSecondLevelCovariatesFile      string // optional TSV/CSV
+	fmriSecondLevelSubjectColumn       string // default: subject
+	fmriSecondLevelCovariateColumns    string // optional space-separated numeric covariates
+	fmriSecondLevelGroupColumn         string // required for two-sample
+	fmriSecondLevelGroupAValue         string // required for two-sample
+	fmriSecondLevelGroupBValue         string // required for two-sample
+	fmriSecondLevelFormula             string // optional second-level contrast formula
+	fmriSecondLevelOutputName          string // optional output label override
+	fmriSecondLevelOutputDir           string // optional output directory override
+	fmriSecondLevelWriteDesignMatrix   bool
+	fmriSecondLevelPermutationEnabled  bool
+	fmriSecondLevelPermutationCount    int
+	fmriSecondLevelTwoSided            bool
+	fmriSecondLevelGroupInputExpanded  bool
+	fmriSecondLevelGroupDesignExpanded bool
+	fmriSecondLevelGroupInferExpanded  bool
+	fmriSecondLevelGroupOutputExpanded bool
+	fmriSecondLevelDiscoveredContrasts []string
 
 	// fMRI trial-wise signatures configuration (beta-series, LSS)
 	fmriTrialSigGroupExpanded           bool
@@ -1727,7 +1763,7 @@ type Model struct {
 
 	// fMRI GLM contrast builder (for fMRI-informed mode)
 	sourceLocFmriContrastEnabled          bool     // Build contrast from BOLD data (vs. load pre-computed)
-	sourceLocFmriContrastType             int      // 0: t-test, 1: paired t-test, 2: F-test, 3: custom formula
+	sourceLocFmriContrastType             int      // 0: t-test, 1: custom formula
 	sourceLocFmriCondAColumn              string   // Condition A column (config/discovery default when empty)
 	sourceLocFmriCondAValue               string   // Condition A value (e.g., "temp49p3", "1")
 	sourceLocFmriCondBColumn              string   // Condition B column
@@ -1929,6 +1965,7 @@ type Model struct {
 	temporalResolutionMs       int
 	temporalCorrectionMethod   int // 0=fdr, 1=cluster
 	temporalSmoothMs           int
+	temporalTopomapWindowMs    int
 	temporalTimeMinMs          int
 	temporalTimeMaxMs          int
 	temporalTargetColumn       string // events.tsv column to correlate against (empty=default rating)
@@ -1996,6 +2033,14 @@ type Model struct {
 	fmriDiscoveredColumnValues map[string][]string // Values for each fMRI column
 	fmriColumnDiscoveryDone    bool                // Whether fMRI discovery has been completed
 	fmriColumnDiscoveryError   string              // Error message if fMRI discovery failed
+
+	// fMRI second-level discovery (used by TUI selectors for group analysis)
+	fmriSecondLevelContrastDiscoveryKey        string
+	fmriSecondLevelContrastDiscoveryError      string
+	fmriSecondLevelCovariatesDiscoveryKey      string
+	fmriSecondLevelCovariatesDiscoveryError    string
+	fmriSecondLevelDiscoveredCovariatesColumns []string
+	fmriSecondLevelDiscoveredCovariatesValues  map[string][]string
 
 	// Multigroup stats discovery (populated from precomputed stats)
 	multigroupStatsAvailable     bool     // Whether multigroup stats are available
@@ -2201,12 +2246,12 @@ type Model struct {
 	microstatesAssignFromGfpPeaks bool // Assign states at GFP peaks then backfit
 
 	// Behavior Statistics
-	behaviorStatsPredictorControl          int     // 0: spline, 1: linear
+	behaviorStatsPredictorControl          int     // 0: spline, 1: linear, 2: none
 	behaviorStatsAllowIIDTrials            bool    // Allow i.i.d. trial assumptions
 	behaviorStatsHierarchicalFDR           bool    // Hierarchical FDR correction
 	behaviorStatsComputeReliability        bool    // Compute reliability
 	statisticsAlpha                        float64 // Global fallback alpha for shared statistics helpers
-	behaviorPermScheme                     int     // 0: circular_shift, 1: shuffle
+	behaviorPermScheme                     int     // 0: shuffle, 1: circular_shift
 	behaviorPermGroupColumnPreference      string  // Group column preference order (comma-separated)
 	behaviorExcludeNonTrialwiseFeatures    bool    // Drop broadcast features
 	iccUnitColumns                         string  // Repeated-measures unit columns (comma-separated)
@@ -2763,6 +2808,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalResolutionMs:                50,
 		temporalCorrectionMethod:            1,
 		temporalSmoothMs:                    100,
+		temporalTopomapWindowMs:             500,
 		temporalTimeMinMs:                   -200,
 		temporalTimeMaxMs:                   1000,
 		temporalTargetColumn:                "",
@@ -2795,17 +2841,18 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionMinTrials:          0,
 		conditionFeaturesSpec:       "",
 		// Column discovery defaults
-		discoveredColumns:              []string{},
-		trialTableColumns:              []string{},
-		conditionEffectsColumns:        []string{},
-		conditionEffectsColumnValues:   make(map[string][]string),
-		conditionEffectsWindows:        []string{},
-		conditionEffectsDiscoveryDone:  false,
-		conditionEffectsDiscoveryError: "",
-		discoveredColumnValues:         make(map[string][]string),
-		trialTableColumnValues:         make(map[string][]string),
-		selectedValueCursors:           make(map[string]int),
-		availableWindowsByFeature:      make(map[string][]string),
+		discoveredColumns:                         []string{},
+		trialTableColumns:                         []string{},
+		conditionEffectsColumns:                   []string{},
+		conditionEffectsColumnValues:              make(map[string][]string),
+		conditionEffectsWindows:                   []string{},
+		conditionEffectsDiscoveryDone:             false,
+		conditionEffectsDiscoveryError:            "",
+		discoveredColumnValues:                    make(map[string][]string),
+		trialTableColumnValues:                    make(map[string][]string),
+		fmriSecondLevelDiscoveredCovariatesValues: make(map[string][]string),
+		selectedValueCursors:                      make(map[string]int),
+		availableWindowsByFeature:                 make(map[string][]string),
 		// Machine Learning defaults
 		mlNPerm:                     0,
 		innerSplits:                 3,
@@ -2990,7 +3037,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorStatsHierarchicalFDR:           true,
 		behaviorStatsComputeReliability:        true,
 		statisticsAlpha:                        0.05,
-		behaviorPermScheme:                     0, // 0: circular_shift
+		behaviorPermScheme:                     0, // 0: shuffle
 		behaviorPermGroupColumnPreference:      "run_id,block",
 		behaviorExcludeNonTrialwiseFeatures:    true,
 		iccUnitColumns:                         "predictor",
@@ -3302,9 +3349,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriGroupAdvancedExpanded = false
 
 	case types.PipelineFmriAnalysis:
-		m.modeOptions = []string{"first-level", "trial-signatures"}
+		m.modeOptions = []string{"first-level", "second-level", "trial-signatures"}
 		m.modeDescriptions = []string{
 			"First-level GLM contrasts (per subject)",
+			"Explicit second-level group inference from first-level contrast maps",
 			"Trial-wise betas + multivariate signature readouts (beta-series or LSS)",
 		}
 		m.steps = []types.WizardStep{
@@ -3379,6 +3427,29 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisPlotSignatures = true
 		m.fmriAnalysisSignatureDir = ""
 		m.fmriAnalysisSignatureMaps = ""
+
+		// Second-level defaults
+		m.fmriSecondLevelModelIndex = 0 // one-sample
+		m.fmriSecondLevelInputRoot = ""
+		m.fmriSecondLevelContrastNames = ""
+		m.fmriSecondLevelConditionLabels = ""
+		m.fmriSecondLevelCovariatesFile = ""
+		m.fmriSecondLevelSubjectColumn = "subject"
+		m.fmriSecondLevelCovariateColumns = ""
+		m.fmriSecondLevelGroupColumn = ""
+		m.fmriSecondLevelGroupAValue = ""
+		m.fmriSecondLevelGroupBValue = ""
+		m.fmriSecondLevelFormula = ""
+		m.fmriSecondLevelOutputName = ""
+		m.fmriSecondLevelOutputDir = ""
+		m.fmriSecondLevelWriteDesignMatrix = true
+		m.fmriSecondLevelPermutationEnabled = false
+		m.fmriSecondLevelPermutationCount = 5000
+		m.fmriSecondLevelTwoSided = true
+		m.fmriSecondLevelGroupInputExpanded = true
+		m.fmriSecondLevelGroupDesignExpanded = true
+		m.fmriSecondLevelGroupInferExpanded = false
+		m.fmriSecondLevelGroupOutputExpanded = false
 
 		// Trial-wise signature defaults (used by beta-series / lss modes)
 		m.fmriTrialSigGroupExpanded = true

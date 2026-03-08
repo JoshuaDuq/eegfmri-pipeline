@@ -42,6 +42,17 @@ class _CaptureTrialPipeline:
         type(self).last_kwargs = kwargs
 
 
+class _CaptureSecondLevelPipeline:
+    last_config = None
+    last_kwargs = None
+
+    def __init__(self, config):
+        type(self).last_config = config
+
+    def run_batch(self, **kwargs):
+        type(self).last_kwargs = kwargs
+
+
 class _ContrastBuilderConfig:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
@@ -50,6 +61,19 @@ class _ContrastBuilderConfig:
 class _TrialSignatureExtractionConfig:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
+
+
+class _SecondLevelPermutationConfig:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class _SecondLevelConfig:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def normalized(self):
+        return self
 
 
 def _build_args_for_fmri(argv: list[str]) -> argparse.Namespace:
@@ -170,6 +194,7 @@ fmri_contrast:
         types.SimpleNamespace(
             ContrastBuilderConfig=_ContrastBuilderConfig,
             load_contrast_config_section=lambda config: config.get("fmri_contrast"),
+            validate_contrast_config_section=lambda _section: None,
         ),
     )
     monkeypatch.setitem(
@@ -235,7 +260,6 @@ fmri_contrast:
   smoothing_fwhm: 6.0
   output_type: "t-stat"
   resample_to_freesurfer: true
-  cluster_correction: true
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -248,6 +272,7 @@ fmri_contrast:
         types.SimpleNamespace(
             ContrastBuilderConfig=_ContrastBuilderConfig,
             load_contrast_config_section=lambda config: config.get("fmri_contrast"),
+            validate_contrast_config_section=lambda _section: None,
         ),
     )
     monkeypatch.setitem(
@@ -295,4 +320,59 @@ fmri_contrast:
     assert contrast_cfg.smoothing_fwhm == 6.0
     assert contrast_cfg.output_type == "t-stat"
     assert contrast_cfg.resample_to_freesurfer is True
-    assert contrast_cfg.cluster_correction is True
+
+
+def test_run_fmri_analysis_dispatches_second_level_mode(tmp_path, monkeypatch) -> None:
+    bids_root = tmp_path / "bids"
+    (bids_root / "sub-0001").mkdir(parents=True, exist_ok=True)
+    (bids_root / "sub-0002").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "fmri_pipeline.analysis.second_level",
+        types.SimpleNamespace(
+            SecondLevelConfig=_SecondLevelConfig,
+            SecondLevelPermutationConfig=_SecondLevelPermutationConfig,
+            load_second_level_config_section=lambda config: config.get("fmri_group_level", {}),
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "fmri_pipeline.pipelines.fmri_second_level",
+        types.SimpleNamespace(FmriSecondLevelPipeline=_CaptureSecondLevelPipeline),
+    )
+
+    args = _build_args_for_fmri_analysis(
+        [
+            "fmri-analysis",
+            "second-level",
+            "--all-subjects",
+            "--group-model",
+            "paired",
+            "--group-contrast-names",
+            "pain_low",
+            "pain_high",
+            "--contrast-name",
+            "pain_high_minus_low",
+            "--group-permutation-inference",
+            "--group-n-permutations",
+            "2500",
+            "--group-one-sided",
+            "--dry-run",
+        ]
+    )
+    config = ConfigDict(
+        {
+            "project": {"task": "pain"},
+            "paths": {"bids_fmri_root": str(bids_root)},
+        }
+    )
+    run_fmri_analysis(args, [], config)
+
+    second_level_cfg = _CaptureSecondLevelPipeline.last_kwargs["second_level_cfg"]
+    assert second_level_cfg.model == "paired"
+    assert second_level_cfg.contrast_names == ("pain_low", "pain_high")
+    assert second_level_cfg.output_name == "pain_high_minus_low"
+    assert second_level_cfg.permutation.enabled is True
+    assert second_level_cfg.permutation.n_permutations == 2500
+    assert second_level_cfg.permutation.two_sided is False

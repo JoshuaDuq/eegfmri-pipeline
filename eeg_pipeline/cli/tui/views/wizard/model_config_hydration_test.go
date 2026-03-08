@@ -32,8 +32,8 @@ func TestApplyConfigKeys_HydratesSourceLocFmriContrastConfig(t *testing.T) {
 	if !m.sourceLocFmriEnabled {
 		t.Fatalf("expected sourceLocFmriEnabled=true")
 	}
-	if m.sourceLocFmriContrastType != 3 {
-		t.Fatalf("expected sourceLocFmriContrastType=3 (custom), got %d", m.sourceLocFmriContrastType)
+	if m.sourceLocFmriContrastType != 1 {
+		t.Fatalf("expected sourceLocFmriContrastType=1 (custom), got %d", m.sourceLocFmriContrastType)
 	}
 	if m.sourceLocFmriCondAColumn != "event_group" {
 		t.Fatalf("expected condition A column event_group, got %q", m.sourceLocFmriCondAColumn)

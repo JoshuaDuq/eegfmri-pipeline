@@ -1168,6 +1168,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 0 {
 			m.temporalSmoothMs = int(val)
 		}
+	case optTemporalTopomapWindowMs:
+		if val >= 1 {
+			m.temporalTopomapWindowMs = int(val)
+		}
 	// ITPC temporal options
 	case optTemporalITPCBaselineMin:
 		m.temporalITPCBaselineMin = val
@@ -1548,6 +1552,10 @@ func (m *Model) commitFmriAnalysisNumber(val float64) {
 	case optFmriTrialSigMaxTrialsPerRun:
 		if val >= 0 {
 			m.fmriTrialSigMaxTrialsPerRun = int(val)
+		}
+	case optFmriSecondLevelPermutationCount:
+		if val > 0 {
+			m.fmriSecondLevelPermutationCount = int(val)
 		}
 	}
 }

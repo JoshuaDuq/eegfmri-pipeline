@@ -1808,6 +1808,8 @@ def compute_cluster_correction_2d(
     
     if not cluster_masses:
         empty_pvalues = np.full_like(correlations, np.nan)
+        for row_idx, col_idx in informative_bins:
+            empty_pvalues[row_idx, col_idx] = 1.0
         empty_mask = np.zeros_like(correlations, dtype=bool)
         return (
             observed_labels,
@@ -1824,6 +1826,9 @@ def compute_cluster_correction_2d(
         permutation_max_masses,
         alpha,
     )
+    for row_idx, col_idx in informative_bins:
+        if not np.isfinite(pvalues[row_idx, col_idx]):
+            pvalues[row_idx, col_idx] = 1.0
     
     return (
         observed_labels,

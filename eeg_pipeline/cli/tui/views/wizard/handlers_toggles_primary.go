@@ -411,7 +411,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriContrastType:
-		m.sourceLocFmriContrastType = (m.sourceLocFmriContrastType + 1) % 4 // 0: t-test, 1: paired, 2: F-test, 3: custom
+		m.sourceLocFmriContrastType = (m.sourceLocFmriContrastType + 1) % 2 // 0: t-test, 1: custom
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriCondAColumn:
 		if len(m.fmriDiscoveredColumns) > 0 {
@@ -1935,7 +1935,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// Temporal
-	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs:
+	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs, optTemporalTopomapWindowMs:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optTemporalCorrectionMethod:

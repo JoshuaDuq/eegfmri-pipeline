@@ -597,6 +597,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Smooth Window (ms)", val, "smoothing length"
+		case optTemporalTopomapWindowMs:
+			val := fmt.Sprintf("%d", m.temporalTopomapWindowMs)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalTopomapWindowMs) {
+				val = numberDisplay
+			}
+			return "Topomap Window (ms)", val, "fixed bin width for by-condition topomaps"
 		case optTemporalTargetColumn:
 			val := m.temporalTargetColumn
 			if strings.TrimSpace(val) == "" {

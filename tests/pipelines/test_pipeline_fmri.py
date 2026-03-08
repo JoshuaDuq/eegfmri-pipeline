@@ -673,7 +673,8 @@ class TestFmriCompletion(unittest.TestCase):
             self.assertIsNone(p.run_group_level(["0001"], task="t"))
 
             p.config = DotConfig({"paths": {"signature_dir": "/path/does/not/exist"}})
-            self.assertIsNone(p._discover_signature_root_and_specs()[0])
+            with self.assertRaises(FileNotFoundError):
+                p._discover_signature_root_and_specs()
 
             class BadCfg:
                 def get(self, *_a, **_k):

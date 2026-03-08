@@ -1,4 +1,4 @@
-"""fMRI analysis CLI command: first-level GLM + contrasts + trial-wise signatures."""
+"""fMRI analysis CLI command: first-level, second-level, and trial-wise analyses."""
 
 from __future__ import annotations
 
@@ -22,14 +22,17 @@ from fmri_pipeline.utils.config import apply_fmri_config_defaults
 def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     parser = subparsers.add_parser(
         "fmri-analysis",
-        help="fMRI analysis: first-level GLM + contrasts",
-        description="Compute subject-level (first-level) fMRI contrasts between conditions.",
+        help="fMRI analysis: first-level, second-level, and trial-wise models",
+        description=(
+            "Run subject-level first-level contrasts, explicit second-level "
+            "group inference, or trial-wise beta/signature extraction."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "mode",
-        choices=["first-level", "beta-series", "lss"],
-        help="Operation to run (first-level | beta-series | lss)",
+        choices=["first-level", "second-level", "beta-series", "lss"],
+        help="Operation to run (first-level | second-level | beta-series | lss)",
     )
 
     add_common_subject_args(parser)
@@ -491,6 +494,118 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         ),
     )
 
+    group_group = parser.add_argument_group("Second-level group analysis")
+    group_group.add_argument(
+        "--group-model",
+        choices=["one-sample", "two-sample", "paired", "repeated-measures"],
+        default=None,
+        help=(
+            "Second-level design. Uses existing first-level effect-size maps in "
+            "MNI152NLin2009cAsym space."
+        ),
+    )
+    group_group.add_argument(
+        "--group-input-root",
+        type=str,
+        default=None,
+        help=(
+            "Root containing first-level subject outputs. Default: deriv_root. "
+            "Use when first-level outputs were written to a custom --output-dir."
+        ),
+    )
+    group_group.add_argument(
+        "--group-contrast-names",
+        nargs="+",
+        default=None,
+        metavar="CONTRAST",
+        help=(
+            "First-level contrast names to include. one-sample/two-sample require "
+            "1, paired requires 2 ordered as A B, repeated-measures requires >=2."
+        ),
+    )
+    group_group.add_argument(
+        "--group-condition-labels",
+        nargs="+",
+        default=None,
+        metavar="LABEL",
+        help=(
+            "Optional labels corresponding to --group-contrast-names. Defaults "
+            "to the first-level contrast names."
+        ),
+    )
+    group_group.add_argument(
+        "--group-covariates-file",
+        type=str,
+        default=None,
+        help="Subject-level TSV/CSV for group assignments and numeric covariates.",
+    )
+    group_group.add_argument(
+        "--group-subject-column",
+        type=str,
+        default=None,
+        help="Subject ID column in --group-covariates-file (default: subject).",
+    )
+    group_group.add_argument(
+        "--group-covariate-columns",
+        nargs="+",
+        default=None,
+        metavar="COL",
+        help=(
+            "Numeric nuisance covariates to include. Supported for one-sample, "
+            "two-sample, and paired models."
+        ),
+    )
+    group_group.add_argument(
+        "--group-column",
+        type=str,
+        default=None,
+        help="Grouping column for two-sample models.",
+    )
+    group_group.add_argument(
+        "--group-a-value",
+        type=str,
+        default=None,
+        help="Reference group label for two-sample models.",
+    )
+    group_group.add_argument(
+        "--group-b-value",
+        type=str,
+        default=None,
+        help="Comparison group label for two-sample models.",
+    )
+    group_group.add_argument(
+        "--group-permutation-inference",
+        dest="group_permutation_inference",
+        action="store_true",
+        default=None,
+        help="Run second-level max-T permutation inference in addition to parametric maps.",
+    )
+    group_group.add_argument(
+        "--no-group-permutation-inference",
+        dest="group_permutation_inference",
+        action="store_false",
+        help="Disable second-level permutation inference.",
+    )
+    group_group.add_argument(
+        "--group-n-permutations",
+        type=int,
+        default=None,
+        help="Number of permutations for second-level inference (default: 5000).",
+    )
+    group_group.add_argument(
+        "--group-two-sided",
+        dest="group_two_sided",
+        action="store_true",
+        default=None,
+        help="Use two-sided second-level permutation inference (default).",
+    )
+    group_group.add_argument(
+        "--group-one-sided",
+        dest="group_two_sided",
+        action="store_false",
+        help="Use one-sided second-level permutation inference.",
+    )
+
     trial_group = parser.add_argument_group("Trial-wise betas / signatures (beta-series, lss)")
     trial_group.add_argument(
         "--include-other-events",
@@ -648,16 +763,6 @@ def _map_task_to_fmri(task: str) -> str:
 
 
 def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: Any) -> None:
-    from fmri_pipeline.analysis.contrast_builder import (
-        ContrastBuilderConfig,
-        load_contrast_config_section,
-    )
-    from fmri_pipeline.analysis.plotting_config import build_fmri_plotting_config_from_args
-    from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
-    from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
-    from fmri_pipeline.analysis.trial_signatures import TrialSignatureExtractionConfig
-    from fmri_pipeline.pipelines.fmri_trial_signatures import FmriTrialSignaturePipeline
-
     progress = create_progress_reporter(args)
     apply_fmri_config_defaults(config)
 
@@ -693,10 +798,8 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
 
     mode = str(getattr(args, "mode", "first-level") or "first-level").strip().lower()
 
-    contrast_cfg_section = load_contrast_config_section(config)
-
     def _cfg_value(*path: str) -> Any:
-        current: Any = contrast_cfg_section
+        current: Any = {}
         for key in path:
             if not isinstance(current, dict) or key not in current:
                 return None
@@ -732,10 +835,197 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             return None
         return [int(item) for item in items]
 
-    # Defaults are intentionally conservative and match analysis defaults.
-    input_source = str(_coalesce(args.input_source, _cfg_value("input_source"), "fmriprep")).strip().lower()
+    if mode == "second-level":
+        from fmri_pipeline.analysis.second_level import (
+            SecondLevelConfig,
+            SecondLevelPermutationConfig,
+            load_second_level_config_section,
+        )
+        from fmri_pipeline.pipelines.fmri_second_level import (
+            FmriSecondLevelPipeline,
+        )
+
+        second_level_section = load_second_level_config_section(config)
+
+        def _group_cfg_value(*path: str) -> Any:
+            current: Any = second_level_section
+            for key in path:
+                if not isinstance(current, dict) or key not in current:
+                    return None
+                current = current[key]
+            return current
+
+        def _normalize_space_separated_list(value: Any) -> tuple[str, ...] | None:
+            if value is None:
+                return None
+            if isinstance(value, str):
+                items = [
+                    part.strip()
+                    for part in value.replace(",", " ").split()
+                    if part.strip()
+                ]
+                return tuple(items) if items else None
+            items = [str(part).strip() for part in value if str(part).strip()]
+            return tuple(items) if items else None
+
+        second_level_cfg = SecondLevelConfig(
+            model=str(
+                _coalesce(
+                    getattr(args, "group_model", None),
+                    _group_cfg_value("model"),
+                    "one-sample",
+                )
+            ).strip(),
+            contrast_names=tuple(
+                _normalize_space_separated_list(
+                    _coalesce(
+                        getattr(args, "group_contrast_names", None),
+                        _group_cfg_value("contrast_names"),
+                    )
+                )
+                or ()
+            ),
+            input_root=_coalesce(
+                getattr(args, "group_input_root", None),
+                _group_cfg_value("input_root"),
+            ),
+            condition_labels=_normalize_space_separated_list(
+                _coalesce(
+                    getattr(args, "group_condition_labels", None),
+                    _group_cfg_value("condition_labels"),
+                )
+            ),
+            formula=str(
+                _coalesce(getattr(args, "formula", None), _group_cfg_value("formula"))
+                or ""
+            ).strip()
+            or None,
+            output_name=str(
+                _coalesce(
+                    getattr(args, "contrast_name", None),
+                    _group_cfg_value("output_name"),
+                )
+                or ""
+            ).strip()
+            or None,
+            output_dir=str(
+                _coalesce(getattr(args, "output_dir", None), _group_cfg_value("output_dir"))
+                or ""
+            ).strip()
+            or None,
+            covariates_file=_coalesce(
+                getattr(args, "group_covariates_file", None),
+                _group_cfg_value("covariates_file"),
+            ),
+            subject_column=str(
+                _coalesce(
+                    getattr(args, "group_subject_column", None),
+                    _group_cfg_value("subject_column"),
+                    "subject",
+                )
+            ).strip()
+            or "subject",
+            covariate_columns=_normalize_space_separated_list(
+                _coalesce(
+                    getattr(args, "group_covariate_columns", None),
+                    _group_cfg_value("covariate_columns"),
+                )
+            ),
+            group_column=str(
+                _coalesce(
+                    getattr(args, "group_column", None),
+                    _group_cfg_value("group_column"),
+                )
+                or ""
+            ).strip()
+            or None,
+            group_a_value=str(
+                _coalesce(
+                    getattr(args, "group_a_value", None),
+                    _group_cfg_value("group_a_value"),
+                )
+                or ""
+            ).strip()
+            or None,
+            group_b_value=str(
+                _coalesce(
+                    getattr(args, "group_b_value", None),
+                    _group_cfg_value("group_b_value"),
+                )
+                or ""
+            ).strip()
+            or None,
+            write_design_matrix=(
+                bool(args.write_design_matrix)
+                if args.write_design_matrix is not None
+                else bool(_coalesce(_group_cfg_value("write_design_matrix"), True))
+            ),
+            permutation=SecondLevelPermutationConfig(
+                enabled=(
+                    bool(args.group_permutation_inference)
+                    if args.group_permutation_inference is not None
+                    else bool(_coalesce(_group_cfg_value("permutation", "enabled"), False))
+                ),
+                n_permutations=int(
+                    _coalesce(
+                        getattr(args, "group_n_permutations", None),
+                        _group_cfg_value("permutation", "n_permutations"),
+                        5000,
+                    )
+                ),
+                two_sided=(
+                    bool(args.group_two_sided)
+                    if args.group_two_sided is not None
+                    else bool(_coalesce(_group_cfg_value("permutation", "two_sided"), True))
+                ),
+            ),
+        ).normalized()
+
+        pipeline = FmriSecondLevelPipeline(config=config)
+        pipeline.run_batch(
+            subjects=subjects,
+            task=fmri_task,
+            progress=progress,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            second_level_cfg=second_level_cfg,
+        )
+        return
+
+    from fmri_pipeline.analysis.contrast_builder import (
+        ContrastBuilderConfig,
+        load_contrast_config_section,
+        validate_contrast_config_section,
+    )
+    from fmri_pipeline.analysis.plotting_config import (
+        build_fmri_plotting_config_from_args,
+    )
+    from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
+    from fmri_pipeline.analysis.trial_signatures import (
+        TrialSignatureExtractionConfig,
+    )
+    from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
+    from fmri_pipeline.pipelines.fmri_trial_signatures import (
+        FmriTrialSignaturePipeline,
+    )
+
+    contrast_cfg_section = load_contrast_config_section(config)
+    validate_contrast_config_section(contrast_cfg_section)
+
+    def _cfg_value(*path: str) -> Any:
+        current: Any = contrast_cfg_section
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current[key]
+        return current
+
+    input_source = str(
+        _coalesce(args.input_source, _cfg_value("input_source"), "fmriprep")
+    ).strip().lower()
     if input_source not in {"fmriprep", "bids_raw"}:
-        input_source = "fmriprep"
+        raise ValueError(
+            f"input_source must be 'fmriprep' or 'bids_raw', got {input_source!r}."
+        )
 
     drift_model = _coalesce(args.drift_model, _cfg_value("drift_model"))
     if drift_model == "none":
@@ -751,10 +1041,17 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         smoothing_fwhm = normalize_smoothing_fwhm(args.smoothing_fwhm)
 
     formula = str(_coalesce(args.formula, _cfg_value("formula")) or "").strip() or None
-    contrast_name = str(_coalesce(args.contrast_name, _cfg_value("name"), "contrast")).strip() or "contrast"
+    contrast_name = (
+        str(_coalesce(args.contrast_name, _cfg_value("name"), "contrast")).strip()
+        or "contrast"
+    )
     contrast_type = str(
         _coalesce(args.contrast_type, _cfg_value("type"), "custom" if formula else "t-test")
     ).strip()
+    if contrast_type not in {"t-test", "custom"}:
+        raise ValueError(
+            f"contrast-type must be 't-test' or 'custom', got {contrast_type!r}."
+        )
     cond_a_column = str(
         _coalesce(args.cond_a_column, _cfg_value("condition_a", "column"), "trial_type")
     ).strip() or "trial_type"
@@ -768,19 +1065,28 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         _cfg_value("condition_scope_trial_types"),
     )
     condition_scope_column = str(
-        _coalesce(getattr(args, "condition_scope_column", None), _cfg_value("condition_scope_column"), "trial_type")
+        _coalesce(
+            getattr(args, "condition_scope_column", None),
+            _cfg_value("condition_scope_column"),
+            "trial_type",
+        )
     ).strip() or "trial_type"
 
     if contrast_type == "custom" and not formula:
         raise ValueError("contrast-type=custom requires --formula")
 
     if contrast_type != "custom" and not _has_value(cond_a_value):
-        raise ValueError("Missing required --cond-a-value (or use --contrast-type custom --formula ...)")
-    if mode in {"beta-series", "lss"}:
-        if not _has_value(cond_b_value):
-            raise ValueError("Trial-wise modes require --cond-b-value (e.g., condition_a vs condition_b).")
+        raise ValueError(
+            "Missing required --cond-a-value (or use --contrast-type custom --formula ...)"
+        )
+    if mode in {"beta-series", "lss"} and not _has_value(cond_b_value):
+        raise ValueError(
+            "Trial-wise modes require --cond-b-value (e.g., condition_a vs condition_b)."
+        )
 
-    confounds_strategy = str(_coalesce(args.confounds_strategy, _cfg_value("confounds_strategy"), "auto")).strip().lower()
+    confounds_strategy = str(
+        _coalesce(args.confounds_strategy, _cfg_value("confounds_strategy"), "auto")
+    ).strip().lower()
     if not confounds_strategy:
         confounds_strategy = "auto"
     if args.write_design_matrix is not None:
@@ -788,24 +1094,36 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
     else:
         write_design_matrix = bool(_coalesce(_cfg_value("write_design_matrix"), False))
 
-    # Default fMRIPrep space differs by mode: first-level defaults to T1w, signature modes default to MNI.
     if args.fmriprep_space:
         fmriprep_space = str(args.fmriprep_space).strip()
     else:
-        fmriprep_space = "MNI152NLin2009cAsym" if mode in {"beta-series", "lss"} else str(
-            _coalesce(_cfg_value("fmriprep_space"), "T1w")
-        ).strip()
+        fmriprep_space = (
+            "MNI152NLin2009cAsym"
+            if mode in {"beta-series", "lss"}
+            else str(_coalesce(_cfg_value("fmriprep_space"), "T1w")).strip()
+        )
 
     if mode == "first-level":
         from fmri_pipeline.analysis.events_selection import normalize_trial_type_list
 
-        events_to_model = normalize_trial_type_list(_coalesce(args.events_to_model, _cfg_value("events_to_model")))
-        stim_phases_to_model = normalize_trial_type_list(
-            _coalesce(getattr(args, "stim_phases_to_model", None), _cfg_value("stim_phases_to_model"))
+        events_to_model = normalize_trial_type_list(
+            _coalesce(args.events_to_model, _cfg_value("events_to_model"))
         )
-        phase_column = str(_coalesce(getattr(args, "phase_column", None), _cfg_value("phase_column"), "stim_phase")).strip() or "stim_phase"
+        stim_phases_to_model = normalize_trial_type_list(
+            _coalesce(
+                getattr(args, "stim_phases_to_model", None),
+                _cfg_value("stim_phases_to_model"),
+            )
+        )
+        phase_column = str(
+            _coalesce(getattr(args, "phase_column", None), _cfg_value("phase_column"), "stim_phase")
+        ).strip() or "stim_phase"
         phase_scope_column = str(
-            _coalesce(getattr(args, "phase_scope_column", None), _cfg_value("phase_scope_column"), "trial_type")
+            _coalesce(
+                getattr(args, "phase_scope_column", None),
+                _cfg_value("phase_scope_column"),
+                "trial_type",
+            )
         ).strip() or "trial_type"
         phase_scope_value = str(
             _coalesce(getattr(args, "phase_scope_value", None), _cfg_value("phase_scope_value"), "")
@@ -833,11 +1151,13 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             runs=list(args.runs) if args.runs else _normalize_runs(_cfg_value("runs")),
             hrf_model=str(_coalesce(args.hrf_model, _cfg_value("hrf_model"), "spm")).strip(),
             drift_model=str(drift_model).strip() if drift_model else None,
-            high_pass_hz=float(_coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)),
+            high_pass_hz=float(
+                _coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)
+            ),
             low_pass_hz=float(low_pass_hz) if low_pass_hz is not None else None,
-            cluster_correction=bool(_coalesce(_cfg_value("cluster_correction"), True)),
-            cluster_p_threshold=float(_coalesce(_cfg_value("cluster_p_threshold"), 0.001)),
-            output_type=str(_coalesce(args.output_type, _cfg_value("output_type"), "z-score")).strip(),
+            output_type=str(
+                _coalesce(args.output_type, _cfg_value("output_type"), "z-score")
+            ).strip(),
             resample_to_freesurfer=(
                 bool(args.resample_to_freesurfer)
                 if args.resample_to_freesurfer is not None
@@ -853,7 +1173,9 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             phase_scope_value=phase_scope_value,
         )
     else:
-        include_other_events = True if args.include_other_events is None else bool(args.include_other_events)
+        include_other_events = (
+            True if args.include_other_events is None else bool(args.include_other_events)
+        )
         fixed_weighting = str(args.fixed_effects_weighting or "variance").strip().lower()
         lss_other = str(args.lss_other_regressors or "per-condition").strip().lower()
         lss_other = "per_condition" if lss_other == "per-condition" else lss_other
@@ -875,7 +1197,9 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             condition_b_value=str(cond_b_value).strip(),
             hrf_model=str(_coalesce(args.hrf_model, _cfg_value("hrf_model"), "spm")).strip(),
             drift_model=str(drift_model).strip() if drift_model else None,
-            high_pass_hz=float(_coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)),
+            high_pass_hz=float(
+                _coalesce(args.high_pass_hz, _cfg_value("high_pass_hz"), 0.008)
+            ),
             low_pass_hz=float(low_pass_hz) if low_pass_hz is not None else None,
             smoothing_fwhm=smoothing_fwhm,
             confounds_strategy=confounds_strategy,
@@ -883,26 +1207,51 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             include_other_events=include_other_events,
             lss_other_regressors=lss_other,
             condition_scope_trial_type_column=(
-                str(getattr(args, "signature_scope_trial_type_column", "") or "").strip() or "trial_type"
+                str(getattr(args, "signature_scope_trial_type_column", "") or "").strip()
+                or "trial_type"
             ),
             condition_scope_phase_column=(
-                str(getattr(args, "signature_scope_phase_column", "") or "").strip() or "stim_phase"
+                str(getattr(args, "signature_scope_phase_column", "") or "").strip()
+                or "stim_phase"
             ),
-            condition_scope_trial_types=tuple(_normalize_string_list(getattr(args, "signature_scope_trial_types", None)) or ()) or None,
-            condition_scope_stim_phases=tuple(_normalize_string_list(getattr(args, "signature_scope_stim_phases", None)) or ()) or None,
-            max_trials_per_run=int(args.max_trials_per_run) if args.max_trials_per_run else None,
+            condition_scope_trial_types=tuple(
+                _normalize_string_list(getattr(args, "signature_scope_trial_types", None))
+                or ()
+            )
+            or None,
+            condition_scope_stim_phases=tuple(
+                _normalize_string_list(getattr(args, "signature_scope_stim_phases", None))
+                or ()
+            )
+            or None,
+            max_trials_per_run=int(args.max_trials_per_run)
+            if args.max_trials_per_run
+            else None,
             fixed_effects_weighting=fixed_weighting,
             signatures=tuple(args.signatures) if args.signatures else None,
-            signature_group_column=str(getattr(args, "signature_group_column", "") or "").strip() or None,
-            signature_group_values=tuple(getattr(args, "signature_group_values", None) or ()) or None,
+            signature_group_column=str(
+                getattr(args, "signature_group_column", "") or ""
+            ).strip()
+            or None,
+            signature_group_values=tuple(getattr(args, "signature_group_values", None) or ())
+            or None,
             signature_group_scope=(
-                str(getattr(args, "signature_group_scope", "") or "").strip().lower().replace("-", "_")
+                str(getattr(args, "signature_group_scope", "") or "")
+                .strip()
+                .lower()
+                .replace("-", "_")
                 if getattr(args, "signature_group_scope", None)
                 else "across_runs"
             ),
-            write_trial_betas=bool(args.write_trial_betas) if args.write_trial_betas is not None else False,
-            write_trial_variances=bool(args.write_trial_variances) if args.write_trial_variances is not None else False,
-            write_condition_betas=bool(args.write_condition_betas) if args.write_condition_betas is not None else True,
+            write_trial_betas=bool(args.write_trial_betas)
+            if args.write_trial_betas is not None
+            else False,
+            write_trial_variances=bool(args.write_trial_variances)
+            if args.write_trial_variances is not None
+            else False,
+            write_condition_betas=bool(args.write_condition_betas)
+            if args.write_condition_betas is not None
+            else True,
         )
 
     out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None

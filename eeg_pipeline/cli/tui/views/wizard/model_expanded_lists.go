@@ -225,6 +225,26 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetSourcePlotConditions())
 	case expandedSourcePlotBands:
 		return len(m.GetSourcePlotBands())
+	case expandedFmriSecondLevelContrastNames:
+		n := len(m.GetFmriSecondLevelDiscoveredContrastNames())
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedFmriSecondLevelSubjectColumn, expandedFmriSecondLevelGroupColumn:
+		n := len(m.currentFmriSecondLevelCovariatesColumns())
+		if n == 0 {
+			return 1
+		}
+		return n
+	case expandedFmriSecondLevelCovariateColumns:
+		return len(m.getExpandedListItems())
+	case expandedFmriSecondLevelGroupAValue, expandedFmriSecondLevelGroupBValue:
+		n := len(m.GetFmriSecondLevelDiscoveredCovariateValues(m.fmriSecondLevelGroupColumn))
+		if n == 0 {
+			return 1
+		}
+		return n
 	case expandedTemporalTopomapsFeatureDir:
 		return len(m.temporalTopomapsStatsFeatureFolders)
 	case expandedPredictorResidualCrossfitGroupColumn:
@@ -520,6 +540,30 @@ func (m Model) getExpandedListItems() []string {
 		return m.GetSourcePlotConditions()
 	case expandedSourcePlotBands:
 		return m.GetSourcePlotBands()
+	case expandedFmriSecondLevelContrastNames:
+		contrasts := m.GetFmriSecondLevelDiscoveredContrastNames()
+		if len(contrasts) == 0 {
+			return []string{"(type manually)"}
+		}
+		return contrasts
+	case expandedFmriSecondLevelSubjectColumn, expandedFmriSecondLevelGroupColumn:
+		columns := m.currentFmriSecondLevelCovariatesColumns()
+		if len(columns) == 0 {
+			return []string{"(type manually)"}
+		}
+		return columns
+	case expandedFmriSecondLevelCovariateColumns:
+		columns := m.currentFmriSecondLevelCovariatesColumns()
+		if len(columns) == 0 {
+			return []string{"(none)", "(type manually)"}
+		}
+		return append([]string{"(none)"}, columns...)
+	case expandedFmriSecondLevelGroupAValue, expandedFmriSecondLevelGroupBValue:
+		values := m.GetFmriSecondLevelDiscoveredCovariateValues(m.fmriSecondLevelGroupColumn)
+		if len(values) == 0 {
+			return []string{"(type manually)"}
+		}
+		return values
 	case expandedTemporalTopomapsFeatureDir:
 		return m.temporalTopomapsStatsFeatureFolders
 	case expandedPredictorResidualCrossfitGroupColumn:
@@ -559,6 +603,11 @@ func (m Model) availableGroupLevelTargets() []string {
 		out = append(out, val)
 	}
 	return out
+}
+
+func (m Model) currentFmriSecondLevelCovariatesColumns() []string {
+	columns, _, _ := m.currentFmriSecondLevelCovariatesDiscovery()
+	return columns
 }
 
 // isColumnValueSelected checks if a value is selected for the current column context
@@ -651,6 +700,10 @@ func (m Model) isColumnValueSelected(value string) bool {
 				selectedValues = cfg.SourceBandsSpec
 			}
 		}
+	case expandedFmriSecondLevelContrastNames:
+		selectedValues = m.fmriSecondLevelContrastNames
+	case expandedFmriSecondLevelCovariateColumns:
+		selectedValues = m.fmriSecondLevelCovariateColumns
 	case expandedDoseResponseBands:
 		if m.editingPlotID != "" {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
@@ -1299,6 +1352,73 @@ func (m *Model) handleExpandedListToggle() {
 			m.toggleSpaceValue(selectedItem, &cfg.SourceBandsSpec)
 			m.plotItemConfigs[m.editingPlotID] = cfg
 		}
+	case expandedFmriSecondLevelContrastNames:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriSecondLevelContrastNames)
+		} else {
+			m.toggleSpaceValue(selectedItem, &m.fmriSecondLevelContrastNames)
+		}
+	case expandedFmriSecondLevelSubjectColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriSecondLevelSubjectColumn)
+		} else {
+			m.fmriSecondLevelSubjectColumn = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriSecondLevelCovariateColumns:
+		switch selectedItem {
+		case "(none)":
+			m.fmriSecondLevelCovariateColumns = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		case "(type manually)":
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriSecondLevelCovariateColumns)
+		default:
+			m.toggleSpaceValue(selectedItem, &m.fmriSecondLevelCovariateColumns)
+		}
+	case expandedFmriSecondLevelGroupColumn:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriSecondLevelGroupColumn)
+		} else {
+			m.fmriSecondLevelGroupColumn = selectedItem
+			m.fmriSecondLevelGroupAValue = ""
+			m.fmriSecondLevelGroupBValue = ""
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriSecondLevelGroupAValue:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriSecondLevelGroupAValue)
+		} else if strings.TrimSpace(m.fmriSecondLevelGroupBValue) == selectedItem {
+			m.ShowToast("Group A and Group B must be different", "warning")
+		} else {
+			m.fmriSecondLevelGroupAValue = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedFmriSecondLevelGroupBValue:
+		if selectedItem == "(type manually)" {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+			m.startTextEdit(textFieldFmriSecondLevelGroupBValue)
+		} else if strings.TrimSpace(m.fmriSecondLevelGroupAValue) == selectedItem {
+			m.ShowToast("Group A and Group B must be different", "warning")
+		} else {
+			m.fmriSecondLevelGroupBValue = selectedItem
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
 	case expandedTemporalTopomapsFeatureDir:
 		if m.editingPlotID != "" {
 			cfg := m.ensurePlotItemConfig(m.editingPlotID)
@@ -1483,6 +1603,18 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optSourceLocFmriConditionScopeTrialTypes
 	case expandedIAFRois:
 		return opt == optIAFRois
+	case expandedFmriSecondLevelContrastNames:
+		return opt == optFmriSecondLevelContrastNames
+	case expandedFmriSecondLevelSubjectColumn:
+		return opt == optFmriSecondLevelSubjectColumn
+	case expandedFmriSecondLevelCovariateColumns:
+		return opt == optFmriSecondLevelCovariateColumns
+	case expandedFmriSecondLevelGroupColumn:
+		return opt == optFmriSecondLevelGroupColumn
+	case expandedFmriSecondLevelGroupAValue:
+		return opt == optFmriSecondLevelGroupAValue
+	case expandedFmriSecondLevelGroupBValue:
+		return opt == optFmriSecondLevelGroupBValue
 	case expandedPredictorResidualCrossfitGroupColumn:
 		return opt == optPredictorResidualCrossfitGroupColumn
 	case expandedGroupLevelTarget:
@@ -1709,6 +1841,31 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			}
 		}
 		return false
+	case expandedFmriSecondLevelContrastNames:
+		for _, contrast := range splitSpaceList(m.fmriSecondLevelContrastNames) {
+			if contrast == item {
+				return true
+			}
+		}
+		return false
+	case expandedFmriSecondLevelSubjectColumn:
+		return m.fmriSecondLevelSubjectColumn == item
+	case expandedFmriSecondLevelCovariateColumns:
+		if item == "(none)" {
+			return strings.TrimSpace(m.fmriSecondLevelCovariateColumns) == ""
+		}
+		for _, column := range splitSpaceList(m.fmriSecondLevelCovariateColumns) {
+			if column == item {
+				return true
+			}
+		}
+		return false
+	case expandedFmriSecondLevelGroupColumn:
+		return m.fmriSecondLevelGroupColumn == item
+	case expandedFmriSecondLevelGroupAValue:
+		return m.fmriSecondLevelGroupAValue == item
+	case expandedFmriSecondLevelGroupBValue:
+		return m.fmriSecondLevelGroupBValue == item
 	case expandedPredictorResidualCrossfitGroupColumn:
 		if item == "(default: run column)" {
 			return strings.TrimSpace(m.predictorResidualCrossfitGroupColumn) == ""

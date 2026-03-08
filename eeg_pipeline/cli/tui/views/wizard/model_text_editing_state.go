@@ -20,6 +20,7 @@ func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 	}
 	if m.derivRoot == "" && summary.DerivRoot != "" {
 		m.derivRoot = summary.DerivRoot
+		m.fmriSecondLevelContrastDiscoveryKey = ""
 	}
 	if m.sourceRoot == "" && summary.SourceRoot != "" {
 		m.sourceRoot = summary.SourceRoot
@@ -35,6 +36,7 @@ func (m *Model) SetTask(task string) {
 		return
 	}
 	m.task = task
+	m.fmriSecondLevelContrastDiscoveryKey = ""
 }
 
 func (m *Model) SetRepoRoot(repoRoot string) {

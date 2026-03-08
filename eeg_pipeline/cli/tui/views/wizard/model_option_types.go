@@ -408,6 +408,7 @@ const (
 	optTemporalTimeMinMs
 	optTemporalTimeMaxMs
 	optTemporalSmoothMs
+	optTemporalTopomapWindowMs
 	optTemporalTargetColumn
 	optTemporalSplitByCondition
 	optTemporalConditionColumn
@@ -880,6 +881,28 @@ const (
 	optFmriAnalysisPlotSignatures
 	optFmriAnalysisSignatureDir
 	optFmriAnalysisSignatureMaps
+	// fMRI second-level group-analysis options
+	optFmriSecondLevelGroupInput
+	optFmriSecondLevelGroupDesign
+	optFmriSecondLevelGroupInference
+	optFmriSecondLevelGroupOutput
+	optFmriSecondLevelModel
+	optFmriSecondLevelInputRoot
+	optFmriSecondLevelContrastNames
+	optFmriSecondLevelConditionLabels
+	optFmriSecondLevelCovariatesFile
+	optFmriSecondLevelSubjectColumn
+	optFmriSecondLevelCovariateColumns
+	optFmriSecondLevelGroupColumn
+	optFmriSecondLevelGroupAValue
+	optFmriSecondLevelGroupBValue
+	optFmriSecondLevelFormula
+	optFmriSecondLevelWriteDesignMatrix
+	optFmriSecondLevelPermutationEnabled
+	optFmriSecondLevelPermutationCount
+	optFmriSecondLevelTwoSided
+	optFmriSecondLevelOutputName
+	optFmriSecondLevelOutputDir
 	// fMRI analysis trial-wise signatures options
 	optFmriTrialSigGroup
 	optFmriTrialSigMethod

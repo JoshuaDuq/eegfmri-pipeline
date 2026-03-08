@@ -1219,7 +1219,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			hint = "build from BOLD vs. load pre-computed"
 		case optSourceLocFmriContrastType:
 			label = "Contrast Type"
-			contrastTypes := []string{"t-test", "paired t-test", "F-test", "custom formula"}
+			contrastTypes := []string{"t-test", "custom formula"}
 			value = contrastTypes[m.sourceLocFmriContrastType]
 			hint = "statistical test type"
 		case optSourceLocFmriCondAColumn:

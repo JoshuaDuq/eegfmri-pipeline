@@ -2,10 +2,11 @@
 
 **Module:** `fmri_pipeline`
 
-This document is the methods reference for the subject-level fMRI analysis pipeline.
+This document is the methods reference for the fMRI analysis pipeline.
 The pipeline starts from BIDS-formatted inputs and covers fMRIPrep preprocessing,
-first-level GLM contrast analysis, trial-wise beta estimation, and multivariate
-signature readout (NPS, SIIPS1).
+first-level GLM contrast analysis, explicit second-level group inference,
+trial-wise beta estimation, and multivariate signature readout using
+user-configured weight maps.
 
 The resulting fMRI statistical maps are used to constrain EEG inverse solutions in the
 source localization stage of the EEG pipeline.
@@ -23,7 +24,7 @@ source localization stage of the EEG pipeline.
 7. [Stage 4 — Trial-Wise Beta Estimation](#7-stage-4--trial-wise-beta-estimation)
 8. [Stage 5 — Reporting and Quality Control](#8-stage-5--reporting-and-quality-control)
 9. [BEM and Coregistration](#9-bem-and-coregistration)
-10. [Multivariate Pain Signatures](#10-multivariate-pain-signatures)
+10. [Multivariate Signature Readouts](#10-multivariate-signature-readouts)
 11. [Output Layout](#11-output-layout)
 12. [Configuration Reference](#12-configuration-reference)
 13. [Dependencies](#13-dependencies)
@@ -35,7 +36,7 @@ source localization stage of the EEG pipeline.
 | Symbol | Meaning |
 |--------|---------|
 | $\mathbf{x} \in \mathbb{R}^V$ | Vectorized voxel image (after masking) |
-| $\mathbf{w} \in \mathbb{R}^V$ | Signature weight map (NPS or SIIPS1) |
+| $\mathbf{w} \in \mathbb{R}^V$ | Signature weight map (configured reference pattern) |
 | $V$ | Number of finite, unmasked voxels |
 | $\beta_i$ | Beta estimate for trial $i$ |
 | $\sigma^2_i$ | Variance of beta estimate for trial $i$ |
@@ -54,9 +55,11 @@ source localization stage of the EEG pipeline.
 |------|---------------|
 | `pipelines/fmri_preprocessing.py` | fMRIPrep pipeline orchestrator |
 | `pipelines/fmri_analysis.py` | First-level GLM pipeline orchestrator |
+| `pipelines/fmri_second_level.py` | Explicit second-level group-analysis pipeline orchestrator |
 | `pipelines/fmri_trial_signatures.py` | Trial-wise beta and signature pipeline orchestrator |
-| `analysis/multivariate_signatures.py` | NPS/SIIPS1 multivariate signature computation |
+| `analysis/multivariate_signatures.py` | Multivariate signature computation from configured weight maps |
 | `analysis/contrast_builder.py` | First-level GLM fitting and contrast computation |
+| `analysis/second_level.py` | Group-level design assembly and second-level inference |
 | `analysis/trial_signatures.py` | Trial-wise beta-series (LSA) and LSS extraction |
 | `analysis/confounds_selection.py` | fMRIPrep confound regressor selection |
 | `analysis/events_selection.py` | Trial-type normalization and filtering |
@@ -65,7 +68,7 @@ source localization stage of the EEG pipeline.
 | `analysis/smoothing.py` | Spatial smoothing FWHM normalization |
 | `analysis/plotting_config.py` | Plot configuration dataclass and validation |
 | `cli/commands/fmri.py` | CLI entry point for fMRIPrep preprocessing |
-| `cli/commands/fmri_analysis.py` | CLI entry point for first-level analysis and trial signatures |
+| `cli/commands/fmri_analysis.py` | CLI entry point for first-level, second-level, and trial-wise analysis |
 | `utils/bold_discovery.py` | BOLD run and confound file discovery |
 | `utils/signature_paths.py` | Signature weight map path resolution |
 | `utils/config/fmri_config.yaml` | Reference fMRI-only config template |
@@ -76,8 +79,10 @@ source localization stage of the EEG pipeline.
 
 ```
 BIDS ──► fMRIPrep ──► First-Level GLM ──► Contrast Maps ──► EEG Source Localization
+                           │                    │
+                           │                    └──► Second-Level GLM ──► Group Inference Maps
                            │
-                           └──► Trial-Wise Betas ──► Signature Expression (NPS/SIIPS1)
+                           └──► Trial-Wise Betas ──► Signature Expression (configured weight maps)
 ```
 
 | Stage | Module | Purpose |
@@ -85,6 +90,7 @@ BIDS ──► fMRIPrep ──► First-Level GLM ──► Contrast Maps ──
 | 1 | Input BIDS dataset + `events.tsv` | Required input contract for downstream modeling |
 | 2 | `pipelines/fmri_preprocessing.py` | fMRIPrep containerized preprocessing |
 | 3 | `pipelines/fmri_analysis.py` + `analysis/contrast_builder.py` | Multi-run first-level GLM and contrast computation |
+| 3b | `pipelines/fmri_second_level.py` + `analysis/second_level.py` | Explicit group-level inference from first-level MNI effect-size maps |
 | 4 | `pipelines/fmri_trial_signatures.py` + `analysis/trial_signatures.py` | Trial-wise beta estimation and signature readout |
 | 5 | `analysis/reporting.py` | HTML report generation with QC diagnostics |
 
@@ -197,9 +203,11 @@ Events undergo three filtering stages before GLM fitting:
 1. **`events_to_model`** — Restricts which `trial_type` rows enter the GLM
    (e.g., `["stimulation", "pain_question", "vas_rating"]`).
 
-2. **`stim_phases_to_model`** — When a `stim_phase` column is present, restricts
-   stimulation events to specified sub-phases (e.g., `["plateau"]`).
-   Non-stimulation rows are unaffected. Use `["all"]` to disable.
+2. **`stim_phases_to_model`** — Restricts stimulation events to specified
+   sub-phases (e.g., `["plateau"]`). The configured `phase_column` must exist
+   whenever phase scoping is requested, and `phase_scope_value` requires its
+   configured scope column to exist. Non-stimulation rows are unaffected. Use
+   `["all"]` to disable.
 
 3. **Condition remapping** — When `condition_a.column` / `condition_a.value` are
    specified:
@@ -248,18 +256,15 @@ intersection (threshold = 1.0) is used as the GLM mask.
 Output types: `z_score` (default), `stat` (t-statistic), `effect_size` (COPE/beta).
 For multi-run models, the contrast definition is replicated per run.
 
-### 6.7 Cluster-Extent Thresholding
+### 6.7 Thresholding Scope
 
-When `cluster_correction = true` on a z-score output:
+The first-level contrast builder saves unthresholded subject-level statistics or effect
+maps. Thresholding is handled separately:
 
-1. Voxelwise z-threshold derived from `cluster_p_threshold` (default 0.001) via the
-   inverse normal CDF. For `tail = abs`, the threshold is two-sided ($p/2$).
-2. Connected components identified using 6-connectivity (face-adjacent voxels).
-3. Components smaller than `cluster_min_voxels` (or `cluster_min_volume_mm3` when
-   voxel dimensions are available) are removed.
-
-The resulting binary mask is saved alongside the contrast map and consumed by the
-EEG source localization stage.
+1. **Visualization/QC** — plotting/reporting can threshold maps for display.
+2. **EEG source localization** — `feature_engineering.sourcelocalization.fmri`
+   applies z/FDR thresholding and cluster filtering when generating constraint masks.
+   Constraint-mask generation requires `fmri_contrast.output_type = z-score`.
 
 ### 6.8 Resampling to FreeSurfer Space
 
@@ -277,13 +282,40 @@ interpolation. Target image priority: `T1.mgz` > `orig.mgz` > `brain.mgz`.
 - Design matrices are written to disk as TSV and PNG when
   `write_design_matrix = true`.
 
+### 6.10 Explicit Second-Level Group Inference
+
+**Module:** `pipelines/fmri_second_level.py` → `analysis/second_level.py`
+
+Second-level analysis is an explicit mode (`eeg-pipeline fmri-analysis second-level`)
+that consumes previously generated first-level maps. It is intentionally separate
+from first-level batch execution so users must choose the group design explicitly.
+
+Supported designs:
+
+- `one-sample`: group mean/random-effects inference for one first-level contrast
+- `two-sample`: between-group comparison for one first-level contrast using a subject-level TSV/CSV
+- `paired`: within-subject comparison between two first-level contrasts via subject-wise difference maps
+- `repeated-measures`: within-subject multi-condition model across two or more first-level contrasts
+
+Validity constraints:
+
+- Inputs must be first-level `effect_size` maps in `MNI152NLin2009cAsym` space.
+- First-level sidecar metadata must match across subjects for each requested contrast.
+- Explicitly requested subjects must all resolve to matching first-level maps.
+- Repeated-measures models do not accept subject-level covariates because those are aliased by the within-subject design.
+
+Permutation inference:
+
+- `group_permutation_inference` adds max-T permutation inference for second-level t-contrasts.
+- Default repeated-measures omnibus tests are parametric F-tests; permutation mode currently requires a custom pairwise t-contrast formula.
+
 ---
 
 ## 7. Stage 4 — Trial-Wise Beta Estimation
 
 **Module:** `pipelines/fmri_trial_signatures.py` → `analysis/trial_signatures.py`
 
-Per-trial beta maps and multivariate pain signature expression.
+Per-trial beta maps and multivariate signature expression.
 
 ### 7.1 Estimation Methods
 
@@ -348,12 +380,12 @@ Condition maps produced:
 
 ### 7.4 Signature Readout
 
-For each trial beta map and condition-averaged map, multivariate pain signature
+For each trial beta map and condition-averaged map, multivariate signature
 expression is computed (see §10).
 
 **Spatial constraint:** Trial-wise signature extraction requires MNI-space images.
 The pipeline raises a `ValueError` if `fmriprep_space` does not include `"mni"`,
-since NPS and SIIPS1 weight maps are defined in MNI space.
+because the current signature workflow assumes standard-space weight maps.
 
 ### 7.5 Outputs
 
@@ -472,18 +504,32 @@ Dockerfile: `eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne`.
 
 ---
 
-## 10. Multivariate Pain Signatures
+## 10. Multivariate Signature Readouts
 
 **Module:** `analysis/multivariate_signatures.py`
 
-Expression of established multivariate pain biomarkers on statistical or beta maps.
+Expression of configured multivariate reference patterns on statistical or beta maps.
 
-### 10.1 Supported Signatures
+### 10.1 Configuration-Driven Signature Maps
 
-| Signature | Weight map | Reference |
-|-----------|-----------|-----------|
-| **NPS** (Neurologic Pain Signature) | `NPS/weights_NSF_grouppred_cvpcr.nii.gz` | Wager et al., 2013, *NEJM* |
-| **SIIPS1** (Stimulus-Independent Pain Signature) | `SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz` | Woo et al., 2017, *Nature Communications* |
+No signatures are hard-coded in the pipeline. Instead, signature maps are supplied
+through configuration:
+
+```yaml
+paths:
+  signature_dir: /path/to/signature_maps
+  signature_maps:
+    - name: "SIG_A"
+      path: "maps/sig_a_weights.nii.gz"
+    - name: "SIG_B"
+      path: "maps/sig_b_weights.nii.gz"
+```
+
+Each configured signature must define:
+
+- a unique `name`
+- a `path` relative to `paths.signature_dir`
+- a weight map in the same standard space expected by the workflow
 
 ### 10.2 Computation
 
@@ -522,6 +568,15 @@ Voxel count $V$ (finite, unmasked voxels used in computation) is recorded for QC
 │           ├── *_desc-preproc_bold.nii.gz
 │           ├── *_desc-brain_mask.nii.gz
 │           └── *_desc-confounds_timeseries.tsv
+├── group/fmri/
+│   └── second_level/
+│       └── task-<task>/model-<model>/contrast-<name>/
+│           ├── group_task-*_stat-*.nii.gz    # Parametric maps (+ optional permutation log-p map)
+│           ├── input_manifest.tsv
+│           ├── second_level_metadata.json
+│           └── qc/
+│               ├── second_level_design_matrix.tsv
+│               └── second_level_design_matrix.png
 └── sub-XXXX/fmri/
     ├── first_level/
     │   └── task-<task>/contrast-<name>/
@@ -560,7 +615,7 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `paths.bids_fmri_root` | BIDS root directory containing raw fMRI data |
 | `paths.freesurfer_dir` | FreeSurfer `SUBJECTS_DIR` |
 | `paths.freesurfer_license` | Path to FreeSurfer `license.txt` (if unset: `EEG_PIPELINE_FREESURFER_LICENSE`, then `~/license.txt`) |
-| `paths.signature_dir` | Root directory containing NPS/SIIPS1 weight maps |
+| `paths.signature_dir` | Root directory containing configured multivariate signature weight maps; explicit paths must exist |
 
 ### 12.2 fMRI Preprocessing (`fmri_preprocessing.fmriprep`)
 
@@ -593,23 +648,44 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `condition_b.value` | `0` | Value selecting condition B trials |
 | `condition_scope_trial_types` | `null` | Restrict condition selection to specific trial types |
 | `events_to_model` | `null` | Restrict which event types enter the GLM |
-| `stim_phases_to_model` | `null` | Restrict stimulation sub-phases |
+| `stim_phases_to_model` | `null` | Restrict stimulation sub-phases; errors if the configured phase column is absent |
 | `formula` | `null` | Custom contrast formula (overrides conditions) |
 | `name` | `contrast` | Contrast output name |
-| `runs` | `null` (auto) | Specific run numbers to include |
+| `runs` | `null` (auto) | Specific run numbers to include; explicit requests fail if any requested run is missing |
 | `hrf_model` | `spm` | HRF model |
 | `drift_model` | `cosine` | Drift model |
 | `high_pass_hz` | `0.008` | High-pass cutoff (Hz) |
 | `low_pass_hz` | `null` | Low-pass cutoff (Hz) |
 | `confounds_strategy` | `auto` | Confound selection strategy |
 | `smoothing_fwhm` | `null` | Spatial smoothing FWHM (mm) |
-| `cluster_correction` | `true` | Generate cluster-extent mask |
-| `cluster_p_threshold` | `0.001` | Cluster-forming p-threshold |
 | `output_type` | `z-score` | Output map type |
 | `resample_to_freesurfer` | `true` | Resample contrast map to FreeSurfer space |
 | `write_design_matrix` | `false` | Write design matrices to disk for QC |
 
-### 12.4 fMRI Constraint (EEG Source Localization)
+### 12.4 Second-Level Group Analysis (`fmri_group_level`)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable second-level defaults for CLI/TUI group mode |
+| `model` | `one-sample` | Group design (`one-sample`, `two-sample`, `paired`, `repeated-measures`) |
+| `contrast_names` | `[]` | First-level contrast names consumed by second-level mode |
+| `condition_labels` | `null` | Optional labels aligned to `contrast_names` |
+| `input_root` | `null` | Optional first-level root override (default: `deriv_root`) |
+| `formula` | `null` | Optional custom second-level contrast formula |
+| `output_name` | `null` | Optional output label override |
+| `output_dir` | `null` | Optional output directory override |
+| `write_design_matrix` | `true` | Write second-level design matrices to `qc/` |
+| `covariates_file` | `null` | Subject-level TSV/CSV for group assignments and covariates |
+| `subject_column` | `subject` | Subject ID column in `covariates_file` |
+| `covariate_columns` | `[]` | Numeric nuisance covariates (centered before fitting) |
+| `group_column` | `null` | Required grouping column for `two-sample` |
+| `group_a_value` | `null` | Reference group label for `two-sample` |
+| `group_b_value` | `null` | Comparison group label for `two-sample` |
+| `permutation.enabled` | `false` | Add max-T permutation inference for second-level t-contrasts |
+| `permutation.n_permutations` | `5000` | Number of permutations |
+| `permutation.two_sided` | `true` | Use two-sided permutation inference |
+
+### 12.5 fMRI Constraint (EEG Source Localization)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -622,7 +698,7 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `fmri_constraint.cluster_min_volume_mm3` | `null` | Minimum cluster volume (overrides voxel count) |
 | `fmri_constraint.max_clusters` | `20` | Maximum number of clusters to retain |
 
-### 12.5 BEM Generation
+### 12.6 BEM Generation
 
 | Key | Default | Description |
 |-----|---------|-------------|

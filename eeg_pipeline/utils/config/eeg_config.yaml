@@ -488,9 +488,9 @@ feature_engineering:
       # NOTE: fmri.time_windows is intentionally unsupported for source feature computation.
       contrast:
         enabled: false
-        type: "t-test"             # "t-test" | "paired-t-test" | "f-test" | "custom"
-        cond_a: {column: "trial_type", value: ""}
-        cond_b: {column: "trial_type", value: ""}
+        type: "t-test"             # "t-test" | "custom"
+        condition_a: {column: "trial_type", value: ""}
+        condition_b: {column: "trial_type", value: ""}
         formula: ""
         name: "pain_vs_baseline"
         runs: []                   # explicit runs (empty = auto-detect)
@@ -502,12 +502,11 @@ feature_engineering:
         # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
         #   ["stimulation", "pain_question", "vas_rating"]
         events_to_model: null
-        # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
+        # Optional: restrict which stimulation sub-phases are modeled using the configured phase column.
+        # If set, that phase column must exist in events.tsv.
         # If null, no stim_phase scoping is applied.
         # Use ["all"] to disable scoping and model all stimulation phases.
         stim_phases_to_model: null
-        cluster_correction: true
-        cluster_p_threshold: 0.001
         output_type: "z-score"     # "z-score" | "t-stat" | "cope" | "beta"
         resample_to_freesurfer: true
 
@@ -798,6 +797,9 @@ behavior_analysis:
     erds:
       baseline_window: [-0.5, -0.1]    # Baseline window for ERDS (seconds)
       method: "percent"                # ERDS computation method: "percent" or "zscore"
+
+  temporal_correlation_topomaps:
+    window_size_ms: 500                # Fixed temporal bin width for by-condition topomap summaries
   
   # Cluster permutation tests
   cluster:

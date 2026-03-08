@@ -32,7 +32,9 @@ def discover_signature_root(config: Any, deriv_root: Any) -> Optional[Path]:
     cfg_path = _get_config_value(config, "paths.signature_dir")
     if cfg_path:
         candidate = Path(str(cfg_path)).expanduser()
-        return candidate if candidate.exists() else None
+        if not candidate.exists():
+            raise FileNotFoundError(f"Configured paths.signature_dir does not exist: {candidate}")
+        return candidate
 
     try:
         candidate = Path(deriv_root).expanduser().resolve().parent / "external"
@@ -52,13 +54,18 @@ def get_signature_specs(config: Any) -> List[Dict[str, str]]:
     if not isinstance(specs, list):
         return []
     validated: List[Dict[str, str]] = []
+    seen_names: set[str] = set()
     for item in specs:
         if not isinstance(item, dict):
-            continue
+            raise ValueError("Each entry in paths.signature_maps must be a mapping with 'name' and 'path'.")
         name = str(item.get("name", "")).strip()
         path = str(item.get("path", "")).strip()
-        if name and path:
-            validated.append({"name": name, "path": path})
+        if not name or not path:
+            raise ValueError("Each entry in paths.signature_maps must define non-empty 'name' and 'path'.")
+        if name in seen_names:
+            raise ValueError(f"Duplicate signature name in paths.signature_maps: {name!r}")
+        seen_names.add(name)
+        validated.append({"name": name, "path": path})
     return validated
 
 

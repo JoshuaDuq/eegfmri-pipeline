@@ -87,6 +87,66 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
 		mode = m.modeOptions[m.modeIndex]
 	}
+	if mode == "second-level" {
+		options = append(options, optFmriSecondLevelGroupInput)
+		if m.fmriSecondLevelGroupInputExpanded {
+			options = append(options,
+				optFmriSecondLevelInputRoot,
+				optFmriSecondLevelContrastNames,
+				optFmriSecondLevelConditionLabels,
+			)
+		}
+
+		options = append(options, optFmriSecondLevelGroupDesign)
+		if m.fmriSecondLevelGroupDesignExpanded {
+			options = append(options,
+				optFmriSecondLevelModel,
+				optFmriSecondLevelFormula,
+				optFmriSecondLevelCovariatesFile,
+				optFmriSecondLevelSubjectColumn,
+			)
+			switch m.fmriSecondLevelModelIndex % 4 {
+			case 1: // two-sample
+				options = append(options,
+					optFmriSecondLevelCovariateColumns,
+					optFmriSecondLevelGroupColumn,
+					optFmriSecondLevelGroupAValue,
+					optFmriSecondLevelGroupBValue,
+				)
+			case 2: // paired
+				options = append(options, optFmriSecondLevelCovariateColumns)
+			case 3: // repeated-measures
+				// repeated-measures currently omits subject-level covariates
+			default: // one-sample
+				options = append(options, optFmriSecondLevelCovariateColumns)
+			}
+		}
+
+		options = append(options, optFmriSecondLevelGroupInference)
+		if m.fmriSecondLevelGroupInferExpanded {
+			options = append(options,
+				optFmriSecondLevelWriteDesignMatrix,
+				optFmriSecondLevelPermutationEnabled,
+			)
+			if m.fmriSecondLevelPermutationEnabled {
+				options = append(options,
+					optFmriSecondLevelPermutationCount,
+					optFmriSecondLevelTwoSided,
+				)
+			}
+		}
+
+		options = append(options, optFmriSecondLevelGroupOutput)
+		if m.fmriSecondLevelGroupOutputExpanded {
+			options = append(options,
+				optFmriSecondLevelOutputName,
+				optFmriSecondLevelOutputDir,
+			)
+		}
+
+		return options
+	}
+
 	isFirstLevel := mode == "" || mode == "first-level"
 
 	options = append(options, optFmriAnalysisGroupInput)

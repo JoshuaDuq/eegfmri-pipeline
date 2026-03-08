@@ -32,6 +32,10 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 
 	labelWidth := defaultLabelWidthWide
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	mode := ""
+	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
+		mode = m.modeOptions[m.modeIndex]
+	}
 
 	// Display values
 	inputSourceOptions := []string{"fmriprep", "bids_raw"}
@@ -189,6 +193,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	plotVmaxModeOptions := []string{"per-space-robust", "shared-robust", "manual"}
 	plotVmaxModeVal := plotVmaxModeOptions[m.fmriAnalysisPlotVmaxModeIndex%len(plotVmaxModeOptions)]
 	plotVmaxManualVal := fmt.Sprintf("%.2f", m.fmriAnalysisPlotVmaxManual)
+	secondLevelPermutationCountVal := fmt.Sprintf("%d", m.fmriSecondLevelPermutationCount)
 
 	if m.editingNumber {
 		buffer := m.numberBuffer + "█"
@@ -207,6 +212,8 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			plotClusterMinVal = buffer
 		case m.isCurrentlyEditing(optFmriAnalysisPlotVmaxManual):
 			plotVmaxManualVal = buffer
+		case m.isCurrentlyEditing(optFmriSecondLevelPermutationCount):
+			secondLevelPermutationCountVal = buffer
 		}
 	}
 
@@ -227,6 +234,105 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	}
 	if fsDirVal == "" {
 		fsDirVal = "(from config)"
+	}
+
+	secondLevelModels := []string{"one-sample", "two-sample", "paired", "repeated-measures"}
+	secondLevelModelVal := secondLevelModels[m.fmriSecondLevelModelIndex%len(secondLevelModels)]
+
+	secondLevelInputRootVal := strings.TrimSpace(m.fmriSecondLevelInputRoot)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelInputRoot {
+		secondLevelInputRootVal = m.textBuffer + "█"
+	}
+	if secondLevelInputRootVal == "" {
+		secondLevelInputRootVal = "(default: deriv_root)"
+	}
+
+	secondLevelContrastNamesVal := strings.TrimSpace(m.fmriSecondLevelContrastNames)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelContrastNames {
+		secondLevelContrastNamesVal = m.textBuffer + "█"
+	}
+	if secondLevelContrastNamesVal == "" {
+		secondLevelContrastNamesVal = "(required)"
+	}
+
+	secondLevelConditionLabelsVal := strings.TrimSpace(m.fmriSecondLevelConditionLabels)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelConditionLabels {
+		secondLevelConditionLabelsVal = m.textBuffer + "█"
+	}
+	if secondLevelConditionLabelsVal == "" {
+		secondLevelConditionLabelsVal = "(use contrast names)"
+	}
+
+	secondLevelCovariatesFileVal := strings.TrimSpace(m.fmriSecondLevelCovariatesFile)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelCovariatesFile {
+		secondLevelCovariatesFileVal = m.textBuffer + "█"
+	}
+	if secondLevelCovariatesFileVal == "" {
+		secondLevelCovariatesFileVal = "(none)"
+	}
+
+	secondLevelSubjectColumnVal := strings.TrimSpace(m.fmriSecondLevelSubjectColumn)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelSubjectColumn {
+		secondLevelSubjectColumnVal = m.textBuffer + "█"
+	}
+	if secondLevelSubjectColumnVal == "" {
+		secondLevelSubjectColumnVal = "subject"
+	}
+
+	secondLevelCovariateColumnsVal := strings.TrimSpace(m.fmriSecondLevelCovariateColumns)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelCovariateColumns {
+		secondLevelCovariateColumnsVal = m.textBuffer + "█"
+	}
+	if secondLevelCovariateColumnsVal == "" {
+		secondLevelCovariateColumnsVal = "(none)"
+	}
+
+	secondLevelGroupColumnVal := strings.TrimSpace(m.fmriSecondLevelGroupColumn)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelGroupColumn {
+		secondLevelGroupColumnVal = m.textBuffer + "█"
+	}
+	if secondLevelGroupColumnVal == "" {
+		secondLevelGroupColumnVal = "(required for two-sample)"
+	}
+
+	secondLevelGroupAVal := strings.TrimSpace(m.fmriSecondLevelGroupAValue)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelGroupAValue {
+		secondLevelGroupAVal = m.textBuffer + "█"
+	}
+	if secondLevelGroupAVal == "" {
+		secondLevelGroupAVal = "(group A)"
+	}
+
+	secondLevelGroupBVal := strings.TrimSpace(m.fmriSecondLevelGroupBValue)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelGroupBValue {
+		secondLevelGroupBVal = m.textBuffer + "█"
+	}
+	if secondLevelGroupBVal == "" {
+		secondLevelGroupBVal = "(group B)"
+	}
+
+	secondLevelFormulaVal := strings.TrimSpace(m.fmriSecondLevelFormula)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelFormula {
+		secondLevelFormulaVal = m.textBuffer + "█"
+	}
+	if secondLevelFormulaVal == "" {
+		secondLevelFormulaVal = "(default contrast)"
+	}
+
+	secondLevelOutputNameVal := strings.TrimSpace(m.fmriSecondLevelOutputName)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelOutputName {
+		secondLevelOutputNameVal = m.textBuffer + "█"
+	}
+	if secondLevelOutputNameVal == "" {
+		secondLevelOutputNameVal = "(derived automatically)"
+	}
+
+	secondLevelOutputDirVal := strings.TrimSpace(m.fmriSecondLevelOutputDir)
+	if m.editingText && m.editingTextField == textFieldFmriSecondLevelOutputDir {
+		secondLevelOutputDirVal = m.textBuffer + "█"
+	}
+	if secondLevelOutputDirVal == "" {
+		secondLevelOutputDirVal = "(default group derivative dir)"
 	}
 
 	options := m.getFmriAnalysisOptions()
@@ -358,6 +464,46 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
+		case optFmriSecondLevelGroupInput:
+			if m.fmriSecondLevelGroupInputExpanded {
+				label = "▾ Group Input"
+			} else {
+				label = "▸ Group Input"
+			}
+			hint = "Existing first-level maps to analyze"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+			}
+		case optFmriSecondLevelGroupDesign:
+			if m.fmriSecondLevelGroupDesignExpanded {
+				label = "▾ Group Design"
+			} else {
+				label = "▸ Group Design"
+			}
+			hint = "Model type, covariates, and formula"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+			}
+		case optFmriSecondLevelGroupInference:
+			if m.fmriSecondLevelGroupInferExpanded {
+				label = "▾ Group Inference"
+			} else {
+				label = "▸ Group Inference"
+			}
+			hint = "Design-matrix export and permutations"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+			}
+		case optFmriSecondLevelGroupOutput:
+			if m.fmriSecondLevelGroupOutputExpanded {
+				label = "▾ Group Output"
+			} else {
+				label = "▸ Group Output"
+			}
+			hint = "Output label and directory"
+			if !isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+			}
 
 		// Input
 		case optFmriAnalysisInputSource:
@@ -379,6 +525,174 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		case optFmriAnalysisRuns:
 			label = "Runs"
 			value = runsVal
+			hint = "Space to edit"
+		case optFmriSecondLevelInputRoot:
+			label = "Input Root"
+			value = secondLevelInputRootVal
+			hint = "Space to edit"
+		case optFmriSecondLevelContrastNames:
+			label = "Input Contrasts"
+			value = secondLevelContrastNamesVal
+			contrastChoices, contrastErr := m.currentFmriSecondLevelContrastDiscovery()
+			switch {
+			case strings.TrimSpace(m.nextFmriSecondLevelContrastDiscoveryKey()) == "":
+				hint = "Select subjects first"
+			case contrastErr != "":
+				hint = contrastErr
+			case len(contrastChoices) > 0:
+				hint = fmt.Sprintf("Space to select · %d shared contrasts", len(contrastChoices))
+			default:
+				hint = "Space to discover and select"
+			}
+			if m.expandedOption == expandedFmriSecondLevelContrastNames {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optFmriSecondLevelConditionLabels:
+			label = "Condition Labels"
+			value = secondLevelConditionLabelsVal
+			hint = "Space to edit (optional; space-separated)"
+		case optFmriSecondLevelModel:
+			label = "Group Model"
+			value = secondLevelModelVal
+			hint = "Space to cycle"
+		case optFmriSecondLevelFormula:
+			label = "Formula"
+			value = secondLevelFormulaVal
+			if mode == "second-level" && secondLevelModelVal == "repeated-measures" {
+				hint = "Space to edit (empty = omnibus F-test)"
+			} else {
+				hint = "Space to edit (empty = default contrast)"
+			}
+		case optFmriSecondLevelCovariatesFile:
+			label = "Covariates File"
+			value = secondLevelCovariatesFileVal
+			hint = "Space to edit"
+		case optFmriSecondLevelSubjectColumn:
+			label = "Subject Column"
+			value = secondLevelSubjectColumnVal
+			columns, _, covErr := m.currentFmriSecondLevelCovariatesDiscovery()
+			switch {
+			case strings.TrimSpace(m.fmriSecondLevelCovariatesFile) == "":
+				hint = "Space to edit"
+			case covErr != "":
+				hint = covErr
+			case len(columns) > 0:
+				hint = fmt.Sprintf("Space to select · %d columns in file", len(columns))
+			default:
+				hint = "Space to inspect file"
+			}
+			if m.expandedOption == expandedFmriSecondLevelSubjectColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optFmriSecondLevelCovariateColumns:
+			label = "Covariate Columns"
+			value = secondLevelCovariateColumnsVal
+			columns, _, covErr := m.currentFmriSecondLevelCovariatesDiscovery()
+			switch {
+			case strings.TrimSpace(m.fmriSecondLevelCovariatesFile) == "":
+				hint = "Space to edit (space-separated)"
+			case covErr != "":
+				hint = covErr
+			case len(columns) > 0:
+				hint = fmt.Sprintf("Space to select · %d columns in file", len(columns))
+			default:
+				hint = "Space to inspect file"
+			}
+			if m.expandedOption == expandedFmriSecondLevelCovariateColumns {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optFmriSecondLevelGroupColumn:
+			label = "Group Column"
+			value = secondLevelGroupColumnVal
+			columns, _, covErr := m.currentFmriSecondLevelCovariatesDiscovery()
+			switch {
+			case strings.TrimSpace(m.fmriSecondLevelCovariatesFile) == "":
+				hint = "Space to edit"
+			case covErr != "":
+				hint = covErr
+			case len(columns) > 0:
+				hint = fmt.Sprintf("Space to select · %d columns in file", len(columns))
+			default:
+				hint = "Space to inspect file"
+			}
+			if m.expandedOption == expandedFmriSecondLevelGroupColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optFmriSecondLevelGroupAValue:
+			label = "Group A Value"
+			value = secondLevelGroupAVal
+			groupValues := m.GetFmriSecondLevelDiscoveredCovariateValues(m.fmriSecondLevelGroupColumn)
+			switch {
+			case strings.TrimSpace(m.fmriSecondLevelGroupColumn) == "":
+				hint = "Select group column first"
+			case len(groupValues) > 0:
+				hint = fmt.Sprintf("Space to select · %d values in %s", len(groupValues), m.fmriSecondLevelGroupColumn)
+			default:
+				_, _, covErr := m.currentFmriSecondLevelCovariatesDiscovery()
+				if covErr != "" {
+					hint = covErr
+				} else {
+					hint = "Space to edit"
+				}
+			}
+			if m.expandedOption == expandedFmriSecondLevelGroupAValue {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optFmriSecondLevelGroupBValue:
+			label = "Group B Value"
+			value = secondLevelGroupBVal
+			groupValues := m.GetFmriSecondLevelDiscoveredCovariateValues(m.fmriSecondLevelGroupColumn)
+			switch {
+			case strings.TrimSpace(m.fmriSecondLevelGroupColumn) == "":
+				hint = "Select group column first"
+			case len(groupValues) > 0:
+				hint = fmt.Sprintf("Space to select · %d values in %s", len(groupValues), m.fmriSecondLevelGroupColumn)
+			default:
+				_, _, covErr := m.currentFmriSecondLevelCovariatesDiscovery()
+				if covErr != "" {
+					hint = covErr
+				} else {
+					hint = "Space to edit"
+				}
+			}
+			if m.expandedOption == expandedFmriSecondLevelGroupBValue {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optFmriSecondLevelWriteDesignMatrix:
+			label = "Write Design Matrix"
+			value = m.boolToOnOff(m.fmriSecondLevelWriteDesignMatrix)
+			hint = "Space to toggle"
+		case optFmriSecondLevelPermutationEnabled:
+			label = "Permutation Inference"
+			value = m.boolToOnOff(m.fmriSecondLevelPermutationEnabled)
+			hint = "Space to toggle"
+		case optFmriSecondLevelPermutationCount:
+			label = "Permutation Count"
+			value = secondLevelPermutationCountVal
+			hint = "Space to edit"
+		case optFmriSecondLevelTwoSided:
+			label = "Two-Sided Permutation"
+			value = m.boolToOnOff(m.fmriSecondLevelTwoSided)
+			hint = "Space to toggle"
+		case optFmriSecondLevelOutputName:
+			label = "Output Name"
+			value = secondLevelOutputNameVal
+			hint = "Space to edit"
+		case optFmriSecondLevelOutputDir:
+			label = "Output Dir"
+			value = secondLevelOutputDirVal
 			hint = "Space to edit"
 
 		// Contrast

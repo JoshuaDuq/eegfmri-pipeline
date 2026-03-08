@@ -981,6 +981,16 @@ class BehaviorContext:
             )
             return
 
+        existing_column = self._find_equivalent_trial_order_covariate(trial_series)
+        if existing_column is not None:
+            self.data_qc["trial_order"].update(
+                {
+                    "existing_covariate_column": str(existing_column),
+                    "added_trial_index_column": False,
+                }
+            )
+            return
+
         self._add_trial_index_to_covariates(trial_series)
 
     def _find_trial_column(self) -> Optional[str]:
@@ -1112,8 +1122,32 @@ class BehaviorContext:
                     validation.get("n_non_monotonic_groups", 0)
                 ),
                 "max_missing_fraction_threshold": max_missing,
+                "added_trial_index_column": True,
             }
         )
+
+    def _find_equivalent_trial_order_covariate(
+        self, trial_series: pd.Series
+    ) -> Optional[str]:
+        """Return an existing covariate column that already encodes trial order."""
+        if self.covariates_df is None or self.covariates_df.empty:
+            return None
+
+        target = pd.to_numeric(trial_series, errors="coerce")
+        for column in self.covariates_df.columns:
+            candidate = pd.to_numeric(self.covariates_df[column], errors="coerce")
+            candidate_mask = candidate.notna().to_numpy()
+            target_mask = target.notna().to_numpy()
+            if not np.array_equal(candidate_mask, target_mask):
+                continue
+            if np.allclose(
+                candidate.to_numpy(dtype=float)[candidate_mask],
+                target.to_numpy(dtype=float)[target_mask],
+                rtol=0.0,
+                atol=0.0,
+            ):
+                return str(column)
+        return None
 
     def _add_trial_index_to_covariates(self, trial_series: pd.Series) -> None:
         """Add trial_index column to covariates DataFrame."""

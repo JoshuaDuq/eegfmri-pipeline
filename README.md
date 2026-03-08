@@ -7,7 +7,7 @@
 
 A modular, end-to-end pipeline for simultaneous EEG–fMRI research.
 Covers raw data conversion, preprocessing, feature extraction, behavioral analysis,
-machine learning, fMRI first-level GLM, and publication-ready visualization —
+machine learning, fMRI first-level and second-level GLM, and publication-ready visualization —
 all from a unified CLI and interactive TUI.
 Under active development.
 
@@ -193,6 +193,9 @@ data/
     │   ├── eeg/                # ICA components, bad channel logs
     │   └── fmri/               # fMRIPrep outputs
     ├── freesurfer/             # FreeSurfer reconstructions (source localization)
+    ├── group/
+    │   └── fmri/
+    │       └── second_level/   # Group GLM inference maps
     └── sub-XXXX/
         ├── eeg/
         │   ├── sub-XXXX_task-*_proc-clean_epo.fif   # Cleaned epochs
@@ -278,7 +281,7 @@ eeg-pipeline <command> --help
 | `behavior` | Relate features to behavior → effect sizes, statistical summaries |
 | `ml` | Trial-level predictive models → cross-validated performance and diagnostics |
 | `fmri` | fMRIPrep-based BOLD preprocessing → preprocessed derivatives |
-| `fmri-analysis` | First-level GLM and trial-wise betas → contrast maps, beta-series |
+| `fmri-analysis` | First-level and second-level GLM plus trial-wise betas → contrast maps, group maps, beta-series |
 | `plotting` | Visualization suites over existing derivatives → figures (PNG/SVG/PDF) |
 | `validate` | Data and derivative integrity checks → structured validation reports |
 | `stats` | Pipeline-wide coverage summary → aggregate statistics dashboard |
@@ -455,7 +458,7 @@ eeg-pipeline ml regression --subject 0001 --cv-scope subject
 
 # Predict fMRI signature expression from EEG
 eeg-pipeline ml regression --subject 0001 --subject 0002 \
-  --target fmri_signature --fmri-signature-name NPS
+  --target fmri_signature --fmri-signature-name SIGNATURE_A
 
 # Model comparison with custom hyperparameters
 eeg-pipeline ml model_comparison --subject 0001 --subject 0002 \
@@ -502,11 +505,12 @@ Note: for container runs, the pipeline automatically ignores macOS metadata file
 
 ### 6.6 fMRI Analysis
 
-Subject-level GLM contrasts and trial-wise beta estimation via nilearn.
+Subject-level and group-level GLM analysis plus trial-wise beta estimation via nilearn.
 
 | Mode | Description |
 |------|-------------|
 | `first-level` | First-level GLM with user-defined contrasts → contrast maps |
+| `second-level` | Explicit group GLM from existing first-level MNI effect-size maps |
 | `beta-series` | Trial-wise beta-series estimation (LSA method) |
 | `lss` | Least-squares-separate (LSS) trial betas |
 
@@ -522,6 +526,11 @@ eeg-pipeline fmri-analysis first-level --subject 0001 \
 eeg-pipeline fmri-analysis first-level --subject 0001 \
   --input-source fmriprep --fmriprep-space MNI152NLin2009cAsym \
   --cond-a-value stimulation --cond-b-value fixation_rest
+
+# Group mean from existing first-level MNI cope/effect-size maps
+eeg-pipeline fmri-analysis second-level --subject 0001 --subject 0002 \
+  --group-model one-sample \
+  --group-contrast-names stimulation_vs_rest
 
 # Beta-series for EEG–fMRI fusion
 eeg-pipeline fmri-analysis beta-series --subject 0001 \
@@ -546,10 +555,14 @@ eeg-pipeline fmri-analysis first-level --subject 0001 \
 | `--confounds-strategy` | `auto`, `none`, `motion6`…`motion24+wmcsf+fd` | `auto` |
 | `--smoothing-fwhm` | Spatial smoothing kernel (mm) | `5.0` |
 | `--output-type` | `z-score`, `t-stat`, `cope`, `beta` | `z-score` |
+| `--group-model` | `one-sample`, `two-sample`, `paired`, `repeated-measures` | `one-sample` |
+| `--group-contrast-names` | First-level contrast names consumed by second-level mode | required for `second-level` |
+| `--group-covariates-file` | Subject-level TSV/CSV for groups and covariates | none |
+| `--group-permutation-inference` | Add max-T permutation inference to second-level mode | disabled |
 | `--resample-to-freesurfer` | Resample to FreeSurfer space | disabled |
 | `--plots` | Generate per-subject figures | disabled |
 | `--plot-html-report` | Write self-contained HTML report | disabled |
-| `--write-design-matrix` | Save design matrices (TSV + PNG) | disabled |
+| `--write-design-matrix` | Save first-level or second-level design matrices (TSV + PNG) | first-level: disabled; second-level: enabled |
 
 ---
 
@@ -826,29 +839,19 @@ This image bundles FreeSurfer 7.4.1 + MNE-Python on Python 3.11 and is used for
 
 ### 11.4 EEG–fMRI Fusion via ML
 
-Predict trial-wise fMRI signature expression (NPS, SIIPS1) from EEG features:
+Predict trial-wise fMRI signature expression from EEG features:
 
 ```bash
 eeg-pipeline ml regression --subject 0001 --subject 0002 \
   --target fmri_signature \
-  --fmri-signature-name NPS \
+  --fmri-signature-name SIGNATURE_A \
   --fmri-signature-method beta-series \
   --fmri-signature-metric dot
 ```
 
-Available signatures: `NPS`, `SIIPS1`. Methods: `beta-series`, `lss`.
+Available signatures are whatever names were generated in the fMRI analysis output
+tables from your configured `paths.signature_maps`. Methods: `beta-series`, `lss`.
 Metrics: `dot`, `cosine`, `pearson_r`.
-
-**NPS (Neuroimaging Pain Signature):** The NPS weight map is not publicly distributed.
-Obtain the signature weights from the original authors (Wager et al., 2013, *NEJM*)
-and place them at `<weights_root>/NPS/weights_NSF_grouppred_cvpcr.nii.gz`.
-Pass the root via `--pain-signature-weights` or `paths.signature_dir` in config.
-
-**SIIPS1 (Stimulus Intensity Independent Pain Signature):** Weights are publicly
-available from the
-[CANlab Neuroimaging_Pattern_Masks](https://github.com/canlab/Neuroimaging_Pattern_Masks)
-repository. Place `nonnoc_v11_4_137subjmap_weighted_mean.nii.gz` at
-`<weights_root>/SIIPS1/`.
 
 ### 11.5 Spatial Transforms (CSD / Laplacian)
 

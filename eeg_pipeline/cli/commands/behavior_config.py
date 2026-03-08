@@ -358,8 +358,12 @@ _TEMPORAL_OVERRIDE_RULES = (
     ),
     ConfigOverrideRule("temporal_include_tf_grid", "behavior_analysis.temporal.include_tf_grid", _to_bool),
     ConfigOverrideRule("temporal_time_resolution_ms", "behavior_analysis.temporal.time_resolution_ms", _to_int),
-    ConfigOverrideRule("temporal_freqs_hz", "behavior_analysis.temporal.freqs_hz", _to_list),
     ConfigOverrideRule("temporal_smooth_window_ms", "behavior_analysis.temporal.smooth_window_ms", _to_int),
+    ConfigOverrideRule(
+        "temporal_topomap_window_ms",
+        "behavior_analysis.temporal_correlation_topomaps.window_size_ms",
+        _to_int,
+    ),
 )
 
 _TEMPORAL_ITPC_OVERRIDE_RULES = (

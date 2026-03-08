@@ -95,6 +95,25 @@ def stage_temporal_stats_impl(
     correction_method = str(get_config_value(ctx.config, "behavior_analysis.temporal.correction_method", "fdr")).strip().lower()
     fdr_alpha = get_config_float(ctx.config, "behavior_analysis.statistics.fdr_alpha", 0.05)
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    cluster_n_permutations_raw = get_config_value(
+        ctx.config,
+        "behavior_analysis.cluster.n_permutations",
+        None,
+    )
+    if cluster_n_permutations_raw is None:
+        cluster_n_permutations_raw = get_config_value(
+            ctx.config,
+            "behavior_analysis.cluster_correction.n_permutations",
+            0,
+        )
+    cluster_n_permutations = int(cluster_n_permutations_raw)
+    if correction_method == "cluster" and cluster_n_permutations <= 0:
+        raise ValueError(
+            "Temporal cluster correction requires behavior_analysis.cluster.n_permutations > 0. "
+            f"Received {cluster_n_permutations}. Set --n-perm to a positive integer or switch "
+            "behavior_analysis.temporal.correction_method to 'fdr', 'bonferroni', or 'none'."
+        )
+
     if not allow_iid_trials:
         if correction_method != "cluster":
             raise ValueError(

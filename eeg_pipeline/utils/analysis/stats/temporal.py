@@ -45,6 +45,18 @@ MIN_OBSERVATIONS_FOR_CORRELATION = 10
 PARALLELIZATION_TASK_THRESHOLD = 50
 
 
+def _get_cluster_n_permutations(config: Any, *, default: int = 0) -> int:
+    """Resolve cluster permutation count without treating explicit 0 as missing."""
+    raw_value = get_config_value(config, "behavior_analysis.cluster.n_permutations", None)
+    if raw_value is None:
+        raw_value = get_config_value(
+            config,
+            "behavior_analysis.cluster_correction.n_permutations",
+            default,
+        )
+    return int(raw_value)
+
+
 def _get_temporal_target_column(config: Any) -> Optional[str]:
     """Return explicit temporal target column override (events column name) if configured."""
     raw = get_config_value(config, "behavior_analysis.temporal.target_column", None)
@@ -54,17 +66,13 @@ def _get_temporal_target_column(config: Any) -> Optional[str]:
     return col or None
 
 
-def _get_temporal_targets_from_events(
+def _resolve_temporal_target_column(
     events: pd.DataFrame,
     *,
     config: Any,
-    logger: logging.Logger,
     analysis_name: str,
-) -> pd.Series:
-    """Resolve and extract the behavioral target series for temporal analyses."""
-    if events is None or not isinstance(events, pd.DataFrame):
-        raise TypeError("events must be a pandas DataFrame")
-
+) -> str:
+    """Resolve the events column used as the temporal target."""
     target_col = _get_temporal_target_column(config)
     if target_col is not None:
         if target_col not in events.columns:
@@ -72,8 +80,7 @@ def _get_temporal_targets_from_events(
                 f"{analysis_name}: temporal target_column='{target_col}' not found in events. "
                 f"Available columns: {list(events.columns)}"
             )
-        logger.info("%s: using temporal target column '%s'", analysis_name, target_col)
-        return pd.to_numeric(events[target_col], errors="coerce")
+        return target_col
 
     outcome_columns = (
         list(config.get("event_columns.outcome", []) or [])
@@ -88,8 +95,76 @@ def _get_temporal_targets_from_events(
             f"{analysis_name}: no outcome column found. Configure event_columns.outcome or set "
             f"behavior_analysis.temporal.target_column. Available columns: {list(events.columns)}"
         )
-    logger.info("%s: using outcome column '%s'", analysis_name, outcome_col)
-    return pd.to_numeric(events[outcome_col], errors="coerce")
+    return outcome_col
+
+
+def _resolve_temporal_condition_column(
+    events: pd.DataFrame,
+    *,
+    temporal_cfg: Dict[str, Any],
+    config: Any,
+) -> str:
+    """Resolve the events column used for temporal condition splitting."""
+    condition_column = str(temporal_cfg.get("condition_column", "") or "").strip()
+    if condition_column:
+        return condition_column
+    resolved = get_binary_outcome_column_from_config(config, events)
+    return str(resolved or "").strip()
+
+
+def _validate_temporal_split_configuration(
+    events: pd.DataFrame,
+    *,
+    config: Any,
+    analysis_name: str,
+) -> None:
+    """Fail fast on degenerate split-by-condition temporal configurations."""
+    temporal_cfg = config.get("behavior_analysis.temporal", {}) or {}
+    if not bool(temporal_cfg.get("split_by_condition", True)):
+        return
+
+    condition_column = _resolve_temporal_condition_column(
+        events,
+        temporal_cfg=temporal_cfg,
+        config=config,
+    )
+    if not condition_column or condition_column not in events.columns:
+        return
+
+    target_column = _resolve_temporal_target_column(
+        events,
+        config=config,
+        analysis_name=analysis_name,
+    )
+    if target_column != condition_column:
+        return
+
+    raise ValueError(
+        f"{analysis_name}: temporal target column '{target_column}' cannot also be used as the "
+        "split-by-condition column. Within each condition the target becomes constant, so no "
+        "correlations can be computed. Choose a different temporal target column or disable "
+        "split_by_condition."
+    )
+
+
+def _get_temporal_targets_from_events(
+    events: pd.DataFrame,
+    *,
+    config: Any,
+    logger: logging.Logger,
+    analysis_name: str,
+) -> pd.Series:
+    """Resolve and extract the behavioral target series for temporal analyses."""
+    if events is None or not isinstance(events, pd.DataFrame):
+        raise TypeError("events must be a pandas DataFrame")
+
+    target_col = _resolve_temporal_target_column(
+        events,
+        config=config,
+        analysis_name=analysis_name,
+    )
+    logger.info("%s: using temporal target column '%s'", analysis_name, target_col)
+    return pd.to_numeric(events[target_col], errors="coerce")
 
 
 def _to_numpy_array(y: Any) -> np.ndarray:
@@ -164,8 +239,7 @@ def _compute_metric_records_with_cluster(
     n_cov = int(cov_vals.shape[1]) if cov_vals is not None else 0
 
     n_cluster_perm = int(
-        get_config_value(config, "behavior_analysis.cluster.n_permutations", None)
-        or get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 0)
+        _get_cluster_n_permutations(config, default=0)
     )
     cluster_alpha = float(
         get_config_value(config, "behavior_analysis.cluster.alpha", None)
@@ -645,8 +719,7 @@ def _compute_correlations_for_condition(
         get_config_value(config, "behavior_analysis.cluster_correction.alpha", alpha)
     )
     n_cluster_perm = int(
-        get_config_value(config, "behavior_analysis.cluster.n_permutations", None) or
-        get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 0)
+        _get_cluster_n_permutations(config, default=0)
     )
     cluster_forming_threshold = (
         get_config_value(config, "behavior_analysis.cluster.forming_threshold", None) or
@@ -807,11 +880,12 @@ def _determine_condition_values(
         condition_vec: Array of condition values for each trial (length n_trials)
     """
     split_by_condition = bool(temporal_cfg.get("split_by_condition", True))
-    condition_column = temporal_cfg.get("condition_column", "") or ""
+    condition_column = _resolve_temporal_condition_column(
+        events,
+        temporal_cfg=temporal_cfg,
+        config=config,
+    )
     requested_values = temporal_cfg.get("condition_values", []) or []
-
-    if not condition_column:
-        condition_column = get_binary_outcome_column_from_config(config, events)
 
     if split_by_condition and condition_column and condition_column in events.columns:
         condition_vec = events[condition_column].to_numpy()[:n_trials]
@@ -945,8 +1019,7 @@ def _run_tf_correlations_core(
             cluster_stat[freq_idx, time_idx] = r * np.sqrt(dof / denominator)
 
     n_perm_cfg = int(
-        get_config_value(config, "behavior_analysis.cluster.n_permutations", None) or
-        get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 100)
+        _get_cluster_n_permutations(config, default=100)
     )
     n_perm = max(n_perm_cfg, int(temporal_cfg.get("n_cluster_perm", 0)))
     c_alpha = float(
@@ -1149,8 +1222,7 @@ def _compute_roi_correlations_for_condition(
 
     # Cluster correction config
     n_cluster_perm = int(
-        get_config_value(config, "behavior_analysis.cluster.n_permutations", None)
-        or get_config_value(config, "behavior_analysis.cluster_correction.n_permutations", 0)
+        _get_cluster_n_permutations(config, default=0)
     )
     c_alpha = float(
         get_config_value(config, "behavior_analysis.cluster.alpha", None)
@@ -1630,6 +1702,11 @@ def compute_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
     if ctx.aligned_events is None:
         ctx.logger.warning("No events available for temporal correlations")
         return None
+    _validate_temporal_split_configuration(
+        ctx.aligned_events,
+        config=ctx.config,
+        analysis_name="Temporal correlations",
+    )
     targets = _get_temporal_targets_from_events(
         ctx.aligned_events,
         config=ctx.config,
@@ -1872,6 +1949,11 @@ def compute_itpc_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[
     if ctx.aligned_events is None:
         ctx.logger.warning("No events available for ITPC temporal correlations")
         return None
+    _validate_temporal_split_configuration(
+        ctx.aligned_events,
+        config=ctx.config,
+        analysis_name="ITPC temporal correlations",
+    )
     targets = _get_temporal_targets_from_events(
         ctx.aligned_events,
         config=ctx.config,
@@ -2097,6 +2179,11 @@ def compute_erds_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[
     if ctx.aligned_events is None:
         ctx.logger.warning("No events available for ERDS temporal correlations")
         return None
+    _validate_temporal_split_configuration(
+        ctx.aligned_events,
+        config=ctx.config,
+        analysis_name="ERDS temporal correlations",
+    )
     targets = _get_temporal_targets_from_events(
         ctx.aligned_events,
         config=ctx.config,

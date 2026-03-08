@@ -312,10 +312,6 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         contrast_cfg["condition_scope_trial_types"] = args.source_fmri_condition_scope_trial_types
     if getattr(args, "source_fmri_condition_scope_column", None) is not None:
         contrast_cfg["condition_scope_column"] = args.source_fmri_condition_scope_column
-    if getattr(args, "source_fmri_cluster_correction", None) is not None:
-        contrast_cfg["cluster_correction"] = args.source_fmri_cluster_correction
-    if getattr(args, "source_fmri_cluster_p_threshold", None) is not None:
-        contrast_cfg["cluster_p_threshold"] = args.source_fmri_cluster_p_threshold
     if getattr(args, "source_fmri_output_type", None) is not None:
         contrast_cfg["output_type"] = args.source_fmri_output_type
     if getattr(args, "source_fmri_resample_to_fs", None) is not None:

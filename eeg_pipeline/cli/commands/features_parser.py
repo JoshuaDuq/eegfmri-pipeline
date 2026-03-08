@@ -158,7 +158,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-cond-a-value", default=None, help="Value for condition A (e.g., 'temp49p3', '1').")
     parser.add_argument("--source-fmri-cond-b-column", default=None, help="Column for condition B in events.tsv.")
     parser.add_argument("--source-fmri-cond-b-value", default=None, help="Value for condition B.")
-    parser.add_argument("--source-fmri-contrast-type", choices=["t-test", "paired-t-test", "f-test", "custom"], default=None, help="Type of statistical contrast to compute.")
+    parser.add_argument("--source-fmri-contrast-type", choices=["t-test", "custom"], default=None, help="Type of statistical contrast to compute.")
     parser.add_argument("--source-fmri-contrast-formula", default=None, help="Custom contrast formula (e.g., 'cond_a - cond_b').")
     parser.add_argument("--source-fmri-contrast-name", default=None, help="Name for the contrast output (default: 'contrast').")
     parser.add_argument("--source-fmri-runs", default=None, help="Comma-separated run numbers to include (e.g., '1,2,3').")
@@ -187,8 +187,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         ),
     )
     parser.add_argument("--source-fmri-condition-scope-column", default=None, help="Optional events.tsv column used to apply --source-fmri-condition-scope-trial-types (default: trial_type).")
-    parser.add_argument("--source-fmri-cluster-correction", action="store_true", default=None, dest="source_fmri_cluster_correction", help="Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction).")
-    parser.add_argument("--source-fmri-cluster-p-threshold", type=float, default=None, help="Cluster-forming p-threshold (default: 0.001).")
     parser.add_argument("--source-fmri-output-type", choices=["z-score", "t-stat", "cope", "beta"], default=None, help="Output statistical map type (default: z-score).")
     parser.add_argument("--source-fmri-resample-to-fs", action="store_true", default=None, dest="source_fmri_resample_to_fs", help="Auto-resample stats map to FreeSurfer subject space.")
     parser.add_argument("--no-source-fmri-resample-to-fs", action="store_false", dest="source_fmri_resample_to_fs", help="Do not auto-resample stats map to FreeSurfer subject space.")

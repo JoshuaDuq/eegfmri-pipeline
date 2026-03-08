@@ -348,15 +348,15 @@ func (m Model) getFeaturesOptions() []optionType {
 					if m.sourceLocFmriMinClusterMM3 <= 0 {
 						options = append(options, optSourceLocFmriMinClusterVox)
 					}
-					options = append(options, optSourceLocFmriContrastEnabled)
-					if m.sourceLocFmriContrastEnabled {
-						options = append(options, optSourceLocFmriContrastType)
-						// Show condition fields based on contrast type
-						if m.sourceLocFmriContrastType == 3 { // custom formula
-							options = append(options, optSourceLocFmriContrastFormula)
-						} else {
-							options = append(options, optSourceLocFmriCondAColumn, optSourceLocFmriCondAValue)
-							options = append(options, optSourceLocFmriCondBColumn, optSourceLocFmriCondBValue)
+						options = append(options, optSourceLocFmriContrastEnabled)
+						if m.sourceLocFmriContrastEnabled {
+							options = append(options, optSourceLocFmriContrastType)
+							// Show condition fields based on contrast type
+							if m.sourceLocFmriContrastType == 1 { // custom formula
+								options = append(options, optSourceLocFmriContrastFormula)
+							} else {
+								options = append(options, optSourceLocFmriCondAColumn, optSourceLocFmriCondAValue)
+								options = append(options, optSourceLocFmriCondBColumn, optSourceLocFmriCondBValue)
 						}
 						options = append(options, optSourceLocFmriContrastName)
 						options = append(options, optSourceLocFmriAutoDetectRuns)
@@ -373,17 +373,13 @@ func (m Model) getFeaturesOptions() []optionType {
 							optSourceLocFmriPhaseScopeColumn,
 							optSourceLocFmriPhaseScopeValue,
 							optSourceLocFmriStimPhasesToModel,
-						)
-						options = append(options, optSourceLocFmriInputSource, optSourceLocFmriRequireFmriprep)
-						options = append(options, optSourceLocFmriHighPassHz, optSourceLocFmriLowPassHz)
-						options = append(options, optSourceLocFmriClusterCorrection)
-						if m.sourceLocFmriClusterCorrection {
-							options = append(options, optSourceLocFmriClusterPThreshold)
+							)
+							options = append(options, optSourceLocFmriInputSource, optSourceLocFmriRequireFmriprep)
+							options = append(options, optSourceLocFmriHighPassHz, optSourceLocFmriLowPassHz)
+							options = append(options, optSourceLocFmriOutputType, optSourceLocFmriResampleToFS)
 						}
-						options = append(options, optSourceLocFmriOutputType, optSourceLocFmriResampleToFS)
 					}
 				}
-			}
 		}
 	}
 

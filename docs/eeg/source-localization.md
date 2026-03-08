@@ -348,8 +348,10 @@ python -m eeg_pipeline.cli.main features compute \
   --source-fmri \
   --source-fmri-contrast-enabled \
   --source-fmri-contrast-type t-test \
-  --source-fmri-contrast-cond1 pain_high \
-  --source-fmri-contrast-cond2 baseline \
+  --source-fmri-cond-a-column trial_type \
+  --source-fmri-cond-a-value pain_high \
+  --source-fmri-cond-b-column trial_type \
+  --source-fmri-cond-b-value baseline \
   --source-fmri-contrast-name pain_vs_baseline \
   --source-fmri-hrf-model spm \
   --source-fmri-resample-to-fs
@@ -492,9 +494,11 @@ FDR thresholding is valid only for z-stat maps. Use `--source-fmri-output-type z
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--source-fmri-contrast-enabled` | Enable automatic contrast building from BOLD data | `False` |
-| `--source-fmri-contrast-type` | Contrast type: `t-test`, `paired-t-test`, `f-test`, `custom` | `t-test` |
-| `--source-fmri-contrast-cond1` | First condition name (e.g., `pain_high`) | (none) |
-| `--source-fmri-contrast-cond2` | Second condition name (e.g., `baseline`) | (none) |
+| `--source-fmri-contrast-type` | Contrast type: `t-test` or `custom` | `t-test` |
+| `--source-fmri-cond-a-column` | Events column used to define condition A | (none) |
+| `--source-fmri-cond-a-value` | Value selecting condition A trials | (none) |
+| `--source-fmri-cond-b-column` | Events column used to define condition B | (none) |
+| `--source-fmri-cond-b-value` | Value selecting condition B trials | (none) |
 | `--source-fmri-contrast-formula` | Custom contrast formula (e.g., `pain_high - pain_low`) | (none) |
 | `--source-fmri-contrast-name` | Output contrast name | `pain_vs_baseline` |
 | `--source-fmri-runs` | Comma-separated run numbers to include (e.g., `1,2,3`) | (auto-detect) |
@@ -502,8 +506,6 @@ FDR thresholding is valid only for z-stat maps. Use `--source-fmri-output-type z
 | `--source-fmri-drift-model` | Drift model: `none`, `cosine`, `polynomial` | `cosine` |
 | `--source-fmri-high-pass` | High-pass filter cutoff in Hz | `0.008` |
 | `--source-fmri-low-pass` | Optional low-pass filter cutoff in Hz (generally avoid for task GLMs unless you know you need it) | (disabled) |
-| `--source-fmri-cluster-correction` | Enable cluster-extent filtering (heuristic; **not** cluster-level FWE correction) | `True` |
-| `--source-fmri-cluster-p-threshold` | Cluster-forming p-threshold | `0.001` |
 | `--source-fmri-output-type` | Output type: `z-score`, `t-stat`, `cope`, `beta` | `z-score` |
 | `--source-fmri-resample-to-fs` | Auto-resample stats map to FreeSurfer subject space | `True` |
 

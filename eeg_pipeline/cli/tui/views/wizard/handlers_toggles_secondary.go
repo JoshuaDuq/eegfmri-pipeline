@@ -641,6 +641,14 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.fmriAnalysisGroupPlottingExpanded = !m.fmriAnalysisGroupPlottingExpanded
 	case optFmriTrialSigGroup:
 		m.fmriTrialSigGroupExpanded = !m.fmriTrialSigGroupExpanded
+	case optFmriSecondLevelGroupInput:
+		m.fmriSecondLevelGroupInputExpanded = !m.fmriSecondLevelGroupInputExpanded
+	case optFmriSecondLevelGroupDesign:
+		m.fmriSecondLevelGroupDesignExpanded = !m.fmriSecondLevelGroupDesignExpanded
+	case optFmriSecondLevelGroupInference:
+		m.fmriSecondLevelGroupInferExpanded = !m.fmriSecondLevelGroupInferExpanded
+	case optFmriSecondLevelGroupOutput:
+		m.fmriSecondLevelGroupOutputExpanded = !m.fmriSecondLevelGroupOutputExpanded
 
 	// Input
 	case optFmriAnalysisInputSource:
@@ -867,6 +875,111 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.startTextEdit(textFieldFmriAnalysisSignatureDir)
 	case optFmriAnalysisSignatureMaps:
 		m.startTextEdit(textFieldFmriAnalysisSignatureMaps)
+	case optFmriSecondLevelModel:
+		m.fmriSecondLevelModelIndex = (m.fmriSecondLevelModelIndex + 1) % 4
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelInputRoot:
+		m.startTextEdit(textFieldFmriSecondLevelInputRoot)
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelContrastNames:
+		if err := m.ensureFmriSecondLevelContrastDiscovery(); err != nil {
+			m.ShowToast(err.Error(), "warning")
+			m.startTextEdit(textFieldFmriSecondLevelContrastNames)
+		} else {
+			m.expandedOption = expandedFmriSecondLevelContrastNames
+			m.subCursor = 0
+		}
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelConditionLabels:
+		m.startTextEdit(textFieldFmriSecondLevelConditionLabels)
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelCovariatesFile:
+		m.startTextEdit(textFieldFmriSecondLevelCovariatesFile)
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelSubjectColumn:
+		if strings.TrimSpace(m.fmriSecondLevelCovariatesFile) == "" {
+			m.startTextEdit(textFieldFmriSecondLevelSubjectColumn)
+		} else if err := m.ensureFmriSecondLevelCovariatesDiscovery(); err != nil {
+			m.ShowToast(err.Error(), "warning")
+			m.startTextEdit(textFieldFmriSecondLevelSubjectColumn)
+		} else {
+			m.expandedOption = expandedFmriSecondLevelSubjectColumn
+			m.subCursor = 0
+		}
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelCovariateColumns:
+		if strings.TrimSpace(m.fmriSecondLevelCovariatesFile) == "" {
+			m.startTextEdit(textFieldFmriSecondLevelCovariateColumns)
+		} else if err := m.ensureFmriSecondLevelCovariatesDiscovery(); err != nil {
+			m.ShowToast(err.Error(), "warning")
+			m.startTextEdit(textFieldFmriSecondLevelCovariateColumns)
+		} else {
+			m.expandedOption = expandedFmriSecondLevelCovariateColumns
+			m.subCursor = 0
+		}
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelGroupColumn:
+		if strings.TrimSpace(m.fmriSecondLevelCovariatesFile) == "" {
+			m.startTextEdit(textFieldFmriSecondLevelGroupColumn)
+		} else if err := m.ensureFmriSecondLevelCovariatesDiscovery(); err != nil {
+			m.ShowToast(err.Error(), "warning")
+			m.startTextEdit(textFieldFmriSecondLevelGroupColumn)
+		} else {
+			m.expandedOption = expandedFmriSecondLevelGroupColumn
+			m.subCursor = 0
+		}
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelGroupAValue:
+		if strings.TrimSpace(m.fmriSecondLevelGroupColumn) == "" {
+			m.ShowToast("Select a group column first", "warning")
+			return
+		}
+		if err := m.ensureFmriSecondLevelCovariatesDiscovery(); err != nil {
+			m.ShowToast(err.Error(), "warning")
+			m.startTextEdit(textFieldFmriSecondLevelGroupAValue)
+		} else if len(m.GetFmriSecondLevelDiscoveredCovariateValues(m.fmriSecondLevelGroupColumn)) > 0 {
+			m.expandedOption = expandedFmriSecondLevelGroupAValue
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldFmriSecondLevelGroupAValue)
+		}
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelGroupBValue:
+		if strings.TrimSpace(m.fmriSecondLevelGroupColumn) == "" {
+			m.ShowToast("Select a group column first", "warning")
+			return
+		}
+		if err := m.ensureFmriSecondLevelCovariatesDiscovery(); err != nil {
+			m.ShowToast(err.Error(), "warning")
+			m.startTextEdit(textFieldFmriSecondLevelGroupBValue)
+		} else if len(m.GetFmriSecondLevelDiscoveredCovariateValues(m.fmriSecondLevelGroupColumn)) > 0 {
+			m.expandedOption = expandedFmriSecondLevelGroupBValue
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldFmriSecondLevelGroupBValue)
+		}
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelFormula:
+		m.startTextEdit(textFieldFmriSecondLevelFormula)
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelWriteDesignMatrix:
+		m.fmriSecondLevelWriteDesignMatrix = !m.fmriSecondLevelWriteDesignMatrix
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelPermutationEnabled:
+		m.fmriSecondLevelPermutationEnabled = !m.fmriSecondLevelPermutationEnabled
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelPermutationCount:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelTwoSided:
+		m.fmriSecondLevelTwoSided = !m.fmriSecondLevelTwoSided
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelOutputName:
+		m.startTextEdit(textFieldFmriSecondLevelOutputName)
+		m.useDefaultAdvanced = false
+	case optFmriSecondLevelOutputDir:
+		m.startTextEdit(textFieldFmriSecondLevelOutputDir)
+		m.useDefaultAdvanced = false
 	case optFmriTrialSigScopeTrialTypeColumn:
 		m.expandedOption = expandedFmriTrialSigScopeTrialTypeColumn
 		m.subCursor = 0

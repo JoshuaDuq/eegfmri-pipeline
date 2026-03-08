@@ -107,11 +107,18 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="Global significance alpha fallback used by shared stats helpers.",
     )
-    compute_group.add_argument("--stats-predictor-control", choices=["linear", "spline"], default=None, dest="stats_predictor_control")
+    compute_group.add_argument(
+        "--stats-predictor-control",
+        choices=["linear", "spline", "none"],
+        default=None,
+        dest="stats_predictor_control",
+    )
     compute_group.add_argument("--stats-allow-iid-trials", action="store_true", default=None)
     compute_group.add_argument("--no-stats-allow-iid-trials", action="store_false", dest="stats_allow_iid_trials")
     compute_group.add_argument("--compute-change-scores", action="store_true", default=None)
     compute_group.add_argument("--no-compute-change-scores", action="store_false", dest="compute_change_scores")
+    compute_group.add_argument("--loso-stability", action="store_true", default=None, dest="loso_stability")
+    compute_group.add_argument("--no-loso-stability", action="store_false", dest="loso_stability")
     compute_group.add_argument("--compute-bayes-factors", action="store_true", default=None)
     compute_group.add_argument("--no-compute-bayes-factors", action="store_false", dest="compute_bayes_factors")
     compute_group.add_argument("--stats-hierarchical-fdr", action="store_true", default=None, dest="stats_hierarchical_fdr")
@@ -400,10 +407,15 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     temporal_group.add_argument("--temporal-correction-method", choices=["fdr", "cluster"], default=None)
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
-    temporal_group.add_argument("--temporal-freqs-hz", nargs="+", type=float, default=None, help="Frequency bins for temporal TF analyses (Hz)")
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-max-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-smooth-window-ms", type=int, default=None)
+    temporal_group.add_argument(
+        "--temporal-topomap-window-ms",
+        type=int,
+        default=None,
+        help="Window size in milliseconds for temporal by-condition topomap summaries",
+    )
     temporal_group.add_argument("--temporal-split-by-condition", action="store_true", default=None, dest="temporal_split_by_condition")
     temporal_group.add_argument("--no-temporal-split-by-condition", action="store_false", dest="temporal_split_by_condition")
     temporal_group.add_argument("--temporal-condition-column", type=str, default=None, help="events.tsv column to split/filter by (default: event_columns.binary_outcome)")

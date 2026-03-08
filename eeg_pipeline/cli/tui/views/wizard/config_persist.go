@@ -489,6 +489,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["temporalResolutionMs"] = m.temporalResolutionMs
 	cfg["temporalCorrectionMethod"] = m.temporalCorrectionMethod
 	cfg["temporalSmoothMs"] = m.temporalSmoothMs
+	cfg["temporalTopomapWindowMs"] = m.temporalTopomapWindowMs
 	cfg["temporalTimeMinMs"] = m.temporalTimeMinMs
 	cfg["temporalTimeMaxMs"] = m.temporalTimeMaxMs
 
@@ -649,6 +650,27 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriAnalysisPlotSignatures"] = m.fmriAnalysisPlotSignatures
 	cfg["fmriAnalysisSignatureDir"] = m.fmriAnalysisSignatureDir
 	cfg["fmriAnalysisSignatureMaps"] = m.fmriAnalysisSignatureMaps
+	cfg["fmriSecondLevelModelIndex"] = m.fmriSecondLevelModelIndex
+	cfg["fmriSecondLevelInputRoot"] = m.fmriSecondLevelInputRoot
+	cfg["fmriSecondLevelContrastNames"] = m.fmriSecondLevelContrastNames
+	cfg["fmriSecondLevelConditionLabels"] = m.fmriSecondLevelConditionLabels
+	cfg["fmriSecondLevelCovariatesFile"] = m.fmriSecondLevelCovariatesFile
+	cfg["fmriSecondLevelSubjectColumn"] = m.fmriSecondLevelSubjectColumn
+	cfg["fmriSecondLevelCovariateColumns"] = m.fmriSecondLevelCovariateColumns
+	cfg["fmriSecondLevelGroupColumn"] = m.fmriSecondLevelGroupColumn
+	cfg["fmriSecondLevelGroupAValue"] = m.fmriSecondLevelGroupAValue
+	cfg["fmriSecondLevelGroupBValue"] = m.fmriSecondLevelGroupBValue
+	cfg["fmriSecondLevelFormula"] = m.fmriSecondLevelFormula
+	cfg["fmriSecondLevelOutputName"] = m.fmriSecondLevelOutputName
+	cfg["fmriSecondLevelOutputDir"] = m.fmriSecondLevelOutputDir
+	cfg["fmriSecondLevelWriteDesignMatrix"] = m.fmriSecondLevelWriteDesignMatrix
+	cfg["fmriSecondLevelPermutationEnabled"] = m.fmriSecondLevelPermutationEnabled
+	cfg["fmriSecondLevelPermutationCount"] = m.fmriSecondLevelPermutationCount
+	cfg["fmriSecondLevelTwoSided"] = m.fmriSecondLevelTwoSided
+	cfg["fmriSecondLevelGroupInputExpanded"] = m.fmriSecondLevelGroupInputExpanded
+	cfg["fmriSecondLevelGroupDesignExpanded"] = m.fmriSecondLevelGroupDesignExpanded
+	cfg["fmriSecondLevelGroupInferExpanded"] = m.fmriSecondLevelGroupInferExpanded
+	cfg["fmriSecondLevelGroupOutputExpanded"] = m.fmriSecondLevelGroupOutputExpanded
 	cfg["fmriTrialSigGroupExpanded"] = m.fmriTrialSigGroupExpanded
 	cfg["fmriTrialSigMethodIndex"] = m.fmriTrialSigMethodIndex
 	cfg["fmriTrialSigIncludeOtherEvents"] = m.fmriTrialSigIncludeOtherEvents
@@ -1395,6 +1417,9 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	// fMRI contrast builder
 	m.sourceLocFmriContrastEnabled = getBool("sourceLocFmriContrastEnabled", m.sourceLocFmriContrastEnabled)
 	m.sourceLocFmriContrastType = getInt("sourceLocFmriContrastType", m.sourceLocFmriContrastType)
+	if m.sourceLocFmriContrastType < 0 || m.sourceLocFmriContrastType > 1 {
+		m.sourceLocFmriContrastType = 0
+	}
 	m.sourceLocFmriCondAColumn = getString("sourceLocFmriCondAColumn", m.sourceLocFmriCondAColumn)
 	m.sourceLocFmriCondAValue = getString("sourceLocFmriCondAValue", m.sourceLocFmriCondAValue)
 	m.sourceLocFmriCondBColumn = getString("sourceLocFmriCondBColumn", m.sourceLocFmriCondBColumn)
@@ -1624,6 +1649,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.temporalResolutionMs = getInt("temporalResolutionMs", m.temporalResolutionMs)
 	m.temporalCorrectionMethod = getInt("temporalCorrectionMethod", m.temporalCorrectionMethod)
 	m.temporalSmoothMs = getInt("temporalSmoothMs", m.temporalSmoothMs)
+	m.temporalTopomapWindowMs = getInt("temporalTopomapWindowMs", m.temporalTopomapWindowMs)
 	m.temporalTimeMinMs = getInt("temporalTimeMinMs", m.temporalTimeMinMs)
 	m.temporalTimeMaxMs = getInt("temporalTimeMaxMs", m.temporalTimeMaxMs)
 
@@ -1784,6 +1810,27 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.fmriAnalysisPlotSignatures = getBool("fmriAnalysisPlotSignatures", m.fmriAnalysisPlotSignatures)
 	m.fmriAnalysisSignatureDir = getString("fmriAnalysisSignatureDir", m.fmriAnalysisSignatureDir)
 	m.fmriAnalysisSignatureMaps = getString("fmriAnalysisSignatureMaps", m.fmriAnalysisSignatureMaps)
+	m.fmriSecondLevelModelIndex = getInt("fmriSecondLevelModelIndex", m.fmriSecondLevelModelIndex)
+	m.fmriSecondLevelInputRoot = getString("fmriSecondLevelInputRoot", m.fmriSecondLevelInputRoot)
+	m.fmriSecondLevelContrastNames = getString("fmriSecondLevelContrastNames", m.fmriSecondLevelContrastNames)
+	m.fmriSecondLevelConditionLabels = getString("fmriSecondLevelConditionLabels", m.fmriSecondLevelConditionLabels)
+	m.fmriSecondLevelCovariatesFile = getString("fmriSecondLevelCovariatesFile", m.fmriSecondLevelCovariatesFile)
+	m.fmriSecondLevelSubjectColumn = getString("fmriSecondLevelSubjectColumn", m.fmriSecondLevelSubjectColumn)
+	m.fmriSecondLevelCovariateColumns = getString("fmriSecondLevelCovariateColumns", m.fmriSecondLevelCovariateColumns)
+	m.fmriSecondLevelGroupColumn = getString("fmriSecondLevelGroupColumn", m.fmriSecondLevelGroupColumn)
+	m.fmriSecondLevelGroupAValue = getString("fmriSecondLevelGroupAValue", m.fmriSecondLevelGroupAValue)
+	m.fmriSecondLevelGroupBValue = getString("fmriSecondLevelGroupBValue", m.fmriSecondLevelGroupBValue)
+	m.fmriSecondLevelFormula = getString("fmriSecondLevelFormula", m.fmriSecondLevelFormula)
+	m.fmriSecondLevelOutputName = getString("fmriSecondLevelOutputName", m.fmriSecondLevelOutputName)
+	m.fmriSecondLevelOutputDir = getString("fmriSecondLevelOutputDir", m.fmriSecondLevelOutputDir)
+	m.fmriSecondLevelWriteDesignMatrix = getBool("fmriSecondLevelWriteDesignMatrix", m.fmriSecondLevelWriteDesignMatrix)
+	m.fmriSecondLevelPermutationEnabled = getBool("fmriSecondLevelPermutationEnabled", m.fmriSecondLevelPermutationEnabled)
+	m.fmriSecondLevelPermutationCount = getInt("fmriSecondLevelPermutationCount", m.fmriSecondLevelPermutationCount)
+	m.fmriSecondLevelTwoSided = getBool("fmriSecondLevelTwoSided", m.fmriSecondLevelTwoSided)
+	m.fmriSecondLevelGroupInputExpanded = getBool("fmriSecondLevelGroupInputExpanded", m.fmriSecondLevelGroupInputExpanded)
+	m.fmriSecondLevelGroupDesignExpanded = getBool("fmriSecondLevelGroupDesignExpanded", m.fmriSecondLevelGroupDesignExpanded)
+	m.fmriSecondLevelGroupInferExpanded = getBool("fmriSecondLevelGroupInferExpanded", m.fmriSecondLevelGroupInferExpanded)
+	m.fmriSecondLevelGroupOutputExpanded = getBool("fmriSecondLevelGroupOutputExpanded", m.fmriSecondLevelGroupOutputExpanded)
 	m.fmriTrialSigGroupExpanded = getBool("fmriTrialSigGroupExpanded", m.fmriTrialSigGroupExpanded)
 	m.fmriTrialSigMethodIndex = getInt("fmriTrialSigMethodIndex", m.fmriTrialSigMethodIndex)
 	m.fmriTrialSigIncludeOtherEvents = getBool("fmriTrialSigIncludeOtherEvents", m.fmriTrialSigIncludeOtherEvents)
