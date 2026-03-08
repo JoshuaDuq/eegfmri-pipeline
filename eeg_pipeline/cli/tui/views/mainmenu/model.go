@@ -443,25 +443,7 @@ func (m Model) renderHeader() string {
 	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Render("◆")
 	logo := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("eegfmri-pipeline")
 	version := lipgloss.NewStyle().Foreground(styles.Muted).Render("v1.0")
-	brand := "  " + glyph + " " + logo + "  " + version
-
-	envBadge := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.ActiveMark + " local")
-	statusParts := []string{envBadge}
-	if task := strings.TrimSpace(m.Task); task != "" && task != "task" && lineWidth >= 72 {
-		taskLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render("task:")
-		taskValue := lipgloss.NewStyle().Foreground(styles.TextDim).Render(task)
-		statusParts = append(statusParts, taskLabel+" "+taskValue)
-	} else if lineWidth >= 72 {
-		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(styles.Muted).Render("task: unset"))
-	}
-	status := strings.Join(statusParts, "  ")
-
-	titleRow := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		brand,
-		lipgloss.NewStyle().Width(max(lineWidth-lipgloss.Width(brand)-lipgloss.Width(status), 0)).Render(""),
-		status,
-	)
+	titleRow := "  " + glyph + " " + logo + "  " + version
 
 	return titleRow + "\n" + styles.RenderHeaderSeparator(lineWidth)
 }
@@ -879,10 +861,6 @@ func (m Model) selectedDetail() selectionDetail {
 
 func (m Model) pipelineDetail(item pipelineItem, group string) selectionDetail {
 	pipeline := types.Pipeline(item.pipelineIdx)
-	savedConfig := "not saved"
-	if count := m.savedConfigCount(item.pipelineIdx); count > 0 {
-		savedConfig = fmt.Sprintf("%d values", count)
-	}
 	return selectionDetail{
 		title:       item.name,
 		description: item.description,
@@ -894,7 +872,6 @@ func (m Model) pipelineDetail(item pipelineItem, group string) selectionDetail {
 			{label: "Source", value: pipeline.GetDataSource()},
 			{label: "Command", value: "eeg-pipeline " + pipeline.CLICommand()},
 			{label: "Task", value: m.currentTaskLabel(), accent: m.hasConfiguredTask()},
-			{label: "Saved", value: savedConfig, accent: savedConfig != "not saved"},
 		},
 	}
 }
@@ -902,10 +879,6 @@ func (m Model) pipelineDetail(item pipelineItem, group string) selectionDetail {
 func (m Model) utilityDetail(item utilityItem) selectionDetail {
 	if item.pipelineIdx >= 0 {
 		pipeline := types.Pipeline(item.pipelineIdx)
-		savedConfig := "not saved"
-		if count := m.savedConfigCount(item.pipelineIdx); count > 0 {
-			savedConfig = fmt.Sprintf("%d values", count)
-		}
 		return selectionDetail{
 			title:       item.name,
 			description: item.description,
@@ -917,7 +890,6 @@ func (m Model) utilityDetail(item utilityItem) selectionDetail {
 				{label: "Source", value: pipeline.GetDataSource()},
 				{label: "Command", value: item.command},
 				{label: "Task", value: m.currentTaskLabel(), accent: m.hasConfiguredTask()},
-				{label: "Saved", value: savedConfig, accent: savedConfig != "not saved"},
 			},
 		}
 	}
@@ -1035,9 +1007,6 @@ func (m Model) renderSelectedMetaLine(detail selectionDetail) string {
 		parts = append(parts, value)
 	}
 	if value := m.detailValue(detail, "Scope"); value != "" {
-		parts = append(parts, value)
-	}
-	if value := m.detailValue(detail, "Saved"); value != "" && value != "not saved" {
 		parts = append(parts, value)
 	}
 	if len(parts) == 0 {

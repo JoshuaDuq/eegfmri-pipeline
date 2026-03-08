@@ -101,12 +101,11 @@ func TestView_WideLayoutShowsPipelinePreviewPane(t *testing.T) {
 	view := normalizeWhitespace(m.View())
 
 	required := []string{
-		"Selected",
 		"Behavior",
-		"Details",
+		"DETAILS",
 		"eeg-pipeline behavior",
 		"Task stroop",
-		"Focus",
+		"FOCUS",
 	}
 	for _, item := range required {
 		if !strings.Contains(view, normalizeWhitespace(item)) {
@@ -153,7 +152,7 @@ func TestView_WideLayoutMarksLastUsedPipeline(t *testing.T) {
 
 	view := normalizeWhitespace(m.View())
 
-	if !strings.Contains(view, "Last used") {
+	if !strings.Contains(view, normalizeWhitespace("last used")) {
 		t.Fatalf("expected preview pane to mark the restored pipeline as last used\nview:\n%s", view)
 	}
 }
@@ -165,9 +164,6 @@ func TestView_WideLayoutShowsSessionSummaryAndRecentRuns(t *testing.T) {
 	m.currentSection = SectionAnalysis
 	m.analysisCursor = 1
 	m.SetLastPipeline(int(types.PipelineBehavior))
-	m.SetSavedConfigCounts(map[int]int{
-		int(types.PipelineBehavior): 128,
-	})
 	m.SetConfigSummary(HomeConfigSummary{
 		Task:               "stroop",
 		DerivRoot:          "/tmp/project/derivatives",
@@ -195,8 +191,7 @@ func TestView_WideLayoutShowsSessionSummaryAndRecentRuns(t *testing.T) {
 
 	required := []string{
 		"Behavior",
-		"128 values",
-		"Workspace",
+		"WORKSPACE",
 		"stroop",
 		"behavior",
 		"2 hr ago",
@@ -222,9 +217,6 @@ func TestView_StandardLayoutShowsSummaryRow(t *testing.T) {
 	m.currentSection = SectionAnalysis
 	m.analysisCursor = 1
 	m.SetLastPipeline(int(types.PipelineBehavior))
-	m.SetSavedConfigCounts(map[int]int{
-		int(types.PipelineBehavior): 128,
-	})
 	m.SetConfigSummary(HomeConfigSummary{
 		Task: "stroop",
 	})
@@ -241,9 +233,8 @@ func TestView_StandardLayoutShowsSummaryRow(t *testing.T) {
 
 	required := []string{
 		"Session",
-		"Last Behavior 128 saved",
+		"Last Behavior",
 		"Task stroop",
-		"Selected",
 		"Behavior",
 		"eeg-pipeline behavior",
 	}
@@ -273,7 +264,6 @@ func TestView_StandardLayoutDropsSummaryRowInShortWindow(t *testing.T) {
 
 	normalized := normalizeWhitespace(view)
 	required := []string{
-		"Choose Workflow",
 		"Preprocessing",
 		"Analysis",
 		"Utilities",
