@@ -1117,11 +1117,13 @@ func (m Model) renderRecentRunLine(run RecentRunSummary) string {
 	if run.Mode != "" {
 		parts = append(parts, lipgloss.NewStyle().Foreground(styles.TextDim).Render(run.Mode))
 	}
-	if run.Duration != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Duration))
-	}
 	if run.Age != "" {
 		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Age))
+	}
+	if run.Duration != "" {
+		durationLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("- Duration")
+		durationValue := lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Duration)
+		parts = append(parts, durationLabel, durationValue)
 	}
 
 	return strings.Join(parts, "  ")

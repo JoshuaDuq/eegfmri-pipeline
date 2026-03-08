@@ -101,12 +101,15 @@ python -m eeg_pipeline.cli.main features compute \
 Run these commands in your terminal:
 
 ```bash
+# Set project root
+export PROJECT_ROOT=/path/to/EEG_fMRI_Pipeline
+
 # Set SUBJECTS_DIR
-export SUBJECTS_DIR=/Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer
+export SUBJECTS_DIR=$PROJECT_ROOT/eeg_pipeline/data/derivatives/freesurfer
 mkdir -p $SUBJECTS_DIR
 
 # Set path to your FreeSurfer license
-export FS_LICENSE=/Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/licenses/license_freesurfer.txt
+export FS_LICENSE=$PROJECT_ROOT/eeg_pipeline/licenses/license_freesurfer.txt
 
 # Verify the license file exists
 cat $FS_LICENSE
@@ -126,7 +129,7 @@ This takes 5-10 minutes (downloads ~2GB of packages). You only need to do this o
 
 ```bash
 docker run --rm \
-  -v /Users/joduq24/Desktop/PAIN_EEG_fMRI:/data \
+  -v $PROJECT_ROOT:/data \
   -v $SUBJECTS_DIR:/subjects \
   -v $FS_LICENSE:/usr/local/freesurfer/.license \
   --platform linux/amd64 \
@@ -152,7 +155,7 @@ You should see files like `orig.mgz`, `T1.mgz`, `brain.mgz`, `wmparc.mgz`.
 
 ```bash
 docker run --rm \
-  -v /Users/joduq24/Desktop/PAIN_EEG_fMRI:/data \
+  -v $PROJECT_ROOT:/data \
   -v $SUBJECTS_DIR:/subjects \
   -v $FS_LICENSE:/usr/local/freesurfer/.license \
   --platform linux/amd64 \
@@ -207,7 +210,7 @@ raw.set_montage(montage)
 # Coregister (requires MRI surfaces)
 mne.gui.coregistration(
     subject="sub-pilot001",
-    subjects_dir="/Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer",
+    subjects_dir="/path/to/EEG_fMRI_Pipeline/eeg_pipeline/data/derivatives/freesurfer",
     inst=raw,
 )
 ```
@@ -223,7 +226,7 @@ A GUI will open. Manually align the electrodes to the MRI, then save the transfo
 #### Step 9: Move the transform file
 
 ```bash
-mv sub-pilot001-trans.fif /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-pilot001/bem/
+mv sub-pilot001-trans.fif $SUBJECTS_DIR/sub-pilot001/bem/
 ```
 
 #### Step 10: Generate fMRI statistical map
@@ -298,9 +301,9 @@ python -m eeg_pipeline.cli.main features compute \
   --source-fmri-threshold 3.1 \
   --source-fmri-tail pos \
   --source-subject sub-pilot001 \
-  --source-subjects-dir /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer \
-  --source-trans /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-pilot001/bem/sub-pilot001-trans.fif \
-  --source-bem /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer/sub-pilot001/bem/sub-pilot001-5120-5120-5120-bem-sol.fif \
+  --source-subjects-dir $SUBJECTS_DIR \
+  --source-trans $SUBJECTS_DIR/sub-pilot001/bem/sub-pilot001-trans.fif \
+  --source-bem $SUBJECTS_DIR/sub-pilot001/bem/sub-pilot001-5120-5120-5120-bem-sol.fif \
   --source-method lcmv \
   --spatial global
 ```
@@ -326,12 +329,13 @@ If you prefer to install FreeSurfer locally instead of using Docker:
 ```bash
 export FREESURFER_HOME=/path/to/freesurfer
 source $FREESURFER_HOME/SetUpFreeSurfer.sh
-export SUBJECTS_DIR=/Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/derivatives/freesurfer
+export PROJECT_ROOT=/path/to/EEG_fMRI_Pipeline
+export SUBJECTS_DIR=$PROJECT_ROOT/eeg_pipeline/data/derivatives/freesurfer
 
 # Run recon-all
 recon-all \
   -subjid sub-pilot001 \
-  -i /Users/joduq24/Desktop/PAIN_EEG_fMRI/eeg_pipeline/data/fMRI_data/sub-pilot001/anat/sub-pilot001_acq-mprageipat2_T1w.nii.gz \
+  -i $PROJECT_ROOT/eeg_pipeline/data/fMRI_data/sub-pilot001/anat/sub-pilot001_acq-mprageipat2_T1w.nii.gz \
   -all \
   -sd $SUBJECTS_DIR
 

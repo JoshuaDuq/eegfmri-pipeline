@@ -5,7 +5,7 @@
 [![BIDS](https://img.shields.io/badge/data-BIDS-orange.svg)](https://bids-specification.readthedocs.io/)
 [![MNE-Python](https://img.shields.io/badge/MNE--Python-1.9.0-informational.svg)](https://mne.tools)
 
-A modular, end-to-end pipeline for simultaneous EEG–fMRI research.
+A modular, end-to-end EEG & fMRI pipeline for multimodal neuroimaging research.
 Covers raw data conversion, preprocessing, feature extraction, behavioral analysis,
 machine learning, fMRI first-level and second-level GLM, and publication-ready visualization —
 all from a unified CLI and interactive TUI.
