@@ -2,20 +2,20 @@ package styles
 
 import "github.com/charmbracelet/lipgloss"
 
-// Theme: Modern Research Dashboard.
-// Warm dark background, signature teal brand, generous whitespace feel.
+// Theme: Academic Research Terminal.
+// Cool dark background, steel-blue brand, high readability, zero gimmicks.
 var (
-	Primary   = lipgloss.Color("#2DD4BF") // Teal-400 — brand, focus rings, active items
-	Secondary = lipgloss.Color("#475569") // Slate-600 — borders, dividers
-	Accent    = lipgloss.Color("#38BDF8") // Sky-400 — highlights, badges, key hints
-	Success   = lipgloss.Color("#34D399") // Emerald-400
-	Warning   = lipgloss.Color("#FBBF24") // Amber-400
-	Error     = lipgloss.Color("#F87171") // Red-400
-	Muted     = lipgloss.Color("#64748B") // Slate-500
-	Text      = lipgloss.Color("#E2E8F0") // Slate-200 — primary text
-	TextDim   = lipgloss.Color("#94A3B8") // Slate-400 — secondary text
-	BgDark    = lipgloss.Color("#0F172A") // Slate-900 — app background
-	Surface   = lipgloss.Color("#1E293B") // Slate-800 — card/panel background
-	Highlight = lipgloss.Color("#0F3D38") // Teal-950 — selected row background
-	Border    = lipgloss.Color("#334155") // Slate-700 — subtle borders
+	Primary   = lipgloss.Color("#5B8DB8") // Steel-blue — brand, focus rings, active items
+	Secondary = lipgloss.Color("#4A5568") // Cool-gray-600 — borders, dividers
+	Accent    = lipgloss.Color("#7C9CBF") // Dusty-blue — secondary highlights
+	Success   = lipgloss.Color("#68A87A") // Muted-green — success states
+	Warning   = lipgloss.Color("#C9974A") // Muted-amber — warnings
+	Error     = lipgloss.Color("#C47070") // Muted-red — errors
+	Muted     = lipgloss.Color("#546378") // Blue-gray-500 — de-emphasized text
+	Text      = lipgloss.Color("#D8E0EA") // Cool-white — primary text
+	TextDim   = lipgloss.Color("#8A9BB0") // Cool-gray-400 — secondary text
+	BgDark    = lipgloss.Color("#0D1117") // Near-black — app background
+	Surface   = lipgloss.Color("#161C26") // Dark-navy — card/panel background
+	Highlight = lipgloss.Color("#1A2D42") // Dark-steel — selected row background
+	Border    = lipgloss.Color("#2D3748") // Cool-gray-700 — subtle borders
 )

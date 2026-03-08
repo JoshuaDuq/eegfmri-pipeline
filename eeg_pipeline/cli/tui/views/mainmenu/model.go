@@ -441,14 +441,18 @@ func (m Model) renderHeader() string {
 	}
 
 	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Render("◆")
-	logo := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render("eegfmri-pipeline")
-	versionBadge := styles.BadgeMutedStyle.Render("v1.0")
-	brand := "  " + glyph + " " + logo + "  " + versionBadge
+	logo := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("eegfmri-pipeline")
+	version := lipgloss.NewStyle().Foreground(styles.Muted).Render("v1.0")
+	brand := "  " + glyph + " " + logo + "  " + version
 
-	envBadge := lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(styles.ActiveMark + " Local")
+	envBadge := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.ActiveMark + " local")
 	statusParts := []string{envBadge}
-	if taskBadge := m.renderTaskBadge(); taskBadge != "" && lineWidth >= 72 {
-		statusParts = append(statusParts, taskBadge)
+	if task := strings.TrimSpace(m.Task); task != "" && task != "task" && lineWidth >= 72 {
+		taskLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render("task:")
+		taskValue := lipgloss.NewStyle().Foreground(styles.TextDim).Render(task)
+		statusParts = append(statusParts, taskLabel+" "+taskValue)
+	} else if lineWidth >= 72 {
+		statusParts = append(statusParts, lipgloss.NewStyle().Foreground(styles.Muted).Render("task: unset"))
 	}
 	status := strings.Join(statusParts, "  ")
 
@@ -460,14 +464,6 @@ func (m Model) renderHeader() string {
 	)
 
 	return titleRow + "\n" + styles.RenderHeaderSeparator(lineWidth)
-}
-
-func (m Model) renderTaskBadge() string {
-	task := strings.TrimSpace(m.Task)
-	if task == "" || task == "task" {
-		return lipgloss.NewStyle().Foreground(styles.Warning).Render("task unset")
-	}
-	return styles.BadgeTaskStyle.Render(task)
 }
 
 func (m Model) renderSectionHeader(title string, isActive bool) string {
@@ -842,15 +838,16 @@ func (m Model) renderPreviewPane(innerWidth int) string {
 	titleStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 	descriptionStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 
-	kindBadge := styles.BadgeMutedStyle.Render(detail.kind)
+	kindLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render(detail.kind)
 	if detail.lastUsed {
-		kindBadge += "  " + styles.BadgeSuccessStyle.Render(styles.CheckMark+" last used")
+		lastUsedMark := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " last used")
+		kindLabel += "  " + lastUsedMark
 	}
 
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(detail.title))
 	b.WriteString("\n")
-	b.WriteString(kindBadge)
+	b.WriteString(kindLabel)
 	b.WriteString("\n")
 	b.WriteString(descriptionStyle.Render(detail.description))
 	if details := m.renderPreviewDetailsBlock(detail, innerWidth); details != "" {
@@ -1021,11 +1018,13 @@ func (m Model) renderSessionStatusLine() string {
 
 func (m Model) renderSelectedTitleLine(detail selectionDetail) string {
 	title := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(detail.title)
-	badges := []string{styles.BadgeMutedStyle.Render(detail.kind)}
+	kind := lipgloss.NewStyle().Foreground(styles.Muted).Render(detail.kind)
+	line := title + "  " + kind
 	if detail.lastUsed {
-		badges = append(badges, styles.BadgeSuccessStyle.Render("Last used"))
+		lastUsed := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " last used")
+		line += "  " + lastUsed
 	}
-	return title + "  " + strings.Join(badges, "  ")
+	return line
 }
 
 func (m Model) renderSelectedMetaLine(detail selectionDetail) string {
@@ -1069,13 +1068,6 @@ func (m Model) previewWorkspaceRows() []detailRow {
 	}
 	if path := m.shortPath(m.configSummary.SourceRoot); path != "" {
 		rows = append(rows, detailRow{label: "Source", value: path})
-	}
-	if m.configSummary.PreprocessingNJobs > 0 {
-		rows = append(rows, detailRow{
-			label:  "NJobs",
-			value:  fmt.Sprintf("%d", m.configSummary.PreprocessingNJobs),
-			accent: true,
-		})
 	}
 	return rows
 }

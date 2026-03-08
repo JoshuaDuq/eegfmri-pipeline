@@ -186,32 +186,29 @@ func RenderRadio(selected, focused bool) string {
 	return lipgloss.NewStyle().Foreground(Muted).Render("○")
 }
 
-// RenderSectionLabel renders a styled section label with a left accent bar.
+// RenderSectionLabel renders a section label with a steel-blue bar and bold white title.
 func RenderSectionLabel(title string) string {
 	bar := lipgloss.NewStyle().Foreground(Primary).Render(SectionIcon)
 	label := lipgloss.NewStyle().Bold(true).Foreground(Text).Render(" " + title)
 	return bar + label
 }
 
-// RenderActiveSectionLabel renders an active section label with uppercase title and primary accent bar.
+// RenderActiveSectionLabel delegates to RenderSectionLabel (active = same strong style).
 func RenderActiveSectionLabel(title string) string {
-	bar := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(SectionIcon)
-	label := lipgloss.NewStyle().Bold(true).Foreground(Primary).Render(" " + strings.ToUpper(title))
+	return RenderSectionLabel(title)
+}
+
+// RenderDimSectionLabel renders an inactive section label: muted bar and text.
+func RenderDimSectionLabel(title string) string {
+	bar := lipgloss.NewStyle().Foreground(Border).Render(SectionIcon)
+	label := lipgloss.NewStyle().Foreground(Muted).Render(" " + title)
 	return bar + label
 }
 
-// RenderDimSectionLabel renders a section label for inactive sections.
-func RenderDimSectionLabel(title string) string {
+// RenderPreviewSubHeader renders a lightweight sub-section label for preview panes.
+func RenderPreviewSubHeader(title string) string {
 	bar := lipgloss.NewStyle().Foreground(Secondary).Render(SectionIcon)
 	label := lipgloss.NewStyle().Foreground(TextDim).Render(" " + title)
-	return bar + label
-}
-
-// RenderPreviewSubHeader renders a lightweight all-caps sub-section label for preview panes,
-// followed by a thin separator rule.
-func RenderPreviewSubHeader(title string) string {
-	bar := lipgloss.NewStyle().Foreground(Primary).Render(SectionIcon)
-	label := lipgloss.NewStyle().Foreground(TextDim).Bold(true).Render(" " + title)
 	return bar + label
 }
 
