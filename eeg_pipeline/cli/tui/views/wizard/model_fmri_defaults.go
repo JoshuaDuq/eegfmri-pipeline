@@ -33,10 +33,7 @@ func (m Model) resolveFmriColumnFromDiscovered(candidates []string, fallback str
 		return found
 	}
 	if len(m.fmriDiscoveredColumns) > 0 {
-		first := strings.TrimSpace(m.fmriDiscoveredColumns[0])
-		if first != "" {
-			return first
-		}
+		return ""
 	}
 	if strings.TrimSpace(fallback) != "" {
 		return strings.TrimSpace(fallback)

@@ -167,6 +167,21 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-high-pass", type=float, default=None, help="High-pass filter cutoff in Hz (default: 0.008).")
     parser.add_argument("--source-fmri-low-pass", type=float, default=None, help="Optional low-pass cutoff in Hz (default: disabled; avoid unless you know you need it).")
     parser.add_argument(
+        "--source-fmri-events-to-model",
+        nargs="+",
+        default=None,
+        metavar="EVENT",
+        help=(
+            "Optional: restrict which events.tsv rows enter the source-fMRI GLM. "
+            "Values are matched against --source-fmri-events-to-model-column."
+        ),
+    )
+    parser.add_argument(
+        "--source-fmri-events-to-model-column",
+        default=None,
+        help="Events column used for --source-fmri-events-to-model. Required when source-fMRI event scoping is enabled.",
+    )
+    parser.add_argument(
         "--source-fmri-stim-phases-to-model",
         type=str,
         default=None,
@@ -186,7 +201,10 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "in source-fMRI contrast building. Use 'all' to disable scoping."
         ),
     )
-    parser.add_argument("--source-fmri-condition-scope-column", default=None, help="Optional events.tsv column used to apply --source-fmri-condition-scope-trial-types (default: trial_type).")
+    parser.add_argument("--source-fmri-condition-scope-column", default=None, help="Events column used to apply --source-fmri-condition-scope-trial-types. Required when source-fMRI condition scoping is enabled.")
+    parser.add_argument("--source-fmri-phase-column", default=None, help="Events column used for --source-fmri-stim-phases-to-model. Required when source-fMRI phase scoping is enabled.")
+    parser.add_argument("--source-fmri-phase-scope-column", default=None, help="Events column used to scope phase filtering to a subset of rows. Required when --source-fmri-phase-scope-value is set.")
+    parser.add_argument("--source-fmri-phase-scope-value", default=None, help="Value in --source-fmri-phase-scope-column that defines which rows phase filtering applies to.")
     parser.add_argument("--source-fmri-output-type", choices=["z-score", "t-stat", "cope", "beta"], default=None, help="Output statistical map type (default: z-score).")
     parser.add_argument("--source-fmri-resample-to-fs", action="store_true", default=None, dest="source_fmri_resample_to_fs", help="Auto-resample stats map to FreeSurfer subject space.")
     parser.add_argument("--no-source-fmri-resample-to-fs", action="store_false", dest="source_fmri_resample_to_fs", help="Do not auto-resample stats map to FreeSurfer subject space.")
@@ -409,9 +427,9 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--erds-infer-contralateral", action="store_true", default=None, help="Infer contralateral hemisphere when trial laterality metadata is missing")
     parser.add_argument("--no-erds-infer-contralateral", action="store_false", dest="erds_infer_contralateral")
     parser.add_argument("--erds-pain-marker-bands", nargs="+", default=None, help="Bands for ERDS pain-marker extraction")
-    parser.add_argument("--erds-laterality-columns", nargs="+", default=None, help="Candidate events.tsv columns for stimulation laterality")
-    parser.add_argument("--erds-somatosensory-left-channels", nargs="+", default=None, help="Left somatosensory channels for pain markers")
-    parser.add_argument("--erds-somatosensory-right-channels", nargs="+", default=None, help="Right somatosensory channels for pain markers")
+    parser.add_argument("--erds-laterality-columns", nargs="+", default=None, help="Candidate events.tsv columns for task laterality (e.g., stimulated side, response hand)")
+    parser.add_argument("--erds-somatosensory-left-channels", nargs="+", default=None, help="Left-lateralized channels used by laterality-aware ERDS summaries")
+    parser.add_argument("--erds-somatosensory-right-channels", nargs="+", default=None, help="Right-lateralized channels used by laterality-aware ERDS summaries")
     parser.add_argument("--erds-onset-min-threshold-percent", type=float, default=None, help="Minimum percent threshold for ERD onset")
     parser.add_argument("--erds-rebound-threshold-sigma", type=float, default=None, help="Sigma threshold for ERD rebound detection")
     parser.add_argument("--erds-rebound-min-threshold-percent", type=float, default=None, help="Minimum percent threshold for ERD rebound")

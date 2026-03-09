@@ -97,8 +97,19 @@ class TestCliFeaturesHelp(unittest.TestCase):
                 "--source-contrast-condition-b",
                 "49.3",
                 "--source-contrast-welch-stats",
+                "--source-fmri-events-to-model",
+                "stimulation",
+                "rating",
+                "--source-fmri-events-to-model-column",
+                "event_class",
                 "--source-fmri-condition-scope-column",
                 "stim_phase",
+                "--source-fmri-phase-column",
+                "stim_phase",
+                "--source-fmri-phase-scope-column",
+                "event_group",
+                "--source-fmri-phase-scope-value",
+                "stimulation",
             ]
         )
         self.assertTrue(bool(args.source_save_stc))
@@ -107,7 +118,12 @@ class TestCliFeaturesHelp(unittest.TestCase):
         self.assertEqual(args.source_contrast_condition_a, "44.3")
         self.assertEqual(args.source_contrast_condition_b, "49.3")
         self.assertTrue(bool(args.source_contrast_welch_stats))
+        self.assertEqual(args.source_fmri_events_to_model, ["stimulation", "rating"])
+        self.assertEqual(args.source_fmri_events_to_model_column, "event_class")
         self.assertEqual(args.source_fmri_condition_scope_column, "stim_phase")
+        self.assertEqual(args.source_fmri_phase_column, "stim_phase")
+        self.assertEqual(args.source_fmri_phase_scope_column, "event_group")
+        self.assertEqual(args.source_fmri_phase_scope_value, "stimulation")
 
 
 if __name__ == "__main__":

@@ -131,7 +131,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--condition-scope-column",
         type=str,
         default=None,
-        help="Events column used for --condition-scope-trial-types (default: trial_type).",
+        help="Events column used for --condition-scope-trial-types. Required when condition scoping is enabled.",
     )
 
     glm_group = parser.add_argument_group("GLM settings")
@@ -170,9 +170,15 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         type=str,
         default=None,
         help=(
-            "Optional comma-separated allow-list of events.tsv trial_type values to include in the GLM. "
+            "Optional comma-separated allow-list of events.tsv values to include in the GLM. "
             "Example: condition_a,condition_b,rating"
         ),
+    )
+    glm_group.add_argument(
+        "--events-to-model-column",
+        type=str,
+        default=None,
+        help="Events column used for values passed via --events-to-model. Required when events scoping is enabled.",
     )
     glm_group.add_argument(
         "--stim-phases-to-model",
@@ -190,7 +196,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         default=None,
         help=(
             "Events column used for phase scoping values passed via --stim-phases-to-model "
-            "(default: stim_phase)."
+            "and required when phase scoping is enabled."
         ),
     )
     glm_group.add_argument(
@@ -198,7 +204,8 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         type=str,
         default=None,
         help=(
-            "Events column used to scope phase filtering to a subset of rows (default: trial_type)."
+            "Events column used to scope phase filtering to a subset of rows. "
+            "Required when --phase-scope-value is set."
         ),
     )
     glm_group.add_argument(
@@ -739,7 +746,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         type=str,
         default=None,
         help=(
-            "Events column used for --signature-scope-trial-types (default: trial_type)."
+            "Events column used for --signature-scope-trial-types. Required when signature trial scoping is enabled."
         ),
     )
     trial_group.add_argument(
@@ -747,7 +754,7 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         type=str,
         default=None,
         help=(
-            "Events column used for --signature-scope-stim-phases (default: stim_phase)."
+            "Events column used for --signature-scope-stim-phases. Required when signature phase scoping is enabled."
         ),
     )
 
@@ -1053,12 +1060,12 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             f"contrast-type must be 't-test' or 'custom', got {contrast_type!r}."
         )
     cond_a_column = str(
-        _coalesce(args.cond_a_column, _cfg_value("condition_a", "column"), "trial_type")
-    ).strip() or "trial_type"
+        _coalesce(args.cond_a_column, _cfg_value("condition_a", "column")) or ""
+    ).strip()
     cond_a_value = _coalesce(args.cond_a_value, _cfg_value("condition_a", "value"))
     cond_b_column = str(
-        _coalesce(args.cond_b_column, _cfg_value("condition_b", "column"), "trial_type")
-    ).strip() or "trial_type"
+        _coalesce(args.cond_b_column, _cfg_value("condition_b", "column")) or ""
+    ).strip()
     cond_b_value = _coalesce(args.cond_b_value, _cfg_value("condition_b", "value"))
     condition_scope_trial_types = _coalesce(
         getattr(args, "condition_scope_trial_types", None),
@@ -1068,16 +1075,29 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         _coalesce(
             getattr(args, "condition_scope_column", None),
             _cfg_value("condition_scope_column"),
-            "trial_type",
         )
-    ).strip() or "trial_type"
+        or ""
+    ).strip()
 
     if contrast_type == "custom" and not formula:
         raise ValueError("contrast-type=custom requires --formula")
 
+    if contrast_type != "custom" and not cond_a_column:
+        raise ValueError(
+            "Missing required --cond-a-column or fmri_contrast.condition_a.column."
+        )
     if contrast_type != "custom" and not _has_value(cond_a_value):
         raise ValueError(
             "Missing required --cond-a-value (or use --contrast-type custom --formula ...)"
+        )
+    if _has_value(cond_b_value) and not cond_b_column:
+        raise ValueError(
+            "Missing required --cond-b-column or fmri_contrast.condition_b.column."
+        )
+    if condition_scope_trial_types and not condition_scope_column:
+        raise ValueError(
+            "condition_scope_trial_types requires --condition-scope-column "
+            "or fmri_contrast.condition_scope_column."
         )
     if mode in {"beta-series", "lss"} and not _has_value(cond_b_value):
         raise ValueError(
@@ -1109,6 +1129,13 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         events_to_model = normalize_trial_type_list(
             _coalesce(args.events_to_model, _cfg_value("events_to_model"))
         )
+        events_to_model_column = str(
+            _coalesce(
+                getattr(args, "events_to_model_column", None),
+                _cfg_value("events_to_model_column"),
+            )
+            or ""
+        ).strip()
         stim_phases_to_model = normalize_trial_type_list(
             _coalesce(
                 getattr(args, "stim_phases_to_model", None),
@@ -1116,18 +1143,33 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             )
         )
         phase_column = str(
-            _coalesce(getattr(args, "phase_column", None), _cfg_value("phase_column"), "stim_phase")
-        ).strip() or "stim_phase"
+            _coalesce(getattr(args, "phase_column", None), _cfg_value("phase_column")) or ""
+        ).strip()
         phase_scope_column = str(
             _coalesce(
                 getattr(args, "phase_scope_column", None),
                 _cfg_value("phase_scope_column"),
-                "trial_type",
             )
-        ).strip() or "trial_type"
+            or ""
+        ).strip()
         phase_scope_value = str(
             _coalesce(getattr(args, "phase_scope_value", None), _cfg_value("phase_scope_value"), "")
         ).strip() or None
+        if events_to_model and not events_to_model_column:
+            raise ValueError(
+                "events_to_model requires --events-to-model-column "
+                "or fmri_contrast.events_to_model_column."
+            )
+        if stim_phases_to_model and not phase_column:
+            raise ValueError(
+                "stim_phases_to_model requires --phase-column "
+                "or fmri_contrast.phase_column."
+            )
+        if phase_scope_value and not phase_scope_column:
+            raise ValueError(
+                "phase_scope_value requires --phase-scope-column "
+                "or fmri_contrast.phase_scope_column."
+            )
         cfg = ContrastBuilderConfig(
             enabled=True,
             input_source=input_source,
@@ -1167,6 +1209,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             write_design_matrix=write_design_matrix,
             smoothing_fwhm=smoothing_fwhm,
             events_to_model=events_to_model,
+            events_to_model_column=events_to_model_column,
             stim_phases_to_model=stim_phases_to_model,
             phase_column=phase_column,
             phase_scope_column=phase_scope_column,
@@ -1206,14 +1249,12 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             method=mode,
             include_other_events=include_other_events,
             lss_other_regressors=lss_other,
-            condition_scope_trial_type_column=(
-                str(getattr(args, "signature_scope_trial_type_column", "") or "").strip()
-                or "trial_type"
-            ),
-            condition_scope_phase_column=(
-                str(getattr(args, "signature_scope_phase_column", "") or "").strip()
-                or "stim_phase"
-            ),
+            condition_scope_trial_type_column=str(
+                getattr(args, "signature_scope_trial_type_column", "") or ""
+            ).strip(),
+            condition_scope_phase_column=str(
+                getattr(args, "signature_scope_phase_column", "") or ""
+            ).strip(),
             condition_scope_trial_types=tuple(
                 _normalize_string_list(getattr(args, "signature_scope_trial_types", None))
                 or ()

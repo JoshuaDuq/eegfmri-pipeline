@@ -238,7 +238,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optMLCovariates:
 			label, value, hint = "Covariates", renderTextOrDefault(m.mlCovariatesSpec, "(none)"), "extra predictors from metadata (optional)"
 		case optMLBaselinePredictors:
-			label, value, hint = "Baseline Predictors", renderTextOrDefault(m.mlBaselinePredictorsSpec, "(config default)"), "used for incremental validity"
+			label, value, hint = "Baseline Predictors", renderTextOrDefault(m.mlBaselinePredictorsSpec, "(required)"), "used for incremental validity"
 		case optMLRequireTrialMlSafe:
 			label, value, hint = "Require trial_ml_safe", m.boolToOnOff(m.mlRequireTrialMlSafe), "fail-fast if feature pipeline isn't ML-safe"
 		case optMLPlotsEnabled:

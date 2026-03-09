@@ -260,7 +260,8 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Baseline predictor columns for incremental_validity (standardized meta names like 'predictor', "
-            "'trial_index', 'block'). Defaults to config machine_learning.incremental_validity.baseline_predictors."
+            "'trial_index', 'block'). Required via --baseline-predictors or "
+            "machine_learning.incremental_validity.baseline_predictors."
         ),
     )
     parser.add_argument("--imputer", choices=["median", "mean", "most_frequent"], default=None)

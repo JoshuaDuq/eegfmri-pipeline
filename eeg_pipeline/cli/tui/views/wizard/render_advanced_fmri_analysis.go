@@ -117,6 +117,14 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		eventsToModelVal = "(all)"
 	}
 
+	eventsToModelColumnVal := strings.TrimSpace(m.fmriAnalysisEventsToModelColumn)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisEventsToModelColumn {
+		eventsToModelColumnVal = m.textBuffer + "█"
+	}
+	if eventsToModelColumnVal == "" {
+		eventsToModelColumnVal = "(required when set)"
+	}
+
 	scopeColumnVal := strings.TrimSpace(m.fmriAnalysisScopeColumn)
 	if m.editingText && m.editingTextField == textFieldFmriAnalysisScopeColumn {
 		scopeColumnVal = m.textBuffer + "█"
@@ -773,6 +781,10 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			label = "Events to Model"
 			value = eventsToModelVal
 			hint = "Space to edit (comma-separated; empty = all)"
+		case optFmriAnalysisEventsToModelColumn:
+			label = "Events Model Column"
+			value = eventsToModelColumnVal
+			hint = "Space to edit (empty = trial_type)"
 		case optFmriAnalysisScopeColumn:
 			label = "Condition Scope Column"
 			value = scopeColumnVal

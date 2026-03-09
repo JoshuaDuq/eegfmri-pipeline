@@ -11,7 +11,10 @@ from eeg_pipeline.analysis.behavior.result_types import GroupLevelResult
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_float, get_config_int, get_config_value
-from eeg_pipeline.utils.data.columns import resolve_outcome_column, resolve_predictor_column
+from eeg_pipeline.utils.data.columns import (
+    require_predictor_column,
+    resolve_outcome_column,
+)
 
 
 _PARTIAL_DESIGN_CONDITION_THRESHOLD = 1e10
@@ -188,7 +191,9 @@ def run_group_level_correlations_impl(
     if target_column is None or target_column not in combined.columns:
         logger.warning("Multilevel correlations: target column '%s' not found.", target_column)
         return pd.DataFrame()
-    predictor_column = resolve_predictor_column(combined, config) or "predictor"
+    predictor_column = ""
+    if control_predictor:
+        predictor_column = require_predictor_column(combined, config)
     block_col = _resolve_group_level_block_column(combined, config)
     if control_run_effects and block_col is None:
         raise ValueError(

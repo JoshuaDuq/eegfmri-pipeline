@@ -178,7 +178,27 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIn("regression", captured["stages"])
         self.assertFalse(captured["filter_disabled_stages"])
 
-    def test_resolve_condition_compare_column_uses_pain_mapping(self):
+    def test_resolve_condition_compare_column_prefers_generic_condition_mapping(self):
+        from eeg_pipeline.analysis.behavior.orchestration import _resolve_condition_compare_column
+
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {"condition": {"compare_column": ""}},
+                "event_columns": {
+                    "condition": ["condition_label"],
+                    "binary_outcome": ["binary_outcome"],
+                },
+            }
+        )
+        df_trials = pd.DataFrame(
+            {
+                "condition_label": ["go", "nogo"],
+                "binary_outcome": [0, 1],
+            }
+        )
+        self.assertEqual(_resolve_condition_compare_column(df_trials, cfg), "condition_label")
+
+    def test_resolve_condition_compare_column_falls_back_to_binary_outcome_mapping(self):
         from eeg_pipeline.analysis.behavior.orchestration import _resolve_condition_compare_column
 
         cfg = DotConfig(
@@ -3293,6 +3313,36 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(list(out["feature"]), ["power_alpha"])
         self.assertEqual(ctx.data_qc["icc_reliability"]["alignment_strategy"], "task_identity")
         self.assertEqual(ctx.data_qc["icc_reliability"]["unit_columns"], ["temperature"])
+
+    def test_icc_requires_explicit_unit_columns(self):
+        from eeg_pipeline.analysis.behavior.stages.diagnostics import (
+            _resolve_configured_icc_unit_columns,
+        )
+
+        df_trials = pd.DataFrame(
+            {
+                "run_id": [1, 2],
+                "trial_index_within_group": [0, 0],
+                "temperature": [44.0, 45.0],
+            }
+        )
+        config = DotConfig(
+            {
+                "behavior_analysis": {
+                    "condition": {"compare_column": ""},
+                },
+                "event_columns": {
+                    "predictor": ["temperature"],
+                },
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "behavior_analysis.icc.unit_columns must not be empty"):
+            _resolve_configured_icc_unit_columns(
+                df_trials,
+                config=config,
+                trial_col="trial_index_within_group",
+            )
 
     def test_paired_condition_permutation_does_not_use_unpaired_label_shuffle(self):
         from eeg_pipeline.utils.parallel import _compute_single_condition_effect

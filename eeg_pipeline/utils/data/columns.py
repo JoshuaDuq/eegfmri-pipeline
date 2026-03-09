@@ -6,8 +6,9 @@ from typing import Any, List, Optional
 
 import pandas as pd
 
-VAS_KEYWORD = "vas"
-OUTCOME_KEYWORD = "outcome"
+
+def _is_numeric_series(df: pd.DataFrame, column: str) -> bool:
+    return bool(column in df.columns and pd.api.types.is_numeric_dtype(df[column]))
 
 
 def find_column_in_events(events_df: pd.DataFrame, column_names: List[str]) -> Optional[str]:
@@ -23,6 +24,16 @@ def find_binary_outcome_column_in_events(events_df: pd.DataFrame, config: Any) -
     
     event_columns = config.get("event_columns", {})
     column_names = event_columns.get("binary_outcome", [])
+    return find_column_in_events(events_df, column_names)
+
+
+def find_condition_column_in_events(events_df: pd.DataFrame, config: Any) -> Optional[str]:
+    """Find generic condition column in events dataframe using config."""
+    if config is None:
+        raise ValueError("config is required")
+
+    event_columns = config.get("event_columns", {})
+    column_names = event_columns.get("condition", [])
     return find_column_in_events(events_df, column_names)
 
 
@@ -66,6 +77,14 @@ def get_binary_outcome_column_from_config(
     return get_column_from_config(config, "event_columns.binary_outcome", events_df)
 
 
+def get_condition_column_from_config(
+    config: Any,
+    events_df: Optional[pd.DataFrame] = None,
+) -> Optional[str]:
+    """Get condition column from config, optionally matching against events dataframe."""
+    return get_column_from_config(config, "event_columns.condition", events_df)
+
+
 def get_predictor_column_from_config(
     config: Any,
     events_df: Optional[pd.DataFrame] = None,
@@ -83,19 +102,20 @@ def get_outcome_column_from_config(
 
 
 def pick_target_column(df: pd.DataFrame, *, target_columns: List[str]) -> Optional[str]:
-    """Pick target column from dataframe, matching target list or VAS/outcome patterns."""
-    for col in target_columns:
-        if col in df.columns:
-            return col
-
-    for col in df.columns:
-        col_lower = str(col).lower()
-        has_vas_or_outcome = VAS_KEYWORD in col_lower or OUTCOME_KEYWORD in col_lower
-        is_numeric = pd.api.types.is_numeric_dtype(df[col])
-        if has_vas_or_outcome and is_numeric:
-            return col
-
+    """Pick numeric target column from dataframe using explicit candidate names only."""
+    for column in target_columns:
+        if _is_numeric_series(df, column):
+            return column
     return None
+
+
+def _available_numeric_columns(events_df: pd.DataFrame) -> List[str]:
+    """Return numeric columns available for behavior column resolution."""
+    return [
+        str(column)
+        for column in events_df.columns
+        if _is_numeric_series(events_df, str(column))
+    ]
 
 
 def _get_explicit_behavior_column(
@@ -122,13 +142,10 @@ def resolve_outcome_column(
         config,
         key="behavior_analysis.outcome_column",
     )
-    if explicit and explicit in events_df.columns:
+    if explicit and _is_numeric_series(events_df, explicit):
         return explicit
 
-    if "outcome" in events_df.columns:
-        return "outcome"
-
-    outcome_candidates = []
+    outcome_candidates: List[str] = []
     if config is not None and hasattr(config, "get"):
         outcome_candidates = list(config.get("event_columns.outcome", []) or [])
     return pick_target_column(events_df, target_columns=outcome_candidates)
@@ -143,28 +160,58 @@ def resolve_predictor_column(
         config,
         key="behavior_analysis.predictor_column",
     )
-    if explicit and explicit in events_df.columns:
+    if explicit and _is_numeric_series(events_df, explicit):
         return explicit
 
     predictor_candidates: List[str] = []
     if config is not None and hasattr(config, "get"):
         predictor_candidates = list(config.get("event_columns.predictor", []) or [])
+    return pick_target_column(events_df, target_columns=predictor_candidates)
 
-    for candidate in predictor_candidates:
-        if candidate in events_df.columns:
-            return candidate
-    return None
+
+def require_outcome_column(
+    events_df: pd.DataFrame,
+    config: Any,
+) -> str:
+    """Resolve the behavior outcome column or raise a configuration error."""
+    resolved = resolve_outcome_column(events_df, config)
+    if resolved:
+        return resolved
+    raise ValueError(
+        "Could not resolve a numeric behavior outcome column. "
+        "Set 'behavior_analysis.outcome_column' or configure "
+        f"'event_columns.outcome'. Available numeric columns: {_available_numeric_columns(events_df)}"
+    )
+
+
+def require_predictor_column(
+    events_df: pd.DataFrame,
+    config: Any,
+) -> str:
+    """Resolve the behavior predictor column or raise a configuration error."""
+    resolved = resolve_predictor_column(events_df, config)
+    if resolved:
+        return resolved
+    raise ValueError(
+        "Could not resolve a numeric behavior predictor column. "
+        "Set 'behavior_analysis.predictor_column' or configure "
+        f"'event_columns.predictor'. Available numeric columns: {_available_numeric_columns(events_df)}"
+    )
 
 
 __all__ = [
     "find_column_in_events",
     "find_binary_outcome_column_in_events",
+    "find_condition_column_in_events",
     "find_predictor_column_in_events",
     "get_column_from_config",
     "get_binary_outcome_column_from_config",
+    "get_condition_column_from_config",
     "get_predictor_column_from_config",
     "get_outcome_column_from_config",
     "pick_target_column",
+    "require_outcome_column",
+    "require_predictor_column",
     "resolve_outcome_column",
     "resolve_predictor_column",
 ]

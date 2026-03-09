@@ -567,12 +567,11 @@ def extract_burst_features(
     threshold_method = str(burst_config["threshold_method"])
     threshold_reference = str(burst_config.get("threshold_reference", "trial")).strip().lower()
     if analysis_mode == "trial_ml_safe" and threshold_reference in {"subject", "condition"} and train_mask is None:
-        ctx.logger.warning(
-            "Bursts: threshold_reference=%s requires cross-trial baselines; forcing threshold_reference='trial' "
-            "in trial_ml_safe mode without train_mask.",
-            threshold_reference,
+        raise ValueError(
+            "Bursts: trial_ml_safe mode with threshold_reference="
+            f"'{threshold_reference}' requires a valid train_mask. "
+            "Cross-trial burst thresholds are not leakage-safe without fold-specific training trials."
         )
-        threshold_reference = "trial"
 
     for band in burst_config["bands"]:
         if band not in precomputed.band_data:

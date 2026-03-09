@@ -720,6 +720,9 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 	case optFmriAnalysisEventsToModel:
 		m.startTextEdit(textFieldFmriAnalysisEventsToModel)
 		m.useDefaultAdvanced = false
+	case optFmriAnalysisEventsToModelColumn:
+		m.startTextEdit(textFieldFmriAnalysisEventsToModelColumn)
+		m.useDefaultAdvanced = false
 	case optFmriAnalysisScopeColumn:
 		m.expandedOption = expandedFmriAnalysisScopeColumn
 		m.subCursor = 0

@@ -89,6 +89,7 @@ def stage_temporal_stats_impl(
     """Compute temporal statistics (power, ITPC, ERDS correlations)."""
     from eeg_pipeline.analysis.behavior.api import compute_temporal_from_context
     from eeg_pipeline.utils.analysis.stats.temporal import compute_itpc_temporal_from_context
+    from eeg_pipeline.utils.data.columns import resolve_outcome_column
 
     selected_temporal_features = resolve_temporal_feature_selection_fn(ctx, selected_features)
 
@@ -259,13 +260,24 @@ def stage_temporal_stats_impl(
         method = "spearman" if ctx.use_spearman else "pearson"
         method_label = format_correlation_method_label_fn(method, None)
         target_label = str(
-            get_config_value(
-                ctx.config,
-                "behavior_analysis.temporal.target_column",
-                get_config_value(ctx.config, "behavior_analysis.outcome_column", "") or "outcome",
+            get_config_value(ctx.config, "behavior_analysis.temporal.target_column", "") or ""
+        ).strip()
+        if not target_label:
+            target_label = str(
+                get_config_value(ctx.config, "behavior_analysis.outcome_column", "") or ""
+            ).strip()
+        if not target_label:
+            aligned_events = getattr(ctx, "aligned_events", None)
+            if aligned_events is not None:
+                target_label = str(
+                    resolve_outcome_column(aligned_events, ctx.config) or ""
+                ).strip()
+        if not target_label:
+            raise ValueError(
+                "Temporal analysis could not resolve the target column. "
+                "Set behavior_analysis.temporal.target_column, "
+                "behavior_analysis.outcome_column, or configure event_columns.outcome."
             )
-            or ""
-        ).strip() or "outcome"
         for _, row in df_temporal.iterrows():
             normalized_records.append(
                 {

@@ -389,13 +389,22 @@ def _warn_if_phase_connectivity_without_spatial_transform(
     if spatial_transform in {"csd", "laplacian"}:
         return
     
+    measures_text = ", ".join(sorted(set(m.lower() for m in measures) & phase_measures))
+    if warn_enabled:
+        raise ValueError(
+            "Phase-based connectivity measures "
+            f"({measures_text}) require CSD/Laplacian transform to reduce spurious "
+            "connectivity from volume conduction. Set "
+            "feature_engineering.spatial_transform='csd' or set "
+            "feature_engineering.connectivity.warn_if_no_spatial_transform=false "
+            "to explicitly allow this unsafe analysis."
+        )
+
     if logger is not None:
         logger.warning(
-            "Phase-based connectivity measures (%s) are used without CSD/Laplacian transform. "
-            "This can lead to spurious connectivity from volume conduction. "
-            "Consider setting feature_engineering.spatial_transform='csd' for more valid results. "
-            "Set feature_engineering.connectivity.warn_if_no_spatial_transform=false to suppress this warning.",
-            ", ".join(sorted(set(m.lower() for m in measures) & phase_measures)),
+            "Phase-based connectivity measures (%s) are running without CSD/Laplacian transform. "
+            "Proceeding only because feature_engineering.connectivity.warn_if_no_spatial_transform=false.",
+            measures_text,
         )
 
 

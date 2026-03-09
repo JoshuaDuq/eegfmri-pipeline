@@ -730,15 +730,15 @@ class PreprocessingPipeline(PipelineBase):
                         str(p).strip()
                         for p in configured_prefixes
                         if str(p).strip()
-                    ) or ("Trig_",)
+                    )
                 elif isinstance(configured_prefixes, str) and configured_prefixes.strip():
                     preferred_prefixes = tuple(
                         part.strip()
                         for part in configured_prefixes.split(",")
                         if part.strip()
-                    ) or ("Trig_",)
+                    )
                 else:
-                    preferred_prefixes = ("Trig_",)
+                    preferred_prefixes = ()
                 excluded_prefixes = (
                     "Volume",
                     "Pulse",

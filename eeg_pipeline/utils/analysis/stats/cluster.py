@@ -29,7 +29,10 @@ from .base import (
 )
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import write_tsv
-from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
+from eeg_pipeline.utils.data.columns import (
+    get_binary_outcome_column_from_config,
+    get_condition_column_from_config,
+)
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh_values, fdr_bh
 from eeg_pipeline.utils.analysis.stats.effect_size import compute_cohens_d_with_bootstrap_ci
 
@@ -1095,7 +1098,10 @@ def _run_cluster_test_core(
     condition_column = (
         condition_column_config
         if condition_column_config and condition_column_config in aligned_events.columns
-        else get_binary_outcome_column_from_config(config, aligned_events)
+        else (
+            get_condition_column_from_config(config, aligned_events)
+            or get_binary_outcome_column_from_config(config, aligned_events)
+        )
     )
     if condition_column is None or condition_column not in aligned_events.columns:
         logger.warning("Cluster condition column not found; skipping cluster test.")

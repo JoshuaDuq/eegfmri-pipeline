@@ -3288,15 +3288,27 @@ def run_incremental_validity_ml(
     ensure_dir(results_dir)
     ensure_dir(metrics_dir)
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
-    
+
     if baseline_predictors is None:
-        raw_preds = get_config_value(config, "machine_learning.incremental_validity.baseline_predictors", ["predictor"])
+        raw_preds = get_config_value(
+            config,
+            "machine_learning.incremental_validity.baseline_predictors",
+            [],
+        )
         if isinstance(raw_preds, (list, tuple)):
-            baseline_predictors = [str(v) for v in raw_preds if str(v).strip() != ""]
+            baseline_predictors = [str(v).strip() for v in raw_preds if str(v).strip()]
         elif isinstance(raw_preds, str) and raw_preds.strip():
             baseline_predictors = [raw_preds.strip()]
         else:
-            baseline_predictors = ["predictor"]
+            baseline_predictors = []
+    else:
+        baseline_predictors = [str(v).strip() for v in baseline_predictors if str(v).strip()]
+
+    if not baseline_predictors:
+        raise ValueError(
+            "Incremental validity requires explicit baseline predictors. "
+            "Set machine_learning.incremental_validity.baseline_predictors or pass --baseline-predictors."
+        )
 
     # Guard against target leakage through baseline predictors.
     forbidden_predictors = {v.lower() for v in _target_covariate_aliases(target, config=config)}

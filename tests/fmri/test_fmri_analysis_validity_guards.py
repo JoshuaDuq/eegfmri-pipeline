@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -12,10 +14,14 @@ from fmri_pipeline.analysis.contrast_builder import (
     ContrastBuilderConfig,
     _apply_trial_phase_scoping,
     _assert_constraint_mask_requires_z_output,
+    _build_intersection_brain_mask,
     _get_constraint_mask_hash,
     _load_constraint_mask_spec,
+    _load_matching_brain_mask_for_bold,
+    _prepare_events_for_glm,
     _resolve_fmri_stats_artifact,
     _validate_consistent_trs,
+    _validate_events_against_bold_run,
     compute_contrast_map,
     discover_bold_runs,
     load_contrast_config,
@@ -25,6 +31,7 @@ from fmri_pipeline.analysis.contrast_builder import (
 from fmri_pipeline.analysis.trial_signatures import (
     TrialInfo,
     TrialSignatureExtractionConfig,
+    _combine_effect_images,
     _build_lss_events,
     _discover_runs,
     _extract_trials_for_run,
@@ -117,6 +124,32 @@ def test_load_contrast_config_rejects_invalid_output_type() -> None:
         load_contrast_config(config)
 
 
+def test_load_contrast_config_requires_events_to_model_column() -> None:
+    config = {
+        "fmri_contrast": {
+            "condition_a": {"column": "trial_type", "value": "pain"},
+            "events_to_model": ["stimulation"],
+            "events_to_model_column": "",
+        }
+    }
+
+    with pytest.raises(ValueError, match="events_to_model_column"):
+        load_contrast_config(config)
+
+
+def test_load_contrast_config_requires_condition_scope_column() -> None:
+    config = {
+        "fmri_contrast": {
+            "condition_a": {"column": "trial_type", "value": "pain"},
+            "condition_scope_trial_types": ["stimulation"],
+            "condition_scope_column": "",
+        }
+    }
+
+    with pytest.raises(ValueError, match="condition_scope_column"):
+        load_contrast_config(config)
+
+
 def test_constraint_mask_requires_z_score_output() -> None:
     with pytest.raises(ValueError, match="requires fmri_contrast.output_type='z-score'"):
         _assert_constraint_mask_requires_z_output(
@@ -162,6 +195,74 @@ def test_apply_trial_phase_scoping_requires_scope_column_when_requested() -> Non
         )
 
 
+def test_trial_signature_config_requires_scope_columns_when_scoping_requested() -> None:
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        runs=None,
+        task="pain",
+        name="trial-signatures",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="auto",
+        method="beta-series",
+        condition_scope_trial_type_column="",
+        condition_scope_phase_column="",
+        condition_scope_trial_types=("stimulation",),
+        condition_scope_stim_phases=("plateau",),
+    )
+
+    with pytest.raises(ValueError, match="condition_scope_trial_types"):
+        cfg.normalized()
+
+
+def test_trial_signature_config_defaults_do_not_inject_scope_columns() -> None:
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        runs=None,
+        task="pain",
+        name="trial-signatures",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="auto",
+        method="beta-series",
+        condition_scope_trial_types=("stimulation",),
+        condition_scope_stim_phases=("plateau",),
+    )
+
+    with pytest.raises(ValueError, match="condition_scope_trial_types"):
+        cfg.normalized()
+
+
+def test_discover_available_conditions_requires_condition_column() -> None:
+    from fmri_pipeline.analysis.contrast_builder import discover_available_conditions
+
+    with pytest.raises(ValueError, match="condition_column is required"):
+        discover_available_conditions(
+            Path("/tmp"),
+            subject="0001",
+            task="pain",
+            condition_column="",
+        )
+
+
 def test_first_level_condition_overlap_raises() -> None:
     cfg = ContrastBuilderConfig(
         enabled=True,
@@ -195,6 +296,274 @@ def test_first_level_condition_overlap_raises() -> None:
 
     with pytest.raises(ValueError, match="must be mutually exclusive"):
         _remap_events_by_condition_columns(events_df, cfg, strict=True)
+
+
+def test_prepare_events_for_glm_keeps_out_of_scope_rows_as_nuisance() -> None:
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="binary_outcome",
+        condition_a_value=1,
+        condition_b_column="binary_outcome",
+        condition_b_value=0,
+        formula=None,
+        name="pain",
+        runs=None,
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+        events_to_model=["stimulation"],
+        stim_phases_to_model=["plateau"],
+        phase_column="stim_phase",
+        phase_scope_column="trial_type",
+        phase_scope_value="stimulation",
+    )
+    events_df = pd.DataFrame(
+        {
+            "onset": [0.0, 10.0, 20.0, 30.0],
+            "duration": [1.0, 1.0, 1.0, 1.0],
+            "trial_type": ["stimulation", "stimulation", "stimulation", "rating"],
+            "stim_phase": ["plateau", "plateau", "ramp", ""],
+            "binary_outcome": [1, 0, 1, 0],
+        }
+    )
+
+    prepared_events, eligible_mask = _prepare_events_for_glm(events_df, cfg)
+    remap_result = _remap_events_by_condition_columns(
+        prepared_events,
+        cfg,
+        strict=True,
+        eligible_mask=eligible_mask,
+    )
+
+    assert eligible_mask.tolist() == [True, True, False, False]
+    assert remap_result.events_df.loc[0, "trial_type"] == "cond_a_pain"
+    assert remap_result.events_df.loc[1, "trial_type"] == "cond_b_pain"
+    assert remap_result.events_df.loc[2, "trial_type"].startswith("nuis_stimulation")
+    assert remap_result.events_df.loc[3, "trial_type"].startswith("nuis_rating")
+
+
+def test_condition_scope_respects_existing_eligibility_mask() -> None:
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="binary_outcome",
+        condition_a_value=1,
+        condition_b_column="binary_outcome",
+        condition_b_value=0,
+        formula=None,
+        name="pain",
+        runs=None,
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+        condition_scope_trial_types=["stimulation"],
+        condition_scope_column="trial_type",
+        events_to_model=["rating"],
+    )
+    events_df = pd.DataFrame(
+        {
+            "onset": [0.0, 10.0],
+            "duration": [1.0, 1.0],
+            "trial_type": ["stimulation", "rating"],
+            "binary_outcome": [1, 0],
+        }
+    )
+
+    prepared_events, eligible_mask = _prepare_events_for_glm(events_df, cfg)
+    remap_result = _remap_events_by_condition_columns(
+        prepared_events,
+        cfg,
+        strict=False,
+        eligible_mask=eligible_mask,
+    )
+
+    assert eligible_mask.tolist() == [False, True]
+    assert remap_result.cond_a_found == False
+    assert remap_result.events_df.loc[0, "trial_type"].startswith("nuis_stimulation")
+
+
+def test_prepare_events_for_glm_uses_configured_events_to_model_column() -> None:
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="binary_outcome",
+        condition_a_value=1,
+        condition_b_column="binary_outcome",
+        condition_b_value=0,
+        formula=None,
+        name="pain",
+        runs=None,
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+        events_to_model=["stimulus", "rating"],
+        events_to_model_column="event_class",
+    )
+    events_df = pd.DataFrame(
+        {
+            "onset": [0.0, 10.0, 20.0],
+            "duration": [1.0, 1.0, 1.0],
+            "trial_type": ["a", "b", "c"],
+            "event_class": ["stimulus", "rating", "iti"],
+            "binary_outcome": [1, 0, 1],
+        }
+    )
+
+    prepared_events, eligible_mask = _prepare_events_for_glm(events_df, cfg)
+
+    assert prepared_events.equals(events_df)
+    assert eligible_mask.tolist() == [True, True, False]
+
+
+def test_prepare_events_for_glm_requires_configured_events_to_model_column() -> None:
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        formula=None,
+        name="pain",
+        runs=None,
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+        events_to_model=["stimulus"],
+        events_to_model_column="event_class",
+    )
+    events_df = pd.DataFrame(
+        {
+            "onset": [0.0],
+            "duration": [1.0],
+            "trial_type": ["pain"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="events_to_model is set but events file has no 'event_class' column"):
+        _prepare_events_for_glm(events_df, cfg)
+
+
+def test_validate_events_against_bold_run_rejects_negative_onsets() -> None:
+    events_df = pd.DataFrame(
+        {
+            "onset": [-0.5, 1.0],
+            "duration": [1.0, 1.0],
+            "trial_type": ["pain", "rest"],
+        }
+    )
+
+    with patch(
+        "fmri_pipeline.analysis.contrast_builder._get_bold_run_duration_seconds",
+        return_value=20.0,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._get_tr_from_bold",
+        return_value=2.0,
+    ):
+        with pytest.raises(ValueError, match="onset must be >= 0"):
+            _validate_events_against_bold_run(
+                events_df,
+                bold_path=Path("run-01_bold.nii.gz"),
+                context="unit-test",
+            )
+
+
+def test_validate_events_against_bold_run_rejects_events_past_scan_end() -> None:
+    events_df = pd.DataFrame(
+        {
+            "onset": [0.0, 19.5],
+            "duration": [1.0, 2.0],
+            "trial_type": ["pain", "rest"],
+        }
+    )
+
+    with patch(
+        "fmri_pipeline.analysis.contrast_builder._get_bold_run_duration_seconds",
+        return_value=20.0,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._get_tr_from_bold",
+        return_value=2.0,
+    ):
+        with pytest.raises(ValueError, match="onset \\+ duration exceeds run duration"):
+            _validate_events_against_bold_run(
+                events_df,
+                bold_path=Path("run-01_bold.nii.gz"),
+                context="unit-test",
+            )
+
+
+def test_load_matching_brain_mask_for_bold_surfaces_mask_load_errors(tmp_path) -> None:
+    bold_path = tmp_path / "sub-0001_task-task_run-01_space-T1w_desc-preproc_bold.nii.gz"
+    mask_path = tmp_path / "sub-0001_task-task_run-01_space-T1w_desc-brain_mask.nii.gz"
+    bold_path.write_bytes(b"")
+    mask_path.write_bytes(b"")
+
+    fake_nib = SimpleNamespace(load=lambda _path: (_ for _ in ()).throw(OSError("bad mask")))
+
+    with patch.dict(sys.modules, {"nibabel": fake_nib}), patch(
+        "fmri_pipeline.analysis.contrast_builder._discover_brain_mask_for_bold",
+        return_value=mask_path,
+    ):
+        with pytest.raises(OSError, match="bad mask"):
+            _load_matching_brain_mask_for_bold(bold_path)
+
+
+def test_build_intersection_brain_mask_surfaces_intersection_errors(tmp_path) -> None:
+    bold_path = tmp_path / "sub-0001_task-task_run-01_space-T1w_desc-preproc_bold.nii.gz"
+    mask_path = tmp_path / "sub-0001_task-task_run-01_space-T1w_desc-brain_mask.nii.gz"
+    bold_path.write_bytes(b"")
+    mask_path.write_bytes(b"")
+
+    fake_nib = SimpleNamespace(load=lambda _path: object())
+    fake_masking = SimpleNamespace(
+        intersect_masks=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("intersect failed"))
+    )
+
+    with patch.dict(
+        sys.modules,
+        {
+            "nibabel": fake_nib,
+            "nilearn.masking": fake_masking,
+        },
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._discover_brain_mask_for_bold",
+        return_value=mask_path,
+    ):
+        with pytest.raises(RuntimeError, match="intersect failed"):
+            _build_intersection_brain_mask([bold_path])
 
 
 def test_trial_signature_condition_overlap_raises(tmp_path) -> None:
@@ -234,6 +603,32 @@ def test_trial_signature_condition_overlap_raises(tmp_path) -> None:
             events_path=events_path,
             run_num=1,
         )
+
+
+def test_combine_effect_images_preserves_missing_support_as_nan(tmp_path: Path) -> None:
+    nib = pytest.importorskip("nibabel")
+
+    effect_a = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
+    effect_b = nib.Nifti1Image(np.array([[[3.0]]], dtype=np.float32), np.eye(4))
+    variance_a = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
+    variance_b = nib.Nifti1Image(np.array([[[np.inf]]], dtype=np.float32), np.eye(4))
+
+    combined = _combine_effect_images(
+        effects=[effect_a, effect_b],
+        variances=[variance_a, variance_b],
+        method="variance",
+    )
+
+    combined_data = np.asarray(combined.dataobj, dtype=float)
+    assert np.isclose(combined_data[0, 0, 0], 1.0)
+
+    no_support = _combine_effect_images(
+        effects=[effect_a],
+        variances=[nib.Nifti1Image(np.array([[[np.inf]]], dtype=np.float32), np.eye(4))],
+        method="variance",
+    )
+    no_support_data = np.asarray(no_support.dataobj, dtype=float)
+    assert np.isnan(no_support_data[0, 0, 0])
 
 
 def test_compute_contrast_map_accepts_zero_valued_condition_codes() -> None:

@@ -154,8 +154,8 @@ def stage_predictor_residual_impl(
     _ = config
     from eeg_pipeline.utils.data.trial_table import add_predictor_residual
     from eeg_pipeline.utils.data.columns import (
-        resolve_outcome_column,
-        resolve_predictor_column,
+        require_outcome_column,
+        require_predictor_column,
     )
 
     df = load_trial_table_df_fn(ctx)
@@ -163,18 +163,8 @@ def stage_predictor_residual_impl(
         ctx.logger.warning("Predictor residual: trial table missing; skipping.")
         return None
 
-    predictor_column = resolve_predictor_column(df, ctx.config) or "predictor"
-    outcome_column = resolve_outcome_column(df, ctx.config) or "outcome"
-
-    required_columns = {predictor_column, outcome_column}
-    missing_columns = required_columns - set(df.columns)
-    if missing_columns:
-        ctx.logger.warning(
-            "Residual stage requires predictor/outcome columns %s; missing: %s. Skipping.",
-            required_columns,
-            missing_columns,
-        )
-        return None
+    predictor_column = require_predictor_column(df, ctx.config)
+    outcome_column = require_outcome_column(df, ctx.config)
 
     try:
         df_augmented, resid_meta = add_predictor_residual(

@@ -117,6 +117,49 @@ def _compute_gfp(epoch_data: np.ndarray) -> np.ndarray:
     return np.nanstd(demeaned, axis=0)
 
 
+def _has_average_reference(epochs: Any) -> bool:
+    info = getattr(epochs, "info", {})
+    for projector in info.get("projs", []) or []:
+        description = str(projector.get("desc", "") or "").strip().lower()
+        if description == "average eeg reference" and bool(projector.get("active", False)):
+            return True
+
+    custom_ref = info.get("custom_ref_applied", 0)
+    try:
+        custom_ref_applied = int(custom_ref) != 0
+    except (TypeError, ValueError):
+        custom_ref_applied = bool(custom_ref)
+    if not custom_ref_applied:
+        return False
+
+    picks, _ = pick_eeg_channels(epochs)
+    if len(picks) == 0:
+        return False
+
+    data = np.asarray(epochs.get_data(picks=picks), dtype=float)
+    if data.ndim != 3 or data.shape[1] == 0:
+        return False
+
+    channel_means = np.nanmean(data, axis=1)
+    finite_mask = np.isfinite(data)
+    if not np.any(finite_mask):
+        return False
+    data_scale = float(np.nanmax(np.abs(data[finite_mask])))
+    atol = 1e-12
+    if not np.isfinite(data_scale) or data_scale == 0.0:
+        return bool(np.allclose(channel_means, 0.0, atol=atol, rtol=0.0))
+    return bool(np.allclose(channel_means, 0.0, atol=atol + (data_scale * 1e-7), rtol=0.0))
+
+
+def _require_average_reference(epochs: Any) -> None:
+    if _has_average_reference(epochs):
+        return
+    raise ValueError(
+        "Microstates require average-referenced EEG before GFP peak extraction. "
+        "Apply set_eeg_reference('average') or activate an average-reference projection first."
+    )
+
+
 def _extract_gfp_peak_indices(
     epoch_data: np.ndarray,
     sfreq: float,
@@ -169,20 +212,31 @@ def _resolve_fixed_templates(
 
     templates = np.asarray(fixed_templates, dtype=float)
     if templates.ndim != 2:
-        return None, False
+        raise ValueError(
+            "Microstates: fixed_templates must be a 2D array shaped (n_states, n_channels)."
+        )
     if templates.shape[0] < n_states:
-        return None, False
+        raise ValueError(
+            "Microstates: fixed_templates has fewer states than requested "
+            f"(got {templates.shape[0]}, need {n_states})."
+        )
 
     if fixed_template_ch_names is not None and len(fixed_template_ch_names) > 0:
         ch_to_idx = {str(ch): i for i, ch in enumerate(fixed_template_ch_names)}
         channel_indices = []
         for ch in selected_ch_names:
             if ch not in ch_to_idx:
-                return None, False
+                raise ValueError(
+                    "Microstates: fixed_templates channel set does not match the selected EEG channels. "
+                    f"Missing channel: {ch}."
+                )
             channel_indices.append(ch_to_idx[ch])
         templates = templates[:, channel_indices]
     elif templates.shape[1] != len(selected_ch_names):
-        return None, False
+        raise ValueError(
+            "Microstates: fixed_templates channel count does not match the selected EEG channels "
+            f"(got {templates.shape[1]}, expected {len(selected_ch_names)})."
+        )
 
     canonical_labels = _class_labels(n_states, canonical=True)
     fixed_labels = list(fixed_template_labels or [])
@@ -405,13 +459,14 @@ def _compute_epoch_metrics(
             durations_ms[k] = float(np.mean(class_runs) * 1000.0 / sfreq)
             occurrence_hz[k] = float(len(class_runs) / max(epoch_sec, 1e-12))
 
-    # Transition probabilities are defined samplewise (t -> t+1),
-    # including self-transitions when a state persists across samples.
+    # Transition probabilities are defined over successive microstate segments,
+    # not samplewise persistence within the same segment.
     counts = np.zeros((n_states, n_states), dtype=float)
-    if n_samples >= 2:
-        for idx in range(n_samples - 1):
-            src = int(states[idx])
-            dst = int(states[idx + 1])
+    run_states = [state for state, _run_len in runs]
+    if len(run_states) >= 2:
+        for idx in range(len(run_states) - 1):
+            src = int(run_states[idx])
+            dst = int(run_states[idx + 1])
             if 0 <= src < n_states and 0 <= dst < n_states:
                 counts[src, dst] += 1.0
 
@@ -514,6 +569,8 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
     if epochs is None or len(epochs) == 0:
         return pd.DataFrame(), []
 
+    _require_average_reference(epochs)
+
     picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         raise ValueError("Microstates: no EEG channels available.")
@@ -556,6 +613,14 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
     train_mask = _validate_train_mask(getattr(ctx, "train_mask", None), n_epochs)
     train_indices = np.flatnonzero(train_mask) if train_mask is not None else np.arange(n_epochs)
 
+    analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
+    fixed_templates = getattr(ctx, "fixed_templates", None)
+    if analysis_mode == "trial_ml_safe" and train_mask is None and fixed_templates is None:
+        raise ValueError(
+            "Microstates: trial_ml_safe mode requires either fixed_templates or a valid train_mask. "
+            "Subject-fitted templates pool information across trials and are not leakage-safe."
+        )
+
     # Training maps are pooled across segments for consistent templates.
     pooled_peak_maps: List[np.ndarray] = []
     for epoch_idx in train_indices:
@@ -573,7 +638,7 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
 
     pooled_matrix = np.vstack(pooled_peak_maps)
     templates, fixed_templates_canonical = _resolve_fixed_templates(
-        fixed_templates=getattr(ctx, "fixed_templates", None),
+        fixed_templates=fixed_templates,
         fixed_template_ch_names=getattr(ctx, "fixed_template_ch_names", None),
         fixed_template_labels=getattr(ctx, "fixed_template_labels", None),
         selected_ch_names=ch_names,

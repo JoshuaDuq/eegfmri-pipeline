@@ -588,6 +588,7 @@ const (
 	textFieldFmriAnalysisContrastName
 	textFieldFmriAnalysisFormula
 	textFieldFmriAnalysisEventsToModel
+	textFieldFmriAnalysisEventsToModelColumn
 	textFieldFmriAnalysisScopeColumn
 	textFieldFmriAnalysisScopeTrialTypes
 	textFieldFmriAnalysisPhaseColumn
@@ -683,6 +684,8 @@ const (
 	textFieldSourceLocFmriContrastFormula
 	textFieldSourceLocFmriContrastName
 	textFieldSourceLocFmriRunsToInclude
+	textFieldSourceLocFmriEventsToModel
+	textFieldSourceLocFmriEventsToModelColumn
 	textFieldSourceLocFmriConditionScopeColumn
 	textFieldSourceLocFmriConditionScopeTrialTypes
 	textFieldSourceLocFmriPhaseColumn
@@ -1092,35 +1095,36 @@ type Model struct {
 	fmriGroupAdvancedExpanded    bool
 
 	// fMRI analysis (first-level GLM + contrasts) configuration
-	fmriAnalysisInputSourceIndex  int    // 0: fmriprep, 1: bids_raw
-	fmriAnalysisFmriprepSpace     string // e.g., "T1w"
-	fmriAnalysisRequireFmriprep   bool   // Fail if fMRIPrep outputs missing
-	fmriAnalysisRunsSpec          string // Space-separated ints (e.g., "1 2 3") or empty for auto
-	fmriAnalysisContrastType      int    // 0: t-test, 1: custom
-	fmriAnalysisCondAColumn       string // Condition A: events column (config/discovery default when empty)
-	fmriAnalysisCondAValue        string // Condition A: value in that column
-	fmriAnalysisCondBColumn       string // Condition B: events column
-	fmriAnalysisCondBValue        string // Condition B: value in that column
-	fmriAnalysisContrastName      string // e.g., "contrast"
-	fmriAnalysisFormula           string // Custom formula
-	fmriAnalysisEventsToModel     string // Optional: comma-separated list of condition values to include (first-level only)
-	fmriAnalysisScopeColumn       string // Events column used by condition scope values
-	fmriAnalysisScopeTrialTypes   string // Optional: space-separated allow-list for condition selection
-	fmriAnalysisPhaseColumn       string // Events column used by phase scoping values
-	fmriAnalysisPhaseScopeColumn  string // Events column used to scope phase filtering
-	fmriAnalysisPhaseScopeValue   string // Optional scope value for fmriAnalysisPhaseScopeColumn
-	fmriAnalysisStimPhasesToModel string // Optional: comma-separated phase allow-list (empty = no scoping)
-	fmriAnalysisHrfModel          int    // 0: spm, 1: flobs, 2: fir
-	fmriAnalysisDriftModel        int    // 0: none, 1: cosine, 2: polynomial
-	fmriAnalysisHighPassHz        float64
-	fmriAnalysisLowPassHz         float64
-	fmriAnalysisSmoothingFwhm     float64 // mm; 0 disables
-	fmriAnalysisOutputType        int     // 0: z-score, 1: t-stat, 2: cope, 3: beta
-	fmriAnalysisOutputDir         string  // Optional output directory override
-	fmriAnalysisResampleToFS      bool
-	fmriAnalysisFreesurferDir     string // Optional FreeSurfer SUBJECTS_DIR override
-	fmriAnalysisConfoundsStrategy int    // 0..N (see render/command builder options)
-	fmriAnalysisWriteDesignMatrix bool   // Write design matrices to <output>/qc/
+	fmriAnalysisInputSourceIndex    int    // 0: fmriprep, 1: bids_raw
+	fmriAnalysisFmriprepSpace       string // e.g., "T1w"
+	fmriAnalysisRequireFmriprep     bool   // Fail if fMRIPrep outputs missing
+	fmriAnalysisRunsSpec            string // Space-separated ints (e.g., "1 2 3") or empty for auto
+	fmriAnalysisContrastType        int    // 0: t-test, 1: custom
+	fmriAnalysisCondAColumn         string // Condition A: events column (config/discovery default when empty)
+	fmriAnalysisCondAValue          string // Condition A: value in that column
+	fmriAnalysisCondBColumn         string // Condition B: events column
+	fmriAnalysisCondBValue          string // Condition B: value in that column
+	fmriAnalysisContrastName        string // e.g., "contrast"
+	fmriAnalysisFormula             string // Custom formula
+	fmriAnalysisEventsToModel       string // Optional: comma-separated list of condition values to include (first-level only)
+	fmriAnalysisEventsToModelColumn string // Events column used by fmriAnalysisEventsToModel values
+	fmriAnalysisScopeColumn         string // Events column used by condition scope values
+	fmriAnalysisScopeTrialTypes     string // Optional: space-separated allow-list for condition selection
+	fmriAnalysisPhaseColumn         string // Events column used by phase scoping values
+	fmriAnalysisPhaseScopeColumn    string // Events column used to scope phase filtering
+	fmriAnalysisPhaseScopeValue     string // Optional scope value for fmriAnalysisPhaseScopeColumn
+	fmriAnalysisStimPhasesToModel   string // Optional: comma-separated phase allow-list (empty = no scoping)
+	fmriAnalysisHrfModel            int    // 0: spm, 1: flobs, 2: fir
+	fmriAnalysisDriftModel          int    // 0: none, 1: cosine, 2: polynomial
+	fmriAnalysisHighPassHz          float64
+	fmriAnalysisLowPassHz           float64
+	fmriAnalysisSmoothingFwhm       float64 // mm; 0 disables
+	fmriAnalysisOutputType          int     // 0: z-score, 1: t-stat, 2: cope, 3: beta
+	fmriAnalysisOutputDir           string  // Optional output directory override
+	fmriAnalysisResampleToFS        bool
+	fmriAnalysisFreesurferDir       string // Optional FreeSurfer SUBJECTS_DIR override
+	fmriAnalysisConfoundsStrategy   int    // 0..N (see render/command builder options)
+	fmriAnalysisWriteDesignMatrix   bool   // Write design matrices to <output>/qc/
 
 	// fMRI analysis UI group expansion states
 	fmriAnalysisGroupInputExpanded     bool
@@ -1779,6 +1783,8 @@ type Model struct {
 	sourceLocFmriDriftModel               int      // 0: none, 1: cosine, 2: polynomial
 	sourceLocFmriHighPassHz               float64  // High-pass cutoff (Hz)
 	sourceLocFmriLowPassHz                float64  // Low-pass cutoff (Hz)
+	sourceLocFmriEventsToModel            string   // Optional: space-separated allow-list for GLM event inclusion
+	sourceLocFmriEventsToModelColumn      string   // Events column matched by sourceLocFmriEventsToModel
 	sourceLocFmriConditionScopeColumn     string   // Events column used by condition scope values
 	sourceLocFmriConditionScopeTrialTypes string   // Optional: space-separated allow-list for condition selection
 	sourceLocFmriPhaseColumn              string   // Events column used by phase filtering values
@@ -1968,9 +1974,9 @@ type Model struct {
 	temporalTopomapWindowMs    int
 	temporalTimeMinMs          int
 	temporalTimeMaxMs          int
-	temporalTargetColumn       string // events.tsv column to correlate against (empty=default rating)
+	temporalTargetColumn       string // events.tsv column to correlate against (empty=default outcome)
 	temporalSplitByCondition   bool   // If true, compute separate correlations per condition value
-	temporalConditionColumn    string // Column to split by (empty = use event_columns.binary_outcome)
+	temporalConditionColumn    string // Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
 	temporalConditionValues    string // Values to compute (empty = all unique values)
 	temporalIncludeROIAverages bool   // Include ROI-averaged rows in output
 	temporalIncludeTFGrid      bool   // Include individual frequency (TF grid) rows
@@ -1992,12 +1998,12 @@ type Model struct {
 	clusterThreshold       float64 // Forming threshold for clusters
 	clusterMinSize         int     // Minimum cluster size
 	clusterTail            int     // 0=two-tailed, 1=upper, -1=lower
-	clusterConditionColumn string  // events.tsv column to split by (empty=event_columns.binary_outcome)
+	clusterConditionColumn string  // events.tsv column to split by (empty=event_columns.condition, then event_columns.binary_outcome)
 	clusterConditionValues string  // Exactly 2 values (space/comma-separated) to compare
 	clusterFeaturesSpec    string  // Comma-separated feature filters for cluster
 	// Condition-specific
 	conditionEffectThreshold float64 // Min effect size to report
-	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.binary_outcome)
+	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.condition, then event_columns.binary_outcome)
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "cond_a,cond_b")
 	conditionCompareLabels   string  // Optional labels aligned to compare values
 	conditionMinTrials       int     // 0=unset; condition.min_trials_per_condition
@@ -2619,6 +2625,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriDriftModel:               1,     // 1: cosine
 		sourceLocFmriHighPassHz:               0.008, // 128s period
 		sourceLocFmriLowPassHz:                0.0,
+		sourceLocFmriEventsToModel:            "",
+		sourceLocFmriEventsToModelColumn:      "",
 		sourceLocFmriConditionScopeColumn:     "",
 		sourceLocFmriConditionScopeTrialTypes: "",
 		sourceLocFmriPhaseColumn:              "",
@@ -2978,11 +2986,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		alignFmriOnsetReference:  0, // 0: as_is
 
 		// Event Column Mapping defaults
-		eventColPredictor:          "predictor",
-		eventColOutcome:            "outcome",
-		eventColBinaryOutcome:      "binary_outcome,outcome_binary,label",
-		eventColCondition:          "condition,trial_type",
-		eventColRequired:           "outcome",
+		eventColPredictor:          "",
+		eventColOutcome:            "",
+		eventColBinaryOutcome:      "",
+		eventColCondition:          "",
+		eventColRequired:           "",
 		conditionPreferredPrefixes: "",
 
 		// Per-Family Spatial Transforms defaults (all 0 = none / inherit global)
@@ -3040,7 +3048,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorPermScheme:                     0, // 0: shuffle
 		behaviorPermGroupColumnPreference:      "run_id,block",
 		behaviorExcludeNonTrialwiseFeatures:    true,
-		iccUnitColumns:                         "predictor",
+		iccUnitColumns:                         "",
 		behaviorFeatureRegistryFilesJSON:       "",
 		behaviorFeatureRegistrySourceJSON:      "",
 		behaviorFeatureRegistryHierarchyJSON:   "",
@@ -3375,6 +3383,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisContrastName = "contrast"
 		m.fmriAnalysisFormula = ""
 		m.fmriAnalysisEventsToModel = ""
+		m.fmriAnalysisEventsToModelColumn = ""
 		m.fmriAnalysisScopeColumn = defaultFmriConditionColumn
 		m.fmriAnalysisScopeTrialTypes = ""
 		m.fmriAnalysisPhaseColumn = m.fmriDefaultPhaseColumn()

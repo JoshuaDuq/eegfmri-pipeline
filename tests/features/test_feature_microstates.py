@@ -55,7 +55,19 @@ class TestMicrostateFeatures(unittest.TestCase):
         info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
         epochs = mne.EpochsArray(data, info=info, tmin=0.0, verbose=False)
         epochs.set_montage("standard_1020")
+        epochs.set_eeg_reference("average", verbose=False)
         return epochs, templates, ch_names
+
+    def _build_epochs_unreferenced(self):
+        epochs, templates, ch_names = self._build_epochs()
+        unreferenced = mne.EpochsArray(
+            epochs.get_data().copy(),
+            info=mne.create_info(ch_names=ch_names, sfreq=epochs.info["sfreq"], ch_types="eeg"),
+            tmin=epochs.tmin,
+            verbose=False,
+        )
+        unreferenced.set_montage("standard_1020")
+        return unreferenced, templates, ch_names
 
     def test_extract_microstate_features_with_fixed_templates(self):
         from eeg_pipeline.analysis.features.microstates import extract_microstate_features
@@ -101,9 +113,15 @@ class TestMicrostateFeatures(unittest.TestCase):
         ]
         coverage_sum = df[cov_cols].sum(axis=1).to_numpy()
         self.assertTrue(np.allclose(coverage_sum, 1.0, atol=0.1))
-        self.assertGreater(
-            df["microstates_active_broadband_global_trans_a_to_a_prob"].iloc[0],
-            df["microstates_active_broadband_global_trans_a_to_b_prob"].iloc[0],
+        self.assertAlmostEqual(
+            float(df["microstates_active_broadband_global_trans_a_to_a_prob"].iloc[0]),
+            0.0,
+            places=7,
+        )
+        self.assertAlmostEqual(
+            float(df["microstates_active_broadband_global_trans_a_to_b_prob"].iloc[0]),
+            1.0,
+            places=7,
         )
         self.assertTrue(bool(df.attrs.get("microstate_labels_canonical")))
 
@@ -120,7 +138,72 @@ class TestMicrostateFeatures(unittest.TestCase):
         )
         self.assertEqual(cfg.min_duration_ms, 20.0)
 
-    def test_transition_probabilities_include_self_transitions(self):
+    def test_microstates_require_average_reference(self):
+        from eeg_pipeline.analysis.features.microstates import extract_microstate_features
+
+        epochs_unref, _, _ = self._build_epochs_unreferenced()
+        mask = np.ones(epochs_unref.get_data().shape[-1], dtype=bool)
+        ctx = SimpleNamespace(
+            epochs=epochs_unref,
+            windows=_WindowStub(mask),
+            name="active",
+            config=DotConfig({"feature_engineering": {"microstates": {"n_states": 2}}}),
+            logger=logging.getLogger("microstate-ref-guard"),
+            fixed_templates=np.array([[1.0] * 6, [0.0] * 6]),
+            fixed_template_ch_names=["Fp1", "Fp2", "C3", "C4", "P3", "P4"],
+            fixed_template_labels=["a", "b"],
+        )
+
+        with self.assertRaisesRegex(ValueError, "average-referenced EEG"):
+            extract_microstate_features(ctx)
+
+    def test_microstates_reject_non_average_custom_reference(self):
+        from eeg_pipeline.analysis.features.microstates import extract_microstate_features
+
+        altered, templates, ch_names = self._build_epochs_unreferenced()
+        altered.set_eeg_reference(ref_channels=["Fp1"], verbose=False)
+        mask = np.ones(altered.get_data().shape[-1], dtype=bool)
+        ctx = SimpleNamespace(
+            epochs=altered,
+            windows=_WindowStub(mask),
+            name="active",
+            config=DotConfig({"feature_engineering": {"microstates": {"n_states": 4}}}),
+            logger=logging.getLogger("microstate-non-average-custom-ref"),
+            fixed_templates=templates,
+            fixed_template_ch_names=ch_names,
+            fixed_template_labels=["a", "b", "c", "d"],
+        )
+
+        with self.assertRaisesRegex(ValueError, "average-referenced EEG"):
+            extract_microstate_features(ctx)
+
+    def test_microstates_allow_active_average_reference_projection(self):
+        from eeg_pipeline.analysis.features.microstates import extract_microstate_features
+
+        epochs_proj, templates, ch_names = self._build_epochs_unreferenced()
+        epochs_proj, _ = mne.set_eeg_reference(
+            epochs_proj,
+            ref_channels="average",
+            projection=True,
+            verbose=False,
+        )
+        epochs_proj.apply_proj(verbose=False)
+        mask = np.ones(epochs_proj.get_data().shape[-1], dtype=bool)
+        ctx = SimpleNamespace(
+            epochs=epochs_proj,
+            windows=_WindowStub(mask),
+            name="active",
+            config=DotConfig({"feature_engineering": {"microstates": {"n_states": 4}}}),
+            logger=logging.getLogger("microstate-ref-proj"),
+            fixed_templates=templates,
+            fixed_template_ch_names=ch_names,
+            fixed_template_labels=["a", "b", "c", "d"],
+        )
+
+        df, _ = extract_microstate_features(ctx)
+        self.assertFalse(df.empty)
+
+    def test_transition_probabilities_use_run_to_run_state_changes(self):
         from eeg_pipeline.analysis.features.microstates import _compute_epoch_metrics
 
         metrics = _compute_epoch_metrics(
@@ -128,8 +211,15 @@ class TestMicrostateFeatures(unittest.TestCase):
             sfreq=100.0,
             n_states=2,
         )
-        self.assertTrue(np.allclose(metrics["transitions"][0], np.array([1.0, 0.0])))
-        self.assertTrue(np.isnan(metrics["transitions"][1]).all())
+        self.assertTrue(np.isnan(metrics["transitions"]).all())
+
+        metrics_seq = _compute_epoch_metrics(
+            states=np.array([0, 0, 1, 1, 0, 0], dtype=int),
+            sfreq=100.0,
+            n_states=2,
+        )
+        self.assertTrue(np.allclose(metrics_seq["transitions"][0], np.array([0.0, 1.0])))
+        self.assertTrue(np.allclose(metrics_seq["transitions"][1], np.array([1.0, 0.0])))
 
     def test_min_duration_prefers_longer_neighbor(self):
         from eeg_pipeline.analysis.features.microstates import _apply_min_duration
@@ -204,6 +294,69 @@ class TestMicrostateFeatures(unittest.TestCase):
         self.assertIn("peak_maps", captured)
         self.assertEqual(captured["peak_maps"].shape[0], int(np.sum(train_mask)))
 
+    def test_trial_ml_safe_requires_train_mask_or_fixed_templates(self):
+        from eeg_pipeline.analysis.features.microstates import extract_microstate_features
+
+        epochs, _, _ = self._build_epochs()
+        mask = np.ones(epochs.get_data().shape[-1], dtype=bool)
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=_WindowStub(mask),
+            name="active",
+            analysis_mode="trial_ml_safe",
+            train_mask=None,
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "microstates": {
+                            "n_states": 2,
+                            "min_duration_ms": 0.0,
+                            "min_peak_distance_ms": 5.0,
+                            "max_gfp_peaks_per_epoch": 200,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("microstate-trial-safe"),
+            fixed_templates=None,
+            fixed_template_ch_names=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "fixed_templates|train_mask"):
+            extract_microstate_features(ctx)
+
+    def test_trial_ml_safe_invalid_fixed_templates_raise(self):
+        from eeg_pipeline.analysis.features.microstates import extract_microstate_features
+
+        epochs, templates, _ = self._build_epochs()
+        mask = np.ones(epochs.get_data().shape[-1], dtype=bool)
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=_WindowStub(mask),
+            name="active",
+            analysis_mode="trial_ml_safe",
+            train_mask=None,
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "microstates": {
+                            "n_states": 4,
+                            "min_duration_ms": 0.0,
+                            "min_peak_distance_ms": 5.0,
+                            "max_gfp_peaks_per_epoch": 200,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("microstate-trial-safe-invalid-fixed"),
+            fixed_templates=templates,
+            fixed_template_ch_names=["Fp1", "Fp2"],
+            fixed_template_labels=["a", "b", "c", "d"],
+        )
+
+        with self.assertRaisesRegex(ValueError, "fixed_templates channel"):
+            extract_microstate_features(ctx)
+
     def test_explicit_windows_are_used_for_template_pooling(self):
         from eeg_pipeline.analysis.features import microstates as mod
 
@@ -216,6 +369,7 @@ class TestMicrostateFeatures(unittest.TestCase):
         info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types="eeg")
         epochs = mne.EpochsArray(data, info=info, tmin=0.0, verbose=False)
         epochs.set_montage("standard_1020")
+        epochs.set_eeg_reference("average", verbose=False)
 
         explicit_windows = [
             {"name": "early", "tmin": 0.0, "tmax": 0.05},

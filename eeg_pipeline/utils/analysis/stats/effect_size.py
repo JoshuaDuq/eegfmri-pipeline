@@ -14,7 +14,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
+from eeg_pipeline.utils.data.columns import (
+    get_binary_outcome_column_from_config,
+    get_condition_column_from_config,
+)
 from eeg_pipeline.utils.analysis.stats.base import get_config_value, get_epsilon_std
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
@@ -432,14 +435,18 @@ def _get_condition_column(
     events_df: pd.DataFrame,
     config: Any,
 ) -> Optional[str]:
-    """Get condition column name from config or default binary-outcome column."""
+    """Get condition column name from config or configured condition aliases."""
     compare_col = str(
         get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
     ).strip()
     
     if compare_col and compare_col in events_df.columns:
         return compare_col
-    
+
+    condition_col = get_condition_column_from_config(config, events_df)
+    if condition_col is not None:
+        return condition_col
+
     return get_binary_outcome_column_from_config(config, events_df)
 
 
@@ -558,7 +565,8 @@ def split_by_condition(
     """Split trials into two conditions based on a column and values.
     
     Supports user-configurable condition column and values via:
-    - config.event_columns.binary_outcome: column name (or list of candidates)
+    - config.event_columns.condition: generic condition column name (or list of candidates)
+    - config.event_columns.binary_outcome: binary condition column name (or list of candidates)
     - config.behavior_analysis.condition.compare_column: explicit events column override (optional)
     - config.behavior_analysis.condition.compare_values: values to compare [val1, val2]
     

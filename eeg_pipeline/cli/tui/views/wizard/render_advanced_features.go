@@ -1382,6 +1382,28 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "optional; generally avoid for task GLM"
+		case optSourceLocFmriEventsToModel:
+			label = "Events To Model"
+			val := strings.TrimSpace(m.sourceLocFmriEventsToModel)
+			if val == "" {
+				val = "(all)"
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriEventsToModel {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "space-separated GLM event values"
+		case optSourceLocFmriEventsToModelColumn:
+			label = "Events Model Column"
+			val := strings.TrimSpace(m.sourceLocFmriEventsToModelColumn)
+			if val == "" {
+				val = "(required when set)"
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriEventsToModelColumn {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			hint = "Space to edit"
 		case optSourceLocFmriConditionScopeColumn:
 			label = "Condition Scope Column"
 			val := strings.TrimSpace(m.sourceLocFmriConditionScopeColumn)

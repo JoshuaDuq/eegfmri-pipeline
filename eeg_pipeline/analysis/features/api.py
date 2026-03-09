@@ -285,13 +285,10 @@ def _align_precomputed_windows(
 
 
 def _get_family_spatial_transform(config: Any, family: str) -> str:
-    """Resolve spatial transform for a feature family; fall back to 'none' on errors."""
-    try:
-        from eeg_pipeline.analysis.features.preparation import _get_spatial_transform_type
+    """Resolve spatial transform for a feature family."""
+    from eeg_pipeline.analysis.features.preparation import _get_spatial_transform_type
 
-        return str(_get_spatial_transform_type(config, feature_family=family)).strip().lower()
-    except Exception:
-        return "none"
+    return str(_get_spatial_transform_type(config, feature_family=family)).strip().lower()
 
 
 def _compute_complex_tfr_for_transform(

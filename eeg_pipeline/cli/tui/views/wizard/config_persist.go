@@ -275,6 +275,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocFmriDriftModel"] = m.sourceLocFmriDriftModel
 	cfg["sourceLocFmriHighPassHz"] = m.sourceLocFmriHighPassHz
 	cfg["sourceLocFmriLowPassHz"] = m.sourceLocFmriLowPassHz
+	cfg["sourceLocFmriEventsToModel"] = m.sourceLocFmriEventsToModel
+	cfg["sourceLocFmriEventsToModelColumn"] = m.sourceLocFmriEventsToModelColumn
 	cfg["sourceLocFmriConditionScopeColumn"] = m.sourceLocFmriConditionScopeColumn
 	cfg["sourceLocFmriConditionScopeTrialTypes"] = m.sourceLocFmriConditionScopeTrialTypes
 	cfg["sourceLocFmriPhaseColumn"] = m.sourceLocFmriPhaseColumn
@@ -1432,6 +1434,8 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.sourceLocFmriDriftModel = getInt("sourceLocFmriDriftModel", m.sourceLocFmriDriftModel)
 	m.sourceLocFmriHighPassHz = getFloat("sourceLocFmriHighPassHz", m.sourceLocFmriHighPassHz)
 	m.sourceLocFmriLowPassHz = getFloat("sourceLocFmriLowPassHz", m.sourceLocFmriLowPassHz)
+	m.sourceLocFmriEventsToModel = getString("sourceLocFmriEventsToModel", m.sourceLocFmriEventsToModel)
+	m.sourceLocFmriEventsToModelColumn = getString("sourceLocFmriEventsToModelColumn", m.sourceLocFmriEventsToModelColumn)
 	m.sourceLocFmriConditionScopeColumn = getString("sourceLocFmriConditionScopeColumn", m.sourceLocFmriConditionScopeColumn)
 	m.sourceLocFmriConditionScopeTrialTypes = getString("sourceLocFmriConditionScopeTrialTypes", m.sourceLocFmriConditionScopeTrialTypes)
 	m.sourceLocFmriPhaseColumn = getString("sourceLocFmriPhaseColumn", m.sourceLocFmriPhaseColumn)

@@ -8,7 +8,10 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
+from eeg_pipeline.utils.data.columns import (
+    get_binary_outcome_column_from_config,
+    get_condition_column_from_config,
+)
 
 
 def compute_series_statistics(series: pd.Series) -> Dict[str, Any]:
@@ -46,6 +49,9 @@ def _resolve_condition_qc_column(ctx: Any) -> Optional[str]:
         return compare_col
     if ctx.aligned_events is None:
         return None
+    condition_col = get_condition_column_from_config(ctx.config, ctx.aligned_events)
+    if condition_col is not None:
+        return condition_col
     return get_binary_outcome_column_from_config(ctx.config, ctx.aligned_events)
 
 

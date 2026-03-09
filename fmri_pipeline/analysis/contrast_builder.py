@@ -72,7 +72,7 @@ class ContrastBuilderConfig:
     # If None, no condition-scope filtering is applied.
     condition_scope_trial_types: Optional[List[str]] = None
     # Events column used for `condition_scope_trial_types`.
-    condition_scope_column: str = "trial_type"
+    condition_scope_column: str = ""
     # Confounds / QC (optional)
     confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|auto
     write_design_matrix: bool = False
@@ -81,13 +81,15 @@ class ContrastBuilderConfig:
     # If None, all rows are modeled (default/current behavior).
     # Useful for multi-phase tasks to limit modeled rows.
     events_to_model: Optional[List[str]] = None
+    # Events column used for `events_to_model`.
+    events_to_model_column: str = ""
     # Optional: restrict which stimulation sub-phases are modeled when events.tsv includes 'stim_phase'.
     # If None, no stim_phase scoping is applied. Use ["all"] to disable phase scoping.
     stim_phases_to_model: Optional[List[str]] = None
     # Events column that stores phase labels used by `stim_phases_to_model`.
-    phase_column: str = "stim_phase"
+    phase_column: str = ""
     # Events column used to scope phase filtering to specific rows.
-    phase_scope_column: str = "trial_type"
+    phase_scope_column: str = ""
     # Optional value in `phase_scope_column` to restrict where phase filtering is applied.
     # If None, phase filtering applies to all rows.
     phase_scope_value: Optional[str] = None
@@ -278,7 +280,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
                 for part in str(scope_raw).split(",")
                 if part.strip()
             ] or None
-    condition_scope_column = str(contrast_cfg.get("condition_scope_column", "trial_type")).strip() or "trial_type"
+    condition_scope_column = str(contrast_cfg.get("condition_scope_column", "") or "").strip()
 
     # Confounds/QC (optional; safe defaults keep behavior stable)
     confounds_strategy = str(contrast_cfg.get("confounds_strategy", "auto")).strip().lower()
@@ -290,12 +292,33 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     smoothing_fwhm = normalize_smoothing_fwhm(contrast_cfg.get("smoothing_fwhm"))
 
     events_to_model = normalize_trial_type_list(contrast_cfg.get("events_to_model"))
+    events_to_model_column = str(
+        contrast_cfg.get("events_to_model_column", "") or ""
+    ).strip()
     stim_phases_to_model = normalize_trial_type_list(contrast_cfg.get("stim_phases_to_model"))
-    phase_column = str(contrast_cfg.get("phase_column", "stim_phase")).strip() or "stim_phase"
-    phase_scope_column = str(contrast_cfg.get("phase_scope_column", "trial_type")).strip() or "trial_type"
+    phase_column = str(contrast_cfg.get("phase_column", "") or "").strip()
+    phase_scope_column = str(contrast_cfg.get("phase_scope_column", "") or "").strip()
     phase_scope_value = contrast_cfg.get("phase_scope_value")
     if phase_scope_value is not None:
         phase_scope_value = str(phase_scope_value).strip() or None
+    if condition_scope_trial_types and not condition_scope_column:
+        raise ValueError(
+            "fmri_contrast.condition_scope_trial_types requires "
+            "fmri_contrast.condition_scope_column."
+        )
+    if events_to_model and not events_to_model_column:
+        raise ValueError(
+            "fmri_contrast.events_to_model requires "
+            "fmri_contrast.events_to_model_column."
+        )
+    if stim_phases_to_model and not phase_column:
+        raise ValueError(
+            "fmri_contrast.stim_phases_to_model requires fmri_contrast.phase_column."
+        )
+    if phase_scope_value and not phase_scope_column:
+        raise ValueError(
+            "fmri_contrast.phase_scope_value requires fmri_contrast.phase_scope_column."
+        )
 
     return ContrastBuilderConfig(
         enabled=bool(contrast_cfg.get("enabled", False)),
@@ -326,6 +349,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         write_design_matrix=write_design_matrix,
         smoothing_fwhm=smoothing_fwhm,
         events_to_model=events_to_model,
+        events_to_model_column=events_to_model_column,
         stim_phases_to_model=stim_phases_to_model,
         phase_column=phase_column,
         phase_scope_column=phase_scope_column,
@@ -337,8 +361,8 @@ def _apply_trial_phase_scoping(
     events_df: pd.DataFrame,
     *,
     allowed_phases: Optional[List[str]],
-    phase_column: str = "stim_phase",
-    phase_scope_column: str = "trial_type",
+    phase_column: str = "",
+    phase_scope_column: str = "",
     phase_scope_value: Optional[str] = None,
 ) -> pd.DataFrame:
     """
@@ -349,43 +373,226 @@ def _apply_trial_phase_scoping(
     where ``phase_scope_column`` matches that value; all other rows are kept as-is.
     When ``phase_scope_value`` is None, phase filtering applies to all rows.
     """
-    phase_column_name = str(phase_column or "").strip() or "stim_phase"
-    phase_scope_column_name = str(phase_scope_column or "").strip() or "trial_type"
+    keep = _build_trial_phase_model_mask(
+        events_df,
+        allowed_phases=allowed_phases,
+        phase_column=phase_column,
+        phase_scope_column=phase_scope_column,
+        phase_scope_value=phase_scope_value,
+    )
+    if bool(keep.all()):
+        return events_df
+    return events_df.loc[keep].copy()
+
+
+def _build_events_to_model_mask(
+    events_df: pd.DataFrame,
+    *,
+    allowed_values: Optional[List[str]],
+    events_column: str = "",
+) -> pd.Series:
+    if not allowed_values:
+        return pd.Series(True, index=events_df.index, dtype=bool)
+
+    column_name = str(events_column or "").strip()
+    if not column_name:
+        raise ValueError(
+            "events_to_model is set but no events_to_model_column was configured."
+        )
+    if column_name not in events_df.columns:
+        raise ValueError(
+            "events_to_model is set but events file has no "
+            f"'{column_name}' column."
+        )
+
+    allow = {str(value).strip() for value in allowed_values if str(value).strip()}
+    if not allow:
+        return pd.Series(True, index=events_df.index, dtype=bool)
+
+    return events_df[column_name].astype(str).isin(sorted(allow))
+
+
+def _build_trial_phase_model_mask(
+    events_df: pd.DataFrame,
+    *,
+    allowed_phases: Optional[List[str]],
+    phase_column: str = "",
+    phase_scope_column: str = "",
+    phase_scope_value: Optional[str] = None,
+) -> pd.Series:
+    phase_column_name = str(phase_column or "").strip()
+    phase_scope_column_name = str(phase_scope_column or "").strip()
 
     raw = allowed_phases
     if raw is None:
-        return events_df
+        return pd.Series(True, index=events_df.index, dtype=bool)
+
     allow_norm = [str(v).strip().lower() for v in raw if str(v).strip()]
     if not allow_norm:
-        return events_df
+        return pd.Series(True, index=events_df.index, dtype=bool)
     if "all" in set(allow_norm):
-        return events_df
-    allow = set(allow_norm)
+        return pd.Series(True, index=events_df.index, dtype=bool)
 
+    if not phase_column_name:
+        raise ValueError(
+            "stim_phases_to_model is set but no phase_column was configured."
+        )
     if phase_column_name not in events_df.columns:
         raise ValueError(
             "stim_phases_to_model is set but events file has no "
             f"'{phase_column_name}' column. Available columns: {list(events_df.columns)}"
         )
 
+    if phase_scope_value is not None and not phase_scope_column_name:
+        raise ValueError(
+            "phase_scope_value is set but no phase_scope_column was configured."
+        )
     if phase_scope_value is not None and phase_scope_column_name not in events_df.columns:
         raise ValueError(
             "phase_scope_value is set but events file has no "
             f"'{phase_scope_column_name}' column. Available columns: {list(events_df.columns)}"
         )
 
+    allow = set(allow_norm)
     phase_norm = events_df[phase_column_name].fillna("").astype(str).str.strip().str.lower()
     if phase_scope_value is not None and phase_scope_column_name in events_df.columns:
         scope_match = events_df[phase_scope_column_name].astype(str).str.strip().str.lower().eq(
             str(phase_scope_value).strip().lower()
         )
-        keep = (~scope_match) | phase_norm.isin(list(allow))
-    else:
-        keep = phase_norm.isin(list(allow))
+        return (~scope_match) | phase_norm.isin(sorted(allow))
+    return phase_norm.isin(sorted(allow))
 
-    if bool(keep.all()):
-        return events_df
-    return events_df.loc[keep].copy()
+
+def _build_nuisance_trial_type(
+    row: pd.Series,
+    *,
+    phase_column: str,
+) -> str:
+    tokens = [
+        "nuis",
+        _safe_slug(str(row.get("trial_type", "event")), default="event"),
+    ]
+    phase_value = row.get(phase_column)
+    if phase_value is not None and str(phase_value).strip():
+        tokens.append(_safe_slug(str(phase_value), default="phase"))
+    return "_".join(tokens)
+
+
+def _prepare_events_for_glm(
+    events_df: pd.DataFrame,
+    cfg: ContrastBuilderConfig,
+) -> tuple[pd.DataFrame, pd.Series]:
+    phase_column_name = str(getattr(cfg, "phase_column", "") or "").strip()
+    trial_type_mask = _build_events_to_model_mask(
+        events_df,
+        allowed_values=getattr(cfg, "events_to_model", None),
+        events_column=str(getattr(cfg, "events_to_model_column", "") or "").strip(),
+    )
+    phase_mask = _build_trial_phase_model_mask(
+        events_df,
+        allowed_phases=getattr(cfg, "stim_phases_to_model", None),
+        phase_column=phase_column_name,
+        phase_scope_column=str(getattr(cfg, "phase_scope_column", "") or "").strip(),
+        phase_scope_value=getattr(cfg, "phase_scope_value", None),
+    )
+    eligible_mask = trial_type_mask & phase_mask
+    if bool(eligible_mask.all()):
+        return events_df, eligible_mask
+
+    events_out = events_df.copy()
+    excluded_rows = events_out.loc[~eligible_mask]
+    events_out.loc[~eligible_mask, "trial_type"] = [
+        _build_nuisance_trial_type(row, phase_column=phase_column_name)
+        for _idx, row in excluded_rows.iterrows()
+    ]
+    return events_out, eligible_mask
+
+
+def _get_bold_run_duration_seconds(bold_path: Path) -> float:
+    import nibabel as nib
+
+    img = nib.load(str(bold_path))
+    if len(img.shape) != 4:
+        raise ValueError(f"Expected 4D BOLD image for {bold_path}, got shape={img.shape}.")
+
+    n_scans = int(img.shape[3])
+    if n_scans <= 0:
+        raise ValueError(f"BOLD image has no timepoints: {bold_path}")
+
+    tr = float(_get_tr_from_bold(bold_path))
+    return float(n_scans) * tr
+
+
+def _validate_events_against_bold_run(
+    events_df: pd.DataFrame,
+    *,
+    bold_path: Path,
+    context: str,
+) -> None:
+    onset = pd.to_numeric(events_df["onset"], errors="coerce")
+    duration = pd.to_numeric(events_df["duration"], errors="coerce")
+
+    if onset.isna().any():
+        bad_rows = onset.index[onset.isna()].tolist()
+        raise ValueError(f"{context}: onset contains non-numeric or missing values at rows {bad_rows}.")
+    if duration.isna().any():
+        bad_rows = duration.index[duration.isna()].tolist()
+        raise ValueError(f"{context}: duration contains non-numeric or missing values at rows {bad_rows}.")
+    if not np.isfinite(onset.to_numpy(dtype=float)).all():
+        raise ValueError(f"{context}: onset contains non-finite values.")
+    if not np.isfinite(duration.to_numpy(dtype=float)).all():
+        raise ValueError(f"{context}: duration contains non-finite values.")
+    if (onset < 0).any():
+        bad_rows = onset.index[onset < 0].tolist()
+        raise ValueError(f"{context}: onset must be >= 0, found negative values at rows {bad_rows}.")
+    if (duration < 0).any():
+        bad_rows = duration.index[duration < 0].tolist()
+        raise ValueError(f"{context}: duration must be >= 0, found negative values at rows {bad_rows}.")
+
+    run_duration = _get_bold_run_duration_seconds(bold_path)
+    tr = float(_get_tr_from_bold(bold_path))
+    tolerance = max(tr * 0.5, 1e-6)
+    if (onset > (run_duration + tolerance)).any():
+        bad_rows = onset.index[onset > (run_duration + tolerance)].tolist()
+        raise ValueError(
+            f"{context}: onset exceeds run duration ({run_duration:.6f}s) beyond tolerance "
+            f"({tolerance:.6f}s) at rows {bad_rows}."
+        )
+
+    event_end = onset + duration
+    if (event_end > (run_duration + tolerance)).any():
+        bad_rows = event_end.index[event_end > (run_duration + tolerance)].tolist()
+        raise ValueError(
+            f"{context}: onset + duration exceeds run duration ({run_duration:.6f}s) beyond tolerance "
+            f"({tolerance:.6f}s) at rows {bad_rows}."
+        )
+
+
+def _load_matching_brain_mask_for_bold(bold_path: Path) -> Optional[Any]:
+    import nibabel as nib
+
+    mask_path = _discover_brain_mask_for_bold(bold_path)
+    if mask_path is None:
+        return None
+    return nib.load(str(mask_path))
+
+
+def _build_intersection_brain_mask(bold_paths: Sequence[Path]) -> Optional[Any]:
+    import nibabel as nib
+    from nilearn.masking import intersect_masks
+
+    mask_paths: list[Path] = []
+    for bold_path in bold_paths:
+        mask_path = _discover_brain_mask_for_bold(bold_path)
+        if mask_path is None:
+            return None
+        mask_paths.append(mask_path)
+
+    if not mask_paths:
+        return None
+
+    mask_imgs = [nib.load(str(path)) for path in mask_paths]
+    return intersect_masks(mask_imgs, threshold=1.0)
 
 
 ###################################################################
@@ -397,13 +604,19 @@ def discover_available_conditions(
     bids_fmri_root: Path,
     subject: str,
     task: str,
+    *,
+    condition_column: str,
 ) -> List[str]:
     """
-    Discover available trial_type conditions from BIDS events files.
+    Discover available condition values from a configured BIDS events column.
 
     Scans all events TSV files for the subject/task and returns unique
-    trial_type values sorted alphabetically.
+    values from ``condition_column`` sorted alphabetically.
     """
+    selected_column = str(condition_column or "").strip()
+    if not selected_column:
+        raise ValueError("condition_column is required to discover available fMRI conditions.")
+
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
     func_dir = bids_fmri_root / sub_label / "func"
 
@@ -424,8 +637,8 @@ def discover_available_conditions(
     for events_file in candidates:
         try:
             events_df = pd.read_csv(events_file, sep="\t")
-            if "trial_type" in events_df.columns:
-                conditions = events_df["trial_type"].dropna().unique().tolist()
+            if selected_column in events_df.columns:
+                conditions = events_df[selected_column].dropna().unique().tolist()
                 all_conditions.update(str(c) for c in conditions)
         except Exception as e:
             logger.warning("Failed to read events file %s: %s", events_file, e)
@@ -709,6 +922,7 @@ def _remap_events_by_condition_columns(
     cfg: ContrastBuilderConfig,
     *,
     strict: bool = False,
+    eligible_mask: Optional[pd.Series] = None,
 ) -> ConditionRemapResult:
     """
     Remap events trial_type based on condition column/value pairs.
@@ -747,10 +961,18 @@ def _remap_events_by_condition_columns(
     col_b = cfg.condition_b_column
     val_b = cfg.condition_b_value
     scope_trial_types = cfg.condition_scope_trial_types
-    scope_column = str(getattr(cfg, "condition_scope_column", "") or "").strip() or "trial_type"
+    scope_column = str(getattr(cfg, "condition_scope_column", "") or "").strip()
 
-    scope_mask = pd.Series(True, index=events_df.index)
+    scope_mask = pd.Series(True, index=events_df.index, dtype=bool)
+    if eligible_mask is not None:
+        if len(eligible_mask) != len(events_df):
+            raise ValueError("eligible_mask must match events_df length.")
+        scope_mask &= eligible_mask.astype(bool)
     if scope_trial_types:
+        if not scope_column:
+            raise ValueError(
+                "condition_scope_trial_types is set but no condition_scope_column was configured."
+            )
         normalized_scope = [str(v).strip() for v in scope_trial_types if str(v).strip()]
         if normalized_scope and not any(v.lower() in {"all", "*", "@all"} for v in normalized_scope):
             if scope_column not in events_df.columns:
@@ -758,7 +980,7 @@ def _remap_events_by_condition_columns(
                     f"Condition scope column '{scope_column}' not found in events. "
                     f"Available columns: {list(events_df.columns)}"
                 )
-            scope_mask = events_df[scope_column].astype(str).isin(normalized_scope)
+            scope_mask &= events_df[scope_column].astype(str).isin(normalized_scope)
 
     # Validate column A exists (this is always required)
     if col_a not in events_df.columns:
@@ -867,26 +1089,21 @@ def fit_first_level_glm(
             f"Events file missing required columns. "
             f"Found: {list(events_df.columns)}, need: {required_cols}"
         )
-
-    if getattr(cfg, "events_to_model", None):
-        allow = set(str(x) for x in (cfg.events_to_model or []) if str(x).strip())
-        if allow:
-            events_df = events_df[events_df["trial_type"].astype(str).isin(allow)].copy()
-            if events_df.empty:
-                raise ValueError(
-                    f"After applying events_to_model={sorted(allow)}, no events remained in {events_path}."
-                )
-
-    events_df = _apply_trial_phase_scoping(
+    _validate_events_against_bold_run(
         events_df,
-        allowed_phases=getattr(cfg, "stim_phases_to_model", None),
-        phase_column=str(getattr(cfg, "phase_column", "stim_phase") or "stim_phase"),
-        phase_scope_column=str(getattr(cfg, "phase_scope_column", "trial_type") or "trial_type"),
-        phase_scope_value=getattr(cfg, "phase_scope_value", None),
+        bold_path=bold_path,
+        context=f"Events validation ({events_path.name})",
     )
 
+    events_df, eligible_mask = _prepare_events_for_glm(events_df, cfg)
+
     # Use strict=True for single-run: cannot skip the only run
-    remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=True)
+    remap_result = _remap_events_by_condition_columns(
+        events_df,
+        cfg,
+        strict=True,
+        eligible_mask=eligible_mask,
+    )
     events_df = remap_result.events_df[["onset", "duration", "trial_type"]].copy()
     synthetic_labels = remap_result.synthetic_labels
 
@@ -910,15 +1127,7 @@ def fit_first_level_glm(
         logger.info("Using %d confound regressors", confounds.shape[1])
 
     # Use a matching brain mask when available (best practice with fMRIPrep outputs).
-    mask_img = None
-    try:
-        import nibabel as nib
-
-        mask_path = _discover_brain_mask_for_bold(bold_path)
-        if mask_path is not None and mask_path.exists():
-            mask_img = nib.load(str(mask_path))
-    except Exception:
-        mask_img = None
+    mask_img = _load_matching_brain_mask_for_bold(bold_path)
 
     flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
 
@@ -1016,30 +1225,21 @@ def fit_first_level_glm_multi_run(
                 f"Events file missing required columns: {events_path}. "
                 f"Found: {list(events_df.columns)}, need: {required_cols}"
             )
-
-        if getattr(cfg, "events_to_model", None):
-            allow = set(str(x) for x in (cfg.events_to_model or []) if str(x).strip())
-            if allow:
-                events_df = events_df[events_df["trial_type"].astype(str).isin(allow)].copy()
-                if events_df.empty:
-                    skipped_runs.append((run_idx, f"events_to_model removed all events for {events_path.name}"))
-                    logger.warning(
-                        "Run %d excluded from GLM: events_to_model removed all events (%s)",
-                        run_idx,
-                        events_path.name,
-                    )
-                    continue
-
-        events_df = _apply_trial_phase_scoping(
+        _validate_events_against_bold_run(
             events_df,
-            allowed_phases=getattr(cfg, "stim_phases_to_model", None),
-            phase_column=str(getattr(cfg, "phase_column", "stim_phase") or "stim_phase"),
-            phase_scope_column=str(getattr(cfg, "phase_scope_column", "trial_type") or "trial_type"),
-            phase_scope_value=getattr(cfg, "phase_scope_value", None),
+            bold_path=bold_path,
+            context=f"Events validation ({events_path.name})",
         )
 
+        events_df, eligible_mask = _prepare_events_for_glm(events_df, cfg)
+
         # Remap conditions, allowing missing values (strict=False)
-        remap_result = _remap_events_by_condition_columns(events_df, cfg, strict=False)
+        remap_result = _remap_events_by_condition_columns(
+            events_df,
+            cfg,
+            strict=False,
+            eligible_mask=eligible_mask,
+        )
 
         # Check if this run should be skipped due to missing conditions
         needs_both = bool(cfg.condition_b_column) and _value_is_specified(cfg.condition_b_value)
@@ -1106,20 +1306,7 @@ def fit_first_level_glm_multi_run(
     logger.info("Fitting multi-run GLM (%d runs, TR=%.2fs)", len(valid_bold_paths), tr)
 
     # If fMRIPrep brain masks exist, use their intersection to stabilize masking.
-    mask_img = None
-    try:
-        import nibabel as nib
-        from nilearn.masking import intersect_masks
-
-        mask_paths = [
-            p for p in (_discover_brain_mask_for_bold(bp) for bp in valid_bold_paths)
-            if p is not None
-        ]
-        if len(mask_paths) == len(valid_bold_paths) and mask_paths:
-            mask_imgs = [nib.load(str(p)) for p in mask_paths]
-            mask_img = intersect_masks(mask_imgs, threshold=1.0)
-    except Exception:
-        mask_img = None
+    mask_img = _build_intersection_brain_mask(valid_bold_paths)
 
     flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
 

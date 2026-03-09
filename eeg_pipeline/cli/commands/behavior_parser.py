@@ -418,7 +418,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     temporal_group.add_argument("--temporal-split-by-condition", action="store_true", default=None, dest="temporal_split_by_condition")
     temporal_group.add_argument("--no-temporal-split-by-condition", action="store_false", dest="temporal_split_by_condition")
-    temporal_group.add_argument("--temporal-condition-column", type=str, default=None, help="events.tsv column to split/filter by (default: event_columns.binary_outcome)")
+    temporal_group.add_argument("--temporal-condition-column", type=str, default=None, help="events.tsv column to split/filter by (default: event_columns.condition, then event_columns.binary_outcome)")
     temporal_group.add_argument("--temporal-condition-values", nargs="+", default=None, metavar="VALUE", help="Subset of values to compute (empty = all unique values)")
     temporal_group.add_argument("--temporal-include-roi-averages", action="store_true", default=None, dest="temporal_include_roi_averages", help="Include ROI-averaged rows in output")
     temporal_group.add_argument("--no-temporal-include-roi-averages", action="store_false", dest="temporal_include_roi_averages", help="Exclude ROI-averaged rows from output")
@@ -446,7 +446,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     cluster_group.add_argument("--cluster-threshold", type=float, default=None, help="Cluster forming threshold")
     cluster_group.add_argument("--cluster-min-size", type=int, default=None, help="Minimum cluster size")
     cluster_group.add_argument("--cluster-tail", type=int, choices=[-1, 0, 1], default=None, help="Test tail: 0=two-tailed, 1=upper, -1=lower")
-    cluster_group.add_argument("--cluster-condition-column", type=str, default=None, help="events.tsv column to split by (default: event_columns.binary_outcome)")
+    cluster_group.add_argument("--cluster-condition-column", type=str, default=None, help="events.tsv column to split by (default: event_columns.condition, then event_columns.binary_outcome)")
     cluster_group.add_argument("--cluster-condition-values", nargs="+", default=None, metavar="VALUE", help="Exactly 2 values to compare (e.g., 0 1 or condition_a condition_b)")
     
     # Condition-specific options
@@ -455,7 +455,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--no-condition-fail-fast", action="store_false", dest="condition_fail_fast")
     condition_group.add_argument("--condition-effect-threshold", type=float, default=None, help="Minimum effect size (Cohen's d) to report")
     condition_group.add_argument("--condition-min-trials", type=int, default=None, help="Minimum trials per condition")
-    condition_group.add_argument("--condition-compare-column", type=str, default=None, help="events.tsv column to use for condition split (default: event_columns.binary_outcome)")
+    condition_group.add_argument("--condition-compare-column", type=str, default=None, help="events.tsv column to use for condition split (default: event_columns.condition, then event_columns.binary_outcome)")
     condition_group.add_argument("--condition-compare-values", nargs="+", default=None, metavar="VALUE", help="Values in the column to compare (e.g., 0 1 or condition_a condition_b)")
     condition_group.add_argument("--condition-compare-labels", nargs="+", default=None, metavar="LABEL", help="Optional labels aligned to --condition-compare-values")
     condition_group.add_argument("--condition-overwrite", action="store_true", default=None, dest="condition_overwrite", help="Overwrite existing condition effects files (default)")

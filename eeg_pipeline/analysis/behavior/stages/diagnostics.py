@@ -26,6 +26,7 @@ def _resolve_icc_alignment_columns(df_trials: pd.DataFrame, config: Any) -> List
     """Resolve task-identity columns used to validate trial-position ICC."""
     from eeg_pipeline.utils.data.columns import (
         get_binary_outcome_column_from_config,
+        get_condition_column_from_config,
         resolve_predictor_column,
     )
 
@@ -33,11 +34,13 @@ def _resolve_icc_alignment_columns(df_trials: pd.DataFrame, config: Any) -> List
         get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
     ).strip()
     if not compare_column:
+        compare_column = str(get_condition_column_from_config(config, df_trials) or "").strip()
+    if not compare_column:
         compare_column = str(get_binary_outcome_column_from_config(config, df_trials) or "").strip()
 
     predictor_column = str(resolve_predictor_column(df_trials, config) or "").strip()
 
-    candidates = [compare_column, predictor_column, "trial_type"]
+    candidates = [compare_column, predictor_column]
     resolved: List[str] = []
     for column in candidates:
         if column and column in df_trials.columns and column not in resolved:
@@ -54,12 +57,17 @@ def _resolve_configured_icc_unit_columns(
     """Resolve configured ICC unit columns from aliases or explicit column names."""
     from eeg_pipeline.utils.data.columns import (
         get_binary_outcome_column_from_config,
+        get_condition_column_from_config,
         resolve_predictor_column,
     )
 
     compare_column = str(
         get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
     ).strip()
+    if not compare_column:
+        compare_column = str(
+            get_condition_column_from_config(config, df_trials) or ""
+        ).strip()
     if not compare_column:
         compare_column = str(
             get_binary_outcome_column_from_config(config, df_trials) or ""
@@ -69,7 +77,7 @@ def _resolve_configured_icc_unit_columns(
     configured_specs = get_config_value(
         config,
         "behavior_analysis.icc.unit_columns",
-        ["predictor"],
+        [],
     )
     unit_specs = [str(spec).strip() for spec in (configured_specs or [])]
     if not unit_specs:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import logging
 from dataclasses import asdict, dataclass, field
@@ -18,6 +19,22 @@ _SUPPORTED_SECOND_LEVEL_MODELS = frozenset(
 )
 _REQUIRED_GROUP_SPACE = "MNI152NLin2009cAsym"
 _REQUIRED_FIRST_LEVEL_OUTPUT = "effect_size"
+_FIRST_LEVEL_CONTRAST_FIELDS = frozenset(
+    {
+        "enabled",
+        "contrast_type",
+        "condition1",
+        "condition2",
+        "condition_a_column",
+        "condition_a_value",
+        "condition_b_column",
+        "condition_b_value",
+        "formula",
+        "name",
+        "output_type",
+        "resample_to_freesurfer",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -187,6 +204,7 @@ class FirstLevelMapRecord:
     map_path: Path
     sidecar_path: Path
     contrast_cfg: Dict[str, Any]
+    run_meta: Dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -268,6 +286,27 @@ def _load_sidecar_json(sidecar_path: Path) -> Dict[str, Any]:
     return payload
 
 
+def _extract_run_label(path_str: str) -> str:
+    name = Path(str(path_str)).name
+    for token in name.split("_"):
+        if token.startswith("run-"):
+            return token
+    raise ValueError(f"Could not extract run label from first-level input path: {path_str}")
+
+
+def _normalize_run_provenance(run_meta: Dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    included_paths = run_meta.get("included_bold_paths")
+    discovered_paths = run_meta.get("discovered_bold_paths")
+    if not isinstance(included_paths, list) or not included_paths:
+        raise ValueError("First-level sidecar is missing non-empty run_meta.included_bold_paths.")
+    if not isinstance(discovered_paths, list) or not discovered_paths:
+        raise ValueError("First-level sidecar is missing non-empty run_meta.discovered_bold_paths.")
+
+    included_runs = tuple(_extract_run_label(path_str) for path_str in included_paths)
+    discovered_runs = tuple(_extract_run_label(path_str) for path_str in discovered_paths)
+    return included_runs, discovered_runs
+
+
 def _candidate_first_level_dirs(
     *,
     input_root: Path,
@@ -329,6 +368,11 @@ def _discover_first_level_effect_size_map(
                 raise ValueError(
                     f"Expected contrast_cfg object in first-level sidecar: {sidecar_path}"
                 )
+            run_meta = payload.get("run_meta")
+            if not isinstance(run_meta, dict):
+                raise ValueError(
+                    f"Expected run_meta object in first-level sidecar: {sidecar_path}"
+                )
             space = str(contrast_cfg.get("fmriprep_space") or "").strip()
             if space != _REQUIRED_GROUP_SPACE:
                 continue
@@ -346,6 +390,7 @@ def _discover_first_level_effect_size_map(
                     map_path=nifti_path,
                     sidecar_path=sidecar_path,
                     contrast_cfg=contrast_cfg,
+                    run_meta=run_meta,
                 )
             )
 
@@ -370,12 +415,15 @@ def _validate_consistent_first_level_configs(
 ) -> None:
     by_contrast: dict[str, str] = {}
     by_paths: dict[str, Path] = {}
+    by_run_signature: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
     for record in records:
         normalized_cfg = json.dumps(record.contrast_cfg, sort_keys=True)
+        run_signature = _normalize_run_provenance(record.run_meta)
         prior = by_contrast.get(record.contrast_name)
         if prior is None:
             by_contrast[record.contrast_name] = normalized_cfg
             by_paths[record.contrast_name] = record.sidecar_path
+            by_run_signature[record.contrast_name] = run_signature
             continue
         if prior != normalized_cfg:
             raise ValueError(
@@ -384,6 +432,52 @@ def _validate_consistent_first_level_configs(
                 f"Conflict detected between {by_paths[record.contrast_name]} and "
                 f"{record.sidecar_path}."
             )
+        if by_run_signature[record.contrast_name] != run_signature:
+            raise ValueError(
+                "Second-level analysis requires each subject-level map for "
+                f"contrast {record.contrast_name!r} to be estimated from the same "
+                "discovered and included runs. "
+                f"Conflict detected between {by_paths[record.contrast_name]} and "
+                f"{record.sidecar_path}."
+            )
+
+
+def _first_level_model_signature(contrast_cfg: Dict[str, Any]) -> str:
+    model_cfg = {
+        key: value
+        for key, value in contrast_cfg.items()
+        if key not in _FIRST_LEVEL_CONTRAST_FIELDS
+    }
+    return json.dumps(model_cfg, sort_keys=True)
+
+
+def _validate_cross_contrast_model_compatibility(
+    records: Sequence[FirstLevelMapRecord],
+) -> None:
+    if not records:
+        raise ValueError("Cannot validate first-level model compatibility without any records.")
+
+    reference_record = records[0]
+    reference_signature = _first_level_model_signature(reference_record.contrast_cfg)
+    reference_run_signature = _normalize_run_provenance(reference_record.run_meta)
+    for record in records[1:]:
+        signature = _first_level_model_signature(record.contrast_cfg)
+        if signature == reference_signature:
+            run_signature = _normalize_run_provenance(record.run_meta)
+            if run_signature == reference_run_signature:
+                continue
+            raise ValueError(
+                "Within-subject second-level analysis requires every input contrast "
+                "to be estimated from the same discovered and included runs. "
+                f"Conflict detected between {reference_record.sidecar_path} and "
+                f"{record.sidecar_path}."
+            )
+        raise ValueError(
+            "Within-subject second-level analysis requires every input contrast "
+            "to be estimated with the same first-level model settings. "
+            f"Conflict detected between {reference_record.sidecar_path} and "
+            f"{record.sidecar_path}."
+        )
 
 
 def _load_subject_covariates(
@@ -557,6 +651,144 @@ def _validate_same_grid(paths: Sequence[Path]) -> None:
                 "same voxel grid. Conflict detected between "
                 f"{reference_path} and {path}."
             )
+
+
+def _validate_second_level_design_matrix(
+    design_matrix: pd.DataFrame,
+    *,
+    n_images: int,
+    context: str,
+    min_residual_dof: int = 1,
+) -> None:
+    values = np.asarray(design_matrix, dtype=float)
+    if values.ndim != 2 or values.size == 0:
+        raise ValueError(f"{context}: design matrix is empty.")
+    if values.shape[0] != int(n_images):
+        raise ValueError(
+            f"{context}: design matrix rows ({values.shape[0]}) do not match "
+            f"the number of input maps ({n_images})."
+        )
+    if not np.isfinite(values).all():
+        raise ValueError(f"{context}: design matrix contains non-finite values.")
+
+    rank = int(np.linalg.matrix_rank(values))
+    n_regressors = int(values.shape[1])
+    residual_dof = int(values.shape[0] - rank)
+    min_residual_dof = max(int(min_residual_dof), 0)
+
+    if rank < n_regressors:
+        raise ValueError(
+            f"{context}: design matrix is rank-deficient "
+            f"(rank={rank}, regressors={n_regressors}, images={values.shape[0]}). "
+            "Reduce aliased covariates or redesign the group model."
+        )
+    if residual_dof < min_residual_dof:
+        raise ValueError(
+            f"{context}: insufficient residual degrees of freedom "
+            f"(images={values.shape[0]}, rank={rank}, residual_dof={residual_dof}). "
+            "Select more subjects or reduce regressors."
+        )
+
+
+def _validate_second_level_contrast_spec(
+    *,
+    contrast_spec: Any,
+    design_columns: Sequence[str],
+    stat_type: str,
+) -> None:
+    contrast_array: np.ndarray
+    if isinstance(contrast_spec, str):
+        contrast_array = _evaluate_second_level_contrast_expression(
+            contrast_spec,
+            design_columns,
+        )
+    else:
+        contrast_array = np.asarray(contrast_spec, dtype=float)
+
+    if not np.isfinite(contrast_array).all():
+        raise ValueError("Second-level contrast specification contains non-finite values.")
+
+    if stat_type == "t":
+        if contrast_array.ndim != 1:
+            raise ValueError("t-contrast second-level inference requires a 1D contrast vector.")
+        if contrast_array.shape[0] != len(design_columns):
+            raise ValueError(
+                "Second-level t-contrast length does not match the design matrix columns."
+            )
+        if np.allclose(contrast_array, 0.0):
+            raise ValueError("Second-level t-contrast must not be all zeros.")
+        return
+
+    if stat_type != "F":
+        raise ValueError(f"Unsupported second-level stat_type {stat_type!r}.")
+    if contrast_array.ndim != 2:
+        raise ValueError("F-contrast second-level inference requires a 2D contrast matrix.")
+    if contrast_array.shape[1] != len(design_columns):
+        raise ValueError(
+            "Second-level F-contrast width does not match the design matrix columns."
+        )
+    if any(np.allclose(row, 0.0) for row in contrast_array):
+        raise ValueError("Second-level F-contrast rows must not be all zeros.")
+
+
+def _evaluate_second_level_contrast_expression(
+    expression: str,
+    design_columns: Sequence[str],
+) -> np.ndarray:
+    basis = {
+        str(column): np.eye(len(design_columns), dtype=float)[column_idx]
+        for column_idx, column in enumerate(design_columns)
+    }
+
+    def _evaluate(node: ast.AST) -> np.ndarray | float:
+        if isinstance(node, ast.Expression):
+            return _evaluate(node.body)
+        if isinstance(node, ast.Name):
+            if node.id not in basis:
+                raise ValueError(f"Unknown design column {node.id!r}.")
+            return basis[node.id]
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            operand = _evaluate(node.operand)
+            return operand if isinstance(node.op, ast.UAdd) else -operand
+        if isinstance(node, ast.BinOp):
+            left = _evaluate(node.left)
+            right = _evaluate(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                if np.isscalar(left):
+                    return float(left) * np.asarray(right, dtype=float)
+                if np.isscalar(right):
+                    return np.asarray(left, dtype=float) * float(right)
+                raise ValueError("Contrast formulas only support scalar-by-vector multiplication.")
+            if isinstance(node.op, ast.Div):
+                if not np.isscalar(right):
+                    raise ValueError("Contrast formulas only support division by scalars.")
+                right_value = float(right)
+                if np.isclose(right_value, 0.0):
+                    raise ValueError("Contrast formulas must not divide by zero.")
+                return np.asarray(left, dtype=float) / right_value
+        raise ValueError("Unsupported second-level contrast formula.")
+
+    try:
+        parsed = ast.parse(expression, mode="eval")
+        evaluated = _evaluate(parsed)
+    except SyntaxError as exc:
+        raise ValueError(f"Invalid second-level contrast formula {expression!r}.") from exc
+
+    contrast = np.asarray(evaluated, dtype=float)
+    if contrast.ndim == 0:
+        raise ValueError("Second-level contrast formulas must reference design columns.")
+    if contrast.shape != (len(design_columns),):
+        raise ValueError(
+            f"Second-level contrast formula {expression!r} did not resolve to a "
+            f"vector of length {len(design_columns)}."
+        )
+    return contrast
 
 
 def _write_design_matrix_files(
@@ -907,6 +1139,7 @@ def _prepare_paired_input(
         for subject in subjects
     )
     _validate_consistent_first_level_configs([*records_a, *records_b])
+    _validate_cross_contrast_model_compatibility([*records_a, *records_b])
 
     difference_dir = output_dir / "intermediate" / "paired_differences"
     difference_dir.mkdir(parents=True, exist_ok=True)
@@ -1007,6 +1240,7 @@ def _prepare_repeated_measures_input(
         all_records.extend(records)
 
     _validate_consistent_first_level_configs(all_records)
+    _validate_cross_contrast_model_compatibility(all_records)
 
     manifest_rows: list[dict[str, Any]] = []
     image_paths: list[Path] = []
@@ -1093,6 +1327,19 @@ def prepare_second_level_input(
     deriv_root: Path,
 ) -> PreparedSecondLevelInput:
     config = config.normalized()
+    normalized_subjects = [_normalize_subject_id(subject) for subject in subjects]
+    seen_subjects: set[str] = set()
+    duplicate_subjects: list[str] = []
+    for subject_id in normalized_subjects:
+        if subject_id in seen_subjects and subject_id not in duplicate_subjects:
+            duplicate_subjects.append(subject_id)
+            continue
+        seen_subjects.add(subject_id)
+    if duplicate_subjects:
+        labels = [_subject_label(subject_id) for subject_id in duplicate_subjects]
+        raise ValueError(
+            f"Second-level fMRI analysis requires unique subjects; duplicates found: {labels}"
+        )
     if len(subjects) < 2:
         raise ValueError(
             "Second-level fMRI analysis requires at least two selected subjects."
@@ -1171,6 +1418,17 @@ def prepare_second_level_input(
             metadata=prepared.metadata,
         )
 
+    _validate_second_level_design_matrix(
+        prepared.design_matrix,
+        n_images=len(prepared.image_paths),
+        context=f"Second-level design ({config.model})",
+        min_residual_dof=1,
+    )
+    _validate_second_level_contrast_spec(
+        contrast_spec=prepared.contrast_spec,
+        design_columns=list(prepared.design_matrix.columns),
+        stat_type=prepared.stat_type,
+    )
     return prepared
 
 

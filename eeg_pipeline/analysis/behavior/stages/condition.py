@@ -15,15 +15,23 @@ def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> st
 
     Resolution order:
     1. ``behavior_analysis.condition.compare_column`` (explicit override)
-    2. ``event_columns.binary_outcome`` (discovered from column aliases)
+    2. ``event_columns.condition`` (generic condition aliases)
+    3. ``event_columns.binary_outcome`` (binary condition aliases)
 
     Raises ``ValueError`` if neither resolves to a column present in the trial table.
     """
-    from eeg_pipeline.utils.data.columns import get_binary_outcome_column_from_config
+    from eeg_pipeline.utils.data.columns import (
+        get_binary_outcome_column_from_config,
+        get_condition_column_from_config,
+    )
 
     compare_col = str(get_config_value(config, "behavior_analysis.condition.compare_column", "") or "").strip()
     if compare_col and compare_col in df_trials.columns:
         return compare_col
+
+    fallback_col = get_condition_column_from_config(config, df_trials)
+    if fallback_col and fallback_col in df_trials.columns:
+        return str(fallback_col)
 
     fallback_col = get_binary_outcome_column_from_config(config, df_trials)
     if fallback_col and fallback_col in df_trials.columns:
@@ -32,7 +40,8 @@ def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> st
     raise ValueError(
         "Could not resolve a condition comparison column. "
         "Set 'behavior_analysis.condition.compare_column' or configure "
-        "'event_columns.binary_outcome' to match a column in the trial table. "
+        "'event_columns.condition' / 'event_columns.binary_outcome' to match "
+        "a column in the trial table. "
         f"Available columns: {sorted(df_trials.columns.tolist())}"
     )
 
@@ -135,7 +144,7 @@ def stage_condition_column_impl(
             msg = (
                 "Condition split produced zero trials; check "
                 "behavior_analysis.condition.compare_column / behavior_analysis.condition.compare_values "
-                "and/or config event_columns.binary_outcome"
+                "and/or config event_columns.condition"
             )
             if fail_fast:
                 raise ValueError(msg)

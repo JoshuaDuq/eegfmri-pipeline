@@ -257,6 +257,10 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	ab.args = append(ab.args, "--confounds-strategy", confoundsOptions[m.fmriAnalysisConfoundsStrategy%len(confoundsOptions)])
 	if isFirstLevel {
 		ab.addIfNonEmpty("--events-to-model", strings.TrimSpace(m.fmriAnalysisEventsToModel))
+		eventsToModelColumn := strings.TrimSpace(m.fmriAnalysisEventsToModelColumn)
+		if eventsToModelColumn != "" && !strings.EqualFold(eventsToModelColumn, "trial_type") {
+			ab.args = append(ab.args, "--events-to-model-column", eventsToModelColumn)
+		}
 		scopeColumn := m.resolveFmriConditionColumn(m.fmriAnalysisScopeColumn)
 		if scopeColumn != "" && !strings.EqualFold(scopeColumn, "trial_type") {
 			ab.args = append(ab.args, "--condition-scope-column", scopeColumn)

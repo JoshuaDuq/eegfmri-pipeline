@@ -2569,6 +2569,35 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                         baseline_predictors=["temperature"],
                     )
 
+    def test_incremental_validity_requires_explicit_baseline_predictors(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
+        y = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": [0, 1, 2, 3],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)):
+                with self.assertRaisesRegex(ValueError, "requires explicit baseline predictors"):
+                    orch.run_incremental_validity_ml(
+                        subjects=["0001", "0002"],
+                        task="task",
+                        deriv_root=Path(td),
+                        config=DotConfig({}),
+                        n_perm=0,
+                        inner_splits=2,
+                        rng_seed=42,
+                        results_root=Path(td),
+                        logger=Mock(),
+                        baseline_predictors=None,
+                    )
+
     def test_incremental_validity_can_use_intercept_fallback_when_explicitly_enabled(self):
         from sklearn.dummy import DummyRegressor
 

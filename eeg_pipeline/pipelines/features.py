@@ -169,8 +169,9 @@ def _load_fixed_templates(
     try:
         with np.load(templates_path, allow_pickle=False) as data:
             if "templates" not in data:
-                logger.warning("Fixed templates file missing 'templates': %s", templates_path)
-                return None, None, None
+                raise ValueError(
+                    f"Fixed templates file is missing required array 'templates': {templates_path}"
+                )
             templates = np.asarray(data["templates"], dtype=float)
             raw_ch_names = data["ch_names"] if "ch_names" in data else None
             raw_labels = None
@@ -178,9 +179,8 @@ def _load_fixed_templates(
                 if label_key in data:
                     raw_labels = data[label_key]
                     break
-    except Exception as exc:
-        logger.warning("Failed loading fixed templates from %s: %s", templates_path, exc)
-        return None, None, None
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Failed loading fixed templates from {templates_path}: {exc}") from exc
 
     ch_names = _decode_optional_text_array(raw_ch_names)
     labels = _decode_optional_text_array(raw_labels)
@@ -678,6 +678,51 @@ def _collect_trial_table_feature_tables(
     ]
 
 
+def _filter_trialwise_columns_for_canonical_export(
+    name: str,
+    df: Optional[pd.DataFrame],
+    config: Any,
+    logger: Any,
+) -> Optional[pd.DataFrame]:
+    """Keep only statistically valid per-trial columns for canonical trial-table export."""
+    if df is None or getattr(df, "empty", False):
+        return df
+
+    from eeg_pipeline.domain.features.naming import infer_feature_provenance
+
+    provenance = infer_feature_provenance(
+        feature_columns=list(df.columns),
+        config=config,
+        df_attrs=dict(getattr(df, "attrs", {}) or {}),
+    )
+    column_props = (provenance.get("columns") or {})
+    keep_columns = [
+        str(column)
+        for column in df.columns
+        if bool((column_props.get(str(column)) or {}).get("trialwise_valid", True))
+        and not bool((column_props.get(str(column)) or {}).get("broadcasted", False))
+    ]
+
+    if len(keep_columns) == len(df.columns):
+        return df
+    if not keep_columns:
+        logger.info(
+            "Skipping canonical trial table export for %s: no statistically valid trialwise columns remain.",
+            name,
+        )
+        return None
+
+    logger.info(
+        "Canonical trial table export: retained %d/%d trialwise-valid columns for %s.",
+        len(keep_columns),
+        int(df.shape[1]),
+        name,
+    )
+    filtered_df = df.loc[:, keep_columns].copy()
+    filtered_df.attrs.update(dict(getattr(df, "attrs", {}) or {}))
+    return filtered_df
+
+
 def _save_canonical_trial_table_artifact(
     *,
     deriv_root: Path,
@@ -715,7 +760,15 @@ def _save_canonical_trial_table_artifact(
                 n_trials,
             )
             continue
-        trialwise_tables.append((name, df.reset_index(drop=True)))
+        filtered_df = _filter_trialwise_columns_for_canonical_export(
+            name=name,
+            df=df.reset_index(drop=True),
+            config=config,
+            logger=logger,
+        )
+        if filtered_df is None or filtered_df.empty:
+            continue
+        trialwise_tables.append((name, filtered_df))
 
     combined_features = combine_feature_tables(trialwise_tables)
     if combined_features is not None and not combined_features.empty:

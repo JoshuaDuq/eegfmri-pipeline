@@ -9,6 +9,7 @@ import pandas as pd
 
 from eeg_pipeline.analysis.features.connectivity import (
     _compute_psi_imaginary,
+    _warn_if_phase_connectivity_without_spatial_transform,
     extract_connectivity_from_precomputed,
     extract_directed_connectivity_from_precomputed,
     extract_connectivity_features,
@@ -82,6 +83,42 @@ def _make_precomputed(*, transform: str, family: str) -> PrecomputedData:
 
 
 class TestConnectivityValidityGuards(unittest.TestCase):
+    def test_phase_connectivity_requires_spatial_transform_by_default(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "connectivity": {"measures": ["wpli"]},
+                    "spatial_transform": "none",
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "require CSD/Laplacian transform"):
+            _warn_if_phase_connectivity_without_spatial_transform(
+                config,
+                ["wpli"],
+                logging.getLogger("test-connectivity-transform-guard"),
+            )
+
+    def test_phase_connectivity_override_allows_unsafe_execution(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "connectivity": {
+                        "measures": ["wpli"],
+                        "warn_if_no_spatial_transform": False,
+                    },
+                    "spatial_transform": "none",
+                }
+            }
+        )
+
+        _warn_if_phase_connectivity_without_spatial_transform(
+            config,
+            ["wpli"],
+            logging.getLogger("test-connectivity-transform-override"),
+        )
+
     def test_imcoh_uses_epochs_backend(self):
         config = DotConfig(
             {
@@ -196,6 +233,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
                         "granularity": "trial",
                         "phase_estimator": "across_epochs",
                         "force_within_epoch_for_ml": False,
+                        "warn_if_no_spatial_transform": False,
                     }
                 }
             }
@@ -225,6 +263,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
                         "condition_column": "condition",
                         "phase_estimator": "within_epoch",
                         "min_epochs_per_group": 1,
+                        "warn_if_no_spatial_transform": False,
                     }
                 }
             }
@@ -259,6 +298,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
                         "condition_column": "condition",
                         "phase_estimator": "within_epoch",
                         "min_epochs_per_group": 1,
+                        "warn_if_no_spatial_transform": False,
                     }
                 }
             }

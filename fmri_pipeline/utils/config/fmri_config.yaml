@@ -167,6 +167,7 @@ fmri_contrast:
   # Optional: restrict which event phases are modeled by the GLM (by events.tsv trial_type).
   # If null, all event rows are modeled (default).
   events_to_model: null
+  events_to_model_column: "trial_type"
 
   # Events column used for phase-level scoping.
   phase_column: "stim_phase"

@@ -58,6 +58,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriAnalysisFormula
 	case textFieldFmriAnalysisEventsToModel:
 		return m.fmriAnalysisEventsToModel
+	case textFieldFmriAnalysisEventsToModelColumn:
+		return m.fmriAnalysisEventsToModelColumn
 	case textFieldFmriAnalysisScopeColumn:
 		return m.fmriAnalysisScopeColumn
 	case textFieldFmriAnalysisScopeTrialTypes:
@@ -230,6 +232,10 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.sourceLocFmriContrastName
 	case textFieldSourceLocFmriRunsToInclude:
 		return m.sourceLocFmriRunsToInclude
+	case textFieldSourceLocFmriEventsToModel:
+		return m.sourceLocFmriEventsToModel
+	case textFieldSourceLocFmriEventsToModelColumn:
+		return m.sourceLocFmriEventsToModelColumn
 	case textFieldSourceLocFmriConditionScopeColumn:
 		return m.sourceLocFmriConditionScopeColumn
 	case textFieldSourceLocFmriConditionScopeTrialTypes:
@@ -497,6 +503,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriAnalysisFormula = strings.TrimSpace(value)
 	case textFieldFmriAnalysisEventsToModel:
 		m.fmriAnalysisEventsToModel = strings.TrimSpace(value)
+	case textFieldFmriAnalysisEventsToModelColumn:
+		m.fmriAnalysisEventsToModelColumn = strings.TrimSpace(value)
 	case textFieldFmriAnalysisScopeColumn:
 		m.fmriAnalysisScopeColumn = strings.TrimSpace(value)
 		m.fmriAnalysisScopeTrialTypes = ""
@@ -675,6 +683,10 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.sourceLocFmriContrastName = value
 	case textFieldSourceLocFmriRunsToInclude:
 		m.sourceLocFmriRunsToInclude = value
+	case textFieldSourceLocFmriEventsToModel:
+		m.sourceLocFmriEventsToModel = strings.Join(strings.Fields(value), " ")
+	case textFieldSourceLocFmriEventsToModelColumn:
+		m.sourceLocFmriEventsToModelColumn = strings.TrimSpace(value)
 	case textFieldSourceLocFmriConditionScopeColumn:
 		m.sourceLocFmriConditionScopeColumn = strings.TrimSpace(value)
 		m.sourceLocFmriConditionScopeTrialTypes = ""

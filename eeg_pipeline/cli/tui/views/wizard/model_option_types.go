@@ -292,6 +292,8 @@ const (
 	optSourceLocFmriDriftModel
 	optSourceLocFmriHighPassHz
 	optSourceLocFmriLowPassHz
+	optSourceLocFmriEventsToModel
+	optSourceLocFmriEventsToModelColumn
 	optSourceLocFmriConditionScopeColumn
 	optSourceLocFmriConditionScopeTrialTypes
 	optSourceLocFmriPhaseColumn
@@ -842,6 +844,7 @@ const (
 	optFmriAnalysisLowPassHz
 	optFmriAnalysisSmoothingFwhm
 	optFmriAnalysisEventsToModel
+	optFmriAnalysisEventsToModelColumn
 	optFmriAnalysisScopeColumn
 	optFmriAnalysisScopeTrialTypes
 	optFmriAnalysisPhaseColumn

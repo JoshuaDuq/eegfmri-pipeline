@@ -231,7 +231,7 @@ def stage_correlate_design_impl(
     sanitize_permutation_groups_fn: Callable[[Any, Any, str], Any],
 ) -> Optional[CorrelateDesign]:
     """Assemble design matrix: targets, covariates, feature columns."""
-    from eeg_pipeline.utils.data.columns import resolve_predictor_column
+    from eeg_pipeline.utils.data.columns import require_predictor_column
 
     df_trials = load_trial_table_df_fn(ctx)
     if is_dataframe_valid_fn(df_trials):
@@ -371,9 +371,10 @@ def stage_correlate_design_impl(
             )
     cov_df = pd.concat(cov_parts, axis=1) if cov_parts else None
 
-    predictor_column = resolve_predictor_column(df_trials, ctx.config) or "predictor"
+    predictor_column = ""
     predictor_series = None
-    if bool(getattr(config, "control_predictor", True)) and predictor_column in df_trials.columns:
+    if bool(getattr(config, "control_predictor", True)):
+        predictor_column = require_predictor_column(df_trials, ctx.config)
         predictor_series = pd.to_numeric(df_trials[predictor_column], errors="coerce")
 
     groups_for_perm = None

@@ -189,7 +189,7 @@ def _resolve_target_series(
         tgt_col = pick_target_column(events_df, target_columns=list(outcome_columns) if outcome_columns else [])
         if tgt_col is None:
             raise ValueError(
-                "No rating column found in events.tsv. "
+                "No outcome column found in events.tsv. "
                 f"Tried config event_columns.outcome={outcome_columns}; available={list(events_df.columns)}"
             )
         series = pd.to_numeric(events_df[tgt_col], errors="coerce")

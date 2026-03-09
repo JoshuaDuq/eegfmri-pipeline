@@ -82,15 +82,16 @@ rois: &roi_definitions
 # 3. CORE PROCESSING PIPELINE
 ###################################################################
 event_columns:
-  predictor: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
-  outcome: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
+  predictor: ["predictor", "stimulus_intensity", "intensity", "dose", "stimulus_temp", "stimulus_temperature", "temp", "temperature"]
+  outcome: ["outcome", "rating", "response", "score", "confidence", "accuracy", "vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating"]
+  condition: ["condition", "condition_label", "trial_type", "event_type"]
   # Optional: restrict strict event validation to these logical groups.
-  # Keep as ["rating"] for paradigm-agnostic use; add "temperature"/"binary_outcome"
+  # Keep as ["outcome"] for paradigm-agnostic use; add "predictor"/"condition"/"binary_outcome"
   # when those analyses are required.
-  required: ["rating"]
+  required: ["outcome"]
   temperature: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
   rating: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
-  binary_outcome: ["binary_outcome_coded", "binary_outcome", "pain"]
+  binary_outcome: ["binary_outcome", "binary_outcome_coded", "outcome_binary", "label", "pain"]
 
 alignment:
   allow_misaligned_trim: false
@@ -502,6 +503,7 @@ feature_engineering:
         # If null, all event rows are modeled (default). For multi-phase pain tasks, a practical choice is:
         #   ["stimulation", "pain_question", "vas_rating"]
         events_to_model: null
+        events_to_model_column: "trial_type"
         # Optional: restrict which stimulation sub-phases are modeled using the configured phase column.
         # If set, that phase column must exist in events.tsv.
         # If null, no stim_phase scoping is applied.
@@ -759,7 +761,7 @@ behavior_analysis:
     enabled: true
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum |Hedges' g| flagged as reportable/highlighted in condition reports
-    compare_column: ""          # Column to split by (empty = use event_columns.binary_outcome)
+    compare_column: ""          # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
     compare_values: []           # Explicit values to compare. Leave empty only for binary columns with exactly 2 observed levels.
     compare_labels: null         # Optional labels for compare_values (same length)
     primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
@@ -772,14 +774,14 @@ behavior_analysis:
   # Temporal correlations computation  
   temporal:
     enabled: true
-    target_column: ""                 # Empty = use event_columns.rating
+    target_column: ""                 # Empty = use event_columns.outcome
     time_resolution_ms: 50
     time_range_ms: [-200, 1000]
     smooth_window_ms: 100
     correction_method: "cluster"      # "fdr" | "bonferroni" | "cluster"
     # Condition-based splitting (similar to condition comparison)
     split_by_condition: true           # If true, compute separate correlations per condition value
-    condition_column: ""               # Column to split by (empty = use event_columns.binary_outcome)
+    condition_column: ""               # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
     condition_values: []               # Specific values to compute for (empty = all unique values in column)
     # Output options for unified temporal correlations file
     include_roi_averages: true         # Include ROI-averaged rows (replaces power_topomap_correlations)
@@ -808,7 +810,7 @@ behavior_analysis:
     forming_threshold: 0.05
     min_cluster_size: 2
     tail: 0  # 0=two-tailed, 1=upper, -1=lower
-    condition_column: ""         # Column to split by (empty = use event_columns.binary_outcome)
+    condition_column: ""         # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
     condition_values: []         # Exactly 2 values to compare (default [0, 1] if empty)
 
   cluster_correction:
@@ -833,7 +835,7 @@ behavior_analysis:
   # Run-to-run reliability
   icc:
     enabled: true
-    unit_columns: ["predictor"]  # aliases: predictor | condition | trial_type | trial_position | explicit columns
+    unit_columns: []             # required; aliases: predictor | condition | trial_type | trial_position | explicit columns
   
   min_samples:
     channel: 10
@@ -936,15 +938,15 @@ machine_learning:
     require_trial_ml_safe: true          # If true, error unless feature_engineering.analysis_mode="trial_ml_safe"
     max_excluded_subject_fraction: 0.25  # Fail ML matrix build if excluded subjects exceed this fraction of requested subjects
 
-  # Targets can be logical names ('rating', 'temperature', 'binary_outcome') or explicit events.tsv column names.
+  # Targets can be logical names ('outcome', 'predictor', 'binary_outcome') or explicit events.tsv column names.
   targets:
-    regression: "rating"
+    regression: "outcome"
     classification: "binary_outcome"
     binary_threshold: null               # Required when classifying a continuous target (e.g., rating > 30)
     strict_regression_target_continuous: false  # If true, error when regression target is binary-like (prefer ml classify)
 
   incremental_validity:
-    baseline_predictors: ["temperature"] # Standardized meta names: temperature, trial_index, block
+    baseline_predictors: []              # required; standardized meta names: predictor, trial_index, block
     require_baseline_predictors: true    # If true, missing baseline predictors raise an error instead of intercept-only fallback
     baseline_alpha: 1.0
 

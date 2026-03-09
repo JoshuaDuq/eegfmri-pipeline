@@ -544,6 +544,47 @@ class TestFeatureHelpers(unittest.TestCase):
 
         self.assertEqual(save_trial_table_mock.call_count, 1)
 
+    def test_canonical_trial_table_filters_non_trialwise_columns_by_provenance(self):
+        from eeg_pipeline.pipelines.features import _save_canonical_trial_table_artifact
+
+        tmp = Path(tempfile.mkdtemp())
+        deriv_root = tmp / "deriv"
+        deriv_root.mkdir(parents=True, exist_ok=True)
+        aligned_events = pd.DataFrame({"rating": [1.0, 2.0]})
+        trialwise_df = pd.DataFrame({"power_active_alpha_global_mean": [0.1, 0.2]})
+        non_trialwise_df = pd.DataFrame({"conn_active_alpha_global_wpli_mean": [0.3, 0.3]})
+        non_trialwise_df.attrs["feature_granularity"] = "subject"
+        non_trialwise_df.attrs["phase_estimator"] = "across_epochs"
+        non_trialwise_df.attrs["broadcast_warning"] = "broadcast"
+
+        captured: dict[str, pd.DataFrame] = {}
+
+        def _fake_save_trial_table(wrapper, out_path, format):
+            _ = out_path
+            _ = format
+            captured["df"] = wrapper.df.copy()
+
+        with patch(
+            "eeg_pipeline.utils.data.trial_table.save_trial_table",
+            side_effect=_fake_save_trial_table,
+        ):
+            _save_canonical_trial_table_artifact(
+                deriv_root=deriv_root,
+                subject="0001",
+                task="task",
+                aligned_events=aligned_events,
+                feature_tables=[
+                    ("power", trialwise_df),
+                    ("connectivity", non_trialwise_df),
+                ],
+                config=DotConfig({"feature_engineering": {"analysis_mode": "trial_ml_safe"}}),
+                logger=Mock(),
+            )
+
+        self.assertIn("df", captured)
+        self.assertIn("power_active_alpha_global_mean", captured["df"].columns)
+        self.assertNotIn("conn_active_alpha_global_wpli_mean", captured["df"].columns)
+
     def test_load_fixed_templates(self):
         from eeg_pipeline.pipelines.features import _load_fixed_templates
 
@@ -565,6 +606,17 @@ class TestFeatureHelpers(unittest.TestCase):
         self.assertEqual(templates.shape, (1, 2))
         self.assertIsNotNone(ch_names)
         self.assertEqual(loaded_labels, ["A"])
+
+    def test_load_fixed_templates_surfaces_invalid_files(self):
+        from eeg_pipeline.pipelines.features import _load_fixed_templates
+
+        logger = Mock()
+        tmp = Path(tempfile.mkdtemp())
+        path = tmp / "templates_missing_key.npz"
+        np.savez(path, ch_names=np.array(["Cz"]))
+
+        with self.assertRaisesRegex(ValueError, "missing required array 'templates'"):
+            _load_fixed_templates(path, logger)
 
     def test_precompute_tfr_helpers(self):
         from eeg_pipeline.pipelines.features import (

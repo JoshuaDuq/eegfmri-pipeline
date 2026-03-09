@@ -193,6 +193,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 			options = append(
 				options,
 				optFmriAnalysisEventsToModel,
+				optFmriAnalysisEventsToModelColumn,
 				optFmriAnalysisScopeColumn,
 				optFmriAnalysisScopeTrialTypes,
 				optFmriAnalysisPhaseColumn,

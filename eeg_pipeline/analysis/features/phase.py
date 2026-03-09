@@ -715,17 +715,10 @@ def _compute_itpc_map_by_method(
 
     if method == "fold_global":
         if train_mask is None:
-            if mode == "trial_ml_safe":
-                raise ValueError(
-                    "ITPC(method='fold_global') requires ctx.train_mask in analysis_mode='trial_ml_safe'. "
-                    "Pass a fold-specific train_mask or switch to analysis_mode='group_stats'."
-                )
-            if logger is not None:
-                logger.info(
-                    "ITPC(method='fold_global') requested but ctx.train_mask is None; computing ITPC across all trials "
-                    "(equivalent to method='global'; not CV-safe)."
-                )
-            return _compute_global_itpc_map(data, n_jobs=n_jobs, logger=logger)
+            raise ValueError(
+                "ITPC(method='fold_global') requires ctx.train_mask. "
+                "Without a fold-specific training mask this estimator is undefined."
+            )
         n_training_trials = int(np.sum(train_mask))
         logger.info(
             "ITPC: Using fold_global mode - computing from %d training trials only",
@@ -873,8 +866,11 @@ def _extract_pac_config(config: Any) -> Dict[str, Any]:
         raise ValueError(f"PAC: unsupported method '{method}'. Only 'mvl' is implemented.")
     surrogate_method = str(pac_cfg.get("surrogate_method", "trial_shuffle")).strip().lower()
     if surrogate_method not in {"trial_shuffle", "circular_shift"}:
-        pac_cfg = dict(pac_cfg)
-        pac_cfg["surrogate_method"] = "trial_shuffle"
+        raise ValueError(
+            "PAC: feature_engineering.pac.surrogate_method must be one of "
+            "{'trial_shuffle', 'circular_shift'} "
+            f"(got {surrogate_method!r})."
+        )
     return pac_cfg
 
 
@@ -891,9 +887,22 @@ def _extract_frequency_ranges(
         phase_max = float(phase_range[1])
         amp_min = float(amp_range[0])
         amp_max = float(amp_range[1])
-    except (IndexError, ValueError, TypeError):
-        phase_min, phase_max = default_phase
-        amp_min, amp_max = default_amp
+    except (IndexError, ValueError, TypeError) as exc:
+        raise ValueError(
+            "PAC: feature_engineering.pac.phase_range and amp_range must each contain "
+            "two finite numeric values [fmin, fmax]."
+        ) from exc
+
+    values = {
+        "phase_range": (phase_min, phase_max),
+        "amp_range": (amp_min, amp_max),
+    }
+    for key, (fmin, fmax) in values.items():
+        if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
+            raise ValueError(
+                f"PAC: {key} must contain two finite values with fmax > fmin "
+                f"(got [{fmin}, {fmax}])."
+            )
     return phase_min, phase_max, amp_min, amp_max
 
 
@@ -956,7 +965,10 @@ def _compute_pac_surrogates(
     is_per_channel = phase_unit_vectors.ndim == 3
     method = str(surrogate_method).strip().lower()
     if method not in {"trial_shuffle", "circular_shift"}:
-        method = "trial_shuffle"
+        raise ValueError(
+            "PAC: surrogate_method must be one of {'trial_shuffle', 'circular_shift'} "
+            f"(got {surrogate_method!r})."
+        )
 
     donor_pool: Optional[np.ndarray] = None
     donor_pool_set = set()
@@ -1069,22 +1081,20 @@ def _resolve_pac_surrogate_method(
     n_epochs: int,
     logger: Optional[logging.Logger],
 ) -> str:
-    """Resolve surrogate method with scientific-validity fallback for low epoch counts."""
+    """Resolve surrogate method with strict validation."""
     method = str(pac_cfg.get("surrogate_method", "trial_shuffle")).strip().lower()
     if method not in {"trial_shuffle", "circular_shift"}:
-        if logger is not None:
-            logger.warning(
-                "PAC: unknown surrogate_method=%r; using 'trial_shuffle'.",
-                method,
-            )
-        method = "trial_shuffle"
+        raise ValueError(
+            "PAC: feature_engineering.pac.surrogate_method must be one of "
+            "{'trial_shuffle', 'circular_shift'} "
+            f"(got {method!r})."
+        )
 
     if method == "trial_shuffle" and int(n_epochs) < 2:
-        if logger is not None:
-            logger.warning(
-                "PAC: surrogate_method='trial_shuffle' requires >=2 epochs; falling back to 'circular_shift'."
-            )
-        return "circular_shift"
+        raise ValueError(
+            "PAC: surrogate_method='trial_shuffle' requires at least 2 epochs. "
+            "Use surrogate_method='circular_shift' or provide more epochs."
+        )
     return method
 
 
@@ -1112,12 +1122,10 @@ def _resolve_pac_surrogate_context(
         return method, donor_epoch_indices
 
     if train_mask is None:
-        if logger is not None:
-            logger.warning(
-                "PAC: trial_ml_safe mode without train_mask; switching surrogate_method "
-                "from 'trial_shuffle' to 'circular_shift' to prevent cross-trial leakage."
-            )
-        return "circular_shift", None
+        raise ValueError(
+            "PAC: trial_ml_safe mode with surrogate_method='trial_shuffle' requires "
+            "a valid train_mask so surrogate donors come only from training trials."
+        )
 
     train_mask_arr = np.asarray(train_mask, dtype=bool).ravel()
     if train_mask_arr.shape[0] != int(n_epochs):
@@ -1128,12 +1136,10 @@ def _resolve_pac_surrogate_context(
 
     donor_epoch_indices = np.flatnonzero(train_mask_arr)
     if donor_epoch_indices.size < 2:
-        if logger is not None:
-            logger.warning(
-                "PAC: surrogate_method='trial_shuffle' in trial_ml_safe mode requires at least 2 "
-                "training trials; falling back to 'circular_shift'."
-            )
-        return "circular_shift", None
+        raise ValueError(
+            "PAC: surrogate_method='trial_shuffle' in trial_ml_safe mode requires at least "
+            "2 training trials in train_mask."
+        )
 
     if logger is not None:
         logger.info(
@@ -1525,7 +1531,7 @@ def _compute_pac_for_channel_band_pair(
         denominator = np.nansum(mean_amplitude, axis=1) + epsilon
         numerator = np.nansum(mean_amplitude * mean_phase_vector, axis=1)
     else:
-        denominator = float(n_times)
+        denominator = 1.0
         numerator = np.nanmean(mean_amplitude * mean_phase_vector, axis=1)
     
     pac_values = np.abs(numerator / denominator)
@@ -1803,7 +1809,12 @@ def extract_itpc_from_precomputed(
             "ITPC(method='global') is not allowed in analysis_mode='trial_ml_safe' because it uses all trials "
             "(including held-out trials) and leaks information. Use method='fold_global' with a fold-specific train_mask."
         )
-    if analysis_mode == "trial_ml_safe" and itpc_method in {"fold_global", "condition"} and train_mask is None:
+    if itpc_method == "fold_global" and train_mask is None:
+        raise ValueError(
+            "ITPC(method='fold_global') requires precomputed.train_mask. "
+            "Without a fold-specific training mask this estimator is undefined."
+        )
+    if analysis_mode == "trial_ml_safe" and itpc_method == "condition" and train_mask is None:
         raise ValueError(
             f"ITPC(method='{itpc_method}') in analysis_mode='trial_ml_safe' requires precomputed.train_mask."
         )
@@ -1903,15 +1914,7 @@ def extract_itpc_from_precomputed(
                     n_jobs=n_jobs,
                 )
             else:
-                if itpc_method == "fold_global" and train_mask is None:
-                    if logger is not None:
-                        logger.info(
-                            "ITPC(method='fold_global') requested but precomputed.train_mask is None; computing baseline ITPC across all trials "
-                            "(equivalent to method='global'; not CV-safe)."
-                        )
-                    use_mask = None
-                else:
-                    use_mask = train_mask if itpc_method == "fold_global" else None
+                use_mask = train_mask if itpc_method == "fold_global" else None
                 base_map = _compute_itpc_map_precomputed(
                     baseline_complex, use_mask, n_jobs=n_jobs, logger=logger
                 )
@@ -1973,18 +1976,7 @@ def extract_itpc_from_precomputed(
                     n_jobs=n_jobs,
                 )
             else:
-                if itpc_method == "fold_global":
-                    if train_mask is None:
-                        if logger is not None:
-                            logger.info(
-                                "ITPC(method='fold_global') requested but precomputed.train_mask is None; computing ITPC across all trials "
-                                "(equivalent to method='global'; not CV-safe)."
-                            )
-                        use_mask = None
-                    else:
-                        use_mask = np.asarray(train_mask, dtype=bool)
-                else:
-                    use_mask = None
+                use_mask = np.asarray(train_mask, dtype=bool) if itpc_method == "fold_global" else None
                 itpc_map = _compute_itpc_map_precomputed(
                     segment_complex, use_mask, n_jobs=n_jobs, logger=logger
                 )
@@ -2197,7 +2189,7 @@ def extract_pac_from_precomputed(
                 denominator = np.nansum(amplitude_data, axis=-1) + eps_amp
                 numerator = np.nansum(amplitude_data * phase_unit_vectors, axis=-1)
             else:
-                denominator = float(n_times)
+                denominator = 1.0
                 numerator = np.nanmean(amplitude_data * phase_unit_vectors, axis=-1)
 
             pac_val = np.abs(numerator / denominator)

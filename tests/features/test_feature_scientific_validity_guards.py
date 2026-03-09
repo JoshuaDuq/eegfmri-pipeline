@@ -12,10 +12,12 @@ import pandas as pd
 
 from eeg_pipeline.analysis.features.preparation import _determine_frequency_bands
 from eeg_pipeline.analysis.features.phase import (
+    _compute_itpc_map_by_method,
     extract_itpc_from_precomputed,
     extract_pac_from_precomputed,
     extract_phase_features,
 )
+from eeg_pipeline.analysis.features.api import _get_family_spatial_transform
 from eeg_pipeline.analysis.features.source_localization import (
     FMRIVoxelSelection,
     _compute_eloreta_source_estimates,
@@ -29,6 +31,7 @@ from eeg_pipeline.analysis.features.source_localization import (
     extract_source_contrast_features,
     extract_source_localization_features,
 )
+from eeg_pipeline.analysis.features.bursts import extract_burst_features
 from eeg_pipeline.types import BandData, PrecomputedData, PrecomputedQC, TimeWindows
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_subject
 from tests.pipelines_test_utils import DotConfig
@@ -190,6 +193,115 @@ class TestScientificValidityGuards(unittest.TestCase):
                     method="lcmv",
                     connectivity_method="wpli",
                 )
+
+    def test_bursts_trial_ml_safe_subject_threshold_requires_train_mask(self):
+        times = np.linspace(-0.5, 0.5, 20)
+        mask = np.ones(times.size, dtype=bool)
+        windows = TimeWindows(
+            baseline_mask=mask,
+            masks={"baseline": mask, "active": mask},
+            ranges={"baseline": (-0.5, 0.5), "active": (-0.5, 0.5)},
+            times=times,
+        )
+        data = np.ones((4, 2, times.size), dtype=float)
+        band = BandData(
+            band="alpha",
+            fmin=8.0,
+            fmax=12.0,
+            filtered=data.copy(),
+            analytic=data.astype(np.complex128),
+            envelope=data.copy(),
+            phase=np.zeros_like(data),
+            power=data.copy(),
+        )
+        precomputed = PrecomputedData(
+            data=data,
+            times=times,
+            sfreq=100.0,
+            ch_names=["C3", "C4"],
+            picks=np.arange(2),
+            band_data={"alpha": band},
+            windows=windows,
+            logger=logging.getLogger("bursts-trial-safe"),
+            train_mask=None,
+        )
+        ctx = SimpleNamespace(
+            precomputed=precomputed,
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "bursts": {
+                            "bands": ["alpha"],
+                            "threshold_reference": "subject",
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("bursts-trial-safe"),
+            analysis_mode="trial_ml_safe",
+            train_mask=None,
+            spatial_modes=["global"],
+        )
+
+        with self.assertRaisesRegex(ValueError, "train_mask"):
+            extract_burst_features(ctx, ["alpha"])
+
+    def test_family_spatial_transform_resolution_surfaces_errors(self):
+        with patch(
+            "eeg_pipeline.analysis.features.preparation._get_spatial_transform_type",
+            side_effect=ValueError("bad transform config"),
+        ):
+            with self.assertRaisesRegex(ValueError, "bad transform config"):
+                _get_family_spatial_transform(DotConfig({}), "pac")
+
+    def test_itpc_fold_global_requires_train_mask_for_tfr_path(self):
+        data = np.ones((4, 2, 3, 10), dtype=np.complex128)
+        with self.assertRaisesRegex(ValueError, "train_mask"):
+            _compute_itpc_map_by_method(
+                data,
+                "fold_global",
+                train_mask=None,
+                analysis_mode="group_stats",
+                logger=logging.getLogger("itpc-fold-global"),
+            )
+
+    def test_itpc_fold_global_requires_train_mask_for_precomputed_path(self):
+        times = np.linspace(-0.2, 0.3, 20)
+        mask = np.ones(times.size, dtype=bool)
+        windows = TimeWindows(
+            baseline_mask=mask,
+            masks={"baseline": mask, "active": mask},
+            ranges={"baseline": (-0.2, 0.3), "active": (-0.2, 0.3)},
+            times=times,
+        )
+        phase = np.zeros((4, 2, times.size), dtype=float)
+        band = BandData(
+            band="alpha",
+            fmin=8.0,
+            fmax=12.0,
+            filtered=np.ones((4, 2, times.size), dtype=float),
+            analytic=np.ones((4, 2, times.size), dtype=np.complex128),
+            envelope=np.ones((4, 2, times.size), dtype=float),
+            phase=phase,
+            power=np.ones((4, 2, times.size), dtype=float),
+        )
+        precomputed = PrecomputedData(
+            data=np.ones((4, 2, times.size), dtype=float),
+            times=times,
+            sfreq=100.0,
+            ch_names=["C3", "C4"],
+            picks=np.arange(2),
+            band_data={"alpha": band},
+            windows=windows,
+            logger=logging.getLogger("itpc-precomputed-fold-global"),
+            config=DotConfig(
+                {"feature_engineering": {"itpc": {"method": "fold_global"}}}
+            ),
+            train_mask=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "train_mask"):
+            extract_itpc_from_precomputed(precomputed)
 
     def test_source_localization_preflights_missing_trans_without_auto_create(self):
         fs_root = Path(tempfile.mkdtemp())
@@ -1287,6 +1399,84 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertFalse(df.empty)
         self.assertTrue(cols)
         self.assertIn("pac_active_theta_gamma_global_val", df.columns)
+
+    def test_pac_precomputed_without_normalization_is_not_divided_by_segment_length(self):
+        n_epochs, n_ch, n_times = 2, 1, 100
+        sfreq = 100.0
+        times = np.arange(n_times, dtype=float) / sfreq
+        mask = np.ones((n_times,), dtype=bool)
+        windows = TimeWindows(
+            masks={"active": mask},
+            ranges={"active": (float(times[0]), float(times[-1]))},
+            times=times,
+            name="active",
+        )
+
+        phase = np.zeros((n_epochs, n_ch, n_times), dtype=float)
+        analytic = np.exp(1j * phase)
+        power = np.ones((n_epochs, n_ch, n_times), dtype=float)
+        filtered = np.ones((n_epochs, n_ch, n_times), dtype=float)
+
+        theta = BandData(
+            band="theta",
+            fmin=4.0,
+            fmax=8.0,
+            filtered=filtered.copy(),
+            analytic=analytic.copy(),
+            envelope=np.ones_like(power),
+            phase=phase.copy(),
+            power=power.copy(),
+        )
+        gamma = BandData(
+            band="gamma",
+            fmin=30.0,
+            fmax=80.0,
+            filtered=filtered.copy(),
+            analytic=analytic.copy(),
+            envelope=np.ones_like(power),
+            phase=phase.copy(),
+            power=power.copy(),
+        )
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "analysis_mode": "group_stats",
+                    "pac": {
+                        "method": "mvl",
+                        "pairs": [["theta", "gamma"]],
+                        "normalize": False,
+                        "n_surrogates": 0,
+                        "min_segment_sec": 0.0,
+                        "min_cycles_at_fmin": 0.0,
+                        "allow_harmonic_overlap": True,
+                    },
+                    "spatial_modes": ["global"],
+                }
+            }
+        )
+        precomputed = PrecomputedData(
+            data=np.zeros((n_epochs, n_ch, n_times), dtype=float),
+            times=times,
+            sfreq=sfreq,
+            ch_names=["C1"],
+            picks=np.arange(n_ch),
+            windows=windows,
+            band_data={"theta": theta, "gamma": gamma},
+            config=cfg,
+            logger=logging.getLogger("pac-precomputed-normalize-false"),
+            spatial_modes=["global"],
+            frequency_bands={"theta": [4.0, 8.0], "gamma": [30.0, 80.0]},
+        )
+
+        df, cols = extract_pac_from_precomputed(precomputed, cfg)
+
+        self.assertIn("pac_active_theta_gamma_global_val", cols)
+        np.testing.assert_allclose(
+            df["pac_active_theta_gamma_global_val"].to_numpy(dtype=float),
+            np.ones((n_epochs,), dtype=float),
+            atol=1e-12,
+        )
 
 
 if __name__ == "__main__":

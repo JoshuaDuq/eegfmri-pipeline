@@ -1250,6 +1250,16 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.sourceLocFmriLowPassHz = f
 			}
 		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.events_to_model", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.sourceLocFmriEventsToModel = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.contrast.events_to_model_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.sourceLocFmriEventsToModelColumn = s
+			}
+		}},
 		{key: "feature_engineering.sourcelocalization.fmri.contrast.condition_scope_column", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				m.sourceLocFmriConditionScopeColumn = s

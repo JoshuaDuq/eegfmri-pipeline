@@ -108,3 +108,9 @@ def test_resolve_single_path_uses_project_root_for_known_prefixes(tmp_path) -> N
 
     assert resolved_data == str((project_root / "data/derivatives").resolve())
     assert resolved_pkg == str((project_root / "eeg_pipeline/data").resolve())
+
+
+def test_get_condition_column_candidates_uses_config_only() -> None:
+    config = loader.ConfigDict({"event_columns": {"condition": []}})
+
+    assert loader.get_condition_column_candidates(config) == []

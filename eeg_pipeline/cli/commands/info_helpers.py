@@ -1109,20 +1109,16 @@ def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
             if selected_column:
                 break
 
-    if selected_column is None and not error_msg and columns:
-        for col in sorted(values.keys()):
-            if col.lower() in {"onset", "duration", "sample"}:
-                continue
-            selected_column = col
-            break
-
     if selected_column is None and not error_msg:
         if not subject:
             error_msg = "No subject specified and none found in fMRI directory"
         elif not columns:
             error_msg = "No fMRI events columns discovered for condition extraction"
         else:
-            error_msg = f"No usable condition column found. Available columns: {columns}"
+            error_msg = (
+                "Could not resolve an fMRI condition column from --condition-column "
+                f"or event_columns.condition. Available columns: {columns}"
+            )
 
     conditions = sorted(values.get(selected_column, [])) if selected_column else []
     task_out = str(task or discovered.get("task") or "")

@@ -2679,79 +2679,85 @@ def extract_source_localization_features(
                     records[epoch_idx][col_name] = mean_env[epoch_idx, roi_idx]
     
     if src_cfg.save_stc and hasattr(ctx, "aligned_events") and ctx.aligned_events is not None:
-        contrast_cfg = _load_source_contrast_config(getattr(ctx, "config", None))
-        cond_col = contrast_cfg.condition_column if contrast_cfg and getattr(contrast_cfg, "condition_column", None) else None
-        
-        if not cond_col:
-            from eeg_pipeline.utils.config.loader import get_config_value
-            from eeg_pipeline.utils.data.columns import find_column_in_events
-            cond_col_candidates = get_config_value(ctx.config, "event_columns.condition", ["condition"])
-            if isinstance(cond_col_candidates, str):
-                cond_col_candidates = [cond_col_candidates]
-            cond_col = find_column_in_events(ctx.aligned_events, cond_col_candidates)
-            
-        # fallback if not found
-        if not cond_col and "condition" in ctx.aligned_events.columns:
-            cond_col = "condition"
-            
-        if cond_col and cond_col in ctx.aligned_events.columns:
-            if logger:
-                logger.info(f"Computing and saving condition-averaged band power STCs based on column '{cond_col}'...")
-            
-            out_dir = source_localization_estimates_dir(
-                features_dir=deriv_features_path(Path(ctx.deriv_root), str(ctx.subject)),
-                method=str(src_cfg.method),
-                mode=str(src_cfg.mode),
-            )
-            out_dir.mkdir(parents=True, exist_ok=True)
+        from eeg_pipeline.utils.data.columns import get_condition_column_from_config
 
-            src_path = out_dir / f"sub-{ctx.subject}_task-{ctx.task}_{src_cfg.method}-src.fif"
-            mne.write_source_spaces(str(src_path), src, overwrite=True)
-            if logger:
-                logger.info("Saved source space for STC plotting: %s", str(src_path))
-            
-            conditions_list = ctx.aligned_events[cond_col].unique()
-            for cond in conditions_list:
-                if pd.isna(cond): continue
-                
-                cond_mask = (ctx.aligned_events[cond_col] == cond).values
-                cond_indices = np.where(cond_mask)[0]
-                if len(cond_indices) == 0: continue
-                
-                # shape (epochs, vertices, times)
-                cond_stc_data = np.stack([stcs[idx].data for idx in cond_indices], axis=0) 
-                
-                for band in bands:
-                    if band not in freq_bands:
-                        continue
-                    fmin_b, fmax_b = freq_bands[band]
-                    if not _validate_source_localization_duration(
-                        n_times=int(cond_stc_data.shape[-1]) if np.ndim(cond_stc_data) >= 3 else 0,
-                        sfreq=float(sfreq),
-                        fmin=float(fmin_b),
-                        min_cycles=min_cycles_per_band,
-                        band=str(band),
-                        logger=logger,
-                    ):
-                        continue
-                    
-                    # Compute power per epoch per vertex
-                    power_stc = _compute_roi_power(cond_stc_data, sfreq, fmin_b, fmax_b)
-                    mean_power = np.nanmean(power_stc, axis=0)
-                    
-                    out_stc = stcs[0].copy()
-                    out_stc.data = mean_power[:, np.newaxis]
-                    out_stc.tmin = 0.0
-                    out_stc.tstep = 1.0
-                    
-                    # MNE automatically appends appropriate extension like -vl.stc or -lh.stc
-                    safe_cond = str(cond).replace(" ", "_").replace("/", "_")
-                    safe_segment = _sanitize_feature_token(segment_label)
-                    stc_name = (
-                        out_dir
-                        / f"sub-{ctx.subject}_task-{ctx.task}_seg-{safe_segment}_cond-{safe_cond}_band-{band}_{src_cfg.method}"
-                    )
-                    out_stc.save(str(stc_name), overwrite=True)
+        contrast_cfg = _load_source_contrast_config(getattr(ctx, "config", None))
+        cond_col = (
+            contrast_cfg.condition_column
+            if contrast_cfg and getattr(contrast_cfg, "condition_column", None)
+            else None
+        )
+        if not cond_col:
+            cond_col = get_condition_column_from_config(ctx.config, ctx.aligned_events)
+        if not cond_col or cond_col not in ctx.aligned_events.columns:
+            raise ValueError(
+                "Source STC export requires an explicit condition column. "
+                "Set feature_engineering.sourcelocalization.contrast.condition_column "
+                "or configure event_columns.condition to match the aligned events table. "
+                f"Available columns: {list(ctx.aligned_events.columns)}"
+            )
+
+        if logger:
+            logger.info(
+                "Computing and saving condition-averaged band power STCs based on column '%s'...",
+                cond_col,
+            )
+
+        out_dir = source_localization_estimates_dir(
+            features_dir=deriv_features_path(Path(ctx.deriv_root), str(ctx.subject)),
+            method=str(src_cfg.method),
+            mode=str(src_cfg.mode),
+        )
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        src_path = out_dir / f"sub-{ctx.subject}_task-{ctx.task}_{src_cfg.method}-src.fif"
+        mne.write_source_spaces(str(src_path), src, overwrite=True)
+        if logger:
+            logger.info("Saved source space for STC plotting: %s", str(src_path))
+
+        conditions_list = ctx.aligned_events[cond_col].unique()
+        for cond in conditions_list:
+            if pd.isna(cond):
+                continue
+
+            cond_mask = (ctx.aligned_events[cond_col] == cond).values
+            cond_indices = np.where(cond_mask)[0]
+            if len(cond_indices) == 0:
+                continue
+
+            cond_stc_data = np.stack([stcs[idx].data for idx in cond_indices], axis=0)
+
+            for band in bands:
+                if band not in freq_bands:
+                    continue
+                fmin_b, fmax_b = freq_bands[band]
+                if not _validate_source_localization_duration(
+                    n_times=int(cond_stc_data.shape[-1]) if np.ndim(cond_stc_data) >= 3 else 0,
+                    sfreq=float(sfreq),
+                    fmin=float(fmin_b),
+                    min_cycles=min_cycles_per_band,
+                    band=str(band),
+                    logger=logger,
+                ):
+                    continue
+
+                # Compute power per epoch per vertex
+                power_stc = _compute_roi_power(cond_stc_data, sfreq, fmin_b, fmax_b)
+                mean_power = np.nanmean(power_stc, axis=0)
+
+                out_stc = stcs[0].copy()
+                out_stc.data = mean_power[:, np.newaxis]
+                out_stc.tmin = 0.0
+                out_stc.tstep = 1.0
+
+                # MNE automatically appends appropriate extension like -vl.stc or -lh.stc
+                safe_cond = str(cond).replace(" ", "_").replace("/", "_")
+                safe_segment = _sanitize_feature_token(segment_label)
+                stc_name = (
+                    out_dir
+                    / f"sub-{ctx.subject}_task-{ctx.task}_seg-{safe_segment}_cond-{safe_cond}_band-{band}_{src_cfg.method}"
+                )
+                out_stc.save(str(stc_name), overwrite=True)
 
                 if fmri_cfg.enabled and fmri_family_series and "fmri_cluster" in fmri_family_series:
                     cluster_roi_data, cluster_roi_names = fmri_family_series["fmri_cluster"]

@@ -1101,6 +1101,30 @@ func TestBuildFeaturesAdvancedArgs_EmitsSourceFmriPhaseScopeFlags(t *testing.T) 
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_EmitsSourceFmriEventsToModelFlags(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "sourcelocalization" {
+			m.selected[i] = true
+			break
+		}
+	}
+	m.sourceLocMode = 1
+	m.sourceLocFmriEnabled = true
+	m.sourceLocFmriContrastEnabled = true
+	m.sourceLocFmriEventsToModel = "stim rating"
+	m.sourceLocFmriEventsToModelColumn = "event_class"
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--source-fmri-events-to-model", "stim", "rating"}) {
+		t.Fatalf("expected --source-fmri-events-to-model stim rating in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--source-fmri-events-to-model-column", "event_class"}) {
+		t.Fatalf("expected --source-fmri-events-to-model-column event_class in args, got: %#v", args)
+	}
+}
+
 func TestBuildFeaturesAdvancedArgs_IncludesPACRandomSeedFlag(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, cat := range m.categories {
@@ -1125,6 +1149,53 @@ func TestBuildPreprocessingAdvancedArgs_EmitsEventColCondition(t *testing.T) {
 	args := m.buildPreprocessingAdvancedArgs()
 	if !containsSubsequence(args, []string{"--event-col-condition", "condition_label", "trial_kind"}) {
 		t.Fatalf("expected --event-col-condition condition_label trial_kind in args, got: %#v", args)
+	}
+}
+
+func TestBuildPreprocessingAdvancedArgs_DoesNotEmitDefaultEventColumnOverrides(t *testing.T) {
+	m := New(types.PipelinePreprocessing, ".")
+
+	args := m.buildPreprocessingAdvancedArgs()
+
+	for _, flag := range []string{
+		"--event-col-predictor",
+		"--event-col-outcome",
+		"--event-col-binary-outcome",
+		"--event-col-condition",
+		"--event-col-required",
+	} {
+		if containsString(args, flag) {
+			t.Fatalf("did not expect %s in args, got: %#v", flag, args)
+		}
+	}
+}
+
+func TestBuildFmriAnalysisAdvancedArgs_DoesNotInferArbitraryConditionColumn(t *testing.T) {
+	m := Model{
+		fmriDiscoveredColumns:  []string{"event_class", "phase_label"},
+		fmriAnalysisCondAValue: "stimulus",
+		fmriAnalysisCondBValue: "rest",
+	}
+
+	args := m.buildFmriAnalysisAdvancedArgs()
+
+	if containsString(args, "--cond-a-column") {
+		t.Fatalf("did not expect --cond-a-column in args, got: %#v", args)
+	}
+	if containsString(args, "--cond-b-column") {
+		t.Fatalf("did not expect --cond-b-column in args, got: %#v", args)
+	}
+}
+
+func TestBuildFmriAnalysisAdvancedArgs_EmitsEventsToModelColumn(t *testing.T) {
+	m := Model{}
+	m.fmriAnalysisEventsToModel = "stimulus,rating"
+	m.fmriAnalysisEventsToModelColumn = "event_class"
+
+	args := m.buildFmriAnalysisAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--events-to-model-column", "event_class"}) {
+		t.Fatalf("expected --events-to-model-column event_class in args, got: %#v", args)
 	}
 }
 

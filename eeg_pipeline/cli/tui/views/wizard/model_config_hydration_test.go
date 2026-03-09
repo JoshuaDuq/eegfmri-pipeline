@@ -15,6 +15,8 @@ func TestApplyConfigKeys_HydratesSourceLocFmriContrastConfig(t *testing.T) {
 		"feature_engineering.sourcelocalization.fmri.contrast.type":                   "custom",
 		"feature_engineering.sourcelocalization.fmri.contrast.condition_a.column":     "event_group",
 		"feature_engineering.sourcelocalization.fmri.contrast.condition_b.column":     "group_label",
+		"feature_engineering.sourcelocalization.fmri.contrast.events_to_model":        []interface{}{"stim", "rating"},
+		"feature_engineering.sourcelocalization.fmri.contrast.events_to_model_column": "event_class",
 		"feature_engineering.sourcelocalization.fmri.contrast.phase_scope_column":     "phase_scope_col",
 		"feature_engineering.sourcelocalization.fmri.contrast.condition_scope_column": "scope_col",
 		"feature_engineering.sourcelocalization.fmri.contrast.stim_phases_to_model":   []interface{}{"ramp", "plateau"},
@@ -46,6 +48,12 @@ func TestApplyConfigKeys_HydratesSourceLocFmriContrastConfig(t *testing.T) {
 	}
 	if m.sourceLocFmriConditionScopeColumn != "scope_col" {
 		t.Fatalf("expected condition scope column scope_col, got %q", m.sourceLocFmriConditionScopeColumn)
+	}
+	if m.sourceLocFmriEventsToModel != "stim rating" {
+		t.Fatalf("expected events_to_model 'stim rating', got %q", m.sourceLocFmriEventsToModel)
+	}
+	if m.sourceLocFmriEventsToModelColumn != "event_class" {
+		t.Fatalf("expected events_to_model_column event_class, got %q", m.sourceLocFmriEventsToModelColumn)
 	}
 	if m.sourceLocFmriStimPhasesToModel != "ramp plateau" {
 		t.Fatalf("expected stim phases 'ramp plateau', got %q", m.sourceLocFmriStimPhasesToModel)

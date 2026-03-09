@@ -77,9 +77,9 @@ class TrialSignatureExtractionConfig:
     include_other_events: bool = True
     lss_other_regressors: str = "per_condition"  # "per_condition" | "all"
     # Events column used for `condition_scope_trial_types`.
-    condition_scope_trial_type_column: str = "trial_type"
+    condition_scope_trial_type_column: str = ""
     # Events column used for `condition_scope_stim_phases`.
-    condition_scope_phase_column: str = "stim_phase"
+    condition_scope_phase_column: str = ""
     # Optional: scope which events.tsv rows are eligible for trial selection (prevents mixing phases).
     # Use ("all",) to disable scoping.
     condition_scope_trial_types: Optional[Tuple[str, ...]] = None
@@ -192,8 +192,16 @@ class TrialSignatureExtractionConfig:
                 f"got {self.signature_group_scope!r}."
             )
 
-        scope_trial_type_column = (self.condition_scope_trial_type_column or "").strip() or "trial_type"
-        scope_phase_column = (self.condition_scope_phase_column or "").strip() or "stim_phase"
+        scope_trial_type_column = (self.condition_scope_trial_type_column or "").strip()
+        scope_phase_column = (self.condition_scope_phase_column or "").strip()
+        if scope_trial_types and not scope_trial_type_column:
+            raise ValueError(
+                "condition_scope_trial_types requires condition_scope_trial_type_column."
+            )
+        if scope_stim_phases and not scope_phase_column:
+            raise ValueError(
+                "condition_scope_stim_phases requires condition_scope_phase_column."
+            )
 
         return TrialSignatureExtractionConfig(
             **{
@@ -451,11 +459,15 @@ def _extract_trials_for_run(
     sel_mask = None
 
     scope_mask = pd.Series([True] * int(len(events_df)), index=events_df.index)
-    scope_trial_type_column = str(cfg.condition_scope_trial_type_column or "").strip() or "trial_type"
-    scope_phase_column = str(cfg.condition_scope_phase_column or "").strip() or "stim_phase"
+    scope_trial_type_column = str(cfg.condition_scope_trial_type_column or "").strip()
+    scope_phase_column = str(cfg.condition_scope_phase_column or "").strip()
 
     scope_trial_types = tuple(cfg.condition_scope_trial_types or ())
     if scope_trial_types:
+        if not scope_trial_type_column:
+            raise ValueError(
+                "condition_scope_trial_types is set but no condition_scope_trial_type_column was configured."
+            )
         if scope_trial_type_column not in events_df.columns:
             raise ValueError(
                 "condition_scope_trial_types is set but events file has no "
@@ -466,6 +478,10 @@ def _extract_trials_for_run(
 
     scope_stim_phases = tuple(cfg.condition_scope_stim_phases or ())
     if scope_stim_phases:
+        if not scope_phase_column:
+            raise ValueError(
+                "condition_scope_stim_phases is set but no condition_scope_phase_column was configured."
+            )
         if scope_phase_column not in events_df.columns:
             raise ValueError(
                 "condition_scope_stim_phases is set but events file has no "
@@ -697,10 +713,9 @@ def _combine_effect_images(
         w[~np.isfinite(w)] = 0.0
         num = np.sum(w * eff, axis=0)
         den = np.sum(w, axis=0)
-        out = np.zeros_like(num, dtype=float)
+        out = np.full_like(num, np.nan, dtype=float)
         m = den > 0
         out[m] = num[m] / den[m]
-        out[~m] = 0.0
     return nib.Nifti1Image(out, ref_img.affine, ref_img.header)
 
 
@@ -784,7 +799,7 @@ def run_trial_signature_extraction_for_subject(
         "n_runs": len(runs),
         "condition_map_inference": condition_map_inference,
     }
-    phase_column_name = str(cfg.condition_scope_phase_column or "stim_phase").strip() or "stim_phase"
+    phase_column_name = str(cfg.condition_scope_phase_column or "").strip()
 
     trial_infos: List[TrialInfo] = []
     trial_rows_out: List[Dict[str, Any]] = []

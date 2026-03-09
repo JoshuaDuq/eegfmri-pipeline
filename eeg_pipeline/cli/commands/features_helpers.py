@@ -300,6 +300,10 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         contrast_cfg["high_pass_hz"] = args.source_fmri_high_pass
     if getattr(args, "source_fmri_low_pass", None) is not None:
         contrast_cfg["low_pass_hz"] = args.source_fmri_low_pass
+    if getattr(args, "source_fmri_events_to_model", None) is not None:
+        contrast_cfg["events_to_model"] = args.source_fmri_events_to_model
+    if getattr(args, "source_fmri_events_to_model_column", None) is not None:
+        contrast_cfg["events_to_model_column"] = args.source_fmri_events_to_model_column
     if getattr(args, "source_fmri_stim_phases_to_model", None) is not None:
         contrast_cfg["stim_phases_to_model"] = args.source_fmri_stim_phases_to_model
     if getattr(args, "source_fmri_phase_column", None) is not None:

@@ -92,6 +92,20 @@ def _build_run_block_covariates(
     return covariates
 
 
+def _require_regression_predictor_column(
+    trial_df: pd.DataFrame,
+    config: Any,
+    cfg: "TrialwiseRegressionConfig",
+) -> Optional[str]:
+    """Resolve the regression predictor column or fail when predictor terms are enabled."""
+    from eeg_pipeline.utils.data.columns import require_predictor_column, resolve_predictor_column
+
+    predictor_required = bool(cfg.include_predictor or cfg.include_interaction)
+    if not predictor_required:
+        return resolve_predictor_column(trial_df, config)
+    return require_predictor_column(trial_df, config)
+
+
 def _screen_feature_candidates(
     trial_df: pd.DataFrame,
     feature_cols: List[str],
@@ -666,9 +680,7 @@ def run_trialwise_feature_regressions(
     if y_all.notna().sum() < cfg.min_samples:
         return pd.DataFrame(), {"status": "insufficient_samples", "n_valid": int(y_all.notna().sum()), **meta}
 
-    predictor_col = resolve_predictor_column(trial_df, config)
-    if predictor_col is None and "predictor" in trial_df.columns:
-        predictor_col = "predictor"
+    predictor_col = _require_regression_predictor_column(trial_df, config, cfg)
     meta["predictor_column"] = predictor_col
     use_run_level = _is_run_level_primary_unit(config)
     if use_run_level and cfg.include_run_block:

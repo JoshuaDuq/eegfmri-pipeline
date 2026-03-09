@@ -419,9 +419,8 @@ def get_config_value(config: Any, key: str, default: Any) -> Any:
 def get_condition_column_candidates(config: Any) -> List[str]:
     """Return configured candidate event columns used for condition labels.
 
-    Resolution order:
+    Resolution source:
     1. `event_columns.condition` from config (list/tuple/string)
-    2. Legacy fallbacks: `condition`, `trial_type`
     """
     raw = get_config_value(config, "event_columns.condition", [])
     candidates: List[str] = []
@@ -435,8 +434,6 @@ def get_condition_column_candidates(config: Any) -> List[str]:
             text = raw.strip()
             if text:
                 candidates.append(text)
-
-    candidates.extend(["condition", "trial_type"])
 
     deduped: List[str] = []
     seen: set[str] = set()
