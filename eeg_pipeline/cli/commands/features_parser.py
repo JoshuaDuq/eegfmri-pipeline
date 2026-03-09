@@ -426,7 +426,12 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--erds-rebound-min-latency-ms", type=float, default=None, help="Minimum latency after ERD peak before searching alpha rebound")
     parser.add_argument("--erds-infer-contralateral", action="store_true", default=None, help="Infer contralateral hemisphere when trial laterality metadata is missing")
     parser.add_argument("--no-erds-infer-contralateral", action="store_false", dest="erds_infer_contralateral")
-    parser.add_argument("--erds-pain-marker-bands", nargs="+", default=None, help="Bands for ERDS pain-marker extraction")
+    parser.add_argument(
+        "--erds-condition-marker-bands",
+        nargs="+",
+        default=None,
+        help="Bands used for laterality-aware ERDS condition markers",
+    )
     parser.add_argument("--erds-laterality-columns", nargs="+", default=None, help="Candidate events.tsv columns for task laterality (e.g., stimulated side, response hand)")
     parser.add_argument("--erds-somatosensory-left-channels", nargs="+", default=None, help="Left-lateralized channels used by laterality-aware ERDS summaries")
     parser.add_argument("--erds-somatosensory-right-channels", nargs="+", default=None, help="Right-lateralized channels used by laterality-aware ERDS summaries")

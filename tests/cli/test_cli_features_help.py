@@ -125,6 +125,26 @@ class TestCliFeaturesHelp(unittest.TestCase):
         self.assertEqual(args.source_fmri_phase_scope_column, "event_group")
         self.assertEqual(args.source_fmri_phase_scope_value, "stimulation")
 
+    def test_features_accepts_erds_condition_marker_bands_flag(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_features(subparsers)
+
+        args = parser.parse_args(
+            [
+                "features",
+                "compute",
+                "--subject",
+                "0001",
+                "--categories",
+                "erds",
+                "--erds-condition-marker-bands",
+                "alpha",
+            ]
+        )
+
+        self.assertEqual(args.erds_condition_marker_bands, ["alpha"])
+
 
 if __name__ == "__main__":
     unittest.main()
