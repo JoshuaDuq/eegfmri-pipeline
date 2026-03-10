@@ -8,20 +8,23 @@ import (
 
 func (m Model) getFeaturesOptions() []optionType {
 	var options []optionType
+	restMode := m.featureRestModeEnabled()
 	options = append(options, optUseDefaults)
 	options = append(options, optConfigSetOverrides)
 
 	if m.isCategorySelected("connectivity") {
 		options = append(options, optFeatGroupConnectivity)
 		if m.featGroupConnectivityExpanded {
-			options = append(options, optConnectivity, optConnOutputLevel, optConnGranularity)
-			if m.connGranularity == 1 {
+			options = append(options, optConnectivity, optConnOutputLevel)
+			if !restMode {
+				options = append(options, optConnGranularity)
+			}
+			if !restMode && m.connGranularity == 1 {
 				options = append(options, optConnConditionColumn, optConnConditionValues)
 			}
 			options = append(
 				options,
 				optConnPhaseEstimator,
-				optConnMinEpochsPerGroup,
 				optConnMinCyclesPerBand,
 				optConnMinSegmentSec,
 				optConnMinSegmentSamples,
@@ -39,7 +42,6 @@ func (m Model) getFeaturesOptions() []optionType {
 				optConnNCycles,
 				optConnDecim,
 				optConnAECOutput,
-				optConnForceWithinEpochML,
 				optConnDynamicEnabled,
 				optConnDynamicMeasures,
 				optConnDynamicAutocorrLag,
@@ -50,6 +52,9 @@ func (m Model) getFeaturesOptions() []optionType {
 				optConnDynamicStateMinWindows,
 				optConnDynamicStateRandomSeed,
 			)
+			if !restMode {
+				options = append(options, optConnMinEpochsPerGroup, optConnForceWithinEpochML)
+			}
 		}
 	}
 
@@ -108,7 +113,7 @@ func (m Model) getFeaturesOptions() []optionType {
 			)
 		}
 	}
-	if m.isCategorySelected("erp") {
+	if m.isCategorySelected("erp") && !restMode {
 		options = append(options, optFeatGroupERP)
 		if m.featGroupERPExpanded {
 			options = append(options, optERPBaseline, optERPAllowNoBaseline, optERPComponents, optERPSmoothMs, optERPPeakProminenceUv, optERPLowpassHz)
@@ -122,25 +127,31 @@ func (m Model) getFeaturesOptions() []optionType {
 				optBurstThresholdMethod,
 				optBurstThresholdPercentile,
 				optBurstThreshold,
-				optBurstThresholdReference,
-				optBurstMinTrialsPerCondition,
 				optBurstMinSegmentSec,
 				optBurstSkipInvalidSegments,
 				optBurstMinDuration,
 				optBurstMinCycles,
 				optBurstBands,
 			)
+			if !restMode {
+				options = append(options, optBurstThresholdReference, optBurstMinTrialsPerCondition)
+			}
 		}
 	}
 	if m.isCategorySelected("power") {
 		options = append(options, optFeatGroupPower)
 		if m.featGroupPowerExpanded {
+			if !restMode {
+				options = append(
+					options,
+					optPowerRequireBaseline,
+					optPowerBaselineMode,
+					optPowerSubtractEvoked,
+					optPowerMinTrialsPerCondition,
+				)
+			}
 			options = append(
 				options,
-				optPowerRequireBaseline,
-				optPowerBaselineMode,
-				optPowerSubtractEvoked,
-				optPowerMinTrialsPerCondition,
 				optPowerExcludeLineNoise,
 				optPowerLineNoiseFreq,
 				optPowerLineNoiseWidthHz,
@@ -215,7 +226,7 @@ func (m Model) getFeaturesOptions() []optionType {
 			)
 		}
 	}
-	if m.isCategorySelected("erds") {
+	if m.isCategorySelected("erds") && !restMode {
 		options = append(options, optFeatGroupERDS)
 		if m.featGroupERDSExpanded {
 			options = append(
@@ -247,7 +258,7 @@ func (m Model) getFeaturesOptions() []optionType {
 			if m.isCategorySelected("connectivity") {
 				options = append(options, optSpatialTransformPerFamilyConnectivity)
 			}
-			if m.isCategorySelected("itpc") {
+			if m.isCategorySelected("itpc") && !restMode {
 				options = append(options, optSpatialTransformPerFamilyItpc)
 			}
 			if m.isCategorySelected("pac") {
@@ -262,7 +273,7 @@ func (m Model) getFeaturesOptions() []optionType {
 			if m.isCategorySelected("bursts") {
 				options = append(options, optSpatialTransformPerFamilyBursts)
 			}
-			if m.isCategorySelected("erds") {
+			if m.isCategorySelected("erds") && !restMode {
 				options = append(options, optSpatialTransformPerFamilyErds)
 			}
 			if m.isCategorySelected("complexity") {
@@ -277,7 +288,7 @@ func (m Model) getFeaturesOptions() []optionType {
 			if m.isCategorySelected("spectral") {
 				options = append(options, optSpatialTransformPerFamilySpectral)
 			}
-			if m.isCategorySelected("erp") {
+			if m.isCategorySelected("erp") && !restMode {
 				options = append(options, optSpatialTransformPerFamilyErp)
 			}
 			if m.isCategorySelected("quality") {
@@ -304,8 +315,10 @@ func (m Model) getFeaturesOptions() []optionType {
 			}
 			options = append(options, optSourceLocSaveStc)
 			options = append(options, optSourceLocConnMethod)
-			options = append(options, optSourceLocContrastEnabled)
-			if m.sourceLocContrastEnabled {
+			if !restMode {
+				options = append(options, optSourceLocContrastEnabled)
+			}
+			if !restMode && m.sourceLocContrastEnabled {
 				options = append(
 					options,
 					optSourceLocContrastConditionColumn,
@@ -386,7 +399,7 @@ func (m Model) getFeaturesOptions() []optionType {
 	}
 
 	// ITPC options (condition-based ITPC for avoiding pseudo-replication)
-	if m.isCategorySelected("itpc") {
+	if m.isCategorySelected("itpc") && !restMode {
 		options = append(options, optFeatGroupITPC)
 		if m.featGroupITPCExpanded {
 			options = append(options, optItpcMethod, optItpcAllowUnsafeLoo, optItpcBaselineCorrection)
@@ -450,13 +463,15 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(
 			options,
 			optMinEpochs,
-			optFeatAnalysisMode,
 			optAggregationMethod,
 			optFeatureTmin,
 			optFeatureTmax,
 			optFeatComputeChangeScores,
 			optFeatSaveTfrWithSidecar,
 		)
+		if !restMode {
+			options = append(options, optFeatAnalysisMode)
+		}
 		if m.hasBandFeatureSelection() {
 			options = append(options, optFeatNJobsBands)
 		}
@@ -469,7 +484,7 @@ func (m Model) getFeaturesOptions() []optionType {
 		if m.isCategorySelected("complexity") {
 			options = append(options, optFeatNJobsComplexity)
 		}
-		if m.isCategorySelected("itpc") {
+		if m.isCategorySelected("itpc") && !restMode {
 			options = append(options, optItpcNJobs)
 		}
 	}

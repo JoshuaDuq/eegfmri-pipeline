@@ -12,6 +12,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    select_single_rest_analysis_segment,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
@@ -136,6 +141,95 @@ def _parse_burst_config(
         "min_cycles": float(burst_config.get("min_cycles", 3.0)),
         "min_trials_per_condition": int(burst_config.get("min_trials_per_condition", 10)),
     }
+
+
+def _valid_analysis_segment_masks(
+    masks: Dict[str, Optional[np.ndarray]],
+) -> Dict[str, np.ndarray]:
+    return valid_rest_analysis_segment_masks(masks)
+
+
+def _resolve_burst_segment_masks(
+    times: np.ndarray,
+    windows: Any,
+    config: Any,
+    logger: Any,
+) -> Dict[str, np.ndarray]:
+    target_name = getattr(windows, "name", None) if windows else None
+    task_is_rest = is_resting_state_feature_mode(config)
+
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            return {target_name: np.asarray(mask, dtype=bool)}
+
+        if task_is_rest:
+            segment_name, segment_mask = select_single_rest_analysis_segment(
+                get_segment_masks(times, windows, config),
+                feature_name="Bursts",
+                target_name=str(target_name),
+            )
+            if logger is not None:
+                logger.info(
+                    "Bursts: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    target_name,
+                    segment_name,
+                )
+            return {segment_name: segment_mask}
+
+        if logger is not None:
+            logger.error(
+                "Bursts: targeted window '%s' has no valid mask; skipping.",
+                target_name,
+            )
+        return {}
+
+    masks = get_segment_masks(times, windows, config)
+    if task_is_rest:
+        return _valid_analysis_segment_masks(masks)
+    return {
+        name: np.asarray(mask, dtype=bool)
+        for name, mask in masks.items()
+        if mask is not None
+    }
+
+
+def _resolve_burst_reference_envelope(
+    envelope: np.ndarray,
+    windows: Any,
+    segment_masks: Dict[str, np.ndarray],
+    config: Any,
+    logger: Any,
+) -> Optional[np.ndarray]:
+    baseline_mask = windows.get_mask("baseline") if windows is not None else None
+    if baseline_mask is not None and np.any(baseline_mask):
+        return envelope[:, :, baseline_mask]
+
+    task_is_rest = is_resting_state_feature_mode(config)
+    if not task_is_rest:
+        if logger is not None:
+            logger.warning("Bursts: baseline window missing; skipping extraction.")
+        return None
+
+    reference_segments = [
+        envelope[:, :, mask]
+        for name, mask in segment_masks.items()
+        if str(name).strip().lower() != "baseline" and mask is not None and np.any(mask)
+    ]
+    if not reference_segments:
+        if logger is not None:
+            logger.warning(
+                "Bursts: resting-state mode found no valid analysis segments for threshold calibration; "
+                "skipping extraction."
+            )
+        return None
+
+    if logger is not None:
+        logger.info(
+            "Bursts: resting-state mode using available analysis segments for threshold calibration."
+        )
+    return np.concatenate(reference_segments, axis=2)
 
 
 def _compute_thresholds(
@@ -525,31 +619,13 @@ def extract_burst_features(
     burst_config = _parse_burst_config(config, bands)
 
     sampling_frequency = float(getattr(precomputed, "sfreq", np.nan))
-    baseline_mask = precomputed.windows.get_mask("baseline")
-    
-    if baseline_mask is None or not np.any(baseline_mask):
-        ctx.logger.warning("Bursts: baseline window missing; skipping extraction.")
-        return pd.DataFrame(), []
-
-    windows = precomputed.windows
-    target_name = getattr(windows, "name", None) if windows else None
-    
-    # Always derive mask from windows - never use np.ones() blindly
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            segment_masks = {target_name: mask}
-        else:
-            if ctx.logger:
-                ctx.logger.error(
-                    "Bursts: targeted window '%s' has no valid mask; skipping.",
-                    target_name,
-                )
-            return pd.DataFrame(), []
-    else:
-        segment_masks = get_segment_masks(precomputed.times, windows, precomputed.config)
+    segment_masks = _resolve_burst_segment_masks(
+        precomputed.times,
+        precomputed.windows,
+        precomputed.config,
+        ctx.logger,
+    )
     segment_names = [name for name in segment_masks.keys() if name != "baseline"]
-    
     if not segment_names:
         return pd.DataFrame(), []
 
@@ -578,7 +654,15 @@ def extract_burst_features(
             continue
 
         envelope = precomputed.band_data[band].envelope
-        baseline_envelope = envelope[:, :, baseline_mask]
+        baseline_envelope = _resolve_burst_reference_envelope(
+            envelope,
+            precomputed.windows,
+            segment_masks,
+            config,
+            ctx.logger,
+        )
+        if baseline_envelope is None or baseline_envelope.shape[-1] == 0:
+            continue
 
         if threshold_reference == "trial":
             thresholds = _compute_thresholds(

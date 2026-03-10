@@ -7,6 +7,8 @@ import unittest
 
 from eeg_pipeline.cli.commands.behavior_config import _configure_behavior_compute_mode
 from eeg_pipeline.cli.commands.behavior_parser import setup_behavior
+from eeg_pipeline.cli.commands.features_helpers import _apply_feature_config_overrides
+from eeg_pipeline.cli.commands.features_parser import setup_features
 from eeg_pipeline.cli.commands.features_helpers import (
     _apply_erds_overrides,
     _apply_itpc_overrides,
@@ -35,6 +37,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
             [
                 "preprocessing",
                 "full",
+                "--task-is-rest",
                 "--ecg-channels",
                 "ECG1,ECG2",
                 "--autoreject-n-interpolate",
@@ -71,6 +74,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         _update_alignment_event_config(args, config)
 
         self.assertEqual(config.get("eeg.ecg_channels"), ["ECG1", "ECG2"])
+        self.assertTrue(config.get("feature_engineering.task_is_rest"))
         self.assertEqual(config.get("epochs.autoreject_n_interpolate"), [4, 8, 16])
         self.assertTrue(config.get("alignment.allow_misaligned_trim", False))
         self.assertEqual(config.get("alignment.min_alignment_samples"), 7)
@@ -83,10 +87,89 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         self.assertEqual(config["pyprep"]["rename_anot_dict"]["BAD boundary"], "BAD_boundary")
         self.assertEqual(config["pyprep"]["custom_bad_dict"]["task"]["0001"], ["TP8"])
 
+    def test_preprocessing_rest_flag_can_be_explicitly_disabled(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_preprocessing(subparsers)
+        args = parser.parse_args(["preprocessing", "full", "--no-task-is-rest"])
+        config = ConfigDict({"feature_engineering": {"task_is_rest": True}})
+
+        _update_preprocessing_config(args, config)
+
+        self.assertFalse(config.get("feature_engineering.task_is_rest"))
+
 
 class TestFeaturesTUIWiring(unittest.TestCase):
+    def test_features_rest_flag_updates_rest_and_power_config(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_features(subparsers)
+        args = parser.parse_args(["features", "compute", "--task-is-rest"])
+        config = ConfigDict({})
+
+        _apply_feature_config_overrides(args, config)
+
+        self.assertTrue(config.get("feature_engineering.task_is_rest"))
+        self.assertFalse(config.get("feature_engineering.power.require_baseline"))
+        self.assertFalse(config.get("feature_engineering.power.subtract_evoked"))
+        self.assertEqual(config.get("feature_engineering.spectral.segments"), [])
+        self.assertTrue(config.get("feature_engineering.bands.allow_full_fallback"))
+        self.assertFalse(config.get("feature_engineering.aperiodic.subtract_evoked"))
+
+    def test_features_rest_flag_rejects_aperiodic_evoked_subtraction(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_features(subparsers)
+        args = parser.parse_args(
+            ["features", "compute", "--task-is-rest", "--aperiodic-subtract-evoked"]
+        )
+        config = ConfigDict({})
+
+        with self.assertRaisesRegex(
+            ValueError, "--aperiodic-subtract-evoked is incompatible with --task-is-rest"
+        ):
+            _apply_feature_config_overrides(args, config)
+
+    def test_features_rest_flag_can_be_explicitly_disabled(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_features(subparsers)
+        args = parser.parse_args(["features", "compute", "--no-task-is-rest"])
+        config = ConfigDict({"feature_engineering": {"task_is_rest": True}})
+
+        _apply_feature_config_overrides(args, config)
+
+        self.assertFalse(config.get("feature_engineering.task_is_rest"))
+
+    def test_features_rest_flag_rejects_trial_ml_safe_analysis_mode(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_features(subparsers)
+        args = parser.parse_args(
+            ["features", "compute", "--task-is-rest", "--analysis-mode", "trial_ml_safe"]
+        )
+        config = ConfigDict({})
+
+        with self.assertRaisesRegex(
+            ValueError, "--analysis-mode trial_ml_safe is incompatible with --task-is-rest"
+        ):
+            _apply_feature_config_overrides(args, config)
+
+    def test_features_rest_flag_rejects_source_contrast(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_features(subparsers)
+        args = parser.parse_args(["features", "compute", "--task-is-rest", "--source-contrast"])
+        config = ConfigDict({})
+
+        with self.assertRaisesRegex(
+            ValueError, "--source-contrast is incompatible with --task-is-rest"
+        ):
+            _apply_feature_config_overrides(args, config)
+
     def test_unwired_feature_overrides_are_applied(self):
         args = argparse.Namespace(
+            task_is_rest=None,
             pac_phase_range=None,
             pac_amp_range=None,
             pac_method=None,

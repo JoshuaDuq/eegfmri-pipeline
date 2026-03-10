@@ -100,3 +100,12 @@ func featureCategoryLabel(category string) string {
 		return strings.ToUpper(category[:1]) + category[1:]
 	}
 }
+
+func featureCategoryIsEventSpecific(category string) bool {
+	switch category {
+	case "erp", "erds", "itpc":
+		return true
+	default:
+		return false
+	}
+}

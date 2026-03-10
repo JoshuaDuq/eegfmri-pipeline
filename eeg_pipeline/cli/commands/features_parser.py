@@ -55,6 +55,20 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--time-range", nargs=3, action="append", metavar=("NAME", "TMIN", "TMAX"), help="Define a named time range (e.g. baseline 0 1). Can be specified multiple times.")
     parser.add_argument("--aggregation-method", choices=["mean", "median"], default="mean", help="Aggregation method for spatial modes (default: mean)")
     parser.add_argument("--analysis-mode", choices=["group_stats", "trial_ml_safe"], default=None, help="Feature analysis mode: group_stats (default) or trial_ml_safe (ML/CV leakage-safe)")
+    rest_group = parser.add_mutually_exclusive_group()
+    rest_group.add_argument(
+        "--task-is-rest",
+        dest="task_is_rest",
+        action="store_true",
+        default=None,
+        help="Treat the current task as resting-state for feature extraction",
+    )
+    rest_group.add_argument(
+        "--no-task-is-rest",
+        dest="task_is_rest",
+        action="store_false",
+        help="Treat the current task as event-related for feature extraction",
+    )
 
     # Connectivity
     parser.add_argument("--connectivity-measures", nargs="+", choices=["wpli", "imcoh", "aec", "plv", "pli"], default=None, help="Connectivity measures to compute")

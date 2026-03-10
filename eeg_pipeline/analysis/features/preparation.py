@@ -13,6 +13,7 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 import mne
 
+from eeg_pipeline.analysis.features.rest import is_resting_state_feature_mode
 from eeg_pipeline.types import PrecomputedData, PrecomputedQC, TimeWindows
 from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
 from eeg_pipeline.utils.analysis.spectral import compute_band_data, compute_psd
@@ -343,7 +344,8 @@ def _estimate_individual_alpha_frequency(
         if not allow_fallback:
             return None
     
-    allow_full_fallback = bool(iaf_config.get("allow_full_fallback", False))
+    task_is_rest = is_resting_state_feature_mode(config)
+    allow_full_fallback = bool(iaf_config.get("allow_full_fallback", False)) or task_is_rest
     baseline_data = _extract_baseline_data(
         data,
         baseline_mask,

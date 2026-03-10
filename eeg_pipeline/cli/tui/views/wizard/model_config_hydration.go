@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/eeg-pipeline/tui/types"
 )
 
 func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
@@ -167,6 +169,22 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "preprocessing.condition_preferred_prefixes", apply: func(v interface{}) {
 			if list, ok := asStringList(v); ok {
 				m.conditionPreferredPrefixes = strings.Join(list, ",")
+			}
+		}},
+		{key: "preprocessing.task_is_rest", apply: func(v interface{}) {
+			if m.Pipeline != types.PipelinePreprocessing {
+				return
+			}
+			if b, ok := asBool(v); ok {
+				m.prepTaskIsRest = b
+			}
+		}},
+		{key: "feature_engineering.task_is_rest", apply: func(v interface{}) {
+			if m.Pipeline != types.PipelineFeatures {
+				return
+			}
+			if b, ok := asBool(v); ok {
+				m.prepTaskIsRest = b
 			}
 		}},
 		// Behavior pipeline hydration (YAML -> TUI model)
@@ -2106,6 +2124,7 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 			b.apply(v)
 		}
 	}
+	m.applyFeatureRestConstraints()
 }
 
 func asString(v interface{}) (string, bool) {

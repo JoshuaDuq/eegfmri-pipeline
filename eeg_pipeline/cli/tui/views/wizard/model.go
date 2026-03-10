@@ -46,6 +46,47 @@ const (
 	singleCharLength = 1
 )
 
+func (m Model) timeRangeShowsRestToggle() bool {
+	return m.Pipeline == types.PipelineFeatures &&
+		m.modeIndex >= 0 &&
+		m.modeIndex < len(m.modeOptions) &&
+		m.modeOptions[m.modeIndex] == styles.ModeCompute
+}
+
+func (m Model) timeRangeSelectableCount() int {
+	count := len(m.TimeRanges)
+	if m.timeRangeShowsRestToggle() {
+		count++
+	}
+	return count
+}
+
+func (m Model) timeRangeCursorOnRestToggle() bool {
+	return m.timeRangeShowsRestToggle() && m.timeRangeCursor == 0
+}
+
+func (m Model) selectedTimeRangeIndex() int {
+	if !m.timeRangeShowsRestToggle() {
+		return m.timeRangeCursor
+	}
+	return m.timeRangeCursor - 1
+}
+
+func (m *Model) clampTimeRangeCursor() {
+	count := m.timeRangeSelectableCount()
+	if count <= 0 {
+		m.timeRangeCursor = 0
+		return
+	}
+	if m.timeRangeCursor < 0 {
+		m.timeRangeCursor = 0
+		return
+	}
+	if m.timeRangeCursor >= count {
+		m.timeRangeCursor = count - 1
+	}
+}
+
 ///////////////////////////////////////////////////////////////////
 // Data Definitions
 ///////////////////////////////////////////////////////////////////
@@ -3924,14 +3965,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			isNotEditing := m.editingRangeIdx == noRangeEditing
 			hasRanges := len(m.TimeRanges) > 0
 			if isTimeRangeStep && isNotEditing && hasRanges {
-				idx := m.timeRangeCursor
+				if m.timeRangeCursorOnRestToggle() {
+					return m, nil
+				}
+				idx := m.selectedTimeRangeIndex()
+				if idx < 0 || idx >= len(m.TimeRanges) {
+					return m, nil
+				}
 				m.TimeRanges = append(m.TimeRanges[:idx], m.TimeRanges[idx+1:]...)
-				if m.timeRangeCursor >= len(m.TimeRanges) {
-					m.timeRangeCursor = len(m.TimeRanges) - 1
-				}
-				if m.timeRangeCursor < 0 {
-					m.timeRangeCursor = 0
-				}
+				m.clampTimeRangeCursor()
 			} else {
 				switch m.CurrentStep {
 				case types.StepSelectBands:
@@ -3970,7 +4012,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				newName := fmt.Sprintf("range%d", len(m.TimeRanges)+1)
 				m.TimeRanges = append(m.TimeRanges, types.TimeRange{Name: newName, Tmin: "", Tmax: ""})
 				m.timeRangeCursor = len(m.TimeRanges) - 1
-				m.editingRangeIdx = m.timeRangeCursor
+				if m.timeRangeShowsRestToggle() {
+					m.timeRangeCursor++
+				}
+				m.editingRangeIdx = len(m.TimeRanges) - 1
 				m.editingField = fieldName
 			} else {
 				switch m.CurrentStep {

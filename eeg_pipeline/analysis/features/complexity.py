@@ -26,6 +26,11 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    select_single_rest_analysis_segment,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.types import PrecomputedData
@@ -123,6 +128,58 @@ def _mse_scales(params: ComplexityParams) -> List[int]:
 
 def _mse_stat_name(scale: int) -> str:
     return f"mse{int(scale):02d}"
+
+
+def _valid_analysis_segments(
+    segments: Dict[str, np.ndarray],
+) -> Dict[str, np.ndarray]:
+    return valid_rest_analysis_segment_masks(segments)
+
+
+def _resolve_complexity_segments(
+    precomputed: PrecomputedData,
+    cfg: Any,
+    logger: Any,
+) -> Dict[str, np.ndarray]:
+    windows = precomputed.windows
+    target_name = getattr(windows, "name", None) if windows else None
+    task_is_rest = is_resting_state_feature_mode(cfg)
+
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            return {target_name: np.asarray(mask, dtype=bool)}
+
+        if task_is_rest:
+            segment_name, segment_mask = select_single_rest_analysis_segment(
+                get_segment_masks(precomputed.times, windows, cfg),
+                feature_name="Complexity",
+                target_name=str(target_name),
+            )
+            if logger:
+                logger.info(
+                    "Complexity: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    target_name,
+                    segment_name,
+                )
+            return {segment_name: segment_mask}
+
+        if logger:
+            logger.warning(
+                "Complexity: targeted window '%s' has no valid mask; skipping.",
+                target_name,
+            )
+        return {}
+
+    segments = get_segment_masks(precomputed.times, windows, cfg)
+    if task_is_rest:
+        return _valid_analysis_segments(segments)
+    return {
+        name: np.asarray(mask, dtype=bool)
+        for name, mask in segments.items()
+        if mask is not None and np.any(mask)
+    }
 
 
 def _compute_epoch_complexity(
@@ -272,25 +329,7 @@ def extract_complexity_from_precomputed(
     cfg = getattr(precomputed, "config", None) or {}
     logger = getattr(precomputed, "logger", None)
     params = _extract_params(cfg)
-
-    windows = precomputed.windows
-    target_name = getattr(windows, "name", None) if windows else None
-
-    # Get segment masks with proper targeted window handling
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            segments = {target_name: mask}
-        else:
-            if logger:
-                logger.warning(
-                    "Complexity: targeted window '%s' has no valid mask; skipping.",
-                    target_name,
-                )
-            return pd.DataFrame(), []
-    else:
-        segments = get_segment_masks(precomputed.times, windows, cfg)
-        segments = {k: v for k, v in segments.items() if v is not None and np.any(v)}
+    segments = _resolve_complexity_segments(precomputed, cfg, logger)
 
     if not segments:
         return pd.DataFrame(), []

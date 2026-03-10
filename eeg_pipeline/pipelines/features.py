@@ -32,6 +32,10 @@ from eeg_pipeline.analysis.features.api import (
     extract_precomputed_features,
 )
 from eeg_pipeline.analysis.features.preparation import precompute_data
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    validate_rest_configuration,
+)
 from eeg_pipeline.analysis.features.results import (
     ExtractionResult,
     FeatureExtractionResult,
@@ -829,6 +833,7 @@ class FeaturePipeline(PipelineBase):
         if task is None:
             raise ValueError("Missing required config value: project.task")
 
+        validate_rest_configuration(self.config)
         feature_categories = resolve_feature_categories(
             self.config, kwargs.get("feature_categories")
         )
@@ -867,6 +872,7 @@ class FeaturePipeline(PipelineBase):
             deriv_root=self.deriv_root,
             logger=self.logger,
             config=self.config,
+            task_is_rest=is_resting_state_feature_mode(self.config),
             required_event_groups=required_event_groups,
         )
 

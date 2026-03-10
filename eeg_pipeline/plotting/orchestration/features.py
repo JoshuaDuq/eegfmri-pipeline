@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import pandas as pd
 import numpy as np
 
+from eeg_pipeline.analysis.features.rest import is_resting_state_feature_mode
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.infra.paths import (
@@ -631,6 +632,7 @@ def _visualize_single_subject(
         preload=False,
         deriv_root=effective_deriv_root,
         config=config,
+        task_is_rest=is_resting_state_feature_mode(config),
         logger=logger,
     )
     
@@ -788,6 +790,7 @@ def visualize_band_power_topomaps_for_group(
             preload=False,
             deriv_root=effective_deriv_root,
             config=config,
+            task_is_rest=is_resting_state_feature_mode(config),
             logger=logger,
         )
         if epochs is None:
@@ -1389,6 +1392,7 @@ def visualize_power_by_condition_for_group(
                 preload=False,
                 deriv_root=effective_deriv_root,
                 config=config,
+                task_is_rest=is_resting_state_feature_mode(config),
                 logger=logger,
             )
             if epochs is None or events_df is None or events_df.empty:
@@ -1698,6 +1702,7 @@ def visualize_power_spectral_density_for_group(
             preload=False,
             deriv_root=effective_deriv_root,
             config=config,
+            task_is_rest=is_resting_state_feature_mode(config),
             logger=logger,
         )
         if epochs is None:

@@ -18,6 +18,142 @@ _NoopProgress = NoopProgress
 
 
 class TestFeatureHelpers(unittest.TestCase):
+    def test_load_epochs_for_analysis_synthesizes_alignment_for_rest(self):
+        from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
+
+        class _EpochsStub:
+            def __init__(self, n_epochs: int):
+                self._n_epochs = int(n_epochs)
+
+            def __len__(self):
+                return self._n_epochs
+
+        tmp = Path(tempfile.mkdtemp())
+        epochs_path = tmp / "sub-0001_task-rest_proc-clean_epo.fif"
+        epochs_path.write_text("stub", encoding="utf-8")
+        config = DotConfig({"preprocessing": {"task_is_rest": True}})
+
+        with patch(
+            "eeg_pipeline.utils.data.epochs.find_clean_epochs_path",
+            return_value=epochs_path,
+        ), patch(
+            "eeg_pipeline.utils.data.epochs._find_clean_events_path",
+            return_value=None,
+        ), patch(
+            "eeg_pipeline.utils.data.epochs.mne.read_epochs",
+            return_value=_EpochsStub(3),
+        ):
+            epochs, aligned_events = load_epochs_for_analysis(
+                "0001",
+                "rest",
+                align="strict",
+                deriv_root=tmp,
+                config=config,
+            )
+
+        self.assertIsNotNone(epochs)
+        self.assertIsNotNone(aligned_events)
+        self.assertEqual(list(aligned_events.columns), ["trial_id"])
+        self.assertEqual(aligned_events["trial_id"].tolist(), [1, 2, 3])
+
+    def test_load_epochs_for_analysis_honors_explicit_rest_override(self):
+        from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
+
+        class _EpochsStub:
+            def __init__(self, n_epochs: int):
+                self._n_epochs = int(n_epochs)
+
+            def __len__(self):
+                return self._n_epochs
+
+        tmp = Path(tempfile.mkdtemp())
+        epochs_path = tmp / "sub-0001_task-rest_proc-clean_epo.fif"
+        epochs_path.write_text("stub", encoding="utf-8")
+        config = DotConfig({"preprocessing": {"task_is_rest": False}})
+
+        with patch(
+            "eeg_pipeline.utils.data.epochs.find_clean_epochs_path",
+            return_value=epochs_path,
+        ), patch(
+            "eeg_pipeline.utils.data.epochs._find_clean_events_path",
+            return_value=None,
+        ), patch(
+            "eeg_pipeline.utils.data.epochs.mne.read_epochs",
+            return_value=_EpochsStub(2),
+        ):
+            epochs, aligned_events = load_epochs_for_analysis(
+                "0001",
+                "rest",
+                align="strict",
+                deriv_root=tmp,
+                config=config,
+                task_is_rest=True,
+            )
+
+        self.assertIsNotNone(epochs)
+        self.assertIsNotNone(aligned_events)
+        self.assertEqual(aligned_events["trial_id"].tolist(), [1, 2])
+
+    def test_feature_pipeline_passes_feature_rest_flag_to_epoch_loading(self):
+        from eeg_pipeline.pipelines.features import FeaturePipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        pipeline = object.__new__(FeaturePipeline)
+        pipeline.config = DotConfig(
+            {
+                "project": {"task": "rest"},
+                "preprocessing": {"task_is_rest": True},
+                "feature_engineering": {"task_is_rest": True},
+            }
+        )
+        pipeline.logger = Mock()
+        pipeline.deriv_root = tmp / "deriv"
+        pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
+        progress = SimpleNamespace(
+            subject_start=lambda *a, **k: None,
+            step=lambda *a, **k: None,
+            subject_done=lambda *a, **k: None,
+            error=lambda *a, **k: None,
+        )
+
+        with patch(
+            "eeg_pipeline.pipelines.features.resolve_feature_categories",
+            return_value=["power"],
+        ), patch(
+            "eeg_pipeline.pipelines.features.deriv_features_path",
+            return_value=tmp / "features",
+        ), patch(
+            "eeg_pipeline.pipelines.features.ensure_dir"
+        ), patch(
+            "eeg_pipeline.pipelines.features.setup_matplotlib"
+        ), patch(
+            "eeg_pipeline.pipelines.features.load_epochs_for_analysis",
+            return_value=(None, None),
+        ) as mock_load:
+            pipeline.process_subject("0001", task="rest", progress=progress)
+
+        self.assertTrue(mock_load.called)
+        self.assertTrue(mock_load.call_args.kwargs["task_is_rest"])
+
+    def test_feature_pipeline_rejects_mismatched_rest_configuration(self):
+        from eeg_pipeline.pipelines.features import FeaturePipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        pipeline = object.__new__(FeaturePipeline)
+        pipeline.config = DotConfig(
+            {
+                "project": {"task": "rest"},
+                "preprocessing": {"task_is_rest": True},
+                "feature_engineering": {"task_is_rest": False},
+            }
+        )
+        pipeline.logger = Mock()
+        pipeline.deriv_root = tmp / "deriv"
+        pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
+
+        with self.assertRaisesRegex(ValueError, "task_is_rest.*must match"):
+            pipeline.process_subject("0001", task="rest", progress=SimpleNamespace())
+
     def test_unpack_feature_results_and_merge_single(self):
         from eeg_pipeline.pipelines.features import _unpack_feature_results, _merge_dataframes
 

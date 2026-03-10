@@ -20,19 +20,21 @@ from eeg_pipeline.analysis.features.source_localization import (
     _make_fmri_subsampling_rng,
     extract_source_connectivity_features,
 )
+from eeg_pipeline.types import TimeWindows
 from tests.pipelines_test_utils import DotConfig
 
 
 class _EpochStub:
-    def __init__(self, n_epochs: int, sfreq: float = 100.0):
+    def __init__(self, n_epochs: int, sfreq: float = 100.0, n_times: int = 80):
         self._n_epochs = int(n_epochs)
         self.info = {"sfreq": float(sfreq)}
+        self.times = np.arange(int(n_times), dtype=float) / float(sfreq)
 
     def __len__(self):
         return self._n_epochs
 
     def copy(self):
-        return _EpochStub(self._n_epochs, self.info["sfreq"])
+        return _EpochStub(self._n_epochs, self.info["sfreq"], len(self.times))
 
     def filter(self, *_args, **_kwargs):
         return self
@@ -44,8 +46,8 @@ class _EpochStub:
 
 
 class _TrackingEpochStub(_EpochStub):
-    def __init__(self, n_epochs: int, sfreq: float = 100.0):
-        super().__init__(n_epochs=n_epochs, sfreq=sfreq)
+    def __init__(self, n_epochs: int, sfreq: float = 100.0, n_times: int = 80):
+        super().__init__(n_epochs=n_epochs, sfreq=sfreq, n_times=n_times)
         self.filter_calls = 0
 
     def copy(self):
@@ -551,6 +553,95 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             )
 
         self.assertEqual(epochs.filter_calls, 0)
+
+    def test_source_connectivity_resting_state_uses_available_analysis_segment(self):
+        n_epochs = 4
+        n_times = 80
+        analysis_mask = np.zeros(n_times, dtype=bool)
+        analysis_mask[:40] = True
+        empty_mask = np.zeros(n_times, dtype=bool)
+        roi_data = np.random.default_rng(303).standard_normal((n_epochs, 2, n_times))
+        epochs = _EpochStub(n_epochs=n_epochs, sfreq=100.0, n_times=n_times)
+
+        captured = {"n_times": None}
+
+        def _fake_spectral_connectivity_epochs(data, **_kwargs):
+            captured["n_times"] = int(np.asarray(data).shape[-1])
+            return _FakeCon(np.array([[0.5]], dtype=float))
+
+        fake_conn_mod = types.ModuleType("mne_connectivity")
+        fake_conn_mod.spectral_connectivity_epochs = _fake_spectral_connectivity_epochs
+        fake_conn_mod.envelope_correlation = lambda *_args, **_kwargs: None
+
+        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        src_cfg = SimpleNamespace(
+            method="lcmv",
+            fmri_cfg=fmri_cfg,
+            subjects_dir=None,
+            trans_path=None,
+            bem_path=None,
+            parcellation="aparc",
+            spacing="oct6",
+            subject="fsaverage",
+            mindist_mm=5.0,
+            lcmv_reg=0.05,
+            eloreta_loose=0.2,
+            eloreta_depth=0.8,
+            eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=False,
+        )
+
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=TimeWindows(
+                masks={"analysis": analysis_mask, "active": empty_mask},
+                ranges={"analysis": (0.0, 0.4), "active": (0.0, 0.8)},
+                times=epochs.times,
+                name="active",
+            ),
+            config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
+            logger=logging.getLogger("source-connectivity-rest"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            name="active",
+            frequency_bands={"alpha": (8.0, 12.0)},
+        )
+
+        with (
+            patch.dict(sys.modules, {"mne_connectivity": fake_conn_mod}),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+                return_value=src_cfg,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+                return_value=("fwd", "src", None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+                return_value=(["stc"] * n_epochs, None),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+                return_value=roi_data,
+            ),
+            patch(
+                "mne.read_labels_from_annot",
+                return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+            ),
+        ):
+            df, cols = extract_source_connectivity_features(
+                ctx,
+                bands=["alpha"],
+                method="lcmv",
+                connectivity_method="wpli",
+            )
+
+        self.assertTrue(cols)
+        self.assertFalse(df.empty)
+        self.assertEqual(captured["n_times"], 40)
+        self.assertEqual(df.attrs.get("segment_label"), "analysis")
 
     def test_aec_prefilters_before_envelope_connectivity(self):
         n_epochs = 4

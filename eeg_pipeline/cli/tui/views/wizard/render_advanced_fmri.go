@@ -149,8 +149,8 @@ func (m Model) renderFmriAdvancedConfig() string {
 
 	// Scrolling support
 	totalLines := len(options)
-	startLine, endLine, showScrollIndicators := calculateScrollWindow(
-		totalLines, m.advancedOffset, m.availableAdvancedContentHeight())
+	startLine, endLine, showScrollIndicators := calculateExactScrollWindow(
+		totalLines, m.advancedOffset, scrollableVisibleLines(totalLines, m.availableAdvancedContentHeight()))
 
 	if showScrollIndicators && startLine > 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more above", startLine)) + "\n")

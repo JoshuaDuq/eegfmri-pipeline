@@ -159,6 +159,9 @@ func (m Model) renderCategorySelection() string {
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		}
 		line := cursor + checkbox + " " + nameStyle.Render(featureCategoryLabel(cat))
+		if m.Pipeline == types.PipelineFeatures && featureCategoryIsEventSpecific(cat) {
+			line += "  " + descStyle.Render("[event-specific]")
+		}
 
 		if i < len(m.categoryDescs) {
 			line += "  " + descStyle.Render(m.categoryDescs[i])

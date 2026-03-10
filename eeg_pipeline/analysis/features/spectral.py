@@ -55,6 +55,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.analysis.features.rest import is_resting_state_feature_mode
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import EPSILON_PSD, validate_precomputed
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
@@ -1100,6 +1101,28 @@ def remove_aperiodic_component(
     return 10 ** residual
 
 
+def _resolve_spectral_segments(
+    segment_masks: Dict[str, np.ndarray],
+    configured_segments: Any,
+    task_is_rest: bool,
+    logger: Any,
+) -> List[str]:
+    """Resolve spectral segments on the current window set."""
+    if configured_segments:
+        if isinstance(configured_segments, str):
+            configured_segments = [configured_segments]
+        segments = [str(name) for name in configured_segments if name in segment_masks]
+        if segments:
+            return segments
+        if task_is_rest:
+            configured = ", ".join(str(name) for name in configured_segments)
+            raise ValueError(
+                "Spectral: resting-state mode requires explicitly configured segments to match "
+                f"the available non-baseline analysis segments. Requested: {configured}."
+            )
+    return list(segment_masks.keys())
+
+
 def compute_peak_frequency(
     psd: np.ndarray,
     freqs: np.ndarray,
@@ -1470,6 +1493,7 @@ def extract_spectral_features(
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     configured_segments = spec_cfg.get("segments")
+    task_is_rest = is_resting_state_feature_mode(config)
     
     # Rebuild masks for the current (potentially cropped) time axis
     # This prevents shape mismatches when epochs have been cropped after windows were built
@@ -1509,12 +1533,12 @@ def extract_spectral_features(
                     if np.any(mask):
                         segment_masks[seg_name] = mask
         
-        if configured_segments:
-            if isinstance(configured_segments, str):
-                configured_segments = [configured_segments]
-            segments = [s for s in configured_segments if s in segment_masks]
-        else:
-            segments = list(segment_masks.keys())
+        segments = _resolve_spectral_segments(
+            segment_masks,
+            configured_segments,
+            task_is_rest,
+            logger,
+        )
     
     if not segments:
         logger.warning("Spectral: No valid segments found; returning empty DataFrame.")

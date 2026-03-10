@@ -9,6 +9,7 @@ import (
 
 func (m Model) buildFeaturesAdvancedArgs() []string {
 	var args []string
+	restMode := m.featureRestModeEnabled()
 
 	// Connectivity options
 	if m.isCategorySelected("connectivity") {
@@ -108,7 +109,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.aperiodicMinSegmentSec != 2.0 {
 			args = append(args, "--aperiodic-min-segment-sec", fmt.Sprintf("%.1f", m.aperiodicMinSegmentSec))
 		}
-		if m.aperiodicSubtractEvoked {
+		if m.aperiodicSubtractEvoked && !restMode {
 			args = append(args, "--aperiodic-subtract-evoked")
 		}
 		if m.aperiodicMaxFreqResolutionHz != 1.0 {
@@ -119,7 +120,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	if m.isCategorySelected("itpc") {
+	if m.isCategorySelected("itpc") && !restMode {
 		itpcMethods := []string{"global", "fold_global", "loo", "condition"}
 		if m.itpcMethod >= 0 && m.itpcMethod < len(itpcMethods) && m.itpcMethod != 0 {
 			args = append(args, "--itpc-method", itpcMethods[m.itpcMethod])
@@ -170,10 +171,12 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--aec-output", "r", "z")
 		}
 		// Force within_epoch for machine learning
-		if m.connForceWithinEpochML {
-			args = append(args, "--conn-force-within-epoch-for-ml")
-		} else {
-			args = append(args, "--no-conn-force-within-epoch-for-ml")
+		if !restMode {
+			if m.connForceWithinEpochML {
+				args = append(args, "--conn-force-within-epoch-for-ml")
+			} else {
+				args = append(args, "--no-conn-force-within-epoch-for-ml")
+			}
 		}
 	}
 
@@ -241,7 +244,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.sourceLocConnMethod != 0 {
 			args = append(args, "--source-connectivity-method", connMethods[m.sourceLocConnMethod])
 		}
-		if m.sourceLocContrastEnabled {
+		if !restMode && m.sourceLocContrastEnabled {
 			args = append(args, "--source-contrast")
 			if strings.TrimSpace(m.sourceLocContrastCondition) != "" {
 				args = append(
@@ -461,7 +464,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 
 	// ERP options
-	if m.isCategorySelected("erp") {
+	if m.isCategorySelected("erp") && !restMode {
 		if m.erpBaselineCorrection {
 			args = append(args, "--erp-baseline")
 		} else {
@@ -494,10 +497,12 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--burst-threshold-method", methods[m.burstThresholdMethod])
 		}
 		refs := []string{"trial", "subject", "condition"}
-		if m.burstThresholdReference >= 0 && m.burstThresholdReference < len(refs) {
+		if restMode {
+			args = append(args, "--burst-threshold-reference", "subject")
+		} else if m.burstThresholdReference >= 0 && m.burstThresholdReference < len(refs) {
 			args = append(args, "--burst-threshold-reference", refs[m.burstThresholdReference])
 		}
-		if m.burstMinTrialsPerCondition != 10 {
+		if !restMode && m.burstMinTrialsPerCondition != 10 {
 			args = append(args, "--burst-min-trials-per-condition", fmt.Sprintf("%d", m.burstMinTrialsPerCondition))
 		}
 		if m.burstMinSegmentSec != 2.0 {
@@ -526,17 +531,22 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 
 	// Power options
 	if m.isCategorySelected("power") {
-		if m.powerRequireBaseline {
-			args = append(args, "--power-require-baseline")
-		} else {
+		if restMode {
 			args = append(args, "--no-power-require-baseline")
-		}
-		if m.powerSubtractEvoked {
-			args = append(args, "--power-subtract-evoked")
-		} else {
 			args = append(args, "--no-power-subtract-evoked")
+		} else {
+			if m.powerRequireBaseline {
+				args = append(args, "--power-require-baseline")
+			} else {
+				args = append(args, "--no-power-require-baseline")
+			}
+			if m.powerSubtractEvoked {
+				args = append(args, "--power-subtract-evoked")
+			} else {
+				args = append(args, "--no-power-subtract-evoked")
+			}
 		}
-		if m.powerMinTrialsPerCondition != 2 {
+		if !restMode && m.powerMinTrialsPerCondition != 2 {
 			args = append(args, "--power-min-trials-per-condition", fmt.Sprintf("%d", m.powerMinTrialsPerCondition))
 		}
 		if m.powerExcludeLineNoise {
@@ -559,7 +569,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--no-power-emit-db")
 		}
 		modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
-		if m.powerBaselineMode < len(modes) {
+		if !restMode && m.powerBaselineMode < len(modes) {
 			args = append(args, "--power-baseline-mode", modes[m.powerBaselineMode])
 		}
 	}
@@ -618,7 +628,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 
 	// ITPC additional options
-	if m.isCategorySelected("itpc") {
+	if m.isCategorySelected("itpc") && !restMode {
 		if m.itpcAllowUnsafeLoo {
 			args = append(args, "--itpc-allow-unsafe-loo")
 		} else {
@@ -708,7 +718,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.iafMinBaselineSec != 0.0 {
 			args = append(args, "--iaf-min-baseline-sec", fmt.Sprintf("%.2f", m.iafMinBaselineSec))
 		}
-		if m.iafAllowFullFallback {
+		if restMode || m.iafAllowFullFallback {
 			args = append(args, "--iaf-allow-full-fallback")
 		} else {
 			args = append(args, "--no-iaf-allow-full-fallback")
@@ -753,11 +763,13 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 
 	// Connectivity advanced options
 	if m.isCategorySelected("connectivity") {
-		if m.connGranularity != 0 {
+		if restMode {
+			args = append(args, "--conn-granularity", "subject")
+		} else if m.connGranularity != 0 {
 			granularities := []string{"trial", "condition", "subject"}
 			args = append(args, "--conn-granularity", granularities[m.connGranularity])
 		}
-		if m.connGranularity == 1 && strings.TrimSpace(m.connConditionColumn) != "" {
+		if !restMode && m.connGranularity == 1 && strings.TrimSpace(m.connConditionColumn) != "" {
 			args = append(args, "--conn-condition-column", strings.TrimSpace(m.connConditionColumn))
 			if strings.TrimSpace(m.connConditionValues) != "" {
 				spec := strings.ReplaceAll(m.connConditionValues, ",", " ")
@@ -768,7 +780,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 				}
 			}
 		}
-		if m.connMinEpochsPerGroup != 5 {
+		if !restMode && m.connMinEpochsPerGroup != 5 {
 			args = append(args, "--conn-min-epochs-per-group", fmt.Sprintf("%d", m.connMinEpochsPerGroup))
 		}
 		if m.connMinCyclesPerBand != 3.0 {
@@ -985,7 +997,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 
 	// ERDS options
-	if m.isCategorySelected("erds") {
+	if m.isCategorySelected("erds") && !restMode {
 		if m.erdsUseLogRatio {
 			args = append(args, "--erds-use-log-ratio")
 		} else {
@@ -1043,7 +1055,11 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 
 	args = append(args, "--min-epochs", fmt.Sprintf("%d", m.minEpochsForFeatures))
 	analysisModes := []string{"group_stats", "trial_ml_safe"}
-	args = append(args, "--analysis-mode", analysisModes[m.featAnalysisMode])
+	if restMode {
+		args = append(args, "--analysis-mode", analysisModes[0])
+	} else {
+		args = append(args, "--analysis-mode", analysisModes[m.featAnalysisMode])
+	}
 	aggregationMethods := []string{"mean", "median"}
 	args = append(args, "--aggregation-method", aggregationMethods[m.aggregationMethod%len(aggregationMethods)])
 	args = append(args, "--tmin", fmt.Sprintf("%.3f", m.featureTmin))
@@ -1102,7 +1118,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	if m.isCategorySelected("connectivity") {
 		appendSTOverride(m.spatialTransformPerFamilyConnectivity, "--spatial-transform-connectivity")
 	}
-	if m.isCategorySelected("itpc") {
+	if m.isCategorySelected("itpc") && !restMode {
 		appendSTOverride(m.spatialTransformPerFamilyItpc, "--spatial-transform-itpc")
 	}
 	if m.isCategorySelected("pac") {
@@ -1117,7 +1133,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	if m.isCategorySelected("bursts") {
 		appendSTOverride(m.spatialTransformPerFamilyBursts, "--spatial-transform-bursts")
 	}
-	if m.isCategorySelected("erds") {
+	if m.isCategorySelected("erds") && !restMode {
 		appendSTOverride(m.spatialTransformPerFamilyErds, "--spatial-transform-erds")
 	}
 	if m.isCategorySelected("complexity") {
@@ -1132,7 +1148,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	if m.isCategorySelected("spectral") {
 		appendSTOverride(m.spatialTransformPerFamilySpectral, "--spatial-transform-spectral")
 	}
-	if m.isCategorySelected("erp") {
+	if m.isCategorySelected("erp") && !restMode {
 		appendSTOverride(m.spatialTransformPerFamilyErp, "--spatial-transform-erp")
 	}
 	if m.isCategorySelected("quality") {

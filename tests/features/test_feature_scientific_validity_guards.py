@@ -17,7 +17,25 @@ from eeg_pipeline.analysis.features.phase import (
     extract_pac_from_precomputed,
     extract_phase_features,
 )
-from eeg_pipeline.analysis.features.api import _get_family_spatial_transform
+from eeg_pipeline.analysis.features.precomputed.erds import extract_erds_from_precomputed
+from eeg_pipeline.analysis.features.spectral import (
+    extract_power_features,
+    extract_spectral_features,
+)
+from eeg_pipeline.analysis.features.erp import extract_erp_features
+from eeg_pipeline.analysis.features.quality import extract_quality_features
+from eeg_pipeline.analysis.features.precomputed.extras import (
+    extract_asymmetry_from_precomputed,
+    extract_band_ratios_from_precomputed,
+)
+from eeg_pipeline.analysis.features.api import (
+    _compute_tfr_for_features,
+    _get_family_spatial_transform,
+    _prepare_precomputed_data,
+    _resolve_pac_segment_window,
+    extract_precomputed_features,
+)
+from eeg_pipeline.analysis.features.selection import resolve_feature_categories
 from eeg_pipeline.analysis.features.source_localization import (
     FMRIVoxelSelection,
     _compute_eloreta_source_estimates,
@@ -38,22 +56,23 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class _EpochStub:
-    def __init__(self, n_epochs: int, sfreq: float = 100.0):
+    def __init__(self, n_epochs: int, sfreq: float = 100.0, n_times: int = 80):
         self._n_epochs = int(n_epochs)
         self.info = {"sfreq": float(sfreq)}
+        self.times = np.arange(int(n_times), dtype=float) / float(sfreq)
 
     def __len__(self):
         return self._n_epochs
 
     def copy(self):
-        return _EpochStub(self._n_epochs, self.info["sfreq"])
+        return _EpochStub(self._n_epochs, self.info["sfreq"], len(self.times))
 
     def filter(self, *_args, **_kwargs):
         return self
 
     def __getitem__(self, key):
         if isinstance(key, np.ndarray) and key.dtype == bool:
-            return _EpochStub(int(np.sum(key)), self.info["sfreq"])
+            return _EpochStub(int(np.sum(key)), self.info["sfreq"], len(self.times))
         return self
 
 
@@ -79,7 +98,477 @@ class _ComplexTFRStub:
         }
 
 
+class _StcStub:
+    def __init__(self, data: np.ndarray):
+        self.data = np.asarray(data, dtype=float)
+        self.tmin = 0.0
+        self.tstep = 1.0
+
+    def copy(self):
+        return _StcStub(self.data.copy())
+
+    def save(self, path: str, overwrite: bool = False):
+        self.saved_path = str(path)
+        self.overwrite = bool(overwrite)
+
+
 class TestScientificValidityGuards(unittest.TestCase):
+    def test_rest_mode_rejects_event_locked_feature_categories(self):
+        config = DotConfig({"feature_engineering": {"task_is_rest": True}})
+        with self.assertRaisesRegex(ValueError, "event-locked categories: erp, itpc"):
+            resolve_feature_categories(config, ["power", "erp", "itpc"])
+
+    def test_erp_extractor_rejects_rest_mode(self):
+        ctx = SimpleNamespace(
+            config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
+            logger=logging.getLogger("erp-rest"),
+        )
+        with self.assertRaisesRegex(ValueError, "ERP is not scientifically valid"):
+            extract_erp_features(ctx)
+
+    def test_itpc_extractors_reject_rest_mode(self):
+        ctx = SimpleNamespace(
+            config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
+            logger=logging.getLogger("itpc-rest"),
+        )
+        with self.assertRaisesRegex(ValueError, "ITPC is not scientifically valid"):
+            extract_phase_features(ctx, ["alpha"])
+        with self.assertRaisesRegex(ValueError, "ITPC is not scientifically valid"):
+            extract_itpc_from_precomputed(SimpleNamespace(config=ctx.config))
+
+    def test_erds_extractor_rejects_rest_mode(self):
+        precomputed = SimpleNamespace(config=DotConfig({"feature_engineering": {"task_is_rest": True}}))
+        with self.assertRaisesRegex(ValueError, "ERDS is not scientifically valid"):
+            extract_erds_from_precomputed(precomputed, ["alpha"])
+
+    def test_extract_precomputed_features_rejects_rest_incompatible_groups(self):
+        with self.assertRaisesRegex(ValueError, "event-locked categories: itpc"):
+            extract_precomputed_features(
+                epochs=SimpleNamespace(),
+                bands=["alpha"],
+                config=DotConfig(
+                    {
+                        "preprocessing": {"task_is_rest": True},
+                        "feature_engineering": {"task_is_rest": True},
+                    }
+                ),
+                logger=logging.getLogger("precomputed-rest-groups"),
+                feature_groups=["itpc"],
+            )
+
+    def test_extract_precomputed_features_rejects_trial_ml_safe_in_rest_mode(self):
+        with self.assertRaisesRegex(ValueError, "analysis_mode=group_stats"):
+            extract_precomputed_features(
+                epochs=SimpleNamespace(),
+                bands=["alpha"],
+                config=DotConfig(
+                    {
+                        "preprocessing": {"task_is_rest": True},
+                        "feature_engineering": {
+                            "task_is_rest": True,
+                            "analysis_mode": "trial_ml_safe",
+                        }
+                    }
+                ),
+                logger=logging.getLogger("precomputed-rest-analysis-mode"),
+                feature_groups=["spectral"],
+            )
+
+    def test_extract_precomputed_features_rejects_mismatched_rest_configuration(self):
+        with self.assertRaisesRegex(ValueError, "task_is_rest.*must match"):
+            extract_precomputed_features(
+                epochs=SimpleNamespace(),
+                bands=["alpha"],
+                config=DotConfig(
+                    {
+                        "preprocessing": {"task_is_rest": True},
+                        "feature_engineering": {"task_is_rest": False},
+                    }
+                ),
+                logger=logging.getLogger("precomputed-rest-mismatch"),
+                feature_groups=["spectral"],
+            )
+
+    def test_extract_precomputed_features_defaults_to_spectral_only(self):
+        precomputed = SimpleNamespace(
+            data=np.ones((2, 1, 4), dtype=float),
+            metadata=None,
+            condition_labels=None,
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.features.api.extract_power_from_precomputed",
+            return_value=(pd.DataFrame({"power": [1.0, 2.0]}), ["power"]),
+        ) as mock_spectral, patch(
+            "eeg_pipeline.analysis.features.api.extract_erds_from_precomputed",
+        ) as mock_erds:
+            result = extract_precomputed_features(
+                epochs=SimpleNamespace(),
+                bands=["alpha"],
+                config=DotConfig(
+                    {
+                        "preprocessing": {"task_is_rest": False},
+                        "feature_engineering": {"task_is_rest": False},
+                    }
+                ),
+                logger=logging.getLogger("precomputed-default-groups"),
+                precomputed=precomputed,
+            )
+
+        self.assertIn("spectral", result.features)
+        self.assertTrue(mock_spectral.called)
+        self.assertFalse(mock_erds.called)
+
+    def test_rest_mode_rejects_precomputed_subtract_evoked(self):
+        ctx = SimpleNamespace(
+            config=DotConfig(
+                {
+                    "preprocessing": {"task_is_rest": True},
+                    "feature_engineering": {
+                        "task_is_rest": True,
+                        "precomputed": {"subtract_evoked": True},
+                    },
+                }
+            ),
+            feature_categories=["spectral"],
+            logger=logging.getLogger("precomputed-subtract-evoked-rest"),
+            aligned_events=pd.DataFrame({"trial_id": [1, 2]}),
+            precomputed=None,
+            windows=None,
+            _original_epochs=None,
+            train_mask=None,
+            analysis_mode="group_stats",
+            get_precomputed_for_family=lambda _family: None,
+            set_precomputed=lambda _value: None,
+            set_precomputed_for_family=lambda _family, _value: None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "subtract_evoked is not scientifically valid"):
+            _prepare_precomputed_data(
+                ctx,
+                working_epochs=SimpleNamespace(),
+                power_bands=["alpha"],
+                tmin=None,
+                tmax=None,
+            )
+
+    def test_rest_mode_rejects_power_subtract_evoked(self):
+        ctx = SimpleNamespace(
+            config=DotConfig(
+                {
+                    "preprocessing": {"task_is_rest": True},
+                    "feature_engineering": {
+                        "task_is_rest": True,
+                        "power": {"subtract_evoked": True},
+                    },
+                }
+            ),
+            feature_categories=["power"],
+            logger=logging.getLogger("power-subtract-evoked-rest"),
+            epochs=SimpleNamespace(
+                info={"sfreq": 100.0},
+                times=np.array([0.0, 0.1], dtype=float),
+            ),
+            aligned_events=pd.DataFrame({"trial_id": [1, 2]}),
+            windows=None,
+            tfr=None,
+            analysis_mode="group_stats",
+            train_mask=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "subtract_evoked is not scientifically valid"):
+            _compute_tfr_for_features(ctx, tmin=None, tmax=None)
+
+    def test_quality_resting_state_uses_available_analysis_segment(self):
+        n_epochs = 2
+        n_channels = 2
+        n_times = 50
+        times = np.arange(n_times, dtype=float) / 100.0
+        analysis_mask = np.ones(n_times, dtype=bool)
+        empty_mask = np.zeros(n_times, dtype=bool)
+        epochs = SimpleNamespace(
+            info={"sfreq": 100.0, "ch_names": ["C3", "C4"]},
+            times=times,
+            get_data=lambda picks=None: np.ones((n_epochs, n_channels, n_times), dtype=float),
+        )
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=TimeWindows(
+                masks={"analysis": analysis_mask, "active": empty_mask},
+                ranges={"analysis": (0.0, 0.5), "active": (0.0, 0.5)},
+                times=times,
+                name="active",
+            ),
+            name="active",
+            config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
+            logger=logging.getLogger("quality-rest"),
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.features.quality.pick_eeg_channels",
+            return_value=(np.array([0, 1]), ["C3", "C4"]),
+        ), patch(
+            "eeg_pipeline.analysis.features.quality._compute_signal_metrics",
+            return_value={"variance": np.array([1.0, 2.0], dtype=float)},
+        ):
+            df, cols = extract_quality_features(ctx)
+
+        self.assertFalse(df.empty)
+        self.assertIn("quality_analysis_broadband_global_variance", cols)
+        self.assertNotIn("quality_active_broadband_global_variance", cols)
+
+    def test_quality_resting_state_rejects_ambiguous_fallback_segments(self):
+        n_times = 50
+        times = np.arange(n_times, dtype=float) / 100.0
+        epochs = SimpleNamespace(
+            info={"sfreq": 100.0, "ch_names": ["C3", "C4"]},
+            times=times,
+            get_data=lambda picks=None: np.ones((2, 2, n_times), dtype=float),
+        )
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=TimeWindows(
+                masks={
+                    "analysis_a": np.ones(n_times, dtype=bool),
+                    "analysis_b": np.ones(n_times, dtype=bool),
+                    "active": np.zeros(n_times, dtype=bool),
+                },
+                ranges={
+                    "analysis_a": (0.0, 0.5),
+                    "analysis_b": (0.0, 0.5),
+                    "active": (0.0, 0.5),
+                },
+                times=times,
+                name="active",
+            ),
+            name="active",
+            config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
+            logger=logging.getLogger("quality-rest-ambiguous"),
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.features.quality.pick_eeg_channels",
+            return_value=(np.array([0, 1]), ["C3", "C4"]),
+        ):
+            with self.assertRaisesRegex(ValueError, "requires exactly one valid non-baseline analysis segment"):
+                extract_quality_features(ctx)
+
+    def test_power_without_baseline_emits_log10raw_for_resting_state(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "power": {"require_baseline": False, "emit_db": True},
+                },
+            }
+        )
+        tfr = SimpleNamespace(
+            data=np.full((2, 1, 1, 2), 10.0, dtype=float),
+            freqs=np.array([10.0], dtype=float),
+            times=np.array([0.0, 0.5], dtype=float),
+            info={"ch_names": ["Cz"]},
+            comment=None,
+        )
+        ctx = SimpleNamespace(
+            results={"tfr": tfr},
+            config=config,
+            frequency_bands={"alpha": (8.0, 12.0)},
+            spatial_modes=["global"],
+            windows=SimpleNamespace(ranges={"active": (0.0, 1.0)}),
+            name="active",
+            logger=logging.getLogger("power-rest"),
+            baseline_df=None,
+        )
+
+        features_df, columns = extract_power_features(ctx, ["alpha"])
+
+        self.assertEqual(columns, ["power_active_alpha_global_log10raw_mean"])
+        self.assertTrue(np.allclose(features_df.iloc[:, 0].to_numpy(dtype=float), 1.0))
+
+    def test_spectral_resting_state_rejects_baseline_only_configured_segments(self):
+        class _EpochsStub:
+            def __init__(self):
+                self.info = {"sfreq": 100.0}
+                self.times = np.linspace(0.0, 3.98, 400)
+
+            def get_data(self, picks=None):
+                data = np.ones((2, 1, self.times.size), dtype=float)
+                return data if picks is None else data[:, picks, :]
+
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "spectral": {
+                        "segments": ["baseline"],
+                        "psd_method": "welch",
+                        "min_segment_sec": 1.0,
+                        "min_cycles_at_fmin": 0.0,
+                        "exclude_line_noise": False,
+                    }
+                },
+                "frequency_bands": {"alpha": [8.0, 12.0]},
+                "rois": {},
+            }
+        )
+        windows = SimpleNamespace(
+            ranges={"analysis": (0.0, 4.0)},
+            get_mask=lambda _name: np.zeros(400, dtype=bool),
+        )
+        ctx = SimpleNamespace(
+            epochs=_EpochsStub(),
+            config=config,
+            logger=logging.getLogger("spectral-rest"),
+            frequency_bands={"alpha": (8.0, 12.0)},
+            spatial_modes=["global"],
+            windows=windows,
+            name=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires explicitly configured segments"):
+            extract_spectral_features(ctx, ["alpha"])
+
+    def test_pac_api_path_resolves_single_rest_segment_window(self):
+        epochs = _EpochStub(n_epochs=2, sfreq=100.0, n_times=80)
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=TimeWindows(
+                masks={
+                    "analysis": np.concatenate([np.ones(40, dtype=bool), np.zeros(40, dtype=bool)]),
+                    "active": np.zeros(80, dtype=bool),
+                },
+                ranges={"analysis": (0.0, 0.4), "active": (0.0, 0.8)},
+                times=epochs.times,
+                name="active",
+            ),
+            name="active",
+            config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
+            logger=logging.getLogger("pac-api-rest"),
+        )
+
+        segment_name, segment_window = _resolve_pac_segment_window(ctx, epochs.times)
+
+        self.assertEqual(segment_name, "analysis")
+        self.assertEqual(segment_window, (0.0, 0.4))
+
+
+    def test_ratios_resting_state_uses_available_analysis_segments(self):
+        sfreq = 100.0
+        times = np.arange(200, dtype=float) / sfreq
+        analysis_mask = np.ones(times.shape, dtype=bool)
+        empty_mask = np.zeros(times.shape, dtype=bool)
+        windows = TimeWindows(
+            masks={"analysis": analysis_mask, "active": empty_mask},
+            ranges={"analysis": (0.0, 2.0), "active": (0.0, 2.0)},
+            times=times,
+            name="active",
+        )
+        precomputed = PrecomputedData(
+            data=np.ones((2, 1, times.size), dtype=float),
+            times=times,
+            sfreq=sfreq,
+            ch_names=["Cz"],
+            picks=np.array([0]),
+            windows=windows,
+            config=DotConfig(),
+            logger=logging.getLogger("ratios-rest"),
+            spatial_modes=["global"],
+        )
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "spectral": {
+                        "ratio_pairs": [["theta", "beta"]],
+                        "include_log_ratios": False,
+                        "psd_method": "welch",
+                        "exclude_line_noise": False,
+                    },
+                    "ratios": {
+                        "min_segment_sec": 0.0,
+                        "min_cycles_at_fmin": 0.0,
+                        "skip_invalid_segments": True,
+                    },
+                },
+                "frequency_bands": {
+                    "theta": [4.0, 8.0],
+                    "beta": [13.0, 30.0],
+                },
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.features.precomputed.extras._compute_psd_band_power_for_segment",
+            return_value={
+                "theta": np.full((2, 1), 4.0, dtype=float),
+                "beta": np.full((2, 1), 2.0, dtype=float),
+            },
+        ):
+            features_df, columns = extract_band_ratios_from_precomputed(precomputed, config)
+
+        self.assertFalse(features_df.empty)
+        self.assertEqual(columns, ["ratios_analysis_theta_beta_global_power_ratio"])
+        np.testing.assert_allclose(
+            features_df["ratios_analysis_theta_beta_global_power_ratio"].to_numpy(dtype=float),
+            np.full((2,), 2.0, dtype=float),
+        )
+
+    def test_asymmetry_resting_state_uses_available_analysis_segments(self):
+        sfreq = 100.0
+        times = np.arange(200, dtype=float) / sfreq
+        analysis_mask = np.ones(times.shape, dtype=bool)
+        empty_mask = np.zeros(times.shape, dtype=bool)
+        windows = TimeWindows(
+            masks={"analysis": analysis_mask, "active": empty_mask},
+            ranges={"analysis": (0.0, 2.0), "active": (0.0, 2.0)},
+            times=times,
+            name="active",
+        )
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "asymmetry": {
+                        "channel_pairs": [["F3", "F4"]],
+                        "min_segment_sec": 0.0,
+                        "min_cycles_at_fmin": 0.0,
+                        "skip_invalid_segments": True,
+                    }
+                },
+                "frequency_bands": {"alpha": [8.0, 12.0]},
+            }
+        )
+        precomputed = PrecomputedData(
+            data=np.ones((2, 2, times.size), dtype=float),
+            times=times,
+            sfreq=sfreq,
+            ch_names=["F3", "F4"],
+            picks=np.array([0, 1]),
+            windows=windows,
+            config=config,
+            logger=logging.getLogger("asymmetry-rest"),
+        )
+        expected_index = (4.0 - 2.0) / (4.0 + 2.0)
+        expected_logdiff = np.log(4.0) - np.log(2.0)
+
+        with patch(
+            "eeg_pipeline.analysis.features.precomputed.extras._compute_psd_band_power_for_segment",
+            return_value={"alpha": np.array([[2.0, 4.0], [2.0, 4.0]], dtype=float)},
+        ):
+            features_df, columns = extract_asymmetry_from_precomputed(precomputed)
+
+        self.assertFalse(features_df.empty)
+        self.assertIn("asymmetry_analysis_alpha_chpair_F3-F4_index", columns)
+        self.assertIn("asymmetry_analysis_alpha_chpair_F3-F4_logdiff", columns)
+        np.testing.assert_allclose(
+            features_df["asymmetry_analysis_alpha_chpair_F3-F4_index"].to_numpy(dtype=float),
+            np.full((2,), expected_index, dtype=float),
+        )
+        np.testing.assert_allclose(
+            features_df["asymmetry_analysis_alpha_chpair_F3-F4_logdiff"].to_numpy(dtype=float),
+            np.full((2,), expected_logdiff, dtype=float),
+        )
+
     def test_iaf_trial_ml_safe_requires_train_mask(self):
         data = np.random.default_rng(7).standard_normal((6, 2, 32))
         windows = TimeWindows(
@@ -246,6 +735,74 @@ class TestScientificValidityGuards(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "train_mask"):
             extract_burst_features(ctx, ["alpha"])
 
+    def test_bursts_resting_state_uses_analysis_segments_without_baseline(self):
+        times = np.arange(200, dtype=float) / 100.0
+        analysis_mask = np.ones(times.size, dtype=bool)
+        empty_mask = np.zeros(times.size, dtype=bool)
+        windows = TimeWindows(
+            masks={"analysis": analysis_mask, "active": empty_mask},
+            ranges={"analysis": (0.0, 2.0), "active": (0.0, 2.0)},
+            times=times,
+            name="active",
+        )
+        data = np.zeros((2, 2, times.size), dtype=float)
+        data[:, :, 50:80] = 5.0
+        band = BandData(
+            band="alpha",
+            fmin=8.0,
+            fmax=12.0,
+            filtered=data.copy(),
+            analytic=data.astype(np.complex128),
+            envelope=data.copy(),
+            phase=np.zeros_like(data),
+            power=data.copy(),
+        )
+        precomputed = PrecomputedData(
+            data=data,
+            times=times,
+            sfreq=100.0,
+            ch_names=["C3", "C4"],
+            picks=np.arange(2),
+            band_data={"alpha": band},
+            windows=windows,
+            logger=logging.getLogger("bursts-rest"),
+            train_mask=None,
+        )
+        ctx = SimpleNamespace(
+            precomputed=precomputed,
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "task_is_rest": True,
+                        "bursts": {
+                            "bands": ["alpha"],
+                            "threshold_reference": "trial",
+                            "threshold_method": "percentile",
+                            "threshold_percentile": 50.0,
+                            "min_duration_ms": 0.0,
+                            "min_cycles": 0.0,
+                        }
+                    },
+                }
+            ),
+            logger=logging.getLogger("bursts-rest"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            spatial_modes=["global"],
+        )
+
+        features_df, columns = extract_burst_features(ctx, ["alpha"])
+
+        self.assertFalse(features_df.empty)
+        self.assertIn("bursts_analysis_alpha_global_count", columns)
+        self.assertNotIn("bursts_active_alpha_global_count", columns)
+        self.assertTrue(
+            np.all(
+                features_df["bursts_analysis_alpha_global_count"].to_numpy(dtype=float)
+                >= 1.0
+            )
+        )
+
     def test_family_spatial_transform_resolution_surfaces_errors(self):
         with patch(
             "eeg_pipeline.analysis.features.preparation._get_spatial_transform_type",
@@ -410,6 +967,201 @@ class TestScientificValidityGuards(unittest.TestCase):
 
         self.assertEqual(cols, [])
         self.assertTrue(df.empty)
+
+    def test_source_localization_resting_state_uses_available_analysis_segment(self):
+        n_epochs = 4
+        n_times = 80
+        roi_data = np.random.default_rng(29).standard_normal((n_epochs, 2, n_times))
+        analysis_mask = np.zeros(n_times, dtype=bool)
+        analysis_mask[:40] = True
+        empty_mask = np.zeros(n_times, dtype=bool)
+
+        fmri_cfg = SimpleNamespace(
+            enabled=False,
+            provenance="independent",
+            require_provenance=False,
+        )
+        src_cfg = SimpleNamespace(
+            method="lcmv",
+            fmri_cfg=fmri_cfg,
+            subjects_dir=None,
+            trans_path=None,
+            bem_path=None,
+            parcellation="aparc",
+            spacing="oct6",
+            subject="fsaverage",
+            mindist_mm=5.0,
+            lcmv_reg=0.05,
+            eloreta_loose=0.2,
+            eloreta_depth=0.8,
+            eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=False,
+        )
+
+        ctx = SimpleNamespace(
+            epochs=_EpochStub(n_epochs, sfreq=100.0),
+            windows=TimeWindows(
+                masks={"analysis": analysis_mask, "active": empty_mask},
+                ranges={"analysis": (0.0, 0.4), "active": (0.0, 0.8)},
+                times=np.arange(n_times, dtype=float) / 100.0,
+                name="active",
+            ),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "task_is_rest": True,
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
+            logger=logging.getLogger("src-loc-rest"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            frequency_bands={"alpha": (8.0, 12.0)},
+            name="active",
+        )
+
+        captured = {"n_times_power": None, "n_times_env": None}
+
+        def _fake_compute_roi_power(data, *_args, **_kwargs):
+            captured["n_times_power"] = int(np.asarray(data).shape[-1])
+            return np.ones((n_epochs, 2), dtype=float)
+
+        def _fake_compute_roi_envelope(data, *_args, **_kwargs):
+            captured["n_times_env"] = int(np.asarray(data).shape[-1])
+            return np.ones((n_epochs, 2, int(np.asarray(data).shape[-1])), dtype=float)
+
+        with patch(
+            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+            return_value=src_cfg,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+            return_value=("fwd", "src", None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+            return_value=(["stc"] * n_epochs, None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+            return_value=roi_data,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+            side_effect=_fake_compute_roi_power,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+            side_effect=_fake_compute_roi_envelope,
+        ), patch(
+            "mne.read_labels_from_annot",
+            return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+        ):
+            df, cols = extract_source_localization_features(
+                ctx,
+                bands=["alpha"],
+                method="lcmv",
+            )
+
+        self.assertFalse(df.empty)
+        self.assertEqual(captured["n_times_power"], 40)
+        self.assertEqual(captured["n_times_env"], 40)
+
+    def test_source_localization_resting_state_save_stc_uses_segment_mask(self):
+        n_epochs = 3
+        n_times = 80
+        analysis_mask = np.zeros(n_times, dtype=bool)
+        analysis_mask[:40] = True
+        empty_mask = np.zeros(n_times, dtype=bool)
+        roi_data = np.random.default_rng(707).standard_normal((n_epochs, 2, n_times))
+        stcs = [_StcStub(np.ones((3, n_times), dtype=float)) for _ in range(n_epochs)]
+
+        fmri_cfg = SimpleNamespace(enabled=False, provenance="independent", require_provenance=False)
+        src_cfg = SimpleNamespace(
+            method="lcmv",
+            fmri_cfg=fmri_cfg,
+            subjects_dir=None,
+            trans_path=None,
+            bem_path=None,
+            parcellation="aparc",
+            spacing="oct6",
+            subject="fsaverage",
+            mindist_mm=5.0,
+            lcmv_reg=0.05,
+            eloreta_loose=0.2,
+            eloreta_depth=0.8,
+            eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=True,
+            mode="surface",
+        )
+        ctx = SimpleNamespace(
+            epochs=_EpochStub(n_epochs, sfreq=100.0, n_times=n_times),
+            windows=TimeWindows(
+                masks={"analysis": analysis_mask, "active": empty_mask},
+                ranges={"analysis": (0.0, 0.4), "active": (0.0, 0.8)},
+                times=np.arange(n_times, dtype=float) / 100.0,
+                name="active",
+            ),
+            aligned_events=pd.DataFrame({"condition": ["A", "A", "B"]}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "task_is_rest": True,
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
+            deriv_root=tempfile.mkdtemp(),
+            subject="01",
+            task="rest",
+            logger=logging.getLogger("src-loc-rest-stc"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            frequency_bands={"alpha": (8.0, 12.0)},
+            name="active",
+        )
+
+        captured_lengths: list[int] = []
+
+        def _fake_compute_roi_power(data, *_args, **_kwargs):
+            captured_lengths.append(int(np.asarray(data).shape[-1]))
+            if np.asarray(data).ndim == 3 and np.asarray(data).shape[1] == 3:
+                return np.ones((np.asarray(data).shape[0], 3), dtype=float)
+            return np.ones((n_epochs, 2), dtype=float)
+
+        with patch(
+            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+            return_value=src_cfg,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._load_source_contrast_config",
+            return_value=SimpleNamespace(condition_column="condition"),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+            return_value=("fwd", "src", None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+            return_value=(stcs, None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+            return_value=roi_data,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+            side_effect=_fake_compute_roi_power,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+            return_value=np.ones((n_epochs, 2, 40), dtype=float),
+        ), patch(
+            "mne.write_source_spaces",
+            return_value=None,
+        ), patch(
+            "mne.read_labels_from_annot",
+            return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+        ):
+            df, cols = extract_source_localization_features(ctx, bands=["alpha"], method="lcmv")
+
+        self.assertGreaterEqual(len(captured_lengths), 2)
+        self.assertEqual(captured_lengths[0], 40)
+        self.assertEqual(captured_lengths[1], 40)
+        self.assertIn("src_analysis_lcmv_alpha_roi1_power", cols)
+        self.assertNotIn("src_active_lcmv_alpha_roi1_power", cols)
 
     def test_fmri_output_space_controls_feature_families(self):
         n_epochs = 3
@@ -866,6 +1618,27 @@ class TestScientificValidityGuards(unittest.TestCase):
             }
         )
         with self.assertRaisesRegex(ValueError, "scientifically valid"):
+            _load_source_contrast_config(cfg)
+
+    def test_source_contrast_config_rejects_rest_mode(self):
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "sourcelocalization": {
+                        "contrast": {
+                            "enabled": True,
+                            "condition_column": "trial_type",
+                            "condition_a": "A",
+                            "condition_b": "B",
+                            "min_trials_per_condition": 2,
+                            "emit_welch_stats": False,
+                        }
+                    },
+                }
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "not scientifically valid when feature_engineering.task_is_rest=true"):
             _load_source_contrast_config(cfg)
 
     def test_source_contrast_extracts_subject_level_row_without_welch(self):
@@ -1399,6 +2172,83 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertFalse(df.empty)
         self.assertTrue(cols)
         self.assertIn("pac_active_theta_gamma_global_val", df.columns)
+
+    def test_pac_resting_state_uses_available_analysis_segment(self):
+        n_epochs, n_ch, n_times = 4, 2, 300
+        sfreq = 100.0
+        times = np.arange(n_times, dtype=float) / sfreq
+        analysis_mask = np.ones((n_times,), dtype=bool)
+        empty_mask = np.zeros((n_times,), dtype=bool)
+        windows = TimeWindows(
+            masks={"analysis": analysis_mask, "active": empty_mask},
+            ranges={"analysis": (float(times[0]), float(times[-1])), "active": (float(times[0]), float(times[-1]))},
+            times=times,
+            name="active",
+        )
+
+        rng = np.random.default_rng(23)
+        phase = rng.uniform(-np.pi, np.pi, size=(n_epochs, n_ch, n_times))
+        analytic = np.exp(1j * phase)
+        power = 1.0 + rng.random((n_epochs, n_ch, n_times))
+        filtered = np.real(analytic)
+
+        theta = BandData(
+            band="theta",
+            fmin=4.0,
+            fmax=8.0,
+            filtered=filtered.copy(),
+            analytic=analytic.copy(),
+            envelope=np.sqrt(power),
+            phase=phase.copy(),
+            power=power.copy(),
+        )
+        gamma = BandData(
+            band="gamma",
+            fmin=30.0,
+            fmax=80.0,
+            filtered=filtered.copy(),
+            analytic=analytic.copy(),
+            envelope=np.sqrt(power),
+            phase=phase.copy(),
+            power=power.copy(),
+        )
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "analysis_mode": "group_stats",
+                    "pac": {
+                        "method": "mvl",
+                        "pairs": [["theta", "gamma"]],
+                        "n_surrogates": 0,
+                        "min_segment_sec": 1.0,
+                        "min_cycles_at_fmin": 3.0,
+                        "allow_harmonic_overlap": True,
+                    },
+                    "spatial_modes": ["global"],
+                }
+            }
+        )
+        precomputed = PrecomputedData(
+            data=np.zeros((n_epochs, n_ch, n_times), dtype=float),
+            times=times,
+            sfreq=sfreq,
+            ch_names=["C1", "C2"],
+            picks=np.arange(n_ch),
+            windows=windows,
+            band_data={"theta": theta, "gamma": gamma},
+            config=cfg,
+            logger=logging.getLogger("pac-precomputed-rest"),
+            spatial_modes=["global"],
+            frequency_bands={"theta": [4.0, 8.0], "gamma": [30.0, 80.0]},
+        )
+
+        df, cols = extract_pac_from_precomputed(precomputed, cfg)
+
+        self.assertFalse(df.empty)
+        self.assertIn("pac_analysis_theta_gamma_global_val", cols)
+        self.assertNotIn("pac_active_theta_gamma_global_val", cols)
 
     def test_pac_precomputed_without_normalization_is_not_divided_by_segment_length(self):
         n_epochs, n_ch, n_times = 2, 1, 100

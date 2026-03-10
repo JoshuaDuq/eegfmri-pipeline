@@ -16,7 +16,7 @@ from eeg_pipeline.analysis.features.connectivity import (
     extract_directed_connectivity_features,
 )
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.types import BandData, PrecomputedData
+from eeg_pipeline.types import BandData, PrecomputedData, TimeWindows
 from tests.pipelines_test_utils import DotConfig
 
 
@@ -169,6 +169,59 @@ class TestConnectivityValidityGuards(unittest.TestCase):
         self.assertTrue(all(method == "imcoh" for method in called_methods))
         self.assertFalse(df.empty)
         self.assertTrue(any("global_imcoh_mean" in col for col in cols))
+
+    def test_connectivity_resting_state_uses_available_analysis_segment(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "connectivity": {
+                        "measures": ["imcoh"],
+                        "granularity": "trial",
+                        "phase_estimator": "within_epoch",
+                        "output_level": "global_only",
+                        "enable_graph_metrics": False,
+                        "min_segment_sec": 0.0,
+                    }
+                }
+            }
+        )
+        precomputed = _make_precomputed(transform="csd", family="connectivity")
+        analysis_mask = np.ones(precomputed.times.shape, dtype=bool)
+        empty_mask = np.zeros(precomputed.times.shape, dtype=bool)
+        precomputed.windows = TimeWindows(
+            masks={"analysis": analysis_mask, "active": empty_mask},
+            ranges={"analysis": (0.0, 0.59), "active": (0.0, 0.59)},
+            times=precomputed.times,
+            name="active",
+        )
+
+        class _ConnObj:
+            def __init__(self, data):
+                self._data = data
+
+            def get_data(self):
+                return self._data
+
+        def _fake_spectral_connectivity_epochs(_seg_data, **kwargs):
+            indices = kwargs.get("indices")
+            n_pairs = int(len(indices[0]))
+            return _ConnObj(np.ones((n_pairs, 1, 2), dtype=float))
+
+        with patch(
+            "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_epochs",
+            side_effect=_fake_spectral_connectivity_epochs,
+        ):
+            df, cols = extract_connectivity_from_precomputed(
+                precomputed,
+                bands=["alpha"],
+                config=config,
+                logger=logging.getLogger("test-connectivity-rest"),
+            )
+
+        self.assertFalse(df.empty)
+        self.assertTrue(any(col.startswith("conn_analysis_alpha_") for col in cols))
+        self.assertFalse(any(col.startswith("conn_active_alpha_") for col in cols))
 
     def test_psi_is_zero_for_constant_phase_lag(self):
         """PSI should be ~0 when coherency phase is constant across frequency."""
@@ -445,6 +498,66 @@ class TestConnectivityValidityGuards(unittest.TestCase):
         self.assertAlmostEqual(float(df[col_fwd_mean].iloc[0]), expected_fwd, places=8)
         self.assertAlmostEqual(float(df[col_bwd_mean].iloc[0]), expected_bwd, places=8)
         self.assertAlmostEqual(float(df[col_asym].iloc[0]), expected_asym, places=8)
+
+    def test_directed_connectivity_resting_state_uses_available_analysis_segment(self):
+        precomputed = _make_precomputed(transform="none", family="directedconnectivity")
+        precomputed.ch_names = ["A", "B", "C"]
+        precomputed.data = np.zeros((1, 3, 60), dtype=float)
+        precomputed.frequency_bands = {"alpha": [8.0, 12.0]}
+        precomputed.band_data = {"alpha": precomputed.band_data["alpha"]}
+        analysis_mask = np.ones(precomputed.times.shape, dtype=bool)
+        empty_mask = np.zeros(precomputed.times.shape, dtype=bool)
+        precomputed.windows = TimeWindows(
+            masks={"analysis": analysis_mask, "active": empty_mask},
+            ranges={"analysis": (0.0, 0.59), "active": (0.0, 0.59)},
+            times=precomputed.times,
+            name="active",
+        )
+
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "directedconnectivity": {
+                        "enable_psi": False,
+                        "enable_dtf": True,
+                        "enable_pdc": False,
+                        "output_level": "full",
+                        "min_segment_samples": 10,
+                        "mvar_order": 2,
+                        "n_freqs": 8,
+                    }
+                }
+            }
+        )
+
+        dtf_matrix = np.array(
+            [
+                [0.0, 0.2, 0.8],
+                [0.9, 0.0, 0.1],
+                [0.3, 0.7, 0.0],
+            ],
+            dtype=float,
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.features.connectivity._compute_directed_connectivity_epoch",
+            return_value={"dtf": dtf_matrix},
+        ):
+            df, cols = extract_directed_connectivity_from_precomputed(
+                precomputed,
+                bands=["alpha"],
+                config=config,
+                logger=logging.getLogger("test-directed-connectivity-rest"),
+            )
+
+        col_ab_fwd = NamingSchema.build("dconn", "analysis", "alpha", "chpair", "dtf_fwd", channel_pair="A-B")
+        self.assertIn(col_ab_fwd, cols)
+        self.assertIn(col_ab_fwd, df.columns)
+        self.assertNotIn(
+            NamingSchema.build("dconn", "active", "alpha", "chpair", "dtf_fwd", channel_pair="A-B"),
+            cols,
+        )
 
 
 if __name__ == "__main__":

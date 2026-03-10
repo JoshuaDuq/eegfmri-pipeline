@@ -17,6 +17,7 @@ from scipy.signal import savgol_filter, find_peaks
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import MIN_SAMPLES_DEFAULT, validate_extractor_inputs
+from eeg_pipeline.analysis.features.rest import raise_if_rest_incompatible
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels, build_roi_map
 from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
@@ -599,6 +600,7 @@ def _find_matching_peak_pairs(
 def extract_erp_features(
     ctx: Any,  # FeatureContext
 ) -> Tuple[pd.DataFrame, List[str]]:
+    raise_if_rest_incompatible(ctx.config, feature_name="ERP")
     valid, err = validate_extractor_inputs(ctx, "ERP", min_epochs=_MIN_EPOCHS_FOR_ERP)
     if not valid:
         ctx.logger.warning(err)

@@ -106,6 +106,49 @@ class TestComplexityEntropyFeatures(unittest.TestCase):
             self.assertIn(col, df.columns)
             self.assertTrue(np.isfinite(np.asarray(df[col], dtype=float)).any(), msg=col)
 
+    def test_resting_state_uses_available_analysis_segment_when_target_window_empty(self):
+        precomputed = self._build_precomputed()
+        times = precomputed.times
+        analysis_mask = (times >= 0.0) & (times <= 1.0)
+        empty_mask = np.zeros(times.shape, dtype=bool)
+        precomputed.windows = TimeWindows(
+            masks={"analysis": analysis_mask, "active": empty_mask},
+            ranges={"analysis": (0.0, 1.0), "active": (0.0, 1.0)},
+            times=times,
+            name="active",
+        )
+        precomputed.config = DotConfig(
+            {
+                "feature_engineering": {
+                    "task_is_rest": True,
+                    "complexity": {
+                        "signal_basis": "filtered",
+                        "pe_order": 3,
+                        "pe_delay": 1,
+                        "sampen_order": 2,
+                        "sampen_r": 0.2,
+                        "mse_scale_min": 1,
+                        "mse_scale_max": 4,
+                        "zscore": True,
+                        "min_segment_sec": 0.5,
+                        "min_samples": 80,
+                    },
+                    "parallel": {"n_jobs_complexity": 1},
+                },
+            }
+        )
+
+        df, cols = extract_complexity_from_precomputed(precomputed, n_jobs=1)
+
+        expected_col = NamingSchema.build("comp", "analysis", "alpha", "global", "sampen")
+        self.assertIn(expected_col, cols)
+        self.assertIn(expected_col, df.columns)
+        self.assertNotIn(
+            NamingSchema.build("comp", "active", "alpha", "global", "sampen"),
+            cols,
+        )
+        self.assertTrue(np.isfinite(np.asarray(df[expected_col], dtype=float)).any())
+
 
 if __name__ == "__main__":
     unittest.main()

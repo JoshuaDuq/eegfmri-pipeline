@@ -59,8 +59,6 @@ func (m *Model) UpdateComputationOffset() {
 
 // UpdateAdvancedOffset calculates and updates the scrolling offset for advanced config lists.
 func (m *Model) UpdateAdvancedOffset() {
-	maxLines := m.availableAdvancedContentHeight()
-
 	totalLines := 0
 	cursorLine := 0
 
@@ -89,9 +87,9 @@ func (m *Model) UpdateAdvancedOffset() {
 		}
 
 	case types.PipelinePlotting:
-		rows := m.getPlottingAdvancedRows()
-		totalLines = len(rows)
-		cursorLine = m.advancedCursor
+		lines, focusedLine := m.buildPlottingAdvancedLines()
+		totalLines = len(lines)
+		cursorLine = focusedLine
 
 	case types.PipelinePreprocessing:
 		options := m.getPreprocessingOptions()
@@ -119,6 +117,7 @@ func (m *Model) UpdateAdvancedOffset() {
 		return
 	}
 
+	maxLines := scrollableVisibleLines(totalLines, m.availableAdvancedContentHeight())
 	m.advancedOffset = calculateScrollOffset(
 		cursorLine,
 		m.advancedOffset,
@@ -129,42 +128,17 @@ func (m *Model) UpdateAdvancedOffset() {
 
 // UpdatePlotOffset calculates and updates the scrolling offset for the plots list
 func (m *Model) UpdatePlotOffset() {
-	// Match overhead with renderPlotSelection (10-14 lines)
-	overheadLines := 10
-	maxLines := m.height - overheadLines
-	if maxLines < minVisibleLines {
-		maxLines = minVisibleLines
-	}
-
-	// Reconstruct the list logic to find cursor position
-	currentGroup := ""
-	lineIdx := 0
-	cursorLine := -1
-
-	for i, plot := range m.plotItems {
-		if !m.IsPlotVisibleForSelection(plot) {
-			continue
-		}
-
-		if plot.Group != currentGroup {
-			lineIdx++ // Group header
-			currentGroup = plot.Group
-		}
-
-		if i == m.plotCursor {
-			cursorLine = lineIdx
-		}
-		lineIdx++ // Item line
-	}
-
-	if cursorLine == -1 {
+	lines, cursorLine, _, _ := m.plotSelectionLines()
+	if cursorLine == -1 || len(lines) == 0 {
+		m.plotOffset = 0
 		return
 	}
 
+	maxLines := m.plotSelectionVisibleRows(len(lines))
 	m.plotOffset = calculateScrollOffset(
 		cursorLine,
 		m.plotOffset,
-		lineIdx,
+		len(lines),
 		maxLines,
 	)
 }

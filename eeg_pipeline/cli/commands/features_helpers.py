@@ -748,6 +748,51 @@ def _apply_output_overrides(args: argparse.Namespace, config: Any) -> None:
         output_cfg["also_save_csv"] = bool(args.also_save_csv)
 
 
+def _apply_rest_mode_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply explicit resting-state overrides for the features pipeline."""
+    if getattr(args, "task_is_rest", None) is None:
+        return
+
+    task_is_rest = bool(args.task_is_rest)
+    config.setdefault("feature_engineering", {})["task_is_rest"] = task_is_rest
+    if not task_is_rest:
+        return
+
+    if getattr(args, "analysis_mode", None) == "trial_ml_safe":
+        raise ValueError(
+            "--analysis-mode trial_ml_safe is incompatible with --task-is-rest."
+        )
+
+    if getattr(args, "source_contrast_enabled", None):
+        raise ValueError(
+            "--source-contrast is incompatible with --task-is-rest."
+        )
+
+    power_cfg = config.setdefault("feature_engineering", {}).setdefault("power", {})
+    if getattr(args, "power_require_baseline", None) is None:
+        power_cfg["require_baseline"] = False
+    if getattr(args, "power_subtract_evoked", None) is None:
+        power_cfg["subtract_evoked"] = False
+
+    spectral_cfg = config.setdefault("feature_engineering", {}).setdefault("spectral", {})
+    if getattr(args, "spectral_segments", None) is None:
+        spectral_cfg["segments"] = []
+
+    bands_cfg = config.setdefault("feature_engineering", {}).setdefault("bands", {})
+    if getattr(args, "iaf_allow_full_fallback", None) is None:
+        bands_cfg["allow_full_fallback"] = True
+
+    aperiodic_subtract_evoked = getattr(args, "aperiodic_subtract_evoked", None)
+    if aperiodic_subtract_evoked:
+        raise ValueError(
+            "--aperiodic-subtract-evoked is incompatible with --task-is-rest."
+        )
+    if aperiodic_subtract_evoked is None:
+        config.setdefault("feature_engineering", {}).setdefault("aperiodic", {})[
+            "subtract_evoked"
+        ] = False
+
+
 def _apply_spatial_transform_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply spatial transform-related config overrides."""
     if getattr(args, "spatial_transform", None) is not None:
@@ -810,6 +855,7 @@ def _apply_feature_config_overrides(args: argparse.Namespace, config: Any) -> No
     """Apply all feature-specific config overrides from CLI arguments."""
     _apply_frequency_bands_override(args, config)
     _apply_rois_override(args, config)
+    _apply_rest_mode_overrides(args, config)
     _apply_connectivity_overrides(args, config)
     _apply_directedconnectivity_overrides(args, config)
     _apply_sourcelocalization_overrides(args, config)

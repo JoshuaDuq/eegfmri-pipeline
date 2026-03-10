@@ -99,7 +99,7 @@ func (m Model) availableMainContentHeight() int {
 }
 
 func (m Model) availableAdvancedContentHeight() int {
-	return max(m.availableMainContentHeight()-advancedContentOverhead, minVisibleLines)
+	return max(m.availableMainContentHeight()-advancedContentOverhead, 1)
 }
 
 func normalizeContentFrame(content string, width, height int) string {

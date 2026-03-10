@@ -6,6 +6,32 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
+func TestApplyConfigKeys_HydratesFeatureRestFlagFromFeatureConfig(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+
+	m.ApplyConfigKeys(map[string]interface{}{
+		"preprocessing.task_is_rest":       false,
+		"feature_engineering.task_is_rest": true,
+	})
+
+	if !m.prepTaskIsRest {
+		t.Fatalf("expected feature pipeline to hydrate task_is_rest from feature_engineering")
+	}
+}
+
+func TestApplyConfigKeys_HydratesPreprocessingRestFlagFromPreprocessingConfig(t *testing.T) {
+	m := New(types.PipelinePreprocessing, ".")
+
+	m.ApplyConfigKeys(map[string]interface{}{
+		"preprocessing.task_is_rest":       true,
+		"feature_engineering.task_is_rest": false,
+	})
+
+	if !m.prepTaskIsRest {
+		t.Fatalf("expected preprocessing pipeline to hydrate task_is_rest from preprocessing")
+	}
+}
+
 func TestApplyConfigKeys_HydratesSourceLocFmriContrastConfig(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 

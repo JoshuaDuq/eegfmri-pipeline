@@ -56,6 +56,49 @@ class TestPreprocessingHelpers(unittest.TestCase):
         self.assertIn("baseline = (None, 0)", cfg)
         self.assertNotIn("reject =", cfg)
 
+    def test_generate_mne_bids_config_for_resting_state(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.bids_root = Path("/tmp/bids")
+        p.deriv_root = Path("/tmp/deriv")
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "preprocessing": {
+                    "task_is_rest": True,
+                    "rest_epochs_duration": 12.0,
+                    "rest_epochs_overlap": 3.0,
+                },
+                "epochs": {"baseline": [-0.2, 0.0], "tmin": -7.0, "tmax": 15.0},
+            }
+        )
+
+        with patch.object(PreprocessingPipeline, "_detect_conditions_from_bids") as mock_detect:
+            cfg = p._generate_mne_bids_config("preprocessing/_07_make_epochs", subjects=["0001"])
+
+        mock_detect.assert_not_called()
+        self.assertIn("task_is_rest = True", cfg)
+        self.assertIn("conditions = None", cfg)
+        self.assertIn("epochs_tmin = 0.0", cfg)
+        self.assertIn("baseline = None", cfg)
+        self.assertIn("rest_epochs_duration = 12.0", cfg)
+        self.assertIn("rest_epochs_overlap = 3.0", cfg)
+        self.assertNotIn("epochs_tmax =", cfg)
+
+    def test_generate_mne_bids_config_requires_conditions_for_task_data(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.bids_root = Path("/tmp/bids")
+        p.deriv_root = Path("/tmp/deriv")
+        p.logger = Mock()
+        p.config = DotConfig({"preprocessing": {"task_is_rest": False}, "epochs": {}})
+
+        with patch.object(PreprocessingPipeline, "_detect_conditions_from_bids", return_value=None):
+            with self.assertRaisesRegex(ValueError, "requires epochs.conditions or detectable BIDS event conditions"):
+                p._generate_mne_bids_config("preprocessing/_07_make_epochs", subjects=["0001"])
+
     def test_run_mne_bids_pipeline_success_and_failure(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -158,15 +201,16 @@ class TestPreprocessingCompletion(unittest.TestCase):
 
         fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
         with patch.dict(sys.modules, {"eeg_pipeline.cli.common": fake_cli}):
-            task, mode, use_pyprep, use_icalabel, n_jobs, progress = p._extract_preprocessing_params(None, {})
+            task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = p._extract_preprocessing_params(None, {})
         self.assertEqual(task, "task")
         self.assertEqual(mode, "full")
         self.assertTrue(use_pyprep)
         self.assertTrue(use_icalabel)
+        self.assertFalse(task_is_rest)
         self.assertEqual(n_jobs, 1)
         self.assertIsNotNone(progress)
 
-        with patch.object(PreprocessingPipeline, "_extract_preprocessing_params", return_value=("task", "full", True, True, 1, _NoopProgress())), patch.object(
+        with patch.object(PreprocessingPipeline, "_extract_preprocessing_params", return_value=("task", "full", True, True, False, 1, _NoopProgress())), patch.object(
             PreprocessingPipeline, "_get_steps_for_mode", return_value=["bad-channels"]
         ), patch.object(PreprocessingPipeline, "_execute_steps") as mock_exec:
             p.process_subject("0001", task=None)
@@ -184,16 +228,16 @@ class TestPreprocessingCompletion(unittest.TestCase):
         ) as m2, patch.object(PreprocessingPipeline, "_run_ica_labeling") as m3, patch.object(
             PreprocessingPipeline, "_run_epoch_creation"
         ) as m4, patch.object(PreprocessingPipeline, "_collect_stats") as m5:
-            p._execute_steps(["bad-channels", "ica-fit", "ica-label", "epochs", "stats"], ["0001"], "t", True, True, 1, _NoopProgress())
+            p._execute_steps(["bad-channels", "ica-fit", "ica-label", "epochs", "stats"], ["0001"], "t", True, True, False, 1, _NoopProgress())
 
         self.assertTrue(m1.called and m2.called and m3.called and m4.called and m5.called)
 
         with patch.object(PreprocessingPipeline, "_run_ica_labeling") as m3:
-            p._execute_steps(["ica-label"], ["0001"], "t", True, False, 1, _NoopProgress())
+            p._execute_steps(["ica-label"], ["0001"], "t", True, False, False, 1, _NoopProgress())
         m3.assert_not_called()
 
         with patch.object(PreprocessingPipeline, "_run_bad_channel_detection") as m1:
-            p._execute_steps(["bad-channels"], ["0001"], "t", False, True, 1, _NoopProgress())
+            p._execute_steps(["bad-channels"], ["0001"], "t", False, True, False, 1, _NoopProgress())
         m1.assert_not_called()
 
     def test_run_epoch_creation_and_collect_stats(self):
@@ -208,9 +252,16 @@ class TestPreprocessingCompletion(unittest.TestCase):
         with patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline") as run_mne, patch.object(
             PreprocessingPipeline, "_write_clean_events_tsv"
         ) as write_clean:
-            p._run_epoch_creation(["0001"], "t")
+            p._run_epoch_creation(["0001"], "t", task_is_rest=False)
         run_mne.assert_called_once()
         write_clean.assert_called_once()
+
+        with patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline") as run_mne, patch.object(
+            PreprocessingPipeline, "_write_clean_events_tsv"
+        ) as write_clean:
+            p._run_epoch_creation(["0001"], "t", task_is_rest=True)
+        run_mne.assert_called_once()
+        write_clean.assert_not_called()
 
         fake_stats = types.SimpleNamespace(collect_preprocessing_stats=Mock())
         with patch.dict(sys.modules, {"eeg_pipeline.preprocessing.pipeline.stats": fake_stats}):
@@ -348,18 +399,18 @@ class TestPreprocessingGapfill(unittest.TestCase):
             p.config = DotConfig(
                 {
                     "eeg": {"eog_channels": ["EOG1", "EOG2"]},
-                    "epochs": {"reject": {"eeg": 0.0002}},
+                    "epochs": {"conditions": ["stim"], "reject": {"eeg": 0.0002}},
                 }
             )
-            txt = p._generate_mne_bids_config(["0001"], "t")
+            txt = p._generate_mne_bids_config("t", subjects=["0001"])
             self.assertIn("eog_channels = ['EOG1', 'EOG2']", txt)
             self.assertIn("reject = {'eeg': 0.0002}", txt)
 
-            # No conditions in file -> warning path in config generation (via detect=None)
+            # No conditions in file -> strict failure for task-based preprocessing
             with patch.object(PreprocessingPipeline, "_detect_conditions_from_bids", return_value=None):
                 p.config = DotConfig({"epochs": {}, "eeg": {}})
-                _ = p._generate_mne_bids_config(["0001"], "t")
-            self.assertTrue(p.logger.warning.called)
+                with self.assertRaisesRegex(ValueError, "requires epochs.conditions or detectable BIDS event conditions"):
+                    p._generate_mne_bids_config("t", subjects=["0001"])
 
             # _detect_conditions_from_bids: no usable conditions -> None
             ev_dir = p.bids_root / "sub-0001" / "eeg"

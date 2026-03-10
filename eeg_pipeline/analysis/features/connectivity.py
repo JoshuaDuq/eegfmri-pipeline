@@ -39,6 +39,11 @@ except ImportError:
     KMeans = None
     StandardScaler = None
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    select_single_rest_analysis_segment,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import (
     get_condition_column_candidates,
@@ -315,6 +320,61 @@ def _resolve_connectivity_condition_column(
         "Set feature_engineering.connectivity.condition_column explicitly (recommended), or configure "
         "event_columns.condition with a valid events.tsv column name."
     )
+
+
+def _valid_analysis_segment_masks(
+    masks: Dict[str, Optional[np.ndarray]],
+) -> Dict[str, np.ndarray]:
+    return valid_rest_analysis_segment_masks(masks)
+
+
+def _resolve_connectivity_segment_masks(
+    times: np.ndarray,
+    windows: Any,
+    config: Any,
+    logger: Any,
+    feature_name: str,
+) -> Dict[str, np.ndarray]:
+    target_name = getattr(windows, "name", None) if windows else None
+    task_is_rest = is_resting_state_feature_mode(config)
+
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            return {target_name: np.asarray(mask, dtype=bool)}
+
+        if task_is_rest:
+            segment_name, segment_mask = select_single_rest_analysis_segment(
+                get_segment_masks(times, windows, config),
+                feature_name=feature_name,
+                target_name=str(target_name),
+            )
+            if logger is not None:
+                logger.info(
+                    "%s: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    feature_name,
+                    target_name,
+                    segment_name,
+                )
+            return {segment_name: segment_mask}
+
+        if logger is not None:
+            logger.error(
+                "%s: targeted window '%s' has no valid mask; skipping.",
+                feature_name,
+                target_name,
+            )
+        return {}
+
+    masks = get_segment_masks(times, windows, config)
+    if task_is_rest:
+        return _valid_analysis_segment_masks(masks)
+    return {
+        name: np.asarray(mask, dtype=bool)
+        for name, mask in masks.items()
+        if mask is not None
+    }
 
 
 def _resolve_connectivity_condition_selection(
@@ -1573,24 +1633,15 @@ def extract_connectivity_from_precomputed(
             logger.warning("Connectivity: no supported measures selected; skipping extraction.")
         return pd.DataFrame(), []
 
-    windows = precomputed.windows
-    target_name = getattr(windows, "name", None) if windows else None
-
-    # Always derive mask from windows - never use np.ones() blindly
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            seg_mask_map = {target_name: mask}
-        else:
-            if logger is not None:
-                logger.error(
-                    "Connectivity: targeted window '%s' has no valid mask; skipping.",
-                    target_name,
-                )
-            return pd.DataFrame(), []
-    else:
-        masks = get_segment_masks(precomputed.times, windows, precomputed.config)
-        seg_mask_map = {k: v for k, v in masks.items() if v is not None}
+    seg_mask_map = _resolve_connectivity_segment_masks(
+        precomputed.times,
+        precomputed.windows,
+        precomputed.config,
+        logger,
+        "Connectivity",
+    )
+    if not seg_mask_map:
+        return pd.DataFrame(), []
 
     segments_use = segments if segments is not None else sorted(seg_mask_map.keys()) or ["full"]
 
@@ -2853,24 +2904,15 @@ def extract_directed_connectivity_from_precomputed(
     
     freq_bands = getattr(precomputed, "frequency_bands", None) or get_frequency_bands(config)
     
-    windows = precomputed.windows
-    target_name = getattr(windows, "name", None) if windows else None
-    
-    # Always derive mask from windows - never use np.ones() blindly
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            seg_mask_map = {target_name: mask}
-        else:
-            if logger is not None:
-                logger.error(
-                    "Directed connectivity: targeted window '%s' has no valid mask; skipping.",
-                    target_name,
-                )
-            return pd.DataFrame(), []
-    else:
-        masks = get_segment_masks(precomputed.times, windows, precomputed.config)
-        seg_mask_map = {k: v for k, v in masks.items() if v is not None}
+    seg_mask_map = _resolve_connectivity_segment_masks(
+        precomputed.times,
+        precomputed.windows,
+        precomputed.config,
+        logger,
+        "Directed connectivity",
+    )
+    if not seg_mask_map:
+        return pd.DataFrame(), []
     
     segments_use = segments if segments is not None else sorted(seg_mask_map.keys()) or ["full"]
     

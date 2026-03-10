@@ -566,6 +566,12 @@ func (m Model) BuildCommand() string {
 	}
 
 	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
+		if m.prepTaskIsRest {
+			parts = append(parts, "--task-is-rest", "--no-power-require-baseline", "--no-power-subtract-evoked")
+		} else {
+			parts = append(parts, "--no-task-is-rest")
+		}
+
 		spatial := m.SelectedSpatialModes()
 		if len(spatial) > 0 && len(spatial) < len(spatialModes) {
 			parts = append(parts, "--spatial")

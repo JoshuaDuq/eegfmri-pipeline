@@ -330,6 +330,7 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPrepTaskIsRest:
 		m.prepTaskIsRest = !m.prepTaskIsRest
+		m.applyFeatureRestConstraints()
 		m.useDefaultAdvanced = false
 	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq, optPrepZaplineFline, optPrepICAComp, optPrepICALFreq, optPrepICARejThresh, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsBaseline, optPrepEpochsReject:
 		m.startNumberEdit()

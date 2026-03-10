@@ -118,6 +118,38 @@ func TestBehaviorAdvancedConfigScrollsExpandedLists(t *testing.T) {
 	}
 }
 
+func TestBehaviorAdvancedExpandedListFitsVisibleFrame(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.width = 120
+	m.height = 30
+	m.contentWidth = 100
+	for i := range m.computations {
+		m.computationSelected[i] = true
+	}
+	m.behaviorGroupGeneralExpanded = true
+	m.behaviorGroupStatsExpanded = true
+	m.expandedOption = expandedBehaviorOutcomeColumn
+	m.subCursor = 6
+	m.discoveredColumns = []string{"col1", "col2", "col3", "col4", "col5", "col6", "col7", "col8", "col9", "col10"}
+	for i, opt := range m.getBehaviorOptions() {
+		if opt == optBehaviorOutcomeColumn {
+			m.advancedCursor = i
+			break
+		}
+	}
+
+	m.UpdateAdvancedOffset()
+	rendered := m.renderBehaviorAdvancedConfig()
+	renderedLines := strings.Count(rendered, "\n")
+	maxLines := m.availableMainContentHeight()
+	if renderedLines > maxLines {
+		t.Fatalf("expected expanded advanced config to fit visible frame (%d), got %d lines:\n%s", maxLines, renderedLines, rendered)
+	}
+	if !strings.Contains(rendered, "col6") {
+		t.Fatalf("expected focused dropdown item to remain visible, got:\n%s", rendered)
+	}
+}
+
 func TestPlottingGlobalOptionsAreRendered(t *testing.T) {
 	m := New(types.PipelinePlotting, ".")
 	m.plotGroupDefaultsExpanded = true
@@ -153,6 +185,120 @@ func TestPlottingPerPlotFieldsAreRendered(t *testing.T) {
 				t.Fatalf("plot %q field %v is not rendered: %s", plot.ID, field, rendered)
 			}
 		}
+	}
+}
+
+func TestPlotSelectionScrollsLongLists(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.height = 14
+	m.contentWidth = 120
+
+	lastVisible := -1
+	for i, plot := range m.plotItems {
+		if m.IsPlotVisibleForSelection(plot) {
+			lastVisible = i
+		}
+	}
+	if lastVisible < 0 {
+		t.Fatal("expected at least one visible plot")
+	}
+
+	m.plotCursor = lastVisible
+	m.UpdatePlotOffset()
+	if m.plotOffset == 0 {
+		t.Fatalf("expected non-zero plot offset with cursor at %d", lastVisible)
+	}
+
+	rendered := m.renderPlotSelection()
+	if !strings.Contains(rendered, "more above") {
+		t.Fatalf("expected scroll-up indicator in plot selection render, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "behavior_binary_outcome_probability") {
+		t.Fatalf("expected focused tail item to remain visible, got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "power_by_condition") {
+		t.Fatalf("expected offscreen head item to be clipped after scrolling, got:\n%s", rendered)
+	}
+}
+
+func TestPlotSelectionFitsVisibleContentFrame(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.width = 120
+	m.height = 28
+	m.contentWidth = 100
+
+	lastVisible := -1
+	for i, plot := range m.plotItems {
+		if m.IsPlotVisibleForSelection(plot) {
+			lastVisible = i
+		}
+	}
+	if lastVisible < 0 {
+		t.Fatal("expected at least one visible plot")
+	}
+
+	m.plotCursor = lastVisible
+	m.UpdatePlotOffset()
+
+	rendered := m.renderPlotSelection()
+	renderedLines := strings.Count(rendered, "\n")
+	maxLines := m.availableMainContentHeight()
+	if renderedLines > maxLines {
+		t.Fatalf("expected plot selection to fit visible frame (%d), got %d lines:\n%s", maxLines, renderedLines, rendered)
+	}
+}
+
+func TestPlottingAdvancedExpandedListScrollsOnCursorMove(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.width = 120
+	m.height = 24
+	m.contentWidth = 100
+	m.CurrentStep = types.StepAdvancedConfig
+	m.plotItemConfigExpanded["behavior_scatter"] = true
+	m.discoveredColumns = []string{
+		"col1", "col2", "col3", "col4", "col5", "col6", "col7", "col8", "col9", "col10",
+	}
+
+	rows := m.getPlottingAdvancedRows()
+	targetRow := -1
+	for i, row := range rows {
+		if row.kind == plottingRowPlotField &&
+			row.plotID == "behavior_scatter" &&
+			row.plotField == plotItemConfigFieldBehaviorScatterColumns {
+			targetRow = i
+			break
+		}
+	}
+	if targetRow < 0 {
+		t.Fatal("expected behavior_scatter columns row in plotting advanced config")
+	}
+
+	m.advancedCursor = targetRow
+	m.expandedOption = expandedBehaviorScatterColumns
+	m.editingPlotID = "behavior_scatter"
+	m.editingPlotField = plotItemConfigFieldBehaviorScatterColumns
+	m.subCursor = 0
+	m.UpdateAdvancedOffset()
+
+	before := m.renderPlottingAdvancedConfigV2()
+	if !strings.Contains(before, "col1") {
+		t.Fatalf("expected initial expanded item to be visible, got:\n%s", before)
+	}
+
+	for i := 0; i < 7; i++ {
+		m.handleDown()
+	}
+
+	if m.subCursor != 7 {
+		t.Fatalf("expected subCursor=7 after moving down, got %d", m.subCursor)
+	}
+	if m.advancedOffset == 0 {
+		t.Fatalf("expected advanced offset to move for plotting expanded list, got 0")
+	}
+
+	after := m.renderPlottingAdvancedConfigV2()
+	if !strings.Contains(after, "col8") {
+		t.Fatalf("expected scrolled plotting dropdown to include focused item, got:\n%s", after)
 	}
 }
 

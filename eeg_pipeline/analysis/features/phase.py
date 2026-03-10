@@ -16,6 +16,12 @@ import pandas as pd
 import mne
 from scipy.signal import find_peaks
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    raise_if_rest_incompatible,
+    select_single_rest_analysis_segment,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
@@ -113,6 +119,59 @@ def _required_duration_seconds(
     if np.isfinite(fmin_hz) and fmin_hz > 0 and np.isfinite(min_cycles_at_fmin) and min_cycles_at_fmin > 0:
         return max(float(min_segment_sec), float(min_cycles_at_fmin) / float(fmin_hz))
     return float(min_segment_sec)
+
+
+def _valid_analysis_segment_masks(
+    masks: Dict[str, Optional[np.ndarray]],
+) -> Dict[str, np.ndarray]:
+    return valid_rest_analysis_segment_masks(masks)
+
+
+def _resolve_pac_segment_masks(
+    times: np.ndarray,
+    windows: Any,
+    config: Any,
+    logger: Any,
+) -> Dict[str, np.ndarray]:
+    target_name = getattr(windows, "name", None) if windows else None
+    task_is_rest = is_resting_state_feature_mode(config)
+
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            return {target_name: np.asarray(mask, dtype=bool)}
+
+        if task_is_rest:
+            segment_name, segment_mask = select_single_rest_analysis_segment(
+                get_segment_masks(times, windows, config),
+                feature_name="PAC",
+                target_name=str(target_name),
+            )
+            if logger is not None:
+                logger.info(
+                    "PAC: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    target_name,
+                    segment_name,
+                )
+            return {segment_name: segment_mask}
+
+        if logger is not None:
+            logger.error(
+                "PAC: targeted window '%s' has no valid mask; skipping.",
+                target_name,
+            )
+        return {}
+
+    masks = get_segment_masks(times, windows, config)
+    if task_is_rest:
+        return _valid_analysis_segment_masks(masks)
+    return {
+        name: np.asarray(mask, dtype=bool)
+        for name, mask in masks.items()
+        if mask is not None
+    }
+
 
 def _get_itpc_method(config: Any) -> str:
     """Get ITPC computation method from config.
@@ -1232,6 +1291,7 @@ def extract_phase_features(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract ITPC phase features from complex TFR data."""
     config = ctx.config
+    raise_if_rest_incompatible(config, feature_name="ITPC")
     epochs = ctx.epochs
     logger = getattr(ctx, "logger", None)
 
@@ -1787,6 +1847,7 @@ def extract_itpc_from_precomputed(
         return pd.DataFrame(), []
 
     cfg = precomputed.config or {}
+    raise_if_rest_incompatible(cfg, feature_name="ITPC")
     itpc_method = _get_itpc_method(cfg)
     if itpc_method == "loo":
         raise ValueError(
@@ -2088,23 +2149,12 @@ def extract_pac_from_precomputed(
         train_mask=train_mask,
         logger=logger,
     )
-    windows = precomputed.windows
-
-    target_name = getattr(windows, "name", None) if windows else None
-
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            masks = {target_name: mask}
-        else:
-            if logger is not None:
-                logger.error(
-                    "PAC: targeted window '%s' has no valid mask; skipping.",
-                    target_name,
-                )
-            return pd.DataFrame(), []
-    else:
-        masks = get_segment_masks(precomputed.times, windows, config)
+    masks = _resolve_pac_segment_masks(
+        precomputed.times,
+        precomputed.windows,
+        config,
+        logger,
+    )
 
     if not masks:
         return pd.DataFrame(), []

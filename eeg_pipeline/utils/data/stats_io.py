@@ -14,6 +14,7 @@ from typing import Optional, List, Any, Dict, Tuple
 
 import pandas as pd
 
+from eeg_pipeline.analysis.features.rest import is_resting_state_feature_mode
 from .covariates import _build_covariate_matrices
 
 
@@ -35,6 +36,7 @@ def _load_epochs_for_subject(
         deriv_root=deriv_root,
         logger=logger,
         config=config,
+        task_is_rest=is_resting_state_feature_mode(config),
     )
     return epochs
 
