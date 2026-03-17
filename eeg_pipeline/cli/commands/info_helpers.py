@@ -14,7 +14,9 @@ from eeg_pipeline.cli.commands.base import (
     detect_feature_availability,
     _empty_feature_availability,
 )
-from eeg_pipeline.cli.common import resolve_task
+from eeg_pipeline.cli.common import get_deriv_root, resolve_task
+from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.roots import resolve_eeg_bids_root
 from eeg_pipeline.utils.data.source_localization_paths import (
     source_localization_candidate_paths,
 )
@@ -124,9 +126,8 @@ def _handle_ml_feature_space_mode(args: argparse.Namespace, config: Any, task: s
     import pyarrow.parquet as pq
 
     from eeg_pipeline.domain.features.naming import NamingSchema
-    from eeg_pipeline.infra.paths import resolve_deriv_root
 
-    deriv_root = resolve_deriv_root(config=config)
+    deriv_root = get_deriv_root(config, command="info")
 
     def _as_list(val: Any) -> Optional[List[str]]:
         if val is None:
@@ -627,7 +628,7 @@ def _build_subject_status_json(
     # Resolve BIDS root
     bids_root = bids_root_override
     if bids_root is None:
-        bids_root = Path(config.bids_root) if hasattr(config, "bids_root") else None
+        bids_root = _resolve_optional_eeg_bids_root(config)
 
     # Resolve source root
     source_root = _resolve_source_root(config, bids_root)
@@ -756,6 +757,8 @@ def _handle_subjects_mode(
         bids_fmri_root = config.get("paths.bids_fmri_root")
         if bids_fmri_root:
             bids_root_override = Path(str(bids_fmri_root))
+    elif args.source in {SOURCE_BIDS, SOURCE_ALL}:
+        bids_root_override = _resolve_optional_eeg_bids_root(config)
 
     # Fast path: serve cached TUI payload without scanning epochs/features trees.
     if args.status and args.output_json and bool(getattr(args, "subjects_cache", False)) and not bool(getattr(args, "subjects_refresh", False)):
@@ -881,8 +884,10 @@ def _handle_config_mode(args: argparse.Namespace, config: Any, deriv_root: Path,
     else:
         summary = {
             "bids_root": str(config.bids_root) if hasattr(config, "bids_root") else None,
+            "bids_rest_root": config.get("paths.bids_rest_root"),
             "bids_fmri_root": config.get("paths.bids_fmri_root"),
             "deriv_root": str(deriv_root),
+            "deriv_rest_root": config.get("paths.deriv_rest_root"),
             "source_root": config.get("paths.source_data"),
             "task": task,
             "preprocessing_n_jobs": config.get("preprocessing.n_jobs", 1),
@@ -965,6 +970,22 @@ def _resolve_fmri_root(config: Any) -> Path:
 
         fmri_root_path = get_project_root() / fmri_root_path
     return fmri_root_path
+
+
+def _resolve_optional_eeg_bids_root(config: Any) -> Optional[Path]:
+    task_root = get_config_value(
+        config,
+        "paths.bids_root",
+        get_config_value(config, "bids_root", None),
+    )
+    rest_root = get_config_value(
+        config,
+        "paths.bids_rest_root",
+        get_config_value(config, "bids_rest_root", None),
+    )
+    if task_root is None and rest_root is None:
+        return None
+    return resolve_eeg_bids_root(config)
 
 
 def _resolve_discovered_column(columns: List[str], candidate: str) -> Optional[str]:
@@ -1153,11 +1174,11 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
         discover_trial_table_columns,
         discover_condition_effects_columns,
     )
-    from eeg_pipeline.infra.paths import resolve_deriv_root
-
     task = resolve_task(args.task, config)
-    bids_root = Path(config.bids_root) if hasattr(config, "bids_root") else None
-    deriv_root = resolve_deriv_root(config=config)
+    bids_root = None
+    if args.discover_source in ["events", "all"]:
+        bids_root = resolve_eeg_bids_root(config)
+    deriv_root = get_deriv_root(config, command="info")
 
     result = {
         "columns": [],
@@ -1235,9 +1256,9 @@ def _handle_rois_mode(args: argparse.Namespace, subjects: List[str], config: Any
     """Handle rois mode: discover available ROIs from feature parquet files."""
     import re
     import pandas as pd
-    from eeg_pipeline.infra.paths import resolve_deriv_root, deriv_features_path
+    from eeg_pipeline.infra.paths import deriv_features_path
 
-    deriv_root = resolve_deriv_root(config=config)
+    deriv_root = get_deriv_root(config, command="info")
 
     subject = args.subject
     if not subject and subjects:
@@ -1336,10 +1357,9 @@ def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
 
 def _handle_multigroup_stats_mode(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Handle multigroup-stats mode: discover available multigroup comparisons from precomputed stats."""
-    from eeg_pipeline.infra.paths import resolve_deriv_root
     from eeg_pipeline.infra.tsv import read_tsv
     
-    deriv_root = resolve_deriv_root(config=config)
+    deriv_root = get_deriv_root(config, command="info")
     
     subject = args.subject
     if not subject and subjects:

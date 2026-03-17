@@ -122,6 +122,34 @@ func TestBuildCommand_FeaturesRestModeIncludesRestSafePowerFlags(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_IncludesBidsRestRootForFeatures(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.bidsRestRoot = "/data/bids/rest"
+	m.derivRestRoot = "/data/derivatives/rest"
+
+	cmd := m.BuildCommand()
+	if !strings.Contains(cmd, "--bids-rest-root /data/bids/rest") {
+		t.Fatalf("expected --bids-rest-root in command, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--deriv-rest-root /data/derivatives/rest") {
+		t.Fatalf("expected --deriv-rest-root in command, got: %s", cmd)
+	}
+}
+
+func TestBuildCommand_IncludesBidsRestRootForPreprocessing(t *testing.T) {
+	m := New(types.PipelinePreprocessing, ".")
+	m.bidsRestRoot = "/data/bids/rest"
+	m.derivRestRoot = "/data/derivatives/rest"
+
+	cmd := m.BuildCommand()
+	if !strings.Contains(cmd, "--bids-rest-root /data/bids/rest") {
+		t.Fatalf("expected --bids-rest-root in command, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--deriv-rest-root /data/derivatives/rest") {
+		t.Fatalf("expected --deriv-rest-root in command, got: %s", cmd)
+	}
+}
+
 func TestValidateTimeRanges_AllowsRestingStatePowerWithoutBaseline(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i := range m.selected {

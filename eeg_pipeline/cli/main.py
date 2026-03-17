@@ -90,8 +90,10 @@ def update_config_from_args(config: dict[str, Any], args: argparse.Namespace) ->
         config,
         source_root=getattr(args, "source_root", None),
         bids_root=getattr(args, "bids_root", None),
+        bids_rest_root=getattr(args, "bids_rest_root", None),
         bids_fmri_root=getattr(args, "bids_fmri_root", None),
         deriv_root=getattr(args, "deriv_root", None),
+        deriv_rest_root=getattr(args, "deriv_rest_root", None),
     )
 
 
@@ -137,7 +139,7 @@ def main() -> int:
     
     config = load_config()
     update_config_from_args(config, args)
-    deriv_root = get_deriv_root(config)
+    deriv_root = get_deriv_root(config, command=args.command)
     
     command = get_command(args.command)
     if not command:

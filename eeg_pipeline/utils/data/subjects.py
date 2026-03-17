@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from ..config.loader import ConfigDict
 from ..parsing import parse_group_arg
-from eeg_pipeline.infra.paths import find_clean_epochs_path, resolve_deriv_root
+from eeg_pipeline.infra.paths import find_clean_epochs_path
+from eeg_pipeline.utils.config.roots import resolve_eeg_bids_root, resolve_eeg_deriv_root
 
 
 EEGConfig = ConfigDict
@@ -206,7 +207,7 @@ def _resolve_source_root(config: EEGConfig, bids_root: Optional[Path]) -> Option
 def _discover_subjects_from_sources(
     discovery_sources: List[str],
     deriv_root: Path,
-    bids_root: Path,
+    bids_root: Optional[Path],
     task: str,
     config: EEGConfig,
     constants: Optional[Dict[str, Any]],
@@ -216,6 +217,8 @@ def _discover_subjects_from_sources(
     discovered_by_source = []
     
     if "bids" in discovery_sources:
+        if bids_root is None:
+            raise ValueError("BIDS discovery requested but no EEG BIDS root was resolved.")
         bids_subjects = _collect_subjects_from_bids(bids_root)
         discovered_by_source.append(("bids", bids_subjects))
         logger.debug(f"Discovered {len(bids_subjects)} subjects from BIDS")
@@ -347,6 +350,7 @@ def get_available_subjects(
     deriv_root: Optional[Path] = None,
     bids_root: Optional[Path] = None,
     task: Optional[str] = None,
+    task_is_rest: Optional[bool] = None,
     discovery_sources: Optional[List[Literal["bids", "derivatives_epochs", "features", "source_data"]]] = None,
     subject_discovery_policy: Literal["intersection", "union", "config_only"] = "intersection",
     logger: Optional[logging.Logger] = None,
@@ -354,21 +358,21 @@ def get_available_subjects(
     """Discover and resolve available subjects based on config and discovery sources."""
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     if deriv_root is None:
-        deriv_root = resolve_deriv_root(config=config)
-    
-    if bids_root is None:
-        bids_root = config.bids_root
-    
+        deriv_root = resolve_eeg_deriv_root(config, task_is_rest=task_is_rest)
+
     if task is None:
         task = config.get("project.task")
-    
+
     if discovery_sources is None:
         discovery_sources = ["derivatives_epochs", "features"]
-    
+
+    if bids_root is None and "bids" in discovery_sources:
+        bids_root = resolve_eeg_bids_root(config, task_is_rest=task_is_rest)
+
     subjects_from_config = _normalize_subject_list(config.get("project.subject_list"))
-    
+
     discovered_by_source = _discover_subjects_from_sources(
         discovery_sources=discovery_sources,
         deriv_root=deriv_root,
@@ -378,7 +382,7 @@ def get_available_subjects(
         constants=constants,
         logger=logger,
     )
-    
+
     return _resolve_subjects_by_policy(
         discovered_by_source=discovered_by_source,
         subjects_from_config=subjects_from_config,
@@ -438,10 +442,10 @@ def parse_subject_args(
     """Parse subject arguments from command-line args."""
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     if deriv_root is None:
-        deriv_root = resolve_deriv_root(config=config)
-    
+        deriv_root = resolve_eeg_deriv_root(config)
+
     if task is None:
         task = config.get("project.task")
     

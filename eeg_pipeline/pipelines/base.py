@@ -51,8 +51,12 @@ class PipelineBase(ABC):
     def _setup(self) -> None:
         """Perform initial setup."""
         setup_matplotlib(self.config)
-        self.deriv_root = resolve_deriv_root(config=self.config)
+        self.deriv_root = self._resolve_pipeline_deriv_root()
         ensure_derivatives_dataset_description(deriv_root=self.deriv_root)
+
+    def _resolve_pipeline_deriv_root(self) -> Path:
+        """Resolve the derivatives root used by this pipeline."""
+        return resolve_deriv_root(config=self.config)
 
     def _validate_batch_inputs(
         self, subjects: List[str], task: Optional[str]

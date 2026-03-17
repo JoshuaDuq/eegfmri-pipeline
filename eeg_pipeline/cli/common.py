@@ -11,8 +11,9 @@ import argparse
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
-from eeg_pipeline.infra.paths import resolve_deriv_root
 from eeg_pipeline.cli.progress import create_progress_reporter, ProgressReporter
+from eeg_pipeline.infra.paths import resolve_deriv_root
+from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 
 
 DEFAULT_TASK_KEY = "project.task"
@@ -77,10 +78,22 @@ def add_path_args(parser: argparse.ArgumentParser) -> None:
         help="Override BIDS fMRI root path (default from config)",
     )
     path_group.add_argument(
+        "--bids-rest-root",
+        type=str,
+        default=None,
+        help="Override BIDS resting-state EEG root path (default from config)",
+    )
+    path_group.add_argument(
         "--deriv-root",
         type=str,
         default=None,
         help="Override derivatives root path (default from config)",
+    )
+    path_group.add_argument(
+        "--deriv-rest-root",
+        type=str,
+        default=None,
+        help="Override resting-state EEG derivatives root path (default from config)",
     )
 
 
@@ -143,8 +156,16 @@ def validate_min_subjects(
         )
 
 
-def get_deriv_root(config: Any) -> Path:
+def get_deriv_root(config: Any, *, command: Optional[str] = None) -> Path:
     """Get derivatives root path from config."""
+    eeg_derivative_commands = {
+        "features",
+        "info",
+        "preprocessing",
+        "validate",
+    }
+    if command in eeg_derivative_commands:
+        return resolve_eeg_deriv_root(config)
     return resolve_deriv_root(config=config)
 
 

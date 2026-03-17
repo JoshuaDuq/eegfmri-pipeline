@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import Any, List
 
-from eeg_pipeline.cli.common import resolve_task
+from eeg_pipeline.cli.common import get_deriv_root, resolve_task
 from eeg_pipeline.cli.commands.info_helpers import (
     MODE_CONFIG,
     MODE_DISCOVER,
@@ -35,11 +35,9 @@ from eeg_pipeline.cli.commands.info_helpers import (
 
 def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the info command."""
-    from eeg_pipeline.infra.paths import resolve_deriv_root
-
     logger = _get_logger(args.output_json)
     task = resolve_task(args.task, config)
-    deriv_root = resolve_deriv_root(config=config)
+    deriv_root = get_deriv_root(config, command="info")
 
     if args.mode == MODE_PLOTTERS:
         _handle_plotters_mode(args.output_json)

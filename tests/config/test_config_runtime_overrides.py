@@ -10,15 +10,19 @@ def test_apply_runtime_overrides_updates_only_provided_values() -> None:
         task="new_task",
         source_root="/src",
         bids_root="/bids",
+        bids_rest_root="/bids-rest",
         bids_fmri_root="/fmri",
         deriv_root="/deriv",
+        deriv_rest_root="/deriv-rest",
     )
 
     assert cfg["project"]["task"] == "new_task"
     assert cfg["paths"]["source_data"] == "/src"
     assert cfg["paths"]["bids_root"] == "/bids"
+    assert cfg["paths"]["bids_rest_root"] == "/bids-rest"
     assert cfg["paths"]["bids_fmri_root"] == "/fmri"
     assert cfg["paths"]["deriv_root"] == "/deriv"
+    assert cfg["paths"]["deriv_rest_root"] == "/deriv-rest"
 
 
 def test_apply_runtime_overrides_ignores_none_values() -> None:

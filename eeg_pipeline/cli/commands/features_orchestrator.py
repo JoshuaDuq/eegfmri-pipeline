@@ -24,8 +24,12 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     
     if getattr(args, "bids_root", None):
         config.setdefault("paths", {})["bids_root"] = args.bids_root
+    if getattr(args, "bids_rest_root", None):
+        config.setdefault("paths", {})["bids_rest_root"] = args.bids_rest_root
     if getattr(args, "deriv_root", None):
         config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+    if getattr(args, "deriv_rest_root", None):
+        config.setdefault("paths", {})["deriv_rest_root"] = args.deriv_rest_root
     if getattr(args, "freesurfer_dir", None):
         config.setdefault("paths", {})["freesurfer_dir"] = args.freesurfer_dir
     

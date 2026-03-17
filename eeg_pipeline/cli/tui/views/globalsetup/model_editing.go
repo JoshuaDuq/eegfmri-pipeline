@@ -64,10 +64,14 @@ func (m Model) browseForPath(field fieldKey) tea.Cmd {
 		switch field {
 		case fieldBidsRoot:
 			prompt = "Select BIDS root folder"
+		case fieldBidsRestRoot:
+			prompt = "Select BIDS resting-state root folder"
 		case fieldBidsFmriRoot:
 			prompt = "Select BIDS fMRI data folder"
 		case fieldDerivRoot:
 			prompt = "Select derivatives root folder"
+		case fieldDerivRestRoot:
+			prompt = "Select resting-state derivatives root folder"
 		case fieldSourceRoot:
 			prompt = "Select source data folder"
 		}
@@ -91,8 +95,10 @@ func (m Model) sectionFields(section sectionKey) []fieldDef {
 	case sectionPaths:
 		return []fieldDef{
 			{fieldBidsRoot, "BIDS Root", "Input BIDS dataset", true},
+			{fieldBidsRestRoot, "BIDS Rest Root", "Resting-state EEG BIDS dataset", true},
 			{fieldBidsFmriRoot, "BIDS fMRI Root", "fMRI data for contrast builder", true},
 			{fieldDerivRoot, "Deriv Root", "Derivatives output", true},
+			{fieldDerivRestRoot, "Deriv Rest Root", "Resting-state EEG derivatives output", true},
 			{fieldSourceRoot, "Source Root", "Raw source data", true},
 			{fieldFreesurferDir, "FreeSurfer Dir", "FreeSurfer SUBJECTS_DIR", true},
 		}
@@ -111,10 +117,14 @@ func (m Model) fieldValue(key fieldKey) string {
 		return m.subjectList
 	case fieldBidsRoot:
 		return m.bidsRoot
+	case fieldBidsRestRoot:
+		return m.bidsRestRoot
 	case fieldBidsFmriRoot:
 		return m.bidsFmriRoot
 	case fieldDerivRoot:
 		return m.derivRoot
+	case fieldDerivRestRoot:
+		return m.derivRestRoot
 	case fieldSourceRoot:
 		return m.sourceRoot
 	case fieldFreesurferDir:
@@ -135,10 +145,14 @@ func (m *Model) setFieldValue(key fieldKey, value string) {
 		m.subjectList = value
 	case fieldBidsRoot:
 		m.bidsRoot = value
+	case fieldBidsRestRoot:
+		m.bidsRestRoot = value
 	case fieldBidsFmriRoot:
 		m.bidsFmriRoot = value
 	case fieldDerivRoot:
 		m.derivRoot = value
+	case fieldDerivRestRoot:
+		m.derivRestRoot = value
 	case fieldSourceRoot:
 		m.sourceRoot = value
 	case fieldFreesurferDir:
@@ -257,11 +271,17 @@ func (m *Model) buildOverrides() map[string]interface{} {
 	if strings.TrimSpace(m.bidsRoot) != "" {
 		paths["bids_root"] = m.bidsRoot
 	}
+	if strings.TrimSpace(m.bidsRestRoot) != "" {
+		paths["bids_rest_root"] = m.bidsRestRoot
+	}
 	if strings.TrimSpace(m.bidsFmriRoot) != "" {
 		paths["bids_fmri_root"] = m.bidsFmriRoot
 	}
 	if strings.TrimSpace(m.derivRoot) != "" {
 		paths["deriv_root"] = m.derivRoot
+	}
+	if strings.TrimSpace(m.derivRestRoot) != "" {
+		paths["deriv_rest_root"] = m.derivRestRoot
 	}
 	if strings.TrimSpace(m.sourceRoot) != "" {
 		paths["source_data"] = m.sourceRoot

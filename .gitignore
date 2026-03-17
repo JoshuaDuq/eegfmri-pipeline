@@ -58,6 +58,7 @@ bin/
 
 ### AI / Agent tooling (local, not shared) ###
 AGENTS.md
+.AGENTS.md
 agents.md
 .cursor/
 .codex/

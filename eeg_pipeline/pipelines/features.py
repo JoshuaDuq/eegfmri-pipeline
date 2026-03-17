@@ -61,6 +61,7 @@ from eeg_pipeline.utils.config.loader import (
     get_condition_column_candidates,
     get_frequency_band_names,
 )
+from eeg_pipeline.utils.config.roots import resolve_eeg_bids_root, resolve_eeg_deriv_root
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.features import align_feature_dataframes
 from eeg_pipeline.utils.data.feature_io import (
@@ -831,12 +832,21 @@ class FeaturePipeline(PipelineBase):
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="feature_extraction", config=config)
 
+    def _resolve_pipeline_deriv_root(self) -> Path:
+        """Resolve EEG feature derivatives root."""
+        return resolve_eeg_deriv_root(
+            self.config,
+            task_is_rest=is_resting_state_feature_mode(self.config),
+        )
+
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
         task = task or self.config.get("project.task")
         if task is None:
             raise ValueError("Missing required config value: project.task")
 
         validate_rest_configuration(self.config)
+        task_is_rest = is_resting_state_feature_mode(self.config)
+        input_bids_root = resolve_eeg_bids_root(self.config, task_is_rest=task_is_rest)
         feature_categories = resolve_feature_categories(
             self.config, kwargs.get("feature_categories")
         )
@@ -875,7 +885,7 @@ class FeaturePipeline(PipelineBase):
             deriv_root=self.deriv_root,
             logger=self.logger,
             config=self.config,
-            task_is_rest=is_resting_state_feature_mode(self.config),
+            task_is_rest=task_is_rest,
             required_event_groups=required_event_groups,
         )
 
@@ -907,7 +917,7 @@ class FeaturePipeline(PipelineBase):
         original_events = _load_events_df(
             subject,
             task,
-            bids_root=self.config.bids_root,
+            bids_root=str(input_bids_root),
             config=self.config,
             prefer_clean=False,
         )

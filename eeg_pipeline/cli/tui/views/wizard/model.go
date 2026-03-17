@@ -997,8 +997,10 @@ type Model struct {
 	// Project setup (received from global config)
 	task               string
 	bidsRoot           string
+	bidsRestRoot       string
 	bidsFmriRoot       string
 	derivRoot          string
+	derivRestRoot      string
 	sourceRoot         string
 	configSetOverrides string // Semicolon-separated KEY=VALUE config overrides
 	repoRoot           string // Project repository root for running Python commands

@@ -165,6 +165,26 @@ class TestPreprocessingCompletion(unittest.TestCase):
             p._run_ica_fitting(["0001"], "t", use_icalabel=True)
         mock_run.assert_called_once()
 
+    def test_preprocessing_init_uses_rest_bids_root_in_rest_mode(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        cfg = DotConfig(
+            {
+                "paths": {
+                    "bids_root": "/tmp/bids-task",
+                    "bids_rest_root": "/tmp/bids-rest",
+                    "deriv_root": "/tmp/derivatives-task",
+                    "deriv_rest_root": "/tmp/derivatives-rest",
+                },
+                "preprocessing": {"task_is_rest": True},
+            }
+        )
+        with patch("eeg_pipeline.pipelines.preprocessing.PipelineBase.__init__", lambda self, name, config=None: setattr(self, "config", config or cfg)):
+            p = PreprocessingPipeline(config=cfg)
+
+        self.assertEqual(str(p.bids_root), "/tmp/bids-rest")
+        self.assertEqual(str(p.deriv_root), "/tmp/derivatives-rest")
+
     def test_run_batch_writes_reproducibility_metadata(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 

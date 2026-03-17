@@ -34,8 +34,10 @@ const (
 	fieldRandomState
 	fieldSubjectList
 	fieldBidsRoot
+	fieldBidsRestRoot
 	fieldBidsFmriRoot
 	fieldDerivRoot
+	fieldDerivRestRoot
 	fieldSourceRoot
 	fieldFreesurferDir
 )
@@ -78,8 +80,10 @@ type Model struct {
 	randomState   string
 	subjectList   string
 	bidsRoot      string
+	bidsRestRoot  string
 	bidsFmriRoot  string
 	derivRoot     string
+	derivRestRoot string
 	sourceRoot    string
 	freesurferDir string
 
@@ -105,8 +109,10 @@ func DefaultConfigKeys() []string {
 		"project.random_state",
 		"project.subject_list",
 		"paths.bids_root",
+		"paths.bids_rest_root",
 		"paths.bids_fmri_root",
 		"paths.deriv_root",
+		"paths.deriv_rest_root",
 		"paths.source_data",
 		"paths.freesurfer_dir",
 	}
@@ -163,11 +169,17 @@ func (m *Model) SetConfigValues(values map[string]interface{}) {
 	if v, ok := values["paths.bids_root"]; ok {
 		m.bidsRoot = toString(v, m.bidsRoot)
 	}
+	if v, ok := values["paths.bids_rest_root"]; ok {
+		m.bidsRestRoot = toString(v, m.bidsRestRoot)
+	}
 	if v, ok := values["paths.bids_fmri_root"]; ok {
 		m.bidsFmriRoot = toString(v, m.bidsFmriRoot)
 	}
 	if v, ok := values["paths.deriv_root"]; ok {
 		m.derivRoot = toString(v, m.derivRoot)
+	}
+	if v, ok := values["paths.deriv_rest_root"]; ok {
+		m.derivRestRoot = toString(v, m.derivRestRoot)
 	}
 	if v, ok := values["paths.source_data"]; ok {
 		m.sourceRoot = toString(v, m.sourceRoot)

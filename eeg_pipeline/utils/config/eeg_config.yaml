@@ -8,8 +8,10 @@ project:
 
 paths:
   bids_root: "../../../data/bids_output/eeg"  # BIDS-formatted EEG data directory
+  bids_rest_root: null  # Optional resting-state EEG BIDS directory used when task_is_rest is enabled
   bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
+  deriv_rest_root: null  # Resting-state EEG derivatives directory used when task_is_rest is enabled
   source_data: "../../../data/source_data"  # Raw source data directory
   freesurfer_dir: "../../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
   freesurfer_license: null  # Path to FreeSurfer license.txt (otherwise use EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt)

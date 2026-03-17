@@ -29,10 +29,26 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 	}
 	binders := []keyBinder{
 		{
+			key: "paths.bids_rest_root",
+			apply: func(v interface{}) {
+				if s, ok := asString(v); ok && s != "" {
+					m.bidsRestRoot = s
+				}
+			},
+		},
+		{
 			key: "paths.bids_fmri_root",
 			apply: func(v interface{}) {
 				if s, ok := asString(v); ok && s != "" {
 					m.bidsFmriRoot = s
+				}
+			},
+		},
+		{
+			key: "paths.deriv_rest_root",
+			apply: func(v interface{}) {
+				if s, ok := asString(v); ok && s != "" {
+					m.derivRestRoot = s
 				}
 			},
 		},

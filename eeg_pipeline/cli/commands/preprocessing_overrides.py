@@ -31,8 +31,12 @@ def _update_path_config(args: argparse.Namespace, config: Any) -> None:
     paths_config = config.setdefault("paths", {})
     if args.bids_root:
         paths_config["bids_root"] = args.bids_root
+    if getattr(args, "bids_rest_root", None):
+        paths_config["bids_rest_root"] = args.bids_rest_root
     if args.deriv_root:
         paths_config["deriv_root"] = args.deriv_root
+    if getattr(args, "deriv_rest_root", None):
+        paths_config["deriv_rest_root"] = args.deriv_rest_root
 
 
 def _update_preprocessing_config(args: argparse.Namespace, config: Any) -> None:

@@ -559,9 +559,15 @@ func (m Model) BuildCommand() string {
 			if m.bidsRoot != "" {
 				parts = append(parts, "--bids-root", expandUserPath(m.bidsRoot))
 			}
+			if m.bidsRestRoot != "" {
+				parts = append(parts, "--bids-rest-root", expandUserPath(m.bidsRestRoot))
+			}
 		}
 		if m.derivRoot != "" {
 			parts = append(parts, "--deriv-root", expandUserPath(m.derivRoot))
+		}
+		if m.Pipeline != types.PipelineFmri && m.Pipeline != types.PipelineFmriAnalysis && m.derivRestRoot != "" {
+			parts = append(parts, "--deriv-rest-root", expandUserPath(m.derivRestRoot))
 		}
 	}
 

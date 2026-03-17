@@ -32,6 +32,22 @@ func TestApplyConfigKeys_HydratesPreprocessingRestFlagFromPreprocessingConfig(t 
 	}
 }
 
+func TestApplyConfigKeys_HydratesBidsRestRoot(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+
+	m.ApplyConfigKeys(map[string]interface{}{
+		"paths.bids_rest_root":  "/data/bids/rest",
+		"paths.deriv_rest_root": "/data/derivatives/rest",
+	})
+
+	if m.bidsRestRoot != "/data/bids/rest" {
+		t.Fatalf("expected bidsRestRoot='/data/bids/rest', got %q", m.bidsRestRoot)
+	}
+	if m.derivRestRoot != "/data/derivatives/rest" {
+		t.Fatalf("expected derivRestRoot='/data/derivatives/rest', got %q", m.derivRestRoot)
+	}
+}
+
 func TestApplyConfigKeys_HydratesSourceLocFmriContrastConfig(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 

@@ -12,8 +12,10 @@ def apply_runtime_overrides(
     task: Optional[str] = None,
     source_root: Optional[str] = None,
     bids_root: Optional[str] = None,
+    bids_rest_root: Optional[str] = None,
     bids_fmri_root: Optional[str] = None,
     deriv_root: Optional[str] = None,
+    deriv_rest_root: Optional[str] = None,
     set_overrides: Optional[Sequence[str]] = None,
 ) -> None:
     """Apply optional runtime path/task overrides in-place.
@@ -25,10 +27,14 @@ def apply_runtime_overrides(
         paths["source_data"] = source_root
     if bids_root:
         paths["bids_root"] = bids_root
+    if bids_rest_root:
+        paths["bids_rest_root"] = bids_rest_root
     if bids_fmri_root:
         paths["bids_fmri_root"] = bids_fmri_root
     if deriv_root:
         paths["deriv_root"] = deriv_root
+    if deriv_rest_root:
+        paths["deriv_rest_root"] = deriv_rest_root
 
     if task:
         config.setdefault("project", {})["task"] = task

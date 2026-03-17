@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Union
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.pipelines.progress import ensure_progress_reporter
 from eeg_pipeline.utils.config.loader import get_condition_column_candidates
+from eeg_pipeline.utils.config.roots import resolve_eeg_bids_root, resolve_eeg_deriv_root
 
 
 STEP_BAD_CHANNELS = "bad-channels"
@@ -58,7 +59,17 @@ class PreprocessingPipeline(PipelineBase):
     
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="preprocessing", config=config)
-        self.bids_root = Path(self.config.bids_root)
+        self.bids_root = resolve_eeg_bids_root(
+            self.config,
+            task_is_rest=self._resolve_task_is_rest(),
+        )
+
+    def _resolve_pipeline_deriv_root(self) -> Path:
+        """Resolve EEG preprocessing derivatives root."""
+        return resolve_eeg_deriv_root(
+            self.config,
+            task_is_rest=self._resolve_task_is_rest(),
+        )
     
     def _extract_preprocessing_params(
         self,

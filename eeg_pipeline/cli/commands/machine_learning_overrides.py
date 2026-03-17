@@ -12,9 +12,13 @@ def _update_path_config(args: argparse.Namespace, config: Any) -> None:
     """Update config with path overrides from arguments."""
     if args.bids_root is not None:
         config.setdefault("paths", {})["bids_root"] = args.bids_root
+    if getattr(args, "bids_rest_root", None) is not None:
+        config.setdefault("paths", {})["bids_rest_root"] = args.bids_rest_root
 
     if args.deriv_root is not None:
         config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+    if getattr(args, "deriv_rest_root", None) is not None:
+        config.setdefault("paths", {})["deriv_rest_root"] = args.deriv_rest_root
 
 
 def _parse_max_depth_values(raw_values: List[str]) -> List[Optional[int]]:

@@ -6,7 +6,7 @@ import argparse
 import json as json_module
 from typing import Any, Dict, List
 
-from eeg_pipeline.cli.common import resolve_task
+from eeg_pipeline.cli.common import get_deriv_root, resolve_task
 from eeg_pipeline.cli.commands.validate_checks import (
     _collect_subjects_to_validate,
     _output_json_report,
@@ -22,10 +22,8 @@ from eeg_pipeline.cli.commands.validate_checks import (
 
 def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the validate command."""
-    from eeg_pipeline.infra.paths import resolve_deriv_root
-
     task = resolve_task(args.task, config)
-    deriv_root = resolve_deriv_root(config=config)
+    deriv_root = get_deriv_root(config, command="validate")
 
     subjects_to_validate = _collect_subjects_to_validate(
         args.subjects,

@@ -48,8 +48,10 @@ type SubjectsResponse struct {
 type ConfigSummaryResponse struct {
 	Task               string `json:"task"`
 	BidsRoot           string `json:"bids_root"`
+	BidsRestRoot       string `json:"bids_rest_root"`
 	BidsFmriRoot       string `json:"bids_fmri_root"`
 	DerivRoot          string `json:"deriv_root"`
+	DerivRestRoot      string `json:"deriv_rest_root"`
 	SourceRoot         string `json:"source_root"`
 	PreprocessingNJobs int    `json:"preprocessing_n_jobs"`
 }
@@ -505,8 +507,10 @@ func LoadConfigSummary(repoRoot string) tea.Cmd {
 			Summary: messages.ConfigSummary{
 				Task:               response.Task,
 				BidsRoot:           response.BidsRoot,
+				BidsRestRoot:       response.BidsRestRoot,
 				BidsFmriRoot:       response.BidsFmriRoot,
 				DerivRoot:          response.DerivRoot,
+				DerivRestRoot:      response.DerivRestRoot,
 				SourceRoot:         response.SourceRoot,
 				PreprocessingNJobs: response.PreprocessingNJobs,
 			},
