@@ -5,7 +5,7 @@
     {
       "name": "right_operculo_periinsular",
       "hemisphere": "rh",
-      "label_file": "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/rh.study2_right_operculo_parietal.label",
+      "label_file": "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/config/roi_library/study2/fsaverage/label/rh.study2_right_operculo_parietal.label",
       "definition": {
         "type": "union_of_aparc_a2009s_labels",
         "labels": [
@@ -21,8 +21,8 @@
       "name": "midcingulate_pre_sma",
       "hemisphere": "both",
       "label_files": [
-        "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/lh.study2_cingulo_pre_sma.label",
-        "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/rh.study2_cingulo_pre_sma.label"
+        "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/config/roi_library/study2/fsaverage/label/lh.study2_cingulo_pre_sma.label",
+        "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/config/roi_library/study2/fsaverage/label/rh.study2_cingulo_pre_sma.label"
       ],
       "definition": {
         "type": "mid_anterior_cingulate_plus_custom_pre_sma",
