@@ -10,9 +10,6 @@ import (
 )
 
 const (
-	defaultViewHeight        = 40
-	headerOverheadLines      = 10
-	minimumVisibleLines      = 8
 	initialLineCapacity      = 256
 	maxAvailableItemsDisplay = 4
 )
@@ -433,19 +430,31 @@ type renderLine struct {
 	text string
 }
 
-func (m Model) buildAllLines() []renderLine {
+func (m Model) buildPlottingAdvancedLines() (lines []renderLine, cursorLine int) {
 	const labelWidth = 28
-	lines := make([]renderLine, 0, initialLineCapacity)
+	lines = make([]renderLine, 0, initialLineCapacity)
+	cursorLine = 0
 
 	rows := m.getPlottingAdvancedRows()
 	plotByID := m.buildPlotMap()
 
 	for i, row := range rows {
 		focused := m.advancedCursor == i
-		line := m.renderRow(row, plotByID, labelWidth, focused)
-		lines = append(lines, line...)
+		rowLines := m.renderRow(row, plotByID, labelWidth, focused)
+		if focused {
+			cursorLine = len(lines)
+			if m.expandedOption >= 0 && len(rowLines) > 1 && m.subCursor >= 0 {
+				cursorLine += 1 + min(m.subCursor, len(rowLines)-2)
+			}
+		}
+		lines = append(lines, rowLines...)
 	}
 
+	return lines, cursorLine
+}
+
+func (m Model) buildAllLines() []renderLine {
+	lines, _ := m.buildPlottingAdvancedLines()
 	return lines
 }
 
@@ -1726,9 +1735,8 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 }
 
 func (m Model) renderLinesWithScrolling(builder *strings.Builder, lines []renderLine) {
-	effectiveHeight := m.getEffectiveHeight()
-	maxLines := m.calculateMaxVisibleLines(effectiveHeight)
-	start, end, showScroll := m.calculateScrollBounds(len(lines), maxLines)
+	maxLines := scrollableVisibleLines(len(lines), m.availableAdvancedContentHeight())
+	start, end, showScroll := calculateExactScrollWindow(len(lines), m.advancedOffset, maxLines)
 
 	if showScroll && start > 0 {
 		scrollStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
@@ -1743,46 +1751,6 @@ func (m Model) renderLinesWithScrolling(builder *strings.Builder, lines []render
 		scrollStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		builder.WriteString(scrollStyle.Render(fmt.Sprintf("  ↓ %d more items below", len(lines)-end)) + "\n")
 	}
-}
-
-func (m Model) getEffectiveHeight() int {
-	if m.height <= 0 {
-		return defaultViewHeight
-	}
-	return m.height
-}
-
-func (m Model) calculateMaxVisibleLines(effectiveHeight int) int {
-	maxLines := effectiveHeight - headerOverheadLines
-	if maxLines < minimumVisibleLines {
-		return minimumVisibleLines
-	}
-	return maxLines
-}
-
-func (m Model) calculateScrollBounds(totalLines int, maxLines int) (start int, end int, showScroll bool) {
-	if totalLines <= maxLines {
-		return 0, totalLines, false
-	}
-
-	showScroll = true
-	start = m.advancedOffset
-	if start < 0 {
-		start = 0
-	}
-	if start > totalLines-maxLines {
-		start = totalLines - maxLines
-	}
-	if start < 0 {
-		start = 0
-	}
-
-	end = start + maxLines
-	if end > totalLines {
-		end = totalLines
-	}
-
-	return start, end, showScroll
 }
 
 func (m Model) renderExpandedListItems(items []string, isSelected func(string) bool) []renderLine {

@@ -10,7 +10,16 @@ if TYPE_CHECKING:
 
 from eeg_pipeline.context.features import FeatureContext
 from eeg_pipeline.analysis.features.selection import resolve_feature_categories
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    raise_if_rest_evoked_subtraction,
+    select_single_rest_analysis_segment,
+    validate_rest_configuration,
+    validate_rest_analysis_mode,
+    validate_rest_feature_categories,
+)
 from eeg_pipeline.types import PrecomputedData
+from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.config.loader import (
     get_condition_column_candidates,
     get_frequency_band_names,
@@ -101,6 +110,55 @@ def _resolve_condition_labels_from_events(
     return None
 
 
+def _resolve_pac_segment_window(ctx: FeatureContext, times: np.ndarray) -> tuple[str, Optional[tuple[float, float]]]:
+    """Resolve the PAC time window on the current TFR time axis."""
+    windows = getattr(ctx, "windows", None)
+    target_name = getattr(ctx, "name", None) or getattr(windows, "name", None)
+    if windows is None:
+        return str(target_name or "full"), None
+
+    if target_name:
+        resolved_masks = get_segment_masks(times, windows, ctx.config)
+        mask = resolved_masks.get(str(target_name))
+        if mask is not None and np.any(mask):
+            selected_name = str(target_name)
+        elif is_resting_state_feature_mode(ctx.config):
+            selected_name, mask = select_single_rest_analysis_segment(
+                resolved_masks,
+                feature_name="PAC",
+                target_name=str(target_name),
+            )
+            if ctx.logger is not None:
+                ctx.logger.info(
+                    "PAC: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    target_name,
+                    selected_name,
+                )
+        else:
+            raise ValueError(f"PAC: targeted window '{target_name}' has no valid mask.")
+        segment_range = getattr(windows, "ranges", {}).get(selected_name)
+        if segment_range is not None:
+            return selected_name, (float(segment_range[0]), float(segment_range[1]))
+
+        mask = np.asarray(mask, dtype=bool)
+        selected_times = np.asarray(times[mask], dtype=float)
+        if selected_times.size < 1:
+            raise ValueError(f"PAC: resolved segment '{selected_name}' has no samples on the TFR time axis.")
+        if selected_times.size == 1:
+            sfreq = float(ctx.epochs.info["sfreq"])
+            return selected_name, (float(selected_times[0]), float(selected_times[0] + 1.0 / sfreq))
+        step = float(np.median(np.diff(selected_times)))
+        return selected_name, (float(selected_times[0]), float(selected_times[-1] + step))
+
+    active_range = getattr(windows, "active_range", None)
+    if active_range is None:
+        return "full", None
+    if not (np.isfinite(active_range[0]) and np.isfinite(active_range[1])):
+        return "full", None
+    return "active", (float(active_range[0]), float(active_range[1]))
+
+
 def _prepare_precomputed_data(
     ctx: FeatureContext,
     working_epochs: "mne.Epochs",
@@ -171,6 +229,10 @@ def _prepare_precomputed_data(
     want_induced_precomputed = bool(subtract_evoked_cfg)
 
     if want_induced_precomputed:
+        raise_if_rest_evoked_subtraction(
+            ctx.config,
+            feature_name="Precomputed spectral",
+        )
         analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
         train_mask = getattr(ctx, "train_mask", None)
         if analysis_mode == "trial_ml_safe" and train_mask is None:
@@ -353,6 +415,10 @@ def _compute_tfr_for_features(
     ctx.power_evoked_subtracted = False
     ctx.power_evoked_subtracted_conditionwise = False
     if want_induced_power:
+        raise_if_rest_evoked_subtraction(
+            ctx.config,
+            feature_name="Power",
+        )
         analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
         train_mask = getattr(ctx, "train_mask", None)
         if analysis_mode == "trial_ml_safe" and train_mask is None:
@@ -655,20 +721,10 @@ def _extract_pac_features(
     freq_min, freq_max, n_freqs, *_ = get_tfr_config(ctx.config)
     frequencies = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
 
-    segment_window = None
-    segment_label = ctx.name or getattr(ctx.windows, "name", None) or "full"
-    segment_range = None
-    
-    if ctx.windows is not None:
-        if ctx.name and ctx.windows.ranges.get(ctx.name) is not None:
-            segment_range = ctx.windows.ranges.get(ctx.name)
-        elif hasattr(ctx.windows, "active_range") and ctx.windows.active_range is not None:
-            active_range = ctx.windows.active_range
-            if np.isfinite(active_range[0]) and np.isfinite(active_range[1]):
-                segment_range = active_range
-
-        if segment_range is not None:
-            segment_window = (float(segment_range[0]), float(segment_range[1]))
+    segment_label, segment_window = _resolve_pac_segment_window(
+        ctx,
+        np.asarray(tfr_complex.times, dtype=float),
+    )
 
     pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = (
         compute_pac_comodulograms(
@@ -848,6 +904,9 @@ def extract_all_features(
         len(ctx.feature_categories), range_label,
         ", ".join(ctx.spatial_modes) if ctx.spatial_modes else "all",
     )
+    validate_rest_configuration(ctx.config)
+    validate_rest_feature_categories(ctx.feature_categories, ctx.config)
+    validate_rest_analysis_mode(ctx.config, getattr(ctx, "analysis_mode", None))
 
     power_bands = ctx.bands if ctx.bands else get_frequency_band_names(ctx.config)
     ctx._original_epochs = ctx.epochs
@@ -1346,7 +1405,16 @@ def extract_precomputed_features(
 ) -> ExtractionResult:
     """Extract features from precomputed intermediate data."""
     if feature_groups is None:
-        feature_groups = ["erds", "spectral"]
+        feature_groups = ["spectral"]
+
+    validate_rest_configuration(config)
+    validate_rest_feature_categories(feature_groups, config)
+    validate_rest_analysis_mode(
+        config,
+        config.get("feature_engineering.analysis_mode", None)
+        if hasattr(config, "get")
+        else None,
+    )
 
     band_dependent_groups = ["erds", "spectral", "connectivity", "pac", "ratios"]
     needs_bands = any(group in feature_groups for group in band_dependent_groups)

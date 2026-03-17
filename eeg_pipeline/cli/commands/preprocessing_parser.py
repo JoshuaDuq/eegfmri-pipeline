@@ -39,7 +39,20 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     prep_group.add_argument("--eog-channels", type=str, default=None, help="EOG channels (comma-separated, e.g., 'Fp1,Fp2')")
     prep_group.add_argument("--ecg-channels", type=str, default=None, help="ECG channels (comma-separated, e.g., 'ECG')")
     prep_group.add_argument("--random-state", type=int, default=None, help="Random seed for reproducibility")
-    prep_group.add_argument("--task-is-rest", action="store_true", default=False, help="Whether task is resting-state")
+    rest_group = prep_group.add_mutually_exclusive_group()
+    rest_group.add_argument(
+        "--task-is-rest",
+        dest="task_is_rest",
+        action="store_true",
+        default=None,
+        help="Enable resting-state preprocessing",
+    )
+    rest_group.add_argument(
+        "--no-task-is-rest",
+        dest="task_is_rest",
+        action="store_false",
+        help="Disable resting-state preprocessing",
+    )
     prep_group.add_argument("--no-icalabel", dest="use_icalabel", action="store_false", help="Disable mne-icalabel, use MNE-BIDS pipeline ICA detection")
     prep_group.add_argument("--no-pyprep", dest="use_pyprep", action="store_false", help="Disable PyPREP bad channel detection")
 

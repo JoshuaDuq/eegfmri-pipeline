@@ -22,6 +22,13 @@ from scipy.optimize import curve_fit
 from scipy.signal import peak_widths
 from joblib import Parallel, delayed
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    raise_if_rest_evoked_subtraction,
+    select_single_rest_analysis_segment,
+    validate_rest_configuration,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_extractor_inputs
@@ -1119,10 +1126,35 @@ def _compute_periodic_peak_metrics_for_band(
 
 
 # Window mask rebuilding (shared between extract_aperiodic_features and extract_aperiodic_from_precomputed)
+def _build_window_masks_from_ranges(
+    windows: Any,
+    times: np.ndarray,
+) -> Dict[str, np.ndarray]:
+    segments: Dict[str, np.ndarray] = {}
+    if windows is None or not hasattr(windows, "ranges"):
+        return segments
+
+    for seg_name, seg_range in windows.ranges.items():
+        if not isinstance(seg_range, (list, tuple)) or len(seg_range) < 2:
+            continue
+        tmin, tmax = float(seg_range[0]), float(seg_range[1])
+        mask = (times >= tmin) & (times < tmax)
+        if np.any(mask):
+            segments[str(seg_name)] = mask
+    return segments
+
+
+def _valid_analysis_window_masks(
+    segments: Dict[str, np.ndarray],
+) -> Dict[str, np.ndarray]:
+    return valid_rest_analysis_segment_masks(segments)
+
+
 def _rebuild_window_masks(
     windows: Any,
     times: np.ndarray,
     target_name: Optional[str],
+    config: Any,
     logger: Any,
 ) -> Tuple[Dict[str, np.ndarray], Optional[str]]:
     """Rebuild window masks for the current time axis.
@@ -1132,33 +1164,52 @@ def _rebuild_window_masks(
     """
     segments: Dict[str, np.ndarray] = {}
     error_msg: Optional[str] = None
+    task_is_rest = is_resting_state_feature_mode(config)
     
     if target_name and windows is not None:
-        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
-        if window_range is not None and len(window_range) >= 2:
-            tmin, tmax = float(window_range[0]), float(window_range[1])
-            mask = (times >= tmin) & (times < tmax)
-        else:
-            mask = windows.get_mask(target_name)
-            if mask is not None and len(mask) != len(times):
+        explicit_target_mask_defined = False
+        mask = windows.get_mask(target_name)
+        if mask is not None:
+            mask = np.asarray(mask, dtype=bool)
+            if len(mask) != len(times):
                 mask = None
+            else:
+                explicit_target_mask_defined = True
+        if mask is None:
+            window_range = windows.ranges.get(target_name) if hasattr(windows, "ranges") else None
+            if window_range is not None and len(window_range) >= 2:
+                tmin, tmax = float(window_range[0]), float(window_range[1])
+                mask = (times >= tmin) & (times < tmax)
         
         if mask is not None and len(mask) == len(times) and np.any(mask):
             segments = {target_name: mask}
         else:
+            if task_is_rest:
+                fallback_masks = _build_window_masks_from_ranges(windows, times)
+                if explicit_target_mask_defined:
+                    fallback_masks.pop(str(target_name), None)
+                segment_name, segment_mask = select_single_rest_analysis_segment(
+                    fallback_masks,
+                    feature_name="Aperiodic",
+                    target_name=str(target_name),
+                )
+                logger.info(
+                    "Aperiodic: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    target_name,
+                    segment_name,
+                )
+                return {segment_name: segment_mask}, None
+
             logger.error(
                 "Aperiodic: targeted window '%s' has no valid mask; skipping.",
                 target_name,
             )
             error_msg = f"invalid_target_window_mask:{target_name}"
     else:
-        if windows is not None and hasattr(windows, 'ranges'):
-            for seg_name, seg_range in windows.ranges.items():
-                if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
-                    tmin, tmax = float(seg_range[0]), float(seg_range[1])
-                    mask = (times >= tmin) & (times < tmax)
-                    if np.any(mask):
-                        segments[seg_name] = mask
+        segments = _build_window_masks_from_ranges(windows, times)
+        if task_is_rest:
+            segments = _valid_analysis_window_masks(segments)
     
     return segments, error_msg
 
@@ -1613,6 +1664,7 @@ def extract_aperiodic_features(
     
     config = ctx.config
     logger = ctx.logger
+    validate_rest_configuration(config)
     freq_bands_override = getattr(ctx, "frequency_bands", None)
     sfreq = epochs.info["sfreq"]
     times = epochs.times
@@ -1638,6 +1690,11 @@ def extract_aperiodic_features(
     min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", _DEFAULT_MIN_SEGMENT_SEC))
     if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
         min_segment_sec = _DEFAULT_MIN_SEGMENT_SEC
+    if bool(aperiodic_cfg.get("subtract_evoked", False)):
+        raise_if_rest_evoked_subtraction(
+            config,
+            feature_name="Aperiodic",
+        )
     
     all_data: Dict[str, Any] = {}
     qc_payload: Dict[str, Any] = {
@@ -1652,7 +1709,7 @@ def extract_aperiodic_features(
     # CRITICAL: Rebuild masks for the current (potentially cropped) time axis
     # This prevents shape mismatches when epochs have been cropped after windows were built
     segments, error_msg = _rebuild_window_masks(
-        windows, epochs.times, target_name, logger
+        windows, epochs.times, target_name, config, logger
     )
     if error_msg:
         qc_payload["error"] = error_msg
@@ -1760,6 +1817,7 @@ def extract_aperiodic_from_precomputed(
     
     if config is None:
         raise ValueError("Aperiodic extraction from precomputed data requires precomputed.config.")
+    validate_rest_configuration(config)
     
     n_epochs = precomputed.data.shape[0]
     ch_names = list(precomputed.ch_names)
@@ -1773,6 +1831,11 @@ def extract_aperiodic_from_precomputed(
     min_fit_points = int(aperiodic_cfg.get("min_fit_points", _DEFAULT_MIN_FIT_POINTS))
     model = str(aperiodic_cfg.get("model", "fixed")).strip().lower()
     subtract_evoked = bool(aperiodic_cfg.get("subtract_evoked", False))
+    if subtract_evoked:
+        raise_if_rest_evoked_subtraction(
+            config,
+            feature_name="Aperiodic",
+        )
     mode = str(
         analysis_mode
         if analysis_mode is not None
@@ -1836,7 +1899,7 @@ def extract_aperiodic_from_precomputed(
         logger = logging.getLogger("aperiodic")
     
     segments, error_msg = _rebuild_window_masks(
-        windows, times, target_name, logger
+        windows, times, target_name, config, logger
     )
     if error_msg:
         qc_payload["error"] = error_msg

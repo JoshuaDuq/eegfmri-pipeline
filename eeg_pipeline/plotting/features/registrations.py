@@ -62,6 +62,7 @@ from eeg_pipeline.plotting.features.power import (
     plot_band_power_topomaps,
     plot_band_power_topomaps_window_contrast,
     plot_power_spectral_density,
+    plot_power_timecourse_by_condition,
     plot_band_power_evolution,
 )
 
@@ -542,6 +543,32 @@ def plot_psd_visualization(ctx: FeaturePlotContext, saved_files):
         "power",
         None,
         plot_power_spectral_density,
+        tfr,
+        ctx.subject,
+        ctx.subdir("power"),
+        ctx.logger,
+        ctx.aligned_events,
+        ctx.config,
+    )
+
+
+@VisualizationRegistry.register("power")
+def plot_power_timecourse_visualization(ctx: FeaturePlotContext, saved_files):
+    """Generate time-resolved power trajectories by condition."""
+    if ctx.epochs is None:
+        return
+
+    tfr = ctx.get_or_compute_tfr()
+    if tfr is None:
+        return
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "power_timecourse",
+        "power",
+        None,
+        plot_power_timecourse_by_condition,
         tfr,
         ctx.subject,
         ctx.subdir("power"),

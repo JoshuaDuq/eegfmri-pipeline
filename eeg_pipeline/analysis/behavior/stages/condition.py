@@ -6,7 +6,31 @@ from typing import Any, Callable, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_bool, get_config_int, get_config_value
+from eeg_pipeline.utils.config.loader import get_config_bool, get_config_value
+
+
+def _resolve_condition_permutation_count(config: Any, *, perm_enabled: bool) -> int:
+    """Resolve the effective condition permutation count from canonical config."""
+    if not perm_enabled:
+        return 0
+
+    scoped = get_config_value(
+        config,
+        "behavior_analysis.condition.permutation.n_permutations",
+        None,
+    )
+    if scoped is not None:
+        return int(scoped)
+
+    statistics = get_config_value(
+        config,
+        "behavior_analysis.statistics.n_permutations",
+        None,
+    )
+    if statistics is not None:
+        return int(statistics)
+
+    return 1000
 
 
 def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
@@ -82,11 +106,7 @@ def stage_condition_column_impl(
     primary_unit = str(get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial")).strip().lower()
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
     perm_enabled = get_config_bool(ctx.config, "behavior_analysis.condition.permutation.enabled", False)
-    n_perm = get_config_int(
-        ctx.config,
-        "behavior_analysis.condition.permutation.n_permutations",
-        get_config_int(ctx.config, "behavior_analysis.statistics.n_permutations", 0),
-    )
+    n_perm = _resolve_condition_permutation_count(ctx.config, perm_enabled=perm_enabled)
     if primary_unit in {"trial", "trialwise"} and (not perm_enabled or n_perm <= 0) and not allow_iid_trials:
         raise ValueError(
             "Trial-level condition comparisons require a valid non-i.i.d inference method. "
@@ -123,7 +143,7 @@ def stage_condition_column_impl(
         ctx.logger.info("Condition column: no feature columns found; skipping.")
         return pd.DataFrame()
 
-    min_trials_required = 2 if use_run_unit else 10
+    min_trials_required = 2
     should_skip, skip_reason = check_early_exit_conditions_fn(
         df_trials,
         feature_cols,

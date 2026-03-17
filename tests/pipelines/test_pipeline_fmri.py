@@ -96,7 +96,7 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
         self.assertTrue(fake_builder.resample_to_freesurfer.called)
         self.assertGreaterEqual(out_mni_loads["count"], 1)
 
-    def test_mni_save_and_contrast_compute_exceptions_swallowed(self):
+    def test_mni_save_and_contrast_compute_exceptions_surface(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
 
         tmp = Path(tempfile.mkdtemp())
@@ -158,9 +158,10 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
                 "nibabel": fake_nib,
             },
         ):
-            p.process_subject("0001", "t", contrast_cfg=Cfg(), plotting_cfg=PlotCfg(), dry_run=False)
+            with self.assertRaisesRegex(RuntimeError, "save-fail"):
+                p.process_subject("0001", "t", contrast_cfg=Cfg(), plotting_cfg=PlotCfg(), dry_run=False)
 
-    def test_mni_build_exception_logs_warning(self):
+    def test_mni_build_exception_surfaces(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
 
         tmp = Path(tempfile.mkdtemp())
@@ -218,9 +219,8 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
                 "nibabel": fake_nib,
             },
         ):
-            p.process_subject("0001", "t", contrast_cfg=Cfg(), plotting_cfg=PlotCfg(), dry_run=False)
-
-        self.assertTrue(p.logger.warning.called)
+            with self.assertRaisesRegex(RuntimeError, "mni-build-fail"):
+                p.process_subject("0001", "t", contrast_cfg=Cfg(), plotting_cfg=PlotCfg(), dry_run=False)
 
 class TestFmriPreprocessingGapfill(unittest.TestCase):
     def test_constructor_and_missing_paths_errors(self):
@@ -539,65 +539,6 @@ class TestFmriDeep(unittest.TestCase):
             ):
                 p.process_subject("0001", task="task", contrast_cfg=contrast_cfg, plotting_cfg=plotting_cfg, dry_run=False)
 
-        def test_fmri_analysis_plotting_exception_and_sidecar_exception(self):
-            from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
-
-            tmp = Path(tempfile.mkdtemp())
-            bids_root = tmp / "bids"
-            bids_root.mkdir(parents=True, exist_ok=True)
-
-            p = object.__new__(FmriAnalysisPipeline)
-            p.config = DotConfig({"paths": {"bids_fmri_root": str(bids_root)}})
-            p.deriv_root = tmp / "deriv"
-            p.deriv_root.mkdir(parents=True, exist_ok=True)
-            p.logger = Mock()
-
-            @dataclass
-            class Cfg:
-                name: str = "pain"
-                output_type: str = "z-score"
-                resample_to_freesurfer: bool = False
-                fmriprep_space: str = "T1w"
-
-            @dataclass
-            class PlotCfg:
-                enabled: bool = True
-                space: str = "native"
-                include_effect_size: bool = True
-                include_standard_error: bool = True
-
-                def normalized(self):
-                    return self
-
-            fake_builder = types.SimpleNamespace(
-                build_contrast_from_runs_detailed=lambda **kwargs: ("img", {"output_type": "z_score"}, SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")), "def", None),
-                resample_to_freesurfer=lambda img, fs_dir: img,
-                ContrastBuilderConfig=Cfg,
-            )
-            fake_nib = types.SimpleNamespace(save=lambda img, path: None, load=lambda path: "img")
-            fake_plot = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
-            fake_report = types.SimpleNamespace(
-                run_fmri_plotting_and_report=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("plot-fail"))
-            )
-
-            with patch.dict(
-                sys.modules,
-                {
-                    "fmri_pipeline.analysis.contrast_builder": fake_builder,
-                    "nibabel": fake_nib,
-                    "fmri_pipeline.analysis.plotting_config": fake_plot,
-                    "fmri_pipeline.analysis.reporting": fake_report,
-                },
-            ):
-                p.process_subject("0001", task="t", contrast_cfg=Cfg(), plotting_cfg=PlotCfg(), dry_run=False)
-            self.assertTrue(p.logger.warning.called)
-
-            # sidecar write error swallowed
-            with patch.dict(sys.modules, {"fmri_pipeline.analysis.contrast_builder": fake_builder, "nibabel": fake_nib}), patch(
-                "pathlib.Path.write_text", side_effect=RuntimeError("no-write")
-            ):
-                p.process_subject("0001", task="t", contrast_cfg=Cfg(), plotting_cfg=None, dry_run=False)
-
         def test_fmri_preprocessing_non_dry_executes_stream(self):
             from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline
 
@@ -681,9 +622,8 @@ class TestFmriCompletion(unittest.TestCase):
                     raise RuntimeError("bad")
 
             p.config = BadCfg()
-            self.assertIsNotNone(p._discover_signature_root_and_specs()[0])
-            p.deriv_root = object()
-            self.assertIsNone(p._discover_signature_root_and_specs()[0])
+            with self.assertRaisesRegex(RuntimeError, "bad"):
+                p._discover_signature_root_and_specs()
 
         def test_fmri_analysis_init_and_error_paths(self):
             from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
@@ -714,8 +654,9 @@ class TestFmriCompletion(unittest.TestCase):
                     raise RuntimeError("bad")
 
             p.config = BadCfg()
-            p.deriv_root = object()  # force fallback path failure branch
-            self.assertIsNone(p._discover_signature_root_and_specs()[0])
+            p.deriv_root = object()
+            with self.assertRaisesRegex(RuntimeError, "bad"):
+                p._discover_signature_root_and_specs()
 
         def test_fmri_analysis_resample_error_paths(self):
             from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline

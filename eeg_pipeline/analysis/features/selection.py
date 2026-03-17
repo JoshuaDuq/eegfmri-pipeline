@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
+from eeg_pipeline.analysis.features.rest import validate_rest_feature_categories
 
 
 def resolve_feature_categories(config: Any, requested: Optional[List[str]]) -> List[str]:
@@ -44,5 +45,5 @@ def resolve_feature_categories(config: Any, requested: Optional[List[str]]) -> L
             f"Valid options: {', '.join(FEATURE_CATEGORIES)}"
         )
 
+    validate_rest_feature_categories(categories, config)
     return categories
-

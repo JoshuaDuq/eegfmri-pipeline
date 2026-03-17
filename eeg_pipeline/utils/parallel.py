@@ -165,14 +165,17 @@ def _compute_ttest_statistics(
     """
     from scipy import stats
 
+    if paired and len(cond_a_values) != len(cond_b_values):
+        raise ValueError(
+            "Paired t-tests require equal-length condition vectors. "
+            f"Got len(cond_a)={len(cond_a_values)} and len(cond_b)={len(cond_b_values)}."
+        )
+
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
             if paired:
-                if len(cond_a_values) != len(cond_b_values):
-                    t_stat, p_val = stats.ttest_ind(cond_a_values, cond_b_values, equal_var=False)
-                else:
-                    t_stat, p_val = stats.ttest_rel(cond_a_values, cond_b_values)
+                t_stat, p_val = stats.ttest_rel(cond_a_values, cond_b_values)
             else:
                 t_stat, p_val = stats.ttest_ind(cond_a_values, cond_b_values, equal_var=False)
             return float(t_stat), float(p_val)

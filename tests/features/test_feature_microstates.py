@@ -125,6 +125,42 @@ class TestMicrostateFeatures(unittest.TestCase):
         )
         self.assertTrue(bool(df.attrs.get("microstate_labels_canonical")))
 
+    def test_resting_state_uses_available_analysis_segment_when_target_window_empty(self):
+        from eeg_pipeline.analysis.features.microstates import extract_microstate_features
+
+        epochs, templates, ch_names = self._build_epochs()
+        analysis_mask = np.ones(epochs.get_data().shape[-1], dtype=bool)
+        empty_mask = np.zeros(epochs.get_data().shape[-1], dtype=bool)
+        ctx = SimpleNamespace(
+            epochs=epochs,
+            windows=_NamedWindowStub("active", {"active": empty_mask, "analysis": analysis_mask}),
+            name="active",
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "task_is_rest": True,
+                        "microstates": {
+                            "n_states": 4,
+                            "min_duration_ms": 0.0,
+                            "min_peak_distance_ms": 5.0,
+                            "max_gfp_peaks_per_epoch": 200,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("microstate-rest"),
+            fixed_templates=templates,
+            fixed_template_ch_names=ch_names,
+            fixed_template_labels=["a", "b", "c", "d"],
+        )
+
+        df, cols = extract_microstate_features(ctx)
+
+        self.assertFalse(df.empty)
+        self.assertIn("microstates_analysis_broadband_global_coverage_a", cols)
+        self.assertIn("microstates_analysis_broadband_global_trans_a_to_b_prob", cols)
+        self.assertNotIn("microstates_active_broadband_global_coverage_a", cols)
+
     def test_microstates_category_registered(self):
         from eeg_pipeline.pipelines import constants
 

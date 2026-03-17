@@ -107,15 +107,12 @@ class FeatureContext:
             return
         
         if self.train_mask is None:
-            self.logger.warning(
-                "analysis_mode='trial_ml_safe' but train_mask is None. "
-                "Cross-trial features (%s) will be skipped to prevent CV leakage. "
-                "Provide train_mask or use analysis_mode='group_stats'.",
-                ", ".join(sorted(cross_trial_requested)),
+            requested = ", ".join(sorted(cross_trial_requested))
+            raise ValueError(
+                "analysis_mode='trial_ml_safe' requires train_mask when requesting "
+                f"cross-trial features ({requested}). "
+                "Provide train_mask or use analysis_mode='group_stats'."
             )
-            self.feature_categories = [
-                cat for cat in self.feature_categories if cat not in CROSS_TRIAL_FEATURES
-            ]
     
     def _resolve_spatial_modes(self) -> None:
         """Resolve spatial modes from config if using default."""
@@ -186,4 +183,3 @@ class FeatureContext:
         if not family:
             return None
         return self.precomputed_by_family.get(family)
-

@@ -123,12 +123,16 @@ class TestAllPipelines(unittest.TestCase):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
         pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.name = "preprocessing"
+        pipeline.config = DotConfig({"project": {"task": "task"}})
+        pipeline.logger = Mock()
+        pipeline.deriv_root = Path(tempfile.mkdtemp())
         progress = _DummyProgress()
 
         with patch.object(
             PreprocessingPipeline,
             "_extract_preprocessing_params",
-            return_value=("task", "ica", True, True, 2, progress),
+            return_value=("task", "ica", True, True, False, 2, progress),
         ), patch.object(
             PreprocessingPipeline,
             "_get_steps_for_mode",
@@ -236,8 +240,10 @@ class TestAllPipelines(unittest.TestCase):
         from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
         pipeline = object.__new__(MLPipeline)
+        pipeline.name = "machine_learning"
         pipeline.config = DotConfig({"project": {"task": "task"}})
         pipeline.logger = Mock()
+        pipeline.deriv_root = Path(tempfile.mkdtemp())
 
         params = {
             "cv_scope": "group",
@@ -286,8 +292,10 @@ class TestAllPipelines(unittest.TestCase):
         from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
         pipeline = object.__new__(MLPipeline)
+        pipeline.name = "machine_learning"
         pipeline.config = DotConfig({"project": {"task": "task"}})
         pipeline.logger = Mock()
+        pipeline.deriv_root = Path(tempfile.mkdtemp())
 
         progress = _DummyProgress()
         params = {

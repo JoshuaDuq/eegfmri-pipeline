@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import mne
+import numpy as np
 import pandas as pd
 
 from ..config.loader import ConfigDict
@@ -96,9 +97,17 @@ def _find_missing_event_columns(
         if logical_name == "outcome":
             if resolve_outcome_column(events_df, config) is not None:
                 continue
+            missing_columns.append(
+                f"event_columns.{logical_name} (tried: {candidates})"
+            )
+            continue
         elif logical_name == "predictor":
             if resolve_predictor_column(events_df, config) is not None:
                 continue
+            missing_columns.append(
+                f"event_columns.{logical_name} (tried: {candidates})"
+            )
+            continue
         elif logical_name == "binary_outcome":
             if config is not None and find_binary_outcome_column_in_events(events_df, config) is not None:
                 continue
@@ -121,13 +130,65 @@ def _validate_align_mode(align: str) -> None:
         )
 
 
+def _resolve_task_is_rest(
+    config: EEGConfig,
+    task_is_rest: Optional[bool],
+) -> bool:
+    if task_is_rest is not None:
+        return bool(task_is_rest)
+    return bool(config.get("preprocessing.task_is_rest", False))
+
+
+def _validate_rest_epoch_overlap_for_analysis(
+    config: EEGConfig,
+    task_is_rest: bool,
+) -> None:
+    if not task_is_rest:
+        return
+
+    raw_overlap = config.get("preprocessing.rest_epochs_overlap", 0.0)
+    try:
+        overlap = float(raw_overlap)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "preprocessing.rest_epochs_overlap must be numeric for resting-state analysis loading."
+        ) from exc
+
+    if not np.isfinite(overlap):
+        raise ValueError(
+            "preprocessing.rest_epochs_overlap must be finite for resting-state analysis loading."
+        )
+    if overlap < 0:
+        raise ValueError(
+            "preprocessing.rest_epochs_overlap must be greater than or equal to 0."
+        )
+    if overlap > 0:
+        raise ValueError(
+            "Resting-state aligned analysis does not support preprocessing.rest_epochs_overlap > 0, "
+            "because overlapping epochs would be treated as independent trial rows. "
+            "Set preprocessing.rest_epochs_overlap = 0."
+        )
+
+
 def _handle_missing_events(
     epochs: mne.Epochs,
     align: str,
     subject: str,
     task: str,
     logger: logging.Logger,
-) -> Tuple[mne.Epochs, None]:
+    task_is_rest: bool,
+) -> Tuple[mne.Epochs, Optional[pd.DataFrame]]:
+    if task_is_rest:
+        logger.info(
+            "Clean events.tsv not found for sub-%s, task-%s; synthesizing resting-state trial alignment.",
+            subject,
+            task,
+        )
+        rest_events = pd.DataFrame(
+            {"trial_id": np.arange(1, len(epochs) + 1, dtype=int)}
+        )
+        return epochs, rest_events
+
     if align == "strict":
         raise ValueError(
             f"Clean events.tsv not found for sub-{subject}, task-{task}. "
@@ -145,6 +206,7 @@ def load_epochs_for_analysis(
     deriv_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
     config: Optional[EEGConfig] = None,
+    task_is_rest: Optional[bool] = None,
     constants: Optional[Any] = None,
     use_cache: bool = True,
     required_event_groups: Optional[Any] = None,
@@ -157,6 +219,8 @@ def load_epochs_for_analysis(
         raise ValueError("config is required for load_epochs_for_analysis")
 
     _validate_align_mode(align)
+    resolved_task_is_rest = _resolve_task_is_rest(config, task_is_rest)
+    _validate_rest_epoch_overlap_for_analysis(config, resolved_task_is_rest)
     
     epochs_path = find_clean_epochs_path(
         subject, task, deriv_root=deriv_root, config=config, constants=constants
@@ -179,7 +243,14 @@ def load_epochs_for_analysis(
     )
     
     if clean_events_path is None or not clean_events_path.exists():
-        return _handle_missing_events(epochs, align, subject, task, logger)
+        return _handle_missing_events(
+            epochs,
+            align,
+            subject,
+            task,
+            logger,
+            resolved_task_is_rest,
+        )
 
     events_df = pd.read_csv(clean_events_path, sep="\t")
     require_trial_id_column(

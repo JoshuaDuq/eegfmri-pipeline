@@ -202,8 +202,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		totalLines += len(m.GetDiscoveredColumnValues(m.sourceLocContrastCondition))
 	}
 
-	startLine, endLine, showScrollIndicators := calculateScrollWindow(
-		totalLines, m.advancedOffset, m.availableAdvancedContentHeight())
+	startLine, endLine, showScrollIndicators := calculateExactScrollWindow(
+		totalLines, m.advancedOffset, scrollableVisibleLines(totalLines, m.availableAdvancedContentHeight()))
 
 	// Show scroll indicator for items above
 	if showScrollIndicators && startLine > 0 {

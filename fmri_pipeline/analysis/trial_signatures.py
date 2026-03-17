@@ -6,7 +6,7 @@ import logging
 import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from fmri_pipeline.analysis.multivariate_signatures import compute_signature_expression
 from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
@@ -743,6 +743,7 @@ def run_trial_signature_extraction_for_subject(
     signature_root: Optional[Path],
     signature_specs: Optional[List[Any]] = None,
     output_dir: Optional[Path] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """
     Compute trial-wise beta maps (beta-series or LSS) and multivariate signature expression.
@@ -882,6 +883,10 @@ def run_trial_signature_extraction_for_subject(
             run_regressors_by_condition: Dict[str, List[str]] = {}
 
             for t in trials:
+                if progress_callback is not None:
+                    progress_callback(
+                        f"beta-series {sub_label} {t.run_label} trial-{t.trial_index:03d}"
+                    )
                 trial_infos.append(t)
                 trial_rows_out.append(
                     {
@@ -970,6 +975,10 @@ def run_trial_signature_extraction_for_subject(
             # LSS: one model per trial within each run
             # Build the run-level trial list once, then fit per-trial models.
             for t in trials:
+                if progress_callback is not None:
+                    progress_callback(
+                        f"lss {sub_label} {t.run_label} trial-{t.trial_index:03d}"
+                    )
                 trial_infos.append(t)
                 trial_rows_out.append(
                     {
@@ -1060,7 +1069,14 @@ def run_trial_signature_extraction_for_subject(
 
     # Write metadata tables
     _write_tsv(out_dir / "trials.tsv", trial_rows_out)
-    _write_tsv(out_dir / "signatures" / "trial_signature_expression.tsv", trial_sig_rows)
+    trial_signature_path = out_dir / "signatures" / "trial_signature_expression.tsv"
+    if signature_root is not None and signature_specs:
+        _write_tsv(
+            trial_signature_path,
+            trial_sig_rows,
+        )
+    elif trial_signature_path.exists():
+        trial_signature_path.unlink()
 
     # Condition/group summary maps + signatures
     cond_rows: List[Dict[str, Any]] = []

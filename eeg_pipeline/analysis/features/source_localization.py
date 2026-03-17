@@ -23,7 +23,13 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    select_single_rest_analysis_segment,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.data.source_localization_paths import source_localization_estimates_dir
 from eeg_pipeline.utils.config.loader import get_config_float, get_config_int, get_config_value, get_frequency_bands
 
@@ -36,6 +42,58 @@ def _as_path(value: Any) -> Optional[Path]:
     if value is None:
         return None
     return Path(str(value)).expanduser()
+
+
+def _valid_source_segment_masks(
+    masks: Dict[str, np.ndarray],
+) -> Dict[str, np.ndarray]:
+    return valid_rest_analysis_segment_masks(masks)
+
+
+def _resolve_source_segment(
+    *,
+    times: Optional[np.ndarray],
+    windows: Any,
+    target_name: Optional[str],
+    config: Any,
+    logger: Optional[logging.Logger],
+    feature_name: str,
+) -> Tuple[str, Optional[np.ndarray]]:
+    if not target_name or windows is None:
+        return "full", None
+
+    mask = windows.get_mask(target_name)
+    if mask is not None and np.any(mask):
+        return str(target_name), np.asarray(mask, dtype=bool)
+
+    if times is None:
+        raise ValueError(
+            "Source connectivity requires epochs.times when time-window masks are specified."
+        )
+
+    if not is_resting_state_feature_mode(config):
+        if logger is not None:
+            logger.error(
+                "%s: targeted window '%s' has no valid mask; skipping.",
+                feature_name,
+                target_name,
+            )
+        return str(target_name), np.zeros(times.shape, dtype=bool)
+
+    segment_name, segment_mask = select_single_rest_analysis_segment(
+        get_segment_masks(times, windows, config),
+        feature_name=feature_name,
+        target_name=str(target_name),
+    )
+    if logger is not None:
+        logger.info(
+            "%s: resting-state mode found no valid target window '%s'; "
+            "using available analysis segment '%s' instead.",
+            feature_name,
+            target_name,
+            segment_name,
+        )
+    return str(segment_name), np.asarray(segment_mask, dtype=bool)
 
 
 @dataclass(frozen=True)
@@ -420,6 +478,13 @@ def _setup_surface_forward_model_configured(
         bem=bem,
         eeg=True,
         mindist=float(mindist_mm),
+        verbose=False,
+    )
+    fwd = mne.convert_forward_solution(
+        fwd,
+        surf_ori=True,
+        copy=False,
+        use_cps=True,
         verbose=False,
     )
     if logger:
@@ -1677,6 +1742,11 @@ def _load_source_contrast_config(config: Any) -> SourceContrastConfig:
         )
 
     if enabled:
+        if is_resting_state_feature_mode(config):
+            raise ValueError(
+                "feature_engineering.sourcelocalization.contrast.enabled is not scientifically "
+                "valid when feature_engineering.task_is_rest=true."
+            )
         if not condition_column:
             raise ValueError(
                 "feature_engineering.sourcelocalization.contrast.condition_column is required when "
@@ -2593,7 +2663,40 @@ def extract_source_localization_features(
 
         roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
     
-    segment_label = ctx.name or getattr(ctx.windows, "name", None) or "full"
+    segment_label, segment_mask = _resolve_source_segment(
+        times=np.asarray(getattr(epochs, "times", None), dtype=float)
+        if getattr(epochs, "times", None) is not None
+        else None,
+        windows=getattr(ctx, "windows", None),
+        target_name=getattr(ctx, "name", None),
+        config=config,
+        logger=logger,
+        feature_name="Source localization",
+    )
+    if segment_mask is not None and not np.any(segment_mask):
+        return pd.DataFrame(), []
+
+    if fmri_cfg.enabled:
+        masked_family_series: Dict[str, Tuple[np.ndarray, List[str]]] = {}
+        for family_name, (family_roi_data, family_label_names) in fmri_family_series.items():
+            family_roi_array = np.asarray(family_roi_data, dtype=float)
+            if segment_mask is not None:
+                if family_roi_array.shape[-1] != int(segment_mask.shape[0]):
+                    raise ValueError(
+                        "Source localization segment mask length does not match extracted ROI time-courses "
+                        f"(mask={int(segment_mask.shape[0])}, roi_times={int(family_roi_array.shape[-1])})."
+                    )
+                family_roi_array = family_roi_array[..., segment_mask]
+            masked_family_series[family_name] = (family_roi_array, family_label_names)
+        fmri_family_series = masked_family_series
+    elif segment_mask is not None:
+        if roi_data.shape[-1] != int(segment_mask.shape[0]):
+            raise ValueError(
+                "Source localization segment mask length does not match extracted ROI time-courses "
+                f"(mask={int(segment_mask.shape[0])}, roi_times={int(roi_data.shape[-1])})."
+            )
+        roi_data = roi_data[..., segment_mask]
+
     if fmri_metadata_payload is not None:
         sidecar_path = _write_fmri_constraint_metadata_sidecar(
             ctx=ctx,
@@ -2715,6 +2818,10 @@ def extract_source_localization_features(
         if logger:
             logger.info("Saved source space for STC plotting: %s", str(src_path))
 
+        segment_times = np.asarray(epochs.times, dtype=float)
+        if segment_mask is not None:
+            segment_times = segment_times[np.asarray(segment_mask, dtype=bool)]
+
         conditions_list = ctx.aligned_events[cond_col].unique()
         for cond in conditions_list:
             if pd.isna(cond):
@@ -2726,6 +2833,8 @@ def extract_source_localization_features(
                 continue
 
             cond_stc_data = np.stack([stcs[idx].data for idx in cond_indices], axis=0)
+            if segment_mask is not None:
+                cond_stc_data = cond_stc_data[..., np.asarray(segment_mask, dtype=bool)]
 
             for band in bands:
                 if band not in freq_bands:
@@ -2791,7 +2900,7 @@ def extract_source_localization_features(
                             tfr_obj = AverageTFR(
                                 info=info,
                                 data=mean_power_tfr,
-                                times=epochs.times,
+                                times=segment_times,
                                 freqs=freqs,
                                 nave=len(cond_indices),
                                 comment=f"Source cluster TFR: {cond}"
@@ -3019,6 +3128,19 @@ def extract_source_connectivity_features(
     if not fmri_cfg.enabled and n_rois < 2:
         logger.warning("Need at least 2 ROIs for connectivity")
         return pd.DataFrame(), []
+
+    segment_label, segment_mask = _resolve_source_segment(
+        times=np.asarray(getattr(epochs, "times", None), dtype=float)
+        if getattr(epochs, "times", None) is not None
+        else None,
+        windows=getattr(ctx, "windows", None),
+        target_name=getattr(ctx, "name", None),
+        config=config,
+        logger=logger,
+        feature_name="Source connectivity",
+    )
+    if segment_mask is not None and not np.any(segment_mask):
+        return pd.DataFrame(), []
     
     records = [{} for _ in range(n_epochs)]
     feature_cols = []
@@ -3063,6 +3185,14 @@ def extract_source_connectivity_features(
             )
         else:
             roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
+
+        if segment_mask is not None:
+            if roi_data.shape[-1] != int(segment_mask.shape[0]):
+                raise ValueError(
+                    "Source connectivity segment mask length does not match extracted ROI time-courses "
+                    f"(mask={int(segment_mask.shape[0])}, roi_times={int(roi_data.shape[-1])})."
+                )
+            roi_data = roi_data[..., segment_mask]
 
         n_rois_band = int(roi_data.shape[1]) if np.ndim(roi_data) >= 2 else 0
         if n_rois_band < 2:
@@ -3177,6 +3307,7 @@ def extract_source_connectivity_features(
 
     features_df.attrs["method"] = str(src_cfg.method)
     features_df.attrs["connectivity_method"] = connectivity_method_l
+    features_df.attrs["segment_label"] = str(segment_label)
     features_df.attrs["fmri_constraint_enabled"] = bool(fmri_cfg.enabled)
     features_df.attrs["fmri_provenance"] = str(fmri_cfg.provenance)
     conn_method_l = connectivity_method_l

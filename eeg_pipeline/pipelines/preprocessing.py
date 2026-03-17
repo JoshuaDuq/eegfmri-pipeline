@@ -64,20 +64,43 @@ class PreprocessingPipeline(PipelineBase):
         self,
         task: Optional[str],
         kwargs: Dict[str, Any],
-    ) -> tuple[str, str, bool, bool, int, Any]:
+    ) -> tuple[str, str, bool, bool, bool, int, Any]:
         """Extract and normalize preprocessing parameters from kwargs.
         
         Returns:
-            Tuple of (resolved_task, mode, use_pyprep, use_icalabel, n_jobs, progress)
+            Tuple of (
+                resolved_task,
+                mode,
+                use_pyprep,
+                use_icalabel,
+                task_is_rest,
+                n_jobs,
+                progress,
+            )
         """
         resolved_task = task or self.config.get("project.task", "task")
         mode = kwargs.get("mode", "full")
         use_pyprep = kwargs.get("use_pyprep", True)
         use_icalabel = kwargs.get("use_icalabel", True)
+        task_is_rest = self._resolve_task_is_rest(kwargs.get("task_is_rest"))
         n_jobs = kwargs.get("n_jobs", 1)
         progress = ensure_progress_reporter(kwargs.get("progress"))
 
-        return resolved_task, mode, use_pyprep, use_icalabel, n_jobs, progress
+        return (
+            resolved_task,
+            mode,
+            use_pyprep,
+            use_icalabel,
+            task_is_rest,
+            n_jobs,
+            progress,
+        )
+
+    def _resolve_task_is_rest(self, override: Optional[bool] = None) -> bool:
+        """Resolve resting-state mode from explicit override or config."""
+        if override is not None:
+            return bool(override)
+        return bool(self.config.get("preprocessing.task_is_rest", False))
     
     def process_subject(
         self,
@@ -93,10 +116,11 @@ class PreprocessingPipeline(PipelineBase):
             **kwargs: Additional options:
                 - mode: 'full', 'bad-channels', 'ica', or 'epochs'
                 - use_icalabel: Whether to use mne-icalabel
+                - task_is_rest: Override config to enable/disable resting-state preprocessing
                 - n_jobs: Number of parallel jobs
                 - progress: ProgressReporter for TUI feedback
         """
-        resolved_task, mode, use_pyprep, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
+        resolved_task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
         
         progress.subject_start(f"sub-{subject}")
         
@@ -108,6 +132,7 @@ class PreprocessingPipeline(PipelineBase):
             task=resolved_task,
             use_pyprep=use_pyprep,
             use_icalabel=use_icalabel,
+            task_is_rest=task_is_rest,
             n_jobs=n_jobs,
             progress=progress,
         )
@@ -128,13 +153,14 @@ class PreprocessingPipeline(PipelineBase):
             **kwargs: Preprocessing options:
                 - mode: 'full', 'bad-channels', 'ica', or 'epochs'
                 - use_icalabel: Whether to use mne-icalabel
+                - task_is_rest: Override config to enable/disable resting-state preprocessing
                 - n_jobs: Number of parallel jobs
                 - progress: ProgressReporter for TUI feedback
             
         Returns:
             List of per-subject status dictionaries
         """
-        resolved_task, mode, use_pyprep, use_icalabel, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
+        resolved_task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
         run_context = self._create_run_metadata_context(
             subjects=subjects,
             task=resolved_task,
@@ -154,6 +180,7 @@ class PreprocessingPipeline(PipelineBase):
                 task=resolved_task,
                 use_pyprep=use_pyprep,
                 use_icalabel=use_icalabel,
+                task_is_rest=task_is_rest,
                 n_jobs=n_jobs,
                 progress=progress,
             )
@@ -208,6 +235,7 @@ class PreprocessingPipeline(PipelineBase):
         task: str,
         use_pyprep: bool,
         use_icalabel: bool,
+        task_is_rest: bool,
         n_jobs: int,
         progress: Any,
     ) -> None:
@@ -232,6 +260,7 @@ class PreprocessingPipeline(PipelineBase):
                     subjects=subjects,
                     task=task,
                     use_icalabel=use_icalabel,
+                    task_is_rest=task_is_rest,
                 )
             elif step == STEP_ICA_LABEL:
                 if use_icalabel:
@@ -243,6 +272,7 @@ class PreprocessingPipeline(PipelineBase):
                 self._run_epoch_creation(
                     subjects=subjects,
                     task=task,
+                    task_is_rest=task_is_rest,
                 )
             elif step == STEP_STATS:
                 self._collect_stats(task=task)
@@ -315,11 +345,16 @@ class PreprocessingPipeline(PipelineBase):
         subjects: List[str],
         task: str,
         use_icalabel: bool = True,
+        task_is_rest: Optional[bool] = None,
     ) -> None:
         """Run ICA fitting via MNE-BIDS pipeline."""
         steps = self._get_ica_fitting_steps(use_icalabel)
         
-        self._run_mne_bids_pipeline(steps, subjects=subjects)
+        self._run_mne_bids_pipeline(
+            steps,
+            subjects=subjects,
+            task_is_rest=task_is_rest,
+        )
         
         self.logger.info("ICA fitting complete")
     
@@ -351,13 +386,20 @@ class PreprocessingPipeline(PipelineBase):
         self,
         subjects: List[str],
         task: str,
+        task_is_rest: bool,
     ) -> None:
         """Create epochs and apply ICA via MNE-BIDS pipeline."""
         steps = "preprocessing/_07_make_epochs,preprocessing/_08a_apply_ica,preprocessing/_09_ptp_reject"
         
-        self._run_mne_bids_pipeline(steps, subjects=subjects)
+        self._run_mne_bids_pipeline(
+            steps,
+            subjects=subjects,
+            task_is_rest=task_is_rest,
+        )
 
-        if bool(self.config.get("preprocessing.write_clean_events", True)):
+        if task_is_rest:
+            self.logger.info("Skipping clean events export for resting-state preprocessing")
+        elif bool(self.config.get("preprocessing.write_clean_events", True)):
             self._write_clean_events_tsv(subjects=subjects, task=task)
         
         self.logger.info("Epoch creation complete")
@@ -403,6 +445,7 @@ class PreprocessingPipeline(PipelineBase):
                     task=task,
                     bids_root=self.bids_root,
                     epochs_path=epochs_path,
+                    config=self.config,
                     conditions=conditions,
                     condition_columns=condition_columns,
                     overwrite=overwrite,
@@ -428,7 +471,12 @@ class PreprocessingPipeline(PipelineBase):
         
         self.logger.info("Statistics collection complete")
     
-    def _run_mne_bids_pipeline(self, steps: str, subjects: List[str] = None) -> None:
+    def _run_mne_bids_pipeline(
+        self,
+        steps: str,
+        subjects: List[str] = None,
+        task_is_rest: Optional[bool] = None,
+    ) -> None:
         """Run MNE-BIDS pipeline with a generated config file.
         
         mne_bids_pipeline requires settings in a Python config file,
@@ -438,10 +486,15 @@ class PreprocessingPipeline(PipelineBase):
         Args:
             steps: MNE-BIDS pipeline steps to run
             subjects: List of subject IDs to process (without 'sub-' prefix)
+            task_is_rest: Override config to enable/disable resting-state preprocessing
         """
         import tempfile
         
-        config_content = self._generate_mne_bids_config(steps, subjects=subjects)
+        config_content = self._generate_mne_bids_config(
+            steps,
+            subjects=subjects,
+            task_is_rest=task_is_rest,
+        )
         
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -488,13 +541,112 @@ class PreprocessingPipeline(PipelineBase):
         finally:
             Path(config_path).unlink(missing_ok=True)
     
-    def _generate_mne_bids_config(self, steps: str, subjects: List[str] = None) -> str:
+    def _get_rest_epoch_parameters(self) -> tuple[float, float]:
+        """Return validated fixed-length epoch settings for resting-state preprocessing."""
+        rest_epochs_duration = self.config.get("preprocessing.rest_epochs_duration")
+        rest_epochs_overlap = self.config.get("preprocessing.rest_epochs_overlap", 0.0)
+
+        if rest_epochs_duration is None:
+            raise ValueError(
+                "Resting-state preprocessing requires preprocessing.rest_epochs_duration."
+            )
+
+        duration = float(rest_epochs_duration)
+        overlap = float(rest_epochs_overlap)
+        if duration <= 0:
+            raise ValueError(
+                "preprocessing.rest_epochs_duration must be greater than 0."
+            )
+        if overlap < 0:
+            raise ValueError(
+                "preprocessing.rest_epochs_overlap must be greater than or equal to 0."
+            )
+        if overlap >= duration:
+            raise ValueError(
+                "preprocessing.rest_epochs_overlap must be smaller than preprocessing.rest_epochs_duration."
+            )
+
+        return duration, overlap
+
+    def _append_rest_epoch_config(self, lines: list[str]) -> None:
+        """Append resting-state epoch configuration for MNE-BIDS-Pipeline."""
+        duration, overlap = self._get_rest_epoch_parameters()
+        lines.append("conditions = None")
+        lines.append("epochs_tmin = 0.0")
+        lines.append("baseline = None")
+        lines.append(f"rest_epochs_duration = {duration}")
+        lines.append(f"rest_epochs_overlap = {overlap}")
+
+    def _append_task_epoch_config(self, lines: list[str]) -> None:
+        """Append event-locked epoch configuration for MNE-BIDS-Pipeline."""
+        conditions = self.config.get("epochs.conditions")
+        if not conditions:
+            conditions = self._detect_conditions_from_bids()
+        if not conditions:
+            raise ValueError(
+                "Non-resting-state preprocessing requires epochs.conditions or "
+                "detectable BIDS event conditions."
+            )
+        lines.append(f"conditions = {list(conditions)}")
+
+        epochs_tmin = self.config.get("epochs.tmin", -3.0)
+        if epochs_tmin is not None:
+            lines.append(f"epochs_tmin = {epochs_tmin}")
+
+        epochs_tmax = self.config.get("epochs.tmax", 12.0)
+        if epochs_tmax is not None:
+            lines.append(f"epochs_tmax = {epochs_tmax}")
+
+        baseline = self.config.get("epochs.baseline")
+        if baseline is not None:
+            if isinstance(baseline, list):
+                baseline = tuple(baseline)
+            lines.append(f"baseline = {baseline}")
+        else:
+            lines.append("baseline = None")
+
+    def _append_rejection_config(self, lines: list[str]) -> None:
+        """Append epoch rejection configuration for MNE-BIDS-Pipeline."""
+        reject = self.config.get("epochs.reject")
+        reject_method = self.config.get("epochs.reject_method")
+        if reject is None and reject_method:
+            rm = str(reject_method).strip().lower()
+            if rm == "none":
+                reject = None
+            elif rm in {"autoreject_local", "autoreject_global"}:
+                reject = rm
+
+        if reject is not None:
+            if isinstance(reject, str):
+                lines.append(f'reject = "{reject}"')
+            else:
+                lines.append(f"reject = {reject}")
+
+        reject_tmin = self.config.get("epochs.reject_tmin")
+        if reject_tmin is not None:
+            lines.append(f"reject_tmin = {float(reject_tmin)}")
+
+        reject_tmax = self.config.get("epochs.reject_tmax")
+        if reject_tmax is not None:
+            lines.append(f"reject_tmax = {float(reject_tmax)}")
+
+        ar_n_interp = self.config.get("epochs.autoreject_n_interpolate")
+        if ar_n_interp is not None:
+            lines.append(f"autoreject_n_interpolate = {ar_n_interp}")
+
+    def _generate_mne_bids_config(
+        self,
+        steps: str,
+        subjects: List[str] = None,
+        task_is_rest: Optional[bool] = None,
+    ) -> str:
         """Generate Python config file content for mne_bids_pipeline.
         
         Args:
             steps: MNE-BIDS pipeline steps to run
             subjects: List of subject IDs to process (without 'sub-' prefix)
         """
+        resolved_task_is_rest = self._resolve_task_is_rest(task_is_rest)
         lines = [
             '"""Auto-generated MNE-BIDS pipeline config."""',
             "",
@@ -540,8 +692,7 @@ class PreprocessingPipeline(PipelineBase):
             lines.append(f'random_state = {random_state}')
         
         # Task is rest
-        task_is_rest = self.config.get("preprocessing.task_is_rest", False)
-        lines.append(f'task_is_rest = {task_is_rest}')
+        lines.append(f"task_is_rest = {resolved_task_is_rest}")
         
         lines.append("")
         lines.append("# Filtering")
@@ -598,71 +749,13 @@ class PreprocessingPipeline(PipelineBase):
         
         lines.append("")
         lines.append("# Epochs")
-        
-        # Conditions (required for non-resting-state)
-        conditions = self.config.get("epochs.conditions")
-        if conditions:
-            lines.append(f'conditions = {conditions}')
+
+        if resolved_task_is_rest:
+            self._append_rest_epoch_config(lines)
         else:
-            # Auto-detect conditions from BIDS events files
-            detected = self._detect_conditions_from_bids()
-            if detected:
-                lines.append(f'conditions = {detected}')
-            else:
-                # Fallback: use None but mne_bids_pipeline may reject this
-                self.logger.warning(
-                    "No conditions found in config or BIDS events. "
-                    "mne_bids_pipeline may fail for non-resting-state data."
-                )
-        
-        # Epoch time window
-        epochs_tmin = self.config.get("epochs.tmin", -3.0)
-        if epochs_tmin is not None:
-            lines.append(f'epochs_tmin = {epochs_tmin}')
-        
-        epochs_tmax = self.config.get("epochs.tmax", 12.0)
-        if epochs_tmax is not None:
-            lines.append(f'epochs_tmax = {epochs_tmax}')
-        
-        # Baseline
-        baseline = self.config.get("epochs.baseline")
-        if baseline is not None:
-            # Convert list to tuple if needed (MNE-BIDS expects tuple)
-            if isinstance(baseline, list):
-                baseline = tuple(baseline)
-            lines.append(f'baseline = {baseline}')
-        else:
-            lines.append('baseline = None')
-        
-        # Reject
-        reject = self.config.get("epochs.reject")
-        reject_method = self.config.get("epochs.reject_method")
-        if reject is None and reject_method:
-            # CLI sets epochs.reject_method ("none"/"autoreject_local"/"autoreject_global")
-            rm = str(reject_method).strip().lower()
-            if rm == "none":
-                reject = None
-            elif rm in {"autoreject_local", "autoreject_global"}:
-                reject = rm
+            self._append_task_epoch_config(lines)
 
-        if reject is not None:
-            if isinstance(reject, str):
-                lines.append(f'reject = "{reject}"')
-            else:
-                lines.append(f"reject = {reject}")
-
-        # Optional PTP reject time window (ignored by autoreject_local)
-        reject_tmin = self.config.get("epochs.reject_tmin")
-        if reject_tmin is not None:
-            lines.append(f"reject_tmin = {float(reject_tmin)}")
-        reject_tmax = self.config.get("epochs.reject_tmax")
-        if reject_tmax is not None:
-            lines.append(f"reject_tmax = {float(reject_tmax)}")
-
-        # Autoreject local configuration
-        ar_n_interp = self.config.get("epochs.autoreject_n_interpolate")
-        if ar_n_interp is not None:
-            lines.append(f"autoreject_n_interpolate = {ar_n_interp}")
+        self._append_rejection_config(lines)
         
         lines.append("")
         
@@ -693,6 +786,8 @@ class PreprocessingPipeline(PipelineBase):
                 condition_column = None
                 condition_idx = None
                 candidates = get_condition_column_candidates(config_obj)
+                if not candidates:
+                    candidates = ["trial_type", "condition"]
                 for candidate in candidates:
                     idx = header_lookup.get(candidate.lower())
                     if idx is not None:

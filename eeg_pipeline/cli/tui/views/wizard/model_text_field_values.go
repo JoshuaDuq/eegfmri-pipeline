@@ -400,6 +400,20 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.prepEcgChannels
 	case textFieldPrepAutorejectNInterpolate:
 		return m.prepAutorejectNInterpolate
+	case textFieldPrepCleanEventsQCEcgVarianceOutputColumn:
+		return m.prepCleanEventsQCEcgVarianceOutputColumn
+	case textFieldPrepCleanEventsQCEcgVarianceChannels:
+		return m.prepCleanEventsQCEcgVarianceChannels
+	case textFieldPrepCleanEventsQCEcgVarianceWindow:
+		return m.prepCleanEventsQCEcgVarianceWindow
+	case textFieldPrepCleanEventsQCPeripheralLowGammaOutputColumn:
+		return m.prepCleanEventsQCPeripheralLowGammaOutputColumn
+	case textFieldPrepCleanEventsQCPeripheralLowGammaChannels:
+		return m.prepCleanEventsQCPeripheralLowGammaChannels
+	case textFieldPrepCleanEventsQCPeripheralLowGammaBand:
+		return m.prepCleanEventsQCPeripheralLowGammaBand
+	case textFieldPrepCleanEventsQCPeripheralLowGammaWindow:
+		return m.prepCleanEventsQCPeripheralLowGammaWindow
 	// Event Column Mapping text fields
 	case textFieldEventColPredictor:
 		return m.eventColPredictor
@@ -865,6 +879,20 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.prepEcgChannels = value
 	case textFieldPrepAutorejectNInterpolate:
 		m.prepAutorejectNInterpolate = strings.Join(splitLooseList(value), ",")
+	case textFieldPrepCleanEventsQCEcgVarianceOutputColumn:
+		m.prepCleanEventsQCEcgVarianceOutputColumn = value
+	case textFieldPrepCleanEventsQCEcgVarianceChannels:
+		m.prepCleanEventsQCEcgVarianceChannels = value
+	case textFieldPrepCleanEventsQCEcgVarianceWindow:
+		m.prepCleanEventsQCEcgVarianceWindow = value
+	case textFieldPrepCleanEventsQCPeripheralLowGammaOutputColumn:
+		m.prepCleanEventsQCPeripheralLowGammaOutputColumn = value
+	case textFieldPrepCleanEventsQCPeripheralLowGammaChannels:
+		m.prepCleanEventsQCPeripheralLowGammaChannels = value
+	case textFieldPrepCleanEventsQCPeripheralLowGammaBand:
+		m.prepCleanEventsQCPeripheralLowGammaBand = value
+	case textFieldPrepCleanEventsQCPeripheralLowGammaWindow:
+		m.prepCleanEventsQCPeripheralLowGammaWindow = value
 	// Event Column Mapping text fields
 	case textFieldEventColPredictor:
 		m.eventColPredictor = strings.Join(splitLooseList(value), ",")

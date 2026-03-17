@@ -13,6 +13,7 @@ import (
 const (
 	defaultLabelWidth     = 22
 	defaultLabelWidthWide = 30
+	scrollIndicatorLines  = 2
 )
 
 // calculateScrollWindow returns the visible line range for scrolling.
@@ -23,6 +24,39 @@ func calculateScrollWindow(totalLines, offset, maxLines int) (startLine, endLine
 	if totalLines <= maxLines {
 		return 0, totalLines, false
 	}
+	showIndicators = true
+	startLine = offset
+	if startLine < 0 {
+		startLine = 0
+	}
+	if startLine > totalLines-maxLines {
+		startLine = totalLines - maxLines
+	}
+	endLine = startLine + maxLines
+	return startLine, endLine, showIndicators
+}
+
+func scrollableVisibleLines(totalLines, maxLines int) int {
+	if maxLines < 1 {
+		return 1
+	}
+	if totalLines > maxLines {
+		maxLines -= scrollIndicatorLines
+		if maxLines < 1 {
+			return 1
+		}
+	}
+	return maxLines
+}
+
+func calculateExactScrollWindow(totalLines, offset, maxLines int) (startLine, endLine int, showIndicators bool) {
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	if totalLines <= maxLines {
+		return 0, totalLines, false
+	}
+
 	showIndicators = true
 	startLine = offset
 	if startLine < 0 {

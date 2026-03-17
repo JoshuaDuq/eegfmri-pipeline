@@ -10,12 +10,9 @@ def _get_config_value(config: Any, key: str) -> Any:
     if config is None:
         return None
     if hasattr(config, "get"):
-        try:
-            value = config.get(key)
-            if value is not None:
-                return value
-        except Exception:
-            return None
+        value = config.get(key)
+        if value is not None:
+            return value
     if isinstance(config, dict):
         parts = key.split(".")
         current = config
@@ -36,11 +33,8 @@ def discover_signature_root(config: Any, deriv_root: Any) -> Optional[Path]:
             raise FileNotFoundError(f"Configured paths.signature_dir does not exist: {candidate}")
         return candidate
 
-    try:
-        candidate = Path(deriv_root).expanduser().resolve().parent / "external"
-        return candidate if candidate.exists() else None
-    except Exception:
-        return None
+    candidate = Path(deriv_root).expanduser().resolve().parent / "external"
+    return candidate if candidate.exists() else None
 
 
 def get_signature_specs(config: Any) -> List[Dict[str, str]]:

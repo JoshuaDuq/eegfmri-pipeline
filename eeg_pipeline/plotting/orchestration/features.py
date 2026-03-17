@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import pandas as pd
 import numpy as np
 
+from eeg_pipeline.analysis.features.rest import is_resting_state_feature_mode
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.infra.paths import (
@@ -631,6 +632,7 @@ def _visualize_single_subject(
         preload=False,
         deriv_root=effective_deriv_root,
         config=config,
+        task_is_rest=is_resting_state_feature_mode(config),
         logger=logger,
     )
     
@@ -788,6 +790,7 @@ def visualize_band_power_topomaps_for_group(
             preload=False,
             deriv_root=effective_deriv_root,
             config=config,
+            task_is_rest=is_resting_state_feature_mode(config),
             logger=logger,
         )
         if epochs is None:
@@ -1289,6 +1292,89 @@ def _compute_subject_condition_psd(
     return freqs, psd_vector
 
 
+def _compute_subject_condition_band_timecourses(
+    *,
+    tfr_epochs: Any,
+    mask: np.ndarray,
+    active_window: Tuple[float, float],
+    baseline_window: Tuple[float, float],
+    frequency_bands: Dict[str, Tuple[float, float]],
+    logger: logging.Logger,
+) -> Optional[Tuple[np.ndarray, Dict[str, np.ndarray]]]:
+    """Compute one subject-level band-power timecourse per condition."""
+    from eeg_pipeline.utils.analysis.tfr import apply_baseline_and_crop
+
+    n_epochs = min(len(tfr_epochs), len(mask))
+    if n_epochs <= 0:
+        return None
+
+    mask_bool = np.asarray(mask[:n_epochs], dtype=bool)
+    if int(mask_bool.sum()) == 0:
+        return None
+
+    tfr_condition = tfr_epochs[mask_bool]
+    if len(tfr_condition) == 0:
+        return None
+
+    display_start = float(min(baseline_window[0], 0.0))
+    display_end = float(active_window[1])
+    per_band_trials: Dict[str, List[np.ndarray]] = {str(band): [] for band in frequency_bands}
+    reference_times: Optional[np.ndarray] = None
+
+    for trial_index in range(len(tfr_condition)):
+        tfr_trial = tfr_condition[[trial_index]].average()
+        apply_baseline_and_crop(
+            tfr_trial,
+            baseline=baseline_window,
+            mode="ratio",
+            logger=logger,
+        )
+
+        times = np.asarray(tfr_trial.times, dtype=float)
+        tmin = max(float(times.min()), display_start)
+        tmax = min(float(times.max()), display_end)
+        if tmax <= tmin:
+            continue
+
+        tfr_trial_window = tfr_trial.copy().crop(tmin=tmin, tmax=tmax)
+        trial_times = np.asarray(tfr_trial_window.times, dtype=float)
+        freqs = np.asarray(tfr_trial_window.freqs, dtype=float)
+        trial_data = np.asarray(tfr_trial_window.data, dtype=float)
+        if trial_data.ndim != 3:
+            continue
+
+        if reference_times is None:
+            reference_times = trial_times
+        elif len(trial_times) != len(reference_times) or not np.allclose(
+            trial_times,
+            reference_times,
+            rtol=1e-6,
+            atol=1e-8,
+        ):
+            continue
+
+        for band_name, (fmin, fmax) in frequency_bands.items():
+            frequency_mask = (freqs >= float(fmin)) & (freqs <= float(fmax))
+            if not np.any(frequency_mask):
+                continue
+            band_trace = trial_data[:, frequency_mask, :].mean(axis=(0, 1))
+            per_band_trials[str(band_name)].append(np.asarray(band_trace, dtype=float))
+
+    if reference_times is None:
+        return None
+
+    subject_timecourses: Dict[str, np.ndarray] = {}
+    for band_name, trial_traces in per_band_trials.items():
+        if not trial_traces:
+            continue
+        stacked_traces = np.vstack(trial_traces)
+        subject_timecourses[band_name] = np.nanmean(stacked_traces, axis=0)
+
+    if not subject_timecourses:
+        return None
+    return reference_times, subject_timecourses
+
+
 def visualize_power_by_condition_for_group(
     *,
     subjects: List[str],
@@ -1310,6 +1396,15 @@ def visualize_power_by_condition_for_group(
         logger = get_logger(__name__)
 
     from eeg_pipeline.infra.tsv import read_table
+    from eeg_pipeline.plotting.features.power import (
+        _compute_group_paired_effect_forest_data,
+        _compute_group_paired_effect_summary,
+        _compute_group_paired_sample_count_summary,
+        _format_condition_display_label,
+        _plot_power_effect_forest,
+        _plot_power_effect_summary_heatmap,
+        _plot_power_sample_count_heatmap,
+    )
     from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
     from eeg_pipeline.plotting.features.utils import (
         plot_multi_window_comparison,
@@ -1389,6 +1484,7 @@ def visualize_power_by_condition_for_group(
                 preload=False,
                 deriv_root=effective_deriv_root,
                 config=config,
+                task_is_rest=is_resting_state_feature_mode(config),
                 logger=logger,
             )
             if epochs is None or events_df is None or events_df.empty:
@@ -1548,6 +1644,68 @@ def visualize_power_by_condition_for_group(
                     )
                     rendered_plots += 1
 
+        if len(segments) == 2:
+            effect_df, qvalue_df = _compute_group_paired_effect_summary(
+                subject_values=window_subject_values,
+                bands=bands,
+                roi_names=roi_names,
+                labels=(segments[0], segments[1]),
+                config=config,
+            )
+            count_df = _compute_group_paired_sample_count_summary(
+                subject_values=window_subject_values,
+                bands=bands,
+                roi_names=roi_names,
+                labels=(segments[0], segments[1]),
+            )
+            if np.isfinite(effect_df.to_numpy(dtype=float)).any():
+                segment1_label = segments[0].replace("_", " ").title()
+                segment2_label = segments[1].replace("_", " ").title()
+                _plot_power_effect_summary_heatmap(
+                    effect_df=effect_df,
+                    qvalue_df=qvalue_df,
+                    subject="group",
+                    save_path=power_plots_dir / "sub-group_power_roi_band_summary_window",
+                    logger=logger,
+                    config=config,
+                    title=f"Group power window effects: {segment2_label} - {segment1_label}",
+                    footer=(
+                        "Group summary | Paired subject-level effect size (d) | "
+                        "n varies by ROI x band cell | FDR across ROI x band cells | "
+                        "open circles: q<0.05"
+                    ),
+                )
+                forest_df = _compute_group_paired_effect_forest_data(
+                    subject_values=window_subject_values,
+                    bands=bands,
+                    roi_names=roi_names,
+                    labels=(segments[0], segments[1]),
+                    config=config,
+                )
+                _plot_power_effect_forest(
+                    forest_df=forest_df,
+                    bands=bands,
+                    roi_names=roi_names,
+                    subject="group",
+                    save_path=power_plots_dir / "sub-group_power_roi_band_forest_window",
+                    logger=logger,
+                    config=config,
+                    title=f"Group power window forest: {segment2_label} - {segment1_label}",
+                    footer=(
+                        "Group summary | Paired subject-level effect size (d) with bootstrap 95% CI | "
+                        "black edge: q<0.05 after FDR across ROI x band cells"
+                    ),
+                )
+                _plot_power_sample_count_heatmap(
+                    count_df=count_df,
+                    save_path=power_plots_dir / "sub-group_power_roi_band_counts_window",
+                    logger=logger,
+                    config=config,
+                    title=f"Group power window coverage: {segment2_label} vs {segment1_label}",
+                    footer="Group summary | Paired subject counts per ROI x band cell",
+                )
+                rendered_plots += 1
+
     if compare_columns:
         if column_labels is None:
             raise ValueError(
@@ -1633,9 +1791,320 @@ def visualize_power_by_condition_for_group(
                     )
                     rendered_plots += 1
 
+        if len(column_labels) == 2:
+            effect_df, qvalue_df = _compute_group_paired_effect_summary(
+                subject_values=column_subject_values,
+                bands=bands,
+                roi_names=roi_names,
+                labels=(column_labels[0], column_labels[1]),
+                config=config,
+            )
+            count_df = _compute_group_paired_sample_count_summary(
+                subject_values=column_subject_values,
+                bands=bands,
+                roi_names=roi_names,
+                labels=(column_labels[0], column_labels[1]),
+            )
+            if np.isfinite(effect_df.to_numpy(dtype=float)).any():
+                label1 = _format_condition_display_label(column_labels[0], config)
+                label2 = _format_condition_display_label(column_labels[1], config)
+                _plot_power_effect_summary_heatmap(
+                    effect_df=effect_df,
+                    qvalue_df=qvalue_df,
+                    subject="group",
+                    save_path=power_plots_dir / "sub-group_power_roi_band_summary_column",
+                    logger=logger,
+                    config=config,
+                    title=f"Group power condition effects: {label2} - {label1}",
+                    footer=(
+                        f"Group summary | Segment: {comparison_segment} | "
+                        "Paired subject-level effect size (d) | n varies by ROI x band cell | "
+                        "FDR across ROI x band cells | open circles: q<0.05"
+                    ),
+                )
+                forest_df = _compute_group_paired_effect_forest_data(
+                    subject_values=column_subject_values,
+                    bands=bands,
+                    roi_names=roi_names,
+                    labels=(column_labels[0], column_labels[1]),
+                    config=config,
+                )
+                _plot_power_effect_forest(
+                    forest_df=forest_df,
+                    bands=bands,
+                    roi_names=roi_names,
+                    subject="group",
+                    save_path=power_plots_dir / "sub-group_power_roi_band_forest_column",
+                    logger=logger,
+                    config=config,
+                    title=f"Group power condition forest: {label2} - {label1}",
+                    footer=(
+                        f"Group summary | Segment: {comparison_segment} | "
+                        "Paired subject-level effect size (d) with bootstrap 95% CI | "
+                        "black edge: q<0.05 after FDR across ROI x band cells"
+                    ),
+                )
+                _plot_power_sample_count_heatmap(
+                    count_df=count_df,
+                    save_path=power_plots_dir / "sub-group_power_roi_band_counts_column",
+                    logger=logger,
+                    config=config,
+                    title=f"Group power condition coverage: {label2} vs {label1}",
+                    footer="Group summary | Paired subject counts per ROI x band cell",
+                )
+                rendered_plots += 1
+
     if rendered_plots == 0:
         raise ValueError(
             "Group power_by_condition generated no plots. Check available power features and comparison configuration."
+        )
+
+    _save_plot_manifest(plots_dir=plots_dir, subject="group", logger=logger)
+
+
+def visualize_power_timecourse_for_group(
+    *,
+    subjects: List[str],
+    task: Optional[str] = None,
+    deriv_root: Optional[Path] = None,
+    config: Any = None,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Render group-level power timecourses using subject-level condition means."""
+    if not subjects:
+        raise ValueError("No subjects specified")
+
+    config = _load_config_if_needed(config)
+    setup_matplotlib(config)
+    task = _resolve_task(task, config)
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
+
+    if logger is None:
+        logger = get_logger(__name__)
+
+    from eeg_pipeline.plotting.features.power import (
+        plot_group_band_power_effect_evolution,
+        plot_group_band_power_evolution,
+    )
+    from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
+    from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
+    from eeg_pipeline.utils.config.loader import get_frequency_bands, require_config_value
+    from eeg_pipeline.utils.formatting import sanitize_label
+
+    baseline_window_config = require_config_value(config, "time_frequency_analysis.baseline_window")
+    active_window_config = require_config_value(config, "time_frequency_analysis.active_window")
+    if not isinstance(baseline_window_config, (list, tuple)) or len(baseline_window_config) < 2:
+        raise ValueError("time_frequency_analysis.baseline_window must be a list/tuple with two values.")
+    if not isinstance(active_window_config, (list, tuple)) or len(active_window_config) < 2:
+        raise ValueError("time_frequency_analysis.active_window must be a list/tuple with two values.")
+
+    baseline_window = (
+        float(baseline_window_config[0]),
+        float(baseline_window_config[1]),
+    )
+    active_window = (
+        float(active_window_config[0]),
+        float(active_window_config[1]),
+    )
+    frequency_bands = {
+        str(band_name): (float(bounds[0]), float(bounds[1]))
+        for band_name, bounds in get_frequency_bands(config).items()
+    }
+    if not frequency_bands:
+        raise ValueError("No frequency bands resolved for group power_timecourse.")
+
+    rois = get_roi_definitions(config)
+    roi_names = _resolve_power_roi_names(config=config, rois=rois)
+
+    roi_reference_times: Dict[str, np.ndarray] = {}
+    roi_subject_conditions: Dict[str, Dict[str, Dict[str, Dict[str, np.ndarray]]]] = {}
+    condition_labels: Optional[List[str]] = None
+
+    for subject in subjects:
+        epochs, events_df = load_epochs_for_analysis(
+            subject=subject,
+            task=task,
+            align="strict",
+            preload=False,
+            deriv_root=effective_deriv_root,
+            config=config,
+            task_is_rest=is_resting_state_feature_mode(config),
+            logger=logger,
+        )
+        if epochs is None:
+            logger.warning("Group power_timecourse: missing epochs for sub-%s; skipping", subject)
+            continue
+        if events_df is None or events_df.empty:
+            logger.warning("Group power_timecourse: missing events for sub-%s; skipping", subject)
+            continue
+        if len(epochs) != len(events_df):
+            logger.warning(
+                "Group power_timecourse: length mismatch for sub-%s (epochs=%d, events=%d); skipping",
+                subject,
+                len(epochs),
+                len(events_df),
+            )
+            continue
+
+        try:
+            conditions = _resolve_group_conditions(
+                events_df=events_df,
+                config=config,
+                allow_single_value=True,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Group power_timecourse: could not resolve conditions for sub-%s; skipping (%s)",
+                subject,
+                exc,
+            )
+            continue
+
+        labels = [label for label, _ in conditions]
+        if condition_labels is None:
+            condition_labels = labels
+        elif labels != condition_labels:
+            raise ValueError("Inconsistent condition labels across subjects in group power_timecourse.")
+
+        tfr = compute_tfr_for_visualization(epochs, config, logger)
+        subject_channels = list(tfr.ch_names)
+
+        for roi_name in roi_names:
+            if roi_name == "all":
+                roi_channels = subject_channels
+            else:
+                roi_channels = get_roi_channels(rois.get(roi_name, []), subject_channels)
+                if not roi_channels:
+                    continue
+
+            tfr_roi = tfr.copy().pick(roi_channels)
+
+            for label, mask in conditions:
+                timecourse_result = _compute_subject_condition_band_timecourses(
+                    tfr_epochs=tfr_roi,
+                    mask=mask,
+                    active_window=active_window,
+                    baseline_window=baseline_window,
+                    frequency_bands=frequency_bands,
+                    logger=logger,
+                )
+                if timecourse_result is None:
+                    continue
+
+                trial_times, band_timecourses = timecourse_result
+                reference_times = roi_reference_times.get(roi_name)
+                if reference_times is None:
+                    roi_reference_times[roi_name] = trial_times
+                    aligned_band_timecourses = band_timecourses
+                else:
+                    aligned_band_timecourses = {}
+                    for band_name, trace in band_timecourses.items():
+                        if len(trial_times) == len(reference_times) and np.allclose(
+                            trial_times,
+                            reference_times,
+                            rtol=1e-6,
+                            atol=1e-8,
+                        ):
+                            aligned_band_timecourses[band_name] = trace
+                        else:
+                            aligned_band_timecourses[band_name] = np.interp(
+                                reference_times,
+                                trial_times,
+                                trace,
+                                left=np.nan,
+                                right=np.nan,
+                            )
+
+                if not aligned_band_timecourses:
+                    continue
+
+                roi_subject_conditions.setdefault(roi_name, {}).setdefault(subject, {})[label] = aligned_band_timecourses
+
+    if condition_labels is None:
+        raise ValueError("Group power_timecourse could not resolve configured conditions for any subject.")
+
+    plots_dir = deriv_plots_path(effective_deriv_root, "group", subdir="features")
+    power_plots_dir = plots_dir / "power"
+    ensure_dir(power_plots_dir)
+
+    rendered_plots = 0
+
+    for roi_name in roi_names:
+        subject_condition_map = roi_subject_conditions.get(roi_name, {})
+        if not subject_condition_map:
+            continue
+
+        reference_times = roi_reference_times.get(roi_name)
+        if reference_times is None or len(reference_times) == 0:
+            continue
+
+        group_series_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+        for band_name in frequency_bands:
+            complete_subjects = [
+                subject_id
+                for subject_id, label_map in subject_condition_map.items()
+                if all(
+                    label in label_map and band_name in label_map[label]
+                    for label in condition_labels
+                )
+            ]
+            if len(complete_subjects) < 2:
+                continue
+
+            label_series: Dict[str, np.ndarray] = {}
+            for label in condition_labels:
+                subject_matrix = np.vstack(
+                    [
+                        np.asarray(subject_condition_map[subject_id][label][band_name], dtype=float)
+                        for subject_id in complete_subjects
+                    ]
+                )
+                label_series[label] = subject_matrix
+
+            group_series_by_band[band_name] = label_series
+
+        if not group_series_by_band:
+            logger.warning(
+                "Group power_timecourse: ROI %s has no complete subject traces; skipping",
+                roi_name,
+            )
+            continue
+
+        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+        roi_suffix = f"_roi-{roi_safe}" if roi_safe else ""
+        if plot_group_band_power_evolution(
+            times=reference_times,
+            group_series_by_band=group_series_by_band,
+            subject="group",
+            save_dir=power_plots_dir,
+            logger=logger,
+            config=config,
+            baseline_window=baseline_window,
+            active_window=active_window,
+            roi_suffix=roi_suffix,
+            roi_name=roi_name,
+        ):
+            rendered_plots += 1
+
+        if len(condition_labels) == 2:
+            if plot_group_band_power_effect_evolution(
+                times=reference_times,
+                group_series_by_band=group_series_by_band,
+                subject="group",
+                save_dir=power_plots_dir,
+                logger=logger,
+                config=config,
+                baseline_window=baseline_window,
+                active_window=active_window,
+                roi_suffix=roi_suffix,
+                roi_name=roi_name,
+            ):
+                rendered_plots += 1
+
+    if rendered_plots == 0:
+        raise ValueError(
+            "Group power_timecourse generated no plots. "
+            "Check epochs availability and comparison configuration."
         )
 
     _save_plot_manifest(plots_dir=plots_dir, subject="group", logger=logger)
@@ -1661,7 +2130,50 @@ def visualize_power_spectral_density_for_group(
     if logger is None:
         logger = get_logger(__name__)
 
+    def _draw_group_psd_subject_traces(
+        ax: Any,
+        freqs: np.ndarray,
+        subject_matrix: np.ndarray,
+        *,
+        color: Any,
+    ) -> None:
+        """Draw restrained subject-level PSD curves behind the group mean."""
+        if freqs.ndim != 1:
+            raise ValueError("Group PSD subject traces require a 1D frequency axis.")
+        if subject_matrix.ndim != 2:
+            raise ValueError("Group PSD subject traces require a 2D subject x frequency matrix.")
+        if subject_matrix.shape[1] != len(freqs):
+            raise ValueError("Group PSD subject traces must match the frequency axis length.")
+
+        n_subjects = subject_matrix.shape[0]
+        linewidth = 0.7 if n_subjects <= 12 else 0.55
+        alpha = 0.14 if n_subjects <= 12 else 0.08
+
+        for subject_curve in subject_matrix:
+            curve = np.asarray(subject_curve, dtype=float)
+            finite_mask = np.isfinite(curve)
+            if int(finite_mask.sum()) < 2:
+                continue
+            ax.plot(
+                freqs[finite_mask],
+                curve[finite_mask],
+                color=color,
+                linewidth=linewidth,
+                alpha=alpha,
+                zorder=1,
+            )
+
     from eeg_pipeline.plotting.config import get_plot_config
+    from eeg_pipeline.plotting.features.power import (
+        _annotate_frequency_bands,
+        _compute_group_band_summary_stats,
+        _compute_group_curve_significance_mask,
+        _draw_curve_significance_strip,
+        _draw_psd_band_summary_strip,
+        _format_condition_display_label,
+        _get_condition_color_map,
+        _style_publication_axis,
+    )
     from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
     from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
     from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
@@ -1698,6 +2210,7 @@ def visualize_power_spectral_density_for_group(
             preload=False,
             deriv_root=effective_deriv_root,
             config=config,
+            task_is_rest=is_resting_state_feature_mode(config),
             logger=logger,
         )
         if epochs is None:
@@ -1745,7 +2258,7 @@ def visualize_power_spectral_density_for_group(
                 if not roi_channels:
                     continue
 
-            tfr_roi = tfr.copy().pick_channels(roi_channels)
+            tfr_roi = tfr.copy().pick(roi_channels)
             per_condition_vectors: Dict[str, np.ndarray] = {}
 
             for label, mask in conditions:
@@ -1784,7 +2297,7 @@ def visualize_power_spectral_density_for_group(
     ensure_dir(power_plots_dir)
 
     rendered_plots = 0
-    condition_colors = plt.cm.Set2(np.linspace(0.2, 0.8, len(condition_labels)))
+    condition_color_map = _get_condition_color_map(condition_labels, config)
 
     for roi_name in roi_names:
         subject_condition_map = roi_subject_conditions.get(roi_name, {})
@@ -1809,24 +2322,35 @@ def visualize_power_spectral_density_for_group(
 
         fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
         fig, ax = plt.subplots(figsize=fig_size)
+        fig.patch.set_facecolor("white")
+        _style_publication_axis(ax)
         plotted = False
 
-        for idx, label in enumerate(condition_labels):
+        for label in condition_labels:
             stacked = np.vstack([subject_condition_map[subject_id][label] for subject_id in complete_subjects])
             mean_psd = np.nanmean(stacked, axis=0)
+            color = condition_color_map[label]
+
+            _draw_group_psd_subject_traces(
+                ax,
+                freqs,
+                stacked,
+                color=color,
+            )
 
             if stacked.shape[0] >= 2:
                 sem_psd = np.nanstd(stacked, axis=0, ddof=1) / np.sqrt(stacked.shape[0])
                 ci_lower = mean_psd - 1.96 * sem_psd
                 ci_upper = mean_psd + 1.96 * sem_psd
-                ax.fill_between(freqs, ci_lower, ci_upper, color=condition_colors[idx], alpha=0.15, linewidth=0)
+                ax.fill_between(freqs, ci_lower, ci_upper, color=color, alpha=0.18, linewidth=0, zorder=2)
 
             ax.plot(
                 freqs,
                 mean_psd,
-                color=condition_colors[idx],
+                color=color,
                 linewidth=2.0,
-                label=f"{label} (n={len(complete_subjects)})",
+                label=f"{_format_condition_display_label(label, config)} (n={len(complete_subjects)})",
+                zorder=3,
             )
             plotted = True
 
@@ -1834,40 +2358,28 @@ def visualize_power_spectral_density_for_group(
             plt.close(fig)
             continue
 
-        for band_name, bounds in frequency_bands.items():
-            if not isinstance(bounds, (list, tuple)) or len(bounds) < 2:
-                continue
-            band_min = float(bounds[0])
-            band_max = float(bounds[1])
-            if band_max <= float(freqs.min()) or band_min >= float(freqs.max()):
-                continue
-
-            span_start = max(band_min, float(freqs.min()))
-            span_end = min(band_max, float(freqs.max()))
-            ax.axvspan(
-                span_start,
-                span_end,
-                color=get_band_color(str(band_name), config),
-                alpha=0.08,
-                zorder=0,
+        n_significant_bands = 0
+        if len(condition_labels) == 2:
+            first = np.vstack(
+                [subject_condition_map[subject_id][condition_labels[0]] for subject_id in complete_subjects]
+            )
+            second = np.vstack(
+                [subject_condition_map[subject_id][condition_labels[1]] for subject_id in complete_subjects]
+            )
+            significant_mask = _compute_group_curve_significance_mask(first, second, config)
+            _draw_curve_significance_strip(ax, freqs, significant_mask, label="PSD FDR q<0.05")
+            band_stats = _compute_group_band_summary_stats(first, second, freqs, frequency_bands, config)
+            _draw_psd_band_summary_strip(ax, band_stats)
+            n_significant_bands = sum(
+                1 for stats in band_stats.values() if bool(stats.get("significant", False))
             )
 
-            mid_frequency = 0.5 * (span_start + span_end)
-            y_max = ax.get_ylim()[1]
-            ax.text(
-                mid_frequency,
-                y_max * 0.95,
-                str(band_name).upper(),
-                fontsize=7,
-                ha="center",
-                va="top",
-                color="0.4",
-            )
+        _annotate_frequency_bands(ax, frequency_bands, float(freqs.max()), config)
 
         roi_display = "All Channels" if roi_name == "all" else roi_name.replace("_", " ").title()
         ax.set_title(
-            f"Power Spectral Density (Group) | ROI: {roi_display}",
-            fontsize=plot_cfg.font.title,
+            f"Group power spectral density | {roi_display}",
+            fontsize=plot_cfg.font.figure_title,
             fontweight="bold",
         )
         ax.set_xscale("log")
@@ -1877,32 +2389,37 @@ def visualize_power_spectral_density_for_group(
         ax.set_ylabel(r"$\log_{10}$(power/baseline)", fontsize=plot_cfg.font.medium)
         ax.tick_params(labelsize=plot_cfg.font.small)
         ax.legend(frameon=False, fontsize=plot_cfg.font.small)
-        sns.despine(ax=ax, trim=True)
-
-        fig.text(
-            0.5,
-            0.01,
-            (
-                f"n={len(complete_subjects)} subjects | "
-                f"active window=[{active_window[0]:.3f}, {active_window[1]:.3f}] s | "
-                f"baseline=[{baseline_window[0]:.3f}, {baseline_window[1]:.3f}] s"
-            ),
-            ha="center",
+        ax.yaxis.grid(True, alpha=0.18, linewidth=0.6)
+        ax.xaxis.grid(False)
+        ax.text(
+            0.02,
+            0.02,
+            "Thin lines: subjects | thick line: group mean",
+            transform=ax.transAxes,
+            ha="left",
             va="bottom",
             fontsize=plot_cfg.font.small,
-            color="gray",
+            color="0.4",
         )
-        plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+        sns.despine(ax=ax, trim=True)
 
         roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
         roi_suffix = f"_roi-{roi_safe}" if roi_safe else ""
         save_fig(
             fig,
             power_plots_dir / f"sub-group_power_spectral_density{roi_suffix}",
+            footer=(
+                f"Group: {subject} | n={len(complete_subjects)} subjects | "
+                f"active window=[{active_window[0]:.3f}, {active_window[1]:.3f}] s | "
+                f"baseline=[{baseline_window[0]:.3f}, {baseline_window[1]:.3f}] s | "
+                f"band sig={n_significant_bands}/{len(frequency_bands)} | "
+                "Thin lines: subject means | thick line: between-subject mean ± 95% CI"
+            ),
             formats=plot_cfg.formats,
             dpi=plot_cfg.dpi,
             bbox_inches=plot_cfg.bbox_inches,
             pad_inches=plot_cfg.pad_inches,
+            tight_layout_rect=(0, 0.04, 1, 0.98),
             config=config,
         )
         plt.close(fig)
@@ -1922,5 +2439,6 @@ __all__ = [
     "visualize_features_for_subjects",
     "visualize_band_power_topomaps_for_group",
     "visualize_power_by_condition_for_group",
+    "visualize_power_timecourse_for_group",
     "visualize_power_spectral_density_for_group",
 ]

@@ -24,6 +24,11 @@ import pandas as pd
 from scipy.signal import find_peaks
 from sklearn.cluster import KMeans
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    select_single_rest_analysis_segment,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
@@ -553,6 +558,51 @@ def _valid_masks(masks: Dict[str, Optional[np.ndarray]]) -> Dict[str, np.ndarray
     }
 
 
+def _valid_analysis_masks(masks: Dict[str, Optional[np.ndarray]]) -> Dict[str, np.ndarray]:
+    return valid_rest_analysis_segment_masks(masks)
+
+
+def _resolve_microstate_segment_masks(
+    times: np.ndarray,
+    windows: Any,
+    target_name: Optional[str],
+    config: Any,
+    logger: Any,
+) -> Dict[str, np.ndarray]:
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            return {target_name: np.asarray(mask, dtype=bool)}
+
+        task_is_rest = is_resting_state_feature_mode(config)
+        if task_is_rest:
+            segment_name, segment_mask = select_single_rest_analysis_segment(
+                get_segment_masks(times, windows, config),
+                feature_name="Microstates",
+                target_name=str(target_name),
+            )
+            if logger is not None:
+                logger.info(
+                    "Microstates: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    target_name,
+                    segment_name,
+                )
+            return {segment_name: segment_mask}
+
+        if logger is not None:
+            logger.error(
+                "Microstates: targeted window '%s' has no valid mask; skipping.",
+                target_name,
+            )
+        return {}
+
+    segment_masks = get_segment_masks(times, windows, config)
+    if is_resting_state_feature_mode(config):
+        return _valid_analysis_masks(segment_masks)
+    return _valid_masks(segment_masks)
+
+
 def _build_column_name(segment: str, stat: str) -> str:
     return NamingSchema.build(
         group="microstates",
@@ -582,20 +632,14 @@ def extract_microstate_features(ctx: Any) -> Tuple[pd.DataFrame, List[str]]:
     windows = getattr(ctx, "windows", None)
     target_name = getattr(ctx, "name", None)
     logger = getattr(ctx, "logger", None)
-
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            segment_masks = {target_name: mask}
-        else:
-            if logger is not None:
-                logger.error(
-                    "Microstates: targeted window '%s' has no valid mask; skipping.",
-                    target_name,
-                )
-            return pd.DataFrame(), []
-    else:
-        segment_masks = get_segment_masks(epochs.times, windows, getattr(ctx, "config", None))
+    config = getattr(ctx, "config", None)
+    segment_masks = _resolve_microstate_segment_masks(
+        epochs.times,
+        windows,
+        target_name,
+        config,
+        logger,
+    )
 
     if not segment_masks:
         return pd.DataFrame(), []

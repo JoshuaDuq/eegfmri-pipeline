@@ -108,6 +108,12 @@ var comparisonFieldProfilesByPlotID = map[string][]plotItemConfigField{
 		plotItemConfigFieldComparisonValues,
 		plotItemConfigFieldComparisonLabels,
 	},
+	"power_timecourse": {
+		plotItemConfigFieldComparisonColumn,
+		plotItemConfigFieldComparisonValues,
+		plotItemConfigFieldComparisonLabels,
+		plotItemConfigFieldComparisonROIs,
+	},
 }
 
 var extraPlotFieldsByPlotID = map[string][]plotItemConfigField{

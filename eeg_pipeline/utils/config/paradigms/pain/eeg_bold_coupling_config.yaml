@@ -1,0 +1,256 @@
+paths:
+  signature_dir: null
+  signature_maps: []
+  # Example:
+  # signature_maps:
+  #   - name: "NPS"
+  #     path: "pain_signatures/NPS_thresholded.nii.gz"
+  #   - name: "SIIPS1"
+  #     path: "pain_signatures/SIIPS1_thresholded.nii.gz"
+
+eeg_bold_coupling:
+  output_dir: null
+
+  roi_builder:
+    enabled: false
+    output_dir: null  # Null -> <deriv_root>/roi_library/eeg_bold_coupling
+    template_subject: "fsaverage"
+    parcellation: "aparc.a2009s"
+    min_vertices_default: 25
+    min_component_vertices_default: 25
+    abs_weight_threshold: 0.0
+    exclude_discordant_vertices: true
+    connected_components: true
+    component_selection: "all"  # "largest" | "all"
+    items: []
+    # Define reviewed anatomical ROIs explicitly for the target study.
+    # Do not rely on generic defaults for confirmatory inference.
+
+  rois:
+    template_subject: "fsaverage"
+    items: []
+    # Use this section when you want to point directly to frozen label files.
+    # If roi_builder.enabled=true and items is empty, the builder outputs are used automatically.
+
+  eeg:
+    bands: ["alpha", "beta"]
+    active_window: [3.0, 10.5]
+    baseline_window: [-5.0, -0.01]
+    feature_batch_size: 256
+    method: "lcmv"
+    spacing: "oct6"
+    subjects_dir: null
+    mindist_mm: 5.0
+    reg: 0.05
+    snr: 3.0
+    loose: 0.2
+    depth: 0.8
+
+  fmri:
+    contrast_name: "pain_trials"
+    input_source: "fmriprep"
+    fmriprep_space: "T1w"
+    require_fmriprep: true
+    extraction_method: "surface_glm"
+    selection_column: "trial_type"
+    selection_values: []
+    hrf_model: "spm"
+    drift_model: "cosine"
+    high_pass_hz: 0.008
+    low_pass_hz: null
+    smoothing_fwhm: 0.0
+    confounds_strategy: "auto"
+    lss_other_regressors: "all"
+
+  covariates:
+    model_terms: ["temperature", "temperature_sq", "fd", "eeg_artifact", "exp_global", "block_start"]
+    temperature_column: null
+    include_temperature_squared: true
+    site_column: null
+    extra_numeric_columns: []
+
+  nuisance:
+    fd:
+      enabled: true
+      output_column: "fd"
+      source_column: "framewise_displacement"
+      hrf_model: "spm"
+      censor_above: null
+
+    dvars:
+      enabled: false
+      output_column: "dvars"
+      source_column: "std_dvars"
+      hrf_model: "spm"
+      censor_above: null
+
+    eeg_artifact:
+      enabled: true
+      output_column: "eeg_artifact"
+      required_components:
+        - "event_residual_ecg_coupling"
+        - "event_peripheral_low_gamma_power"
+      component_z_threshold: 5.0
+      composite_threshold: 3.0
+      event_numeric_columns:
+        - "residual_ecg_coupling"
+        - "peripheral_low_gamma_power"
+      # These columns are produced upstream by preprocessing.clean_events_qc
+      # in eeg_config.yaml. Keep the clean-events export and coupling config aligned.
+
+      global_amplitude:
+        enabled: false
+        window: [-5.0, 10.5]
+
+      ecg_amplitude:
+        enabled: false
+        channels: []
+        window: [-5.0, 10.5]
+
+      peripheral_band_power:
+        enabled: false
+        channels: []
+        band: [30.0, 45.0]
+        window: [3.0, 10.5]
+        # Example channels:
+        # channels: ["Fp1", "Fp2", "FT9", "FT10", "T7", "T8", "TP9", "TP10"]
+
+    censoring:
+      require_all_model_terms_finite: true
+
+  fmri_qc:
+    enabled: true
+    design:
+      max_abs_target_other_correlation: null
+      min_target_efficiency: null
+      max_target_variance: null
+    roi:
+      outlier_mad_threshold: 5.0
+      max_outlier_proportion: null
+
+  sensitivities:
+    painful_only:
+      enabled: false
+      output_name: "painful_only"
+      binary_column: null
+      painful_values: ["1"]
+      rating_column: null
+      min_rating: null
+      # Columns must exist in the merged trial table. Clean-events metadata is carried
+      # forward with an "events_" prefix, for example:
+      # binary_column: "events_binary_outcome_coded"
+      # rating_column: "events_vas_final_coded_rating"
+
+    alternative_fmri:
+      enabled: false
+      name: "alternative_fmri"
+      beta_dir_template: null
+      # Example:
+      # beta_dir_template: "{deriv_root}/sub-{subject}/fmri/glmsingle/task-{task}/contrast-{contrast_name}"
+      # Expected file layout matches the LSS trial-beta layout:
+      #   <beta_dir_template>/trial_betas/run-XX/sub-XX_task-<task>_run-XX_trial-YYY_beta.nii.gz
+
+    delta_temperature:
+      enabled: false
+      output_name: "delta_temperature"
+      temperature_column: "temperature"
+      model_terms: ["temperature", "temperature_sq", "fd", "eeg_artifact", "delta_temperature"]
+
+    temperature_categorical:
+      enabled: false
+      output_name: "temperature_categorical"
+      temperature_column: "temperature"
+      factor_column: "temperature_factor"
+      model_terms: ["temperature_factor", "fd", "eeg_artifact", "exp_global", "block_start"]
+      max_levels: null
+
+    residualized_correlation:
+      enabled: true
+      output_name: "residualized_correlation"
+      bootstrap_iterations: 5000
+      permutation_iterations: 5000
+
+    primary_permutation:
+      enabled: true
+      output_name: "primary_permutation"
+      bootstrap_iterations: 5000
+      permutation_iterations: 5000
+
+    source_methods:
+      enabled: false
+      items: []
+      # Example:
+      # items:
+      #   - name: "dspm"
+      #     method: "dspm"
+      #     bands: ["alpha", "beta"]
+      #   - name: "wmne"
+      #     method: "wmne"
+      #     bands: ["alpha", "beta"]
+      #   - name: "lcmv_low_gamma"
+      #     method: "lcmv"
+      #     bands: ["low_gamma"]
+
+    anatomical_specificity:
+      enabled: false
+      items: []
+      # Example:
+      # items:
+      #   - name: "control_rois"
+      #     rois:
+      #       - name: "control_roi"
+      #         template_subject: "fsaverage"
+      #         parcellation: "aparc.a2009s"
+      #         annot_labels: ["SomeLabel-lh"]
+
+    artifact_models:
+      enabled: false
+      items: []
+      # Example:
+      # items:
+      #   - name: "expanded_artifact"
+      #     nuisance_overrides:
+      #       eeg_artifact:
+      #         required_components:
+      #           - "event_residual_ecg_coupling"
+      #           - "event_peripheral_low_gamma_power"
+      #           - "global_amplitude"
+      #         global_amplitude:
+      #           enabled: true
+      #           window: [-5.0, 10.5]
+
+    within_between:
+      enabled: false
+      output_name: "within_between"
+
+  secondary:
+    local_signature_expression:
+      enabled: false
+      signatures: []
+      abs_weight_threshold: 0.0
+      normalize_weights: "l1"
+
+  negative_controls:
+    trial_shuffle:
+      enabled: false
+      output_name: "trial_shuffle"
+
+  statistics:
+    backend: "nlme_lme_ar1"
+    min_trials_per_subject: 20
+    min_runs_per_subject: 2
+    include_run_fixed_effect: true
+    use_outcome_variance: false
+    alpha: 0.05
+    rscript_path: "Rscript"
+    fit_method: "reml"
+    max_iterations: 200
+    em_iterations: 50
+    singular_tolerance: 1.0e-8
+
+  alignment:
+    key_mode: "run_trial_number"
+
+  runtime:
+    preflight: true
+    profile_stages: true

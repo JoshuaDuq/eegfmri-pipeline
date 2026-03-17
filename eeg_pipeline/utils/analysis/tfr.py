@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import logging
 import os
@@ -1057,9 +1059,17 @@ def apply_baseline_safe(
         baseline_start_clipped, baseline_end_clipped, times, min_samples, logger
     )
     
-    tfr_obj.apply_baseline(baseline=(baseline_start_clipped, baseline_end_clipped), mode=mode)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        tfr_obj.apply_baseline(
+            baseline=(baseline_start_clipped, baseline_end_clipped),
+            mode=mode,
+        )
     _add_baseline_comment(tfr_obj, mode, baseline_start_clipped, baseline_end_clipped, config=config)
-    logger.info(f"Applied baseline {(baseline_start_clipped, baseline_end_clipped)} with mode='{mode}'.")
+    logger.debug(
+        "Applied baseline %s with mode='%s'.",
+        (baseline_start_clipped, baseline_end_clipped),
+        mode,
+    )
     return True
 
 

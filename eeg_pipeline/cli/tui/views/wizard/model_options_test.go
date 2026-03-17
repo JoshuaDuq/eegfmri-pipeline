@@ -224,6 +224,138 @@ func TestGetFeaturesOptions_SpatialTransformPerFamilyOptionsAreCategoryScoped(t 
 	}
 }
 
+func TestGetFeaturesOptions_RestingStateHidesTrialSpecificAdvancedControls(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, category := range m.categories {
+		switch category {
+		case "power", "connectivity", "bursts", "sourcelocalization", "erp", "erds", "itpc":
+			m.selected[i] = true
+		}
+	}
+
+	m.prepTaskIsRest = true
+	m.featGroupPowerExpanded = true
+	m.featGroupConnectivityExpanded = true
+	m.featGroupBurstsExpanded = true
+	m.featGroupSourceLocExpanded = true
+	m.featGroupSpatialTransformExpanded = true
+	m.featGroupExecutionExpanded = true
+
+	opts := m.getFeaturesOptions()
+
+	hiddenOptions := []optionType{
+		optFeatGroupERP,
+		optFeatGroupERDS,
+		optFeatGroupITPC,
+		optPowerRequireBaseline,
+		optPowerBaselineMode,
+		optPowerSubtractEvoked,
+		optPowerMinTrialsPerCondition,
+		optBurstThresholdReference,
+		optBurstMinTrialsPerCondition,
+		optConnGranularity,
+		optConnConditionColumn,
+		optConnConditionValues,
+		optConnMinEpochsPerGroup,
+		optConnForceWithinEpochML,
+		optSourceLocContrastEnabled,
+		optFeatAnalysisMode,
+		optItpcNJobs,
+		optSpatialTransformPerFamilyErp,
+		optSpatialTransformPerFamilyErds,
+		optSpatialTransformPerFamilyItpc,
+	}
+
+	for _, option := range hiddenOptions {
+		if hasOption(opts, option) {
+			t.Fatalf("did not expect option %v in resting-state features options", option)
+		}
+	}
+
+	for _, option := range []optionType{
+		optFeatGroupPower,
+		optFeatGroupConnectivity,
+		optFeatGroupBursts,
+		optFeatGroupSourceLoc,
+		optFeatGroupExecution,
+	} {
+		if !hasOption(opts, option) {
+			t.Fatalf("expected option %v in resting-state features options", option)
+		}
+	}
+}
+
+func TestApplyFeatureRestConstraints_RemovesRestIncompatibleSelectionsAndForcesRestSafeState(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, category := range m.categories {
+		switch category {
+		case "erp", "erds", "itpc":
+			m.selected[i] = true
+		}
+	}
+
+	m.prepTaskIsRest = true
+	m.powerRequireBaseline = true
+	m.powerSubtractEvoked = true
+	m.powerMinTrialsPerCondition = 7
+	m.burstThresholdReference = 0
+	m.burstMinTrialsPerCondition = 4
+	m.connGranularity = 0
+	m.connConditionColumn = "condition"
+	m.connConditionValues = "A B"
+	m.connForceWithinEpochML = true
+	m.sourceLocContrastEnabled = true
+	m.sourceLocContrastCondition = "condition"
+	m.sourceLocContrastA = "A"
+	m.sourceLocContrastB = "B"
+	m.sourceLocContrastMinTrials = 9
+	m.featAnalysisMode = 1
+
+	m.applyFeatureRestConstraints()
+
+	for i, category := range m.categories {
+		if (category == "erp" || category == "erds" || category == "itpc") && m.selected[i] {
+			t.Fatalf("did not expect %q to remain selected in resting-state mode", category)
+		}
+	}
+	if m.powerRequireBaseline {
+		t.Fatalf("expected resting-state constraints to disable power baseline requirement")
+	}
+	if m.powerSubtractEvoked {
+		t.Fatalf("expected resting-state constraints to disable power evoked subtraction")
+	}
+	if m.powerMinTrialsPerCondition != 2 {
+		t.Fatalf("expected resting-state constraints to reset power min trials, got %d", m.powerMinTrialsPerCondition)
+	}
+	if m.burstThresholdReference != 1 {
+		t.Fatalf("expected resting-state constraints to force burst threshold reference=subject, got %d", m.burstThresholdReference)
+	}
+	if m.burstMinTrialsPerCondition != 10 {
+		t.Fatalf("expected resting-state constraints to reset burst min trials, got %d", m.burstMinTrialsPerCondition)
+	}
+	if m.connGranularity != 2 {
+		t.Fatalf("expected resting-state constraints to force subject granularity, got %d", m.connGranularity)
+	}
+	if m.connConditionColumn != "" || m.connConditionValues != "" {
+		t.Fatalf("expected resting-state constraints to clear connectivity condition grouping, got column=%q values=%q", m.connConditionColumn, m.connConditionValues)
+	}
+	if m.connForceWithinEpochML {
+		t.Fatalf("expected resting-state constraints to disable within-epoch ML forcing")
+	}
+	if m.sourceLocContrastEnabled {
+		t.Fatalf("expected resting-state constraints to disable source contrasts")
+	}
+	if m.sourceLocContrastCondition != "" || m.sourceLocContrastA != "" || m.sourceLocContrastB != "" {
+		t.Fatalf("expected resting-state constraints to clear source contrast fields")
+	}
+	if m.sourceLocContrastMinTrials != 5 {
+		t.Fatalf("expected resting-state constraints to reset source contrast min trials, got %d", m.sourceLocContrastMinTrials)
+	}
+	if m.featAnalysisMode != 0 {
+		t.Fatalf("expected resting-state constraints to force group_stats analysis mode, got %d", m.featAnalysisMode)
+	}
+}
+
 func TestGetBehaviorOptions_HidesInferenceAndAdvancedForNonStatSelections(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	for i := range m.computations {

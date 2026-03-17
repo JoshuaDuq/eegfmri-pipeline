@@ -45,8 +45,14 @@ def test_discover_signature_root_falls_back_to_external_sibling(tmp_path: Path) 
     assert discovered == external
 
 
-def test_discover_signature_root_returns_none_on_invalid_inputs() -> None:
-    assert discover_signature_root(_BadConfig(), object()) is None
+def test_discover_signature_root_surfaces_invalid_config_getter() -> None:
+    with pytest.raises(RuntimeError, match="bad config"):
+        discover_signature_root(_BadConfig(), Path("/tmp/derivatives"))
+
+
+def test_discover_signature_root_surfaces_invalid_derivative_root_type() -> None:
+    with pytest.raises(TypeError):
+        discover_signature_root({}, object())
 
 
 def test_get_signature_specs_rejects_duplicate_names() -> None:

@@ -70,6 +70,187 @@ func TestBuildCommand_AppendsConfigSetOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildPreprocessingAdvancedArgs_EmitsCleanEventsQCSetOverrides(t *testing.T) {
+	m := New(types.PipelinePreprocessing, ".")
+	m.prepCleanEventsQCEnabled = false
+	m.prepCleanEventsQCEcgVarianceEnabled = false
+	m.prepCleanEventsQCEcgVarianceOutputColumn = "ecg_coupling_qc"
+	m.prepCleanEventsQCEcgVarianceChannels = "[\"ECG\",\"EKG\"]"
+	m.prepCleanEventsQCEcgVarianceWindow = "[-1.5,0.25]"
+	m.prepCleanEventsQCPeripheralLowGammaEnabled = false
+	m.prepCleanEventsQCPeripheralLowGammaOutputColumn = "gamma_qc"
+	m.prepCleanEventsQCPeripheralLowGammaChannels = "[\"Fp1\",\"Fp2\"]"
+	m.prepCleanEventsQCPeripheralLowGammaBand = "[28,44]"
+	m.prepCleanEventsQCPeripheralLowGammaWindow = "[-1,0.5]"
+
+	args := m.buildPreprocessingAdvancedArgs()
+
+	for _, subseq := range [][]string{
+		{"--set", "preprocessing.clean_events_qc.enabled=false"},
+		{"--set", "preprocessing.clean_events_qc.ecg_coupling.enabled=false"},
+		{"--set", "preprocessing.clean_events_qc.ecg_coupling.output_column=ecg_coupling_qc"},
+		{"--set", "preprocessing.clean_events_qc.ecg_coupling.channels=[\"ECG\",\"EKG\"]"},
+		{"--set", "preprocessing.clean_events_qc.ecg_coupling.window=[-1.5,0.25]"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.enabled=false"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.output_column=gamma_qc"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.channels=[\"Fp1\",\"Fp2\"]"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.band=[28,44]"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.window=[-1,0.5]"},
+	} {
+		if !containsSubsequence(args, subseq) {
+			t.Fatalf("expected %#v in preprocessing args: %#v", subseq, args)
+		}
+	}
+}
+
+func TestBuildCommand_FeaturesRestModeIncludesRestSafePowerFlags(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i := range m.selected {
+		m.selected[i] = i < len(m.categories) && m.categories[i] == "power"
+	}
+	m.prepTaskIsRest = true
+
+	cmd := m.BuildCommand()
+	for _, fragment := range []string{
+		"--task-is-rest",
+		"--no-power-require-baseline",
+		"--no-power-subtract-evoked",
+	} {
+		if !strings.Contains(cmd, fragment) {
+			t.Fatalf("expected %q in command, got: %s", fragment, cmd)
+		}
+	}
+}
+
+func TestValidateTimeRanges_AllowsRestingStatePowerWithoutBaseline(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i := range m.selected {
+		m.selected[i] = i < len(m.categories) && m.categories[i] == "power"
+	}
+	m.prepTaskIsRest = true
+	m.powerRequireBaseline = true
+	m.TimeRanges = []types.TimeRange{
+		{Name: "active", Tmin: "0", Tmax: "10"},
+	}
+
+	errors := m.validateTimeRanges()
+	for _, err := range errors {
+		if strings.Contains(err, "baseline") {
+			t.Fatalf("did not expect baseline-related error for resting-state power, got: %#v", errors)
+		}
+	}
+}
+
+func TestValidateTimeRanges_AllowsEmptyRangesForRestingState(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.prepTaskIsRest = true
+
+	errors := m.validateTimeRanges()
+	if len(errors) != 0 {
+		t.Fatalf("expected resting-state time range validation to allow no explicit ranges, got %#v", errors)
+	}
+}
+
+func TestBuildFeaturesAdvancedArgs_RestingStateForcesIafFullFallback(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.prepTaskIsRest = true
+	m.iafEnabled = true
+	m.iafAllowFullFallback = false
+
+	args := m.buildFeaturesAdvancedArgs()
+	if !containsString(args, "--iaf-allow-full-fallback") {
+		t.Fatalf("expected resting-state IAF to force --iaf-allow-full-fallback, got %#v", args)
+	}
+	if containsString(args, "--no-iaf-allow-full-fallback") {
+		t.Fatalf("did not expect --no-iaf-allow-full-fallback in resting-state args: %#v", args)
+	}
+}
+
+func TestBuildFeaturesAdvancedArgs_RestingStateSuppressesAperiodicEvokedSubtraction(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.prepTaskIsRest = true
+	for i := range m.selected {
+		m.selected[i] = i < len(m.categories) && m.categories[i] == "aperiodic"
+	}
+	m.aperiodicSubtractEvoked = true
+
+	args := m.buildFeaturesAdvancedArgs()
+	if containsString(args, "--aperiodic-subtract-evoked") {
+		t.Fatalf("did not expect resting-state args to include --aperiodic-subtract-evoked: %#v", args)
+	}
+}
+
+func TestBuildFeaturesAdvancedArgs_RestingStateOmitsTrialSpecificFeatureArgs(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, category := range m.categories {
+		switch category {
+		case "power", "connectivity", "bursts", "sourcelocalization", "erp", "erds", "itpc":
+			m.selected[i] = true
+		}
+	}
+
+	m.prepTaskIsRest = true
+	m.powerMinTrialsPerCondition = 7
+	m.powerBaselineMode = 3
+	m.burstThresholdReference = 0
+	m.burstMinTrialsPerCondition = 4
+	m.connGranularity = 1
+	m.connConditionColumn = "condition"
+	m.connConditionValues = "A,B"
+	m.connMinEpochsPerGroup = 9
+	m.connForceWithinEpochML = true
+	m.sourceLocContrastEnabled = true
+	m.sourceLocContrastCondition = "condition"
+	m.sourceLocContrastA = "A"
+	m.sourceLocContrastB = "B"
+	m.sourceLocContrastMinTrials = 8
+	m.featAnalysisMode = 1
+	m.itpcMethod = 3
+	m.erpBaselineCorrection = true
+	m.erdsUseLogRatio = true
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	for _, flag := range []string{
+		"--power-min-trials-per-condition",
+		"--power-baseline-mode",
+		"--burst-min-trials-per-condition",
+		"--conn-condition-column",
+		"--conn-condition-values",
+		"--conn-min-epochs-per-group",
+		"--conn-force-within-epoch-for-ml",
+		"--no-conn-force-within-epoch-for-ml",
+		"--source-contrast",
+		"--itpc-method",
+		"--itpc-condition-column",
+		"--itpc-min-trials-per-condition",
+		"--itpc-allow-unsafe-loo",
+		"--erp-baseline",
+		"--no-erp-baseline",
+		"--erds-use-log-ratio",
+		"--no-erds-use-log-ratio",
+		"--spatial-transform-itpc",
+		"--spatial-transform-erds",
+		"--spatial-transform-erp",
+	} {
+		if containsString(args, flag) {
+			t.Fatalf("did not expect %s in resting-state args: %#v", flag, args)
+		}
+	}
+
+	for _, subseq := range [][]string{
+		{"--conn-granularity", "subject"},
+		{"--burst-threshold-reference", "subject"},
+		{"--analysis-mode", "group_stats"},
+		{"--no-power-require-baseline"},
+		{"--no-power-subtract-evoked"},
+	} {
+		if !containsSubsequence(args, subseq) {
+			t.Fatalf("expected %#v in resting-state args: %#v", subseq, args)
+		}
+	}
+}
+
 func TestBuildBehaviorAdvancedArgs_OmitsDeprecatedTfHeatmapFlags(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	m.tfHeatmapEnabled = false
@@ -854,11 +1035,12 @@ func TestSelectedPlotIDs_PlottingGroupScopeFiltersUnsupportedPlots(t *testing.T)
 		{ID: "band_power_topomaps", Group: "power"},
 		{ID: "power_by_condition", Group: "power"},
 		{ID: "power_spectral_density", Group: "power"},
+		{ID: "power_timecourse", Group: "power"},
 	}
-	m.plotSelected = map[int]bool{0: true, 1: true, 2: true}
+	m.plotSelected = map[int]bool{0: true, 1: true, 2: true, 3: true}
 
 	got := m.SelectedPlotIDs()
-	want := []string{"band_power_topomaps", "power_by_condition", "power_spectral_density"}
+	want := []string{"band_power_topomaps", "power_by_condition", "power_spectral_density", "power_timecourse"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected group plotting IDs %v, got %v", want, got)
 	}

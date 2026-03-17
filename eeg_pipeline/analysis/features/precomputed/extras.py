@@ -15,6 +15,11 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    select_single_rest_analysis_segment,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_precomputed
@@ -177,17 +182,37 @@ def _get_segment_masks_with_fallback(
     logger: Optional[logging.Logger],
     feature_name: str,
 ) -> Dict[str, np.ndarray]:
-    """Get segment masks (strict; no full-epoch fallback)."""
+    """Get valid segment masks for precomputed extras."""
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    
+
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
-    
+    task_is_rest = is_resting_state_feature_mode(config)
+
+    def _valid_analysis_masks(masks: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        return valid_rest_analysis_segment_masks(masks)
+
     if target_name and windows is not None:
         mask = windows.get_mask(target_name)
         if mask is not None and np.any(mask):
             return {target_name: mask}
-        
+
+        if task_is_rest:
+            segment_name, segment_mask = select_single_rest_analysis_segment(
+                get_segment_masks(precomputed.times, windows, config),
+                feature_name=feature_name,
+                target_name=str(target_name),
+            )
+            if logger:
+                logger.info(
+                    "%s: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    feature_name,
+                    target_name,
+                    segment_name,
+                )
+            return {segment_name: segment_mask}
+
         if logger:
             logger.error(
                 "%s: targeted window '%s' has no valid mask; skipping.",
@@ -195,8 +220,11 @@ def _get_segment_masks_with_fallback(
                 target_name,
             )
         return {}
-    
-    return get_segment_masks(precomputed.times, windows, config)
+
+    segment_masks = get_segment_masks(precomputed.times, windows, config)
+    if task_is_rest:
+        return _valid_analysis_masks(segment_masks)
+    return segment_masks
 
 
 def extract_band_ratios_from_precomputed(
@@ -208,7 +236,7 @@ def extract_band_ratios_from_precomputed(
     Uses PSD-integrated band power (scientifically valid for ratios).
     Power is bandwidth-normalized (power per Hz) for comparability across bands.
     """
-    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
+    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True)
     if not is_valid:
         logger = getattr(precomputed, "logger", None)
         if logger is not None:

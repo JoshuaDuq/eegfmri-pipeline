@@ -369,7 +369,7 @@ def _process_subjects_parallel(
         f"Starting ERP visualization: {len(subjects)} subject(s), "
         f"task={task} [parallel, n_jobs={n_jobs}]"
     )
-    results = Parallel(n_jobs=n_jobs, backend="loky", verbose=10)(
+    results = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(_visualize_single_subject)(
             subject,
             task,

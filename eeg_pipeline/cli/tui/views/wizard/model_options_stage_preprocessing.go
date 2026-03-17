@@ -105,6 +105,16 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepWriteCleanEvents,
 				optPrepOverwriteCleanEvents,
 				optPrepCleanEventsStrict,
+				optPrepCleanEventsQCEnabled,
+				optPrepCleanEventsQCEcgVarianceEnabled,
+				optPrepCleanEventsQCEcgVarianceOutputColumn,
+				optPrepCleanEventsQCEcgVarianceChannels,
+				optPrepCleanEventsQCEcgVarianceWindow,
+				optPrepCleanEventsQCPeripheralLowGammaEnabled,
+				optPrepCleanEventsQCPeripheralLowGammaOutputColumn,
+				optPrepCleanEventsQCPeripheralLowGammaChannels,
+				optPrepCleanEventsQCPeripheralLowGammaBand,
+				optPrepCleanEventsQCPeripheralLowGammaWindow,
 			)
 		}
 	}

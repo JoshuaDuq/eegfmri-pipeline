@@ -935,6 +935,16 @@ const (
 	// EEG Preprocessing: ecg_channels, autoreject_n_interpolate
 	optPrepEcgChannels
 	optPrepAutorejectNInterpolate
+	optPrepCleanEventsQCEnabled
+	optPrepCleanEventsQCEcgVarianceEnabled
+	optPrepCleanEventsQCEcgVarianceOutputColumn
+	optPrepCleanEventsQCEcgVarianceChannels
+	optPrepCleanEventsQCEcgVarianceWindow
+	optPrepCleanEventsQCPeripheralLowGammaEnabled
+	optPrepCleanEventsQCPeripheralLowGammaOutputColumn
+	optPrepCleanEventsQCPeripheralLowGammaChannels
+	optPrepCleanEventsQCPeripheralLowGammaBand
+	optPrepCleanEventsQCPeripheralLowGammaWindow
 
 	// Alignment
 	optAlignAllowMisalignedTrim

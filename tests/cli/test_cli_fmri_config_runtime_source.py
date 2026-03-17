@@ -182,6 +182,8 @@ paths:
   bids_fmri_root: "{bids_root}"
 fmri_contrast:
   name: "from_yaml"
+  condition_a:
+    column: "trial_type"
 """.strip()
         + "\n",
         encoding="utf-8",

@@ -13,6 +13,10 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class TestBehaviorValidityFixes(unittest.TestCase):
+    class _BadConfig:
+        def get(self, *_args, **_kwargs):
+            raise RuntimeError("bad config")
+
     def _ctx(self, config: DotConfig) -> SimpleNamespace:
         event_columns = config.setdefault("event_columns", {})
         event_columns.setdefault("predictor", ["predictor", "temperature"])
@@ -45,6 +49,132 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(primary_spec)
         self.assertIn(StageRegistry.RESOURCE_EFFECT_SIZES, primary_spec.requires)
         self.assertNotIn(StageRegistry.RESOURCE_PVALUES, primary_spec.requires)
+
+    def test_feature_inference_surfaces_registry_failures(self):
+        from eeg_pipeline.analysis.behavior.feature_inference import (
+            infer_feature_band_impl,
+            infer_feature_type_impl,
+        )
+
+        with patch(
+            "eeg_pipeline.domain.features.registry.get_feature_registry",
+            side_effect=RuntimeError("registry-broken"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "registry-broken"):
+                infer_feature_type_impl(
+                    "power_alpha",
+                    DotConfig({}),
+                    feature_column_prefixes=["power_"],
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "registry-broken"):
+                infer_feature_band_impl("power_alpha", DotConfig({}))
+
+    def test_paired_ttest_rejects_length_mismatch(self):
+        from eeg_pipeline.utils.parallel import _compute_ttest_statistics
+
+        with self.assertRaisesRegex(ValueError, "equal-length"):
+            _compute_ttest_statistics(
+                np.array([1.0, 2.0, 3.0], dtype=float),
+                np.array([1.0, 2.0], dtype=float),
+                paired=True,
+            )
+
+    def test_permutation_predictor_control_rejects_invalid_mode(self):
+        from eeg_pipeline.utils.analysis.stats.permutation import _get_predictor_control_mode
+
+        with self.assertRaisesRegex(ValueError, "predictor_control"):
+            _get_predictor_control_mode(
+                DotConfig({"behavior_analysis": {"statistics": {"predictor_control": "banana"}}})
+            )
+
+    def test_permutation_predictor_control_surfaces_config_getter_failures(self):
+        from eeg_pipeline.utils.analysis.stats.permutation import _get_predictor_control_mode
+
+        with self.assertRaisesRegex(RuntimeError, "bad config"):
+            _get_predictor_control_mode(self._BadConfig())
+
+    def test_permutation_predictor_control_none_returns_empty_covariates(self):
+        from eeg_pipeline.utils.analysis.stats.permutation import _build_predictor_covariates
+
+        out = _build_predictor_covariates(
+            pd.Series([1.0, 2.0, 3.0], name="predictor"),
+            config=DotConfig({"behavior_analysis": {"statistics": {"predictor_control": "none"}}}),
+        )
+        self.assertTrue(out.empty)
+
+    def test_partial_predictor_control_rejects_invalid_mode(self):
+        from eeg_pipeline.utils.analysis.stats.partial import _get_predictor_control_mode
+
+        with self.assertRaisesRegex(ValueError, "predictor_control"):
+            _get_predictor_control_mode(
+                DotConfig({"behavior_analysis": {"statistics": {"predictor_control": "banana"}}})
+            )
+
+    def test_partial_predictor_control_surfaces_config_getter_failures(self):
+        from eeg_pipeline.utils.analysis.stats.partial import _get_predictor_control_mode
+
+        with self.assertRaisesRegex(RuntimeError, "bad config"):
+            _get_predictor_control_mode(self._BadConfig())
+
+    def test_selected_feature_files_reject_unknown_keys(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="task",
+            config=DotConfig({}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+            selected_feature_files=["not_a_feature"],
+        )
+
+        with self.assertRaisesRegex(ValueError, "Unknown feature file key"):
+            ctx._load_selected_feature_files()
+
+    def test_selected_feature_files_require_requested_files_to_exist(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="task",
+            config=DotConfig({}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+            selected_feature_files=["power"],
+        )
+
+        with self.assertRaisesRegex(FileNotFoundError, "Feature file not found"):
+            ctx._load_selected_feature_files()
+
+    def test_selected_feature_files_surface_table_load_failures(self):
+        from eeg_pipeline.context.behavior import BehaviorContext
+
+        ctx = BehaviorContext(
+            subject="0001",
+            task="task",
+            config=DotConfig({}),
+            logger=Mock(),
+            deriv_root=Path(tempfile.mkdtemp()),
+            stats_dir=Path(tempfile.mkdtemp()),
+            selected_feature_files=["power"],
+        )
+        features_dir = ctx.deriv_root / "sub-0001" / "eeg" / "features"
+        features_dir.mkdir(parents=True, exist_ok=True)
+        feature_path = features_dir / "features_power.parquet"
+        feature_path.write_text("power_alpha\n1.0\n", encoding="utf-8")
+
+        with patch("eeg_pipeline.context.behavior.deriv_features_path", return_value=features_dir), patch(
+            "eeg_pipeline.utils.data.feature_discovery._find_feature_file_path",
+            return_value=feature_path,
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=ValueError("bad table"),
+        ):
+            with self.assertRaisesRegex(ValueError, "bad table"):
+                ctx._load_selected_feature_files()
 
     def test_predictor_residual_stage_updates_trial_table_cache(self):
         import pandas as pd
@@ -1229,7 +1359,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIsNotNone(design)
         self.assertEqual(design.targets, ["rating", "temperature"])
 
-    def test_correlate_design_with_no_explicit_targets_returns_none(self):
+    def test_correlate_design_without_explicit_targets_resolves_default_outcome(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design
 
         cfg = DotConfig(
@@ -1263,7 +1393,8 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 ctx,
                 SimpleNamespace(control_predictor=True, control_trial_order=True),
             )
-        self.assertIsNone(design)
+        self.assertIsNotNone(design)
+        self.assertEqual(design.targets, ["rating"])
 
     def test_correlate_design_does_not_force_run_adjustment_when_disabled(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_correlate_design

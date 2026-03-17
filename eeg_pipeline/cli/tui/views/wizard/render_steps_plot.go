@@ -10,58 +10,103 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m Model) renderPlotSelection() string {
-	var b strings.Builder
-	b.WriteString("\n")
+const (
+	plotSelectionIntroLines      = 4
+	plotSelectionDetailBaseLines = 4
+)
 
-	b.WriteString(styles.RenderStepHeader("Plots", m.contentWidth) + "\n")
-
-	visibleItems := []int{}
-	for i, plot := range m.plotItems {
-		if !m.IsPlotVisibleForSelection(plot) {
-			continue
-		}
-		visibleItems = append(visibleItems, i)
-	}
-
-	count := 0
-	for _, idx := range visibleItems {
-		if m.plotSelected[idx] {
-			count++
-		}
-	}
-
-	b.WriteString(styles.RenderStatusCount(count, len(visibleItems), "selected"))
-	b.WriteString("\n\n")
-
+func (m Model) plotSelectionLines() (lines []string, cursorLine int, visibleCount int, selectedCount int) {
+	cursorLine = -1
 	currentGroup := ""
+
 	for i, plot := range m.plotItems {
 		if !m.IsPlotVisibleForSelection(plot) {
 			continue
 		}
+
+		visibleCount++
+		if m.plotSelected[i] {
+			selectedCount++
+		}
+
 		if plot.Group != currentGroup {
 			if currentGroup != "" {
-				b.WriteString("\n")
+				lines = append(lines, "")
 			}
-			b.WriteString(styles.RenderDimSectionLabel(strings.ToUpper(plot.Group)) + "\n")
+			lines = append(lines, styles.RenderDimSectionLabel(strings.ToUpper(plot.Group)))
 			currentGroup = plot.Group
 		}
 
-		isSelected := m.plotSelected[i]
 		isFocused := i == m.plotCursor
+		if isFocused {
+			cursorLine = len(lines)
+		}
+
 		cursor := "  "
 		if isFocused {
 			cursor = styles.RenderCursor()
 		}
-		checkbox := styles.RenderCheckbox(isSelected, isFocused)
+		checkbox := styles.RenderCheckbox(m.plotSelected[i], isFocused)
 		idStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
 		if isFocused {
 			idStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		}
-		line := cursor + checkbox + " " + idStyle.Render(plot.ID) + nameStyle.Render(" \u2014 "+plot.Name)
-		b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
+
+		line := cursor + checkbox + " " + idStyle.Render(plot.ID) + nameStyle.Render(" — "+plot.Name)
+		lines = append(lines, styles.TruncateLine(line, m.contentWidth))
+	}
+
+	return lines, cursorLine, visibleCount, selectedCount
+}
+
+func (m Model) plotSelectionDetailLines() int {
+	if m.plotCursor < 0 || m.plotCursor >= len(m.plotItems) {
+		return 0
+	}
+	if !m.IsPlotVisibleForSelection(m.plotItems[m.plotCursor]) {
+		return 0
+	}
+
+	plot := m.plotItems[m.plotCursor]
+	_, totalCount, _ := m.plotAvailabilitySummary(plot)
+	lines := plotSelectionDetailBaseLines
+	if totalCount > 0 {
+		lines++
+	}
+	return lines
+}
+
+func (m Model) plotSelectionVisibleRows(totalLines int) int {
+	availableRows := m.availableMainContentHeight() - plotSelectionIntroLines - m.plotSelectionDetailLines()
+	if availableRows < 1 {
+		return 1
+	}
+	return scrollableVisibleLines(totalLines, availableRows)
+}
+
+func (m Model) renderPlotSelection() string {
+	var b strings.Builder
+	b.WriteString(styles.RenderStepHeader("Plots", m.contentWidth) + "\n")
+
+	lines, _, visibleCount, selectedCount := m.plotSelectionLines()
+	b.WriteString(styles.RenderStatusCount(selectedCount, visibleCount, "selected"))
+	b.WriteString("\n\n")
+
+	startLine, endLine, showIndicators := calculateExactScrollWindow(
+		len(lines),
+		m.plotOffset,
+		m.plotSelectionVisibleRows(len(lines)),
+	)
+	if showIndicators && startLine > 0 {
+		b.WriteString(styles.RenderScrollUpIndicator(startLine) + "\n")
+	}
+	for i := startLine; i < endLine; i++ {
+		b.WriteString(lines[i] + "\n")
+	}
+	if showIndicators && endLine < len(lines) {
+		b.WriteString(styles.RenderScrollDownIndicator(len(lines)-endLine) + "\n")
 	}
 
 	if m.plotCursor >= 0 && m.plotCursor < len(m.plotItems) && m.IsPlotVisibleForSelection(m.plotItems[m.plotCursor]) {
@@ -172,6 +217,36 @@ func (m Model) renderTimeRange() string {
 	b.WriteString("\n")
 	b.WriteString(styles.RenderStepHeader("Time range", m.contentWidth) + "\n")
 
+	if m.timeRangeShowsRestToggle() {
+		isFocused := m.timeRangeCursorOnRestToggle() && m.editingRangeIdx == noRangeEditing
+		cursor := "  "
+		if isFocused {
+			cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
+		}
+		labelStyle := lipgloss.NewStyle().Foreground(styles.Text)
+		if isFocused {
+			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
+		}
+		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+		b.WriteString(
+			styles.RenderConfigLine(
+				cursor,
+				labelStyle.Render("Resting State:"),
+				valueStyle.Render(m.boolToOnOff(m.prepTaskIsRest)),
+				hintStyle.Render("ON = no task events; power uses raw/log power"),
+				defaultLabelWidth,
+				m.contentWidth,
+			) + "\n\n",
+		)
+		if m.prepTaskIsRest {
+			infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+			b.WriteString(infoStyle.Render(
+				"  The pipeline defaults to a full-epoch analysis window when no explicit time range is provided.",
+			) + "\n\n")
+		}
+	}
+
 	var tmin, tmax float64
 	hasMetadata := false
 	for _, s := range m.subjects {
@@ -237,7 +312,7 @@ func (m Model) renderTimeRange() string {
 	}
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  +: add  D: delete  Space/Enter: edit") + "\n\n")
+		"  +: add  D: delete  Space: toggle/edit") + "\n\n")
 
 	nameWidth := 15
 	valWidth := 10
@@ -247,12 +322,22 @@ func (m Model) renderTimeRange() string {
 	b.WriteString("  " + styles.RenderDivider(nameWidth+valWidth*2+2) + "\n")
 
 	if len(m.TimeRanges) == 0 {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render("  No time ranges defined. Press [A] to add one.") + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  Note: 'baseline' is required for normalization (ERDS, log-ratio).") + "\n")
+		emptyStateStyle := lipgloss.NewStyle().Foreground(styles.Accent).Italic(true)
+		b.WriteString("\n")
+		if m.prepTaskIsRest {
+			b.WriteString(emptyStateStyle.Render("  No explicit time ranges defined. Press [A] to add one.") + "\n")
+		} else {
+			b.WriteString(emptyStateStyle.Render("  No time ranges defined. Press [A] to add one.") + "\n")
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  Note: 'baseline' is required for normalization (ERDS, log-ratio).") + "\n")
+		}
 	}
 
 	for i, tr := range m.TimeRanges {
-		isFocused := i == m.timeRangeCursor
+		rowCursor := i
+		if m.timeRangeShowsRestToggle() {
+			rowCursor++
+		}
+		isFocused := rowCursor == m.timeRangeCursor
 		isEditing := i == m.editingRangeIdx
 		cursor := "  "
 		if isFocused {

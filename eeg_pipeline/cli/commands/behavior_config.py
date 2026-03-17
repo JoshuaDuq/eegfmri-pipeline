@@ -32,6 +32,10 @@ def _to_float(value: Any) -> float:
     return float(value)
 
 
+def _to_float_list(value: Any) -> list[float]:
+    return [float(v) for v in (value or [])]
+
+
 def _to_stripped(value: Any) -> str:
     return str(value).strip()
 
@@ -358,6 +362,7 @@ _TEMPORAL_OVERRIDE_RULES = (
     ),
     ConfigOverrideRule("temporal_include_tf_grid", "behavior_analysis.temporal.include_tf_grid", _to_bool),
     ConfigOverrideRule("temporal_time_resolution_ms", "behavior_analysis.temporal.time_resolution_ms", _to_int),
+    ConfigOverrideRule("temporal_freqs_hz", "behavior_analysis.temporal.freqs_hz", _to_float_list),
     ConfigOverrideRule("temporal_smooth_window_ms", "behavior_analysis.temporal.smooth_window_ms", _to_int),
     ConfigOverrideRule(
         "temporal_topomap_window_ms",

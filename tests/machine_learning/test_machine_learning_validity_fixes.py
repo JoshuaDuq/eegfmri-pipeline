@@ -5,6 +5,7 @@ import sys
 import tempfile
 import types
 import unittest
+from builtins import __import__ as _real_import
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -15,6 +16,30 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class TestMachineLearningValidityFixes(unittest.TestCase):
+    def test_spatial_feature_selector_requires_feature_names_when_regions_are_requested(self):
+        from eeg_pipeline.analysis.machine_learning.preprocessing import SpatialFeatureSelector
+
+        selector = SpatialFeatureSelector(allowed_regions=["insula"], config=DotConfig({}))
+
+        with self.assertRaisesRegex(ValueError, "feature names"):
+            selector.fit(np.ones((4, 3), dtype=float))
+
+    def test_resolve_feature_families_surfaces_standard_catalog_import_failure(self):
+        from eeg_pipeline.utils.data.machine_learning import _resolve_feature_families
+
+        def _import_with_failure(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "eeg_pipeline.utils.data.feature_discovery":
+                raise ImportError("catalog-missing")
+            return _real_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=_import_with_failure):
+            with self.assertRaisesRegex(ImportError, "catalog-missing"):
+                _resolve_feature_families(
+                    feature_families=None,
+                    feature_set="combined",
+                    config=DotConfig({}),
+                )
+
     def test_cnn_validation_split_stays_group_disjoint_when_group_splitter_fails(self):
         from eeg_pipeline.analysis.machine_learning import cnn
 
@@ -1127,6 +1152,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     rng_seed=42,
                     results_root=Path(td),
                     logger=Mock(),
+                    baseline_predictors=["temperature"],
                 )
             with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
@@ -2314,6 +2340,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     rng_seed=42,
                     results_root=Path(td),
                     logger=Mock(),
+                    baseline_predictors=["temperature"],
                 )
 
         self.assertTrue(calls)
@@ -2387,6 +2414,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     rng_seed=42,
                     results_root=Path(td),
                     logger=Mock(),
+                    baseline_predictors=["temperature"],
                 )
 
             with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:

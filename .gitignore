@@ -34,6 +34,7 @@ eeg_pipeline/.venv311/
 .matplotlib_cache/
 .matplotlib/
 .coverage
+coverage.xml
 htmlcov/
 .cache/
 .tox/
@@ -41,6 +42,8 @@ htmlcov/
 .hypothesis/
 .mypy_cache/
 .ruff_cache/
+.ipynb_checkpoints/
+.python-version
 
 ### Go (TUI) ###
 .gocache/
@@ -75,6 +78,12 @@ Thumbs.db
 *.log
 output.json
 columns_sample.txt
+
+### R ###
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
 
 ### Data ###
 # Ignore all data by default

@@ -19,6 +19,7 @@ import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.analysis.features.rest import is_resting_state_feature_mode
 from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.utils.data.feature_alignment import (
     attach_feature_alignment_columns,
@@ -154,6 +155,7 @@ def _load_features_and_targets(
             preload=False,
             deriv_root=deriv_root,
             config=config,
+            task_is_rest=is_resting_state_feature_mode(config),
         )
         if epochs is None:
             raise FileNotFoundError(

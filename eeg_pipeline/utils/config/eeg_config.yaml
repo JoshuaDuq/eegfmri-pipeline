@@ -114,10 +114,26 @@ preprocessing:
   notch_freq: 60
   line_freq: 60
   n_jobs: 1
+  task_is_rest: false              # True = fixed-length resting-state epochs, no event conditions
+  rest_epochs_duration: 10.0       # Fixed-length resting-state epoch duration [s]
+  rest_epochs_overlap: 0.0         # Resting-state epoch overlap [s]
   find_breaks: true
   write_clean_events: true           # Write post-rejection (kept-epochs) *_proc-clean_events.tsv in derivatives
   clean_events_overwrite: true       # Overwrite existing clean events.tsv
   clean_events_strict: true          # Fail preprocessing if clean events.tsv cannot be written/aligned
+  clean_events_qc:
+    enabled: true
+    ecg_coupling:
+      enabled: true
+      output_column: "residual_ecg_coupling"
+      channels: ["ECG"]
+      window: *active_window
+    peripheral_low_gamma:
+      enabled: true
+      output_column: "peripheral_low_gamma_power"
+      channels: ["Fp1", "Fp2", "FT9", "FT10", "TP9", "TP10"]
+      band: [30.0, 45.0]
+      window: *active_window
 
 pyprep:
   ransac: true
@@ -204,6 +220,7 @@ time_frequency_analysis:
 
 # 4.3 Feature Extraction
 feature_engineering:
+  task_is_rest: false
   feature_categories: ["power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "quality", "microstates", "erds", "spectral", "ratios", "asymmetry", "erp", "bursts"]
   spatial_modes: ["roi", "channels", "global"]
   # Controls cross-trial feature computation and leakage constraints:
@@ -1173,10 +1190,10 @@ plotting:
       annotate_descriptive: false
       sig_mask_params:
         marker: "o"
-        markerfacecolor: "none"
-        markeredgecolor: "g"
-        linewidth: 0.8
-        markersize: 3
+        markerfacecolor: "white"
+        markeredgecolor: "black"
+        markeredgewidth: 0.8
+        markersize: 4
     tfr:
       log_base: *log_base
       percentage_multiplier: *percentage_multiplier

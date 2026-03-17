@@ -124,6 +124,20 @@
       "requires_epochs": true
     },
     {
+      "id": "power_timecourse",
+      "group": "power",
+      "label": "Timecourse",
+      "description": "Time-resolved band power trajectories by condition",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "feature_categories": [
+        "power"
+      ],
+      "requires_epochs": true
+    },
+    {
       "id": "connectivity_by_condition",
       "group": "connectivity",
       "label": "Condition Comparison",

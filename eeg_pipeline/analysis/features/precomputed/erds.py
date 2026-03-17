@@ -12,6 +12,7 @@ from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
 from eeg_pipeline.utils.analysis.channels import build_roi_map
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_precomputed
+from eeg_pipeline.analysis.features.rest import raise_if_rest_incompatible
 from eeg_pipeline.utils.config.loader import get_feature_constant
 
 from .extras import validate_window_masks
@@ -298,6 +299,7 @@ def extract_erds_from_precomputed(
     precomputed: PrecomputedData,
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
+    raise_if_rest_incompatible(precomputed.config or {}, feature_name="ERDS")
     is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
     if not is_valid:
         logger = getattr(precomputed, "logger", None)

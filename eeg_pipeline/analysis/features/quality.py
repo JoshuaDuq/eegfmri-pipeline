@@ -19,6 +19,11 @@ import numpy as np
 import pandas as pd
 import mne
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    select_single_rest_analysis_segment,
+    valid_rest_analysis_segment_masks,
+)
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.domain.features.naming import NamingSchema
@@ -36,6 +41,56 @@ DEFAULT_SNR_SIGNAL_BAND = [1.0, 30.0]
 DEFAULT_SNR_NOISE_BAND = [40.0, 80.0]
 DEFAULT_MUSCLE_BAND = [30.0, 80.0]
 SNR_DB_MULTIPLIER = 10
+
+
+def _valid_quality_segment_masks(
+    masks: Dict[str, np.ndarray],
+) -> Dict[str, np.ndarray]:
+    return valid_rest_analysis_segment_masks(masks)
+
+
+def _resolve_quality_segment_masks(
+    times: np.ndarray,
+    windows: Any,
+    target_name: str | None,
+    config: Any,
+    logger: Any,
+) -> Dict[str, np.ndarray]:
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            return {target_name: np.asarray(mask, dtype=bool)}
+
+        if is_resting_state_feature_mode(config):
+            segment_name, segment_mask = select_single_rest_analysis_segment(
+                get_segment_masks(times, windows, config),
+                feature_name="Quality",
+                target_name=str(target_name),
+            )
+            if logger:
+                logger.info(
+                    "Quality: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    target_name,
+                    segment_name,
+                )
+            return {segment_name: segment_mask}
+
+        if logger:
+            logger.error(
+                "Quality: targeted window '%s' has no valid mask; skipping.",
+                target_name,
+            )
+        return {}
+
+    masks = get_segment_masks(times, windows, config)
+    if is_resting_state_feature_mode(config):
+        return _valid_quality_segment_masks(masks)
+    return {
+        name: np.asarray(mask, dtype=bool)
+        for name, mask in masks.items()
+        if mask is not None and np.any(mask)
+    }
 
 
 def _extract_quality_config(config: Any) -> Dict[str, Any]:
@@ -396,22 +451,14 @@ def extract_quality_features(
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     logger = getattr(ctx, "logger", None)
-    
-    config is not None and hasattr(config, "get")
-    
-    if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
-            masks = {target_name: mask}
-        else:
-            if logger:
-                logger.error(
-                    "Quality: targeted window '%s' has no valid mask; skipping.",
-                    target_name,
-                )
-            return pd.DataFrame(), []
-    else:
-        masks = get_segment_masks(epochs.times, windows, config)
+
+    masks = _resolve_quality_segment_masks(
+        epochs.times,
+        windows,
+        target_name,
+        config,
+        logger,
+    )
     
     if not masks:
         if logger:

@@ -141,6 +141,31 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
         self.assertIn("segments", qc)
         self.assertIn("active", qc["segments"])
 
+    def test_resting_state_uses_available_analysis_segment_when_target_window_empty(self):
+        precomputed = self._build_precomputed()
+        times = precomputed.times
+        analysis_mask = np.ones(times.shape, dtype=bool)
+        empty_mask = np.zeros(times.shape, dtype=bool)
+        precomputed.windows = TimeWindows(
+            masks={"analysis": analysis_mask, "active": empty_mask},
+            ranges={"analysis": (float(times[0]), float(times[-1] + (1.0 / precomputed.sfreq))), "active": (float(times[0]), float(times[-1] + (1.0 / precomputed.sfreq)))},
+            times=times,
+            name="active",
+        )
+        precomputed.config.setdefault("preprocessing", {})["task_is_rest"] = True
+        precomputed.config.setdefault("feature_engineering", {})["task_is_rest"] = True
+
+        df, cols, qc = extract_aperiodic_from_precomputed(precomputed, ["alpha"])
+
+        expected_col = NamingSchema.build("aperiodic", "analysis", "broadband", "global", "slope")
+        self.assertFalse(df.empty)
+        self.assertIn(expected_col, cols)
+        self.assertNotIn(
+            NamingSchema.build("aperiodic", "active", "broadband", "global", "slope"),
+            cols,
+        )
+        self.assertIn("analysis", qc.get("segments", {}))
+
     def test_trial_ml_safe_requires_train_mask_for_subtract_evoked(self):
         precomputed = self._build_precomputed()
         precomputed.config["feature_engineering"]["aperiodic"]["subtract_evoked"] = True
@@ -170,6 +195,15 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
         self.assertTrue(cols)
         self.assertTrue(seen_masks)
         np.testing.assert_array_equal(seen_masks[0], precomputed.train_mask)
+
+    def test_resting_state_rejects_subtract_evoked(self):
+        precomputed = self._build_precomputed()
+        precomputed.config["preprocessing"] = {"task_is_rest": True}
+        precomputed.config["feature_engineering"]["task_is_rest"] = True
+        precomputed.config["feature_engineering"]["aperiodic"]["subtract_evoked"] = True
+
+        with self.assertRaisesRegex(ValueError, "subtract_evoked is not scientifically valid"):
+            extract_aperiodic_from_precomputed(precomputed, ["alpha"])
 
     def test_extract_aperiodic_features_uses_aligned_event_condition_labels(self):
         n_epochs = 3

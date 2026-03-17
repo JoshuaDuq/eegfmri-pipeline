@@ -66,7 +66,7 @@ class TestEventColumnValidation(unittest.TestCase):
         )
         self.assertEqual(
             missing,
-            ["event_columns.outcome (tried: ['outcome', 'rating'])"],
+            ["event_columns.outcome (tried: ['vas_final_coded_rating', 'rating'])"],
         )
 
     def test_behavior_resolution_does_not_fallback_to_unconfigured_outcome_column(self):

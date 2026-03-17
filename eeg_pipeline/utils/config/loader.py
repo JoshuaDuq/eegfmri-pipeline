@@ -422,8 +422,12 @@ def get_condition_column_candidates(config: Any) -> List[str]:
     Resolution source:
     1. `event_columns.condition` from config (list/tuple/string)
     """
-    raw = get_config_value(config, "event_columns.condition", [])
+    missing = object()
+    raw = get_config_value(config, "event_columns.condition", missing)
     candidates: List[str] = []
+
+    if raw is missing:
+        return ["condition", "trial_type", "binary_outcome"]
 
     if isinstance(raw, (list, tuple)):
         candidates.extend(str(v).strip() for v in raw if str(v).strip())
@@ -443,6 +447,7 @@ def get_condition_column_candidates(config: Any) -> List[str]:
             continue
         seen.add(key)
         deduped.append(col)
+
     return deduped
 
 

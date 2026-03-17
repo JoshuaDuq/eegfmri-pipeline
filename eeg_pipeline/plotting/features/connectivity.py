@@ -13,6 +13,7 @@ from mne_connectivity.viz import plot_connectivity_circle
 
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import log_if_present, save_fig
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import (
     get_config_value,
     get_frequency_band_names,
@@ -112,9 +113,9 @@ def _filter_connectivity_columns_by_roi(
     """Filter connectivity columns to within-ROI edges."""
     if roi_name == "all" or roi_name not in roi_definitions:
         return columns
-    
+
     from eeg_pipeline.plotting.features.roi import get_roi_channels
-    
+
     channel_pattern = re.compile(r'_chpair_([^_]+)_([^_]+)_')
     all_channel_names = set()
     for col in all_features_columns:
@@ -122,9 +123,9 @@ def _filter_connectivity_columns_by_roi(
         if match:
             all_channel_names.add(match.group(1))
             all_channel_names.add(match.group(2))
-    
+
     roi_channels = set(get_roi_channels(roi_definitions[roi_name], list(all_channel_names)))
-    
+
     filtered_columns = []
     for col in columns:
         match = channel_pattern.search(str(col))
@@ -132,7 +133,7 @@ def _filter_connectivity_columns_by_roi(
             ch1, ch2 = match.group(1), match.group(2)
             if ch1 in roi_channels and ch2 in roi_channels:
                 filtered_columns.append(col)
-    
+
     return filtered_columns if filtered_columns else columns
 
 
@@ -173,6 +174,77 @@ def _detect_segments_from_data(
     return [str(s) for s in segments]
 
 
+def _get_available_connectivity_segments(features_df: pd.DataFrame) -> List[str]:
+    """Return connectivity segments present in the current feature table."""
+    segments = set()
+    for column in features_df.columns:
+        parsed = NamingSchema.parse(str(column))
+        if not parsed.get("valid") or parsed.get("group") != "conn":
+            continue
+        segment = str(parsed.get("segment") or "").strip()
+        if segment:
+            segments.add(segment)
+    return sorted(segments)
+
+
+def _measure_has_connectivity_data(
+    features_df: pd.DataFrame,
+    *,
+    measure: str,
+    bands: List[str],
+    segments: List[str],
+) -> bool:
+    columns = list(features_df.columns)
+    for segment in segments:
+        for band in bands:
+            matched_cols, _, _ = parse_connectivity_columns(
+                columns,
+                measure,
+                band,
+                segment=segment,
+            )
+            if matched_cols:
+                return True
+    return False
+
+
+def _validate_connectivity_plot_request(
+    features_df: pd.DataFrame,
+    *,
+    measures: List[str],
+    bands: List[str],
+    requested_segments: List[str],
+) -> None:
+    """Fail fast when the requested connectivity plot configuration cannot match the data."""
+    available_segments = _get_available_connectivity_segments(features_df)
+    missing_segments = [segment for segment in requested_segments if segment not in available_segments]
+    if missing_segments:
+        available_text = ", ".join(available_segments) if available_segments else "none"
+        raise ValueError(
+            "Connectivity plotting requested segment(s) "
+            f"{missing_segments}, but the loaded connectivity features only contain "
+            f"segments: {available_text}."
+        )
+
+    missing_measures = [
+        measure
+        for measure in measures
+        if not _measure_has_connectivity_data(
+            features_df,
+            measure=measure,
+            bands=bands,
+            segments=requested_segments,
+        )
+    ]
+    if missing_measures:
+        raise ValueError(
+            "Connectivity plotting requested measure(s) "
+            f"{missing_measures}, but no matching connectivity columns were found for the "
+            f"requested segments {requested_segments} and bands {bands}. "
+            "Use extractor-supported measures only: aec, wpli, pli, plv, imcoh."
+        )
+
+
 def _plot_window_comparison_connectivity(
     features_df: pd.DataFrame,
     segments: List[str],
@@ -190,6 +262,10 @@ def _plot_window_comparison_connectivity(
     
     Supports both 2-window comparison (simple paired) and multi-window comparison
     (3+ windows with all pairwise brackets and significance asterisks).
+
+    Connectivity condition plots display ROI-aggregated edge means. Behavior-pipeline
+    condition-effect tables are edge-level, so reusing them here produces annotations
+    that do not correspond to the displayed series.
     """
     from eeg_pipeline.plotting.features.utils import plot_paired_comparison, plot_multi_window_comparison
     from eeg_pipeline.utils.formatting import sanitize_label
@@ -246,7 +322,7 @@ def _plot_window_comparison_connectivity(
                         config=config,
                         logger=logger,
                         roi_name=roi_name,
-                        stats_dir=stats_dir,
+                        stats_dir=None,
                     )
             else:
                 # 2-window comparison
@@ -294,7 +370,7 @@ def _plot_window_comparison_connectivity(
                         label1=segment1.capitalize(),
                         label2=segment2.capitalize(),
                         roi_name=roi_name,
-                        stats_dir=stats_dir,
+                        stats_dir=None,
                     )
     
     plot_type = "multi-window" if use_multi_window else "paired"
@@ -466,10 +542,148 @@ def _plot_column_comparison_connectivity(
     
     Supports both 2-group comparison (simple unpaired) and multi-group comparison
     (3+ groups with all pairwise brackets and significance asterisks).
+
+    Connectivity condition plots display ROI-aggregated edge means. Behavior-pipeline
+    condition-effect tables are edge-level, so reusing them here produces annotations
+    that do not correspond to the displayed series.
     """
+    from scipy.stats import mannwhitneyu
+
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
-    from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats, get_band_color, plot_multi_group_column_comparison
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_band_color, plot_multi_group_column_comparison
     from eeg_pipeline.utils.formatting import sanitize_label
+
+    def compute_plot_limits(values: np.ndarray, measure_name: str) -> Tuple[float, float]:
+        finite_values = np.asarray(values, dtype=float)
+        finite_values = finite_values[np.isfinite(finite_values)]
+        if finite_values.size == 0:
+            return -0.05, 0.05
+
+        measure_lower = str(measure_name).lower()
+        ymin = float(np.nanmin(finite_values))
+        ymax = float(np.nanmax(finite_values))
+        center = 0.5 * (ymin + ymax)
+        observed_span = ymax - ymin
+        reference_scale = max(abs(ymin), abs(ymax), abs(center), 1e-6)
+
+        if "imcoh" in measure_lower:
+            min_span = reference_scale * 0.2
+        else:
+            min_span = reference_scale * 0.1
+
+        span = max(observed_span, min_span, 1e-6)
+        half_span = 0.55 * span
+        y_lower = center - half_span
+        y_upper = center + half_span
+
+        if y_lower < 0.0 and ymin >= 0.0:
+            shift = -y_lower
+            y_lower += shift
+            y_upper += shift
+
+        return y_lower, y_upper
+
+    def prepare_display_values(
+        values1: np.ndarray,
+        values2: np.ndarray,
+        measure_name: str,
+    ) -> Tuple[np.ndarray, np.ndarray, float, float, Optional[str], bool]:
+        all_values = np.concatenate([values1, values2])
+        finite_values = all_values[np.isfinite(all_values)]
+        if finite_values.size == 0:
+            return values1, values2, -0.05, 0.05, None, False
+
+        ymin = float(np.nanmin(finite_values))
+        ymax = float(np.nanmax(finite_values))
+        observed_span = ymax - ymin
+        reference_scale = max(abs(ymin), abs(ymax), abs(float(np.nanmedian(finite_values))), 1e-6)
+        needs_centering = observed_span / reference_scale < 0.05
+
+        if not needs_centering:
+            y_lower, y_upper = compute_plot_limits(finite_values, measure_name)
+            return values1, values2, y_lower, y_upper, None, False
+
+        center_value = float(np.nanmedian(finite_values))
+        centered_values1 = values1 - center_value
+        centered_values2 = values2 - center_value
+        centered_all_values = np.concatenate([centered_values1, centered_values2])
+        max_abs = float(np.nanmax(np.abs(centered_all_values))) if centered_all_values.size > 0 else 0.0
+        half_range = max(max_abs * 1.25, observed_span * 0.75, 1e-6)
+        center_label = f"Centered at {center_value:.3e}"
+        return centered_values1, centered_values2, -half_range, half_range, center_label, True
+
+    def compute_rank_biserial(u1: float, n_group1: int, n_group2: int) -> float:
+        if n_group1 <= 0 or n_group2 <= 0:
+            return 0.0
+
+        total_pairs = float(n_group1 * n_group2)
+        if np.isclose(total_pairs, 0.0):
+            return 0.0
+        return float(1.0 - (2.0 * u1 / total_pairs))
+
+    def compute_connectivity_column_stats(
+        cell_data: Dict[int, Optional[Dict[str, np.ndarray]]],
+    ) -> Tuple[Dict[int, Tuple[float, float, float, bool]], int]:
+        qvalues: Dict[int, Tuple[float, float, float, bool]] = {}
+        all_pvalues: List[float] = []
+        pvalue_keys: List[Tuple[int, float, float]] = []
+
+        for band_idx in range(len(bands)):
+            data = cell_data.get(band_idx)
+            if data is None:
+                continue
+
+            values1 = np.asarray(data.get("v1", np.array([])), dtype=float)
+            values2 = np.asarray(data.get("v2", np.array([])), dtype=float)
+            values1 = values1[np.isfinite(values1)]
+            values2 = values2[np.isfinite(values2)]
+            if values1.size < 3 or values2.size < 3:
+                continue
+
+            try:
+                u1, p_value = mannwhitneyu(values1, values2, alternative="two-sided")
+                effect_size = compute_rank_biserial(float(u1), int(values1.size), int(values2.size))
+            except (ValueError, RuntimeError) as exc:
+                log_if_present(
+                    logger,
+                    "debug",
+                    f"Connectivity column stats failed for band index {band_idx}: {exc}",
+                )
+                continue
+
+            all_pvalues.append(float(p_value))
+            pvalue_keys.append((band_idx, float(p_value), effect_size))
+
+        if not all_pvalues:
+            return qvalues, 0
+
+        rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
+        for index, (band_idx, p_value, effect_size) in enumerate(pvalue_keys):
+            qvalues[band_idx] = (p_value, float(qvals[index]), effect_size, bool(rejected[index]))
+        return qvalues, int(np.sum(rejected))
+
+    def summarize_group_counts(
+        cell_data: Dict[int, Optional[Dict[str, np.ndarray]]],
+    ) -> str:
+        counts1 = []
+        counts2 = []
+        for data in cell_data.values():
+            if data is None:
+                continue
+            counts1.append(len(np.asarray(data.get("v1", np.array([])))))
+            counts2.append(len(np.asarray(data.get("v2", np.array([])))))
+
+        def format_range(counts: List[int]) -> str:
+            valid_counts = [int(count) for count in counts if int(count) > 0]
+            if not valid_counts:
+                return "0"
+            count_min = min(valid_counts)
+            count_max = max(valid_counts)
+            if count_min == count_max:
+                return str(count_min)
+            return f"{count_min}-{count_max}"
+
+        return f"N: {format_range(counts1)} vs {format_range(counts2)} trials"
     
     values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
@@ -481,9 +695,6 @@ def _plot_column_comparison_connectivity(
         
         masks_dict, group_labels = multi_group_info
         segment = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
-        
-        from eeg_pipeline.plotting.features.utils import load_multigroup_stats
-        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
         
         for roi_name in roi_names:
             for measure in measures:
@@ -524,8 +735,8 @@ def _plot_column_comparison_connectivity(
                         config=config,
                         logger=logger,
                         roi_name=roi_name,
-                        stats_dir=stats_dir,
-                        multigroup_stats=multigroup_stats,
+                        stats_dir=None,
+                        multigroup_stats=None,
                     )
         
         log_if_present(logger, "info", f"Saved connectivity multi-group column comparison for {len(roi_names)} ROIs")
@@ -542,8 +753,6 @@ def _plot_column_comparison_connectivity(
     segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
     band_colors = {band: get_band_color(band, config) for band in bands}
     n_bands = len(bands)
-    n_trials = len(features_df)
-    
     for roi_name in roi_names:
         for measure in measures:
             cell_data = {}
@@ -567,14 +776,8 @@ def _plot_column_comparison_connectivity(
                 
                 cell_data[band_idx] = {"v1": values1, "v2": values2}
             
-            qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
-                stats_dir=stats_dir,
-                feature_type="connectivity",
-                feature_keys=bands,
-                cell_data=cell_data,
-                config=config,
-                logger=logger,
-            )
+            qvalues, n_significant = compute_connectivity_column_stats(cell_data)
+            use_precomputed = False
             
             fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
             
@@ -589,8 +792,13 @@ def _plot_column_comparison_connectivity(
                     continue
                 
                 values1, values2 = data["v1"], data["v2"]
+                display_values1, display_values2, y_lower, y_upper, center_label, centered_display = prepare_display_values(
+                    values1,
+                    values2,
+                    measure,
+                )
                 
-                boxplot = ax.boxplot([values1, values2], positions=[0, 1], 
+                boxplot = ax.boxplot([display_values1, display_values2], positions=[0, 1], 
                                     widths=0.4, patch_artist=True)
                 boxplot["boxes"][0].set_facecolor(segment_colors["v1"])
                 boxplot["boxes"][0].set_alpha(0.6)
@@ -600,23 +808,42 @@ def _plot_column_comparison_connectivity(
                 jitter_range = 0.08
                 rng = np.random.default_rng(42)
                 ax.scatter(rng.uniform(-jitter_range, jitter_range, len(values1)), 
-                          values1, c=segment_colors["v1"], alpha=0.3, s=6)
+                          display_values1, c=segment_colors["v1"], alpha=0.3, s=6)
                 ax.scatter(1 + rng.uniform(-jitter_range, jitter_range, len(values2)), 
-                          values2, c=segment_colors["v2"], alpha=0.3, s=6)
-                
-                all_values = np.concatenate([values1, values2])
-                ymin, ymax = np.nanmin(all_values), np.nanmax(all_values)
-                yrange = ymax - ymin if ymax > ymin else 0.1
-                ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                          display_values2, c=segment_colors["v2"], alpha=0.3, s=6)
+
+                ax.set_ylim(y_lower, y_upper)
+                if max(abs(y_lower), abs(y_upper)) < 1e-2:
+                    ax.ticklabel_format(axis="y", style="sci", scilimits=(-2, 2), useMathText=True)
+                if centered_display:
+                    ax.axhline(0.0, color="0.6", linewidth=0.8, linestyle="--", alpha=0.8)
+                    ax.text(
+                        0.02,
+                        0.98,
+                        center_label,
+                        transform=ax.transAxes,
+                        ha="left",
+                        va="top",
+                        fontsize=plot_cfg.font.small,
+                        color="0.45",
+                    )
                 
                 if band_idx in qvalues:
                     _, qvalue, effect_size, is_significant = qvalues[band_idx]
                     sig_marker = "†" if is_significant else ""
                     sig_color = "#d62728" if is_significant else "#333333"
-                    annotation_text = f"q={qvalue:.3f}{sig_marker}\nd={effect_size:.2f}"
-                    ax.annotate(annotation_text, xy=(0.5, ymax + 0.05 * yrange),
-                               ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
-                               fontweight="bold" if is_significant else "normal")
+                    annotation_text = f"q={qvalue:.3f}{sig_marker}\nr={effect_size:.2f}"
+                    ax.text(
+                        0.5,
+                        0.42,
+                        annotation_text,
+                        transform=ax.transAxes,
+                        ha="center",
+                        va="center",
+                        fontsize=plot_cfg.font.medium,
+                        color=sig_color,
+                        fontweight="bold" if is_significant else "normal",
+                    )
                 
                 ax.set_xticks([0, 1])
                 ax.set_xticklabels([label1, label2], fontsize=9)
@@ -628,9 +855,10 @@ def _plot_column_comparison_connectivity(
             n_tests = len(qvalues)
             roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Edges"
             stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
+            count_summary = summarize_group_counts(cell_data)
             title_text = (
                 f"Connectivity ({measure.upper()}): {label1} vs {label2} (Column Comparison)\n"
-                f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | "
+                f"Subject: {subject} | ROI: {roi_display} | {count_summary} | "
                 f"{stats_source} | FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
             )
             fig.suptitle(title_text, fontsize=plot_cfg.font.suptitle, 
@@ -678,12 +906,25 @@ def plot_connectivity_by_condition(
     compare_windows = get_config_value(config, "plotting.comparisons.compare_windows", True)
     compare_columns = get_config_value(config, "plotting.comparisons.compare_columns", False)
     
-    segments = _detect_segments_from_data(features_df, config, logger)
+    segments = _detect_segments_from_data(features_df, config, logger) if compare_windows else []
     measures = get_config_value(
         config, "plotting.plots.features.connectivity.measures", 
-        ["aec", "wpli", "pli", "plv", "coherence"]
+        ["aec", "wpli", "pli", "plv", "imcoh"]
     )
     bands = list(get_frequency_band_names(config) or ['theta', 'alpha', 'beta', 'gamma'])
+    requested_segments = list(segments)
+    if compare_columns:
+        comparison_segment = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
+        if comparison_segment == "":
+            raise ValueError("plotting.comparisons.comparison_segment must be a non-empty string.")
+        requested_segments.append(comparison_segment)
+    if requested_segments:
+        _validate_connectivity_plot_request(
+            features_df,
+            measures=list(measures),
+            bands=bands,
+            requested_segments=requested_segments,
+        )
     
     roi_definitions = get_roi_definitions(config)
     roi_names = _get_roi_names_for_comparison(config, roi_definitions)

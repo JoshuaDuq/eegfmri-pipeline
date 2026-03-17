@@ -1,0 +1,57 @@
+{
+  "template_subject": "fsaverage",
+  "parcellation_reference": "aparc.a2009s",
+  "rois": [
+    {
+      "name": "right_operculo_periinsular",
+      "hemisphere": "rh",
+      "label_file": "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/rh.study2_right_operculo_parietal.label",
+      "definition": {
+        "type": "union_of_aparc_a2009s_labels",
+        "labels": [
+          "G_Ins_lg_and_S_cent_ins-rh",
+          "G_and_S_subcentral-rh",
+          "S_circular_insula_inf-rh",
+          "S_circular_insula_sup-rh"
+        ]
+      },
+      "n_vertices": 7633
+    },
+    {
+      "name": "midcingulate_pre_sma",
+      "hemisphere": "both",
+      "label_files": [
+        "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/lh.study2_cingulo_pre_sma.label",
+        "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/rh.study2_cingulo_pre_sma.label"
+      ],
+      "definition": {
+        "type": "mid_anterior_cingulate_plus_custom_pre_sma",
+        "cingulate_labels": [
+          "G_and_S_cingul-Mid-Ant-lh",
+          "G_and_S_cingul-Mid-Ant-rh"
+        ],
+        "pre_sma_rule": {
+          "source_label": "BA6_exvivo.thresh.label",
+          "frontal_labels": [
+            "G_front_sup",
+            "S_front_sup"
+          ],
+          "medial_abs_x_mm_max": 20.0,
+          "anterior_y_mm_min": 0.0
+        }
+      },
+      "counts": {
+        "lh": {
+          "mid_anterior_cingulate_vertices": 1957,
+          "pre_sma_vertices": 1237,
+          "combined_vertices": 3194
+        },
+        "rh": {
+          "mid_anterior_cingulate_vertices": 2197,
+          "pre_sma_vertices": 1252,
+          "combined_vertices": 3449
+        }
+      }
+    }
+  ]
+}

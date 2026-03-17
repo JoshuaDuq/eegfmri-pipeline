@@ -32,6 +32,7 @@ var groupSupportedPlotIDs = map[string]struct{}{
 	"band_power_topomaps":    {},
 	"power_by_condition":     {},
 	"power_spectral_density": {},
+	"power_timecourse":       {},
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -170,8 +171,8 @@ func (m *Model) handleUp() {
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
 			m.editingField = moveCursorInList(m.editingField, -1, timeRangeFieldCount)
-		} else if len(m.TimeRanges) > 0 {
-			m.timeRangeCursor = moveCursorInList(m.timeRangeCursor, -1, len(m.TimeRanges))
+		} else if m.timeRangeSelectableCount() > 0 {
+			m.timeRangeCursor = moveCursorInList(m.timeRangeCursor, -1, m.timeRangeSelectableCount())
 		}
 	case types.StepSelectPreprocessingStages:
 		m.prepStageCursor = moveCursorInList(m.prepStageCursor, -1, len(m.prepStages))
@@ -235,8 +236,8 @@ func (m *Model) handleDown() {
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
 			m.editingField = moveCursorInList(m.editingField, 1, timeRangeFieldCount)
-		} else if len(m.TimeRanges) > 0 {
-			m.timeRangeCursor = moveCursorInList(m.timeRangeCursor, 1, len(m.TimeRanges))
+		} else if m.timeRangeSelectableCount() > 0 {
+			m.timeRangeCursor = moveCursorInList(m.timeRangeCursor, 1, m.timeRangeSelectableCount())
 		}
 	case types.StepSelectPreprocessingStages:
 		m.prepStageCursor = moveCursorInList(m.prepStageCursor, 1, len(m.prepStages))
@@ -476,8 +477,15 @@ func (m *Model) handleSpace() {
 				m.editingRangeIdx = -1
 				m.editingField = 0
 			}
+		} else if m.timeRangeCursorOnRestToggle() {
+			m.prepTaskIsRest = !m.prepTaskIsRest
+			m.applyFeatureRestConstraints()
 		} else {
-			m.editingRangeIdx = m.timeRangeCursor
+			rangeIndex := m.selectedTimeRangeIndex()
+			if rangeIndex < 0 || rangeIndex >= len(m.TimeRanges) {
+				break
+			}
+			m.editingRangeIdx = rangeIndex
 			m.editingField = 1
 		}
 	case types.StepAdvancedConfig:
@@ -803,6 +811,9 @@ func (m *Model) validateTimeRanges() []string {
 	var errors []string
 
 	if len(m.TimeRanges) == 0 {
+		if m.prepTaskIsRest {
+			return nil
+		}
 		errors = append(errors, "No time ranges defined")
 		return errors
 	}
@@ -850,7 +861,7 @@ func (m *Model) validateTimeRanges() []string {
 		}
 	}
 
-	powerNeedsBaseline := m.isCategorySelected("power") && m.powerRequireBaseline
+	powerNeedsBaseline := m.isCategorySelected("power") && m.powerRequireBaseline && !m.prepTaskIsRest
 	if powerNeedsBaseline && !hasBaseline {
 		errors = append(errors, "Time range 'baseline' is required for power normalization (power.require_baseline=true)")
 	}

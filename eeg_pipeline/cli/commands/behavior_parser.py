@@ -407,6 +407,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     temporal_group.add_argument("--temporal-correction-method", choices=["fdr", "cluster"], default=None)
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
+    temporal_group.add_argument("--temporal-freqs-hz", nargs="+", type=float, default=None)
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-max-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-smooth-window-ms", type=int, default=None)

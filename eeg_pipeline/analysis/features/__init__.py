@@ -2,7 +2,7 @@
 EEG Feature Extraction Package
 ==============================
 
-Efficient feature extraction for EEG analysis across event-related studies.
+Efficient feature extraction for EEG analysis across task and resting-state studies.
 
 Quick Start
 -----------

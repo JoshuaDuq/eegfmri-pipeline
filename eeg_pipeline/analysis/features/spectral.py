@@ -55,6 +55,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.analysis.features.rest import (
+    is_resting_state_feature_mode,
+    select_single_rest_analysis_segment,
+)
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import EPSILON_PSD, validate_precomputed
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
@@ -1100,6 +1104,93 @@ def remove_aperiodic_component(
     return 10 ** residual
 
 
+def _resolve_spectral_segments(
+    segment_masks: Dict[str, np.ndarray],
+    configured_segments: Any,
+    task_is_rest: bool,
+    logger: Any,
+) -> List[str]:
+    """Resolve spectral segments on the current window set."""
+    if configured_segments:
+        if isinstance(configured_segments, str):
+            configured_segments = [configured_segments]
+        segments = [str(name) for name in configured_segments if name in segment_masks]
+        if segments:
+            return segments
+        if task_is_rest:
+            configured = ", ".join(str(name) for name in configured_segments)
+            raise ValueError(
+                "Spectral: resting-state mode requires explicitly configured segments to match "
+                f"the available non-baseline analysis segments. Requested: {configured}."
+            )
+    return list(segment_masks.keys())
+
+
+def _rebuild_spectral_segment_masks(
+    windows: Any,
+    current_times: np.ndarray,
+    target_name: Optional[str],
+    *,
+    task_is_rest: bool,
+    logger: Any,
+) -> Tuple[Dict[str, np.ndarray], List[str], Optional[str]]:
+    """Resolve spectral segment masks on the current epoch time axis."""
+    if target_name and windows is not None:
+        explicit_target_mask_defined = False
+        mask = windows.get_mask(target_name)
+        if mask is not None:
+            mask = np.asarray(mask, dtype=bool)
+            if len(mask) != len(current_times):
+                mask = None
+            else:
+                explicit_target_mask_defined = True
+        if mask is None:
+            window_range = windows.ranges.get(target_name) if hasattr(windows, "ranges") else None
+            if window_range is not None and len(window_range) >= 2:
+                tmin, tmax = float(window_range[0]), float(window_range[1])
+                mask = (current_times >= tmin) & (current_times < tmax)
+
+        if mask is not None and np.any(mask):
+            return {target_name: mask}, [target_name], None
+
+        if task_is_rest:
+            segment_masks: Dict[str, np.ndarray] = {}
+            if windows is not None and hasattr(windows, "ranges"):
+                for seg_name, seg_range in windows.ranges.items():
+                    if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
+                        tmin, tmax = float(seg_range[0]), float(seg_range[1])
+                        rebuilt_mask = (current_times >= tmin) & (current_times < tmax)
+                        if np.any(rebuilt_mask):
+                            segment_masks[str(seg_name)] = rebuilt_mask
+            if explicit_target_mask_defined:
+                segment_masks.pop(str(target_name), None)
+            segment_name, segment_mask = select_single_rest_analysis_segment(
+                segment_masks,
+                feature_name="Spectral",
+                target_name=str(target_name),
+            )
+            if logger is not None:
+                logger.info(
+                    "Spectral: resting-state mode found no valid target window '%s'; "
+                    "using available analysis segment '%s' instead.",
+                    target_name,
+                    segment_name,
+                )
+            return {segment_name: segment_mask}, [segment_name], None
+
+        return {}, [], f"invalid_target_window_mask:{target_name}"
+
+    segment_masks = {}
+    if windows is not None and hasattr(windows, "ranges"):
+        for seg_name, seg_range in windows.ranges.items():
+            if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
+                tmin, tmax = float(seg_range[0]), float(seg_range[1])
+                mask = (current_times >= tmin) & (current_times < tmax)
+                if np.any(mask):
+                    segment_masks[str(seg_name)] = mask
+    return segment_masks, [], None
+
+
 def compute_peak_frequency(
     psd: np.ndarray,
     freqs: np.ndarray,
@@ -1431,25 +1522,7 @@ def extract_spectral_features(
     epochs = ctx.epochs
     config = ctx.config
     logger = ctx.logger
-    
-    picks, ch_names = pick_eeg_channels(epochs)
-    if len(picks) == 0:
-        logger.warning("Spectral: No EEG channels available; skipping.")
-        return pd.DataFrame(), [], {}
-    
-    freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
-    spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
-    
-    roi_map = {}
-    if "roi" in spatial_modes:
-        roi_defs = get_roi_definitions(config)
-        if roi_defs:
-            roi_map = build_roi_map(ch_names, roi_defs)
-    
     sfreq = epochs.info["sfreq"]
-    data = epochs.get_data(picks=picks)
-    n_epochs = data.shape[0]
-    n_channels = data.shape[1]
 
     spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
     psd_method = str(spec_cfg.get("psd_method", "multitaper")).strip().lower()
@@ -1470,55 +1543,50 @@ def extract_spectral_features(
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     configured_segments = spec_cfg.get("segments")
-    
-    # Rebuild masks for the current (potentially cropped) time axis
-    # This prevents shape mismatches when epochs have been cropped after windows were built
+    task_is_rest = is_resting_state_feature_mode(config)
     current_times = epochs.times
-    
-    # Always derive mask from windows - never use np.ones() blindly
-    if target_name and windows is not None:
-        # Rebuild mask for the current time axis using window ranges
-        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
-        if window_range is not None and len(window_range) >= 2:
-            tmin, tmax = float(window_range[0]), float(window_range[1])
-            mask = (current_times >= tmin) & (current_times < tmax)
-        else:
-            mask = windows.get_mask(target_name)
-            # Validate mask length matches data
-            if mask is not None and len(mask) != data.shape[2]:
-                # Mask was built for different time axis; rebuild
-                mask = None
-        
-        if mask is not None and mask.size == data.shape[2] and np.any(mask):
-            segment_masks = {target_name: mask}
-        else:
-            logger.error(
-                "Spectral: targeted window '%s' has no valid mask; skipping.",
-                target_name,
-            )
-            return pd.DataFrame(), [], {"error": f"invalid_target_window_mask:{target_name}"}
-        segments = [target_name]
-    else:
-        # Rebuild all segment masks for the current time axis
-        segment_masks = {}
-        if windows is not None and hasattr(windows, 'ranges'):
-            for seg_name, seg_range in windows.ranges.items():
-                if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
-                    tmin, tmax = float(seg_range[0]), float(seg_range[1])
-                    mask = (current_times >= tmin) & (current_times < tmax)
-                    if np.any(mask):
-                        segment_masks[seg_name] = mask
-        
-        if configured_segments:
-            if isinstance(configured_segments, str):
-                configured_segments = [configured_segments]
-            segments = [s for s in configured_segments if s in segment_masks]
-        else:
-            segments = list(segment_masks.keys())
-    
+
+    segment_masks, segments, mask_error = _rebuild_spectral_segment_masks(
+        windows,
+        current_times,
+        target_name,
+        task_is_rest=task_is_rest,
+        logger=logger,
+    )
+    if mask_error is not None:
+        logger.error(
+            "Spectral: targeted window '%s' has no valid mask; skipping.",
+            target_name,
+        )
+        return pd.DataFrame(), [], {"error": mask_error}
+    if not segments:
+        segments = _resolve_spectral_segments(
+            segment_masks,
+            configured_segments,
+            task_is_rest,
+            logger,
+        )
     if not segments:
         logger.warning("Spectral: No valid segments found; returning empty DataFrame.")
         return pd.DataFrame(), [], {}
+
+    picks, ch_names = pick_eeg_channels(epochs)
+    if len(picks) == 0:
+        logger.warning("Spectral: No EEG channels available; skipping.")
+        return pd.DataFrame(), [], {}
+
+    freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
+    spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
+
+    roi_map = {}
+    if "roi" in spatial_modes:
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+
+    data = epochs.get_data(picks=picks)
+    n_epochs = data.shape[0]
+    n_channels = data.shape[1]
     
     # Segment duration validation parameters
     min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))

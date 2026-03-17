@@ -36,15 +36,44 @@ class CorrelationRequest:
     want_partial_predictor: bool
     want_partial_cov_predictor: bool
     want_run_mean: bool
+    types_explicitly_configured: bool
+
+
+def _resolve_correlation_permutation_count(config: Any, *, perm_enabled: bool) -> int:
+    """Resolve the effective trialwise correlation permutation count."""
+    if not perm_enabled:
+        return 0
+
+    scoped = get_config_value(
+        config,
+        "behavior_analysis.correlations.permutation.n_permutations",
+        None,
+    )
+    if scoped is not None:
+        return int(scoped)
+
+    statistics = get_config_value(
+        config,
+        "behavior_analysis.statistics.n_permutations",
+        None,
+    )
+    if statistics is not None:
+        return int(statistics)
+
+    return 1000
 
 
 def _resolve_correlation_request(config: Any) -> CorrelationRequest:
     """Resolve requested correlation outputs from configuration."""
-    correlation_types = get_config_value(
+    raw_correlation_types = get_config_value(
         config,
         "behavior_analysis.correlations.types",
-        ["partial_cov_predictor"],
+        None,
     )
+    types_explicitly_configured = raw_correlation_types is not None
+    correlation_types = raw_correlation_types
+    if correlation_types is None:
+        correlation_types = ["partial_cov_predictor"]
     if not isinstance(correlation_types, (list, tuple)):
         correlation_types = [correlation_types]
 
@@ -63,6 +92,7 @@ def _resolve_correlation_request(config: Any) -> CorrelationRequest:
         want_partial_cov_predictor="partial_cov_predictor" in normalized_types,
         want_run_mean=("run_mean" in normalized_types)
         or primary_unit in {"run", "run_mean", "runmean", "run_level"},
+        types_explicitly_configured=types_explicitly_configured,
     )
 
 
@@ -83,17 +113,49 @@ def _resolve_default_target_columns(
     return targets
 
 
+def _correlation_measure_is_available(
+    *,
+    measure: str,
+    design: CorrelateDesign,
+    target: str,
+) -> bool:
+    """Return whether a requested correlation estimand is identifiable for this design."""
+    if measure == "raw":
+        return True
+    if measure == "partial_cov":
+        return design.cov_df is not None and not design.cov_df.empty
+    if measure == "partial_predictor":
+        return (
+            design.predictor_series is not None
+            and str(target) != str(design.predictor_column)
+        )
+    if measure == "partial_cov_predictor":
+        return _correlation_measure_is_available(
+            measure="partial_cov",
+            design=design,
+            target=target,
+        ) and _correlation_measure_is_available(
+            measure="partial_predictor",
+            design=design,
+            target=target,
+        )
+    if measure == "run_mean":
+        return True
+    return False
+
+
 def _select_requested_primary_measure(
     *,
     request: CorrelationRequest,
     design: CorrelateDesign,
     target: str,
     run_mean: bool,
-) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
     """Select the configured primary measure without downgrading estimands."""
-    requested_trial_measures: List[tuple[bool, tuple[str, str, str]]] = [
+    requested_trial_measures: List[tuple[bool, str, tuple[str, str, str]]] = [
         (
             request.want_partial_cov_predictor,
+            "partial_cov_predictor",
             (
                 "p_partial_cov_predictor",
                 "r_partial_cov_predictor",
@@ -102,6 +164,7 @@ def _select_requested_primary_measure(
         ),
         (
             request.want_partial_predictor,
+            "partial_predictor",
             (
                 "p_partial_predictor",
                 "r_partial_predictor",
@@ -110,6 +173,7 @@ def _select_requested_primary_measure(
         ),
         (
             request.want_partial_cov,
+            "partial_cov",
             (
                 "p_partial_cov",
                 "r_partial_cov",
@@ -118,6 +182,7 @@ def _select_requested_primary_measure(
         ),
         (
             request.want_raw,
+            "raw",
             (
                 "p_raw",
                 "r_raw",
@@ -126,8 +191,30 @@ def _select_requested_primary_measure(
         ),
     ]
 
-    for is_requested, keys in requested_trial_measures:
+    for is_requested, measure_name, keys in requested_trial_measures:
         if not is_requested:
+            continue
+        if (
+            not request.types_explicitly_configured
+            and not _correlation_measure_is_available(
+                measure=measure_name,
+                design=design,
+                target=target,
+            )
+        ):
+            continue
+        if (
+            request.types_explicitly_configured
+            and measure_name == "raw"
+            and (
+                request.want_partial_cov_predictor
+                or request.want_partial_predictor
+                or request.want_partial_cov
+            )
+        ):
+            # Preserve the explicitly requested controlled estimand as primary.
+            # Raw remains available in the record but should not silently become
+            # the primary measure when a stricter control target was configured.
             continue
         if run_mean:
             p_key, r_key, source = keys
@@ -140,8 +227,15 @@ def _select_requested_primary_measure(
             )
         return keys
 
-    if run_mean and request.want_run_mean:
+    if run_mean:
         return "p_run_mean", "r_run_mean", "run_mean"
+
+    if (not request.types_explicitly_configured) and _correlation_measure_is_available(
+        measure="raw",
+        design=design,
+        target=target,
+    ):
+        return "p_raw", "r_raw", "raw"
 
     raise ValueError(
         "Correlations primary selection requires at least one requested non-run_mean "
@@ -249,11 +343,7 @@ def stage_correlate_design_impl(
     ).strip().lower()
     allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
     perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
-    n_perm = get_config_int(
-        ctx.config,
-        "behavior_analysis.correlations.permutation.n_permutations",
-        get_config_int(ctx.config, "behavior_analysis.statistics.n_permutations", 0),
-    )
+    n_perm = _resolve_correlation_permutation_count(ctx.config, perm_enabled=perm_enabled)
     if primary_unit in {"trial", "trialwise"} and (not perm_enabled or n_perm <= 0) and not allow_iid_trials:
         raise ValueError(
             "Trial-level correlations require a valid non-i.i.d inference method. "
@@ -671,6 +761,7 @@ def stage_correlate_effect_sizes_impl(
             want_partial_predictor=False,
             want_partial_cov_predictor=False,
             want_run_mean=request.want_run_mean,
+            types_explicitly_configured=request.types_explicitly_configured,
         )
 
     tasks = [(feat, target) for target in design.targets for feat in design.feature_cols]
@@ -897,7 +988,7 @@ def stage_correlate_pvalues_impl(
     method = getattr(config, "method", "spearman")
     robust_method = getattr(config, "robust_method", None)
     perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
-    n_perm = get_config_int(ctx.config, "behavior_analysis.correlations.permutation.n_permutations", ctx.n_perm or 0)
+    n_perm = _resolve_correlation_permutation_count(ctx.config, perm_enabled=perm_enabled)
     perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
 
     perm_ok_standard = (

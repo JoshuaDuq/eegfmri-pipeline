@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from fmri_pipeline.utils.bold_discovery import (
+    _parse_optional_positive_float_attr,
     build_first_level_model,
     coerce_condition_value,
     discover_fmriprep_preproc_bold,
@@ -132,6 +133,16 @@ def test_build_first_level_model_coerces_and_filters_optional_float_settings() -
     assert model.params["mask_img"] == "brain-mask"
     assert model.params["standardize"] is False
     assert model.params["signal_scaling"] == 0
+
+
+def test_parse_optional_positive_float_attr_surfaces_config_accessor_failures() -> None:
+    class BadConfig:
+        @property
+        def low_pass_hz(self) -> float:
+            raise RuntimeError("bad config")
+
+    with pytest.raises(RuntimeError, match="bad config"):
+        _parse_optional_positive_float_attr(BadConfig(), "low_pass_hz")
 
 
 def test_coerce_condition_value_matches_series_dtype_best_effort() -> None:

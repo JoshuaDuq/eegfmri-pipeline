@@ -258,136 +258,106 @@ class FmriAnalysisPipeline(PipelineBase):
         self.logger.info("Saved contrast map: %s", nifti_path.name)
 
         plotting_meta: Optional[dict[str, Any]] = None
-        try:
-            from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
-            from fmri_pipeline.analysis.reporting import run_fmri_plotting_and_report
+        from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
+        from fmri_pipeline.analysis.reporting import run_fmri_plotting_and_report
 
-            cfg_obj = plotting_cfg if isinstance(plotting_cfg, FmriPlottingConfig) else None
-            if cfg_obj is not None and cfg_obj.normalized().enabled:
-                # Optionally generate an MNI-space contrast in-memory (for plots only).
-                mni_img = None
-                mni_effect = None
-                mni_variance = None
-                want_mni = cfg_obj.normalized().space in {"mni", "both"}
-                if want_mni:
-                    try:
-                        from fmri_pipeline.analysis.contrast_builder import ContrastBuilderConfig
+        cfg_obj = plotting_cfg if isinstance(plotting_cfg, FmriPlottingConfig) else None
+        if cfg_obj is not None and cfg_obj.normalized().enabled:
+            # Optionally generate an MNI-space contrast in-memory (for plots only).
+            mni_img = None
+            mni_effect = None
+            mni_variance = None
+            want_mni = cfg_obj.normalized().space in {"mni", "both"}
+            if want_mni:
+                from fmri_pipeline.analysis.contrast_builder import ContrastBuilderConfig
 
-                        if isinstance(contrast_cfg, ContrastBuilderConfig):
-                            cfg_mni = ContrastBuilderConfig(
-                                **{**asdict(contrast_cfg), "fmriprep_space": "MNI152NLin2009cAsym"}
-                            )
-                        else:
-                            cfg_mni = replace(contrast_cfg) if is_dataclass(contrast_cfg) else copy.deepcopy(contrast_cfg)
-                            if hasattr(cfg_mni, "fmriprep_space"):
-                                setattr(cfg_mni, "fmriprep_space", "MNI152NLin2009cAsym")
+                if isinstance(contrast_cfg, ContrastBuilderConfig):
+                    cfg_mni = ContrastBuilderConfig(
+                        **{**asdict(contrast_cfg), "fmriprep_space": "MNI152NLin2009cAsym"}
+                    )
+                else:
+                    cfg_mni = replace(contrast_cfg) if is_dataclass(contrast_cfg) else copy.deepcopy(contrast_cfg)
+                    if hasattr(cfg_mni, "fmriprep_space"):
+                        setattr(cfg_mni, "fmriprep_space", "MNI152NLin2009cAsym")
 
-                        # Cache MNI map to disk for reproducibility and to avoid refitting when rerunning plots.
-                        mni_nifti_path = out_dir / (
-                            f"{sub_label}_task-{task}_contrast-{contrast_name}"
-                            f"_space-MNI152NLin2009cAsym_stat-{output_type_actual}_{cfg_hash}.nii.gz"
-                        )
-                        if mni_nifti_path.exists():
-                            mni_img = nib.load(str(mni_nifti_path))
-                        else:
-                            mni_img, _mni_meta, mni_glm, mni_contrast_def, _mni_out_type = build_contrast_from_runs_detailed(
-                                bids_fmri_root=Path(str(bids_fmri_root)).expanduser().resolve(),
-                                bids_derivatives=deriv_root,
-                                subject=subject,
-                                task=task,
-                                cfg=cfg_mni,
-                                output_dir=out_dir,
-                            )
-                            try:
-                                nib.save(mni_img, str(mni_nifti_path))
-                            except Exception as exc:
-                                self.logger.warning(
-                                    "Failed to cache MNI contrast NIfTI at %s: %s",
-                                    mni_nifti_path,
-                                    exc,
-                                )
+                # Cache MNI map to disk for reproducibility and to avoid refitting when rerunning plots.
+                mni_nifti_path = out_dir / (
+                    f"{sub_label}_task-{task}_contrast-{contrast_name}"
+                    f"_space-MNI152NLin2009cAsym_stat-{output_type_actual}_{cfg_hash}.nii.gz"
+                )
+                if mni_nifti_path.exists():
+                    mni_img = nib.load(str(mni_nifti_path))
+                else:
+                    mni_img, _mni_meta, mni_glm, mni_contrast_def, _mni_out_type = build_contrast_from_runs_detailed(
+                        bids_fmri_root=Path(str(bids_fmri_root)).expanduser().resolve(),
+                        bids_derivatives=deriv_root,
+                        subject=subject,
+                        task=task,
+                        cfg=cfg_mni,
+                        output_dir=out_dir,
+                    )
+                    nib.save(mni_img, str(mni_nifti_path))
 
-                            try:
-                                mni_contrast_arg = _contrast_arg_for_model_runs(mni_glm.flm, mni_contrast_def)
-                                mni_effect = mni_glm.flm.compute_contrast(mni_contrast_arg, output_type="effect_size")
-                                mni_variance = mni_glm.flm.compute_contrast(
-                                    mni_contrast_arg,
-                                    output_type="effect_variance",
-                                )
-                            except Exception as exc:
-                                self.logger.warning(
-                                    "Failed to compute MNI effect/variance maps for plotting: %s",
-                                    exc,
-                                )
-                    except Exception as exc:
-                        self.logger.warning("Skipping MNI plotting (failed to build MNI contrast): %s", exc)
-
-                native_bg, native_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="native")
-                mni_bg, mni_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="mni")
-                sig_root, sig_specs = self._discover_signature_root_and_specs()
-
-                native_effect = None
-                native_variance = None
-                try:
-                    if bool(getattr(cfg_obj, "include_effect_size", True)) or bool(
-                        getattr(cfg_obj, "include_standard_error", True)
-                    ):
-                        native_contrast_arg = _contrast_arg_for_model_runs(glm_result.flm, contrast_def)
-                        native_effect = glm_result.flm.compute_contrast(native_contrast_arg, output_type="effect_size")
-                        native_variance = glm_result.flm.compute_contrast(
-                            native_contrast_arg,
-                            output_type="effect_variance",
-                        )
-                except Exception as exc:
-                    self.logger.warning(
-                        "Failed to compute native effect/variance maps for plotting: %s",
-                        exc,
+                    mni_contrast_arg = _contrast_arg_for_model_runs(mni_glm.flm, mni_contrast_def)
+                    mni_effect = mni_glm.flm.compute_contrast(mni_contrast_arg, output_type="effect_size")
+                    mni_variance = mni_glm.flm.compute_contrast(
+                        mni_contrast_arg,
+                        output_type="effect_variance",
                     )
 
-                plotting_meta = run_fmri_plotting_and_report(
-                    contrast_dir=out_dir,
-                    subject=sub_label,
-                    task=task,
-                    contrast_name=contrast_name,
-                    cfg=cfg_obj,
-                    run_meta=run_meta if isinstance(run_meta, dict) else None,
-                    native_stat_img=contrast_img_for_plotting,
-                    mni_stat_img=mni_img,
-                    native_effect_img=native_effect,
-                    native_variance_img=native_variance,
-                    mni_effect_img=mni_effect,
-                    mni_variance_img=mni_variance,
-                    native_bg_img_path=native_bg,
-                    mni_bg_img_path=mni_bg,
-                    native_mask_img_path=native_mask,
-                    mni_mask_img_path=mni_mask,
-                    signature_root=sig_root,
-                    signature_specs=sig_specs,
+            native_bg, native_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="native")
+            mni_bg, mni_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="mni")
+            sig_root, sig_specs = self._discover_signature_root_and_specs()
+
+            native_effect = None
+            native_variance = None
+            if bool(getattr(cfg_obj, "include_effect_size", True)) or bool(
+                getattr(cfg_obj, "include_standard_error", True)
+            ):
+                native_contrast_arg = _contrast_arg_for_model_runs(glm_result.flm, contrast_def)
+                native_effect = glm_result.flm.compute_contrast(native_contrast_arg, output_type="effect_size")
+                native_variance = glm_result.flm.compute_contrast(
+                    native_contrast_arg,
+                    output_type="effect_variance",
                 )
-        except Exception as exc:
-            # Best-effort: plotting/reporting should never fail the fMRI analysis step.
-            self.logger.warning("Failed to generate fMRI plots/report (continuing): %s", exc)
 
-        try:
-            import json
+            plotting_meta = run_fmri_plotting_and_report(
+                contrast_dir=out_dir,
+                subject=sub_label,
+                task=task,
+                contrast_name=contrast_name,
+                cfg=cfg_obj,
+                run_meta=run_meta if isinstance(run_meta, dict) else None,
+                native_stat_img=contrast_img_for_plotting,
+                mni_stat_img=mni_img,
+                native_effect_img=native_effect,
+                native_variance_img=native_variance,
+                mni_effect_img=mni_effect,
+                mni_variance_img=mni_variance,
+                native_bg_img_path=native_bg,
+                mni_bg_img_path=mni_bg,
+                native_mask_img_path=native_mask,
+                mni_mask_img_path=mni_mask,
+                signature_root=sig_root,
+                signature_specs=sig_specs,
+            )
 
-            payload = {
-                "subject": sub_label,
-                "task": task,
-                "contrast_name": getattr(contrast_cfg, "name", None),
-                "output_type_requested": output_type_req,
-                "output_type_actual": output_type_actual,
-                "run_meta": run_meta,
-                "contrast_cfg": asdict(contrast_cfg) if hasattr(contrast_cfg, "__dataclass_fields__") else repr(contrast_cfg),
-                "plotting": {
-                    "cfg": asdict(plotting_cfg) if hasattr(plotting_cfg, "__dataclass_fields__") else repr(plotting_cfg),
-                    "outputs": plotting_meta,
-                },
-            }
-            sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
-        except Exception:
-            # Sidecar is best-effort; do not fail the analysis.
-            pass
+        import json
+
+        payload = {
+            "subject": sub_label,
+            "task": task,
+            "contrast_name": getattr(contrast_cfg, "name", None),
+            "output_type_requested": output_type_req,
+            "output_type_actual": output_type_actual,
+            "run_meta": run_meta,
+            "contrast_cfg": asdict(contrast_cfg) if hasattr(contrast_cfg, "__dataclass_fields__") else repr(contrast_cfg),
+            "plotting": {
+                "cfg": asdict(plotting_cfg) if hasattr(plotting_cfg, "__dataclass_fields__") else repr(plotting_cfg),
+                "outputs": plotting_meta,
+            },
+        }
+        sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
         total_elapsed = _time.perf_counter() - t_glm
         self.logger.info(

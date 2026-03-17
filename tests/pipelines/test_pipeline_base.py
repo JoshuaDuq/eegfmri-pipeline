@@ -159,3 +159,56 @@ class TestBaseCompletion(unittest.TestCase):
 
         payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
         self.assertEqual(payload["status"], "partial_success")
+
+    def test_write_run_metadata_surfaces_write_failure(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def __init__(self):
+                self.name = "dummy_meta"
+                self.config = DotConfig({"project": {"task": "x"}})
+                self.logger = Mock()
+                self.deriv_root = Path(tempfile.mkdtemp())
+
+            def process_subject(self, subject: str, task: str, **kwargs):
+                return None
+
+        d = Dummy()
+        run_context = d._create_run_metadata_context(
+            subjects=["0001"],
+            task="x",
+            kwargs={},
+        )
+
+        with patch("pathlib.Path.write_text", side_effect=RuntimeError("no-write")):
+            with self.assertRaisesRegex(RuntimeError, "no-write"):
+                d._write_run_metadata(run_context, status="success")
+
+    def test_run_batch_preserves_pipeline_error_when_metadata_write_also_fails(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def __init__(self):
+                self.name = "dummy_meta_fail"
+                self.config = DotConfig({"project": {"task": "x"}})
+                self.logger = Mock()
+                self.deriv_root = Path(tempfile.mkdtemp())
+
+            def process_subject(self, subject: str, task: str, **kwargs):
+                raise RuntimeError("boom")
+
+        d = Dummy()
+        original_write_text = Path.write_text
+
+        def _write_text(path_obj, *args, **kwargs):
+            if "run_metadata" in str(path_obj):
+                raise RuntimeError("meta-fail")
+            return original_write_text(path_obj, *args, **kwargs)
+
+        with patch("eeg_pipeline.pipelines.base.BatchProgress", _NoopBatchProgress):
+            with patch("pathlib.Path.write_text", autospec=True, side_effect=_write_text):
+                with self.assertRaisesRegex(RuntimeError, "boom") as exc_info:
+                    d.run_batch(["0001"], task="x", fail_fast=True, progress=_NoopProgress())
+
+        notes = getattr(exc_info.exception, "__notes__", [])
+        self.assertTrue(any("meta-fail" in note for note in notes))

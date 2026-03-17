@@ -46,6 +46,47 @@ const (
 	singleCharLength = 1
 )
 
+func (m Model) timeRangeShowsRestToggle() bool {
+	return m.Pipeline == types.PipelineFeatures &&
+		m.modeIndex >= 0 &&
+		m.modeIndex < len(m.modeOptions) &&
+		m.modeOptions[m.modeIndex] == styles.ModeCompute
+}
+
+func (m Model) timeRangeSelectableCount() int {
+	count := len(m.TimeRanges)
+	if m.timeRangeShowsRestToggle() {
+		count++
+	}
+	return count
+}
+
+func (m Model) timeRangeCursorOnRestToggle() bool {
+	return m.timeRangeShowsRestToggle() && m.timeRangeCursor == 0
+}
+
+func (m Model) selectedTimeRangeIndex() int {
+	if !m.timeRangeShowsRestToggle() {
+		return m.timeRangeCursor
+	}
+	return m.timeRangeCursor - 1
+}
+
+func (m *Model) clampTimeRangeCursor() {
+	count := m.timeRangeSelectableCount()
+	if count <= 0 {
+		m.timeRangeCursor = 0
+		return
+	}
+	if m.timeRangeCursor < 0 {
+		m.timeRangeCursor = 0
+		return
+	}
+	if m.timeRangeCursor >= count {
+		m.timeRangeCursor = count - 1
+	}
+}
+
 ///////////////////////////////////////////////////////////////////
 // Data Definitions
 ///////////////////////////////////////////////////////////////////
@@ -773,6 +814,13 @@ const (
 	// EEG Preprocessing new text fields
 	textFieldPrepEcgChannels
 	textFieldPrepAutorejectNInterpolate
+	textFieldPrepCleanEventsQCEcgVarianceOutputColumn
+	textFieldPrepCleanEventsQCEcgVarianceChannels
+	textFieldPrepCleanEventsQCEcgVarianceWindow
+	textFieldPrepCleanEventsQCPeripheralLowGammaOutputColumn
+	textFieldPrepCleanEventsQCPeripheralLowGammaChannels
+	textFieldPrepCleanEventsQCPeripheralLowGammaBand
+	textFieldPrepCleanEventsQCPeripheralLowGammaWindow
 
 	// Event Column Mapping text fields
 	textFieldEventColPredictor
@@ -810,6 +858,7 @@ var defaultPlotItems = []PlotItem{
 	{ID: "band_power_topomaps", Group: "power", Name: "Topomaps", Description: "Band power topographic maps for selected time window", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "cross_frequency_power_correlation", Group: "power", Name: "Cross-Frequency Correlation", Description: "Correlation matrix between frequency bands", RequiredFiles: []string{"features_power*.tsv"}, RequiresFeatures: true},
 	{ID: "power_spectral_density", Group: "power", Name: "PSD Summary", Description: "Power spectral density curves", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "power_timecourse", Group: "power", Name: "Timecourse", Description: "Time-resolved band power trajectories by condition", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	// Connectivity
 	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.tsv", "events.tsv"}, RequiresFeatures: true},
 	{ID: "connectivity_circle_condition", Group: "connectivity", Name: "Circle by Condition", Description: "Connectivity circles per measure and band by condition", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true},
@@ -1978,6 +2027,7 @@ type Model struct {
 	temporalSplitByCondition   bool   // If true, compute separate correlations per condition value
 	temporalConditionColumn    string // Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
 	temporalConditionValues    string // Values to compute (empty = all unique values)
+	temporalFreqsHz            string // Space/comma-separated frequency bins for temporal TF analyses
 	temporalIncludeROIAverages bool   // Include ROI-averaged rows in output
 	temporalIncludeTFGrid      bool   // Include individual frequency (TF grid) rows
 	temporalFeaturesSpec       string // Comma-separated feature filters for temporal
@@ -2338,6 +2388,17 @@ type Model struct {
 	prepWriteCleanEvents     bool // Write clean events.tsv aligned to kept epochs
 	prepOverwriteCleanEvents bool // Overwrite existing clean events.tsv
 	prepCleanEventsStrict    bool // Fail if clean events.tsv cannot be written
+	// Clean-events QC options
+	prepCleanEventsQCEnabled                        bool
+	prepCleanEventsQCEcgVarianceEnabled             bool
+	prepCleanEventsQCEcgVarianceOutputColumn        string
+	prepCleanEventsQCEcgVarianceChannels            string
+	prepCleanEventsQCEcgVarianceWindow              string
+	prepCleanEventsQCPeripheralLowGammaEnabled      bool
+	prepCleanEventsQCPeripheralLowGammaOutputColumn string
+	prepCleanEventsQCPeripheralLowGammaChannels     string
+	prepCleanEventsQCPeripheralLowGammaBand         string
+	prepCleanEventsQCPeripheralLowGammaWindow       string
 
 	// Preprocessing UI group expansion states (for collapsible sections)
 	prepGroupStagesExpanded    bool
@@ -2823,6 +2884,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalSplitByCondition:            true,
 		temporalConditionColumn:             "",
 		temporalConditionValues:             "",
+		temporalFreqsHz:                     "",
 		temporalIncludeROIAverages:          true,
 		temporalIncludeTFGrid:               true,
 		temporalFeaturesSpec:                "",
@@ -2976,8 +3038,18 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlTargetsStrictRegressionCont:    true,
 
 		// EEG Preprocessing missing defaults
-		prepEcgChannels:            "",
-		prepAutorejectNInterpolate: "4,8,16",
+		prepEcgChannels:                                 "",
+		prepAutorejectNInterpolate:                      "4,8,16",
+		prepCleanEventsQCEnabled:                        true,
+		prepCleanEventsQCEcgVarianceEnabled:             true,
+		prepCleanEventsQCEcgVarianceOutputColumn:        "residual_ecg_coupling",
+		prepCleanEventsQCEcgVarianceChannels:            "[\"ECG\"]",
+		prepCleanEventsQCEcgVarianceWindow:              "[-2,0]",
+		prepCleanEventsQCPeripheralLowGammaEnabled:      true,
+		prepCleanEventsQCPeripheralLowGammaOutputColumn: "peripheral_low_gamma_power",
+		prepCleanEventsQCPeripheralLowGammaChannels:     "[\"Fp1\",\"Fp2\",\"FT9\",\"FT10\",\"TP9\",\"TP10\"]",
+		prepCleanEventsQCPeripheralLowGammaBand:         "[30,45]",
+		prepCleanEventsQCPeripheralLowGammaWindow:       "[-2,0]",
 
 		// Alignment defaults
 		alignAllowMisalignedTrim: false,
@@ -3924,14 +3996,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			isNotEditing := m.editingRangeIdx == noRangeEditing
 			hasRanges := len(m.TimeRanges) > 0
 			if isTimeRangeStep && isNotEditing && hasRanges {
-				idx := m.timeRangeCursor
+				if m.timeRangeCursorOnRestToggle() {
+					return m, nil
+				}
+				idx := m.selectedTimeRangeIndex()
+				if idx < 0 || idx >= len(m.TimeRanges) {
+					return m, nil
+				}
 				m.TimeRanges = append(m.TimeRanges[:idx], m.TimeRanges[idx+1:]...)
-				if m.timeRangeCursor >= len(m.TimeRanges) {
-					m.timeRangeCursor = len(m.TimeRanges) - 1
-				}
-				if m.timeRangeCursor < 0 {
-					m.timeRangeCursor = 0
-				}
+				m.clampTimeRangeCursor()
 			} else {
 				switch m.CurrentStep {
 				case types.StepSelectBands:
@@ -3970,7 +4043,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				newName := fmt.Sprintf("range%d", len(m.TimeRanges)+1)
 				m.TimeRanges = append(m.TimeRanges, types.TimeRange{Name: newName, Tmin: "", Tmax: ""})
 				m.timeRangeCursor = len(m.TimeRanges) - 1
-				m.editingRangeIdx = m.timeRangeCursor
+				if m.timeRangeShowsRestToggle() {
+					m.timeRangeCursor++
+				}
+				m.editingRangeIdx = len(m.TimeRanges) - 1
 				m.editingField = fieldName
 			} else {
 				switch m.CurrentStep {
