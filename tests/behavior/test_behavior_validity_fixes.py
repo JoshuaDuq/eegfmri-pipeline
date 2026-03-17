@@ -7,7 +7,6 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 from tests.pipelines_test_utils import DotConfig
 

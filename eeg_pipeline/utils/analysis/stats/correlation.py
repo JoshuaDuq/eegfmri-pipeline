@@ -21,10 +21,8 @@ from .base import (
     _safe_float,
     ensure_config,
     get_ci_level,
-    get_config_value,
     get_min_samples_for_correlation,
 )
-from .fdr import fdr_bh
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
 

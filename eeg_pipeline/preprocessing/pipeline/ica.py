@@ -34,7 +34,7 @@ def run_ica_label_single_file(
     bad_ica_frame.loc[p, "session"] = ses_num
 
     with mne.utils.use_log_level(False):
-        msg = f"Finding bad icas using mne-icalabel."
+        msg = "Finding bad icas using mne-icalabel."
         logger.info(**gen_log_kwargs(message=msg, subject=sub_num, session=ses_num))
 
         ica = io.load_ica(p)

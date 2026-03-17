@@ -27,7 +27,6 @@ from scipy.linalg import lstsq
 
 from .base import get_statistics_constants, get_config_value
 from .correlation import compute_correlation
-from .splines import build_predictor_rcs_design
 
 
 # Constants

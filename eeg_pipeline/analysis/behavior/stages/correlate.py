@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_targets
-from eeg_pipeline.utils.analysis.stats.correlation import normalize_robust_correlation_method
 from eeg_pipeline.utils.config.loader import get_config_bool, get_config_int, get_config_value
 from eeg_pipeline.utils.data.columns import resolve_outcome_column
 

@@ -623,8 +623,6 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
     if ctx.power_df is None or ctx.aligned_events is None:
         return
 
-    power_bands = get_frequency_band_names(ctx.config)
-
     safe_plot(
         ctx,
         saved_files,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, Dict, List
+from typing import Any
 
 from eeg_pipeline.utils.parsing import (
     parse_frequency_band_definitions,

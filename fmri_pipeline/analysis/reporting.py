@@ -1066,7 +1066,7 @@ def generate_fmri_space_section(
                 fig, ax = plt.subplots(figsize=(7.2, 3.2), dpi=150)
                 ax.hist(data, bins=80, color="#1F77B4", alpha=0.9, edgecolor="none")
                 if thr_val is not None and thr_label != "none":
-                    ax.axvline(float(thr_val), color="#E31A1C", linestyle="--", linewidth=1.5, label=f"+thr")
+                    ax.axvline(float(thr_val), color="#E31A1C", linestyle="--", linewidth=1.5, label="+thr")
                     ax.axvline(-float(thr_val), color="#E31A1C", linestyle="--", linewidth=1.5)
                 ax.set_title("Z-statistic distribution")
                 ax.set_xlabel("z")

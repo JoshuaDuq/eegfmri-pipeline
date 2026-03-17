@@ -608,7 +608,7 @@ def contrast_maxmin_predictor(
         strict_mode = get_strict_mode(config)
         ensure_aligned_lengths(
             tfr_sub, mask_min, mask_max,
-            context=f"Temperature contrast",
+            context="Temperature contrast",
             strict=strict_mode,
             logger=logger
         )

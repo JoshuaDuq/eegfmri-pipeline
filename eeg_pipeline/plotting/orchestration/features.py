@@ -2175,7 +2175,7 @@ def visualize_power_spectral_density_for_group(
         _style_publication_axis,
     )
     from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
-    from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
+    from eeg_pipeline.plotting.io.figures import save_fig
     from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
     from eeg_pipeline.utils.config.loader import get_frequency_bands, require_config_value
     from eeg_pipeline.utils.formatting import sanitize_label

@@ -3444,7 +3444,6 @@ def plot_band_power_topomaps_window_contrast(
     plot_cfg = get_plot_config(config)
     viz_params = get_viz_params(config)
     alpha = float(get_fdr_alpha(config))
-    descriptive_value_label = r"mean $\log_{10}$(ratio)"
     stat_label = r"$\log_{10}$(ratio)"
 
     def _band_channel_columns(df: pd.DataFrame, segment_name: str) -> Dict[str, Dict[str, str]]:
@@ -3824,6 +3823,7 @@ def plot_band_power_topomaps_group_condition_contrast(
 
     display_label1 = _format_condition_display_label(label1, config)
     display_label2 = _format_condition_display_label(label2, config)
+    descriptive_value_label = "mean power"
     fig.suptitle(
         f"Band power contrast | {segment.capitalize()} | {display_label2} - {display_label1}",
         fontsize=plot_cfg.font.figure_title,

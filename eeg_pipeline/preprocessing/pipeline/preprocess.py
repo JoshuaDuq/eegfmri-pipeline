@@ -52,7 +52,7 @@ def run_bads_detection_single_file(
 
     try:
         with mne.utils.use_log_level(False):
-            msg = f"Finding bad channels using pyprep."
+            msg = "Finding bad channels using pyprep."
             logger.info(
                 **gen_log_kwargs(
                     message=msg,

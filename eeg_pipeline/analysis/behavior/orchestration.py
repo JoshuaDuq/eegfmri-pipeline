@@ -53,7 +53,7 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     compute_correlation,
     format_correlation_method_label,
 )
-from eeg_pipeline.utils.config.loader import get_config_int, get_config_bool
+from eeg_pipeline.utils.config.loader import get_config_bool
 from eeg_pipeline.infra.paths import ensure_dir
 
 

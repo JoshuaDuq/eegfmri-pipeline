@@ -2635,7 +2635,7 @@ def _local_expression_cell_specs(
 ) -> List[CellSpec]:
     cells: List[CellSpec] = []
     for roi in rois:
-        prefix = f"bold_localexpr_"
+        prefix = "bold_localexpr_"
         matching_columns = [
             str(column)
             for column in bold_table.columns

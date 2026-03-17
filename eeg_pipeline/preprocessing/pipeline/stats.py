@@ -59,7 +59,7 @@ def collect_preprocessing_stats(bids_path, pipeline_path, task):
         else:
             chan_file = io.read_channels_tsv(chan_filename)
         
-        msg = f"Collecting preprocessing stats."
+        msg = "Collecting preprocessing stats."
         logger.info(**gen_log_kwargs(message=msg, subject=sub_num.replace("sub", ""), session=sess_num))
         
         preprocessing_stats.loc[(sub_num, sess_num), "n_bad_channels"] = len(chan_file)

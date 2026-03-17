@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
-from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
+from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus
 
 
@@ -609,7 +609,6 @@ def _plot_discrete_stc_volumetric(
     """
     try:
         from nilearn import plotting as nipl
-        import nibabel as nib
     except ImportError:
         raise RuntimeError(
             "nilearn and nibabel are required for volumetric STC rendering. "
@@ -783,7 +782,6 @@ def _plot_discrete_stc_orthogonal_projections(
     """
     try:
         from nilearn import plotting as nipl
-        import nibabel as nib
         import io
     except ImportError:
         raise RuntimeError(
@@ -2775,15 +2773,6 @@ def _render_cluster_composition(
 
     ax_abs.set_ylabel("fMRI Cluster", fontsize=10)
 
-    # Shared lobe legend (below figure).
-    lobes_present = sorted(
-        {_classify_atlas_lobe(r) for r in sorted_regions},
-        key=lambda lb: _LOBE_ORDER.index(lb) if lb in _LOBE_ORDER else len(_LOBE_ORDER),
-    )
-    lobe_handles = [
-        plt.Rectangle((0, 0), 1, 1, fc=_LOBE_COLORS.get(lb, "#AAA"))
-        for lb in lobes_present
-    ]
     # Region legend on the right axis.
     region_handles = [
         plt.Rectangle((0, 0), 1, 1, fc=region_colors[r])
@@ -2833,7 +2822,6 @@ def _parse_source_feature_columns(
             continue
         if not col.startswith("src_"):
             continue
-        parts = col.split("_")
         # Find family token position.
         try:
             fam_start = col.index(prefix)
@@ -3152,8 +3140,6 @@ def _try_render_atlas_contrast_heatmap(
     logger: logging.Logger,
 ) -> None:
     """Render B−A condition-contrast version of the atlas heatmap if possible."""
-    from matplotlib.colors import TwoSlopeNorm
-
     condition_a_raw = get_config_value(
         config, "plotting.plots.features.sourcelocalization.source_condition_a", None
     )
@@ -3746,7 +3732,6 @@ def _render_atlas_surface(
             label_vertices[label.hemi][base_name] = valid
 
     # Precompute per-band vertex stat maps and global range.
-    all_power_vals: list = []
     band_maps: Dict[str, tuple] = {}
 
     for band in bands:
@@ -3781,10 +3766,6 @@ def _render_atlas_surface(
                     stat[vertices] = power_val
 
         band_maps[band] = (stat_lh, stat_rh)
-        finite = np.concatenate([
-            stat_lh[np.isfinite(stat_lh)],
-            stat_rh[np.isfinite(stat_rh)],
-        ])
     # Render each view panel independently, then composite.
     view_specs = [
         ("left", "lateral", fsaverage5["infl_left"], fsaverage5["sulc_left"]),
@@ -3881,7 +3862,7 @@ def _render_atlas_surface(
             cmap="magma", norm=plt.Normalize(vmin=vmin, vmax=vmax),
         )
         sm.set_array([])
-        cbar = fig.colorbar(sm, cax=cax, orientation="vertical")
+        fig.colorbar(sm, cax=cax, orientation="vertical")
         cax.set_title("Power", fontsize=8, pad=2)
         cax.tick_params(labelsize=8)
         # Format ticks to handle tiny floats concisely

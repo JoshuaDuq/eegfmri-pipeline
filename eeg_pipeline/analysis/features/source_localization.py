@@ -1171,8 +1171,6 @@ def _extract_roi_timecourses_from_vertex_indices(
     if n_epochs == 0:
         return np.zeros((0, 0, 0)), []
 
-    n_times = int(stcs[0].data.shape[1])
-
     # stcs[0].vertices is a list (one per source space). For volume, usually [vertno]
     stc_verts = np.asarray(stcs[0].vertices[0], dtype=int)
     roi_row_indices, surviving_roi_names, dropped_rois = _resolve_surviving_roi_rows(

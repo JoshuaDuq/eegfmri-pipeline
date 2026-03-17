@@ -615,7 +615,7 @@ mne.write_bem_solution(
                 f"{result.stderr}"
             )
 
-        logger.info(f"BEM generation completed successfully")
+        logger.info("BEM generation completed successfully")
         if result.stdout:
             logger.debug(f"Docker output:\n{result.stdout}")
 

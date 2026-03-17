@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.data.feature_alignment import drop_feature_alignment_columns
@@ -446,11 +445,6 @@ def add_predictor_residual(
             default_group_col,
         )
         group_col = str(group_col_raw or "").strip()
-        n_splits_required = int(
-            get_config_value(
-                config, "behavior_analysis.predictor_residual.crossfit.n_splits", 5
-            )
-        )
         method_raw = get_config_value(
             config, "behavior_analysis.predictor_residual.crossfit.method", None
         )
