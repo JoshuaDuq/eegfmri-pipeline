@@ -1,4 +1,4 @@
 # Dependency shim for users/tools expecting requirements.txt.
 # Single source of truth lives in pyproject.toml.
-# Installs package + runtime deps + optional ML extras.
--e ".[ml]"
+# Installs package + full test/runtime deps + optional ML extras.
+-e ".[dev,ml]"

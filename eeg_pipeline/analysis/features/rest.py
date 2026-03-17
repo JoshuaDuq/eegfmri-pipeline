@@ -10,6 +10,7 @@ from eeg_pipeline.utils.config.loader import get_config_value
 
 
 REST_INCOMPATIBLE_FEATURE_CATEGORIES = frozenset({"erp", "erds", "itpc", "phase"})
+_MISSING = object()
 
 
 def is_resting_state_feature_mode(config: Any) -> bool:
@@ -18,19 +19,28 @@ def is_resting_state_feature_mode(config: Any) -> bool:
 
 
 def validate_rest_configuration(config: Any) -> None:
-    """Require preprocessing and feature extraction rest flags to agree."""
-    preprocessing_task_is_rest = bool(
-        get_config_value(config, "preprocessing.task_is_rest", False)
+    """Require preprocessing and feature extraction rest flags to agree when both are set."""
+    preprocessing_raw = get_config_value(
+        config,
+        "preprocessing.task_is_rest",
+        _MISSING,
     )
-    feature_task_is_rest = bool(
-        get_config_value(config, "feature_engineering.task_is_rest", False)
+    feature_raw = get_config_value(
+        config,
+        "feature_engineering.task_is_rest",
+        _MISSING,
     )
+    if preprocessing_raw is _MISSING or feature_raw is _MISSING:
+        return
+
+    preprocessing_task_is_rest = bool(preprocessing_raw)
+    feature_task_is_rest = bool(feature_raw)
     if preprocessing_task_is_rest == feature_task_is_rest:
         return
 
     raise ValueError(
         "Resting-state feature extraction requires preprocessing.task_is_rest and "
-        "feature_engineering.task_is_rest to match; "
+        "feature_engineering.task_is_rest to match; these flags must match. "
         f"got preprocessing.task_is_rest={preprocessing_task_is_rest} and "
         f"feature_engineering.task_is_rest={feature_task_is_rest}."
     )

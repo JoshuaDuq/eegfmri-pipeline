@@ -25,19 +25,19 @@ _RESIDUAL_VARIANCE_TOLERANCE_FACTOR = 1e-12
 def _get_predictor_control_mode(config: Optional[Any]) -> str:
     if config is None:
         return "spline"
-    try:
-        mode = str(
-            get_config_value(
-                config,
-                "behavior_analysis.statistics.predictor_control",
-                get_config_value(config, "behavior_analysis.regression.predictor_control", "spline"),
-            )
-        ).strip().lower()
-    except Exception:
-        return "spline"
-    if mode in {"spline", "linear"}:
+    mode = str(
+        get_config_value(
+            config,
+            "behavior_analysis.statistics.predictor_control",
+            get_config_value(config, "behavior_analysis.regression.predictor_control", "spline"),
+        )
+    ).strip().lower()
+    if mode in {"none", "spline", "linear"}:
         return mode
-    return "spline"
+    raise ValueError(
+        "Invalid behavior_analysis.statistics.predictor_control value: "
+        f"{mode!r}. Expected one of: 'none', 'linear', 'spline'."
+    )
 
 
 def _build_predictor_covariates(
@@ -47,6 +47,8 @@ def _build_predictor_covariates(
 ) -> pd.DataFrame:
     """Build predictor covariates (linear or restricted cubic spline) for control."""
     mode = _get_predictor_control_mode(config)
+    if mode == "none":
+        return pd.DataFrame(index=predictor_series.index)
     if mode == "linear":
         return pd.DataFrame({"predictor": predictor_series})
 

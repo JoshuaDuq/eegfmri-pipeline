@@ -52,13 +52,13 @@ def get_column_from_config(
     column_key: str,
     events_df: Optional[pd.DataFrame] = None,
 ) -> Optional[str]:
-    """Get column name from config, optionally matching against events dataframe."""
+    """Get an optional configured column alias, optionally matched against a dataframe."""
     if config is None:
         raise ValueError("config is required")
 
     columns = config.get(column_key)
     if columns is None:
-        raise ValueError(f"{column_key} not found in config")
+        return None
 
     if not columns:
         return None

@@ -1,19 +1,10 @@
-"""
-EEG analysis modules.
+"""EEG analysis modules."""
 
-This package contains the core analysis logic for the EEG pipeline:
+from __future__ import annotations
 
-Submodules:
-- behavior: Behavioral correlation analysis (EEG-behavior correlations)
-- machine_learning: Machine learning pipeline (LOSO CV, time generalization)
-- features: Feature extraction (power, connectivity, ERDS, ERP, etc.)
-- utilities: BIDS metadata helpers (participants.tsv, events sidecar)
-"""
+from importlib import import_module
+from types import ModuleType
 
-from eeg_pipeline.analysis import behavior
-from eeg_pipeline.analysis import machine_learning
-from eeg_pipeline.analysis import features
-from eeg_pipeline.analysis import utilities
 
 __all__ = [
     "behavior",
@@ -21,3 +12,22 @@ __all__ = [
     "features",
     "utilities",
 ]
+
+_SUBMODULES = {
+    "behavior": "eeg_pipeline.analysis.behavior",
+    "machine_learning": "eeg_pipeline.analysis.machine_learning",
+    "features": "eeg_pipeline.analysis.features",
+    "utilities": "eeg_pipeline.analysis.utilities",
+}
+
+
+def __getattr__(name: str) -> ModuleType:
+    try:
+        module_path = _SUBMODULES[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    return import_module(module_path)
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

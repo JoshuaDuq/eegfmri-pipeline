@@ -3,7 +3,10 @@ ifeq ($(wildcard .venv/bin/python),.venv/bin/python)
 PYTHON := .venv/bin/python
 endif
 
-.PHONY: verify-structure verify-architecture verify-maintainability
+.PHONY: test verify-structure verify-architecture verify-maintainability
+
+test:
+	$(PYTHON) -m pytest
 
 verify-structure:
 	$(PYTHON) -m compileall -q tests

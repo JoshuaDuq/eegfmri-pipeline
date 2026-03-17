@@ -97,9 +97,17 @@ def _find_missing_event_columns(
         if logical_name == "outcome":
             if resolve_outcome_column(events_df, config) is not None:
                 continue
+            missing_columns.append(
+                f"event_columns.{logical_name} (tried: {candidates})"
+            )
+            continue
         elif logical_name == "predictor":
             if resolve_predictor_column(events_df, config) is not None:
                 continue
+            missing_columns.append(
+                f"event_columns.{logical_name} (tried: {candidates})"
+            )
+            continue
         elif logical_name == "binary_outcome":
             if config is not None and find_binary_outcome_column_in_events(events_df, config) is not None:
                 continue

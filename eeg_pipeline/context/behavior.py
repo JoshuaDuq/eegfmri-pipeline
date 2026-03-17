@@ -269,14 +269,11 @@ class BehaviorContext:
 
         for key in self.selected_feature_files:
             if key == "all":
-                self.logger.warning(
-                    "Feature file key 'all' is not supported in behavior analysis; "
-                    "skipping."
+                raise ValueError(
+                    "Feature file key 'all' is not supported in behavior analysis."
                 )
-                continue
             if key not in STANDARD_FEATURE_FILES:
-                self.logger.warning("Unknown feature file key: %s", key)
-                continue
+                raise ValueError(f"Unknown feature file key: {key}")
 
             self._load_single_feature_file(key, features_dir, STANDARD_FEATURE_FILES)
 
@@ -291,54 +288,39 @@ class BehaviorContext:
         path = _find_feature_file_path(features_dir, key, filename)
 
         if not path.exists():
-            self.logger.warning("Feature file not found: %s", path)
-            return
+            raise FileNotFoundError(f"Feature file not found: {path}")
 
         attr_name = _FEATURE_FILE_TO_ATTR.get(key)
         if not attr_name:
-            self.logger.warning(
-                "Feature file key '%s' has no mapped context attribute; skipping.",
-                key,
+            raise KeyError(
+                f"Feature file key {key!r} has no mapped context attribute."
             )
-            return
 
-        try:
-            df = read_table(path)
-            self.feature_paths[key] = path
-            try:
-                meta_dir = path.parent / "metadata"
-                candidates = [
-                    meta_dir / f"{path.stem}.json",
-                ]
-                for meta_path in candidates:
-                    if not meta_path.exists():
-                        continue
-                    try:
-                        text = meta_path.read_text(encoding="utf-8")
-                    except Exception:
-                        continue
-                    if not text.lstrip().startswith("{"):
-                        continue
-                    self.feature_manifests[key] = json.loads(text)
-                    break
-            except (OSError, json.JSONDecodeError) as exc:
-                self.logger.warning("Failed to load feature metadata for %s: %s", path, exc)
-            current_df = getattr(self, attr_name)
-            if current_df is None:
-                setattr(self, attr_name, df)
-            else:
-                new_columns = [
-                    col for col in df.columns if col not in current_df.columns
-                ]
-                if new_columns:
-                    merged_df = pd.concat([current_df, df[new_columns]], axis=1)
-                    setattr(self, attr_name, merged_df)
+        df = read_table(path)
+        self.feature_paths[key] = path
 
-            self.logger.info(
-                "Loaded %s: %d columns, %d rows", key, df.shape[1], df.shape[0]
-            )
-        except (OSError, pd.errors.EmptyDataError, ValueError) as e:
-            self.logger.warning("Failed to load %s: %s", key, e)
+        meta_dir = path.parent / "metadata"
+        meta_path = meta_dir / f"{path.stem}.json"
+        if meta_path.exists():
+            text = meta_path.read_text(encoding="utf-8")
+            if not text.lstrip().startswith("{"):
+                raise ValueError(f"Feature metadata file is not valid JSON: {meta_path}")
+            self.feature_manifests[key] = json.loads(text)
+
+        current_df = getattr(self, attr_name)
+        if current_df is None:
+            setattr(self, attr_name, df)
+        else:
+            new_columns = [
+                col for col in df.columns if col not in current_df.columns
+            ]
+            if new_columns:
+                merged_df = pd.concat([current_df, df[new_columns]], axis=1)
+                setattr(self, attr_name, merged_df)
+
+        self.logger.info(
+            "Loaded %s: %d columns, %d rows", key, df.shape[1], df.shape[0]
+        )
 
     def _load_all_features_from_bundle(self) -> None:
         """Load all features using feature bundle."""

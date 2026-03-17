@@ -622,7 +622,7 @@ def extract_burst_features(
     segment_masks = _resolve_burst_segment_masks(
         precomputed.times,
         precomputed.windows,
-        precomputed.config,
+        config,
         ctx.logger,
     )
     segment_names = [name for name in segment_masks.keys() if name != "baseline"]

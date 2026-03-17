@@ -123,74 +123,76 @@ class TestMachineLearningDeep(unittest.TestCase):
                 self.assertEqual(p._execute_permutation(["0001"], "t", "group", params, progress), Path("/tmp/p"))
 
 class TestMachineLearningGapfill(unittest.TestCase):
-        def test_ml_missing_task_and_visualize(self):
-            from eeg_pipeline.pipelines.machine_learning import MLPipeline
+    def test_ml_missing_task_and_visualize(self):
+        from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
-            p = object.__new__(MLPipeline)
-            p.config = DotConfig({})
-            with self.assertRaises(ValueError):
-                p._validate_inputs(["0001", "0002"], None, "group")
-            with self.assertRaises(NotImplementedError):
-                p.visualize(Path(tempfile.mkdtemp()))
+        p = object.__new__(MLPipeline)
+        p.config = DotConfig({})
+        with self.assertRaises(ValueError):
+            p._validate_inputs(["0001", "0002"], None, "group")
+        with self.assertRaises(NotImplementedError):
+            p.visualize(Path(tempfile.mkdtemp()))
 
-        def test_run_batch_raises_when_mode_returns_none(self):
-            from eeg_pipeline.pipelines.machine_learning import MLPipeline
+    def test_run_batch_raises_when_mode_returns_none(self):
+        from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
-            p = object.__new__(MLPipeline)
-            p.config = DotConfig({})
-            p.logger = Mock()
+        p = object.__new__(MLPipeline)
+        p.name = "machine_learning"
+        p.config = DotConfig({})
+        p.logger = Mock()
+        p.deriv_root = Path(tempfile.mkdtemp())
 
-            progress = Mock()
-            params = {
-                "progress": progress,
-                "cv_scope": "group",
-                "model": "elasticnet",
-                "n_perm": 0,
-                "inner_splits": 3,
-            }
+        progress = Mock()
+        params = {
+            "progress": progress,
+            "cv_scope": "group",
+            "model": "elasticnet",
+            "n_perm": 0,
+            "inner_splits": 3,
+        }
 
-            with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
-                MLPipeline, "_validate_inputs", return_value="task"
-            ), patch.object(
-                MLPipeline, "_get_mode_dispatcher", return_value={"regression": (lambda **kwargs: None)}
-            ):
-                with self.assertRaisesRegex(RuntimeError, "produced no output"):
-                    p.run_batch(["0001", "0002"], task="task", mode="regression")
-            progress.complete.assert_called_once_with(success=False)
+        with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
+            MLPipeline, "_validate_inputs", return_value="task"
+        ), patch.object(
+            MLPipeline, "_get_mode_dispatcher", return_value={"regression": (lambda **kwargs: None)}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "produced no output"):
+                p.run_batch(["0001", "0002"], task="task", mode="regression")
+        progress.complete.assert_called_once_with(success=False)
 
-        def test_run_batch_writes_reproducibility_metadata(self):
-            from eeg_pipeline.pipelines.machine_learning import MLPipeline
+    def test_run_batch_writes_reproducibility_metadata(self):
+        from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
-            p = object.__new__(MLPipeline)
-            p.name = "machine_learning"
-            p.config = DotConfig({})
-            p.logger = Mock()
-            p.deriv_root = Path(tempfile.mkdtemp())
-            p.results_root = p.deriv_root / "machine_learning"
+        p = object.__new__(MLPipeline)
+        p.name = "machine_learning"
+        p.config = DotConfig({})
+        p.logger = Mock()
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.results_root = p.deriv_root / "machine_learning"
 
-            progress = _NoopProgress()
-            params = {
-                "progress": progress,
-                "cv_scope": "group",
-                "model": "elasticnet",
-                "n_perm": 0,
-                "inner_splits": 3,
-            }
-            out_dir = Path(tempfile.mkdtemp())
+        progress = _NoopProgress()
+        params = {
+            "progress": progress,
+            "cv_scope": "group",
+            "model": "elasticnet",
+            "n_perm": 0,
+            "inner_splits": 3,
+        }
+        out_dir = Path(tempfile.mkdtemp())
 
-            with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
-                MLPipeline, "_validate_inputs", return_value="task"
-            ), patch.object(
-                MLPipeline,
-                "_get_mode_dispatcher",
-                return_value={"regression": (lambda **kwargs: out_dir)},
-            ):
-                out = p.run_batch(["0001"], task="task", mode="regression")
+        with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
+            MLPipeline, "_validate_inputs", return_value="task"
+        ), patch.object(
+            MLPipeline,
+            "_get_mode_dispatcher",
+            return_value={"regression": (lambda **kwargs: out_dir)},
+        ):
+            out = p.run_batch(["0001"], task="task", mode="regression")
 
-            self.assertEqual(out[0]["status"], "success")
-            metadata_dir = p.deriv_root / "logs" / "run_metadata" / "machine_learning"
-            metadata_files = sorted(metadata_dir.glob("run_*.json"))
-            self.assertTrue(metadata_files)
-            payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
-            self.assertEqual(payload["status"], "success")
-            self.assertEqual(payload["specifications"]["mode"], "regression")
+        self.assertEqual(out[0]["status"], "success")
+        metadata_dir = p.deriv_root / "logs" / "run_metadata" / "machine_learning"
+        metadata_files = sorted(metadata_dir.glob("run_*.json"))
+        self.assertTrue(metadata_files)
+        payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["specifications"]["mode"], "regression")

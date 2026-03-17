@@ -899,9 +899,7 @@ def _compute_effect_size_ci(
     values1: np.ndarray,
     values2: np.ndarray,
 ) -> Tuple[float, float]:
-    """Estimate a deterministic bootstrap CI for paired Cohen's d."""
-    from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
-
+    """Estimate a deterministic bootstrap CI for paired repeated-measures effect size."""
     sample_size = len(values1)
     if sample_size < 2:
         return np.nan, np.nan
@@ -910,7 +908,7 @@ def _compute_effect_size_ci(
     bootstrap_effects = np.empty(FOREST_BOOTSTRAP_SAMPLES, dtype=float)
     for index in range(FOREST_BOOTSTRAP_SAMPLES):
         sample_indices = rng.integers(0, sample_size, size=sample_size)
-        bootstrap_effects[index] = compute_paired_cohens_d(
+        bootstrap_effects[index] = _compute_plot_paired_effect_size(
             values1[sample_indices],
             values2[sample_indices],
         )
@@ -924,6 +922,32 @@ def _compute_effect_size_ci(
     )
 
 
+def _compute_plot_paired_effect_size(
+    values1: np.ndarray,
+    values2: np.ndarray,
+) -> float:
+    """Return a finite paired repeated-measures effect size for plotting.
+
+    Uses Cohen's d_av so constant paired shifts remain plottable.
+    """
+    before = np.asarray(values1, dtype=float).ravel()
+    after = np.asarray(values2, dtype=float).ravel()
+    finite_mask = np.isfinite(before) & np.isfinite(after)
+    before = before[finite_mask]
+    after = after[finite_mask]
+    if before.size < 2:
+        return np.nan
+
+    pooled_sd = np.sqrt((np.var(before, ddof=1) + np.var(after, ddof=1)) / 2.0)
+    mean_diff = float(np.mean(after - before))
+    if not np.isfinite(pooled_sd) or pooled_sd <= 0:
+        if np.isclose(mean_diff, 0.0):
+            return 0.0
+        pooled_sd = np.finfo(float).eps
+
+    return float(mean_diff / pooled_sd)
+
+
 def _compute_group_paired_effect_forest_data(
     subject_values: Dict[str, Dict[str, Dict[str, Dict[str, float]]]],
     bands: List[str],
@@ -933,7 +957,6 @@ def _compute_group_paired_effect_forest_data(
 ) -> pd.DataFrame:
     """Return paired group effect statistics for forest plotting."""
     from eeg_pipeline.plotting.features.utils import apply_fdr_correction
-    from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
 
     rows: List[Dict[str, Any]] = []
     pvalues: List[float] = []
@@ -949,7 +972,7 @@ def _compute_group_paired_effect_forest_data(
             if len(values1) < 2:
                 continue
 
-            effect_size = float(compute_paired_cohens_d(values1, values2))
+            effect_size = float(_compute_plot_paired_effect_size(values1, values2))
             differences = values2 - values1
             if np.allclose(differences, 0.0):
                 pvalue = 1.0
@@ -3940,7 +3963,6 @@ def _compute_group_band_summary_stats(
 ) -> Dict[str, Dict[str, float]]:
     """Return paired band-summary statistics for group PSD curves."""
     from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_fdr_alpha
-    from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
 
     if freqs.ndim != 1:
         raise ValueError("Group band summary requires a 1D frequency axis.")
@@ -3973,23 +3995,26 @@ def _compute_group_band_summary_stats(
 
         finite_values1 = values1[finite_mask]
         finite_values2 = values2[finite_mask]
-        effect_size = compute_paired_cohens_d(finite_values1, finite_values2)
+        effect_size = _compute_plot_paired_effect_size(finite_values1, finite_values2)
         diffs = finite_values2 - finite_values1
         if diffs.size == 0 or np.allclose(diffs, 0):
             p_value = 1.0
+            include_in_fdr = False
         else:
             p_value = float(wilcoxon(diffs, zero_method="wilcox", alternative="two-sided").pvalue)
+            include_in_fdr = True
 
         band_stats[str(band_name)] = {
             "fmin": band_min,
             "fmax": band_max,
             "effect_size": float(effect_size),
             "p_value": p_value,
-            "q_value": np.nan,
+            "q_value": 1.0 if not include_in_fdr else np.nan,
             "significant": False,
         }
-        pvalues.append(p_value)
-        tested_bands.append(str(band_name))
+        if include_in_fdr:
+            pvalues.append(p_value)
+            tested_bands.append(str(band_name))
 
     if not pvalues:
         return band_stats

@@ -789,6 +789,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.temporalConditionValues = strings.Join(splitLooseList(spec), " ")
 			}
 		}},
+		{key: "behavior_analysis.temporal.freqs_hz", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.temporalFreqsHz = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
 		{key: "behavior_analysis.temporal.include_roi_averages", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.temporalIncludeROIAverages = b

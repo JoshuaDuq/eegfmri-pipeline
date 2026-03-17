@@ -137,6 +137,11 @@ def get_feature_registry(config: Any = None) -> FeatureRegistry:
     global _FEATURE_REGISTRY_CACHE
 
     if config is not None:
+        registry_cfg = get_config_value(config, "behavior_analysis.feature_registry", None)
+        if registry_cfg is None:
+            if _FEATURE_REGISTRY_CACHE is None:
+                _FEATURE_REGISTRY_CACHE = load_feature_registry(load_config())
+            return _FEATURE_REGISTRY_CACHE
         return load_feature_registry(config)
 
     if _FEATURE_REGISTRY_CACHE is None:

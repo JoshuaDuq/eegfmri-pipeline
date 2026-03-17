@@ -412,6 +412,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			spec := strings.ReplaceAll(m.temporalConditionValues, ",", " ")
 			args = append(args, splitSpaceList(spec)...)
 		}
+		if strings.TrimSpace(m.temporalFreqsHz) != "" {
+			args = append(args, "--temporal-freqs-hz")
+			spec := strings.ReplaceAll(m.temporalFreqsHz, ",", " ")
+			args = append(args, splitSpaceList(spec)...)
+		}
 		appendBoolPair(
 			m.temporalIncludeROIAverages,
 			"--temporal-include-roi-averages",

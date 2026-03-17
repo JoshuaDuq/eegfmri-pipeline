@@ -321,6 +321,7 @@ def test_prepare_events_for_glm_keeps_out_of_scope_rows_as_nuisance() -> None:
         output_type="z-score",
         resample_to_freesurfer=False,
         events_to_model=["stimulation"],
+        events_to_model_column="trial_type",
         stim_phases_to_model=["plateau"],
         phase_column="stim_phase",
         phase_scope_column="trial_type",
@@ -376,6 +377,7 @@ def test_condition_scope_respects_existing_eligibility_mask() -> None:
         condition_scope_trial_types=["stimulation"],
         condition_scope_column="trial_type",
         events_to_model=["rating"],
+        events_to_model_column="trial_type",
     )
     events_df = pd.DataFrame(
         {
@@ -436,7 +438,9 @@ def test_prepare_events_for_glm_uses_configured_events_to_model_column() -> None
 
     prepared_events, eligible_mask = _prepare_events_for_glm(events_df, cfg)
 
-    assert prepared_events.equals(events_df)
+    assert prepared_events.loc[0, "trial_type"] == "a"
+    assert prepared_events.loc[1, "trial_type"] == "b"
+    assert prepared_events.loc[2, "trial_type"].startswith("nuis_c")
     assert eligible_mask.tolist() == [True, True, False]
 
 

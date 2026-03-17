@@ -1840,14 +1840,14 @@ def extract_itpc_from_precomputed(
         n_jobs: Number of parallel jobs (-1 for all CPUs)
     """
     logger = getattr(precomputed, "logger", None)
+    cfg = precomputed.config or {}
+    raise_if_rest_incompatible(cfg, feature_name="ITPC")
     is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
     if not is_valid:
         if logger is not None:
             logger.warning("ITPC: %s; skipping extraction.", err_msg)
         return pd.DataFrame(), []
 
-    cfg = precomputed.config or {}
-    raise_if_rest_incompatible(cfg, feature_name="ITPC")
     itpc_method = _get_itpc_method(cfg)
     if itpc_method == "loo":
         raise ValueError(

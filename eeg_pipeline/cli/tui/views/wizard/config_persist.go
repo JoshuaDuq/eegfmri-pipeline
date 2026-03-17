@@ -408,6 +408,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["temporalTargetColumn"] = m.temporalTargetColumn
 	cfg["temporalConditionColumn"] = m.temporalConditionColumn
 	cfg["temporalConditionValues"] = m.temporalConditionValues
+	cfg["temporalFreqsHz"] = m.temporalFreqsHz
 	cfg["temporalSplitByCondition"] = m.temporalSplitByCondition
 	cfg["temporalIncludeROIAverages"] = m.temporalIncludeROIAverages
 	cfg["temporalIncludeTFGrid"] = m.temporalIncludeTFGrid
@@ -1577,6 +1578,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.temporalTargetColumn = getString("temporalTargetColumn", m.temporalTargetColumn)
 	m.temporalConditionColumn = getString("temporalConditionColumn", m.temporalConditionColumn)
 	m.temporalConditionValues = getString("temporalConditionValues", m.temporalConditionValues)
+	m.temporalFreqsHz = getString("temporalFreqsHz", m.temporalFreqsHz)
 	m.temporalSplitByCondition = getBool("temporalSplitByCondition", m.temporalSplitByCondition)
 	m.temporalIncludeROIAverages = getBool("temporalIncludeROIAverages", m.temporalIncludeROIAverages)
 	m.temporalIncludeTFGrid = getBool("temporalIncludeTFGrid", m.temporalIncludeTFGrid)

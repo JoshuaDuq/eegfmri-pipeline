@@ -377,6 +377,34 @@ def _resolve_connectivity_segment_masks(
     }
 
 
+def _resolve_requested_segment_names(
+    segment_masks: Dict[str, np.ndarray],
+    segments: Optional[List[str]],
+    *,
+    feature_name: str,
+) -> List[str]:
+    """Resolve requested segment names, allowing explicit full-interval extraction."""
+    if segments is None:
+        return sorted(segment_masks.keys()) if segment_masks else ["full"]
+
+    requested = [str(name) for name in segments]
+    missing = [
+        name
+        for name in requested
+        if name != "full" and name not in segment_masks
+    ]
+    if missing:
+        missing_text = ", ".join(missing)
+        available_text = ", ".join(sorted(segment_masks)) if segment_masks else "none"
+        raise ValueError(
+            f"{feature_name}: requested segments not found in available window masks: "
+            f"{missing_text}. Available segments: {available_text}."
+        )
+    if not requested:
+        return ["full"]
+    return requested
+
+
 def _resolve_connectivity_condition_selection(
     *,
     labels: pd.Series,
@@ -1636,14 +1664,15 @@ def extract_connectivity_from_precomputed(
     seg_mask_map = _resolve_connectivity_segment_masks(
         precomputed.times,
         precomputed.windows,
-        precomputed.config,
+        config,
         logger,
         "Connectivity",
     )
-    if not seg_mask_map:
-        return pd.DataFrame(), []
-
-    segments_use = segments if segments is not None else sorted(seg_mask_map.keys()) or ["full"]
+    segments_use = _resolve_requested_segment_names(
+        seg_mask_map,
+        segments,
+        feature_name="Connectivity",
+    )
 
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)
@@ -2907,14 +2936,15 @@ def extract_directed_connectivity_from_precomputed(
     seg_mask_map = _resolve_connectivity_segment_masks(
         precomputed.times,
         precomputed.windows,
-        precomputed.config,
+        config,
         logger,
         "Directed connectivity",
     )
-    if not seg_mask_map:
-        return pd.DataFrame(), []
-    
-    segments_use = segments if segments is not None else sorted(seg_mask_map.keys()) or ["full"]
+    segments_use = _resolve_requested_segment_names(
+        seg_mask_map,
+        segments,
+        feature_name="Directed connectivity",
+    )
     
     n_epochs = int(precomputed.data.shape[0])
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]

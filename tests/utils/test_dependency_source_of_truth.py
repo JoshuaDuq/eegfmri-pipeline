@@ -12,4 +12,4 @@ def test_requirements_txt_is_thin_pyproject_shim() -> None:
         if line.strip() and not line.strip().startswith("#")
     ]
 
-    assert lines == ['-e ".[ml]"']
+    assert lines == ['-e ".[dev,ml]"']

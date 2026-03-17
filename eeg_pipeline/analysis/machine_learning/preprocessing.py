@@ -124,9 +124,6 @@ class DropAllNaNColumns(BaseEstimator, TransformerMixin):
 
 class SpatialFeatureSelector(BaseEstimator, TransformerMixin):
     """Keep only features whose inferred ROI is in ``allowed_regions``.
-
-    The selector is conservative: if feature names are unavailable (e.g., pure
-    NumPy arrays), it keeps all columns to avoid accidental feature loss.
     """
 
     def __init__(self, allowed_regions: Optional[List[str]] = None, config: Optional[Any] = None):
@@ -145,14 +142,13 @@ class SpatialFeatureSelector(BaseEstimator, TransformerMixin):
         if hasattr(X, "columns"):
             try:
                 feature_names = [str(v) for v in list(X.columns)]
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 feature_names = None
 
         if feature_names is None or len(feature_names) != n_features:
-            logger.warning(
-                "SpatialFeatureSelector: feature names unavailable or mismatched; keeping all features."
+            raise ValueError(
+                "SpatialFeatureSelector requires feature names when allowed_regions is set."
             )
-            return self
 
         from eeg_pipeline.analysis.machine_learning.feature_metadata import build_feature_metadata
 

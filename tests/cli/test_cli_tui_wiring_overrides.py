@@ -74,7 +74,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         _update_alignment_event_config(args, config)
 
         self.assertEqual(config.get("eeg.ecg_channels"), ["ECG1", "ECG2"])
-        self.assertTrue(config.get("feature_engineering.task_is_rest"))
+        self.assertTrue(config.get("preprocessing.task_is_rest"))
         self.assertEqual(config.get("epochs.autoreject_n_interpolate"), [4, 8, 16])
         self.assertTrue(config.get("alignment.allow_misaligned_trim", False))
         self.assertEqual(config.get("alignment.min_alignment_samples"), 7)
@@ -92,11 +92,11 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         subparsers = parser.add_subparsers(dest="command")
         setup_preprocessing(subparsers)
         args = parser.parse_args(["preprocessing", "full", "--no-task-is-rest"])
-        config = ConfigDict({"feature_engineering": {"task_is_rest": True}})
+        config = ConfigDict({"preprocessing": {"task_is_rest": True}})
 
         _update_preprocessing_config(args, config)
 
-        self.assertFalse(config.get("feature_engineering.task_is_rest"))
+        self.assertFalse(config.get("preprocessing.task_is_rest"))
 
 
 class TestFeaturesTUIWiring(unittest.TestCase):

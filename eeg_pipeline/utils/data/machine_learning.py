@@ -105,18 +105,11 @@ def _resolve_feature_families(
     # If feature_set is "combined" and no explicit list is provided, prefer a broad
     # default that matches the feature pipeline's standard outputs.
     if (feature_set or "").strip().lower() in {"combined", ""}:
-        try:
-            from eeg_pipeline.utils.data.feature_discovery import STANDARD_FEATURE_FILES
+        from eeg_pipeline.utils.data.feature_discovery import STANDARD_FEATURE_FILES
 
-            return list(STANDARD_FEATURE_FILES.keys())
-        except Exception as exc:
-            logger.warning(
-                "Failed to import STANDARD_FEATURE_FILES; falling back to conservative ML feature family defaults: %s",
-                exc,
-            )
+        return list(STANDARD_FEATURE_FILES.keys())
 
-    # Conservative fallback.
-    return ["power"]
+    return []
 
 
 def _resolve_feature_filename(

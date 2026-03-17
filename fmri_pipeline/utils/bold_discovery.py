@@ -27,10 +27,7 @@ def _coerce_float(value: Any) -> Optional[float]:
 
 
 def _parse_optional_positive_float_attr(cfg: Any, attr_name: str, default: Any = None) -> Optional[float]:
-    try:
-        raw_value = getattr(cfg, attr_name, default)
-    except Exception:
-        raw_value = default
+    raw_value = getattr(cfg, attr_name, default)
     if raw_value is None:
         return None
     coerced = _coerce_float(raw_value)

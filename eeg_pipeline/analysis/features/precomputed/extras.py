@@ -236,7 +236,7 @@ def extract_band_ratios_from_precomputed(
     Uses PSD-integrated band power (scientifically valid for ratios).
     Power is bandwidth-normalized (power per Hz) for comparability across bands.
     """
-    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
+    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True)
     if not is_valid:
         logger = getattr(precomputed, "logger", None)
         if logger is not None:

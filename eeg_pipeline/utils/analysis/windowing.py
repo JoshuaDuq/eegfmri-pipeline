@@ -574,27 +574,13 @@ def get_segment_masks(
         return {}
 
     all_masks = dict(windows.masks)
-    
     target_name = getattr(windows, "name", None)
-    if target_name:
-        targeted = {}
-        if target_name in all_masks:
-            targeted[target_name] = all_masks[target_name]
-        elif target_name.lower() in all_masks:
-            targeted[target_name] = all_masks[target_name.lower()]
-        
-        if not targeted:
-            # Fallback for case-insensitive lookup
-            for name, mask in all_masks.items():
-                if name.lower() == target_name.lower():
-                    targeted[target_name] = mask
-                    break
-        
-        return targeted
-    
-    # If no specific target, return all masks. 
-    # NOTE: Decisions about whether to include 'baseline' in iteration 
-    # should be made by the feature extractors themselves.
+    if target_name and target_name not in all_masks:
+        for name, mask in all_masks.items():
+            if str(name).lower() == str(target_name).lower():
+                all_masks[str(target_name)] = mask
+                break
+
     return all_masks
 
 

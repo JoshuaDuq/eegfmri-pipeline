@@ -2027,6 +2027,7 @@ type Model struct {
 	temporalSplitByCondition   bool   // If true, compute separate correlations per condition value
 	temporalConditionColumn    string // Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
 	temporalConditionValues    string // Values to compute (empty = all unique values)
+	temporalFreqsHz            string // Space/comma-separated frequency bins for temporal TF analyses
 	temporalIncludeROIAverages bool   // Include ROI-averaged rows in output
 	temporalIncludeTFGrid      bool   // Include individual frequency (TF grid) rows
 	temporalFeaturesSpec       string // Comma-separated feature filters for temporal
@@ -2883,6 +2884,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalSplitByCondition:            true,
 		temporalConditionColumn:             "",
 		temporalConditionValues:             "",
+		temporalFreqsHz:                     "",
 		temporalIncludeROIAverages:          true,
 		temporalIncludeTFGrid:               true,
 		temporalFeaturesSpec:                "",

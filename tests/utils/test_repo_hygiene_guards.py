@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import tomllib
 
 from tests import REPO_ROOT
 
@@ -73,4 +74,25 @@ def test_removed_legacy_scripts_do_not_reappear() -> None:
         "Deprecated standalone utility scripts must not be reintroduced. "
         "Use `python paradigm-specific-scripts/run_paradigm_specific.py ...` instead.\n"
         f"Found: {reintroduced}"
+    )
+
+
+def test_ruff_configuration_is_not_f821_only() -> None:
+    pyproject_path = REPO_ROOT / "pyproject.toml"
+    config = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    select = list(config["tool"]["ruff"]["lint"]["select"])
+
+    assert select != ["F821"], (
+        "Ruff cannot be configured as an F821-only gate. "
+        "Enable a broader static quality baseline."
+    )
+    assert "F" in select, "Ruff should enable the broader Pyflakes rule family."
+
+
+def test_requirements_installs_full_test_stack() -> None:
+    requirements_text = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    assert ".[dev,ml]" in requirements_text or ".[ml,dev]" in requirements_text, (
+        "requirements.txt must install both dev and ml extras so a fresh environment "
+        "can run the full pytest suite."
     )

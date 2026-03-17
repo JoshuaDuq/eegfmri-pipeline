@@ -1167,21 +1167,29 @@ def _rebuild_window_masks(
     task_is_rest = is_resting_state_feature_mode(config)
     
     if target_name and windows is not None:
-        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
-        if window_range is not None and len(window_range) >= 2:
-            tmin, tmax = float(window_range[0]), float(window_range[1])
-            mask = (times >= tmin) & (times < tmax)
-        else:
-            mask = windows.get_mask(target_name)
-            if mask is not None and len(mask) != len(times):
+        explicit_target_mask_defined = False
+        mask = windows.get_mask(target_name)
+        if mask is not None:
+            mask = np.asarray(mask, dtype=bool)
+            if len(mask) != len(times):
                 mask = None
+            else:
+                explicit_target_mask_defined = True
+        if mask is None:
+            window_range = windows.ranges.get(target_name) if hasattr(windows, "ranges") else None
+            if window_range is not None and len(window_range) >= 2:
+                tmin, tmax = float(window_range[0]), float(window_range[1])
+                mask = (times >= tmin) & (times < tmax)
         
         if mask is not None and len(mask) == len(times) and np.any(mask):
             segments = {target_name: mask}
         else:
             if task_is_rest:
+                fallback_masks = _build_window_masks_from_ranges(windows, times)
+                if explicit_target_mask_defined:
+                    fallback_masks.pop(str(target_name), None)
                 segment_name, segment_mask = select_single_rest_analysis_segment(
-                    _build_window_masks_from_ranges(windows, times),
+                    fallback_masks,
                     feature_name="Aperiodic",
                     target_name=str(target_name),
                 )

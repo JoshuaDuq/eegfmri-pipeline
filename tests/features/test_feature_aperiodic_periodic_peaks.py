@@ -157,11 +157,11 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
 
         df, cols, qc = extract_aperiodic_from_precomputed(precomputed, ["alpha"])
 
-        expected_col = NamingSchema.build("aperiodic", "analysis", "alpha", "global", "slope")
+        expected_col = NamingSchema.build("aperiodic", "analysis", "broadband", "global", "slope")
         self.assertFalse(df.empty)
         self.assertIn(expected_col, cols)
         self.assertNotIn(
-            NamingSchema.build("aperiodic", "active", "alpha", "global", "slope"),
+            NamingSchema.build("aperiodic", "active", "broadband", "global", "slope"),
             cols,
         )
         self.assertIn("analysis", qc.get("segments", {}))

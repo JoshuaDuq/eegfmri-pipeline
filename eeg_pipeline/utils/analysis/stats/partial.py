@@ -38,6 +38,8 @@ _MIN_SAMPLES_CORRELATION = 3
 
 def _get_predictor_control_mode(config: Optional[Any]) -> str:
     """Resolve predictor control mode for correlation statistics."""
+    if config is None:
+        return "spline"
     mode = str(
         get_config_value(
             config,
@@ -45,9 +47,12 @@ def _get_predictor_control_mode(config: Optional[Any]) -> str:
             get_config_value(config, "behavior_analysis.regression.predictor_control", "spline"),
         )
     ).strip().lower()
-    if mode in {"spline", "linear"}:
+    if mode in {"none", "spline", "linear"}:
         return mode
-    return "spline"
+    raise ValueError(
+        "Invalid behavior_analysis.statistics.predictor_control value: "
+        f"{mode!r}. Expected one of: 'none', 'linear', 'spline'."
+    )
 
 
 def _build_predictor_covariates(
@@ -57,6 +62,8 @@ def _build_predictor_covariates(
 ) -> pd.DataFrame:
     """Build predictor covariates (linear or restricted cubic spline) for control."""
     mode = _get_predictor_control_mode(config)
+    if mode == "none":
+        return pd.DataFrame(index=predictor_series.index)
     if mode == "linear":
         return pd.DataFrame({"predictor": predictor_series})
 
@@ -253,6 +260,15 @@ def partial_corr_xy_given_Z(
 
     residuals_x = x_vals - design_matrix @ beta_x
     residuals_y = y_vals - design_matrix @ beta_y
+
+    residual_std_x = float(np.nanstd(residuals_x))
+    residual_std_y = float(np.nanstd(residuals_y))
+    if residual_std_x <= 1e-12 or residual_std_y <= 1e-12:
+        if np.allclose(residuals_x, residuals_y, atol=1e-12, rtol=1e-6):
+            return 1.0, np.nan, int(len(df))
+        if np.allclose(residuals_x, -residuals_y, atol=1e-12, rtol=1e-6):
+            return -1.0, np.nan, int(len(df))
+        return np.nan, np.nan, int(len(df))
 
     # Partial correlation: correlation of residuals is valid, but the p-value must
     # use dof = n - k - 2 (k covariates), not the default dof = n - 2.
@@ -489,4 +505,3 @@ def compute_partial_correlations_with_cov_predictor(
         p_cov_predictor,
         n_cov_predictor,
     )
-

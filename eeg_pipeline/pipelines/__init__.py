@@ -1,45 +1,56 @@
-"""Pipeline orchestration modules.
+"""Pipeline orchestration modules."""
 
-This package provides high-level pipeline classes for running
-complete analysis workflows on EEG data.
+from __future__ import annotations
 
-Pipeline Classes:
-- FeaturePipeline: Feature extraction (TFR-based and precomputed)
-- BehaviorPipeline: EEG-behavior correlation analysis
-- MLPipeline: Machine learning pipeline (LOSO, time-generalization)
-- PreprocessingPipeline: Bad channels, ICA, epochs
+from importlib import import_module
+from typing import Any
 
-Note: Raw-to-BIDS conversion and event-log harmonization are external to this
-package. Run those dataset-specific steps before this pipeline.
-"""
-
-from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.pipelines.behavior import (
-    BehaviorPipeline,
-    BehaviorPipelineConfig,
-    BehaviorPipelineResults,
-)
-from eeg_pipeline.pipelines.features import (
-    FeaturePipeline,
-    extract_all_features,
-    extract_precomputed_features,
-)
-from eeg_pipeline.pipelines.machine_learning import MLPipeline
-from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
 __all__ = [
-    # Base
     "PipelineBase",
-    # Features
     "FeaturePipeline",
     "extract_all_features",
     "extract_precomputed_features",
-    # Behavior
     "BehaviorPipeline",
     "BehaviorPipelineConfig",
     "BehaviorPipelineResults",
-    # Machine Learning
     "MLPipeline",
-    # Preprocessing
     "PreprocessingPipeline",
 ]
+
+_EXPORTS = {
+    "PipelineBase": ("eeg_pipeline.pipelines.base", "PipelineBase"),
+    "FeaturePipeline": ("eeg_pipeline.pipelines.features", "FeaturePipeline"),
+    "extract_all_features": ("eeg_pipeline.pipelines.features", "extract_all_features"),
+    "extract_precomputed_features": (
+        "eeg_pipeline.pipelines.features",
+        "extract_precomputed_features",
+    ),
+    "BehaviorPipeline": ("eeg_pipeline.pipelines.behavior", "BehaviorPipeline"),
+    "BehaviorPipelineConfig": (
+        "eeg_pipeline.pipelines.behavior",
+        "BehaviorPipelineConfig",
+    ),
+    "BehaviorPipelineResults": (
+        "eeg_pipeline.pipelines.behavior",
+        "BehaviorPipelineResults",
+    ),
+    "MLPipeline": ("eeg_pipeline.pipelines.machine_learning", "MLPipeline"),
+    "PreprocessingPipeline": (
+        "eeg_pipeline.pipelines.preprocessing",
+        "PreprocessingPipeline",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_path, attr_name = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    module = import_module(module_path)
+    return getattr(module, attr_name)
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

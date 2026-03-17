@@ -177,78 +177,65 @@ class PipelineBase(ABC):
         error: Optional[str] = None,
         outputs: Optional[Dict[str, Any]] = None,
         summary: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Path]:
+    ) -> Path:
         """Persist run-level reproducibility metadata as JSON."""
         pipeline_name = getattr(self, "name", type(self).__name__)
-        logger = getattr(self, "logger", None)
         deriv_root = getattr(self, "deriv_root", None)
         if deriv_root is None:
-            if logger is not None:
-                logger.warning(
-                    "Skipping run metadata for %s: deriv_root is not set.",
-                    pipeline_name,
-                )
-            return None
-
-        try:
-            started_at = run_context["started_at"]
-            finished_at = datetime.now(timezone.utc)
-            duration_seconds = round(
-                (finished_at - started_at).total_seconds(),
-                3,
+            raise RuntimeError(
+                f"Cannot write run metadata for {pipeline_name}: deriv_root is not set."
             )
 
-            metadata_dir = (
-                Path(deriv_root)
-                / "logs"
-                / "run_metadata"
-                / pipeline_name
-            )
-            metadata_dir.mkdir(parents=True, exist_ok=True)
+        started_at = run_context["started_at"]
+        finished_at = datetime.now(timezone.utc)
+        duration_seconds = round(
+            (finished_at - started_at).total_seconds(),
+            3,
+        )
 
-            raw_config: Any = getattr(self, "config", {})
-            if isinstance(raw_config, dict):
-                raw_config = dict(raw_config)
+        metadata_dir = (
+            Path(deriv_root)
+            / "logs"
+            / "run_metadata"
+            / pipeline_name
+        )
+        metadata_dir.mkdir(parents=True, exist_ok=True)
 
-            payload = {
-                "schema_version": "1.0",
-                "run_id": run_context["run_id"],
-                "pipeline": pipeline_name,
-                "status": status,
-                "started_at_utc": started_at.isoformat(),
-                "finished_at_utc": finished_at.isoformat(),
-                "duration_seconds": duration_seconds,
-                "task": run_context.get("task"),
-                "subjects": run_context.get("subjects", []),
-                "specifications": run_context.get("specifications", {}),
-                "config": self._sanitize_metadata_value(raw_config),
-                "environment": {
-                    "cwd": os.getcwd(),
-                    "argv": list(sys.argv),
-                    "python_executable": sys.executable,
-                    "python_version": platform.python_version(),
-                    "platform": platform.platform(),
-                },
-                "outputs": self._sanitize_metadata_value(outputs or {}),
-                "summary": self._sanitize_metadata_value(summary or {}),
-            }
-            if error:
-                payload["error"] = str(error)
+        raw_config: Any = getattr(self, "config", {})
+        if isinstance(raw_config, dict):
+            raw_config = dict(raw_config)
 
-            out_path = metadata_dir / f"run_{run_context['run_id']}.json"
-            out_path.write_text(
-                json.dumps(payload, indent=2),
-                encoding="utf-8",
-            )
-            return out_path
-        except Exception as exc:
-            if logger is not None:
-                logger.warning(
-                    "Failed writing run metadata for %s: %s",
-                    pipeline_name,
-                    exc,
-                )
-            return None
+        payload = {
+            "schema_version": "1.0",
+            "run_id": run_context["run_id"],
+            "pipeline": pipeline_name,
+            "status": status,
+            "started_at_utc": started_at.isoformat(),
+            "finished_at_utc": finished_at.isoformat(),
+            "duration_seconds": duration_seconds,
+            "task": run_context.get("task"),
+            "subjects": run_context.get("subjects", []),
+            "specifications": run_context.get("specifications", {}),
+            "config": self._sanitize_metadata_value(raw_config),
+            "environment": {
+                "cwd": os.getcwd(),
+                "argv": list(sys.argv),
+                "python_executable": sys.executable,
+                "python_version": platform.python_version(),
+                "platform": platform.platform(),
+            },
+            "outputs": self._sanitize_metadata_value(outputs or {}),
+            "summary": self._sanitize_metadata_value(summary or {}),
+        }
+        if error:
+            payload["error"] = str(error)
+
+        out_path = metadata_dir / f"run_{run_context['run_id']}.json"
+        out_path.write_text(
+            json.dumps(payload, indent=2),
+            encoding="utf-8",
+        )
+        return out_path
 
     def _process_single_subject(
         self,
@@ -334,6 +321,7 @@ class PipelineBase(ABC):
         )
         run_status = "failed"
         run_error: Optional[str] = None
+        caught_error: Optional[Exception] = None
 
         if progress is not None:
             progress.start(self.name, subjects)
@@ -384,21 +372,23 @@ class PipelineBase(ABC):
             run_status = "success" if all_succeeded else "partial_success"
             self._complete_progress(progress, success=all_succeeded)
 
-            return ledger
         except Exception as exc:
             run_error = str(exc)
-            raise
-        finally:
-            summary = {
-                "n_subjects": len(subjects),
-                "n_success": sum(
-                    1 for item in ledger if item.get("status") == "success"
-                ),
-                "n_failed": sum(
-                    1 for item in ledger if item.get("status") == "failed"
-                ),
-            }
-            outputs = {"ledger_path": str(resolved_ledger_path)}
+            caught_error = exc
+
+        summary = {
+            "n_subjects": len(subjects),
+            "n_success": sum(
+                1 for item in ledger if item.get("status") == "success"
+            ),
+            "n_failed": sum(
+                1 for item in ledger if item.get("status") == "failed"
+            ),
+        }
+        outputs = {"ledger_path": str(resolved_ledger_path)}
+
+        metadata_error: Optional[Exception] = None
+        try:
             self._write_run_metadata(
                 run_context,
                 status=run_status,
@@ -406,6 +396,17 @@ class PipelineBase(ABC):
                 outputs=outputs,
                 summary=summary,
             )
+        except Exception as exc:
+            metadata_error = exc
+
+        if caught_error is not None:
+            if metadata_error is not None:
+                caught_error.add_note(f"Run metadata writing also failed: {metadata_error}")
+            raise caught_error
+        if metadata_error is not None:
+            raise metadata_error
+
+        return ledger
 
     @abstractmethod
     def process_subject(self, subject: str, task: str, **kwargs: Any) -> None:

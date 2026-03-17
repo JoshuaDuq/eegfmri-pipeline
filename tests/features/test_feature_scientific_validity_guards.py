@@ -49,6 +49,7 @@ from eeg_pipeline.analysis.features.source_localization import (
     extract_source_contrast_features,
     extract_source_localization_features,
 )
+from eeg_pipeline.context.features import FeatureContext
 from eeg_pipeline.analysis.features.bursts import extract_burst_features
 from eeg_pipeline.types import BandData, PrecomputedData, PrecomputedQC, TimeWindows
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_subject
@@ -113,6 +114,21 @@ class _StcStub:
 
 
 class TestScientificValidityGuards(unittest.TestCase):
+    def test_feature_context_rejects_cross_trial_features_without_train_mask_in_trial_safe_mode(self):
+        with self.assertRaisesRegex(ValueError, "train_mask"):
+            FeatureContext(
+                subject="0001",
+                task="pain",
+                config=DotConfig({"feature_engineering": {"analysis_mode": "trial_ml_safe"}}),
+                deriv_root=Path(tempfile.mkdtemp()),
+                logger=logging.getLogger("feature-context-trial-safe"),
+                epochs=_EpochStub(n_epochs=4, sfreq=100.0, n_times=40),
+                aligned_events=pd.DataFrame({"trial": [0, 1, 2, 3]}),
+                feature_categories=["connectivity"],
+                train_mask=None,
+                analysis_mode="trial_ml_safe",
+            )
+
     def test_rest_mode_rejects_event_locked_feature_categories(self):
         config = DotConfig({"feature_engineering": {"task_is_rest": True}})
         with self.assertRaisesRegex(ValueError, "event-locked categories: erp, itpc"):
@@ -1090,7 +1106,7 @@ class TestScientificValidityGuards(unittest.TestCase):
             eloreta_snr=3.0,
             allow_template_fallback=True,
             save_stc=True,
-            mode="surface",
+            mode="eeg_only",
         )
         ctx = SimpleNamespace(
             epochs=_EpochStub(n_epochs, sfreq=100.0, n_times=n_times),
