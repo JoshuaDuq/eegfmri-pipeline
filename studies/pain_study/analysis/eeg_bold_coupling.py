@@ -19,7 +19,7 @@ from scipy.signal import hilbert
 from scipy.spatial import cKDTree
 
 from eeg_pipeline.analysis.features.source_localization import _setup_surface_forward_model_configured
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_nuisance import (
+from studies.pain_study.analysis.eeg_bold_nuisance import (
     CouplingNuisanceConfig,
     apply_trial_censoring,
     compute_dvars_table,
@@ -27,38 +27,38 @@ from eeg_pipeline.analysis.paradigms.pain.eeg_bold_nuisance import (
     compute_fd_table,
     write_qc_summary,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_fmri_qc import (
+from studies.pain_study.analysis.eeg_bold_fmri_qc import (
     run_subject_fmri_qc,
     write_subject_fmri_qc,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_permutation import (
+from studies.pain_study.analysis.eeg_bold_permutation import (
     aggregate_primary_permutation_effects,
     fit_subject_primary_permutation_effects,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_roi_builder import (
+from studies.pain_study.analysis.eeg_bold_roi_builder import (
     build_eeg_bold_rois,
     built_rois_as_runtime_specs,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_residualized import (
+from studies.pain_study.analysis.eeg_bold_residualized import (
     aggregate_residualized_correlations,
     fit_subject_residualized_correlations,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_signatures import (
+from studies.pain_study.analysis.eeg_bold_signatures import (
     LocalSignatureExpressionConfig,
     normalize_signature_weights,
     resolve_signature_paths,
     sample_signatures_to_subject_surface,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_sensitivity import (
+from studies.pain_study.analysis.eeg_bold_sensitivity import (
     CouplingSensitivityConfig,
     filter_painful_trials,
     resolve_sensitivity_beta_dir,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_source import (
+from studies.pain_study.analysis.eeg_bold_source import (
     iterate_band_specific_lcmv_estimates,
     compute_source_estimates,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_statistics import (
+from studies.pain_study.analysis.eeg_bold_statistics import (
     CellSpec,
     CouplingStatisticsConfig,
     finalize_group_results,
@@ -1164,7 +1164,7 @@ def _run_group_preflight(
 ) -> None:
     if coupling_cfg.statistics.backend != "nlme_lme_ar1":
         raise ValueError("Unsupported group backend.")
-    from eeg_pipeline.analysis.paradigms.pain.eeg_bold_statistics import (
+    from studies.pain_study.analysis.eeg_bold_statistics import (
         _resolve_rscript_path,
         _r_backend_script_path,
     )

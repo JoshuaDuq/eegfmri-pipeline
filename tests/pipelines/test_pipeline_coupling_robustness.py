@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_coupling import (
+from studies.pain_study.analysis.eeg_bold_coupling import (
     _add_within_between_predictors,
     _negative_control_passes,
     _sign_match,
@@ -17,15 +17,15 @@ from eeg_pipeline.analysis.paradigms.pain.eeg_bold_coupling import (
     _summarize_leave_one_out_refits,
     _shuffle_bold_table_within_run,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_nuisance import (
+from studies.pain_study.analysis.eeg_bold_nuisance import (
     CouplingNuisanceConfig,
     apply_trial_censoring,
     compute_dvars_table,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_sensitivity import (
+from studies.pain_study.analysis.eeg_bold_sensitivity import (
     CouplingSensitivityConfig,
 )
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_statistics import (
+from studies.pain_study.analysis.eeg_bold_statistics import (
     CellSpec,
     CouplingStatisticsConfig,
     _prepare_model_table,
@@ -177,19 +177,19 @@ def test_compute_dvars_table_adds_trialwise_dvars_column(
     )
 
     monkeypatch.setattr(
-        "eeg_pipeline.analysis.paradigms.pain.eeg_bold_nuisance.discover_fmriprep_preproc_bold",
+        "studies.pain_study.analysis.eeg_bold_nuisance.discover_fmriprep_preproc_bold",
         lambda **_kwargs: bold_path,
     )
     monkeypatch.setattr(
-        "eeg_pipeline.analysis.paradigms.pain.eeg_bold_nuisance.discover_confounds",
+        "studies.pain_study.analysis.eeg_bold_nuisance.discover_confounds",
         lambda **_kwargs: confounds_path,
     )
     monkeypatch.setattr(
-        "eeg_pipeline.analysis.paradigms.pain.eeg_bold_nuisance.get_tr_from_bold",
+        "studies.pain_study.analysis.eeg_bold_nuisance.get_tr_from_bold",
         lambda _path: 1.0,
     )
     monkeypatch.setattr(
-        "eeg_pipeline.analysis.paradigms.pain.eeg_bold_nuisance.nib.load",
+        "studies.pain_study.analysis.eeg_bold_nuisance.nib.load",
         lambda _path: SimpleNamespace(shape=(2, 2, 2, 4)),
     )
 
@@ -638,7 +638,7 @@ def test_leave_one_out_refits_calls_fit_for_each_subject_and_run(monkeypatch) ->
         }
 
     monkeypatch.setattr(
-        "eeg_pipeline.analysis.paradigms.pain.eeg_bold_coupling.fit_mixedlm_cell",
+        "studies.pain_study.analysis.eeg_bold_coupling.fit_mixedlm_cell",
         fake_fit_mixedlm_cell,
     )
 

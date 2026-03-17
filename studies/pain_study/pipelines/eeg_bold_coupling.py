@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, List, Optional
 
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_coupling import (
+from studies.pain_study.analysis.eeg_bold_coupling import (
     run_group_eeg_bold_coupling,
     run_subject_eeg_bold_coupling,
 )

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
 
-from eeg_pipeline.analysis.paradigms.pain.eeg_bold_sensitivity import (
+from studies.pain_study.analysis.eeg_bold_sensitivity import (
     ResidualizedCorrelationSensitivityConfig,
 )
 
