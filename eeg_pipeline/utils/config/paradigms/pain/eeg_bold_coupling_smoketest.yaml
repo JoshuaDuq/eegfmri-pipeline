@@ -1,0 +1,189 @@
+paths:
+  bids_fmri_root: "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri"
+  bids_root: "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg"
+  deriv_root: "/Volumes/KINGSTON/EEG_fMRI_data/derivatives"
+  freesurfer_dir: "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/preprocessed/fmri/sourcedata/freesurfer"
+  signature_maps:
+    - name: "NPS"
+      path: "/Volumes/KINGSTON/EEG_fMRI_data/external/NPS/weights_NSF_grouppred_cvpcr.nii.gz"
+    - name: "SIIPS1"
+      path: "/Volumes/KINGSTON/EEG_fMRI_data/external/SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+
+project:
+  task: "thermalactive"
+  random_state: 42
+
+event_columns:
+  predictor: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
+  temperature: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
+  binary_outcome: ["pain_binary_coded", "binary_outcome_coded", "binary_outcome"]
+  outcome: ["vas_final_coded_rating", "vas_final_rating", "pain_rating", "rating"]
+
+frequency_bands:
+  alpha: [8.0, 13.0]
+  beta: [13.0, 30.0]
+  low_gamma: [30.0, 45.0]
+
+eeg_bold_coupling:
+  output_dir: "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/data/derivatives/eeg_bold_coupling_smoketest"
+
+  rois:
+    template_subject: "fsaverage"
+    items:
+      - name: "right_operculo_parietal"
+        parcellation: "aparc.a2009s"
+        annot_labels:
+          - "G_temp_sup-G_T_transv-rh"
+          - "S_circular_insula_sup-rh"
+          - "G_and_S_subcentral-rh"
+      - name: "cingulo_pre_sma"
+        parcellation: "aparc.a2009s"
+        annot_labels:
+          - "G_and_S_cingul-Mid-Ant-lh"
+          - "G_and_S_cingul-Mid-Ant-rh"
+          - "G_and_S_paracentral-lh"
+          - "G_and_S_paracentral-rh"
+
+  eeg:
+    bands: ["alpha", "beta"]
+    active_window: [3.0, 10.5]
+    baseline_window: [-5.0, -0.01]
+    feature_batch_size: 256
+    method: "lcmv"
+    spacing: "oct6"
+    subjects_dir: "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/preprocessed/fmri/sourcedata/freesurfer"
+    mindist_mm: 5.0
+    reg: 0.05
+    snr: 3.0
+    loose: 0.2
+    depth: 0.8
+
+  fmri:
+    contrast_name: "plateau_trials"
+    input_source: "fmriprep"
+    fmriprep_space: "T1w"
+    require_fmriprep: true
+    extraction_method: "surface_glm"
+    selection_column: "stim_phase"
+    selection_values: ["plateau"]
+    hrf_model: "spm"
+    drift_model: "cosine"
+    high_pass_hz: 0.008
+    low_pass_hz: null
+    smoothing_fwhm: 0.0
+    confounds_strategy: "auto"
+    lss_other_regressors: "all"
+
+  covariates:
+    model_terms: ["temperature", "temperature_sq", "fd", "exp_site", "exp_global", "block_start"]
+    temperature_column: "events_stimulus_temp"
+    include_temperature_squared: true
+    site_column: "events_selected_surface"
+    extra_numeric_columns: []
+
+  nuisance:
+    fd:
+      enabled: true
+      output_column: "fd"
+      source_column: "framewise_displacement"
+      hrf_model: "spm"
+      censor_above: null
+    eeg_artifact:
+      enabled: false
+      output_column: "eeg_artifact"
+      required_components: []
+      component_z_threshold: null
+      composite_threshold: null
+      event_numeric_columns: []
+      global_amplitude:
+        enabled: true
+        window: [-5.0, 10.5]
+      ecg_amplitude:
+        enabled: false
+        channels: []
+        window: [-5.0, 10.5]
+      peripheral_band_power:
+        enabled: false
+        channels: []
+        band: [30.0, 45.0]
+        window: [3.0, 10.5]
+    censoring:
+      require_all_model_terms_finite: true
+
+  fmri_qc:
+    enabled: true
+    design:
+      max_abs_target_other_correlation: null
+      min_target_efficiency: null
+      max_target_variance: null
+    roi:
+      outlier_mad_threshold: 5.0
+      max_outlier_proportion: null
+
+  secondary:
+    local_signature_expression:
+      enabled: false
+      signatures: ["NPS", "SIIPS1"]
+      abs_weight_threshold: 0.0
+      normalize_weights: "l1"
+
+  sensitivities:
+    painful_only:
+      enabled: false
+      output_name: "painful_only"
+      binary_column: "events_pain_binary_coded"
+      painful_values: ["1"]
+      rating_column: "events_vas_final_coded_rating"
+      min_rating: null
+    alternative_fmri:
+      enabled: false
+      name: "alternative_fmri"
+      beta_dir_template: null
+    delta_temperature:
+      enabled: false
+      output_name: "delta_temperature"
+      temperature_column: "temperature"
+      model_terms: ["temperature", "temperature_sq", "fd", "eeg_artifact", "delta_temperature"]
+    temperature_categorical:
+      enabled: false
+      output_name: "temperature_categorical"
+      temperature_column: "temperature"
+      factor_column: "temperature_factor"
+      model_terms: ["temperature_factor", "fd", "eeg_artifact", "exp_global", "block_start"]
+      max_levels: null
+    residualized_correlation:
+      enabled: true
+      output_name: "residualized_correlation"
+      bootstrap_iterations: 200
+      permutation_iterations: 1000
+
+    primary_permutation:
+      enabled: true
+      output_name: "primary_permutation"
+      bootstrap_iterations: 200
+      permutation_iterations: 1000
+
+    source_methods:
+      enabled: false
+      items: []
+
+  statistics:
+    backend: "nlme_lme_ar1"
+    min_trials_per_subject: 20
+    min_runs_per_subject: 2
+    include_run_fixed_effect: true
+    use_outcome_variance: false
+    alpha: 0.05
+    rscript_path: "Rscript"
+    fit_method: "reml"
+    max_iterations: 200
+    em_iterations: 50
+    singular_tolerance: 1.0e-8
+
+  alignment:
+    key_mode: "run_trial_number"
+
+  runtime:
+    preflight: true
+    profile_stages: true
+    key_mode: "run_trial_number"

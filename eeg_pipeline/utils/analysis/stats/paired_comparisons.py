@@ -23,11 +23,13 @@ def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
         return np.nan
     
     diff = after - before
+    mean_diff = float(np.mean(diff))
     std_diff = np.std(diff, ddof=1)
     
     if std_diff < MIN_STD_FOR_COHENS_D:
-        return 0.0
+        if np.isclose(mean_diff, 0.0):
+            return 0.0
+        return float(np.copysign(np.inf, mean_diff))
     
-    return float(np.mean(diff) / std_diff)
-
+    return float(mean_diff / std_diff)
 

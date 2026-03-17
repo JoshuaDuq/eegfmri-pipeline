@@ -70,6 +70,39 @@ func TestBuildCommand_AppendsConfigSetOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildPreprocessingAdvancedArgs_EmitsCleanEventsQCSetOverrides(t *testing.T) {
+	m := New(types.PipelinePreprocessing, ".")
+	m.prepCleanEventsQCEnabled = false
+	m.prepCleanEventsQCEcgVarianceEnabled = false
+	m.prepCleanEventsQCEcgVarianceOutputColumn = "ecg_coupling_qc"
+	m.prepCleanEventsQCEcgVarianceChannels = "[\"ECG\",\"EKG\"]"
+	m.prepCleanEventsQCEcgVarianceWindow = "[-1.5,0.25]"
+	m.prepCleanEventsQCPeripheralLowGammaEnabled = false
+	m.prepCleanEventsQCPeripheralLowGammaOutputColumn = "gamma_qc"
+	m.prepCleanEventsQCPeripheralLowGammaChannels = "[\"Fp1\",\"Fp2\"]"
+	m.prepCleanEventsQCPeripheralLowGammaBand = "[28,44]"
+	m.prepCleanEventsQCPeripheralLowGammaWindow = "[-1,0.5]"
+
+	args := m.buildPreprocessingAdvancedArgs()
+
+	for _, subseq := range [][]string{
+		{"--set", "preprocessing.clean_events_qc.enabled=false"},
+		{"--set", "preprocessing.clean_events_qc.ecg_coupling.enabled=false"},
+		{"--set", "preprocessing.clean_events_qc.ecg_coupling.output_column=ecg_coupling_qc"},
+		{"--set", "preprocessing.clean_events_qc.ecg_coupling.channels=[\"ECG\",\"EKG\"]"},
+		{"--set", "preprocessing.clean_events_qc.ecg_coupling.window=[-1.5,0.25]"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.enabled=false"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.output_column=gamma_qc"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.channels=[\"Fp1\",\"Fp2\"]"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.band=[28,44]"},
+		{"--set", "preprocessing.clean_events_qc.peripheral_low_gamma.window=[-1,0.5]"},
+	} {
+		if !containsSubsequence(args, subseq) {
+			t.Fatalf("expected %#v in preprocessing args: %#v", subseq, args)
+		}
+	}
+}
+
 func TestBuildCommand_FeaturesRestModeIncludesRestSafePowerFlags(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i := range m.selected {
@@ -105,6 +138,16 @@ func TestValidateTimeRanges_AllowsRestingStatePowerWithoutBaseline(t *testing.T)
 		if strings.Contains(err, "baseline") {
 			t.Fatalf("did not expect baseline-related error for resting-state power, got: %#v", errors)
 		}
+	}
+}
+
+func TestValidateTimeRanges_AllowsEmptyRangesForRestingState(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.prepTaskIsRest = true
+
+	errors := m.validateTimeRanges()
+	if len(errors) != 0 {
+		t.Fatalf("expected resting-state time range validation to allow no explicit ranges, got %#v", errors)
 	}
 }
 
@@ -992,11 +1035,12 @@ func TestSelectedPlotIDs_PlottingGroupScopeFiltersUnsupportedPlots(t *testing.T)
 		{ID: "band_power_topomaps", Group: "power"},
 		{ID: "power_by_condition", Group: "power"},
 		{ID: "power_spectral_density", Group: "power"},
+		{ID: "power_timecourse", Group: "power"},
 	}
-	m.plotSelected = map[int]bool{0: true, 1: true, 2: true}
+	m.plotSelected = map[int]bool{0: true, 1: true, 2: true, 3: true}
 
 	got := m.SelectedPlotIDs()
-	want := []string{"band_power_topomaps", "power_by_condition", "power_spectral_density"}
+	want := []string{"band_power_topomaps", "power_by_condition", "power_spectral_density", "power_timecourse"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected group plotting IDs %v, got %v", want, got)
 	}

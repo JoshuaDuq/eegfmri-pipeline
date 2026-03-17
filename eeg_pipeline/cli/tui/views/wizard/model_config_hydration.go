@@ -1885,6 +1885,56 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.prepAutorejectNInterpolate = strings.Join(splitLooseList(spec), ",")
 			}
 		}},
+		{key: "preprocessing.clean_events_qc.enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.prepCleanEventsQCEnabled = b
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.ecg_coupling.enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.prepCleanEventsQCEcgVarianceEnabled = b
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.ecg_coupling.output_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.prepCleanEventsQCEcgVarianceOutputColumn = s
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.ecg_coupling.channels", apply: func(v interface{}) {
+			if spec, ok := asJSONArraySpec(v); ok {
+				m.prepCleanEventsQCEcgVarianceChannels = spec
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.ecg_coupling.window", apply: func(v interface{}) {
+			if spec, ok := asJSONArraySpec(v); ok {
+				m.prepCleanEventsQCEcgVarianceWindow = spec
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.peripheral_low_gamma.enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.prepCleanEventsQCPeripheralLowGammaEnabled = b
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.peripheral_low_gamma.output_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.prepCleanEventsQCPeripheralLowGammaOutputColumn = s
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.peripheral_low_gamma.channels", apply: func(v interface{}) {
+			if spec, ok := asJSONArraySpec(v); ok {
+				m.prepCleanEventsQCPeripheralLowGammaChannels = spec
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.peripheral_low_gamma.band", apply: func(v interface{}) {
+			if spec, ok := asJSONArraySpec(v); ok {
+				m.prepCleanEventsQCPeripheralLowGammaBand = spec
+			}
+		}},
+		{key: "preprocessing.clean_events_qc.peripheral_low_gamma.window", apply: func(v interface{}) {
+			if spec, ok := asJSONArraySpec(v); ok {
+				m.prepCleanEventsQCPeripheralLowGammaWindow = spec
+			}
+		}},
 		{key: "alignment.allow_misaligned_trim", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.alignAllowMisalignedTrim = b
@@ -2206,6 +2256,24 @@ func asListSpec(v interface{}) (string, bool) {
 			}
 		}
 		return strings.Join(out, " "), true
+	}
+	return "", false
+}
+
+func asJSONArraySpec(v interface{}) (string, bool) {
+	switch val := v.(type) {
+	case []interface{}, []string, map[string]interface{}, map[string]string:
+		bytes, err := json.Marshal(val)
+		if err != nil {
+			return "", false
+		}
+		return string(bytes), true
+	case string:
+		trimmed := strings.TrimSpace(val)
+		if trimmed == "" {
+			return "", false
+		}
+		return trimmed, true
 	}
 	return "", false
 }

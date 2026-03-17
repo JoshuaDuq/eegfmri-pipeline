@@ -32,6 +32,7 @@ var groupSupportedPlotIDs = map[string]struct{}{
 	"band_power_topomaps":    {},
 	"power_by_condition":     {},
 	"power_spectral_density": {},
+	"power_timecourse":       {},
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -810,6 +811,9 @@ func (m *Model) validateTimeRanges() []string {
 	var errors []string
 
 	if len(m.TimeRanges) == 0 {
+		if m.prepTaskIsRest {
+			return nil
+		}
 		errors = append(errors, "No time ranges defined")
 		return errors
 	}

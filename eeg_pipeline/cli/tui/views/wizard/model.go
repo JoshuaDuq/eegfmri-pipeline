@@ -814,6 +814,13 @@ const (
 	// EEG Preprocessing new text fields
 	textFieldPrepEcgChannels
 	textFieldPrepAutorejectNInterpolate
+	textFieldPrepCleanEventsQCEcgVarianceOutputColumn
+	textFieldPrepCleanEventsQCEcgVarianceChannels
+	textFieldPrepCleanEventsQCEcgVarianceWindow
+	textFieldPrepCleanEventsQCPeripheralLowGammaOutputColumn
+	textFieldPrepCleanEventsQCPeripheralLowGammaChannels
+	textFieldPrepCleanEventsQCPeripheralLowGammaBand
+	textFieldPrepCleanEventsQCPeripheralLowGammaWindow
 
 	// Event Column Mapping text fields
 	textFieldEventColPredictor
@@ -851,6 +858,7 @@ var defaultPlotItems = []PlotItem{
 	{ID: "band_power_topomaps", Group: "power", Name: "Topomaps", Description: "Band power topographic maps for selected time window", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "cross_frequency_power_correlation", Group: "power", Name: "Cross-Frequency Correlation", Description: "Correlation matrix between frequency bands", RequiredFiles: []string{"features_power*.tsv"}, RequiresFeatures: true},
 	{ID: "power_spectral_density", Group: "power", Name: "PSD Summary", Description: "Power spectral density curves", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "power_timecourse", Group: "power", Name: "Timecourse", Description: "Time-resolved band power trajectories by condition", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	// Connectivity
 	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.tsv", "events.tsv"}, RequiresFeatures: true},
 	{ID: "connectivity_circle_condition", Group: "connectivity", Name: "Circle by Condition", Description: "Connectivity circles per measure and band by condition", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true},
@@ -2379,6 +2387,17 @@ type Model struct {
 	prepWriteCleanEvents     bool // Write clean events.tsv aligned to kept epochs
 	prepOverwriteCleanEvents bool // Overwrite existing clean events.tsv
 	prepCleanEventsStrict    bool // Fail if clean events.tsv cannot be written
+	// Clean-events QC options
+	prepCleanEventsQCEnabled                        bool
+	prepCleanEventsQCEcgVarianceEnabled             bool
+	prepCleanEventsQCEcgVarianceOutputColumn        string
+	prepCleanEventsQCEcgVarianceChannels            string
+	prepCleanEventsQCEcgVarianceWindow              string
+	prepCleanEventsQCPeripheralLowGammaEnabled      bool
+	prepCleanEventsQCPeripheralLowGammaOutputColumn string
+	prepCleanEventsQCPeripheralLowGammaChannels     string
+	prepCleanEventsQCPeripheralLowGammaBand         string
+	prepCleanEventsQCPeripheralLowGammaWindow       string
 
 	// Preprocessing UI group expansion states (for collapsible sections)
 	prepGroupStagesExpanded    bool
@@ -3017,8 +3036,18 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlTargetsStrictRegressionCont:    true,
 
 		// EEG Preprocessing missing defaults
-		prepEcgChannels:            "",
-		prepAutorejectNInterpolate: "4,8,16",
+		prepEcgChannels:                                 "",
+		prepAutorejectNInterpolate:                      "4,8,16",
+		prepCleanEventsQCEnabled:                        true,
+		prepCleanEventsQCEcgVarianceEnabled:             true,
+		prepCleanEventsQCEcgVarianceOutputColumn:        "residual_ecg_coupling",
+		prepCleanEventsQCEcgVarianceChannels:            "[\"ECG\"]",
+		prepCleanEventsQCEcgVarianceWindow:              "[-2,0]",
+		prepCleanEventsQCPeripheralLowGammaEnabled:      true,
+		prepCleanEventsQCPeripheralLowGammaOutputColumn: "peripheral_low_gamma_power",
+		prepCleanEventsQCPeripheralLowGammaChannels:     "[\"Fp1\",\"Fp2\",\"FT9\",\"FT10\",\"TP9\",\"TP10\"]",
+		prepCleanEventsQCPeripheralLowGammaBand:         "[30,45]",
+		prepCleanEventsQCPeripheralLowGammaWindow:       "[-2,0]",
 
 		// Alignment defaults
 		alignAllowMisalignedTrim: false,

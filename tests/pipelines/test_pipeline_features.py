@@ -94,6 +94,27 @@ class TestFeatureHelpers(unittest.TestCase):
         self.assertIsNotNone(aligned_events)
         self.assertEqual(aligned_events["trial_id"].tolist(), [1, 2])
 
+    def test_load_epochs_for_analysis_rejects_overlapping_rest_epochs(self):
+        from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
+
+        config = DotConfig(
+            {
+                "preprocessing": {
+                    "task_is_rest": True,
+                    "rest_epochs_overlap": 2.5,
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "rest_epochs_overlap > 0"):
+            load_epochs_for_analysis(
+                "0001",
+                "rest",
+                align="strict",
+                deriv_root=Path(tempfile.mkdtemp()),
+                config=config,
+            )
+
     def test_feature_pipeline_passes_feature_rest_flag_to_epoch_loading(self):
         from eeg_pipeline.pipelines.features import FeaturePipeline
 
@@ -134,6 +155,42 @@ class TestFeatureHelpers(unittest.TestCase):
 
         self.assertTrue(mock_load.called)
         self.assertTrue(mock_load.call_args.kwargs["task_is_rest"])
+
+    def test_feature_pipeline_rejects_overlapping_rest_epochs(self):
+        from eeg_pipeline.pipelines.features import FeaturePipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        pipeline = object.__new__(FeaturePipeline)
+        pipeline.config = DotConfig(
+            {
+                "project": {"task": "rest"},
+                "preprocessing": {"task_is_rest": True, "rest_epochs_overlap": 1.0},
+                "feature_engineering": {"task_is_rest": True},
+            }
+        )
+        pipeline.logger = Mock()
+        pipeline.deriv_root = tmp / "deriv"
+        pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
+        progress = SimpleNamespace(
+            subject_start=lambda *a, **k: None,
+            step=lambda *a, **k: None,
+            subject_done=lambda *a, **k: None,
+            error=lambda *a, **k: None,
+        )
+
+        with patch(
+            "eeg_pipeline.pipelines.features.resolve_feature_categories",
+            return_value=["power"],
+        ), patch(
+            "eeg_pipeline.pipelines.features.deriv_features_path",
+            return_value=tmp / "features",
+        ), patch(
+            "eeg_pipeline.pipelines.features.ensure_dir"
+        ), patch(
+            "eeg_pipeline.pipelines.features.setup_matplotlib"
+        ):
+            with self.assertRaisesRegex(ValueError, "rest_epochs_overlap > 0"):
+                pipeline.process_subject("0001", task="rest", progress=progress)
 
     def test_feature_pipeline_rejects_mismatched_rest_configuration(self):
         from eeg_pipeline.pipelines.features import FeaturePipeline

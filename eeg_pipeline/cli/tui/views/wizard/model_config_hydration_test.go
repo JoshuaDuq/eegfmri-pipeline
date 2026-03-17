@@ -178,6 +178,16 @@ func TestApplyConfigKeys_HydratesAdditionalFeatureAndPreprocessingConfig(t *test
 		"alignment.fmri_onset_reference":                                          "first_iti_start",
 		"eeg.ecg_channels":                                                        []interface{}{"ECG", "EKG"},
 		"epochs.autoreject_n_interpolate":                                         []interface{}{4, 8, 16},
+		"preprocessing.clean_events_qc.enabled":                                   false,
+		"preprocessing.clean_events_qc.ecg_coupling.enabled":                      false,
+		"preprocessing.clean_events_qc.ecg_coupling.output_column":                "ecg_coupling_qc",
+		"preprocessing.clean_events_qc.ecg_coupling.channels":                     []interface{}{"ECG", "EKG"},
+		"preprocessing.clean_events_qc.ecg_coupling.window":                       []interface{}{-1.5, 0.25},
+		"preprocessing.clean_events_qc.peripheral_low_gamma.enabled":              false,
+		"preprocessing.clean_events_qc.peripheral_low_gamma.output_column":        "gamma_qc",
+		"preprocessing.clean_events_qc.peripheral_low_gamma.channels":             []interface{}{"Fp1", "Fp2"},
+		"preprocessing.clean_events_qc.peripheral_low_gamma.band":                 []interface{}{28.0, 44.0},
+		"preprocessing.clean_events_qc.peripheral_low_gamma.window":               []interface{}{-1.0, 0.5},
 		"feature_engineering.spatial_transform_per_family.connectivity":           "laplacian",
 		"feature_engineering.change_scores.transform":                             "log_ratio",
 		"feature_engineering.change_scores.window_pairs":                          []interface{}{[]interface{}{"baseline", "active"}},
@@ -204,6 +214,36 @@ func TestApplyConfigKeys_HydratesAdditionalFeatureAndPreprocessingConfig(t *test
 	}
 	if m.prepAutorejectNInterpolate != "4,8,16" {
 		t.Fatalf("expected prepAutorejectNInterpolate='4,8,16', got %q", m.prepAutorejectNInterpolate)
+	}
+	if m.prepCleanEventsQCEnabled {
+		t.Fatalf("expected prepCleanEventsQCEnabled=false")
+	}
+	if m.prepCleanEventsQCEcgVarianceEnabled {
+		t.Fatalf("expected prepCleanEventsQCEcgVarianceEnabled=false")
+	}
+	if m.prepCleanEventsQCEcgVarianceOutputColumn != "ecg_coupling_qc" {
+		t.Fatalf("expected prepCleanEventsQCEcgVarianceOutputColumn='ecg_coupling_qc', got %q", m.prepCleanEventsQCEcgVarianceOutputColumn)
+	}
+	if m.prepCleanEventsQCEcgVarianceChannels != "[\"ECG\",\"EKG\"]" {
+		t.Fatalf("expected prepCleanEventsQCEcgVarianceChannels JSON array, got %q", m.prepCleanEventsQCEcgVarianceChannels)
+	}
+	if m.prepCleanEventsQCEcgVarianceWindow != "[-1.5,0.25]" {
+		t.Fatalf("expected prepCleanEventsQCEcgVarianceWindow JSON array, got %q", m.prepCleanEventsQCEcgVarianceWindow)
+	}
+	if m.prepCleanEventsQCPeripheralLowGammaEnabled {
+		t.Fatalf("expected prepCleanEventsQCPeripheralLowGammaEnabled=false")
+	}
+	if m.prepCleanEventsQCPeripheralLowGammaOutputColumn != "gamma_qc" {
+		t.Fatalf("expected prepCleanEventsQCPeripheralLowGammaOutputColumn='gamma_qc', got %q", m.prepCleanEventsQCPeripheralLowGammaOutputColumn)
+	}
+	if m.prepCleanEventsQCPeripheralLowGammaChannels != "[\"Fp1\",\"Fp2\"]" {
+		t.Fatalf("expected prepCleanEventsQCPeripheralLowGammaChannels JSON array, got %q", m.prepCleanEventsQCPeripheralLowGammaChannels)
+	}
+	if m.prepCleanEventsQCPeripheralLowGammaBand != "[28,44]" {
+		t.Fatalf("expected prepCleanEventsQCPeripheralLowGammaBand JSON array, got %q", m.prepCleanEventsQCPeripheralLowGammaBand)
+	}
+	if m.prepCleanEventsQCPeripheralLowGammaWindow != "[-1,0.5]" {
+		t.Fatalf("expected prepCleanEventsQCPeripheralLowGammaWindow JSON array, got %q", m.prepCleanEventsQCPeripheralLowGammaWindow)
 	}
 	if m.spatialTransformPerFamilyConnectivity != 3 {
 		t.Fatalf("expected spatialTransformPerFamilyConnectivity=3 (laplacian), got %d", m.spatialTransformPerFamilyConnectivity)

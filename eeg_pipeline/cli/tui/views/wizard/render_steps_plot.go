@@ -239,6 +239,12 @@ func (m Model) renderTimeRange() string {
 				m.contentWidth,
 			) + "\n\n",
 		)
+		if m.prepTaskIsRest {
+			infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+			b.WriteString(infoStyle.Render(
+				"  The pipeline defaults to a full-epoch analysis window when no explicit time range is provided.",
+			) + "\n\n")
+		}
 	}
 
 	var tmin, tmax float64
@@ -316,8 +322,14 @@ func (m Model) renderTimeRange() string {
 	b.WriteString("  " + styles.RenderDivider(nameWidth+valWidth*2+2) + "\n")
 
 	if len(m.TimeRanges) == 0 {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render("  No time ranges defined. Press [A] to add one.") + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  Note: 'baseline' is required for normalization (ERDS, log-ratio).") + "\n")
+		emptyStateStyle := lipgloss.NewStyle().Foreground(styles.Accent).Italic(true)
+		b.WriteString("\n")
+		if m.prepTaskIsRest {
+			b.WriteString(emptyStateStyle.Render("  No explicit time ranges defined. Press [A] to add one.") + "\n")
+		} else {
+			b.WriteString(emptyStateStyle.Render("  No time ranges defined. Press [A] to add one.") + "\n")
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  Note: 'baseline' is required for normalization (ERDS, log-ratio).") + "\n")
+		}
 	}
 
 	for i, tr := range m.TimeRanges {

@@ -26,6 +26,7 @@ class Command:
 
 
 from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
+from eeg_pipeline.cli.commands.coupling import setup_coupling, run_coupling
 from eeg_pipeline.cli.commands.features import setup_features, run_features
 from eeg_pipeline.cli.commands.info import setup_info, run_info
 from eeg_pipeline.cli.commands.machine_learning import setup_ml, run_ml
@@ -42,6 +43,11 @@ COMMANDS: List[Command] = [
         name="behavior",
         setup=setup_behavior,
         run=run_behavior,
+    ),
+    Command(
+        name="coupling",
+        setup=setup_coupling,
+        run=run_coupling,
     ),
     Command(
         name="features",

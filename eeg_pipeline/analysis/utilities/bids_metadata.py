@@ -29,6 +29,26 @@ def ensure_events_sidecar(events_tsv: Path, columns: list[str]) -> None:
     """Ensure the `_events.json` sidecar documents merged columns."""
     sidecar = events_json_path(events_tsv)
     data = _load_json(sidecar)
+    clean_event_descriptions = {
+        "epoch_index": {
+            "Description": "Zero-based row index within the kept clean-epochs file."
+        },
+        "trial_id": {
+            "Description": "Zero-based trial index aligned to the kept clean-epochs axis."
+        },
+        "event_index": {
+            "Description": "Zero-based event index within the condition-filtered pre-rejection event table."
+        },
+        "residual_ecg_coupling": {
+            "Description": "Per-epoch mean absolute correlation between the ECG channel and EEG channels over the configured artifact-QC window after preprocessing."
+        },
+        "peripheral_low_gamma_power": {
+            "Description": "Per-epoch low-gamma power averaged across configured peripheral EEG channels over the configured artifact-QC window after preprocessing."
+        },
+    }
+    for key in clean_event_descriptions:
+        if key not in columns and key in data:
+            del data[key]
 
     data.setdefault(
         "onset",
@@ -61,6 +81,9 @@ def ensure_events_sidecar(events_tsv: Path, columns: list[str]) -> None:
         if col in {"onset", "duration", "trial_type", "value", "sample"}:
             continue
         if col in data:
+            continue
+        if col in clean_event_descriptions:
+            data[col] = clean_event_descriptions[col]
             continue
         if col.endswith("_time"):
             data[col] = {"Description": f"{col} (experiment clock).", "Units": "s"}
@@ -121,4 +144,3 @@ def ensure_participants_tsv(bids_root: Path, subject_labels: list[str]) -> None:
         with path.open("a", encoding="utf-8") as handle:
             for row in new_rows:
                 handle.write(f"{row}\n")
-

@@ -7,10 +7,10 @@ Extracted from plot_features.py for modular organization.
 from __future__ import annotations
 
 from pathlib import Path
+import textwrap
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 import matplotlib.pyplot as plt
-from matplotlib import collections as mpl_collections
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -19,7 +19,7 @@ from mne.viz import plot_topomap
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
-from eeg_pipeline.plotting.io.figures import get_viz_params
+from eeg_pipeline.plotting.io.figures import get_viz_params, robust_sym_vlim
 from eeg_pipeline.utils.data.columns import (
     find_predictor_column_in_events,
 )
@@ -32,7 +32,7 @@ from eeg_pipeline.plotting.features.roi import (
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_and_crop,
 )
-from eeg_pipeline.utils.config.loader import get_frequency_bands, require_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_bands, require_config_value
 from scipy.stats import mannwhitneyu
 from scipy.stats import wilcoxon
 
@@ -53,6 +53,12 @@ BAR_LABEL_OFFSET = 0.02
 HISTOGRAM_BINS = 15
 MIN_FONT_SIZE = 6
 MAX_FONT_SIZE = 10
+HEATMAP_EFFECT_ANNOTATION_THRESHOLD = 40
+TOPO_MASK_MARKER_SIZE = 4.0
+TIMECOURSE_BASELINE_MODE = "ratio"
+TOPO_COLORBAR_PAD = 0.02
+TOPO_COLORBAR_WIDTH = 0.012
+FOREST_BOOTSTRAP_SAMPLES = 2000
 
 
 ###################################################################
@@ -73,6 +79,423 @@ def _get_comparison_segments(
             f"(got {segments!r})"
         )
     return [str(s) for s in segments]
+
+
+def _get_condition_color_map(labels: List[str], config: Any) -> Dict[str, Any]:
+    """Return a stable condition palette aligned with plot configuration."""
+    plot_cfg = get_plot_config(config)
+    normalized_labels = [str(label) for label in labels]
+    if len(normalized_labels) == 1:
+        return {normalized_labels[0]: plot_cfg.get_color("condition_1")}
+    if len(normalized_labels) == 2:
+        return {
+            normalized_labels[0]: plot_cfg.get_color("condition_1"),
+            normalized_labels[1]: plot_cfg.get_color("condition_2"),
+        }
+
+    palette = sns.color_palette("colorblind", n_colors=len(normalized_labels))
+    return {label: palette[index] for index, label in enumerate(normalized_labels)}
+
+
+def _build_channel_data_array(
+    channel_values: Dict[str, float],
+    epochs_info: mne.Info,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Project channel-level values into epochs_info order."""
+    data_array = np.full(len(epochs_info.ch_names), np.nan, dtype=float)
+    valid_mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
+
+    for channel_index, channel_name in enumerate(epochs_info.ch_names):
+        if channel_name not in channel_values:
+            continue
+        value = channel_values[channel_name]
+        if np.isfinite(value):
+            data_array[channel_index] = float(value)
+            valid_mask[channel_index] = True
+
+    return data_array, valid_mask
+
+
+def _compute_shared_topomap_vlim(
+    topomap_arrays: List[np.ndarray],
+    config: Any,
+    *,
+    symmetric: bool = True,
+) -> Tuple[float, float]:
+    """Compute a robust value range for a set of topomap panels."""
+    if symmetric:
+        vmax = float(robust_sym_vlim(topomap_arrays, config=config))
+        if not np.isfinite(vmax) or vmax <= 0:
+            vmax = 1.0
+        return -vmax, vmax
+
+    flat_arrays = [
+        np.asarray(array, dtype=float).ravel()
+        for array in topomap_arrays
+        if array is not None
+    ]
+    if not flat_arrays:
+        return 0.0, 1.0
+
+    finite_data = np.concatenate(flat_arrays)
+    finite_data = finite_data[np.isfinite(finite_data)]
+    if finite_data.size == 0:
+        return 0.0, 1.0
+
+    q_low = float(get_config_value(config, "visualization.robust_vlim.q_low", 0.01))
+    q_high = float(get_config_value(config, "visualization.robust_vlim.q_high", 0.99))
+    min_value = float(get_config_value(config, "visualization.robust_vlim.min_v", 1e-6))
+
+    vmin = float(np.nanquantile(finite_data, q_low))
+    vmax = float(np.nanquantile(finite_data, q_high))
+    if vmin >= 0:
+        vmin = 0.0
+    if vmax <= 0:
+        vmax = 0.0
+
+    if not np.isfinite(vmin):
+        vmin = 0.0
+    if not np.isfinite(vmax):
+        vmax = 1.0
+    if vmax < vmin:
+        vmax = vmin + max(abs(vmin) * 0.05, min_value)
+    if np.isclose(vmin, vmax):
+        padding = max(abs(vmax) * 0.05, min_value)
+        vmin -= padding
+        vmax += padding
+    return vmin, vmax
+
+
+def _resolve_topomap_colormap(
+    vmin: float,
+    vmax: float,
+    *,
+    symmetric: bool,
+) -> str:
+    """Choose a colormap that matches the value range semantics."""
+    if symmetric or (vmin < 0 < vmax):
+        return "RdBu_r"
+    if vmax <= 0:
+        return "Blues_r"
+    return "Reds"
+
+
+def _format_condition_display_label(
+    label: Optional[str],
+    config: Any,
+) -> str:
+    """Format raw comparison values into readable condition labels."""
+    label_text = str(label).strip() if label is not None else ""
+    if not label_text:
+        return ""
+
+    comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
+    comparison_values = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    comparison_labels = get_config_value(config, "plotting.comparisons.comparison_labels", [])
+
+    configured_label_set = {
+        str(item).strip()
+        for item in comparison_labels
+        if str(item).strip()
+    }
+    configured_value_set = {
+        str(item).strip()
+        for item in comparison_values
+        if str(item).strip()
+    }
+
+    if label_text in configured_label_set or comparison_column == "":
+        return label_text
+    if label_text in configured_value_set:
+        return f"{comparison_column}={label_text}"
+    return label_text
+
+
+def _format_topomap_condition_title_label(
+    label: Optional[str],
+    config: Any,
+) -> str:
+    """Format raw comparison values into readable topomap condition titles."""
+    return _format_condition_display_label(label, config)
+
+
+def _add_topomap_colorbar(
+    fig: plt.Figure,
+    axes: Any,
+    image: Any,
+    *,
+    label: str,
+) -> None:
+    """Place the topomap colorbar in a dedicated right-side axis."""
+    axes_list = list(np.atleast_1d(axes))
+    visible_axes = [ax for ax in axes_list if ax.get_visible()]
+    if not visible_axes:
+        return
+
+    max_right = max(ax.get_position().x1 for ax in visible_axes)
+    bottom = min(ax.get_position().y0 for ax in visible_axes)
+    top = max(ax.get_position().y1 for ax in visible_axes)
+
+    colorbar_left = min(max_right + TOPO_COLORBAR_PAD, 0.98 - TOPO_COLORBAR_WIDTH)
+    colorbar_height = max(top - bottom, 0.1)
+    cax = fig.add_axes([colorbar_left, bottom, TOPO_COLORBAR_WIDTH, colorbar_height])
+    fig.colorbar(image, cax=cax, label=label)
+
+
+def _add_topomap_colorbar_in_rect(
+    fig: plt.Figure,
+    image: Any,
+    *,
+    rect: Tuple[float, float, float, float],
+    label: str,
+) -> None:
+    """Place a topomap colorbar into an explicit figure rectangle."""
+    cax = fig.add_axes(list(rect))
+    colorbar = fig.colorbar(image, cax=cax)
+    colorbar.set_label(label, fontsize=10)
+    colorbar.ax.tick_params(labelsize=8)
+
+
+def _format_triptych_condition_label(
+    label: str,
+    config: Any,
+) -> str:
+    """Return a concise panel title label for a comparison condition."""
+    comparison_values = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    comparison_labels = get_config_value(config, "plotting.comparisons.comparison_labels", [])
+
+    normalized_label = str(label).strip()
+    normalized_value_map = {
+        str(value).strip(): str(value).strip()
+        for value in comparison_values
+        if str(value).strip()
+    }
+    normalized_label_set = {
+        str(value).strip()
+        for value in comparison_labels
+        if str(value).strip()
+    }
+
+    if normalized_label in normalized_label_set:
+        return normalized_label
+    if normalized_label in normalized_value_map:
+        return normalized_value_map[normalized_label]
+    return _format_condition_display_label(normalized_label, config)
+
+
+def _wrap_topomap_panel_title(
+    title: str,
+    *,
+    width: int = 18,
+) -> str:
+    """Wrap a topomap panel title onto compact lines."""
+    return textwrap.fill(str(title), width=width, break_long_words=False)
+
+
+def _build_topomap_panel(
+    channel_values: Dict[str, float],
+    epochs_info: mne.Info,
+) -> Optional[Tuple[np.ndarray, mne.Info]]:
+    """Build one topomap panel from channel values."""
+    data_array, present_mask = _build_channel_data_array(channel_values, epochs_info)
+    if int(present_mask.sum()) <= MIN_CHANNELS_FOR_TOPO:
+        return None
+    return data_array[present_mask], mne.pick_info(epochs_info, np.where(present_mask)[0])
+
+
+def _save_band_topomap_triptych(
+    *,
+    descriptive_panel_1: Tuple[np.ndarray, mne.Info],
+    descriptive_panel_2: Tuple[np.ndarray, mne.Info],
+    contrast_panel: Tuple[np.ndarray, np.ndarray, mne.Info],
+    band: str,
+    subject: str,
+    save_path: Path,
+    logger: logging.Logger,
+    config: Any,
+    segment_label: str,
+    label1: str,
+    label2: str,
+    descriptive_value_label: str,
+    contrast_value_label: str,
+    footer: str,
+) -> None:
+    """Render a single-band triptych: condition/window 1, 2, and contrast."""
+    plot_cfg = get_plot_config(config)
+    viz_params = get_viz_params(config)
+
+    desc_data_1, desc_info_1 = descriptive_panel_1
+    desc_data_2, desc_info_2 = descriptive_panel_2
+    contrast_data, contrast_sig, contrast_info = contrast_panel
+
+    desc_vmin, desc_vmax = _compute_shared_topomap_vlim(
+        [desc_data_1, desc_data_2],
+        config,
+        symmetric=False,
+    )
+    desc_cmap = _resolve_topomap_colormap(desc_vmin, desc_vmax, symmetric=False)
+    contrast_vmin, contrast_vmax = _compute_shared_topomap_vlim(
+        [contrast_data],
+        config,
+        symmetric=True,
+    )
+
+    fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.9))
+    fig.patch.set_facecolor("white")
+
+    display_label1 = _format_condition_display_label(label1, config)
+    display_label2 = _format_condition_display_label(label2, config)
+    panel_label1 = _format_triptych_condition_label(label1, config)
+    panel_label2 = _format_triptych_condition_label(label2, config)
+    band_title = str(band).upper()
+    band_color = get_band_color(band, config)
+
+    for ax in axes:
+        ax.set_facecolor("white")
+
+    desc_image = None
+    desc_image, _ = plot_topomap(
+        desc_data_1,
+        desc_info_1,
+        axes=axes[0],
+        show=False,
+        cmap=desc_cmap,
+        contours=viz_params.get("topo_contours"),
+        vlim=(desc_vmin, desc_vmax),
+    )
+    axes[0].set_title(
+        _wrap_topomap_panel_title(panel_label1),
+        fontsize=10,
+        fontweight="bold",
+        pad=12,
+    )
+
+    plot_topomap(
+        desc_data_2,
+        desc_info_2,
+        axes=axes[1],
+        show=False,
+        cmap=desc_cmap,
+        contours=viz_params.get("topo_contours"),
+        vlim=(desc_vmin, desc_vmax),
+    )
+    axes[1].set_title(
+        _wrap_topomap_panel_title(panel_label2),
+        fontsize=10,
+        fontweight="bold",
+        pad=12,
+    )
+
+    contrast_image, _ = plot_topomap(
+        contrast_data,
+        contrast_info,
+        axes=axes[2],
+        show=False,
+        cmap="RdBu_r",
+        contours=viz_params.get("topo_contours"),
+        vlim=(contrast_vmin, contrast_vmax),
+        mask=contrast_sig,
+        mask_params=_build_topomap_mask_params(config),
+    )
+    axes[2].set_title(
+        _wrap_topomap_panel_title(f"{panel_label2} - {panel_label1}"),
+        fontsize=10,
+        fontweight="bold",
+        pad=12,
+    )
+
+    if desc_image is not None:
+        _add_topomap_colorbar_in_rect(
+            fig,
+            desc_image,
+            rect=(0.89, 0.56, TOPO_COLORBAR_WIDTH, 0.28),
+            label=descriptive_value_label,
+        )
+    _add_topomap_colorbar_in_rect(
+        fig,
+        contrast_image,
+        rect=(0.89, 0.18, TOPO_COLORBAR_WIDTH, 0.28),
+        label=contrast_value_label,
+    )
+
+    fig.suptitle(
+        f"{band_title} topomap comparison | {segment_label}",
+        fontsize=plot_cfg.font.figure_title,
+        fontweight="bold",
+        color=band_color,
+        y=0.97,
+    )
+    save_fig(
+        fig,
+        save_path,
+        footer=(
+            f"{footer} | Comparison: {display_label2} - {display_label1}"
+        ),
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 0.87, 0.94),
+        config=config,
+    )
+    logger.debug("Saved band topomap triptych: %s", save_path.name)
+
+
+def _build_topomap_mask_params(config: Any) -> Dict[str, Any]:
+    """Resolve readable significance mask styling for publication plots."""
+    viz_params = get_viz_params(config)
+    mask_params = dict(viz_params.get("sig_mask_params", {}))
+    if "markersize" not in mask_params:
+        mask_params["markersize"] = TOPO_MASK_MARKER_SIZE
+    if "linewidth" in mask_params and "markeredgewidth" not in mask_params:
+        mask_params["markeredgewidth"] = mask_params.pop("linewidth")
+    else:
+        mask_params.pop("linewidth", None)
+    mask_params["linestyle"] = "none"
+    return mask_params
+
+
+def _style_publication_axis(ax: Any) -> None:
+    """Apply consistent manuscript-style axis styling."""
+    ax.set_facecolor("white")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(0.8)
+    ax.spines["bottom"].set_linewidth(0.8)
+
+
+def _annotate_frequency_bands(
+    ax: Any,
+    freq_bands: Dict[str, Tuple[float, float]],
+    max_frequency: float,
+    config: Any,
+) -> None:
+    """Add restrained frequency-band shading and labels to a PSD axis."""
+    for band_name, (fmin, fmax) in freq_bands.items():
+        if fmin >= max_frequency:
+            continue
+        fmax_clipped = min(fmax, max_frequency)
+        ax.axvspan(
+            fmin,
+            fmax_clipped,
+            alpha=0.035,
+            color=get_band_color(str(band_name), config),
+            linewidth=0,
+            zorder=0,
+        )
+        band_midpoint = 0.5 * (fmin + fmax_clipped)
+        if band_midpoint >= max_frequency:
+            continue
+        ax.text(
+            band_midpoint,
+            0.985,
+            str(band_name).capitalize(),
+            transform=ax.get_xaxis_transform(),
+            fontsize=7,
+            ha="center",
+            va="top",
+            color="0.45",
+        )
 
 
 def _get_comparison_rois(
@@ -263,6 +686,613 @@ def _compute_column_comparison_statistics(
     return qvalues, n_significant
 
 
+def _compute_window_effect_summary(
+    power_df: pd.DataFrame,
+    bands: List[str],
+    segments: List[str],
+    roi_names: List[str],
+    rois: Dict[str, Any],
+    all_channels: List[str],
+    config: Any,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Summarize paired window effects across ROI and band."""
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction
+    from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
+
+    if len(segments) != 2:
+        raise ValueError("_compute_window_effect_summary requires exactly 2 segments.")
+
+    effect_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+    pvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+    segment1, segment2 = segments
+
+    for roi_name in roi_names:
+        roi_channels = all_channels if roi_name == "all" else get_roi_channels(rois[roi_name], all_channels)
+        if not roi_channels:
+            continue
+
+        band_data = _extract_band_data_for_roi(
+            power_df=power_df,
+            bands=bands,
+            segments=[segment1, segment2],
+            roi_channels=roi_channels,
+        )
+        for band, (values1, values2) in band_data.items():
+            if len(values1) < MIN_TRIALS_FOR_STATISTICS or len(values2) < MIN_TRIALS_FOR_STATISTICS:
+                continue
+            if len(values1) != len(values2):
+                continue
+
+            effect_df.loc[roi_name, band] = compute_paired_cohens_d(values1, values2)
+            diffs = values2 - values1
+            if diffs.size == 0 or not np.isfinite(diffs).any() or np.allclose(diffs, 0):
+                pvalue_df.loc[roi_name, band] = 1.0
+            else:
+                pvalue_df.loc[roi_name, band] = float(
+                    wilcoxon(diffs, zero_method="wilcox", alternative="two-sided").pvalue
+                )
+
+    finite_pvalues = pvalue_df.to_numpy(dtype=float)
+    finite_mask = np.isfinite(finite_pvalues)
+    qvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+    if finite_mask.any():
+        rejected, qvals, _ = apply_fdr_correction(finite_pvalues[finite_mask].tolist(), config=config)
+        qvalue_values = qvalue_df.to_numpy(dtype=float)
+        qvalue_values[finite_mask] = qvals
+        qvalue_df.iloc[:, :] = qvalue_values
+
+    return effect_df, qvalue_df
+
+
+def _compute_column_effect_summary(
+    power_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    bands: List[str],
+    seg_name: str,
+    roi_names: List[str],
+    rois: Dict[str, Any],
+    all_channels: List[str],
+    config: Any,
+) -> Tuple[pd.DataFrame, pd.DataFrame, str, str]:
+    """Summarize condition effects across ROI and band."""
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, compute_cohens_d
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+
+    comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
+    if not comp_mask_info:
+        raise ValueError("Configured condition comparison could not resolve comparison masks.")
+
+    mask1, mask2, label1, label2 = comp_mask_info
+    effect_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+    pvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+
+    for roi_name in roi_names:
+        roi_channels = all_channels if roi_name == "all" else get_roi_channels(rois[roi_name], all_channels)
+        if not roi_channels:
+            continue
+
+        for band in bands:
+            columns = _get_power_columns_for_roi(power_df, seg_name, band, roi_channels)
+            if not columns:
+                continue
+
+            value_series = power_df[columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+            values1 = value_series[mask1].dropna().values
+            values2 = value_series[mask2].dropna().values
+            if len(values1) < MIN_TRIALS_FOR_STATISTICS or len(values2) < MIN_TRIALS_FOR_STATISTICS:
+                continue
+
+            effect_df.loc[roi_name, band] = compute_cohens_d(values1, values2)
+            pvalue_df.loc[roi_name, band] = float(
+                mannwhitneyu(values1, values2, alternative="two-sided").pvalue
+            )
+
+    finite_pvalues = pvalue_df.to_numpy(dtype=float)
+    finite_mask = np.isfinite(finite_pvalues)
+    qvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+    if finite_mask.any():
+        rejected, qvals, _ = apply_fdr_correction(finite_pvalues[finite_mask].tolist(), config=config)
+        qvalue_values = qvalue_df.to_numpy(dtype=float)
+        qvalue_values[finite_mask] = qvals
+        qvalue_df.iloc[:, :] = qvalue_values
+
+    return effect_df, qvalue_df, str(label1), str(label2)
+
+
+def _compute_group_paired_effect_summary(
+    subject_values: Dict[str, Dict[str, Dict[str, Dict[str, float]]]],
+    bands: List[str],
+    roi_names: List[str],
+    labels: Tuple[str, str],
+    config: Any,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Summarize paired group effects across ROI and band."""
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction
+    from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
+
+    label1, label2 = labels
+    effect_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+    pvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+
+    for roi_name in roi_names:
+        roi_band_values = subject_values.get(roi_name, {})
+        if not roi_band_values:
+            continue
+
+        for band in bands:
+            subject_band_values = roi_band_values.get(band, {})
+            values1: List[float] = []
+            values2: List[float] = []
+
+            for condition_values in subject_band_values.values():
+                value1 = condition_values.get(label1)
+                value2 = condition_values.get(label2)
+                try:
+                    value1_float = float(value1)
+                    value2_float = float(value2)
+                except (TypeError, ValueError):
+                    continue
+                if not np.isfinite(value1_float) or not np.isfinite(value2_float):
+                    continue
+                values1.append(value1_float)
+                values2.append(value2_float)
+
+            if len(values1) < 2:
+                continue
+
+            values1_array = np.asarray(values1, dtype=float)
+            values2_array = np.asarray(values2, dtype=float)
+            effect_df.loc[roi_name, band] = compute_paired_cohens_d(values1_array, values2_array)
+
+            diffs = values2_array - values1_array
+            if np.allclose(diffs, 0.0):
+                pvalue_df.loc[roi_name, band] = 1.0
+                continue
+
+            pvalue_df.loc[roi_name, band] = float(
+                wilcoxon(diffs, zero_method="wilcox", alternative="two-sided").pvalue
+            )
+
+    finite_pvalues = pvalue_df.to_numpy(dtype=float)
+    finite_mask = np.isfinite(finite_pvalues)
+    qvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
+    if finite_mask.any():
+        _, qvalues, _ = apply_fdr_correction(finite_pvalues[finite_mask].tolist(), config=config)
+        qvalue_values = qvalue_df.to_numpy(dtype=float)
+        qvalue_values[finite_mask] = qvalues
+        qvalue_df.iloc[:, :] = qvalue_values
+
+    return effect_df, qvalue_df
+
+
+def _extract_group_paired_cell_values(
+    subject_values: Dict[str, Dict[str, Dict[str, Dict[str, float]]]],
+    *,
+    roi_name: str,
+    band: str,
+    labels: Tuple[str, str],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract finite paired values for one ROI x band cell."""
+    label1, label2 = labels
+    roi_band_values = subject_values.get(roi_name, {})
+    subject_band_values = roi_band_values.get(band, {})
+    values1: List[float] = []
+    values2: List[float] = []
+
+    for condition_values in subject_band_values.values():
+        value1 = condition_values.get(label1)
+        value2 = condition_values.get(label2)
+        try:
+            value1_float = float(value1)
+            value2_float = float(value2)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(value1_float) or not np.isfinite(value2_float):
+            continue
+        values1.append(value1_float)
+        values2.append(value2_float)
+
+    return np.asarray(values1, dtype=float), np.asarray(values2, dtype=float)
+
+
+def _compute_effect_size_ci(
+    values1: np.ndarray,
+    values2: np.ndarray,
+) -> Tuple[float, float]:
+    """Estimate a deterministic bootstrap CI for paired Cohen's d."""
+    from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
+
+    sample_size = len(values1)
+    if sample_size < 2:
+        return np.nan, np.nan
+
+    rng = np.random.default_rng(42)
+    bootstrap_effects = np.empty(FOREST_BOOTSTRAP_SAMPLES, dtype=float)
+    for index in range(FOREST_BOOTSTRAP_SAMPLES):
+        sample_indices = rng.integers(0, sample_size, size=sample_size)
+        bootstrap_effects[index] = compute_paired_cohens_d(
+            values1[sample_indices],
+            values2[sample_indices],
+        )
+
+    finite_effects = bootstrap_effects[np.isfinite(bootstrap_effects)]
+    if finite_effects.size == 0:
+        return np.nan, np.nan
+    return (
+        float(np.nanquantile(finite_effects, 0.025)),
+        float(np.nanquantile(finite_effects, 0.975)),
+    )
+
+
+def _compute_group_paired_effect_forest_data(
+    subject_values: Dict[str, Dict[str, Dict[str, Dict[str, float]]]],
+    bands: List[str],
+    roi_names: List[str],
+    labels: Tuple[str, str],
+    config: Any,
+) -> pd.DataFrame:
+    """Return paired group effect statistics for forest plotting."""
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction
+    from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
+
+    rows: List[Dict[str, Any]] = []
+    pvalues: List[float] = []
+
+    for band in bands:
+        for roi_name in roi_names:
+            values1, values2 = _extract_group_paired_cell_values(
+                subject_values,
+                roi_name=roi_name,
+                band=band,
+                labels=labels,
+            )
+            if len(values1) < 2:
+                continue
+
+            effect_size = float(compute_paired_cohens_d(values1, values2))
+            differences = values2 - values1
+            if np.allclose(differences, 0.0):
+                pvalue = 1.0
+            else:
+                pvalue = float(
+                    wilcoxon(differences, zero_method="wilcox", alternative="two-sided").pvalue
+                )
+
+            ci_low, ci_high = _compute_effect_size_ci(values1, values2)
+            rows.append(
+                {
+                    "band": band,
+                    "roi_name": roi_name,
+                    "effect_size": effect_size,
+                    "ci_low": ci_low,
+                    "ci_high": ci_high,
+                    "p_value": pvalue,
+                    "n": int(len(values1)),
+                }
+            )
+            pvalues.append(pvalue)
+
+    forest_df = pd.DataFrame(rows)
+    if forest_df.empty:
+        return forest_df
+
+    rejected, qvalues, _ = apply_fdr_correction(pvalues, config=config)
+    forest_df["q_value"] = np.asarray(qvalues, dtype=float)
+    forest_df["significant_fdr"] = np.asarray(rejected, dtype=bool)
+    return forest_df
+
+
+def _compute_group_paired_sample_count_summary(
+    subject_values: Dict[str, Dict[str, Dict[str, Dict[str, float]]]],
+    bands: List[str],
+    roi_names: List[str],
+    labels: Tuple[str, str],
+) -> pd.DataFrame:
+    """Count paired subjects contributing to each ROI x band cell."""
+    label1, label2 = labels
+    count_df = pd.DataFrame(0, index=roi_names, columns=bands, dtype=int)
+
+    for roi_name in roi_names:
+        roi_band_values = subject_values.get(roi_name, {})
+        if not roi_band_values:
+            continue
+
+        for band in bands:
+            subject_band_values = roi_band_values.get(band, {})
+            paired_count = 0
+            for condition_values in subject_band_values.values():
+                value1 = condition_values.get(label1)
+                value2 = condition_values.get(label2)
+                try:
+                    value1_float = float(value1)
+                    value2_float = float(value2)
+                except (TypeError, ValueError):
+                    continue
+                if not np.isfinite(value1_float) or not np.isfinite(value2_float):
+                    continue
+                paired_count += 1
+
+            count_df.loc[roi_name, band] = paired_count
+
+    return count_df
+
+
+def _plot_power_effect_summary_heatmap(
+    effect_df: pd.DataFrame,
+    qvalue_df: pd.DataFrame,
+    subject: str,
+    save_path: Path,
+    logger: logging.Logger,
+    config: Any,
+    *,
+    title: str,
+    footer: str,
+) -> None:
+    """Render an ROI x band effect-size heatmap with FDR markers."""
+    finite_effects = effect_df.to_numpy(dtype=float)
+    if not np.isfinite(finite_effects).any():
+        if logger:
+            logger.warning("No finite effect sizes available for power summary heatmap.")
+        return
+
+    plot_cfg = get_plot_config(config)
+    n_rows, n_cols = effect_df.shape
+    fig_width = max(4.8, 1.15 * n_cols + 2.4)
+    fig_height = max(3.4, 0.48 * n_rows + 1.8)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    vmax = float(robust_sym_vlim([finite_effects], config=config))
+    if not np.isfinite(vmax) or vmax <= 0:
+        vmax = 1.0
+
+    annot = n_rows * n_cols <= HEATMAP_EFFECT_ANNOTATION_THRESHOLD
+    roi_labels = ["All Channels" if roi_name == "all" else roi_name.replace("_", " ") for roi_name in effect_df.index]
+    band_labels = [str(column).upper() for column in effect_df.columns]
+
+    sns.heatmap(
+        effect_df,
+        ax=ax,
+        cmap="RdBu_r",
+        center=0.0,
+        vmin=-vmax,
+        vmax=vmax,
+        linewidths=0.6,
+        linecolor="white",
+        cbar_kws={"label": "Effect size (d)"},
+        annot=annot,
+        fmt=".2f",
+        annot_kws={"fontsize": plot_cfg.font.small},
+    )
+
+    ax.set_yticklabels(roi_labels, rotation=0, fontsize=plot_cfg.font.small)
+    ax.set_xticklabels(band_labels, rotation=0, fontsize=plot_cfg.font.medium, fontweight="bold")
+    ax.set_xlabel("Frequency band", fontsize=plot_cfg.font.label)
+    ax.set_ylabel("ROI", fontsize=plot_cfg.font.label)
+    ax.set_title(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", pad=12)
+
+    significant_cells = np.argwhere((qvalue_df.to_numpy(dtype=float) < FDR_ALPHA_DEFAULT) & np.isfinite(qvalue_df.to_numpy(dtype=float)))
+    for row_index, col_index in significant_cells:
+        ax.scatter(
+            col_index + 0.5,
+            row_index + 0.5,
+            s=36,
+            facecolors="none",
+            edgecolors="black",
+            linewidths=1.0,
+            zorder=5,
+        )
+
+    save_fig(
+        fig,
+        save_path,
+        footer=footer,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 1, 0.97),
+        config=config,
+    )
+    if logger:
+        logger.debug("Saved power ROI x band effect summary heatmap: %s", save_path.name)
+
+
+def _plot_power_effect_forest(
+    forest_df: pd.DataFrame,
+    *,
+    bands: List[str],
+    roi_names: List[str],
+    subject: str,
+    save_path: Path,
+    logger: logging.Logger,
+    config: Any,
+    title: str,
+    footer: str,
+) -> None:
+    """Render a band-by-ROI forest plot using paired effect-size estimates and CIs."""
+    if forest_df.empty:
+        if logger:
+            logger.warning("No paired forest statistics available for power forest plot.")
+        return
+
+    finite_effects = forest_df["effect_size"].to_numpy(dtype=float)
+    finite_effects = finite_effects[np.isfinite(finite_effects)]
+    if finite_effects.size == 0:
+        if logger:
+            logger.warning("No finite effect sizes available for power forest plot.")
+        return
+
+    plot_cfg = get_plot_config(config)
+    available_bands = [band for band in bands if band in set(forest_df["band"])]
+    if not available_bands:
+        return
+
+    range_values = forest_df[["effect_size", "ci_low", "ci_high"]].to_numpy(dtype=float)
+    max_abs = float(np.nanmax(np.abs(range_values)))
+    if not np.isfinite(max_abs) or max_abs <= 0:
+        max_abs = 1.0
+    x_limit = max_abs * 1.1
+
+    fig_width = max(8.0, 2.15 * len(available_bands) + 1.6)
+    fig_height = max(4.6, 0.45 * len(roi_names) + 1.8)
+    fig, axes = plt.subplots(
+        1,
+        len(available_bands),
+        figsize=(fig_width, fig_height),
+        sharey=True,
+        squeeze=False,
+    )
+    fig.patch.set_facecolor("white")
+
+    y_positions = np.arange(len(roi_names))[::-1]
+    roi_display_labels = [
+        "All Channels" if roi_name == "all" else roi_name.replace("_", " ")
+        for roi_name in roi_names
+    ]
+
+    for axis_index, band in enumerate(available_bands):
+        ax = axes[0, axis_index]
+        _style_publication_axis(ax)
+        band_color = get_band_color(band, config)
+        band_df = forest_df[forest_df["band"] == band].copy().set_index("roi_name")
+
+        ax.axvline(0.0, color="0.45", linestyle="--", linewidth=0.9, alpha=0.7, zorder=0)
+
+        for roi_index, roi_name in enumerate(roi_names):
+            if roi_name not in band_df.index:
+                continue
+
+            row = band_df.loc[roi_name]
+            y_position = y_positions[roi_index]
+            effect_size = float(row["effect_size"])
+            ci_low = float(row["ci_low"])
+            ci_high = float(row["ci_high"])
+            significant = bool(row["significant_fdr"])
+
+            if np.isfinite(ci_low) and np.isfinite(ci_high):
+                ax.hlines(
+                    y_position,
+                    ci_low,
+                    ci_high,
+                    color=band_color,
+                    linewidth=1.6,
+                    alpha=0.75,
+                    zorder=1,
+                )
+
+            marker_edge = "black" if significant else band_color
+            marker_face = "white" if significant else band_color
+            marker_alpha = 1.0 if significant else 0.75
+            ax.scatter(
+                effect_size,
+                y_position,
+                s=34,
+                facecolor=marker_face,
+                edgecolor=marker_edge,
+                linewidth=1.1,
+                alpha=marker_alpha,
+                zorder=3,
+            )
+
+        ax.set_xlim(-x_limit, x_limit)
+        ax.set_title(
+            band.upper(),
+            fontweight="bold",
+            color=band_color,
+            fontsize=plot_cfg.font.title,
+        )
+        ax.set_xlabel("Effect size (d)", fontsize=plot_cfg.font.medium)
+        ax.tick_params(axis="x", labelsize=plot_cfg.font.small)
+        ax.tick_params(axis="y", labelsize=plot_cfg.font.small)
+        ax.yaxis.grid(False)
+        ax.xaxis.grid(True, alpha=0.16, linewidth=0.6)
+        ax.set_yticks(y_positions)
+        if axis_index == 0:
+            ax.set_yticklabels(roi_display_labels, fontsize=plot_cfg.font.small)
+        else:
+            ax.set_yticklabels([])
+
+    fig.suptitle(
+        title,
+        fontsize=plot_cfg.font.figure_title,
+        fontweight="bold",
+        y=0.99,
+    )
+    save_fig(
+        fig,
+        save_path,
+        footer=footer,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 1, 0.98),
+        config=config,
+    )
+    plt.close(fig)
+
+    if logger:
+        logger.debug("Saved power ROI x band forest plot: %s", save_path.name)
+
+
+def _plot_power_sample_count_heatmap(
+    count_df: pd.DataFrame,
+    save_path: Path,
+    logger: logging.Logger,
+    config: Any,
+    *,
+    title: str,
+    footer: str,
+) -> None:
+    """Render an ROI x band sample-count heatmap."""
+    count_values = count_df.to_numpy(dtype=float)
+    if not np.isfinite(count_values).any() or np.nanmax(count_values) <= 0:
+        logger.warning("No positive sample counts available for power count heatmap.")
+        return
+
+    plot_cfg = get_plot_config(config)
+    n_rows, n_cols = count_df.shape
+    fig_width = max(4.8, 1.15 * n_cols + 2.4)
+    fig_height = max(3.4, 0.48 * n_rows + 1.8)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    roi_labels = ["All Channels" if roi_name == "all" else roi_name.replace("_", " ") for roi_name in count_df.index]
+    band_labels = [str(column).upper() for column in count_df.columns]
+
+    sns.heatmap(
+        count_df,
+        ax=ax,
+        cmap="Greys",
+        vmin=0,
+        vmax=float(np.nanmax(count_values)),
+        linewidths=0.6,
+        linecolor="white",
+        cbar_kws={"label": "Paired subjects"},
+        annot=True,
+        fmt=".0f",
+        annot_kws={"fontsize": plot_cfg.font.small},
+    )
+
+    ax.set_yticklabels(roi_labels, rotation=0, fontsize=plot_cfg.font.small)
+    ax.set_xticklabels(band_labels, rotation=0, fontsize=plot_cfg.font.medium, fontweight="bold")
+    ax.set_xlabel("Frequency band", fontsize=plot_cfg.font.label)
+    ax.set_ylabel("ROI", fontsize=plot_cfg.font.label)
+    ax.set_title(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", pad=12)
+
+    save_fig(
+        fig,
+        save_path,
+        footer=footer,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 1, 0.97),
+        config=config,
+    )
+    logger.debug("Saved power ROI x band sample count heatmap: %s", save_path.name)
+
+
 def _plot_window_comparison(
     power_df: pd.DataFrame,
     events_df: pd.DataFrame,
@@ -429,7 +1459,10 @@ def _plot_column_comparison(
                 )
         
         if logger:
-            logger.info(f"Saved power multi-group column comparison for {len(roi_names)} ROIs")
+            logger.debug(
+                "Saved power multi-group column comparison for %s ROIs",
+                len(roi_names),
+            )
         return
     
     comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
@@ -449,8 +1482,8 @@ def _plot_column_comparison(
         )
     
     plot_cfg = get_plot_config(config)
-    segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
     band_colors = {band: get_band_color(band, config) for band in bands}
+    label_colors = _get_condition_color_map([label1, label2], config)
     
     precomputed_column_stats = None
     if stats_dir is not None:
@@ -464,7 +1497,10 @@ def _plot_column_comparison(
         )
         if precomputed_column_stats is not None and not precomputed_column_stats.empty:
             if logger:
-                logger.info(f"Using pre-computed column comparison stats ({len(precomputed_column_stats)} entries)")
+                logger.debug(
+                    "Using pre-computed column comparison stats (%s entries)",
+                    len(precomputed_column_stats),
+                )
     
     use_precomputed = precomputed_column_stats is not None and not precomputed_column_stats.empty
     
@@ -535,14 +1571,47 @@ def _plot_column_comparison(
             
             v1, v2 = data["v1"], data["v2"]
             
-            bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
-            bp["boxes"][0].set_facecolor(segment_colors["v1"])
-            bp["boxes"][0].set_alpha(0.6)
-            bp["boxes"][1].set_facecolor(segment_colors["v2"])
-            bp["boxes"][1].set_alpha(0.6)
-            
-            ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
-            ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+            for position, values, label in ((0.0, v1, label1), (1.0, v2, label2)):
+                color = label_colors[label]
+                violin = ax.violinplot(values, positions=[position], showextrema=False, widths=0.68)
+                for body in violin["bodies"]:
+                    body.set_facecolor(color)
+                    body.set_edgecolor(color)
+                    body.set_alpha(0.22)
+                    body.set_linewidth(0.8)
+
+                box_center = position - 0.11 if position == 0.0 else position + 0.11
+                ax.boxplot(
+                    values,
+                    positions=[box_center],
+                    widths=0.16,
+                    showfliers=False,
+                    patch_artist=True,
+                    boxprops=dict(facecolor="white", color=color, linewidth=1.0),
+                    medianprops=dict(color="black", linewidth=1.2),
+                    whiskerprops=dict(color=color, linewidth=1.0),
+                    capprops=dict(color=color, linewidth=1.0),
+                )
+                jitter_low = position - 0.18 if position == 0.0 else position + 0.02
+                jitter_high = position - 0.02 if position == 0.0 else position + 0.18
+                jitter = np.random.default_rng(42 + int(position * 10)).uniform(jitter_low, jitter_high, len(values))
+                ax.scatter(jitter, values, c=[color], alpha=0.65, s=12, linewidths=0, zorder=4)
+
+                mean_value = float(np.nanmean(values))
+                ci_half_width = 0.0
+                if len(values) > 1:
+                    ci_half_width = 1.96 * float(np.nanstd(values, ddof=1) / np.sqrt(len(values)))
+                ax.errorbar(
+                    [box_center],
+                    [mean_value],
+                    yerr=[[ci_half_width], [ci_half_width]],
+                    fmt="o",
+                    color="black",
+                    markersize=4.5,
+                    linewidth=1.0,
+                    capsize=2.5,
+                    zorder=6,
+                )
             
             all_vals = np.concatenate([v1, v2])
             ymin = np.nanmin(all_vals)
@@ -554,42 +1623,68 @@ def _plot_column_comparison(
             
             if col_idx in qvalues:
                 _, q, d, sig = qvalues[col_idx]
-                sig_marker = "†" if sig else ""
                 sig_color = "#d62728" if sig else "#333333"
-                annotation_y = ymax + 0.05 * yrange
-                ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, annotation_y),
-                           ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
-                           fontweight="bold" if sig else "normal")
+                q_label = "q<.001" if q < 0.001 else f"q={q:.3f}"
+                ax.text(
+                    0.5,
+                    1.01,
+                    f"{q_label} | d={d:.2f}" + ("  *" if sig else ""),
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="bottom",
+                    fontsize=plot_cfg.font.small,
+                    color=sig_color,
+                    fontweight="bold" if sig else "normal",
+                )
             
             ax.set_xticks([0, 1])
             ax.set_xticklabels([label1, label2], fontsize=9)
-            ax.set_title(band.capitalize(), fontweight="bold", color=band_colors[band])
+            ax.set_xlim(-0.35, 1.35)
+            ax.set_title(band.capitalize(), fontweight="bold", color=band_colors[band], pad=12)
+            ax.yaxis.grid(True, alpha=0.18, linewidth=0.6)
+            ax.xaxis.grid(False)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
+            ax.spines["left"].set_linewidth(0.8)
+            ax.spines["bottom"].set_linewidth(0.8)
         
         n_trials = len(power_df)
         roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
         n_tests = len(qvalues)
         
         stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
-        title = (f"Band Power: {label1} vs {label2} (Column Comparison)\n"
-                 f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
-                 f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
-        fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
-        
-        plt.tight_layout()
+        title = f"Band Power: {label1} vs {label2}"
+        footer = (
+            f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | "
+            f"{stats_source} | FDR: {n_significant}/{n_tests} significant"
+        )
+        fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=0.99)
         
         from eeg_pipeline.utils.formatting import sanitize_label
         roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
         suffix = f"_roi-{roi_safe}" if roi_safe else ""
         filename = f"sub-{subject}_power_by_condition{suffix}_column"
         
-        save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                 bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-        plt.close(fig)
+        save_fig(
+            fig,
+            save_dir / filename,
+            footer=footer,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+            tight_layout_rect=(0, 0.04, 1, 0.97),
+            config=config,
+        )
         
         if logger:
-            logger.info(f"Saved power column comparison for ROI {roi_display} ({n_significant}/{n_tests} FDR significant, {stats_source})")
+            logger.debug(
+                "Saved power column comparison for ROI %s (%s/%s FDR significant, %s)",
+                roi_display,
+                n_significant,
+                n_tests,
+                stats_source,
+            )
 
 
 def plot_power_by_condition(
@@ -624,18 +1719,71 @@ def plot_power_by_condition(
     roi_names = _get_comparison_rois(config, rois)
     
     if logger:
-        logger.info(f"Power comparison: segments={segments}, ROIs={roi_names}, compare_windows={compare_wins}, compare_columns={compare_cols}")
+        logger.debug(
+            "Power comparison: segments=%s, ROIs=%s, compare_windows=%s, compare_columns=%s",
+            segments,
+            roi_names,
+            compare_wins,
+            compare_cols,
+        )
     
     if compare_wins and len(segments) >= 2:
         _plot_window_comparison(
             power_df, events_df, subject, save_dir, logger, config,
             segments, bands, roi_names, rois, all_channels, stats_dir
         )
+        if len(segments) == 2:
+            effect_df, qvalue_df = _compute_window_effect_summary(
+                power_df=power_df,
+                bands=bands,
+                segments=segments,
+                roi_names=roi_names,
+                rois=rois,
+                all_channels=all_channels,
+                config=config,
+            )
+            _plot_power_effect_summary_heatmap(
+                effect_df=effect_df,
+                qvalue_df=qvalue_df,
+                subject=subject,
+                save_path=save_dir / f"sub-{subject}_power_roi_band_summary_window",
+                logger=logger,
+                config=config,
+                title=f"Power window effects: {segments[1].capitalize()} - {segments[0].capitalize()}",
+                footer=(
+                    f"Subject: {subject} | Paired effect size (d) | "
+                    f"FDR across ROI x band cells | open circles: q<0.05"
+                ),
+            )
 
     if compare_cols:
         _plot_column_comparison(
             power_df, events_df, subject, save_dir, logger, config,
             bands, roi_names, rois, all_channels, stats_dir
+        )
+        comparison_segment = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
+        effect_df, qvalue_df, label1, label2 = _compute_column_effect_summary(
+            power_df=power_df,
+            events_df=events_df,
+            bands=bands,
+            seg_name=comparison_segment,
+            roi_names=roi_names,
+            rois=rois,
+            all_channels=all_channels,
+            config=config,
+        )
+        _plot_power_effect_summary_heatmap(
+            effect_df=effect_df,
+            qvalue_df=qvalue_df,
+            subject=subject,
+            save_path=save_dir / f"sub-{subject}_power_roi_band_summary_column",
+            logger=logger,
+            config=config,
+            title=f"Power condition effects: {label2} - {label1}",
+            footer=(
+                f"Subject: {subject} | Segment: {comparison_segment} | "
+                f"Unpaired effect size (d) | FDR across ROI x band cells | open circles: q<0.05"
+            ),
         )
 
 
@@ -757,6 +1905,193 @@ def _crop_tfr_to_active(tfr: Any, active_window: List[float], logger: logging.Lo
     return tfr.copy().crop(tmin, tmax)
 
 
+def _compute_mean_ci(values: np.ndarray) -> Tuple[float, float]:
+    """Return the mean and 95% CI half-width for finite values."""
+    finite_values = np.asarray(values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        return np.nan, 0.0
+    mean_value = float(np.nanmean(finite_values))
+    if finite_values.size < 2:
+        return mean_value, 0.0
+    sem = float(np.nanstd(finite_values, ddof=1) / np.sqrt(finite_values.size))
+    return mean_value, 1.96 * sem
+
+
+def _compute_window_mean_series(
+    sample_matrix: np.ndarray,
+    times: np.ndarray,
+    window: Tuple[float, float],
+    *,
+    context: str,
+) -> np.ndarray:
+    """Return one mean value per sample across the requested time window."""
+    values = np.asarray(sample_matrix, dtype=float)
+    time_axis = np.asarray(times, dtype=float)
+    if values.ndim != 2:
+        raise ValueError(f"{context} requires a 2D sample x time matrix.")
+    if time_axis.ndim != 1 or values.shape[1] != time_axis.size:
+        raise ValueError(
+            f"{context} requires a 1D time axis matching matrix width; got {values.shape} and {time_axis.shape}."
+        )
+
+    window_mask = (time_axis >= float(window[0])) & (time_axis <= float(window[1]))
+    if not np.any(window_mask):
+        raise ValueError(f"{context} window {window!r} does not overlap the plotted time axis.")
+
+    return np.nanmean(values[:, window_mask], axis=1)
+
+
+def _draw_active_window_summary_inset(
+    ax: Any,
+    *,
+    summary_by_label: Dict[str, np.ndarray],
+    condition_labels: List[str],
+    condition_color_map: Dict[str, Any],
+    config: Any,
+) -> None:
+    """Draw a compact active-window summary inset with raw values and mean ± CI."""
+    plotted_labels = [label for label in condition_labels if label in summary_by_label]
+    if not plotted_labels:
+        return
+
+    inset_ax = ax.inset_axes([0.68, 0.56, 0.28, 0.32])
+    inset_ax.set_facecolor("white")
+    inset_ax.axhline(1.0, color="0.55", linestyle="--", linewidth=0.8, alpha=0.7, zorder=0)
+
+    if len(plotted_labels) == 2:
+        values_1 = np.asarray(summary_by_label[plotted_labels[0]], dtype=float)
+        values_2 = np.asarray(summary_by_label[plotted_labels[1]], dtype=float)
+        if values_1.shape == values_2.shape:
+            finite_mask = np.isfinite(values_1) & np.isfinite(values_2)
+            if np.any(finite_mask):
+                inset_ax.plot(
+                    [0.0, 1.0],
+                    np.vstack([values_1[finite_mask], values_2[finite_mask]]),
+                    color="0.78",
+                    linewidth=0.55,
+                    alpha=0.55,
+                    zorder=1,
+                )
+
+    for index, label in enumerate(plotted_labels):
+        values = np.asarray(summary_by_label[label], dtype=float)
+        finite_values = values[np.isfinite(values)]
+        if finite_values.size == 0:
+            continue
+
+        color = condition_color_map[label]
+        rng = np.random.default_rng(900 + index)
+        jitter = rng.uniform(index - 0.08, index + 0.08, size=finite_values.size)
+        inset_ax.scatter(
+            jitter,
+            finite_values,
+            s=10,
+            color=color,
+            alpha=0.65,
+            linewidths=0,
+            zorder=3,
+        )
+
+        mean_value, ci_half_width = _compute_mean_ci(finite_values)
+        inset_ax.errorbar(
+            [index],
+            [mean_value],
+            yerr=[[ci_half_width], [ci_half_width]],
+            fmt="o",
+            color="black",
+            markerfacecolor="white",
+            markersize=4.2,
+            capsize=2.0,
+            linewidth=0.9,
+            zorder=5,
+        )
+
+    plot_cfg = get_plot_config(config)
+    inset_labels = [
+        textwrap.fill(_format_condition_display_label(label, config), width=10)
+        for label in plotted_labels
+    ]
+    inset_ax.set_xlim(-0.35, max(len(plotted_labels) - 0.35, 0.35))
+    inset_ax.set_xticks(list(range(len(plotted_labels))))
+    inset_ax.set_xticklabels(inset_labels, fontsize=max(plot_cfg.font.small - 1, 6))
+    inset_ax.tick_params(axis="y", labelsize=max(plot_cfg.font.small - 1, 6))
+    inset_ax.set_title("Active window", fontsize=plot_cfg.font.small, pad=3)
+    inset_ax.yaxis.grid(True, alpha=0.15, linewidth=0.5)
+    inset_ax.xaxis.grid(False)
+    sns.despine(ax=inset_ax, trim=True)
+
+
+def _compute_paired_effect_matrix(
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+    *,
+    context: str,
+) -> np.ndarray:
+    """Return the paired effect matrix using the plotting convention condition2 - condition1."""
+    first = np.asarray(condition1_values, dtype=float)
+    second = np.asarray(condition2_values, dtype=float)
+    if first.ndim != 2 or second.ndim != 2:
+        raise ValueError(f"{context} requires 2D subject x time arrays.")
+    if first.shape != second.shape:
+        raise ValueError(f"{context} requires arrays with matching shapes, got {first.shape} and {second.shape}.")
+    return second - first
+
+
+def _draw_effect_window_summary_inset(
+    ax: Any,
+    *,
+    effect_values: np.ndarray,
+    color: Any,
+    config: Any,
+) -> None:
+    """Draw a compact active-window effect inset for paired subject differences."""
+    finite_values = np.asarray(effect_values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        return
+
+    inset_ax = ax.inset_axes([0.68, 0.56, 0.28, 0.32])
+    inset_ax.set_facecolor("white")
+    inset_ax.axhline(0.0, color="0.55", linestyle="--", linewidth=0.8, alpha=0.7, zorder=0)
+
+    rng = np.random.default_rng(1400)
+    jitter = rng.uniform(-0.08, 0.08, size=finite_values.size)
+    inset_ax.scatter(
+        jitter,
+        finite_values,
+        s=10,
+        color=color,
+        alpha=0.68,
+        linewidths=0,
+        zorder=3,
+    )
+
+    mean_value, ci_half_width = _compute_mean_ci(finite_values)
+    inset_ax.errorbar(
+        [0.0],
+        [mean_value],
+        yerr=[[ci_half_width], [ci_half_width]],
+        fmt="o",
+        color="black",
+        markerfacecolor="white",
+        markersize=4.2,
+        capsize=2.0,
+        linewidth=0.9,
+        zorder=5,
+    )
+
+    plot_cfg = get_plot_config(config)
+    inset_ax.set_xlim(-0.22, 0.22)
+    inset_ax.set_xticks([0.0])
+    inset_ax.set_xticklabels(["Δ"], fontsize=max(plot_cfg.font.small - 1, 6))
+    inset_ax.tick_params(axis="y", labelsize=max(plot_cfg.font.small - 1, 6))
+    inset_ax.set_title("Active-window effect", fontsize=plot_cfg.font.small, pad=3)
+    inset_ax.yaxis.grid(True, alpha=0.15, linewidth=0.5)
+    inset_ax.xaxis.grid(False)
+    sns.despine(ax=inset_ax, trim=True)
+
+
 def _validate_predictor_data(
     tfr: Any,
     events_df: Optional[pd.DataFrame],
@@ -874,11 +2209,13 @@ def _plot_psd_by_conditions(
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
+    fig.patch.set_facecolor("white")
+    _style_publication_axis(ax)
     
     active_window = _get_active_window(config)
     tfr_baseline = _get_plotting_tfr_baseline_window(config)
     
-    condition_colors = plt.cm.Set2(np.linspace(0.2, 0.8, len(conditions)))
+    condition_color_map = _get_condition_color_map([label for label, _ in conditions], config)
     
     freq_bands = get_frequency_bands(config)
     features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
@@ -944,7 +2281,8 @@ def _plot_psd_by_conditions(
             'ci_lower': psd_ci_lower,
             'ci_upper': psd_ci_upper,
             'n_trials': n_trials_cond,
-            'color': condition_colors[idx],
+            'color': condition_color_map[label],
+            'stacked': psd_per_trial if len(tfr_cond) >= MIN_EPOCHS_FOR_SEM and len(psd_per_trial) >= MIN_EPOCHS_FOR_SEM else None,
         })
     
     if not psd_data_by_condition:
@@ -973,44 +2311,40 @@ def _plot_psd_by_conditions(
             psd_data['mean'],
             color=psd_data['color'],
             linewidth=2.0,
-            label=f"{psd_data['label']} (n={psd_data['n_trials']})",
+            label=(
+                f"{_format_condition_display_label(psd_data['label'], config)} "
+                f"(n={psd_data['n_trials']})"
+            ),
             zorder=3,
         )
-        
-        alpha_band = features_freq_bands.get('alpha', (8, 13))
-        alpha_mask = (psd_data['freqs'] >= alpha_band[0]) & (psd_data['freqs'] <= alpha_band[1])
-        if np.any(alpha_mask):
-            alpha_freqs = psd_data['freqs'][alpha_mask]
-            alpha_psd = psd_data['mean'][alpha_mask]
-            peak_idx = np.argmax(alpha_psd)
-            peak_freq = alpha_freqs[peak_idx]
-            peak_val = alpha_psd[peak_idx]
-            
-            ax.plot(peak_freq, peak_val, marker='v', color=psd_data['color'], markersize=6, zorder=4)
-            ax.annotate(
-                f"{peak_freq:.1f}Hz",
-                xy=(peak_freq, peak_val),
-                xytext=(0, 6),
-                textcoords='offset points',
-                ha='center',
-                va='bottom',
-                fontsize=7,
-                color=psd_data['color'],
-                fontweight='bold',
-                zorder=4
-            )
-    
-    for band, (fmin, fmax) in features_freq_bands.items():
-        if fmin < psd_data_by_condition[0]['freqs'].max():
-            fmax_clipped = min(fmax, psd_data_by_condition[0]['freqs'].max())
-            ax.axvspan(fmin, fmax_clipped, alpha=0.06, color="0.6", linewidth=0, zorder=0)
-            mid = (fmin + fmax_clipped) / 2
-            if mid < psd_data_by_condition[0]['freqs'].max():
-                y_max = ax.get_ylim()[1]
-                ax.text(
-                    mid, y_max * 0.96, band[0].upper(),
-                    fontsize=8, ha="center", va="top", color="0.5", zorder=2,
-                    fontweight='medium'
+
+    _annotate_frequency_bands(
+        ax,
+        features_freq_bands,
+        float(psd_data_by_condition[0]['freqs'].max()),
+        config,
+    )
+
+    n_significant_bands = 0
+    if len(psd_data_by_condition) == 2:
+        first_stacked = psd_data_by_condition[0]["stacked"]
+        second_stacked = psd_data_by_condition[1]["stacked"]
+        if first_stacked is not None and second_stacked is not None:
+            first_stacked = np.asarray(first_stacked, dtype=float)
+            second_stacked = np.asarray(second_stacked, dtype=float)
+            if first_stacked.shape == second_stacked.shape and first_stacked.ndim == 2:
+                significant_mask = _compute_group_curve_significance_mask(first_stacked, second_stacked, config)
+                _draw_curve_significance_strip(ax, psd_data_by_condition[0]["freqs"], significant_mask, label="PSD FDR q<0.05")
+                band_stats = _compute_group_band_summary_stats(
+                    first_stacked,
+                    second_stacked,
+                    psd_data_by_condition[0]["freqs"],
+                    features_freq_bands,
+                    config,
+                )
+                _draw_psd_band_summary_strip(ax, band_stats)
+                n_significant_bands = sum(
+                    1 for stats in band_stats.values() if bool(stats.get("significant", False))
                 )
     
     ax.axhline(0, color="0.4", linewidth=1.0, alpha=0.5, linestyle='--', zorder=2)
@@ -1020,39 +2354,38 @@ def _plot_psd_by_conditions(
     ax.set_xticks([2, 4, 8, 16, 32, 64])
     ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
     ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
-    ax.legend(loc='best', fontsize=plot_cfg.font.medium, frameon=False, handlelength=1.5)
+    ax.legend(loc='upper left', fontsize=plot_cfg.font.medium, frameon=False, handlelength=1.5)
     
     if roi_name:
         roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
-        title = f"Power Spectral Density (sub-{subject}) | ROI: {roi_display}"
-        fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.98)
-    
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_linewidth(0.8)
-    ax.spines['bottom'].set_linewidth(0.8)
+        title = f"Descriptive power spectral density | {roi_display}"
+        fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.99)
+
     ax.grid(True, alpha=0.25, linestyle='-', linewidth=0.5, zorder=0)
     ax.tick_params(labelsize=plot_cfg.font.small)
     
     footer_text = (
-        f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
-        f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}]s | "
-        f"n={len(tfr_epochs)} trials | 95% CI"
+        f"Subject: {subject} | Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}] s | "
+        f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}] s | "
+        f"Band sig={n_significant_bands}/{len(features_freq_bands)} | "
+        "Within-subject mean ± 95% CI"
     )
-    fig.text(
-        0.99, 0.01, footer_text,
-        ha='right', va='bottom',
-        fontsize=plot_cfg.font.small - 1,
-        color='0.5',
-        alpha=0.7
-    )
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_power_spectral_density_by_condition{roi_suffix}'
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    logger.info(f"Saved PSD by condition (Induced) with uncertainty visualization{roi_suffix}")
+    save_fig(
+        fig,
+        output_path,
+        footer=footer_text,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 1, 0.98),
+        config=config,
+    )
+    logger.debug(
+        "Saved PSD by condition (Induced) with uncertainty visualization%s",
+        roi_suffix,
+    )
     return True
 
 
@@ -1089,7 +2422,9 @@ def _plot_psd_by_predictor(
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
-    temp_colors = plt.cm.coolwarm(np.linspace(0.2, 0.8, len(unique_temps)))
+    fig.patch.set_facecolor("white")
+    _style_publication_axis(ax)
+    temp_palette = sns.color_palette("coolwarm", n_colors=len(unique_temps))
     
     active_window = _get_active_window(config)
     tfr_baseline = _get_plotting_tfr_baseline_window(config)
@@ -1159,7 +2494,7 @@ def _plot_psd_by_predictor(
             'ci_lower': psd_ci_lower,
             'ci_upper': psd_ci_upper,
             'n_trials': n_trials_temp,
-            'color': temp_colors[idx],
+            'color': temp_palette[idx],
         })
     
     if not psd_data_by_temp:
@@ -1188,42 +2523,13 @@ def _plot_psd_by_predictor(
             label=f"{psd_data['label']} (n={psd_data['n_trials']})",
             zorder=3,
         )
-        
-        alpha_band = features_freq_bands.get('alpha', (8, 13))
-        alpha_mask = (psd_data['freqs'] >= alpha_band[0]) & (psd_data['freqs'] <= alpha_band[1])
-        if np.any(alpha_mask):
-            alpha_freqs = psd_data['freqs'][alpha_mask]
-            alpha_psd = psd_data['mean'][alpha_mask]
-            peak_idx = np.argmax(alpha_psd)
-            peak_freq = alpha_freqs[peak_idx]
-            peak_val = alpha_psd[peak_idx]
-            
-            ax.plot(peak_freq, peak_val, marker='v', color=psd_data['color'], markersize=6, zorder=4)
-            ax.annotate(
-                f"{peak_freq:.1f}Hz",
-                xy=(peak_freq, peak_val),
-                xytext=(0, 6),
-                textcoords='offset points',
-                ha='center',
-                va='bottom',
-                fontsize=7,
-                color=psd_data['color'],
-                fontweight='bold',
-                zorder=4
-            )
-    
-    for band, (fmin, fmax) in features_freq_bands.items():
-        if fmin < psd_data_by_temp[0]['freqs'].max():
-            fmax_clipped = min(fmax, psd_data_by_temp[0]['freqs'].max())
-            ax.axvspan(fmin, fmax_clipped, alpha=0.06, color="0.6", linewidth=0, zorder=0)
-            mid = (fmin + fmax_clipped) / 2
-            if mid < psd_data_by_temp[0]['freqs'].max():
-                y_max = ax.get_ylim()[1]
-                ax.text(
-                    mid, y_max * 0.96, band[0].upper(),
-                    fontsize=8, ha="center", va="top", color="0.5", zorder=2,
-                    fontweight='medium'
-                )
+
+    _annotate_frequency_bands(
+        ax,
+        features_freq_bands,
+        float(psd_data_by_temp[0]['freqs'].max()),
+        config,
+    )
     
     ax.axhline(0, color="0.4", linewidth=1.0, alpha=0.5, linestyle='--', zorder=2)
     ax.set_xscale('log')
@@ -1233,32 +2539,27 @@ def _plot_psd_by_predictor(
     ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
     ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
     ax.legend(loc='best', fontsize=plot_cfg.font.medium, frameon=False, handlelength=1.5)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_linewidth(0.8)
-    ax.spines['bottom'].set_linewidth(0.8)
     ax.grid(True, alpha=0.25, linestyle='-', linewidth=0.5, zorder=0)
     ax.tick_params(labelsize=plot_cfg.font.small)
     
     footer_text = (
-        f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
-        f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}]s | "
-        f"n={len(tfr_epochs)} trials | 95% CI"
+        f"Subject: {subject} | Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}] s | "
+        f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}] s | "
+        "Within-subject mean ± 95% CI"
     )
-    fig.text(
-        0.99, 0.01, footer_text,
-        ha='right', va='bottom',
-        fontsize=plot_cfg.font.small - 1,
-        color='0.5',
-        alpha=0.7
-    )
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_power_spectral_density_by_predictor'
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    logger.info("Saved PSD by predictor (Induced) with uncertainty visualization")
+    save_fig(
+        fig,
+        output_path,
+        footer=footer_text,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 1, 0.98),
+        config=config,
+    )
+    logger.debug("Saved PSD by predictor (Induced) with uncertainty visualization")
     return True
 
 
@@ -1281,49 +2582,21 @@ def _plot_psd_overall(
     psd_avg = tfr_avg_win.data.mean(axis=(0, 2))
     
     fig, ax = plt.subplots(figsize=(4.0, 2.5), constrained_layout=True)
+    fig.patch.set_facecolor("white")
+    _style_publication_axis(ax)
     ax.plot(tfr_avg_win.freqs, psd_avg, color="0.2", linewidth=1.0)
-    
-    freq_bands = get_frequency_bands(config)
-    features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
-    alpha_band = features_freq_bands.get('alpha', (8, 13))
-    alpha_mask = (tfr_avg_win.freqs >= alpha_band[0]) & (tfr_avg_win.freqs <= alpha_band[1])
-    if np.any(alpha_mask):
-        alpha_freqs = tfr_avg_win.freqs[alpha_mask]
-        alpha_psd = psd_avg[alpha_mask]
-        peak_idx = np.argmax(alpha_psd)
-        peak_freq = alpha_freqs[peak_idx]
-        peak_val = alpha_psd[peak_idx]
-        
-        ax.plot(peak_freq, peak_val, marker='v', color='0.2', markersize=6, zorder=4)
-        ax.annotate(
-            f"{peak_freq:.1f}Hz",
-            xy=(peak_freq, peak_val),
-            xytext=(0, 6),
-            textcoords='offset points',
-            ha='center',
-            va='bottom',
-            fontsize=7,
-            color='0.2',
-            fontweight='bold',
-            zorder=4
-        )
 
     ax.axhline(0, color="0.7", linewidth=0.5, alpha=0.6)
     
     freq_bands = get_frequency_bands(config)
     features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
-    
-    for band, (fmin, fmax) in features_freq_bands.items():
-        if fmin < tfr_avg_win.freqs.max():
-            fmax_clipped = min(fmax, tfr_avg_win.freqs.max())
-            ax.axvspan(fmin, fmax_clipped, alpha=0.08, color="0.5", linewidth=0)
-            mid = (fmin + fmax_clipped) / 2
-            if mid < tfr_avg_win.freqs.max():
-                y_max = ax.get_ylim()[1]
-                ax.text(
-                    mid, y_max * 0.95, band[0].upper(),
-                    fontsize=7, ha="center", va="top", color="0.4"
-                )
+
+    _annotate_frequency_bands(
+        ax,
+        features_freq_bands,
+        float(tfr_avg_win.freqs.max()),
+        config,
+    )
     
     plot_cfg = get_plot_config(config)
     ax.set_xscale('log')
@@ -1339,7 +2612,7 @@ def _plot_psd_overall(
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
     plt.close(fig)
-    logger.info("Saved PSD (Induced)")
+    logger.debug("Saved PSD (Induced)")
 
 
 def plot_power_spectral_density(
@@ -1396,7 +2669,7 @@ def plot_power_spectral_density(
     roi_names = _get_comparison_rois(config, rois)
     
     if logger:
-        logger.info(f"PSD plotting: ROIs={roi_names}")
+        logger.debug("PSD plotting: ROIs=%s", roi_names)
     
     column = require_config_value(config, "plotting.comparisons.comparison_column")
     values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
@@ -1459,7 +2732,7 @@ def plot_power_spectral_density(
                 logger.warning(f"No channels found for ROI {roi_name}, skipping PSD plot")
             continue
         
-        tfr_roi = tfr.copy().pick_channels(roi_channels)
+        tfr_roi = tfr.copy().pick(roi_channels)
         if len(tfr_roi.ch_names) == 0:
             if logger:
                 logger.warning(f"No valid channels after filtering for ROI {roi_name}, skipping PSD plot")
@@ -1469,6 +2742,113 @@ def plot_power_spectral_density(
         roi_suffix = f"_roi-{roi_safe}" if roi_safe else ""
         
         _plot_psd_by_conditions(tfr_roi, conditions, subject, save_dir, logger, config, roi_suffix=roi_suffix, roi_name=roi_name)
+
+
+def plot_power_timecourse_by_condition(
+    tfr: Any,
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    events_df: Optional[pd.DataFrame] = None,
+    config: Optional[Any] = None,
+) -> None:
+    """Plot time-resolved band power trajectories for configured conditions."""
+    _validate_epochs_tfr(tfr, "plot_power_timecourse_by_condition", logger)
+
+    if events_df is None or events_df.empty:
+        raise ValueError(
+            "plot_power_timecourse_by_condition requires events_df. "
+            "No fallback will be used."
+        )
+    if config is None:
+        raise ValueError(
+            "plot_power_timecourse_by_condition requires config. "
+            "No fallback will be used."
+        )
+    if len(tfr) != len(events_df):
+        raise ValueError(
+            f"TFR window ({len(tfr)} epochs) and events "
+            f"({len(events_df)} rows) length mismatch for subject {subject}"
+        )
+
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+    from eeg_pipeline.utils.formatting import sanitize_label
+
+    rois = get_roi_definitions(config)
+    all_channels = tfr.ch_names
+    roi_names = _get_comparison_rois(config, rois)
+
+    column = require_config_value(config, "plotting.comparisons.comparison_column")
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
+
+    if not isinstance(values_spec, (list, tuple)) or len(values_spec) < 1:
+        raise ValueError(
+            "plot_power_timecourse_by_condition requires plotting.comparisons.comparison_values "
+            "with at least 1 value."
+        )
+
+    if len(values_spec) == 1:
+        value = values_spec[0]
+        label = str(labels_spec[0]).strip() if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 1 else str(value)
+        column_values = events_df[column]
+        try:
+            numeric_value = float(value)
+            mask = (pd.to_numeric(column_values, errors="coerce") == numeric_value).values
+        except (TypeError, ValueError):
+            value_string = str(value).strip().lower()
+            mask = (column_values.astype(str).str.strip().str.lower() == value_string).values
+        if int(mask.sum()) == 0:
+            raise ValueError(
+                f"plot_power_timecourse_by_condition: no trials found for value {value!r} in column {column!r}"
+            )
+        conditions = [(label, mask)]
+    elif len(values_spec) == 2:
+        comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
+        if not comp_mask_info:
+            raise ValueError(
+                "plot_power_timecourse_by_condition could not resolve configured comparison masks."
+            )
+        mask1, mask2, label1, label2 = comp_mask_info
+        conditions = [(label1, mask1), (label2, mask2)]
+    else:
+        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
+        if not multi_group_info:
+            raise ValueError(
+                "plot_power_timecourse_by_condition could not resolve configured multi-group masks."
+            )
+        masks_dict, group_labels = multi_group_info
+        conditions = [(label, masks_dict[label]) for label in group_labels]
+
+    for roi_name in roi_names:
+        if roi_name == "all":
+            roi_channels = all_channels
+        else:
+            roi_channels = get_roi_channels(rois[roi_name], all_channels)
+
+        if not roi_channels:
+            if logger:
+                logger.warning("No channels found for ROI %s, skipping timecourse plot", roi_name)
+            continue
+
+        tfr_roi = tfr.copy().pick(roi_channels)
+        if len(tfr_roi.ch_names) == 0:
+            if logger:
+                logger.warning("No valid channels after filtering for ROI %s, skipping timecourse plot", roi_name)
+            continue
+
+        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
+        roi_suffix = f"_roi-{roi_safe}" if roi_safe else ""
+        plot_band_power_evolution(
+            tfr_epochs=tfr_roi,
+            conditions=conditions,
+            subject=subject,
+            save_dir=save_dir,
+            logger=logger,
+            config=config,
+            roi_suffix=roi_suffix,
+            roi_name=roi_name,
+        )
 
 def plot_band_power_topomaps(
     pow_df: pd.DataFrame,
@@ -1510,7 +2890,6 @@ def plot_band_power_topomaps(
     compare_columns = bool(get_config_value(config, "plotting.comparisons.compare_columns", True))
     comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
     comparison_values = get_config_value(config, "plotting.comparisons.comparison_values", [])
-
     has_column_spec = (
         comparison_column != ""
         and isinstance(comparison_values, (list, tuple))
@@ -1533,7 +2912,7 @@ def plot_band_power_topomaps(
             )
         mask1, mask2, label1, label2 = comp_mask_info
         conditions = [(label1, mask1), (label2, mask2)]
-    
+
     _plot_band_power_topomaps_single_segment(
         pow_df,
         epochs_info,
@@ -1662,7 +3041,6 @@ def _plot_band_power_topomaps_single_segment(
     unit_label = STAT_TO_LABEL.get(primary_stat, "power")
     value_label = f"mean {unit_label}" if primary_stat else "mean power"
     
-    len(valid_bands)
     width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
     
     from eeg_pipeline.utils.formatting import sanitize_label
@@ -1672,73 +3050,90 @@ def _plot_band_power_topomaps_single_segment(
     def save_topomap_plot(
         condition_pow_df: pd.DataFrame,
         condition_label: Optional[str],
-        condition_color: Optional[str],
         n_samples: int,
-        unit: str,
         value: str,
     ) -> None:
         """Create and save a topomap plot for a condition."""
         cond_valid_bands, cond_band_data, _ = extract_band_data(condition_pow_df)
         if not cond_valid_bands:
             return
-        
+
+        panel_arrays: Dict[str, np.ndarray] = {}
+        panel_infos: Dict[str, mne.Info] = {}
+        for band in cond_valid_bands:
+            data_array, present_mask = _build_channel_data_array(cond_band_data[band], epochs_info)
+            if present_mask.sum() <= MIN_CHANNELS_FOR_TOPO:
+                continue
+            panel_arrays[band] = data_array[present_mask]
+            panel_infos[band] = mne.pick_info(epochs_info, np.where(present_mask)[0])
+
+        if not panel_arrays:
+            return
+
+        vmin, vmax = _compute_shared_topomap_vlim(
+            list(panel_arrays.values()),
+            config,
+            symmetric=False,
+        )
+        cmap = _resolve_topomap_colormap(vmin, vmax, symmetric=False)
         fig, axes = plt.subplots(1, len(cond_valid_bands), figsize=(width_per_band * len(cond_valid_bands), 4))
+        fig.patch.set_facecolor("white")
         if len(cond_valid_bands) == 1:
             axes = [axes]
-        
+
+        shared_image = None
         for i, band in enumerate(cond_valid_bands):
             ax = axes[i]
-            ch_power = cond_band_data[band]
-            
-            data_array = np.full(len(epochs_info.ch_names), np.nan)
-            mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
-            
-            for ch_idx, ch_name in enumerate(epochs_info.ch_names):
-                if ch_name in ch_power:
-                    val = ch_power[ch_name]
-                    try:
-                        is_finite = np.isfinite(val)
-                    except TypeError:
-                        is_finite = False
-                    if is_finite:
-                        data_array[ch_idx] = float(val)
-                        mask[ch_idx] = True
-            
-            if mask.sum() > MIN_CHANNELS_FOR_TOPO:
-                valid_data = data_array[mask]
-                valid_info = mne.pick_info(epochs_info, np.where(mask)[0])
-                
-                im, _ = plot_topomap(
-                    valid_data, valid_info,
-                    axes=ax, show=False, cmap="RdBu_r", contours=6
-                )
-                plt.colorbar(im, ax=ax, shrink=0.6, label=unit)
-            
+            ax.set_facecolor("white")
+            if band not in panel_arrays:
+                ax.set_axis_off()
+                continue
+
+            shared_image, _ = plot_topomap(
+                panel_arrays[band],
+                panel_infos[band],
+                axes=ax,
+                show=False,
+                cmap=cmap,
+                contours=get_viz_params(config).get("topo_contours"),
+                vlim=(vmin, vmax),
+            )
             band_color = get_band_color(band, config)
             ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
-        
-        title_text = f"Band Power Topomaps - {segment.capitalize()} (sub-{subject})"
+
+        if shared_image is not None:
+            _add_topomap_colorbar(fig, axes, shared_image, label=value)
+
+        title_text = f"Descriptive band power topomaps | {segment.capitalize()}"
         effective_label = condition_label or (str(label_suffix).strip() if label_suffix is not None else "")
+        effective_label = _format_topomap_condition_title_label(effective_label, config)
         if effective_label:
             title_text += f" | {effective_label}"
-        fig.suptitle(title_text, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
-        
+        fig.suptitle(title_text, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.99)
+
         unit_label = str(sample_unit).strip() or "trials"
-        footer = f"n={n_samples} {unit_label} | Segment: {segment} | Values: {value}"
-        fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
-        
-        plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+        footer = (
+            f"Subject: {subject} | Descriptive mean across {n_samples} {unit_label} | "
+            f"Values: {value}"
+        )
         
         if effective_label:
             condition_safe = sanitize_label(effective_label).lower().replace(" ", "_")
             filename = f"sub-{subject}_band_power_topomaps_{segment}_{condition_safe}"
         else:
             filename = f"sub-{subject}_band_power_topomaps_{segment}"
-        
-        save_fig(fig, save_dir / filename,
-                 formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                 bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-        plt.close(fig)
+
+        save_fig(
+            fig,
+            save_dir / filename,
+            footer=footer,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+            tight_layout_rect=(0, 0.04, 0.9, 0.98),
+            config=config,
+        )
 
     def _band_channel_columns(df: pd.DataFrame) -> Dict[str, Dict[str, str]]:
         """Map band -> channel -> column for this segment."""
@@ -1765,9 +3160,21 @@ def _plot_band_power_topomaps_single_segment(
             return
         if events_df is None:
             raise ValueError("band_power_topomaps compare_columns requires events_df.")
+        if len(conditions) != 2:
+            raise ValueError("band_power_topomaps compare_columns requires exactly 2 conditions.")
 
         band_to_ch_col = _band_channel_columns(pow_df)
         alpha = float(get_fdr_alpha(config))
+        label1, mask1 = conditions[0]
+        label2, mask2 = conditions[1]
+
+        n_samples_1 = min(len(pow_df), len(mask1))
+        n_samples_2 = min(len(pow_df), len(mask2))
+        condition_df_1 = pow_df.iloc[:n_samples_1].loc[np.asarray(mask1[:n_samples_1], dtype=bool)]
+        condition_df_2 = pow_df.iloc[:n_samples_2].loc[np.asarray(mask2[:n_samples_2], dtype=bool)]
+
+        triptych_band_data_1 = extract_band_data(condition_df_1)[1]
+        triptych_band_data_2 = extract_band_data(condition_df_2)[1]
 
         # Collect p-values across all band×channel tests for global FDR within this plot.
         tests: List[Tuple[str, str, float]] = []  # (band, ch, p)
@@ -1811,16 +3218,19 @@ def _plot_band_power_topomaps_single_segment(
             q_map[(band, ch)] = float(q)
             sig_map[(band, ch)] = bool(rej) and float(q) < alpha
 
+        viz_params = get_viz_params(config)
         n_bands = len([str(b) for b in bands])
         fig, axes = plt.subplots(1, n_bands, figsize=(width_per_band * n_bands, 4))
+        fig.patch.set_facecolor("white")
         if n_bands == 1:
             axes = [axes]
 
         total_sig = 0
         total_tests = 0
+        panel_arrays: List[np.ndarray] = []
+        band_panel_data: Dict[str, Tuple[np.ndarray, np.ndarray, mne.Info]] = {}
 
-        for i, band in enumerate([str(b) for b in bands]):
-            ax = axes[i]
+        for band in [str(b) for b in bands]:
             data_array = np.full(len(epochs_info.ch_names), np.nan, dtype=float)
             sig_mask_full = np.zeros(len(epochs_info.ch_names), dtype=bool)
 
@@ -1834,28 +3244,40 @@ def _plot_band_power_topomaps_single_segment(
 
             present = np.isfinite(data_array)
             if present.sum() <= MIN_CHANNELS_FOR_TOPO:
-                ax.set_axis_off()
                 continue
 
             valid_data = data_array[present]
             valid_info = mne.pick_info(epochs_info, np.where(present)[0])
             valid_sig = sig_mask_full[present]
+            panel_arrays.append(valid_data)
+            band_panel_data[band] = (valid_data, valid_sig, valid_info)
 
-            vmax = float(np.nanmax(np.abs(valid_data))) if np.isfinite(valid_data).any() else 1.0
-            vmin = -vmax
+        if not band_panel_data:
+            plt.close(fig)
+            return
 
-            im, _ = plot_topomap(
+        vmin, vmax = _compute_shared_topomap_vlim(panel_arrays, config)
+        shared_image = None
+
+        for i, band in enumerate([str(b) for b in bands]):
+            ax = axes[i]
+            ax.set_facecolor("white")
+            if band not in band_panel_data:
+                ax.set_axis_off()
+                continue
+
+            valid_data, valid_sig, valid_info = band_panel_data[band]
+            shared_image, _ = plot_topomap(
                 valid_data,
                 valid_info,
                 axes=ax,
                 show=False,
                 cmap="RdBu_r",
-                contours=6,
+                contours=viz_params.get("topo_contours"),
                 vlim=(vmin, vmax),
                 mask=valid_sig,
-                mask_params=dict(markersize=2, markerfacecolor="none", markeredgecolor="k"),
+                mask_params=_build_topomap_mask_params(config),
             )
-            plt.colorbar(im, ax=ax, shrink=0.6, label=unit_label)
 
             band_color = get_band_color(band, config)
             ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
@@ -1868,20 +3290,20 @@ def _plot_band_power_topomaps_single_segment(
                     if sig_map.get(key, False):
                         total_sig += 1
 
-        label1 = str(conditions[0][0])
-        label2 = str(conditions[1][0])
-        title = f"Band Power Contrast - {segment.capitalize()} (sub-{subject}) | {label2} − {label1}"
-        fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
-        fig.text(
-            0.5,
-            0.01,
-            f"n={len(pow_df)} trials | FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests,1)}",
-            ha="center",
-            va="bottom",
-            fontsize=plot_cfg.font.small,
-            color="gray",
+        if shared_image is not None:
+            _add_topomap_colorbar(fig, axes, shared_image, label=f"Δ {unit_label}")
+
+        display_label1 = _format_condition_display_label(label1, config)
+        display_label2 = _format_condition_display_label(label2, config)
+        title = (
+            f"Band power contrast | {segment.capitalize()} | "
+            f"{display_label2} - {display_label1}"
         )
-        plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+        footer = (
+            f"Subject: {subject} | n={len(pow_df)} trials | "
+            f"FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests, 1)}"
+        )
+        fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.99)
 
         label1_safe = sanitize_label(str(conditions[0][0])).lower().replace(" ", "_")
         label2_safe = sanitize_label(str(conditions[1][0])).lower().replace(" ", "_")
@@ -1889,18 +3311,56 @@ def _plot_band_power_topomaps_single_segment(
         save_fig(
             fig,
             out,
+            footer=footer,
             formats=plot_cfg.formats,
             dpi=plot_cfg.dpi,
             bbox_inches=plot_cfg.bbox_inches,
             pad_inches=plot_cfg.pad_inches,
+            tight_layout_rect=(0, 0.04, 0.9, 0.98),
             config=config,
         )
-        plt.close(fig)
+
+        for band in [str(b) for b in bands]:
+            condition_band_1 = triptych_band_data_1.get(band)
+            condition_band_2 = triptych_band_data_2.get(band)
+            contrast_panel_data = band_panel_data.get(band)
+            if condition_band_1 is None or condition_band_2 is None or contrast_panel_data is None:
+                continue
+
+            descriptive_panel_1 = _build_topomap_panel(condition_band_1, epochs_info)
+            descriptive_panel_2 = _build_topomap_panel(condition_band_2, epochs_info)
+            if descriptive_panel_1 is None or descriptive_panel_2 is None:
+                continue
+
+            contrast_data, contrast_sig, contrast_info = contrast_panel_data
+            band_total_tests = sum(1 for ch_name in epochs_info.ch_names if (band, ch_name) in q_map)
+            band_total_sig = sum(
+                1 for ch_name in epochs_info.ch_names if sig_map.get((band, ch_name), False)
+            )
+            _save_band_topomap_triptych(
+                descriptive_panel_1=descriptive_panel_1,
+                descriptive_panel_2=descriptive_panel_2,
+                contrast_panel=(contrast_data, contrast_sig, contrast_info),
+                band=band,
+                subject=subject,
+                save_path=save_dir / (
+                    f"sub-{subject}_band_power_topomap_triptych_{segment}_band-{band}_"
+                    f"{label2_safe}_minus_{label1_safe}"
+                ),
+                logger=logger,
+                config=config,
+                segment_label=segment.capitalize(),
+                label1=label1,
+                label2=label2,
+                descriptive_value_label=value_label,
+                contrast_value_label=f"Δ {unit_label}",
+                footer=(
+                    f"Subject: {subject} | n={len(condition_df_1)} vs {len(condition_df_2)} {sample_unit} | "
+                    f"Band: {band.upper()} | FDR α={alpha:.3f} | sig={band_total_sig}/{max(band_total_tests, 1)}"
+                ),
+            )
     
     if conditions:
-        group_colors = plt.cm.Set2(np.linspace(0, 1, max(len(conditions), 3)))
-        condition_colors = {label: group_colors[i] for i, (label, _) in enumerate(conditions)}
-        
         for condition_label, condition_mask in conditions:
             n_samples = min(len(pow_df), len(condition_mask))
             if n_samples <= 0:
@@ -1912,22 +3372,28 @@ def _plot_band_power_topomaps_single_segment(
             
             condition_pow_df = pow_df.loc[condition_mask_array]
             n_trials = int(condition_mask_array.sum())
-            condition_color = condition_colors.get(condition_label, plot_cfg.get_color("blue"))
-            
-            save_topomap_plot(condition_pow_df, condition_label, condition_color, n_trials, unit_label, value_label)
+            save_topomap_plot(condition_pow_df, condition_label, n_trials, value_label)
         
         if logger:
-            logger.info(f"Saved band power topomaps ({segment}) for {len(conditions)} conditions")
+            logger.debug(
+                "Saved band power topomaps (%s) for %s conditions",
+                segment,
+                len(conditions),
+            )
         if compare_columns:
             save_column_comparison_topomaps()
     else:
-        save_topomap_plot(pow_df, None, None, len(pow_df), unit_label, value_label)
+        save_topomap_plot(pow_df, None, len(pow_df), value_label)
         if logger:
             label_for_log = str(label_suffix).strip() if label_suffix is not None else ""
             if label_for_log:
-                logger.info(f"Saved band power topomaps ({segment}) | {label_for_log}")
+                logger.debug(
+                    "Saved band power topomaps (%s) | %s",
+                    segment,
+                    label_for_log,
+                )
             else:
-                logger.info(f"Saved band power topomaps ({segment})")
+                logger.debug("Saved band power topomaps (%s)", segment)
 
 
 def plot_band_power_topomaps_window_contrast(
@@ -1953,7 +3419,10 @@ def plot_band_power_topomaps_window_contrast(
     from scipy.stats import wilcoxon
 
     plot_cfg = get_plot_config(config)
+    viz_params = get_viz_params(config)
     alpha = float(get_fdr_alpha(config))
+    descriptive_value_label = r"mean $\log_{10}$(ratio)"
+    stat_label = r"$\log_{10}$(ratio)"
 
     def _band_channel_columns(df: pd.DataFrame, segment_name: str) -> Dict[str, Dict[str, str]]:
         mapping: Dict[str, Dict[str, str]] = {str(b): {} for b in bands}
@@ -2015,14 +3484,16 @@ def plot_band_power_topomaps_window_contrast(
 
     width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
     fig, axes = plt.subplots(1, len(bands), figsize=(width_per_band * len(bands), 4))
+    fig.patch.set_facecolor("white")
     if len(bands) == 1:
         axes = [axes]
 
     total_sig = 0
     total_tests = 0
+    panel_arrays: List[np.ndarray] = []
+    band_panel_data: Dict[str, Tuple[np.ndarray, np.ndarray, mne.Info]] = {}
 
-    for i, band in enumerate([str(b) for b in bands]):
-        ax = axes[i]
+    for band in [str(b) for b in bands]:
         data_array = np.full(len(epochs_info.ch_names), np.nan, dtype=float)
         sig_mask_full = np.zeros(len(epochs_info.ch_names), dtype=bool)
 
@@ -2040,93 +3511,110 @@ def plot_band_power_topomaps_window_contrast(
 
         present = np.isfinite(data_array)
         if present.sum() <= MIN_CHANNELS_FOR_TOPO:
-            ax.set_axis_off()
             continue
 
         valid_data = data_array[present]
         valid_info = mne.pick_info(epochs_info, np.where(present)[0])
         valid_sig = sig_mask_full[present]
+        band_panel_data[band] = (valid_data, valid_sig, valid_info)
+        panel_arrays.append(valid_data)
 
-        vmax = float(np.nanmax(np.abs(valid_data))) if np.isfinite(valid_data).any() else 1.0
-        vmin = -vmax
+    if not band_panel_data:
+        plt.close(fig)
+        return
 
-        # Primary data plot
-        im, _ = plot_topomap(
+    vmin, vmax = _compute_shared_topomap_vlim(panel_arrays, config)
+    shared_image = None
+
+    for i, band in enumerate([str(b) for b in bands]):
+        ax = axes[i]
+        ax.set_facecolor("white")
+        if band not in band_panel_data:
+            ax.set_axis_off()
+            continue
+
+        valid_data, valid_sig, valid_info = band_panel_data[band]
+        shared_image, _ = plot_topomap(
             valid_data,
             valid_info,
             axes=ax,
             show=False,
             cmap="RdBu_r",
-            contours=6,
+            contours=viz_params.get("topo_contours"),
             vlim=(vmin, vmax),
+            mask=valid_sig,
+            mask_params=_build_topomap_mask_params(config),
         )
-        
-        # Apply opacity masking via secondary interpolation
-        try:
-            # Interpolate the boolean significance mask (0.3 for non-sig, 1.0 for sig)
-            im_mask, _ = plot_topomap(
-                valid_sig.astype(float) * 0.7 + 0.3,
-                valid_info,
-                axes=ax,
-                show=False,
-                contours=0,
-                cmap="gray",
-                vlim=(0, 1),
-            )
-            
-            # Extract the alpha grid and remove the dummy plot
-            alpha_grid = im_mask.get_array().copy()
-            im_mask.remove()
-            
-            # Apply alpha channel to the original image data
-            img_grid = im.get_array()
-            rgba = im.cmap(im.norm(img_grid))
-            
-            if np.ma.is_masked(img_grid):
-                alpha_grid[img_grid.mask] = 0.0
-                rgba[:, :, 3] = alpha_grid
-            else:
-                rgba[:, :, 3] = alpha_grid
-                
-            im.set_data(rgba)
-            
-            # Ensure dots are hidden if using opacity
-            for coll in ax.collections:
-                if isinstance(coll, mpl_collections.PathCollection):
-                    coll.set_visible(False)
-        except (AttributeError, IndexError, TypeError, ValueError) as exc:
-            logger.warning("Opacity masking failed for band=%s: %s", band, exc)
-        plt.colorbar(im, ax=ax, shrink=0.6, label="Δ power")
 
         band_color = get_band_color(band, config)
         ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
 
+    if shared_image is not None:
+        _add_topomap_colorbar(fig, axes, shared_image, label="Δ power")
+
     fig.suptitle(
-        f"Band Power Window Contrast (sub-{subject}) | {window2} − {window1}",
+        f"Band power window contrast | {window2} - {window1}",
         fontsize=plot_cfg.font.figure_title,
         fontweight="bold",
-        y=1.02,
+        y=0.99,
     )
-    fig.text(
-        0.5,
-        0.01,
-        f"n={len(pow_df)} trials | FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests,1)}",
-        ha="center",
-        va="bottom",
-        fontsize=plot_cfg.font.small,
-        color="gray",
-    )
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+    footer = f"Subject: {subject} | n={len(pow_df)} trials | FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests,1)}"
     save_fig(
         fig,
         save_dir / f"sub-{subject}_band_power_topomaps_contrast_{window2}_minus_{window1}",
+        footer=footer,
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 0.9, 0.98),
         config=config,
     )
-    plt.close(fig)
+
+    for band in [str(b) for b in bands]:
+        window1_columns = cols_w1.get(band, {})
+        window2_columns = cols_w2.get(band, {})
+        contrast_panel = band_panel_data.get(band)
+        if not window1_columns or not window2_columns or contrast_panel is None:
+            continue
+
+        window1_values = {
+            ch_name: float(pd.to_numeric(pow_df[col], errors="coerce").mean())
+            for ch_name, col in window1_columns.items()
+        }
+        window2_values = {
+            ch_name: float(pd.to_numeric(pow_df[col], errors="coerce").mean())
+            for ch_name, col in window2_columns.items()
+        }
+        descriptive_panel_1 = _build_topomap_panel(window1_values, epochs_info)
+        descriptive_panel_2 = _build_topomap_panel(window2_values, epochs_info)
+        if descriptive_panel_1 is None or descriptive_panel_2 is None:
+            continue
+
+        contrast_data, contrast_sig, contrast_info = contrast_panel
+        band_total_tests = sum(1 for ch_name in epochs_info.ch_names if (band, ch_name) in q_map)
+        band_total_sig = sum(1 for ch_name in epochs_info.ch_names if sig_map.get((band, ch_name), False))
+        _save_band_topomap_triptych(
+            descriptive_panel_1=descriptive_panel_1,
+            descriptive_panel_2=descriptive_panel_2,
+            contrast_panel=(contrast_data, contrast_sig, contrast_info),
+            band=band,
+            subject=subject,
+            save_path=save_dir / (
+                f"sub-{subject}_band_power_topomap_triptych_{window2}_minus_{window1}_band-{band}"
+            ),
+            logger=logger,
+            config=config,
+            segment_label=f"{window1.capitalize()} vs {window2.capitalize()}",
+            label1=window1.capitalize(),
+            label2=window2.capitalize(),
+            descriptive_value_label=f"mean {stat_label}",
+            contrast_value_label="Δ power",
+            footer=(
+                f"Subject: {subject} | n={len(pow_df)} trials | Band: {band.upper()} | "
+                f"FDR α={alpha:.3f} | sig={band_total_sig}/{max(band_total_tests, 1)}"
+            ),
+        )
 
 
 def plot_band_power_topomaps_group_condition_contrast(
@@ -2240,14 +3728,16 @@ def plot_band_power_topomaps_group_condition_contrast(
 
     width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
     fig, axes = plt.subplots(1, len(bands), figsize=(width_per_band * len(bands), 4))
+    fig.patch.set_facecolor("white")
     if len(bands) == 1:
         axes = [axes]
 
     total_sig = 0
     total_tests = 0
+    panel_arrays: List[np.ndarray] = []
+    band_panel_data: Dict[str, Tuple[np.ndarray, np.ndarray, mne.Info]] = {}
 
-    for i, band in enumerate([str(b) for b in bands]):
-        ax = axes[i]
+    for band in [str(b) for b in bands]:
         data_array = np.full(len(epochs_info.ch_names), np.nan, dtype=float)
         sig_mask_full = np.zeros(len(epochs_info.ch_names), dtype=bool)
 
@@ -2261,67 +3751,13 @@ def plot_band_power_topomaps_group_condition_contrast(
 
         present = np.isfinite(data_array)
         if present.sum() <= MIN_CHANNELS_FOR_TOPO:
-            ax.set_axis_off()
             continue
 
         valid_data = data_array[present]
         valid_info = mne.pick_info(epochs_info, np.where(present)[0])
         valid_sig = sig_mask_full[present]
-
-        vmax = float(np.nanmax(np.abs(valid_data))) if np.isfinite(valid_data).any() else 1.0
-        vmin = -vmax
-
-        # Primary data plot
-        im, _ = plot_topomap(
-            valid_data,
-            valid_info,
-            axes=ax,
-            show=False,
-            cmap="RdBu_r",
-            contours=6,
-            vlim=(vmin, vmax),
-        )
-        
-        # Apply opacity masking via secondary interpolation
-        try:
-            # Interpolate the boolean significance mask (0.3 for non-sig, 1.0 for sig)
-            im_mask, _ = plot_topomap(
-                valid_sig.astype(float) * 0.7 + 0.3,
-                valid_info,
-                axes=ax,
-                show=False,
-                contours=0,
-                cmap="gray",
-                vlim=(0, 1),
-            )
-            
-            # Extract the alpha grid and remove the dummy plot
-            alpha_grid = im_mask.get_array().copy()
-            im_mask.remove()
-            
-            # Apply alpha channel to the original image data
-            img_grid = im.get_array()
-            rgba = im.cmap(im.norm(img_grid))
-            
-            if np.ma.is_masked(img_grid):
-                alpha_grid[img_grid.mask] = 0.0
-                rgba[:, :, 3] = alpha_grid
-            else:
-                rgba[:, :, 3] = alpha_grid
-                
-            im.set_data(rgba)
-            
-            # Ensure dots are hidden if using opacity
-            import matplotlib.collections
-            for coll in ax.collections:
-                if isinstance(coll, matplotlib.collections.PathCollection):
-                    coll.set_visible(False)
-        except (AttributeError, IndexError, TypeError, ValueError) as exc:
-            logger.warning("Opacity masking failed for band=%s: %s", band, exc)
-        plt.colorbar(im, ax=ax, shrink=0.6, label="Δ power")
-
-        band_color = get_band_color(band, config)
-        ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
+        band_panel_data[band] = (valid_data, valid_sig, valid_info)
+        panel_arrays.append(valid_data)
 
         for ch_name in epochs_info.ch_names:
             key = (band, ch_name)
@@ -2330,22 +3766,51 @@ def plot_band_power_topomaps_group_condition_contrast(
                 if sig_map.get(key, False):
                     total_sig += 1
 
+    if not band_panel_data:
+        plt.close(fig)
+        return
+
+    vmin, vmax = _compute_shared_topomap_vlim(panel_arrays, config)
+    shared_image = None
+
+    for i, band in enumerate([str(b) for b in bands]):
+        ax = axes[i]
+        ax.set_facecolor("white")
+        if band not in band_panel_data:
+            ax.set_axis_off()
+            continue
+
+        valid_data, valid_sig, valid_info = band_panel_data[band]
+        shared_image, _ = plot_topomap(
+            valid_data,
+            valid_info,
+            axes=ax,
+            show=False,
+            cmap="RdBu_r",
+            contours=viz_params.get("topo_contours"),
+            vlim=(vmin, vmax),
+            mask=valid_sig,
+            mask_params=_build_topomap_mask_params(config),
+        )
+
+        band_color = get_band_color(band, config)
+        ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
+
+    if shared_image is not None:
+        _add_topomap_colorbar(fig, axes, shared_image, label="Δ power")
+
+    display_label1 = _format_condition_display_label(label1, config)
+    display_label2 = _format_condition_display_label(label2, config)
     fig.suptitle(
-        f"Band Power Contrast - {segment.capitalize()} (sub-{subject}) | {label2} − {label1}",
+        f"Band power contrast | {segment.capitalize()} | {display_label2} - {display_label1}",
         fontsize=plot_cfg.font.figure_title,
         fontweight="bold",
-        y=1.02,
+        y=0.99,
     )
-    fig.text(
-        0.5,
-        0.01,
-        f"n={len(pow_df_condition1)} {sample_unit} | FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests,1)}",
-        ha="center",
-        va="bottom",
-        fontsize=plot_cfg.font.small,
-        color="gray",
+    footer = (
+        f"Subject: {subject} | n={len(pow_df_condition1)} {sample_unit} | "
+        f"FDR α={alpha:.3f} | sig={total_sig}/{max(total_tests,1)}"
     )
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
 
     label1_safe = sanitize_label(str(label1)).lower().replace(" ", "_")
     label2_safe = sanitize_label(str(label2)).lower().replace(" ", "_")
@@ -2353,13 +3818,649 @@ def plot_band_power_topomaps_group_condition_contrast(
     save_fig(
         fig,
         out,
+        footer=footer,
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 0.9, 0.98),
         config=config,
     )
-    plt.close(fig)
+
+    for band in [str(b) for b in bands]:
+        window_condition_1 = cols1.get(band, {})
+        window_condition_2 = cols2.get(band, {})
+        contrast_panel = band_panel_data.get(band)
+        if not window_condition_1 or not window_condition_2 or contrast_panel is None:
+            continue
+
+        condition_values_1 = {
+            ch_name: float(pd.to_numeric(pow_df_condition1[col], errors="coerce").mean())
+            for ch_name, col in window_condition_1.items()
+        }
+        condition_values_2 = {
+            ch_name: float(pd.to_numeric(pow_df_condition2[col], errors="coerce").mean())
+            for ch_name, col in window_condition_2.items()
+        }
+        descriptive_panel_1 = _build_topomap_panel(condition_values_1, epochs_info)
+        descriptive_panel_2 = _build_topomap_panel(condition_values_2, epochs_info)
+        if descriptive_panel_1 is None or descriptive_panel_2 is None:
+            continue
+
+        contrast_data, contrast_sig, contrast_info = contrast_panel
+        band_total_tests = sum(1 for ch_name in epochs_info.ch_names if (band, ch_name) in q_map)
+        band_total_sig = sum(1 for ch_name in epochs_info.ch_names if sig_map.get((band, ch_name), False))
+        _save_band_topomap_triptych(
+            descriptive_panel_1=descriptive_panel_1,
+            descriptive_panel_2=descriptive_panel_2,
+            contrast_panel=(contrast_data, contrast_sig, contrast_info),
+            band=band,
+            subject=subject,
+            save_path=save_dir / (
+                f"sub-{subject}_band_power_topomap_triptych_{segment}_band-{band}_"
+                f"{label2_safe}_minus_{label1_safe}"
+            ),
+            logger=logger,
+            config=config,
+            segment_label=segment.capitalize(),
+            label1=label1,
+            label2=label2,
+            descriptive_value_label=descriptive_value_label,
+            contrast_value_label="Δ power",
+            footer=(
+                f"Group: {subject} | n={len(pow_df_condition1)} {sample_unit} | "
+                f"Band: {band.upper()} | FDR α={alpha:.3f} | sig={band_total_sig}/{max(band_total_tests, 1)}"
+            ),
+        )
+
+
+def _compute_group_curve_significance_mask(
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+    config: Any,
+) -> np.ndarray:
+    """Return an FDR-corrected significance mask across curve samples for paired group data."""
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_fdr_alpha
+
+    if condition1_values.ndim != 2 or condition2_values.ndim != 2:
+        raise ValueError("Group curve significance expects 2D subject x sample arrays.")
+    if condition1_values.shape != condition2_values.shape:
+        raise ValueError("Group curve significance arrays must share the same shape.")
+
+    n_subjects, n_samples = condition1_values.shape
+    significant_mask = np.zeros(n_samples, dtype=bool)
+    if n_subjects < MIN_TRIALS_FOR_STATISTICS:
+        return significant_mask
+
+    pvalues: List[float] = []
+    valid_sample_indices: List[int] = []
+
+    for sample_index in range(n_samples):
+        values1 = np.asarray(condition1_values[:, sample_index], dtype=float)
+        values2 = np.asarray(condition2_values[:, sample_index], dtype=float)
+        finite_mask = np.isfinite(values1) & np.isfinite(values2)
+        if int(finite_mask.sum()) < MIN_TRIALS_FOR_STATISTICS:
+            continue
+
+        diffs = values2[finite_mask] - values1[finite_mask]
+        if diffs.size == 0 or np.allclose(diffs, 0):
+            p_value = 1.0
+        else:
+            p_value = float(wilcoxon(diffs, zero_method="wilcox", alternative="two-sided").pvalue)
+
+        pvalues.append(p_value)
+        valid_sample_indices.append(sample_index)
+
+    if not pvalues:
+        return significant_mask
+
+    rejected, qvalues, _ = apply_fdr_correction(pvalues, config=config)
+    alpha = float(get_fdr_alpha(config))
+    for sample_index, rejected_flag, q_value in zip(valid_sample_indices, rejected, qvalues):
+        significant_mask[sample_index] = bool(rejected_flag) and float(q_value) < alpha
+
+    return significant_mask
+
+
+def _compute_group_timecourse_significance_mask(
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+    config: Any,
+) -> np.ndarray:
+    """Return an FDR-corrected significance mask across time for paired group traces."""
+    return _compute_group_curve_significance_mask(condition1_values, condition2_values, config)
+
+
+def _compute_group_band_summary_stats(
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+    freqs: np.ndarray,
+    frequency_bands: Dict[str, Tuple[float, float]],
+    config: Any,
+) -> Dict[str, Dict[str, float]]:
+    """Return paired band-summary statistics for group PSD curves."""
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_fdr_alpha
+    from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
+
+    if freqs.ndim != 1:
+        raise ValueError("Group band summary requires a 1D frequency axis.")
+    if condition1_values.ndim != 2 or condition2_values.ndim != 2:
+        raise ValueError("Group band summary requires 2D subject x frequency arrays.")
+    if condition1_values.shape != condition2_values.shape:
+        raise ValueError("Group band summary arrays must share the same shape.")
+    if condition1_values.shape[1] != len(freqs):
+        raise ValueError("Group band summary arrays must match the frequency axis length.")
+
+    band_stats: Dict[str, Dict[str, float]] = {}
+    pvalues: List[float] = []
+    tested_bands: List[str] = []
+
+    for band_name, bounds in frequency_bands.items():
+        if not isinstance(bounds, (list, tuple)) or len(bounds) < 2:
+            continue
+
+        band_min = float(bounds[0])
+        band_max = float(bounds[1])
+        band_mask = (freqs >= band_min) & (freqs <= band_max)
+        if not np.any(band_mask):
+            continue
+
+        values1 = np.nanmean(condition1_values[:, band_mask], axis=1)
+        values2 = np.nanmean(condition2_values[:, band_mask], axis=1)
+        finite_mask = np.isfinite(values1) & np.isfinite(values2)
+        if int(finite_mask.sum()) < MIN_TRIALS_FOR_STATISTICS:
+            continue
+
+        finite_values1 = values1[finite_mask]
+        finite_values2 = values2[finite_mask]
+        effect_size = compute_paired_cohens_d(finite_values1, finite_values2)
+        diffs = finite_values2 - finite_values1
+        if diffs.size == 0 or np.allclose(diffs, 0):
+            p_value = 1.0
+        else:
+            p_value = float(wilcoxon(diffs, zero_method="wilcox", alternative="two-sided").pvalue)
+
+        band_stats[str(band_name)] = {
+            "fmin": band_min,
+            "fmax": band_max,
+            "effect_size": float(effect_size),
+            "p_value": p_value,
+            "q_value": np.nan,
+            "significant": False,
+        }
+        pvalues.append(p_value)
+        tested_bands.append(str(band_name))
+
+    if not pvalues:
+        return band_stats
+
+    rejected, qvalues, _ = apply_fdr_correction(pvalues, config=config)
+    alpha = float(get_fdr_alpha(config))
+    for band_name, rejected_flag, q_value in zip(tested_bands, rejected, qvalues):
+        band_stats[band_name]["q_value"] = float(q_value)
+        band_stats[band_name]["significant"] = bool(rejected_flag) and float(q_value) < alpha
+
+    return band_stats
+
+
+def _iter_true_runs(mask: np.ndarray) -> List[Tuple[int, int]]:
+    """Return inclusive index runs where the boolean mask is true."""
+    runs: List[Tuple[int, int]] = []
+    run_start: Optional[int] = None
+
+    for index, flag in enumerate(np.asarray(mask, dtype=bool)):
+        if flag and run_start is None:
+            run_start = index
+        if not flag and run_start is not None:
+            runs.append((run_start, index - 1))
+            run_start = None
+
+    if run_start is not None:
+        runs.append((run_start, len(mask) - 1))
+    return runs
+
+
+def _draw_curve_significance_strip(
+    ax: Any,
+    x_values: np.ndarray,
+    significant_mask: np.ndarray,
+    *,
+    label: str = "FDR q<0.05",
+) -> None:
+    """Draw a compact significance strip along the bottom of a 1D curve axis."""
+    if x_values.ndim != 1:
+        raise ValueError("Curve significance strip expects a 1D axis.")
+    if significant_mask.shape != x_values.shape:
+        raise ValueError("Curve significance mask must match the axis shape.")
+    if not significant_mask.any():
+        return
+
+    if len(x_values) > 1:
+        sample_step = float(np.nanmedian(np.diff(x_values)))
+    else:
+        sample_step = 0.0
+
+    for start_index, end_index in _iter_true_runs(significant_mask):
+        start_value = float(x_values[start_index] - 0.5 * sample_step)
+        end_value = float(x_values[end_index] + 0.5 * sample_step)
+        ax.axvspan(
+            start_value,
+            end_value,
+            ymin=0.02,
+            ymax=0.055,
+            color="0.15",
+            alpha=0.16,
+            linewidth=0,
+            zorder=0,
+        )
+
+    ax.text(
+        0.98,
+        0.06,
+        label,
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color="0.35",
+    )
+
+
+def _draw_timecourse_significance_strip(
+    ax: Any,
+    times: np.ndarray,
+    significant_mask: np.ndarray,
+) -> None:
+    """Draw a compact significance strip along the bottom of the timecourse axis."""
+    _draw_curve_significance_strip(ax, times, significant_mask, label="FDR q<0.05")
+
+
+def _draw_psd_band_summary_strip(
+    ax: Any,
+    band_stats: Dict[str, Dict[str, float]],
+) -> None:
+    """Draw a compact canonical-band significance strip above the curve strip."""
+    significant_bands = [
+        stats
+        for stats in band_stats.values()
+        if bool(stats.get("significant", False))
+    ]
+    if not significant_bands:
+        return
+
+    for stats in significant_bands:
+        ax.axvspan(
+            float(stats["fmin"]),
+            float(stats["fmax"]),
+            ymin=0.07,
+            ymax=0.11,
+            color="0.1",
+            alpha=0.18,
+            linewidth=0,
+            zorder=0,
+        )
+
+    ax.text(
+        0.98,
+        0.115,
+        "Band q<0.05",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color="0.35",
+    )
+
+
+def _draw_group_subject_traces(
+    ax: Any,
+    times: np.ndarray,
+    subject_matrix: np.ndarray,
+    *,
+    color: Any,
+) -> None:
+    """Draw restrained subject-level traces behind the group mean."""
+    if times.ndim != 1:
+        raise ValueError("Group subject traces require a 1D time axis.")
+    if subject_matrix.ndim != 2:
+        raise ValueError("Group subject traces require a 2D subject x time matrix.")
+    if subject_matrix.shape[1] != len(times):
+        raise ValueError("Group subject trace matrix must match the time axis length.")
+
+    n_subjects = subject_matrix.shape[0]
+    linewidth = 0.7 if n_subjects <= 12 else 0.55
+    alpha = 0.14 if n_subjects <= 12 else 0.08
+
+    for subject_trace in subject_matrix:
+        trace = np.asarray(subject_trace, dtype=float)
+        finite_mask = np.isfinite(trace)
+        if int(finite_mask.sum()) < 2:
+            continue
+        ax.plot(
+            times[finite_mask],
+            trace[finite_mask],
+            color=color,
+            lw=linewidth,
+            alpha=alpha,
+            zorder=1,
+        )
+
+
+def plot_group_band_power_evolution(
+    *,
+    times: np.ndarray,
+    group_series_by_band: Dict[str, Dict[str, np.ndarray]],
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    baseline_window: Tuple[float, float],
+    active_window: Tuple[float, float],
+    roi_suffix: str = "",
+    roi_name: Optional[str] = None,
+) -> bool:
+    """Plot one group-level timecourse figure per band using subject-level summaries."""
+    if times.ndim != 1 or len(times) == 0:
+        raise ValueError("plot_group_band_power_evolution requires a non-empty 1D time axis.")
+    if not group_series_by_band:
+        raise ValueError("plot_group_band_power_evolution requires grouped subject timecourses.")
+
+    plot_cfg = get_plot_config(config)
+    condition_labels = list(
+        dict.fromkeys(
+            label
+            for band_series in group_series_by_band.values()
+            for label in band_series.keys()
+        )
+    )
+    if not condition_labels:
+        raise ValueError("plot_group_band_power_evolution requires at least one condition label.")
+
+    condition_color_map = _get_condition_color_map(condition_labels, config)
+    band_colors = {band: get_band_color(band, config) for band in group_series_by_band}
+    roi_display = roi_name.replace("_", " ").title() if roi_name and roi_name != "all" else "All Channels"
+    rendered_bands = 0
+
+    for band_name, label_series in group_series_by_band.items():
+        if not label_series:
+            continue
+
+        fig, ax = plt.subplots(1, 1, figsize=(5.4, 4.1))
+        fig.patch.set_facecolor("white")
+        _style_publication_axis(ax)
+
+        subject_count: Optional[int] = None
+        plotted_labels = 0
+
+        for label in condition_labels:
+            subject_matrix = label_series.get(label)
+            if subject_matrix is None:
+                continue
+            subject_matrix = np.asarray(subject_matrix, dtype=float)
+            if subject_matrix.ndim != 2 or subject_matrix.shape[1] != len(times):
+                raise ValueError(
+                    f"Group timecourse for band {band_name!r}, condition {label!r} has invalid shape "
+                    f"{subject_matrix.shape}; expected (n_subjects, {len(times)})."
+                )
+            if subject_matrix.shape[0] < 2:
+                continue
+
+            color = condition_color_map[label]
+            _draw_group_subject_traces(
+                ax,
+                times,
+                subject_matrix,
+                color=color,
+            )
+
+            mean_trace = np.nanmean(subject_matrix, axis=0)
+            sem_trace = np.nanstd(subject_matrix, axis=0, ddof=1) / np.sqrt(subject_matrix.shape[0])
+            ci_lower = mean_trace - 1.96 * sem_trace
+            ci_upper = mean_trace + 1.96 * sem_trace
+
+            ax.plot(
+                times,
+                mean_trace,
+                color=color,
+                lw=2,
+                label=(
+                    f"{_format_condition_display_label(label, config)} "
+                    f"(n={subject_matrix.shape[0]})"
+                ),
+            )
+            ax.fill_between(times, ci_lower, ci_upper, color=color, alpha=0.2, lw=0)
+            subject_count = subject_matrix.shape[0]
+            plotted_labels += 1
+
+        if plotted_labels == 0 or subject_count is None:
+            plt.close(fig)
+            continue
+
+        if len(condition_labels) == 2:
+            first = label_series.get(condition_labels[0])
+            second = label_series.get(condition_labels[1])
+            if first is not None and second is not None:
+                first = np.asarray(first, dtype=float)
+                second = np.asarray(second, dtype=float)
+                if first.shape == second.shape and first.ndim == 2 and first.shape[0] >= MIN_TRIALS_FOR_STATISTICS:
+                    significant_mask = _compute_group_timecourse_significance_mask(first, second, config)
+                    _draw_timecourse_significance_strip(ax, times, significant_mask)
+
+        ax.axvspan(baseline_window[0], baseline_window[1], color="0.88", alpha=0.7, zorder=0)
+        ax.axvspan(active_window[0], active_window[1], color=band_colors.get(band_name, "0.7"), alpha=0.08, zorder=0)
+        ax.axhline(1.0, color="0.4", linestyle="--", alpha=0.5, lw=1)
+        ax.axvline(0.0, color="0.4", linestyle="--", alpha=0.5, lw=1)
+        ax.axvline(active_window[0], color="0.6", linestyle=":", alpha=0.8, lw=0.9)
+        ax.set_xlim(float(times[0]), float(times[-1]))
+        ax.set_title(
+            band_name.capitalize(),
+            color=band_colors.get(band_name, "0.2"),
+            fontweight="bold",
+        )
+        ax.set_xlabel("Time (s)", fontsize=plot_cfg.font.medium)
+        ax.set_ylabel("Power / baseline", fontsize=plot_cfg.font.medium)
+        ax.legend(loc="upper left", frameon=False, fontsize=plot_cfg.font.small)
+        ax.yaxis.grid(True, alpha=0.18, linewidth=0.6)
+        ax.xaxis.grid(False)
+        ax.text(
+            0.02,
+            0.02,
+            "Thin lines: subjects | thick line: group mean",
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=plot_cfg.font.small,
+            color="0.4",
+        )
+        sns.despine(ax=ax, trim=True)
+
+        fig.suptitle(
+            f"Group time-resolved band power | {roi_display} | {band_name.capitalize()}",
+            fontsize=plot_cfg.font.figure_title,
+            fontweight="bold",
+            y=0.99,
+        )
+        footer = (
+            f"Group: {subject} | n={subject_count} subjects | "
+            f"Baseline: [{baseline_window[0]:.2f}, {baseline_window[1]:.2f}] s | "
+            f"Active window: [{active_window[0]:.2f}, {active_window[1]:.2f}] s | "
+            "Thin lines: subject means | thick line: between-subject mean ± 95% CI"
+        )
+        save_fig(
+            fig,
+            save_dir / f"sub-{subject}_power_timecourse_band-{band_name}{roi_suffix}",
+            footer=footer,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+            tight_layout_rect=(0, 0.04, 1, 0.98),
+            config=config,
+        )
+        rendered_bands += 1
+
+    if rendered_bands == 0:
+        logger.warning("No group band power timecourses were rendered.")
+        return False
+    return True
+
+
+def plot_group_band_power_effect_evolution(
+    *,
+    times: np.ndarray,
+    group_series_by_band: Dict[str, Dict[str, np.ndarray]],
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    baseline_window: Tuple[float, float],
+    active_window: Tuple[float, float],
+    roi_suffix: str = "",
+    roi_name: Optional[str] = None,
+) -> bool:
+    """Plot one paired group-level effect figure per band using condition2 - condition1."""
+    if times.ndim != 1 or len(times) == 0:
+        raise ValueError("plot_group_band_power_effect_evolution requires a non-empty 1D time axis.")
+    if not group_series_by_band:
+        raise ValueError("plot_group_band_power_effect_evolution requires grouped subject timecourses.")
+
+    plot_cfg = get_plot_config(config)
+    condition_labels = list(
+        dict.fromkeys(
+            label
+            for band_series in group_series_by_band.values()
+            for label in band_series.keys()
+        )
+    )
+    if len(condition_labels) != 2:
+        raise ValueError(
+            "plot_group_band_power_effect_evolution requires exactly two condition labels."
+        )
+
+    label1, label2 = condition_labels
+    band_colors = {band: get_band_color(band, config) for band in group_series_by_band}
+    roi_display = roi_name.replace("_", " ").title() if roi_name and roi_name != "all" else "All Channels"
+    rendered_bands = 0
+
+    for band_name, label_series in group_series_by_band.items():
+        first = label_series.get(label1)
+        second = label_series.get(label2)
+        if first is None or second is None:
+            continue
+
+        effect_matrix = _compute_paired_effect_matrix(
+            first,
+            second,
+            context=f"group timecourse effect for {band_name}",
+        )
+        if effect_matrix.shape[0] < 2 or effect_matrix.shape[1] != len(times):
+            continue
+
+        fig, ax = plt.subplots(1, 1, figsize=(5.4, 4.1))
+        fig.patch.set_facecolor("white")
+        _style_publication_axis(ax)
+
+        effect_color = band_colors.get(band_name, "0.2")
+        _draw_group_subject_traces(
+            ax,
+            times,
+            effect_matrix,
+            color=effect_color,
+        )
+
+        mean_trace = np.nanmean(effect_matrix, axis=0)
+        sem_trace = np.nanstd(effect_matrix, axis=0, ddof=1) / np.sqrt(effect_matrix.shape[0])
+        ci_lower = mean_trace - 1.96 * sem_trace
+        ci_upper = mean_trace + 1.96 * sem_trace
+
+        display_label_1 = _format_condition_display_label(label1, config)
+        display_label_2 = _format_condition_display_label(label2, config)
+        ax.plot(
+            times,
+            mean_trace,
+            color=effect_color,
+            lw=2.2,
+            label=f"{display_label_2} - {display_label_1} (n={effect_matrix.shape[0]})",
+        )
+        ax.fill_between(times, ci_lower, ci_upper, color=effect_color, alpha=0.2, lw=0)
+
+        significant_mask = _compute_group_curve_significance_mask(
+            np.asarray(first, dtype=float),
+            np.asarray(second, dtype=float),
+            config,
+        )
+        _draw_timecourse_significance_strip(ax, times, significant_mask)
+
+        ax.axvspan(baseline_window[0], baseline_window[1], color="0.88", alpha=0.7, zorder=0)
+        ax.axvspan(active_window[0], active_window[1], color=effect_color, alpha=0.08, zorder=0)
+        ax.axhline(0.0, color="0.4", linestyle="--", alpha=0.6, lw=1)
+        ax.axvline(0.0, color="0.4", linestyle="--", alpha=0.5, lw=1)
+        ax.axvline(active_window[0], color="0.6", linestyle=":", alpha=0.8, lw=0.9)
+        ax.set_xlim(float(times[0]), float(times[-1]))
+        ax.set_title(
+            band_name.capitalize(),
+            color=effect_color,
+            fontweight="bold",
+        )
+        ax.set_xlabel("Time (s)", fontsize=plot_cfg.font.medium)
+        ax.set_ylabel("Δ power / baseline", fontsize=plot_cfg.font.medium)
+        ax.legend(loc="upper left", frameon=False, fontsize=plot_cfg.font.small)
+        _draw_effect_window_summary_inset(
+            ax,
+            effect_values=_compute_window_mean_series(
+                effect_matrix,
+                times,
+                active_window,
+                context=f"group timecourse active-window effect for {band_name}",
+            ),
+            color=effect_color,
+            config=config,
+        )
+        ax.yaxis.grid(True, alpha=0.18, linewidth=0.6)
+        ax.xaxis.grid(False)
+        ax.text(
+            0.02,
+            0.02,
+            "Thin lines: paired subject effects | thick line: group mean effect",
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=plot_cfg.font.small,
+            color="0.4",
+        )
+        sns.despine(ax=ax, trim=True)
+
+        fig.suptitle(
+            f"Group time-resolved power effect | {roi_display} | {band_name.capitalize()}",
+            fontsize=plot_cfg.font.figure_title,
+            fontweight="bold",
+            y=0.99,
+        )
+        footer = (
+            f"Group: {subject} | n={effect_matrix.shape[0]} subjects | "
+            f"Effect: {display_label_2} - {display_label_1} | "
+            f"Baseline: [{baseline_window[0]:.2f}, {baseline_window[1]:.2f}] s | "
+            f"Active window: [{active_window[0]:.2f}, {active_window[1]:.2f}] s | "
+            "Thin lines: paired subject effects | thick line: mean paired effect ± 95% CI | "
+            "Inset: active-window paired effects"
+        )
+        save_fig(
+            fig,
+            save_dir / f"sub-{subject}_power_timecourse_effect_band-{band_name}{roi_suffix}",
+            footer=footer,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+            tight_layout_rect=(0, 0.04, 1, 0.98),
+            config=config,
+        )
+        rendered_bands += 1
+
+    if rendered_bands == 0:
+        logger.warning("No group band power effect timecourses were rendered.")
+        return False
+    return True
 
 
 def plot_band_power_evolution(
@@ -2390,6 +4491,8 @@ def plot_band_power_evolution(
     
     active_window = _get_active_window(config)
     tfr_baseline = _get_plotting_tfr_baseline_window(config)
+    display_start = float(min(tfr_baseline[0], 0.0))
+    display_end = float(active_window[1])
     
     # Check if there are valid trials to avoid empty plots
     has_valid_data = False
@@ -2401,16 +4504,12 @@ def plot_band_power_evolution(
     if not has_valid_data:
         logger.warning("No valid trials found across conditions for plot_band_power_evolution.")
         return False
-        
-    condition_colors = plt.cm.Set2(np.linspace(0.2, 0.8, len(conditions)))
+
+    condition_color_map = _get_condition_color_map([label for label, _ in conditions], config)
     band_colors = {band: get_band_color(band, config) for band in freq_bands.keys()}
-    
-    fig_width = min(4.0 * len(freq_bands), 16.0)
-    fig, axes = plt.subplots(1, len(freq_bands), figsize=(fig_width, 4.0), sharey=True)
-    if len(freq_bands) == 1:
-        axes = [axes]
-    
-    for cond_idx, (label, mask) in enumerate(conditions):
+    band_series: Dict[str, Dict[str, Any]] = {band_name: {} for band_name in freq_bands.keys()}
+
+    for label, mask in conditions:
         n_trials_cond = int(mask.sum())
         if n_trials_cond < 1:
             continue
@@ -2420,56 +4519,124 @@ def plot_band_power_evolution(
         psd_per_trial = []
         for trial_idx in range(len(tfr_cond)):
             tfr_trial = tfr_cond[[trial_idx]].average()
-            apply_baseline_and_crop(tfr_trial, baseline=tfr_baseline, mode="logratio", logger=logger)
-            tfr_trial_win = _crop_tfr_to_active(tfr_trial, active_window, logger)
-            if tfr_trial_win is not None:
-                psd_per_trial.append(tfr_trial_win.data)
+            apply_baseline_and_crop(
+                tfr_trial,
+                baseline=tfr_baseline,
+                mode=TIMECOURSE_BASELINE_MODE,
+                logger=logger,
+            )
+            times = np.asarray(tfr_trial.times)
+            tmin = max(float(times.min()), display_start)
+            tmax = min(float(times.max()), display_end)
+            if tmax <= tmin:
+                continue
+            tfr_trial_display = tfr_trial.copy().crop(tmin, tmax)
+            psd_per_trial.append(tfr_trial_display.data)
                 
         if not psd_per_trial:
             continue
             
         psd_per_trial = np.array(psd_per_trial)
         psd_per_trial_roi = psd_per_trial.mean(axis=1)
-        freqs = tfr_trial_win.freqs
-        times = tfr_trial_win.times
+        freqs = tfr_trial_display.freqs
+        times = tfr_trial_display.times
         
-        for band_idx, (band_name, (fmin, fmax)) in enumerate(freq_bands.items()):
-            ax = axes[band_idx]
-            
+        for band_name, (fmin, fmax) in freq_bands.items():
             fmask = (freqs >= fmin) & (freqs <= fmax)
             if not np.any(fmask):
                 continue
                 
             band_power_trials = psd_per_trial_roi[:, fmask, :].mean(axis=1)
             band_mean = band_power_trials.mean(axis=0)
-            
             band_sem = band_power_trials.std(axis=0, ddof=1) / np.sqrt(len(band_power_trials))
-            ci_lower = band_mean - 1.96 * band_sem
-            ci_upper = band_mean + 1.96 * band_sem
-            
-            color = condition_colors[cond_idx]
-            
-            ax.plot(times, band_mean, label=f"{label} (n={n_trials_cond})" if band_idx == 0 else "", color=color, lw=2)
-            ax.fill_between(times, ci_lower, ci_upper, color=color, alpha=0.2, lw=0)
-            
-    for band_idx, band_name in enumerate(freq_bands.keys()):
-        ax = axes[band_idx]
-        ax.set_title(band_name.capitalize(), color=band_colors.get(band_name, "0.2"), fontweight="bold")
-        ax.axhline(0, color="0.4", linestyle="--", alpha=0.5, lw=1)
-        ax.axvline(0, color="0.4", linestyle="--", alpha=0.5, lw=1)
-        ax.set_xlabel("Time (s)", fontsize=plot_cfg.font.medium)
-        if band_idx == 0:
-            ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.medium)
-            ax.legend(loc="best", frameon=False, fontsize=plot_cfg.font.small)
-        sns.despine(ax=ax, trim=True)
-        
+            band_series[band_name][label] = {
+                "times": times,
+                "mean": band_mean,
+                "ci_lower": band_mean - 1.96 * band_sem,
+                "ci_upper": band_mean + 1.96 * band_sem,
+                "n_trials": n_trials_cond,
+            }
+
     roi_display = roi_name.replace("_", " ").title() if roi_name and roi_name != "all" else "All Channels"
-    fig.suptitle(f"Continuous Time-Resolved Band Power Trace | {roi_display} (sub-{subject})", 
-                 fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.05)
-    
-    plt.tight_layout()
-    output_path = save_dir / f'sub-{subject}_power_continuous_trace_by_condition{roi_suffix}'
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi, 
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
+    footer = (
+        f"Subject: {subject} | Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}] s | "
+        f"Active window: [{active_window[0]:.2f}, {active_window[1]:.2f}] s | "
+        "Within-subject mean ± 95% CI"
+    )
+
+    for band_name in freq_bands.keys():
+        if not band_series[band_name]:
+            continue
+
+        fig, ax = plt.subplots(1, 1, figsize=(5.2, 4.0))
+        fig.patch.set_facecolor("white")
+        _style_publication_axis(ax)
+
+        for label, series in band_series[band_name].items():
+            color = condition_color_map[label]
+            ax.plot(
+                series["times"],
+                series["mean"],
+                label=(
+                    f"{_format_condition_display_label(label, config)} "
+                    f"(n={series['n_trials']})"
+                ),
+                color=color,
+                lw=2,
+            )
+            ax.fill_between(
+                series["times"],
+                series["ci_lower"],
+                series["ci_upper"],
+                color=color,
+                alpha=0.2,
+                lw=0,
+            )
+
+        ax.set_title(
+            band_name.capitalize(),
+            color=band_colors.get(band_name, "0.2"),
+            fontweight="bold",
+        )
+        ax.axvspan(tfr_baseline[0], tfr_baseline[1], color="0.88", alpha=0.7, zorder=0)
+        ax.axvspan(active_window[0], active_window[1], color=band_colors.get(band_name, "0.7"), alpha=0.08, zorder=0)
+        ax.axhline(1.0, color="0.4", linestyle="--", alpha=0.5, lw=1)
+        ax.axvline(0, color="0.4", linestyle="--", alpha=0.5, lw=1)
+        ax.axvline(active_window[0], color="0.6", linestyle=":", alpha=0.8, lw=0.9)
+        ax.set_xlim(display_start, display_end)
+        ax.set_xlabel("Time (s)", fontsize=plot_cfg.font.medium)
+        ax.set_ylabel("Power / baseline", fontsize=plot_cfg.font.medium)
+        ax.legend(loc="upper left", frameon=False, fontsize=plot_cfg.font.small)
+        ax.yaxis.grid(True, alpha=0.18, linewidth=0.6)
+        ax.xaxis.grid(False)
+        ax.text(
+            0.02,
+            0.02,
+            "Descriptive within-subject trace",
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=plot_cfg.font.small,
+            color="0.4",
+        )
+        sns.despine(ax=ax, trim=True)
+
+        fig.suptitle(
+            f"Descriptive time-resolved band power | {roi_display} | {band_name.capitalize()}",
+            fontsize=plot_cfg.font.figure_title,
+            fontweight="bold",
+            y=0.99,
+        )
+        output_path = save_dir / f"sub-{subject}_power_continuous_trace_by_condition_band-{band_name}{roi_suffix}"
+        save_fig(
+            fig,
+            output_path,
+            footer=footer,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+            tight_layout_rect=(0, 0.04, 1, 0.98),
+            config=config,
+        )
     return True

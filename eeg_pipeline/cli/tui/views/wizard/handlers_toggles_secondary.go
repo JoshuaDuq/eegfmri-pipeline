@@ -395,6 +395,36 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optPrepCleanEventsStrict:
 		m.prepCleanEventsStrict = !m.prepCleanEventsStrict
 		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCEnabled:
+		m.prepCleanEventsQCEnabled = !m.prepCleanEventsQCEnabled
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCEcgVarianceEnabled:
+		m.prepCleanEventsQCEcgVarianceEnabled = !m.prepCleanEventsQCEcgVarianceEnabled
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCEcgVarianceOutputColumn:
+		m.startTextEdit(textFieldPrepCleanEventsQCEcgVarianceOutputColumn)
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCEcgVarianceChannels:
+		m.startTextEdit(textFieldPrepCleanEventsQCEcgVarianceChannels)
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCEcgVarianceWindow:
+		m.startTextEdit(textFieldPrepCleanEventsQCEcgVarianceWindow)
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCPeripheralLowGammaEnabled:
+		m.prepCleanEventsQCPeripheralLowGammaEnabled = !m.prepCleanEventsQCPeripheralLowGammaEnabled
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCPeripheralLowGammaOutputColumn:
+		m.startTextEdit(textFieldPrepCleanEventsQCPeripheralLowGammaOutputColumn)
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCPeripheralLowGammaChannels:
+		m.startTextEdit(textFieldPrepCleanEventsQCPeripheralLowGammaChannels)
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCPeripheralLowGammaBand:
+		m.startTextEdit(textFieldPrepCleanEventsQCPeripheralLowGammaBand)
+		m.useDefaultAdvanced = false
+	case optPrepCleanEventsQCPeripheralLowGammaWindow:
+		m.startTextEdit(textFieldPrepCleanEventsQCPeripheralLowGammaWindow)
+		m.useDefaultAdvanced = false
 	// ECG channels
 	case optPrepEcgChannels:
 		m.startTextEdit(textFieldPrepEcgChannels)

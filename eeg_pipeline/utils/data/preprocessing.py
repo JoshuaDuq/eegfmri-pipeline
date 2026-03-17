@@ -11,15 +11,24 @@ Helper functions for preprocessing operations:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 import mne
 
 from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.utils.analysis.artifact_qc import (
+    band_power_metric,
+    mean_abs_correlation_metric,
+    pick_channels,
+    window_mask,
+)
+from eeg_pipeline.utils.config.loader import get_config_value
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +400,237 @@ def ensure_dataset_description(bids_root: Path, name: str = "EEG BIDS dataset") 
 ###################################################################
 
 
+def _require_mapping(value: Any, *, path: str) -> Mapping[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{path} must be a mapping.")
+    return value
+
+
+def _require_sequence(value: Any, *, path: str) -> Tuple[Any, ...]:
+    if value is None:
+        return tuple()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{path} must be a list.")
+    return tuple(value)
+
+
+def _require_float_pair(
+    value: Any,
+    *,
+    path: str,
+    default: Optional[Tuple[float, float]] = None,
+) -> Tuple[float, float]:
+    raw = default if value is None else value
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        raise ValueError(f"{path} must be a 2-item list [start, end].")
+    start = float(raw[0])
+    end = float(raw[1])
+    if not np.isfinite(start) or not np.isfinite(end):
+        raise ValueError(f"{path} values must be finite.")
+    if not start < end:
+        raise ValueError(f"{path} must satisfy start < end.")
+    return start, end
+
+
+@dataclass(frozen=True)
+class ECGCouplingQCConfig:
+    enabled: bool
+    output_column: str
+    channels: Tuple[str, ...]
+    window: Tuple[float, float]
+
+
+@dataclass(frozen=True)
+class PeripheralLowGammaQCConfig:
+    enabled: bool
+    output_column: str
+    channels: Tuple[str, ...]
+    band: Tuple[float, float]
+    window: Tuple[float, float]
+
+
+@dataclass(frozen=True)
+class CleanEventsQCConfig:
+    enabled: bool
+    ecg_coupling: ECGCouplingQCConfig
+    peripheral_low_gamma: PeripheralLowGammaQCConfig
+
+    @classmethod
+    def from_config(cls, config: Any) -> "CleanEventsQCConfig":
+        raw = _require_mapping(
+            get_config_value(config, "preprocessing.clean_events_qc", {}),
+            path="preprocessing.clean_events_qc",
+        )
+        default_active_window = tuple(
+            float(v)
+            for v in _require_float_pair(
+                get_config_value(config, "time_windows.active", [3.0, 10.5]),
+                path="time_windows.active",
+            )
+        )
+        ecg_raw = _require_mapping(
+            raw.get("ecg_coupling", {}),
+            path="preprocessing.clean_events_qc.ecg_coupling",
+        )
+        peripheral_raw = _require_mapping(
+            raw.get("peripheral_low_gamma", {}),
+            path="preprocessing.clean_events_qc.peripheral_low_gamma",
+        )
+        cfg = cls(
+            enabled=bool(raw.get("enabled", True)),
+            ecg_coupling=ECGCouplingQCConfig(
+                enabled=bool(ecg_raw.get("enabled", True)),
+                output_column=str(
+                    ecg_raw.get("output_column", "residual_ecg_coupling")
+                ).strip(),
+                channels=tuple(
+                    str(value).strip()
+                    for value in _require_sequence(
+                        ecg_raw.get("channels", ["ECG"]),
+                        path="preprocessing.clean_events_qc.ecg_coupling.channels",
+                    )
+                    if str(value).strip()
+                ),
+                window=_require_float_pair(
+                    ecg_raw.get("window"),
+                    path="preprocessing.clean_events_qc.ecg_coupling.window",
+                    default=default_active_window,
+                ),
+            ),
+            peripheral_low_gamma=PeripheralLowGammaQCConfig(
+                enabled=bool(peripheral_raw.get("enabled", True)),
+                output_column=str(
+                    peripheral_raw.get("output_column", "peripheral_low_gamma_power")
+                ).strip(),
+                channels=tuple(
+                    str(value).strip()
+                    for value in _require_sequence(
+                        peripheral_raw.get(
+                            "channels",
+                            ["Fp1", "Fp2", "FT9", "FT10", "TP9", "TP10"],
+                        ),
+                        path="preprocessing.clean_events_qc.peripheral_low_gamma.channels",
+                    )
+                    if str(value).strip()
+                ),
+                band=_require_float_pair(
+                    peripheral_raw.get("band"),
+                    path="preprocessing.clean_events_qc.peripheral_low_gamma.band",
+                    default=(30.0, 45.0),
+                ),
+                window=_require_float_pair(
+                    peripheral_raw.get("window"),
+                    path="preprocessing.clean_events_qc.peripheral_low_gamma.window",
+                    default=default_active_window,
+                ),
+            ),
+        )
+        if not cfg.enabled:
+            return cfg
+        if cfg.ecg_coupling.enabled:
+            if not cfg.ecg_coupling.output_column:
+                raise ValueError(
+                    "preprocessing.clean_events_qc.ecg_coupling.output_column must not be blank."
+                )
+            if not cfg.ecg_coupling.channels:
+                raise ValueError(
+                    "preprocessing.clean_events_qc.ecg_coupling.channels must not be empty when enabled."
+                )
+        if cfg.peripheral_low_gamma.enabled:
+            if not cfg.peripheral_low_gamma.output_column:
+                raise ValueError(
+                    "preprocessing.clean_events_qc.peripheral_low_gamma.output_column must not be blank."
+                )
+            if not cfg.peripheral_low_gamma.channels:
+                raise ValueError(
+                    "preprocessing.clean_events_qc.peripheral_low_gamma.channels must not be empty when enabled."
+                )
+        if not cfg.ecg_coupling.enabled and not cfg.peripheral_low_gamma.enabled:
+            raise ValueError(
+                "preprocessing.clean_events_qc.enabled=true requires at least one QC metric."
+            )
+        return cfg
+
+
+def _ecg_coupling_metric(
+    *,
+    epochs: mne.BaseEpochs,
+    channels: Sequence[str],
+    mask: np.ndarray,
+) -> np.ndarray:
+    picks = pick_channels(
+        epochs.info,
+        channels,
+        path="preprocessing.clean_events_qc.ecg_coupling.channels",
+    )
+    ecg_data = np.asarray(epochs.get_data(picks=picks), dtype=float)
+    eeg_data = np.asarray(epochs.get_data(picks="eeg"), dtype=float)
+    if eeg_data.ndim != 3 or eeg_data.shape[1] == 0:
+        raise ValueError("ECG coupling QC requires EEG channels.")
+    return mean_abs_correlation_metric(ecg_data[:, :, mask], eeg_data[:, :, mask])
+
+
+def _peripheral_low_gamma_metric(
+    *,
+    epochs: mne.BaseEpochs,
+    channels: Sequence[str],
+    band: Tuple[float, float],
+    mask: np.ndarray,
+) -> np.ndarray:
+    return band_power_metric(
+        epochs=epochs,
+        channels=channels,
+        band=band,
+        mask=mask,
+        path="preprocessing.clean_events_qc.peripheral_low_gamma.channels",
+    )
+
+
+def _compute_clean_events_qc_table(
+    *,
+    epochs: mne.BaseEpochs,
+    qc_cfg: CleanEventsQCConfig,
+) -> pd.DataFrame:
+    if not qc_cfg.enabled:
+        return pd.DataFrame(index=np.arange(len(epochs), dtype=int))
+    if not epochs.preload:
+        epochs.load_data()
+
+    times = np.asarray(epochs.times, dtype=float)
+    out = pd.DataFrame(index=np.arange(len(epochs), dtype=int))
+
+    if qc_cfg.ecg_coupling.enabled:
+        ecg_mask = window_mask(
+            times,
+            qc_cfg.ecg_coupling.window,
+            path="preprocessing.clean_events_qc.ecg_coupling.window",
+        )
+        out[qc_cfg.ecg_coupling.output_column] = _ecg_coupling_metric(
+            epochs=epochs,
+            channels=qc_cfg.ecg_coupling.channels,
+            mask=ecg_mask,
+        )
+
+    if qc_cfg.peripheral_low_gamma.enabled:
+        peripheral_mask = window_mask(
+            times,
+            qc_cfg.peripheral_low_gamma.window,
+            path="preprocessing.clean_events_qc.peripheral_low_gamma.window",
+        )
+        out[qc_cfg.peripheral_low_gamma.output_column] = _peripheral_low_gamma_metric(
+            epochs=epochs,
+            channels=qc_cfg.peripheral_low_gamma.channels,
+            band=qc_cfg.peripheral_low_gamma.band,
+            mask=peripheral_mask,
+        )
+
+    if out.shape[0] != len(epochs):
+        raise ValueError("Clean-events QC table length must match the number of epochs.")
+    return out.reset_index(drop=True)
+
+
 def _build_epoch_event_mask(
     events_df: pd.DataFrame,
     conditions: List[str],
@@ -513,6 +753,7 @@ def write_clean_events_tsv_for_epochs(
     task: str,
     bids_root: Path,
     epochs_path: Path,
+    config: Any,
     conditions: Optional[List[str]] = None,
     condition_columns: Optional[List[str]] = None,
     overwrite: bool = True,
@@ -540,6 +781,7 @@ def write_clean_events_tsv_for_epochs(
         return out_path
 
     epochs = mne.read_epochs(epochs_path, preload=False, verbose=False)
+    qc_cfg = CleanEventsQCConfig.from_config(config)
 
     if conditions is None:
         # Fallback to event_id keys if explicit conditions were not provided.
@@ -598,6 +840,12 @@ def write_clean_events_tsv_for_epochs(
 
     kept.insert(0, "trial_id", range(len(kept)))
     kept.insert(0, "epoch_index", range(len(kept)))
+    qc_table = _compute_clean_events_qc_table(epochs=epochs, qc_cfg=qc_cfg)
+    if len(qc_table) != len(kept):
+        raise ValueError(
+            f"QC table length mismatch for {subject_label}, task-{task}: {len(qc_table)} vs {len(kept)}."
+        )
+    kept = pd.concat([kept.reset_index(drop=True), qc_table], axis=1)
 
     kept.to_csv(out_path, sep="\t", index=False)
     ensure_events_sidecar(out_path, list(kept.columns))

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Tuple, List, Dict, Any, Optional, Union
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 
@@ -63,6 +64,18 @@ def get_condition_colors(config: Any = None) -> Dict[str, str]:
 def get_fdr_alpha(config: Any = None, default: float = 0.05) -> float:
     """Return FDR alpha threshold from config."""
     return float(get_config_value(config, "statistics.fdr_alpha", default))
+
+
+def _format_count_range(counts: List[int]) -> str:
+    """Format a list of sample counts as a compact exact value or range."""
+    valid_counts = [int(count) for count in counts if int(count) > 0]
+    if not valid_counts:
+        return "0"
+    count_min = min(valid_counts)
+    count_max = max(valid_counts)
+    if count_min == count_max:
+        return str(count_min)
+    return f"{count_min}-{count_max}"
 
 
 def get_numeric_feature_columns(
@@ -355,20 +368,191 @@ def _compute_paired_wilcoxon_stats(
     condition1_values: np.ndarray,
     condition2_values: np.ndarray,
 ) -> Tuple[float, float]:
-    """Compute Wilcoxon signed-rank test and effect size for paired data.
+    """Compute Wilcoxon signed-rank test and rank-biserial effect size for paired data.
     
     Returns:
-        Tuple of (p_value, effect_size_d)
+        Tuple of (p_value, rank_biserial_r)
     """
     from scipy.stats import wilcoxon
-    
-    _, p_value = wilcoxon(condition2_values, condition1_values)
-    effect_size = compute_paired_cohens_d(condition1_values, condition2_values)
-    return float(p_value), float(effect_size) if np.isfinite(effect_size) else 0.0
+
+    paired_condition1 = np.asarray(condition1_values, dtype=float)
+    paired_condition2 = np.asarray(condition2_values, dtype=float)
+    finite_mask = np.isfinite(paired_condition1) & np.isfinite(paired_condition2)
+    differences = paired_condition2[finite_mask] - paired_condition1[finite_mask]
+
+    if differences.size < 2 or np.allclose(differences, 0.0):
+        return 1.0, 0.0
+
+    _, p_value = wilcoxon(differences, zero_method="wilcox", alternative="two-sided")
+    return float(p_value), _compute_paired_rank_biserial(differences)
+
+
+def _compute_paired_rank_biserial(differences: np.ndarray) -> float:
+    """Compute the matched-pairs rank-biserial correlation for paired differences."""
+    from scipy.stats import rankdata
+
+    finite_differences = np.asarray(differences, dtype=float)
+    finite_differences = finite_differences[np.isfinite(finite_differences)]
+    nonzero_mask = ~np.isclose(finite_differences, 0.0)
+    nonzero_differences = finite_differences[nonzero_mask]
+
+    if nonzero_differences.size == 0:
+        return 0.0
+
+    ranks = rankdata(np.abs(nonzero_differences), method="average")
+    positive_rank_sum = float(np.sum(ranks[nonzero_differences > 0]))
+    negative_rank_sum = float(np.sum(ranks[nonzero_differences < 0]))
+    total_rank_sum = positive_rank_sum + negative_rank_sum
+    if np.isclose(total_rank_sum, 0.0):
+        return 0.0
+    return float((positive_rank_sum - negative_rank_sum) / total_rank_sum)
+
+
+def _format_qvalue_label(q_value: float) -> str:
+    """Format q-values consistently for compact panel annotations."""
+    return "q<.001" if q_value < 0.001 else f"q={q_value:.3f}"
+
+
+def _compute_mean_ci(values: np.ndarray) -> Tuple[float, float]:
+    """Return mean and 95% CI half-width for finite values."""
+    finite_values = np.asarray(values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        return np.nan, 0.0
+    mean_value = float(np.nanmean(finite_values))
+    if finite_values.size < 2:
+        return mean_value, 0.0
+    sem = float(np.nanstd(finite_values, ddof=1) / np.sqrt(finite_values.size))
+    return mean_value, 1.96 * sem
+
+
+def _compute_paired_differences(
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+) -> np.ndarray:
+    """Return finite paired differences using the plotting convention condition2 - condition1."""
+    paired_condition1 = np.asarray(condition1_values, dtype=float)
+    paired_condition2 = np.asarray(condition2_values, dtype=float)
+    if paired_condition1.shape != paired_condition2.shape:
+        return np.array([], dtype=float)
+
+    differences = paired_condition2 - paired_condition1
+    return differences[np.isfinite(differences)]
+
+
+def _draw_paired_difference_summary(
+    ax: Any,
+    differences: np.ndarray,
+    *,
+    x_position: float,
+    color: str,
+) -> None:
+    """Draw a compact paired-difference summary column on an existing comparison axis."""
+    if differences.size == 0:
+        return
+
+    strip_left = x_position - 0.22
+    strip_right = x_position + 0.22
+    ax.axvspan(strip_left, strip_right, color=color, alpha=0.08, zorder=0)
+    ax.hlines(
+        0.0,
+        strip_left,
+        strip_right,
+        color="0.55",
+        linewidth=0.8,
+        linestyle="--",
+        alpha=0.8,
+        zorder=1,
+    )
+
+    rng = np.random.default_rng(1234)
+    jitter = rng.uniform(x_position - 0.08, x_position + 0.08, size=differences.size)
+    ax.scatter(
+        jitter,
+        differences,
+        s=14,
+        color=color,
+        alpha=0.7,
+        zorder=12,
+        linewidths=0,
+    )
+
+    mean_difference, ci_half_width = _compute_mean_ci(differences)
+    ax.errorbar(
+        [x_position],
+        [mean_difference],
+        yerr=[[ci_half_width], [ci_half_width]],
+        fmt="o",
+        color="black",
+        markerfacecolor="white",
+        markersize=5.0,
+        capsize=2.5,
+        linewidth=1.0,
+        zorder=20,
+    )
+
+
+def _compute_axis_limits(values: np.ndarray) -> Tuple[float, float]:
+    """Compute padded y-axis limits for a one-dimensional numeric series."""
+    finite_values = np.asarray(values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        return -0.05, 0.05
+
+    value_min = float(np.nanmin(finite_values))
+    value_max = float(np.nanmax(finite_values))
+    value_range = value_max - value_min
+    if value_range <= 0.0:
+        scale = max(abs(value_min), abs(value_max), 1.0)
+        padding = 0.1 * scale
+    else:
+        padding = 0.1 * value_range
+    return value_min - padding, value_max + padding
+
+
+def _compute_difference_axis_limits(differences: np.ndarray) -> Tuple[float, float]:
+    """Compute padded y-axis limits for paired differences, always including zero."""
+    finite_differences = np.asarray(differences, dtype=float)
+    finite_differences = finite_differences[np.isfinite(finite_differences)]
+    if finite_differences.size == 0:
+        return -0.05, 0.05
+
+    value_min = min(float(np.nanmin(finite_differences)), 0.0)
+    value_max = max(float(np.nanmax(finite_differences)), 0.0)
+    value_range = value_max - value_min
+    if value_range <= 0.0:
+        scale = max(abs(value_min), abs(value_max), 1.0)
+        padding = 0.1 * scale
+    else:
+        padding = 0.12 * value_range
+    return value_min - padding, value_max + padding
+
+
+def _style_difference_axis(
+    delta_ax: Any,
+    *,
+    color: str,
+) -> None:
+    """Apply the shared style for the dedicated paired-difference axis."""
+    delta_ax.set_facecolor((1.0, 1.0, 1.0, 0.0))
+    delta_ax.patch.set_facecolor(color)
+    delta_ax.patch.set_alpha(0.08)
+    delta_ax.yaxis.tick_right()
+    delta_ax.yaxis.set_label_position("right")
+    delta_ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+    delta_ax.tick_params(axis="y", labelsize=7, colors="0.35", pad=2)
+    delta_ax.tick_params(axis="x", labelsize=9, colors="0.2")
+    delta_ax.grid(axis="y", alpha=0.12, linewidth=0.5)
+    delta_ax.grid(axis="x", visible=False)
+    delta_ax.spines["top"].set_visible(False)
+    delta_ax.spines["left"].set_visible(False)
+    delta_ax.spines["right"].set_linewidth(0.8)
+    delta_ax.spines["bottom"].set_linewidth(0.8)
 
 
 def _plot_single_band_comparison(
     ax: Any,
+    delta_ax: Any,
     condition1_values: np.ndarray,
     condition2_values: np.ndarray,
     band: str,
@@ -383,10 +567,11 @@ def _plot_single_band_comparison(
     plot_cfg: Any,
     config: Any,
 ) -> None:
-    """Plot single band comparison with box plots, scatter, and connecting lines.
+    """Plot a paired band comparison with raw values and an explicit delta summary.
     
     Args:
         ax: Matplotlib axes
+        delta_ax: Dedicated axis for the paired-difference summary
         condition1_values: First condition values
         condition2_values: Second condition values
         band: Band name for title
@@ -407,63 +592,133 @@ def _plot_single_band_comparison(
             transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray"
         )
         ax.set_xticks([])
+        delta_ax.set_visible(False)
         return
     
-    box_positions = [0, 1]
-    
+    box_positions = [0.0, 1.0]
+    condition1_values = np.asarray(condition1_values, dtype=float)
+    condition2_values = np.asarray(condition2_values, dtype=float)
+    differences = _compute_paired_differences(condition1_values, condition2_values)
+
+    if differences.size > 0:
+        pair_order = np.argsort(0.5 * (condition1_values + condition2_values))
+        paired_condition1 = condition1_values[pair_order]
+        paired_condition2 = condition2_values[pair_order]
+        ax.plot(
+            [box_positions[0], box_positions[1]],
+            np.vstack([paired_condition1, paired_condition2]),
+            color="0.75",
+            linewidth=0.6,
+            alpha=0.6,
+            zorder=1,
+        )
+
     colors = [condition1_color, condition2_color]
     data_list = [condition1_values, condition2_values]
-    
+    clip_bounds = [
+        (-np.inf, box_positions[0]),
+        (box_positions[1], np.inf),
+    ]
+
     for j, (data, color) in enumerate(zip(data_list, colors)):
         pos = box_positions[j]
-        # Half violin
-        v = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.5)
-        for b in v['bodies']:
-            b.get_paths()[0].vertices[:, 0] = np.clip(b.get_paths()[0].vertices[:, 0], pos, np.inf)
-            b.set_facecolor(color)
-            b.set_edgecolor(color)
-            b.set_alpha(0.6)
-        
-        # Boxplot
-        ax.boxplot(data, positions=[pos - 0.1], widths=0.1, showfliers=False,
-                   patch_artist=True, boxprops=dict(facecolor="white", color=color),
-                   medianprops=dict(color="black", linewidth=1.5),
-                   whiskerprops=dict(color=color), capprops=dict(color=color))
-        
-        # Jitter scatter
+        clip_min, clip_max = clip_bounds[j]
+
+        violin = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.72)
+        for body in violin["bodies"]:
+            vertices = body.get_paths()[0].vertices
+            vertices[:, 0] = np.clip(vertices[:, 0], clip_min, clip_max)
+            body.set_facecolor(color)
+            body.set_edgecolor(color)
+            body.set_alpha(0.22)
+            body.set_linewidth(0.8)
+
+        box_center = pos - 0.11 if j == 0 else pos + 0.11
+        ax.boxplot(
+            data,
+            positions=[box_center],
+            widths=0.16,
+            showfliers=False,
+            patch_artist=True,
+            boxprops=dict(facecolor="white", color=color, linewidth=1.0),
+            medianprops=dict(color="black", linewidth=1.2),
+            whiskerprops=dict(color=color, linewidth=1.0),
+            capprops=dict(color=color, linewidth=1.0),
+        )
+
         rng = np.random.default_rng(42 + j)
-        jitter = rng.uniform(pos - 0.25, pos - 0.15, size=len(data))
-        ax.scatter(jitter, data, s=8, color=color, alpha=0.4, zorder=10, linewidths=0)
-    
-    all_values = np.concatenate([condition1_values, condition2_values])
-    y_min = np.nanmin(all_values)
-    y_max = np.nanmax(all_values)
-    y_range = y_max - y_min if y_max > y_min else 0.1
-    padding_bottom = 0.1 * y_range
-    padding_top = 0.3 * y_range
-    ax.set_ylim(y_min - padding_bottom, y_max + padding_top)
-    
+        jitter_low = pos - 0.22 if j == 0 else pos + 0.02
+        jitter_high = pos - 0.03 if j == 0 else pos + 0.22
+        jitter = rng.uniform(jitter_low, jitter_high, size=len(data))
+        ax.scatter(
+            jitter,
+            data,
+            s=12,
+            color=color,
+            alpha=0.65,
+            zorder=10,
+            linewidths=0,
+        )
+
+        mean_value, ci_half_width = _compute_mean_ci(data)
+        ax.errorbar(
+            [box_center],
+            [mean_value],
+            yerr=[[ci_half_width], [ci_half_width]],
+            fmt="o",
+            color="black",
+            markersize=4.5,
+            capsize=2.5,
+            linewidth=1.0,
+            zorder=20,
+        )
+
+    condition_axis_values = np.concatenate([condition1_values, condition2_values])
+    main_y_min, main_y_max = _compute_axis_limits(condition_axis_values)
+    ax.set_ylim(main_y_min, main_y_max)
+
+    if differences.size > 0:
+        _style_difference_axis(delta_ax, color=band_color)
+        delta_ax.set_xlim(-0.45, 0.45)
+        delta_y_min, delta_y_max = _compute_difference_axis_limits(differences)
+        delta_ax.set_ylim(delta_y_min, delta_y_max)
+        _draw_paired_difference_summary(
+            delta_ax,
+            differences,
+            x_position=0.0,
+            color=band_color,
+        )
+        delta_ax.set_xticks([0.0])
+        delta_ax.set_xticklabels(["Δ"])
+    else:
+        delta_ax.set_visible(False)
+
     if q_value is not None and effect_size is not None:
-        sig_marker = "†" if is_significant else ""
-        q_str = f"q={q_value:.3f}" if q_value >= 0.001 else "q<.001"
-        annotation_text = f"{q_str}{sig_marker}\nd={effect_size:.2f}"
+        sig_marker = "  *" if is_significant else ""
+        annotation_text = f"{_format_qvalue_label(q_value)} | r={effect_size:.2f}{sig_marker}"
         significance_color = get_significance_color(is_significant, config)
-        annotation_y = y_max + 0.05 * y_range
-        
-        ax.annotate(
+        ax.text(
+            0.5,
+            1.01,
             annotation_text,
-            xy=(0.5, annotation_y),
+            transform=ax.transAxes,
             ha="center",
-            fontsize=plot_cfg.font.medium,
+            va="bottom",
+            fontsize=plot_cfg.font.small,
             color=significance_color,
             fontweight="bold" if is_significant else "normal",
         )
-    
+
+    ax.set_xlim(-0.4, 1.4)
     ax.set_xticks(box_positions)
     ax.set_xticklabels([label1, label2], fontsize=9)
-    ax.set_title(band.capitalize(), fontweight="bold", color=band_color)
+    ax.set_title(band.capitalize(), fontweight="bold", color=band_color, pad=12)
+    ax.yaxis.grid(True, alpha=0.18, linewidth=0.6)
+    ax.xaxis.grid(False)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(0.8)
+    ax.spines["bottom"].set_linewidth(0.8)
 
 
 def _load_condition_effects_files(
@@ -561,7 +816,12 @@ def _normalize_condition_effects_df(
         result["comparison_type"] = comparison_type
     
     if "effect_size_d" not in result.columns:
-        result["effect_size_d"] = 0.0
+        if "cohens_d" in result.columns:
+            result["effect_size_d"] = pd.to_numeric(result["cohens_d"], errors="coerce")
+        elif "hedges_g" in result.columns:
+            result["effect_size_d"] = pd.to_numeric(result["hedges_g"], errors="coerce")
+        else:
+            result["effect_size_d"] = 0.0
     
     if "q_value" not in result.columns:
         p_series = result.get("p_value", pd.Series(dtype=float, index=result.index))
@@ -767,6 +1027,28 @@ def _draw_significance_bracket(
     return y + bracket_height + text_offset + 0.03
 
 
+def _summarize_paired_sample_counts(
+    data_by_band: Dict[str, Tuple[np.ndarray, np.ndarray]],
+    sample_unit: str,
+) -> str:
+    """Summarize complete paired sample counts across bands."""
+    paired_counts = [len(values1) for values1, values2 in data_by_band.values() if len(values1) == len(values2)]
+    return f"N: {_format_count_range(paired_counts)} {sample_unit}"
+
+
+def _summarize_multi_window_sample_counts(
+    data_by_band: Dict[str, Dict[str, np.ndarray]],
+    sample_unit: str,
+) -> str:
+    """Summarize per-window sample counts across bands for multi-window plots."""
+    counts = [
+        len(values)
+        for segment_data in data_by_band.values()
+        for values in segment_data.values()
+    ]
+    return f"N per window: {_format_count_range(counts)} {sample_unit}"
+
+
 def plot_multi_window_comparison(
     data_by_band: Dict[str, Dict[str, np.ndarray]],
     subject: str,
@@ -875,13 +1157,12 @@ def plot_multi_window_comparison(
             color = segment_color_map[seg]
             pos = positions[i]
             
-            # Half violin
-            v = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.5)
-            for b in v['bodies']:
-                b.get_paths()[0].vertices[:, 0] = np.clip(b.get_paths()[0].vertices[:, 0], pos, np.inf)
-                b.set_facecolor(color)
-                b.set_edgecolor(color)
-                b.set_alpha(0.6)
+            violin = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.6)
+            for body in violin["bodies"]:
+                body.set_facecolor(color)
+                body.set_edgecolor(color)
+                body.set_alpha(0.22)
+                body.set_linewidth(0.8)
             
             # Boxplot
             ax.boxplot(data, positions=[pos - 0.1], widths=0.1, showfliers=False,
@@ -891,8 +1172,8 @@ def plot_multi_window_comparison(
             
             # Jitter scatter
             rng = np.random.default_rng(42 + i)
-            jitter = rng.uniform(pos - 0.25, pos - 0.15, size=len(data))
-            ax.scatter(jitter, data, s=8, color=color, alpha=0.4, zorder=10, linewidths=0)
+            jitter = rng.uniform(pos - 0.12, pos + 0.12, size=len(data))
+            ax.scatter(jitter, data, s=10, color=color, alpha=0.55, zorder=10, linewidths=0)
         
         all_values = np.concatenate([segment_data[seg] for seg in available_segments])
         y_min = np.nanmin(all_values)
@@ -932,8 +1213,6 @@ def plot_multi_window_comparison(
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
     
-    first_band = bands_in_order[0]
-    n_trials = len(data_by_band[first_band][segments[0]]) if segments[0] in data_by_band[first_band] else 0
     n_tests = len(qvalues)
     
     roi_display = roi_name.replace("_", " ").title() if roi_name and roi_name != "all" else "All Channels"
@@ -946,24 +1225,29 @@ def plot_multi_window_comparison(
     info_parts = [
         f"Subject: {subject}",
         f"ROI: {roi_display}",
-        f"N: {n_trials} {sample_unit}",
+        _summarize_multi_window_sample_counts(data_by_band, sample_unit),
         "Wilcoxon signed-rank",
         f"FDR: {n_significant}/{n_tests} significant (*p<.05, **p<.01, ***p<.001)"
     ]
     title_parts.append(" | ".join(info_parts))
     
-    fig.suptitle("\n".join(title_parts), fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
-    
-    plt.tight_layout()
+    fig.suptitle(
+        title_parts[0],
+        fontsize=plot_cfg.font.suptitle,
+        fontweight="bold",
+        y=0.99,
+    )
+    footer = " | ".join(info_parts)
     save_fig(
         fig, save_path,
+        footer=footer,
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 1, 0.97),
         config=config
     )
-    plt.close(fig)
     
     if logger:
         logger.info(
@@ -1078,14 +1362,15 @@ def plot_paired_comparison(
                 qvalues[band] = (p_value, qvals[i], effect_size, rejected[i])
             n_significant = int(np.sum(rejected))
     
-    fig_width_per_band = 3
+    fig_width_per_band = 4.2
     fig_height = 5
-    fig, axes = plt.subplots(
-        1, n_bands, figsize=(fig_width_per_band * n_bands, fig_height), squeeze=False
-    )
+    fig = plt.figure(figsize=(fig_width_per_band * n_bands, fig_height))
+    outer_grid = fig.add_gridspec(1, n_bands, wspace=0.34)
     
     for band_idx, band in enumerate(bands_in_order):
-        ax = axes.flatten()[band_idx]
+        band_grid = outer_grid[0, band_idx].subgridspec(1, 2, width_ratios=[4.8, 1.0], wspace=0.08)
+        ax = fig.add_subplot(band_grid[0, 0])
+        delta_ax = fig.add_subplot(band_grid[0, 1])
         condition1_values, condition2_values = data_by_band[band]
         
         q_value = None
@@ -1096,6 +1381,7 @@ def plot_paired_comparison(
         
         _plot_single_band_comparison(
             ax=ax,
+            delta_ax=delta_ax,
             condition1_values=condition1_values,
             condition2_values=condition2_values,
             band=band,
@@ -1111,11 +1397,10 @@ def plot_paired_comparison(
             config=config,
         )
     
-    n_trials = len(data_by_band[bands_in_order[0]][0]) if bands_in_order else 0
     n_tests = len(qvalues)
     
-    title_parts = [f"{feature_label}: {label1} vs {label2} (Paired Comparison)"]
-    
+    title_parts = [f"{feature_label}: {label1} vs {label2}"]
+
     info_parts = [f"Subject: {subject}"]
     if roi_name:
         roi_display = (
@@ -1123,29 +1408,28 @@ def plot_paired_comparison(
         )
         info_parts.append(f"ROI: {roi_display}")
     info_parts.extend([
-        f"N: {n_trials} {sample_unit}",
+        _summarize_paired_sample_counts(data_by_band, sample_unit),
         "Wilcoxon signed-rank",
-        f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
+        f"Δ: {label2} - {label1}",
+        f"FDR: {n_significant}/{n_tests} significant"
     ])
-    title_parts.append(" | ".join(info_parts))
-    
     fig.suptitle(
-        "\n".join(title_parts),
+        title_parts[0],
         fontsize=plot_cfg.font.suptitle,
         fontweight="bold",
-        y=1.02
+        y=0.99,
     )
-    
-    plt.tight_layout()
+    footer = " | ".join(info_parts)
     save_fig(
         fig, save_path,
+        footer=footer,
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 1, 0.97),
         config=config
     )
-    plt.close(fig)
     
     if logger:
         logger.info(
@@ -1375,13 +1659,12 @@ def _plot_multi_group_separate_bands(
             color = group_colors[groups.index(g) % len(group_colors)]
             pos = positions[i]
             
-            # Half violin
-            v = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.5)
-            for b in v['bodies']:
-                b.get_paths()[0].vertices[:, 0] = np.clip(b.get_paths()[0].vertices[:, 0], pos, np.inf)
-                b.set_facecolor(color)
-                b.set_edgecolor(color)
-                b.set_alpha(0.6)
+            violin = ax.violinplot(data, positions=[pos], showextrema=False, widths=0.6)
+            for body in violin["bodies"]:
+                body.set_facecolor(color)
+                body.set_edgecolor(color)
+                body.set_alpha(0.22)
+                body.set_linewidth(0.8)
             
             # Boxplot
             ax.boxplot(data, positions=[pos - 0.1], widths=0.1, showfliers=False,
@@ -1391,7 +1674,7 @@ def _plot_multi_group_separate_bands(
             
             # Scatter jitter
             rng = np.random.default_rng(42 + i)
-            jitter = rng.uniform(pos - 0.25, pos - 0.15, size=len(data))
+            jitter = rng.uniform(pos - 0.12, pos + 0.12, size=len(data))
             ax.scatter(jitter, data, s=15, color=color, alpha=0.5, zorder=3, linewidths=0)
         
         all_vals = np.concatenate([band_data[g] for g in available_groups])

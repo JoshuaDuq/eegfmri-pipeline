@@ -480,6 +480,13 @@ def _setup_surface_forward_model_configured(
         mindist=float(mindist_mm),
         verbose=False,
     )
+    fwd = mne.convert_forward_solution(
+        fwd,
+        surf_ori=True,
+        copy=False,
+        use_cps=True,
+        verbose=False,
+    )
     if logger:
         logger.info("Surface forward model: %d sources", int(fwd["nsource"]))
     return fwd, src

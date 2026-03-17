@@ -131,6 +131,37 @@ def _resolve_task_is_rest(
     return bool(config.get("preprocessing.task_is_rest", False))
 
 
+def _validate_rest_epoch_overlap_for_analysis(
+    config: EEGConfig,
+    task_is_rest: bool,
+) -> None:
+    if not task_is_rest:
+        return
+
+    raw_overlap = config.get("preprocessing.rest_epochs_overlap", 0.0)
+    try:
+        overlap = float(raw_overlap)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "preprocessing.rest_epochs_overlap must be numeric for resting-state analysis loading."
+        ) from exc
+
+    if not np.isfinite(overlap):
+        raise ValueError(
+            "preprocessing.rest_epochs_overlap must be finite for resting-state analysis loading."
+        )
+    if overlap < 0:
+        raise ValueError(
+            "preprocessing.rest_epochs_overlap must be greater than or equal to 0."
+        )
+    if overlap > 0:
+        raise ValueError(
+            "Resting-state aligned analysis does not support preprocessing.rest_epochs_overlap > 0, "
+            "because overlapping epochs would be treated as independent trial rows. "
+            "Set preprocessing.rest_epochs_overlap = 0."
+        )
+
+
 def _handle_missing_events(
     epochs: mne.Epochs,
     align: str,
@@ -181,6 +212,7 @@ def load_epochs_for_analysis(
 
     _validate_align_mode(align)
     resolved_task_is_rest = _resolve_task_is_rest(config, task_is_rest)
+    _validate_rest_epoch_overlap_for_analysis(config, resolved_task_is_rest)
     
     epochs_path = find_clean_epochs_path(
         subject, task, deriv_root=deriv_root, config=config, constants=constants

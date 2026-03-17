@@ -1,0 +1,262 @@
+paths:
+  signature_dir: null
+  signature_maps: []
+  # Example:
+  # signature_maps:
+  #   - name: "NPS"
+  #     path: "pain_signatures/NPS_thresholded.nii.gz"
+  #   - name: "SIIPS1"
+  #     path: "pain_signatures/SIIPS1_thresholded.nii.gz"
+
+eeg_bold_coupling:
+  output_dir: null
+
+  roi_builder:
+    enabled: false
+    output_dir: null  # Null -> <deriv_root>/roi_library/eeg_bold_coupling
+    template_subject: "fsaverage"
+    parcellation: "aparc.a2009s"
+    min_vertices_default: 25
+    min_component_vertices_default: 25
+    abs_weight_threshold: 0.0
+    exclude_discordant_vertices: true
+    connected_components: true
+    component_selection: "all"  # "largest" | "all"
+    items: []
+    # Study 2 uses frozen direct label files below.
+
+  rois:
+    template_subject: "fsaverage"
+    items:
+      - name: "right_operculo_periinsular"
+        template_subject: "fsaverage"
+        label_files:
+          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/rh.study2_right_operculo_parietal.label"
+      - name: "midcingulate_pre_sma"
+        template_subject: "fsaverage"
+        label_files:
+          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/lh.study2_cingulo_pre_sma.label"
+          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/rh.study2_cingulo_pre_sma.label"
+    # Frozen ROI provenance:
+    # /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/study2_roi_manifest.json
+
+  eeg:
+    bands: ["alpha", "beta"]
+    active_window: [3.0, 10.5]
+    baseline_window: [-5.0, -0.01]
+    feature_batch_size: 256
+    method: "lcmv"
+    spacing: "oct6"
+    subjects_dir: null
+    mindist_mm: 5.0
+    reg: 0.05
+    snr: 3.0
+    loose: 0.2
+    depth: 0.8
+
+  fmri:
+    contrast_name: "plateau_trials"
+    input_source: "fmriprep"
+    fmriprep_space: "T1w"
+    require_fmriprep: true
+    extraction_method: "surface_glm"
+    selection_column: "stim_phase"
+    selection_values: ["plateau"]
+    hrf_model: "spm"
+    drift_model: "cosine"
+    high_pass_hz: 0.008
+    low_pass_hz: null
+    smoothing_fwhm: 0.0
+    confounds_strategy: "auto"
+    lss_other_regressors: "all"
+
+  covariates:
+    model_terms: ["temperature", "temperature_sq", "fd", "eeg_artifact", "exp_site", "exp_global", "block_start"]
+    temperature_column: "events_stimulus_temp"
+    include_temperature_squared: true
+    site_column: "events_selected_surface"
+    extra_numeric_columns: []
+
+  nuisance:
+    fd:
+      enabled: true
+      output_column: "fd"
+      source_column: "framewise_displacement"
+      hrf_model: "spm"
+      censor_above: 0.5
+
+    dvars:
+      enabled: true
+      output_column: "dvars"
+      source_column: "std_dvars"
+      hrf_model: "spm"
+      censor_above: 2.5
+
+    eeg_artifact:
+      enabled: true
+      output_column: "eeg_artifact"
+      required_components:
+        - "event_residual_ecg_coupling"
+        - "event_peripheral_low_gamma_power"
+      component_z_threshold: 5.0
+      composite_threshold: 3.0
+      event_numeric_columns:
+        - "residual_ecg_coupling"
+        - "peripheral_low_gamma_power"
+      # These columns are produced upstream by preprocessing.clean_events_qc
+      # in eeg_config.yaml. Keep the clean-events export and coupling config aligned.
+
+      global_amplitude:
+        enabled: false
+        window: [-5.0, 10.5]
+
+      ecg_amplitude:
+        enabled: false
+        channels: []
+        window: [-5.0, 10.5]
+
+      peripheral_band_power:
+        enabled: false
+        channels: []
+        band: [30.0, 45.0]
+        window: [3.0, 10.5]
+        # Example channels:
+        # channels: ["Fp1", "Fp2", "FT9", "FT10", "T7", "T8", "TP9", "TP10"]
+
+    censoring:
+      require_all_model_terms_finite: true
+
+  fmri_qc:
+    enabled: true
+    design:
+      max_abs_target_other_correlation: 0.5
+      min_target_efficiency: 0.01
+      max_target_variance: 100.0
+    roi:
+      outlier_mad_threshold: 5.0
+      max_outlier_proportion: 0.1
+
+  sensitivities:
+    painful_only:
+      enabled: false
+      output_name: "painful_only"
+      binary_column: null
+      painful_values: ["1"]
+      rating_column: null
+      min_rating: null
+      # Columns must exist in the merged trial table. Clean-events metadata is carried
+      # forward with an "events_" prefix, for example:
+      # binary_column: "events_binary_outcome_coded"
+      # rating_column: "events_vas_final_coded_rating"
+
+    alternative_fmri:
+      enabled: false
+      name: "alternative_fmri"
+      beta_dir_template: null
+      # Example:
+      # beta_dir_template: "{deriv_root}/sub-{subject}/fmri/glmsingle/task-{task}/contrast-{contrast_name}"
+      # Expected file layout matches the LSS trial-beta layout:
+      #   <beta_dir_template>/trial_betas/run-XX/sub-XX_task-<task>_run-XX_trial-YYY_beta.nii.gz
+
+    delta_temperature:
+      enabled: false
+      output_name: "delta_temperature"
+      temperature_column: "temperature"
+      model_terms: ["temperature", "temperature_sq", "fd", "eeg_artifact", "delta_temperature"]
+
+    temperature_categorical:
+      enabled: false
+      output_name: "temperature_categorical"
+      temperature_column: "temperature"
+      factor_column: "temperature_factor"
+      model_terms: ["temperature_factor", "fd", "eeg_artifact", "exp_global", "block_start"]
+      max_levels: null
+
+    residualized_correlation:
+      enabled: true
+      output_name: "residualized_correlation"
+      bootstrap_iterations: 5000
+      permutation_iterations: 5000
+
+    primary_permutation:
+      enabled: true
+      output_name: "primary_permutation"
+      bootstrap_iterations: 5000
+      permutation_iterations: 5000
+
+    source_methods:
+      enabled: true
+      items:
+        - name: "eloreta"
+          method: "eloreta"
+          bands: ["alpha", "beta"]
+
+    anatomical_specificity:
+      enabled: true
+      items:
+        - name: "control_rois"
+          rois:
+            - name: "left_operculo_periinsular_control"
+              template_subject: "fsaverage"
+              parcellation: "aparc.a2009s"
+              annot_labels:
+                - "G_Ins_lg_and_S_cent_ins-lh"
+                - "G_and_S_subcentral-lh"
+                - "S_circular_insula_inf-lh"
+                - "S_circular_insula_sup-lh"
+            - name: "posterior_midcingulate_control"
+              template_subject: "fsaverage"
+              parcellation: "aparc.a2009s"
+              annot_labels:
+                - "G_and_S_cingul-Mid-Post-lh"
+                - "G_and_S_cingul-Mid-Post-rh"
+
+    artifact_models:
+      enabled: true
+      items:
+        - name: "expanded_artifact"
+          nuisance_overrides:
+            eeg_artifact:
+              required_components:
+                - "event_residual_ecg_coupling"
+                - "event_peripheral_low_gamma_power"
+                - "global_amplitude"
+              global_amplitude:
+                enabled: true
+                window: [-5.0, 10.5]
+
+    within_between:
+      enabled: true
+      output_name: "within_between"
+
+  secondary:
+    local_signature_expression:
+      enabled: false
+      signatures: []
+      abs_weight_threshold: 0.0
+      normalize_weights: "l1"
+
+  statistics:
+    backend: "nlme_lme_ar1"
+    min_trials_per_subject: 20
+    min_runs_per_subject: 2
+    include_run_fixed_effect: true
+    use_outcome_variance: true
+    alpha: 0.05
+    rscript_path: "Rscript"
+    fit_method: "reml"
+    max_iterations: 200
+    em_iterations: 50
+    singular_tolerance: 1.0e-8
+
+  negative_controls:
+    trial_shuffle:
+      enabled: true
+      output_name: "trial_shuffle"
+
+  alignment:
+    key_mode: "run_trial_number"
+
+  runtime:
+    preflight: true
+    profile_stages: true

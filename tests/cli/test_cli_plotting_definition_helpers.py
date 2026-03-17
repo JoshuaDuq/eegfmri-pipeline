@@ -10,6 +10,9 @@ def test_map_plot_id_to_plotters_returns_expected_tokens() -> None:
     result = map_plot_id_to_plotters("power_by_condition", ["power"])
     assert result == ["power.plot_power_condition_comparison"]
 
+    timecourse_result = map_plot_id_to_plotters("power_timecourse", ["power"])
+    assert timecourse_result == ["power.plot_power_timecourse_visualization"]
+
 
 def test_map_plot_id_to_plotters_returns_none_for_unknown_plot_id() -> None:
     assert map_plot_id_to_plotters("unknown_plot", ["power"]) is None

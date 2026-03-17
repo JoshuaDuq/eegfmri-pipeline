@@ -445,6 +445,7 @@ class PreprocessingPipeline(PipelineBase):
                     task=task,
                     bids_root=self.bids_root,
                     epochs_path=epochs_path,
+                    config=self.config,
                     conditions=conditions,
                     condition_columns=condition_columns,
                     overwrite=overwrite,

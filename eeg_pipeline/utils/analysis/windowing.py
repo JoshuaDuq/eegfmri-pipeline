@@ -239,8 +239,33 @@ class TimeWindowSpec:
             self._build_from_explicit_windows(explicit_by_name)
         elif self.tmin is not None or self.tmax is not None:
             self._build_from_tmin_tmax()
-        elif self.name:
-            self._add_empty_window(self.name, reason="no_explicit_windows_defined")
+        else:
+            self._build_full_epoch_window()
+
+    def _build_full_epoch_window(self) -> None:
+        """Build a default full-epoch analysis window when no other window is defined."""
+        window_name = self.name if self.name else "analysis"
+        full_mask = np.ones_like(self.times, dtype=bool)
+        start = float(self.times[0])
+        end = float(self._time_axis_upper_bound())
+
+        self.masks[window_name] = full_mask
+        self.metadata[window_name] = WindowMetadata(
+            start=start,
+            end=end,
+            clamped=False,
+            n_samples=int(full_mask.sum()),
+            valid=True,
+            coverage=1.0,
+        )
+
+        if self.logger:
+            self.logger.info(
+                "Auto-generating default full-epoch window '%s': [%.3f, %.3f]",
+                window_name,
+                start,
+                end,
+            )
     
     def _build_from_tmin_tmax(self):
         """Auto-generate a window from CLI tmin/tmax when no explicit windows defined.
@@ -319,9 +344,10 @@ class TimeWindowSpec:
         
         time_min_available = self.times[0]
         time_max_available = self.times[-1]
+        time_upper_bound = self._time_axis_upper_bound()
         
         final_start, final_end, was_clamped = self._clamp_window_bounds(
-            start, end, time_min_available, time_max_available
+            start, end, time_min_available, time_upper_bound
         )
         
         mask = (self.times >= final_start) & (self.times < final_end)
@@ -349,7 +375,7 @@ class TimeWindowSpec:
             else:
                 self.logger.debug(
                     f"Window '{full_name}' outside current range (expected): "
-                    f"req=[{start:.2f}, {end:.2f}], available=[{time_min_available:.2f}, {time_max_available:.2f}]"
+                f"req=[{start:.2f}, {end:.2f}], available=[{time_min_available:.2f}, {time_max_available:.2f}]"
                 )
         
         self.masks[full_name] = mask
@@ -361,6 +387,20 @@ class TimeWindowSpec:
             valid=is_valid,
             coverage=coverage,
         )
+
+    def _time_axis_upper_bound(self) -> float:
+        """Return the exclusive upper bound for half-open masks on this time axis."""
+        if self.times.size <= 1:
+            sample_period = 1.0 / self.sfreq if np.isfinite(self.sfreq) and self.sfreq > 0 else 1e-9
+            return float(self.times[-1]) + float(sample_period)
+
+        diffs = np.diff(self.times.astype(float))
+        positive_diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+        if positive_diffs.size == 0:
+            sample_period = 1.0 / self.sfreq if np.isfinite(self.sfreq) and self.sfreq > 0 else 1e-9
+        else:
+            sample_period = float(np.median(positive_diffs))
+        return float(self.times[-1]) + float(sample_period)
     
     def _clamp_window_bounds(
         self,

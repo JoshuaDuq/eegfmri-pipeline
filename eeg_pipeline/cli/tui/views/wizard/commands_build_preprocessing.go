@@ -10,6 +10,10 @@ import (
 func (m Model) buildPreprocessingAdvancedArgs() []string {
 	var args []string
 
+	appendSetOverride := func(key string, value interface{}) {
+		args = append(args, "--set", fmt.Sprintf("%s=%v", key, value))
+	}
+
 	if !m.prepUsePyprep {
 		args = append(args, "--no-pyprep")
 	}
@@ -159,6 +163,43 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 	if !m.prepCleanEventsStrict {
 		args = append(args, "--no-clean-events-strict")
+	}
+	if m.prepCleanEventsQCEnabled != true {
+		appendSetOverride("preprocessing.clean_events_qc.enabled", m.prepCleanEventsQCEnabled)
+	}
+	if m.prepCleanEventsQCEcgVarianceEnabled != true {
+		appendSetOverride("preprocessing.clean_events_qc.ecg_coupling.enabled", m.prepCleanEventsQCEcgVarianceEnabled)
+	}
+	if strings.TrimSpace(m.prepCleanEventsQCEcgVarianceOutputColumn) != "" &&
+		m.prepCleanEventsQCEcgVarianceOutputColumn != "residual_ecg_coupling" {
+		appendSetOverride("preprocessing.clean_events_qc.ecg_coupling.output_column", m.prepCleanEventsQCEcgVarianceOutputColumn)
+	}
+	if strings.TrimSpace(m.prepCleanEventsQCEcgVarianceChannels) != "" &&
+		m.prepCleanEventsQCEcgVarianceChannels != "[\"ECG\"]" {
+		appendSetOverride("preprocessing.clean_events_qc.ecg_coupling.channels", m.prepCleanEventsQCEcgVarianceChannels)
+	}
+	if strings.TrimSpace(m.prepCleanEventsQCEcgVarianceWindow) != "" &&
+		m.prepCleanEventsQCEcgVarianceWindow != "[-2,0]" {
+		appendSetOverride("preprocessing.clean_events_qc.ecg_coupling.window", m.prepCleanEventsQCEcgVarianceWindow)
+	}
+	if m.prepCleanEventsQCPeripheralLowGammaEnabled != true {
+		appendSetOverride("preprocessing.clean_events_qc.peripheral_low_gamma.enabled", m.prepCleanEventsQCPeripheralLowGammaEnabled)
+	}
+	if strings.TrimSpace(m.prepCleanEventsQCPeripheralLowGammaOutputColumn) != "" &&
+		m.prepCleanEventsQCPeripheralLowGammaOutputColumn != "peripheral_low_gamma_power" {
+		appendSetOverride("preprocessing.clean_events_qc.peripheral_low_gamma.output_column", m.prepCleanEventsQCPeripheralLowGammaOutputColumn)
+	}
+	if strings.TrimSpace(m.prepCleanEventsQCPeripheralLowGammaChannels) != "" &&
+		m.prepCleanEventsQCPeripheralLowGammaChannels != "[\"Fp1\",\"Fp2\",\"FT9\",\"FT10\",\"TP9\",\"TP10\"]" {
+		appendSetOverride("preprocessing.clean_events_qc.peripheral_low_gamma.channels", m.prepCleanEventsQCPeripheralLowGammaChannels)
+	}
+	if strings.TrimSpace(m.prepCleanEventsQCPeripheralLowGammaBand) != "" &&
+		m.prepCleanEventsQCPeripheralLowGammaBand != "[30,45]" {
+		appendSetOverride("preprocessing.clean_events_qc.peripheral_low_gamma.band", m.prepCleanEventsQCPeripheralLowGammaBand)
+	}
+	if strings.TrimSpace(m.prepCleanEventsQCPeripheralLowGammaWindow) != "" &&
+		m.prepCleanEventsQCPeripheralLowGammaWindow != "[-2,0]" {
+		appendSetOverride("preprocessing.clean_events_qc.peripheral_low_gamma.window", m.prepCleanEventsQCPeripheralLowGammaWindow)
 	}
 
 	// ECG channels

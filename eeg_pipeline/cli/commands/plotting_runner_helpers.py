@@ -11,6 +11,66 @@ from eeg_pipeline.cli.commands.plotting_item_overrides import apply_plot_item_ov
 from eeg_pipeline.cli.commands.plotting_selection import unique_in_order
 from eeg_pipeline.utils.config.loader import ConfigDict
 
+
+SHARED_COMPARISON_OVERRIDE_KEYS = {
+    "compare_windows",
+    "comparison_windows",
+    "compare_columns",
+    "comparison_segment",
+    "comparison_column",
+    "comparison_values",
+    "comparison_labels",
+    "comparison_rois",
+}
+
+
+def _collect_shared_group_overrides(
+    plot_ids: List[str],
+    plot_item_configs: Dict[str, Dict[str, List[str]]],
+) -> Dict[str, Dict[str, List[str]]]:
+    """Collect group-wide comparison overrides and reject conflicts."""
+    shared_by_group: Dict[str, Dict[str, List[str]]] = {}
+
+    for plot_id in plot_ids:
+        definition = PLOT_BY_ID.get(plot_id)
+        if definition is None or not definition.group:
+            continue
+
+        overrides = plot_item_configs.get(plot_id, {})
+        if not overrides:
+            continue
+
+        group_shared = shared_by_group.setdefault(definition.group, {})
+        for key in SHARED_COMPARISON_OVERRIDE_KEYS:
+            if key not in overrides:
+                continue
+
+            values = list(overrides[key])
+            if key in group_shared and group_shared[key] != values:
+                raise ValueError(
+                    "Conflicting --plot-item-config values for shared comparison setting "
+                    f"{key!r} in plot group {definition.group!r}."
+                )
+            group_shared[key] = values
+
+    return shared_by_group
+
+
+def _resolve_plot_overrides(
+    plot_id: str,
+    plot_item_configs: Dict[str, Dict[str, List[str]]],
+    shared_group_overrides: Dict[str, Dict[str, List[str]]],
+) -> Dict[str, List[str]]:
+    """Merge group-shared comparison overrides with plot-specific overrides."""
+    definition = PLOT_BY_ID.get(plot_id)
+    if definition is None or not definition.group:
+        return dict(plot_item_configs.get(plot_id, {}))
+
+    resolved = dict(shared_group_overrides.get(definition.group, {}))
+    resolved.update(plot_item_configs.get(plot_id, {}))
+    return resolved
+
+
 def render_plots_with_per_plot_config(
     plot_ids: List[str],
     plot_item_configs: Dict[str, Dict[str, List[str]]],
@@ -26,6 +86,7 @@ def render_plots_with_per_plot_config(
     from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects
     from eeg_pipeline.plotting.orchestration.erp import visualize_erp_for_subjects
 
+    shared_group_overrides = _collect_shared_group_overrides(plot_ids, plot_item_configs)
     total = len(plot_ids)
     for idx, plot_id in enumerate(plot_ids, start=1):
         definition = PLOT_BY_ID.get(plot_id)
@@ -33,7 +94,7 @@ def render_plots_with_per_plot_config(
             continue
 
         plot_config = ConfigDict(copy.deepcopy(dict(config)))
-        overrides = plot_item_configs.get(plot_id, {})
+        overrides = _resolve_plot_overrides(plot_id, plot_item_configs, shared_group_overrides)
         if overrides:
             apply_plot_item_overrides(plot_config, overrides)
 
@@ -167,6 +228,7 @@ def run_group_plotting(
     from eeg_pipeline.plotting.orchestration.features import (
         visualize_band_power_topomaps_for_group,
         visualize_power_by_condition_for_group,
+        visualize_power_timecourse_for_group,
         visualize_power_spectral_density_for_group,
     )
 
@@ -174,9 +236,11 @@ def run_group_plotting(
     group_plotters = {
         "band_power_topomaps": visualize_band_power_topomaps_for_group,
         "power_by_condition": visualize_power_by_condition_for_group,
+        "power_timecourse": visualize_power_timecourse_for_group,
         "power_spectral_density": visualize_power_spectral_density_for_group,
     }
     supported = set(group_plotters.keys())
+    shared_group_overrides = _collect_shared_group_overrides(plot_ids, plot_item_configs)
 
     total = len(plot_ids)
     for idx, plot_id in enumerate(plot_ids, start=1):
@@ -193,7 +257,7 @@ def run_group_plotting(
             continue
 
         plot_config = ConfigDict(copy.deepcopy(dict(config)))
-        overrides = plot_item_configs.get(plot_id, {})
+        overrides = _resolve_plot_overrides(plot_id, plot_item_configs, shared_group_overrides)
         if overrides:
             apply_plot_item_overrides(plot_config, overrides)
 

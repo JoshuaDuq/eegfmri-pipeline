@@ -13,6 +13,7 @@ def map_plot_id_to_plotters(plot_id: str, feature_categories: List[str]) -> Opti
     plot_id_to_plotter = {
         "power_by_condition": "plot_power_condition_comparison",
         "power_spectral_density": "plot_psd_visualization",
+        "power_timecourse": "plot_power_timecourse_visualization",
         "band_power_topomaps": "plot_power_summary",
         "cross_frequency_power_correlation": "plot_power_condition_comparison",
         "connectivity_by_condition": "plot_connectivity_condition",

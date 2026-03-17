@@ -1,0 +1,120 @@
+eeg_bold_coupling:
+  output_dir: "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/data/derivatives/eeg_bold_coupling_smoke_robustness"
+
+  rois:
+    template_subject: "fsaverage"
+    items:
+      - name: "right_operculo_periinsular"
+        template_subject: "fsaverage"
+        label_files:
+          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/rh.study2_right_operculo_parietal.label"
+      - name: "midcingulate_pre_sma"
+        template_subject: "fsaverage"
+        label_files:
+          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/lh.study2_cingulo_pre_sma.label"
+          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/utils/config/paradigms/pain/roi_library/study2/fsaverage/label/rh.study2_cingulo_pre_sma.label"
+
+  covariates:
+    model_terms: ["temperature", "temperature_sq", "fd", "eeg_artifact", "exp_site", "exp_global", "block_start"]
+    temperature_column: "events_stimulus_temp"
+    include_temperature_squared: true
+    site_column: "events_selected_surface"
+
+  nuisance:
+    fd:
+      enabled: true
+      output_column: "fd"
+      source_column: "framewise_displacement"
+      hrf_model: "spm"
+      censor_above: 0.5
+
+    dvars:
+      enabled: true
+      output_column: "dvars"
+      source_column: "std_dvars"
+      hrf_model: "spm"
+      censor_above: 2.5
+
+    eeg_artifact:
+      enabled: true
+      output_column: "eeg_artifact"
+      required_components:
+        - "event_residual_ecg_coupling"
+        - "event_peripheral_low_gamma_power"
+      component_z_threshold: 5.0
+      composite_threshold: 3.0
+      event_numeric_columns:
+        - "residual_ecg_coupling"
+        - "peripheral_low_gamma_power"
+
+      global_amplitude:
+        enabled: false
+        window: [-5.0, 10.5]
+
+      ecg_amplitude:
+        enabled: false
+        channels: []
+        window: [-5.0, 10.5]
+
+      peripheral_band_power:
+        enabled: false
+        channels: []
+        band: [30.0, 45.0]
+        window: [3.0, 10.5]
+
+    censoring:
+      require_all_model_terms_finite: true
+
+  fmri_qc:
+    enabled: true
+    design:
+      max_abs_target_other_correlation: 0.5
+      min_target_efficiency: 0.01
+      max_target_variance: 100.0
+    roi:
+      outlier_mad_threshold: 5.0
+      max_outlier_proportion: 0.1
+
+  sensitivities:
+    residualized_correlation:
+      enabled: false
+
+    primary_permutation:
+      enabled: false
+
+    source_methods:
+      enabled: true
+      items:
+        - name: "eloreta"
+          method: "eloreta"
+          bands: ["alpha", "beta"]
+
+    anatomical_specificity:
+      enabled: false
+      items: []
+
+    artifact_models:
+      enabled: true
+      items:
+        - name: "expanded_artifact"
+          nuisance_overrides:
+            eeg_artifact:
+              required_components:
+                - "event_residual_ecg_coupling"
+                - "event_peripheral_low_gamma_power"
+                - "global_amplitude"
+              global_amplitude:
+                enabled: true
+                window: [-5.0, 10.5]
+
+    within_between:
+      enabled: true
+      output_name: "within_between"
+
+  statistics:
+    use_outcome_variance: true
+
+  negative_controls:
+    trial_shuffle:
+      enabled: true
+      output_name: "trial_shuffle"

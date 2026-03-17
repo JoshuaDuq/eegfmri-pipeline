@@ -121,6 +121,19 @@ preprocessing:
   write_clean_events: true           # Write post-rejection (kept-epochs) *_proc-clean_events.tsv in derivatives
   clean_events_overwrite: true       # Overwrite existing clean events.tsv
   clean_events_strict: true          # Fail preprocessing if clean events.tsv cannot be written/aligned
+  clean_events_qc:
+    enabled: true
+    ecg_coupling:
+      enabled: true
+      output_column: "residual_ecg_coupling"
+      channels: ["ECG"]
+      window: *active_window
+    peripheral_low_gamma:
+      enabled: true
+      output_column: "peripheral_low_gamma_power"
+      channels: ["Fp1", "Fp2", "FT9", "FT10", "TP9", "TP10"]
+      band: [30.0, 45.0]
+      window: *active_window
 
 pyprep:
   ransac: true
@@ -1177,10 +1190,10 @@ plotting:
       annotate_descriptive: false
       sig_mask_params:
         marker: "o"
-        markerfacecolor: "none"
-        markeredgecolor: "g"
-        linewidth: 0.8
-        markersize: 3
+        markerfacecolor: "white"
+        markeredgecolor: "black"
+        markeredgewidth: 0.8
+        markersize: 4
     tfr:
       log_base: *log_base
       percentage_multiplier: *percentage_multiplier

@@ -457,7 +457,7 @@ def _process_subjects_parallel(
         f"Starting TFR visualization ({mode_str}): {len(subjects)} subject(s), task={task} "
         f"[parallel, n_jobs={n_jobs}]"
     )
-    results = Parallel(n_jobs=n_jobs, backend="loky", verbose=10)(
+    results = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(_visualize_single_subject)(
             subject,
             task,

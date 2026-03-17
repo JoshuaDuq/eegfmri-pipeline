@@ -71,6 +71,34 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	if strings.TrimSpace(icaLabelsVal) == "" {
 		icaLabelsVal = "(default)"
 	}
+	cleanEventsQCEcgVarianceOutputColumnVal := m.prepCleanEventsQCEcgVarianceOutputColumn
+	if m.editingText && m.editingTextField == textFieldPrepCleanEventsQCEcgVarianceOutputColumn {
+		cleanEventsQCEcgVarianceOutputColumnVal = m.textBuffer + "█"
+	}
+	cleanEventsQCEcgVarianceChannelsVal := m.prepCleanEventsQCEcgVarianceChannels
+	if m.editingText && m.editingTextField == textFieldPrepCleanEventsQCEcgVarianceChannels {
+		cleanEventsQCEcgVarianceChannelsVal = m.textBuffer + "█"
+	}
+	cleanEventsQCEcgVarianceWindowVal := m.prepCleanEventsQCEcgVarianceWindow
+	if m.editingText && m.editingTextField == textFieldPrepCleanEventsQCEcgVarianceWindow {
+		cleanEventsQCEcgVarianceWindowVal = m.textBuffer + "█"
+	}
+	cleanEventsQCPeripheralLowGammaOutputColumnVal := m.prepCleanEventsQCPeripheralLowGammaOutputColumn
+	if m.editingText && m.editingTextField == textFieldPrepCleanEventsQCPeripheralLowGammaOutputColumn {
+		cleanEventsQCPeripheralLowGammaOutputColumnVal = m.textBuffer + "█"
+	}
+	cleanEventsQCPeripheralLowGammaChannelsVal := m.prepCleanEventsQCPeripheralLowGammaChannels
+	if m.editingText && m.editingTextField == textFieldPrepCleanEventsQCPeripheralLowGammaChannels {
+		cleanEventsQCPeripheralLowGammaChannelsVal = m.textBuffer + "█"
+	}
+	cleanEventsQCPeripheralLowGammaBandVal := m.prepCleanEventsQCPeripheralLowGammaBand
+	if m.editingText && m.editingTextField == textFieldPrepCleanEventsQCPeripheralLowGammaBand {
+		cleanEventsQCPeripheralLowGammaBandVal = m.textBuffer + "█"
+	}
+	cleanEventsQCPeripheralLowGammaWindowVal := m.prepCleanEventsQCPeripheralLowGammaWindow
+	if m.editingText && m.editingTextField == textFieldPrepCleanEventsQCPeripheralLowGammaWindow {
+		cleanEventsQCPeripheralLowGammaWindowVal = m.textBuffer + "█"
+	}
 	eogChannelsVal := m.prepEogChannels
 	if m.editingText && m.editingTextField == textFieldPrepEogChannels {
 		eogChannelsVal = m.textBuffer + "█"
@@ -517,6 +545,46 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			label = "Clean Events Strict"
 			value = m.boolToOnOff(m.prepCleanEventsStrict)
 			hint = "Fail if clean events.tsv cannot be written"
+		case optPrepCleanEventsQCEnabled:
+			label = "Clean Events QC"
+			value = m.boolToOnOff(m.prepCleanEventsQCEnabled)
+			hint = "Compute trial-level QC metrics for clean events"
+		case optPrepCleanEventsQCEcgVarianceEnabled:
+			label = "QC ECG Coupling"
+			value = m.boolToOnOff(m.prepCleanEventsQCEcgVarianceEnabled)
+			hint = "Enable ECG-to-EEG coupling artifact metric"
+		case optPrepCleanEventsQCEcgVarianceOutputColumn:
+			label = "QC ECG Column"
+			value = cleanEventsQCEcgVarianceOutputColumnVal
+			hint = "Output column name for ECG coupling metric"
+		case optPrepCleanEventsQCEcgVarianceChannels:
+			label = "QC ECG Channels"
+			value = cleanEventsQCEcgVarianceChannelsVal
+			hint = "JSON array of ECG channels"
+		case optPrepCleanEventsQCEcgVarianceWindow:
+			label = "QC ECG Window"
+			value = cleanEventsQCEcgVarianceWindowVal
+			hint = "JSON array [tmin,tmax] in seconds"
+		case optPrepCleanEventsQCPeripheralLowGammaEnabled:
+			label = "QC Low-Gamma"
+			value = m.boolToOnOff(m.prepCleanEventsQCPeripheralLowGammaEnabled)
+			hint = "Enable peripheral low-gamma QC metric"
+		case optPrepCleanEventsQCPeripheralLowGammaOutputColumn:
+			label = "QC Gamma Column"
+			value = cleanEventsQCPeripheralLowGammaOutputColumnVal
+			hint = "Output column name for low-gamma metric"
+		case optPrepCleanEventsQCPeripheralLowGammaChannels:
+			label = "QC Gamma Channels"
+			value = cleanEventsQCPeripheralLowGammaChannelsVal
+			hint = "JSON array of peripheral channels"
+		case optPrepCleanEventsQCPeripheralLowGammaBand:
+			label = "QC Gamma Band"
+			value = cleanEventsQCPeripheralLowGammaBandVal
+			hint = "JSON array [low,high] in Hz"
+		case optPrepCleanEventsQCPeripheralLowGammaWindow:
+			label = "QC Gamma Window"
+			value = cleanEventsQCPeripheralLowGammaWindowVal
+			hint = "JSON array [tmin,tmax] in seconds"
 		// ECG channels
 		case optPrepEcgChannels:
 			label = "ECG Channels"
