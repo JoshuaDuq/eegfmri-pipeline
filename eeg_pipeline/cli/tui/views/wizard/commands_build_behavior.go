@@ -399,6 +399,10 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if strings.TrimSpace(m.temporalTargetColumn) != "" {
 			args = append(args, "--temporal-target-column", strings.TrimSpace(m.temporalTargetColumn))
 		}
+		if strings.TrimSpace(m.temporalFreqsHzSpec) != "" {
+			args = append(args, "--temporal-freqs-hz")
+			args = append(args, splitCSVList(m.temporalFreqsHzSpec)...)
+		}
 		appendBoolPair(
 			m.temporalSplitByCondition,
 			"--temporal-split-by-condition",

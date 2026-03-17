@@ -785,9 +785,9 @@ class PreprocessingPipeline(PipelineBase):
                 }
                 condition_column = None
                 condition_idx = None
-                candidates = get_condition_column_candidates(config_obj)
+                candidates = list(get_condition_column_candidates(config_obj))
                 if not candidates:
-                    candidates = ["trial_type", "condition"]
+                    candidates = ["condition", "trial_type"]
                 for candidate in candidates:
                     idx = header_lookup.get(candidate.lower())
                     if idx is not None:

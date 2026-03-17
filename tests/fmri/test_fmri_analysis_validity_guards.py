@@ -22,12 +22,15 @@ from fmri_pipeline.analysis.contrast_builder import (
     _resolve_fmri_stats_artifact,
     _validate_consistent_trs,
     _validate_events_against_bold_run,
+    build_contrast_from_runs_detailed,
     compute_contrast_map,
     discover_bold_runs,
     load_contrast_config,
     load_contrast_config_section,
     _remap_events_by_condition_columns,
 )
+from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
+from fmri_pipeline.analysis.reporting import run_fmri_plotting_and_report
 from fmri_pipeline.analysis.trial_signatures import (
     TrialInfo,
     TrialSignatureExtractionConfig,
@@ -1015,3 +1018,97 @@ def test_build_lss_events_keeps_group_specific_other_regressors() -> None:
         "other_group_44_3",
         "other_group_45_3",
     }
+
+
+def test_build_contrast_from_runs_detailed_raises_when_requested_design_qc_write_fails(tmp_path: Path) -> None:
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=False,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        formula=None,
+        name="pain-vs-rest",
+        runs=[1],
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+        write_design_matrix=True,
+    )
+    glm_result = SimpleNamespace(
+        flm="flm",
+        included_bold_paths=[tmp_path / "run-01_bold.nii.gz"],
+        included_events_paths=[tmp_path / "run-01_events.tsv"],
+        included_confounds_paths=[None],
+        skipped_runs=[],
+        total_cond_a_events=1,
+        total_cond_b_events=1,
+        confound_columns=[],
+        all_conditions=["cond_a_pain", "cond_b_pain"],
+        synthetic_labels=[],
+    )
+
+    with patch(
+        "fmri_pipeline.analysis.contrast_builder.discover_bold_runs",
+        return_value=[(tmp_path / "run-01_bold.nii.gz", tmp_path / "run-01_events.tsv", 1)],
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder.discover_confounds",
+        return_value=None,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder.fit_first_level_glm_multi_run",
+        return_value=glm_result,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._write_design_matrices",
+        side_effect=OSError("disk full"),
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder.compute_contrast_map",
+        return_value=("contrast-map", "cond_a_pain - cond_b_pain", "z_score"),
+    ):
+        with pytest.raises(OSError, match="disk full"):
+            build_contrast_from_runs_detailed(
+                bids_fmri_root=tmp_path,
+                bids_derivatives=tmp_path,
+                subject="0001",
+                task="pain",
+                cfg=cfg,
+                output_dir=tmp_path / "contrast",
+            )
+
+
+def test_run_fmri_plotting_and_report_raises_when_provenance_write_fails(tmp_path: Path) -> None:
+    cfg = FmriPlottingConfig(
+        enabled=True,
+        html_report=False,
+        formats=("png",),
+        space="both",
+        include_motion_qc=False,
+        include_carpet_qc=False,
+        include_tsnr_qc=False,
+        include_design_qc=False,
+        include_signatures=False,
+    )
+
+    with patch(
+        "fmri_pipeline.analysis.reporting.generate_signature_tables",
+        return_value=[],
+    ), patch(
+        "pathlib.Path.write_text",
+        side_effect=OSError("provenance write failed"),
+    ):
+        with pytest.raises(OSError, match="provenance write failed"):
+            run_fmri_plotting_and_report(
+                contrast_dir=tmp_path,
+                subject="0001",
+                task="pain",
+                contrast_name="pain-vs-rest",
+                cfg=cfg,
+            )

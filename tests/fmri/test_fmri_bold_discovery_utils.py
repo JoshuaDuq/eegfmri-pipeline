@@ -152,6 +152,25 @@ def test_coerce_condition_value_matches_series_dtype_best_effort() -> None:
     assert coerce_condition_value("not-a-number", pd.Series([1, 2, 3])) == "not-a-number"
 
 
+def test_parse_optional_positive_float_attr_surfaces_unexpected_accessor_errors() -> None:
+    class BrokenConfig:
+        def __getattr__(self, _name: str) -> float:
+            raise RuntimeError("broken config accessor")
+
+    with pytest.raises(RuntimeError, match="broken config accessor"):
+        _parse_optional_positive_float_attr(BrokenConfig(), "low_pass_hz")
+
+
+def test_coerce_condition_value_surfaces_unexpected_series_accessor_errors() -> None:
+    class BrokenSeries:
+        @property
+        def dtype(self) -> str:
+            raise RuntimeError("broken dtype accessor")
+
+    with pytest.raises(RuntimeError, match="broken dtype accessor"):
+        coerce_condition_value("10", BrokenSeries())
+
+
 def test_select_confounds_returns_empty_when_input_missing(tmp_path: Path) -> None:
     missing = tmp_path / "missing.tsv"
     confounds_df, columns = select_confounds(missing, strategy="auto")

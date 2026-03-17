@@ -1626,7 +1626,10 @@ def _resolve_condition_labels_from_context(ctx: Any, n_epochs: int) -> Optional[
     aligned_events = getattr(ctx, "aligned_events", None)
     if isinstance(aligned_events, pd.DataFrame):
         lookup = {str(col).strip().lower(): str(col) for col in aligned_events.columns}
-        for candidate in get_condition_column_candidates(getattr(ctx, "config", None)):
+        candidates = list(get_condition_column_candidates(getattr(ctx, "config", None)))
+        if not candidates:
+            candidates = ["condition", "trial_type"]
+        for candidate in candidates:
             resolved = lookup.get(candidate.lower())
             if resolved is None:
                 continue

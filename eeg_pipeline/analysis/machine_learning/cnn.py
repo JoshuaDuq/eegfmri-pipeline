@@ -332,7 +332,6 @@ def nested_loso_cnn_classification(
     y_prob_all = np.full(len(y), np.nan, dtype=float)
     fold_ids = np.zeros(len(y), dtype=int)
     test_indices = np.arange(len(y), dtype=int)
-    failed_folds = 0
 
     for fold_idx, (train_idx, test_idx) in enumerate(outer_splits):
         fold_number = int(fold_idx + 1)
@@ -342,12 +341,10 @@ def nested_loso_cnn_classification(
         groups_train = groups[train_idx]
 
         if len(np.unique(y_train)) < 2:
-            maj = int(np.median(y_train)) if len(y_train) > 0 else 0
-            y_pred_all[test_idx] = maj
-            y_prob_all[test_idx] = np.nan
-            fold_ids[test_idx] = fold_number
-            failed_folds += 1
-            continue
+            raise ValueError(
+                f"CNN fold {fold_number} training data contains only one class. "
+                "Subject-wise cross-validation requires both classes in every training fold."
+            )
 
         try:
             y_pred, y_prob = fit_predict_cnn_binary_classifier(
@@ -363,12 +360,7 @@ def nested_loso_cnn_classification(
             y_prob_all[test_idx] = y_prob
             fold_ids[test_idx] = fold_number
         except Exception as exc:
-            log.warning("CNN fold %d failed (%s); falling back to majority prediction.", int(fold_idx), exc)
-            maj = int(np.median(y_train)) if len(y_train) > 0 else 0
-            y_pred_all[test_idx] = maj
-            y_prob_all[test_idx] = np.nan
-            fold_ids[test_idx] = fold_number
-            failed_folds += 1
+            raise RuntimeError(f"CNN fold {fold_number} failed.") from exc
 
     result = ClassificationResult(
         y_true=y,
@@ -377,7 +369,7 @@ def nested_loso_cnn_classification(
         groups=groups,
         fold_ids=fold_ids,
         test_indices=test_indices,
-        failed_fold_count=int(failed_folds),
+        failed_fold_count=0,
         n_folds_total=int(len(outer_splits)),
     )
     log.info(result.summary())

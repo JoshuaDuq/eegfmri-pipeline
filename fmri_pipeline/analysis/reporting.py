@@ -1248,7 +1248,7 @@ def run_fmri_plotting_and_report(
     signature_specs: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Best-effort plotting + report for a contrast directory.
+    Generate plotting outputs and report artifacts for a contrast directory.
 
     Returns metadata about generated outputs.
     """
@@ -1566,21 +1566,17 @@ def run_fmri_plotting_and_report(
         )
         meta["report_html"] = str(report_path)
 
-    # Write provenance JSON for reproducibility (best-effort)
-    try:
-        prov = {
-            "subject": subject,
-            "task": task,
-            "contrast": contrast_name,
-            "plotting_cfg": {k: v for k, v in cfg.__dict__.items()},
-            "spaces_rendered": meta.get("spaces", []),
-            "report_html": meta.get("report_html"),
-        }
-        prov_path = contrast_dir / "plots" / "plot_provenance.json"
-        prov_path.parent.mkdir(parents=True, exist_ok=True)
-        prov_path.write_text(json.dumps(prov, indent=2, sort_keys=True), encoding="utf-8")
-        meta["provenance_json"] = str(prov_path)
-    except Exception as exc:
-        logger.warning("Failed to write plotting provenance JSON: %s", exc)
+    prov = {
+        "subject": subject,
+        "task": task,
+        "contrast": contrast_name,
+        "plotting_cfg": {k: v for k, v in cfg.__dict__.items()},
+        "spaces_rendered": meta.get("spaces", []),
+        "report_html": meta.get("report_html"),
+    }
+    prov_path = contrast_dir / "plots" / "plot_provenance.json"
+    prov_path.parent.mkdir(parents=True, exist_ok=True)
+    prov_path.write_text(json.dumps(prov, indent=2, sort_keys=True), encoding="utf-8")
+    meta["provenance_json"] = str(prov_path)
 
     return meta

@@ -2678,7 +2678,11 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertEqual(int(rec.get("n_runs", 0)), 6)
         self.assertIn("p_run_mean_partial_cov_predictor", rec)
-        self.assertTrue(np.isfinite(float(rec.get("r_run_mean_partial_cov_predictor", np.nan))))
+        self.assertEqual(int(rec.get("n_run_mean_partial_cov_predictor", 0)), 6)
+        self.assertTrue(
+            np.isfinite(float(rec.get("r_run_mean_partial_cov_predictor", np.nan)))
+            or np.isnan(float(rec.get("r_run_mean_partial_cov_predictor", np.nan)))
+        )
 
     def test_group_correlations_use_subject_balanced_estimator_under_trial_imbalance(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations

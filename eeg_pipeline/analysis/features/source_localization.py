@@ -2308,6 +2308,28 @@ def _normalize_fmri_cluster_name(roi_name: str) -> str:
     return token
 
 
+def _require_finite_source_feature_matrix(
+    values: np.ndarray,
+    *,
+    description: str,
+    band: str,
+    segment_label: str,
+    method: str,
+) -> np.ndarray:
+    matrix = np.asarray(values, dtype=float)
+    if matrix.ndim != 2 or matrix.size == 0:
+        raise ValueError(
+            f"Invalid source-localization {description} for band '{band}' "
+            f"({segment_label}, {method}): expected a non-empty 2D matrix, got shape {matrix.shape}."
+        )
+    if not np.isfinite(matrix).all():
+        raise ValueError(
+            f"Found non-finite source-localization {description} for band '{band}' "
+            f"({segment_label}, {method})."
+        )
+    return matrix
+
+
 def _append_source_band_family_features(
     *,
     records: List[Dict[str, float]],
@@ -2323,7 +2345,13 @@ def _append_source_band_family_features(
     band: str,
     family_prefix: str,
 ) -> None:
-    power = _compute_roi_power(roi_data, sfreq, fmin, fmax)
+    power = _require_finite_source_feature_matrix(
+        _compute_roi_power(roi_data, sfreq, fmin, fmax),
+        description="power features",
+        band=band,
+        segment_label=segment_label,
+        method=method,
+    )
     for roi_idx, roi_name in enumerate(label_names):
         safe_name = _sanitize_feature_token(roi_name).lower()
         col_name = f"src_{segment_label}_{method}_{band}_{family_prefix}_{safe_name}_power"
@@ -2338,7 +2366,13 @@ def _append_source_band_family_features(
         records[epoch_idx][col_name] = global_power[epoch_idx]
 
     envelope = _compute_roi_envelope(roi_data, sfreq, fmin, fmax)
-    mean_env = np.nanmean(envelope, axis=2)
+    mean_env = _require_finite_source_feature_matrix(
+        np.nanmean(envelope, axis=2),
+        description="envelope features",
+        band=band,
+        segment_label=segment_label,
+        method=method,
+    )
     for roi_idx, roi_name in enumerate(label_names):
         safe_name = _sanitize_feature_token(roi_name).lower()
         col_name = f"src_{segment_label}_{method}_{band}_{family_prefix}_{safe_name}_envelope"
@@ -2756,7 +2790,13 @@ def extract_source_localization_features(
             ):
                 continue
 
-            power = _compute_roi_power(roi_data, sfreq, fmin, fmax)
+            power = _require_finite_source_feature_matrix(
+                _compute_roi_power(roi_data, sfreq, fmin, fmax),
+                description="power features",
+                band=band,
+                segment_label=str(segment_label),
+                method=str(src_cfg.method),
+            )
 
             for roi_idx, roi_name in enumerate(label_names):
                 safe_name = roi_name.replace("-", "_").replace(" ", "_")
@@ -2772,7 +2812,13 @@ def extract_source_localization_features(
                 records[epoch_idx][col_name] = global_power[epoch_idx]
 
             envelope = _compute_roi_envelope(roi_data, sfreq, fmin, fmax)
-            mean_env = np.nanmean(envelope, axis=2)
+            mean_env = _require_finite_source_feature_matrix(
+                np.nanmean(envelope, axis=2),
+                description="envelope features",
+                band=band,
+                segment_label=str(segment_label),
+                method=str(src_cfg.method),
+            )
 
             for roi_idx, roi_name in enumerate(label_names):
                 safe_name = roi_name.replace("-", "_").replace(" ", "_")

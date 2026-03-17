@@ -232,12 +232,9 @@ def validate_design_matrices(
 
 def coerce_condition_value(value: Any, series: Any) -> Any:
     """Coerce a condition value to match a pandas Series dtype (best effort)."""
-    try:
-        is_integer = pd.api.types.is_integer_dtype(series)
-        is_float = pd.api.types.is_float_dtype(series)
-        is_bool = pd.api.types.is_bool_dtype(series)
-    except Exception:
-        return value
+    is_integer = pd.api.types.is_integer_dtype(series)
+    is_float = pd.api.types.is_float_dtype(series)
+    is_bool = pd.api.types.is_bool_dtype(series)
 
     if is_integer:
         try:

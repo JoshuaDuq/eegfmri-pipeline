@@ -65,15 +65,17 @@ def _resolve_correlation_permutation_count(config: Any, *, perm_enabled: bool) -
 
 def _resolve_correlation_request(config: Any) -> CorrelationRequest:
     """Resolve requested correlation outputs from configuration."""
+    primary_unit = str(
+        get_config_value(config, "behavior_analysis.correlations.primary_unit", "trial") or "trial"
+    ).strip().lower()
+    default_types = ["partial_cov_predictor"] if primary_unit in {"run", "run_mean", "runmean", "run_level"} else ["raw"]
     raw_correlation_types = get_config_value(
         config,
         "behavior_analysis.correlations.types",
         None,
     )
     types_explicitly_configured = raw_correlation_types is not None
-    correlation_types = raw_correlation_types
-    if correlation_types is None:
-        correlation_types = ["partial_cov_predictor"]
+    correlation_types = raw_correlation_types if types_explicitly_configured else default_types
     if not isinstance(correlation_types, (list, tuple)):
         correlation_types = [correlation_types]
 
@@ -82,9 +84,6 @@ def _resolve_correlation_request(config: Any) -> CorrelationRequest:
         for item in correlation_types
         if str(item).strip()
     }
-    primary_unit = str(
-        get_config_value(config, "behavior_analysis.correlations.primary_unit", "trial") or "trial"
-    ).strip().lower()
     return CorrelationRequest(
         want_raw="raw" in normalized_types,
         want_partial_cov="partial_cov" in normalized_types,
@@ -96,20 +95,51 @@ def _resolve_correlation_request(config: Any) -> CorrelationRequest:
     )
 
 
+def _has_explicit_raw_only_correlation_types(config: Any) -> bool:
+    """Return True only when correlations.types is explicitly restricted to raw outputs."""
+    sentinel = object()
+    configured_types = get_config_value(
+        config,
+        "behavior_analysis.correlations.types",
+        sentinel,
+    )
+    if configured_types is sentinel:
+        return False
+
+    if not isinstance(configured_types, (list, tuple)):
+        configured_types = [configured_types]
+
+    normalized_types = {
+        str(item).strip().lower()
+        for item in configured_types
+        if str(item).strip()
+    }
+    return bool(normalized_types) and normalized_types.issubset({"raw", "run_mean"})
+
+
 def _resolve_default_target_columns(
     df_trials: pd.DataFrame,
     config: Any,
 ) -> List[str]:
-    """Resolve paradigm-agnostic default targets for correlation analyses."""
-    targets: List[str] = []
+    """Resolve the default target set, preferring predictor-residual targets when available."""
+    use_cv_resid = get_config_bool(
+        config,
+        "behavior_analysis.correlations.use_crossfit_predictor_residual",
+        True,
+    )
+    residual_target = ""
+    if use_cv_resid and "predictor_residual_cv" in df_trials.columns:
+        residual_target = "predictor_residual_cv"
+    elif "predictor_residual" in df_trials.columns:
+        residual_target = "predictor_residual"
 
     outcome_column = resolve_outcome_column(df_trials, config)
-    if outcome_column:
+    if not residual_target:
+        return [str(outcome_column)] if outcome_column else []
+
+    targets = [residual_target]
+    if outcome_column and outcome_column != residual_target:
         targets.append(str(outcome_column))
-
-    if "predictor_residual" in df_trials.columns and "predictor_residual" not in targets:
-        targets.append("predictor_residual")
-
     return targets
 
 
@@ -740,15 +770,12 @@ def stage_correlate_effect_sizes_impl(
     )
 
     if robust_method not in (None, "", False):
-        requested_partial_controls = (
-            request.want_partial_cov
-            or request.want_partial_predictor
-            or request.want_partial_cov_predictor
-        )
-        if requested_partial_controls and (has_covariate_controls or has_predictor_control):
+        explicit_raw_only = _has_explicit_raw_only_correlation_types(ctx.config)
+        if (has_covariate_controls or has_predictor_control) and not explicit_raw_only:
             raise ValueError(
                 "Correlations: robust correlation with covariate/predictor controls is not supported. "
-                "Disable robust correlation or run without partial controls to avoid confounded primary effects."
+                "Disable robust correlation or explicitly set behavior_analysis.correlations.types "
+                "to raw-only outputs to avoid silently dropping controlled estimands."
             )
         if request.want_partial_cov or request.want_partial_predictor or request.want_partial_cov_predictor:
             ctx.logger.info(

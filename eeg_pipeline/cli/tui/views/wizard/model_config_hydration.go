@@ -804,6 +804,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.temporalIncludeTFGrid = b
 			}
 		}},
+		{key: "behavior_analysis.temporal.freqs_hz", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.temporalFreqsHzSpec = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
 		{key: "behavior_analysis.temporal.features.power", apply: func(v interface{}) {
 			if b, ok := asBool(v); ok {
 				m.temporalFeaturePowerEnabled = b

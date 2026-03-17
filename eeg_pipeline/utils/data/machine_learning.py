@@ -112,6 +112,34 @@ def _resolve_feature_families(
     return []
 
 
+def _parse_time_window_bounds(window: Any, *, config_path: str) -> Tuple[float, float]:
+    try:
+        start = float(window[0])
+        end = float(window[1])
+    except (TypeError, ValueError, IndexError) as exc:
+        raise ValueError(
+            f"{config_path} must contain exactly two numeric values, got {window!r}."
+        ) from exc
+    return start, end
+
+
+def _require_window_mask(
+    times: np.ndarray,
+    *,
+    start: float,
+    end: float,
+    window_name: str,
+    subject_id: str,
+) -> np.ndarray:
+    mask = (times >= start) & (times < end)
+    if not np.any(mask):
+        raise ValueError(
+            f"{window_name} window empty for sub-{subject_id}: "
+            f"[{start}, {end}) does not overlap the epoch time axis."
+        )
+    return mask
+
+
 def _resolve_feature_filename(
     family: str,
     config: Any,
@@ -1369,20 +1397,22 @@ def load_channels_mean_matrix(
 
         baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
         active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-        try:
-            b0, b1 = float(baseline_window[0]), float(baseline_window[1])
-            a0, a1 = float(active_window[0]), float(active_window[1])
-        except (ValueError, TypeError, IndexError):
-            b0, b1 = -3.0, -0.5
-            a0, a1 = 3.0, 10.5
+        b0, b1 = _parse_time_window_bounds(
+            baseline_window,
+            config_path="time_frequency_analysis.baseline_window",
+        )
+        a0, a1 = _parse_time_window_bounds(
+            active_window,
+            config_path="time_frequency_analysis.active_window",
+        )
 
-        bmask = (times >= b0) & (times < b1)
-        amask = (times >= a0) & (times < a1)
-        if not np.any(amask):
-            log.warning("Active window empty for sub-%s; using full epoch mean.", str(sub))
-            amask = np.ones_like(times, dtype=bool)
-        if not np.any(bmask):
-            log.warning("Baseline window empty for sub-%s; using zero baseline.", str(sub))
+        amask = _require_window_mask(
+            times,
+            start=a0,
+            end=a1,
+            window_name="Active",
+            subject_id=str(sub),
+        )
 
         active_mean = np.nanmean(data[..., amask], axis=2)
         epochs_baseline = getattr(epochs, "baseline", None)
@@ -1390,10 +1420,15 @@ def load_channels_mean_matrix(
 
         if epochs_already_baselined:
             baseline_mean = np.zeros_like(active_mean)
-        elif np.any(bmask):
-            baseline_mean = np.nanmean(data[..., bmask], axis=2)
         else:
-            baseline_mean = np.zeros_like(active_mean)
+            bmask = _require_window_mask(
+                times,
+                start=b0,
+                end=b1,
+                window_name="Baseline",
+                subject_id=str(sub),
+            )
+            baseline_mean = np.nanmean(data[..., bmask], axis=2)
 
         X_sub = (active_mean - baseline_mean).astype(float)
 

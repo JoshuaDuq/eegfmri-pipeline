@@ -56,6 +56,10 @@ def _to_lower_stripped_list(value: Any) -> list[str]:
     return [str(v).strip().lower() for v in (value or [])]
 
 
+def _to_float_list(value: Any) -> list[float]:
+    return [float(v) for v in (value or [])]
+
+
 def _to_optional_int_max(value: Any) -> int | None:
     parsed = int(value)
     return None if parsed <= 0 else parsed

@@ -412,6 +412,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["temporalSplitByCondition"] = m.temporalSplitByCondition
 	cfg["temporalIncludeROIAverages"] = m.temporalIncludeROIAverages
 	cfg["temporalIncludeTFGrid"] = m.temporalIncludeTFGrid
+	cfg["temporalFreqsHzSpec"] = m.temporalFreqsHzSpec
 	cfg["temporalFeaturePowerEnabled"] = m.temporalFeaturePowerEnabled
 	cfg["temporalFeatureITPCEnabled"] = m.temporalFeatureITPCEnabled
 	cfg["temporalFeatureERDSEnabled"] = m.temporalFeatureERDSEnabled
@@ -1582,6 +1583,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.temporalSplitByCondition = getBool("temporalSplitByCondition", m.temporalSplitByCondition)
 	m.temporalIncludeROIAverages = getBool("temporalIncludeROIAverages", m.temporalIncludeROIAverages)
 	m.temporalIncludeTFGrid = getBool("temporalIncludeTFGrid", m.temporalIncludeTFGrid)
+	m.temporalFreqsHzSpec = getString("temporalFreqsHzSpec", m.temporalFreqsHzSpec)
 	m.temporalFeaturePowerEnabled = getBool("temporalFeaturePowerEnabled", m.temporalFeaturePowerEnabled)
 	m.temporalFeatureITPCEnabled = getBool("temporalFeatureITPCEnabled", m.temporalFeatureITPCEnabled)
 	m.temporalFeatureERDSEnabled = getBool("temporalFeatureERDSEnabled", m.temporalFeatureERDSEnabled)
@@ -2247,6 +2249,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.correlationsFeaturesSpec = getString("correlationsFeaturesSpec", m.correlationsFeaturesSpec)
 	m.conditionFeaturesSpec = getString("conditionFeaturesSpec", m.conditionFeaturesSpec)
 	m.temporalFeaturesSpec = getString("temporalFeaturesSpec", m.temporalFeaturesSpec)
+	m.temporalFreqsHzSpec = getString("temporalFreqsHzSpec", m.temporalFreqsHzSpec)
 	m.clusterFeaturesSpec = getString("clusterFeaturesSpec", m.clusterFeaturesSpec)
 	m.behaviorStatsPredictorControl = getInt("behaviorStatsPredictorControl", m.behaviorStatsPredictorControl)
 	m.behaviorStatsAllowIIDTrials = getBool("behaviorStatsAllowIIDTrials", m.behaviorStatsAllowIIDTrials)

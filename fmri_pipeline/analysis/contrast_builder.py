@@ -396,9 +396,7 @@ def _build_events_to_model_mask(
 
     column_name = str(events_column or "").strip()
     if not column_name:
-        raise ValueError(
-            "events_to_model is set but no events_to_model_column was configured."
-        )
+        column_name = "trial_type"
     if column_name not in events_df.columns:
         raise ValueError(
             "events_to_model is set but events file has no "
@@ -496,16 +494,7 @@ def _prepare_events_for_glm(
         phase_scope_value=getattr(cfg, "phase_scope_value", None),
     )
     eligible_mask = trial_type_mask & phase_mask
-    if bool(eligible_mask.all()):
-        return events_df, eligible_mask
-
-    events_out = events_df.copy()
-    excluded_rows = events_out.loc[~eligible_mask]
-    events_out.loc[~eligible_mask, "trial_type"] = [
-        _build_nuisance_trial_type(row, phase_column=phase_column_name)
-        for _idx, row in excluded_rows.iterrows()
-    ]
-    return events_out, eligible_mask
+    return events_df.copy(), eligible_mask
 
 
 def _get_bold_run_duration_seconds(bold_path: Path) -> float:
@@ -981,6 +970,14 @@ def _remap_events_by_condition_columns(
                     f"Available columns: {list(events_df.columns)}"
                 )
             scope_mask &= events_df[scope_column].astype(str).isin(normalized_scope)
+
+    excluded_mask = ~scope_mask
+    if bool(excluded_mask.any()):
+        phase_column_name = str(getattr(cfg, "phase_column", "") or "").strip()
+        events_out.loc[excluded_mask, "trial_type"] = [
+            _build_nuisance_trial_type(row, phase_column=phase_column_name)
+            for _idx, row in events_out.loc[excluded_mask].iterrows()
+        ]
 
     # Validate column A exists (this is always required)
     if col_a not in events_df.columns:
@@ -1518,20 +1515,17 @@ def build_contrast_from_runs_detailed(
 
     qc_meta: Dict[str, Any] = {}
     if bool(getattr(cfg, "write_design_matrix", False)) and output_dir is not None:
-        try:
-            sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
-            prefix = (
-                f"{sub_label}_task-{task}_contrast-"
-                f"{_safe_slug(str(getattr(cfg, 'name', 'contrast')), default='contrast')}"
-            )
-            qc_meta = _write_design_matrices(
-                glm_result.flm,
-                glm_result.included_bold_paths,
-                Path(output_dir).expanduser().resolve(),
-                prefix=prefix,
-            )
-        except Exception as exc:
-            logger.warning("Failed to write design-matrix QC outputs (%s); continuing.", exc)
+        sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
+        prefix = (
+            f"{sub_label}_task-{task}_contrast-"
+            f"{_safe_slug(str(getattr(cfg, 'name', 'contrast')), default='contrast')}"
+        )
+        qc_meta = _write_design_matrices(
+            glm_result.flm,
+            glm_result.included_bold_paths,
+            Path(output_dir).expanduser().resolve(),
+            prefix=prefix,
+        )
 
     contrast_map, contrast_def, output_type = compute_contrast_map(
         glm_result.flm,

@@ -146,7 +146,7 @@ def _resolve_condition_labels_for_events(
     lookup = {str(col).strip().lower(): str(col) for col in events_df.columns}
     candidates = list(get_condition_column_candidates(config))
     if not candidates:
-        candidates = ["condition", "trial_type", "binary_outcome"]
+        candidates = ["condition", "trial_type"]
     for candidate in candidates:
         resolved = lookup.get(candidate.lower())
         if resolved is not None:

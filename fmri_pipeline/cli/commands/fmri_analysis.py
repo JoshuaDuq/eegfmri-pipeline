@@ -1060,11 +1060,11 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
             f"contrast-type must be 't-test' or 'custom', got {contrast_type!r}."
         )
     cond_a_column = str(
-        _coalesce(args.cond_a_column, _cfg_value("condition_a", "column")) or ""
+        _coalesce(args.cond_a_column, _cfg_value("condition_a", "column"), "trial_type") or ""
     ).strip()
     cond_a_value = _coalesce(args.cond_a_value, _cfg_value("condition_a", "value"))
     cond_b_column = str(
-        _coalesce(args.cond_b_column, _cfg_value("condition_b", "column")) or ""
+        _coalesce(args.cond_b_column, _cfg_value("condition_b", "column"), "trial_type") or ""
     ).strip()
     cond_b_value = _coalesce(args.cond_b_value, _cfg_value("condition_b", "value"))
     condition_scope_trial_types = _coalesce(

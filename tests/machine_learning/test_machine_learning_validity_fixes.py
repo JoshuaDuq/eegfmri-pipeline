@@ -40,6 +40,27 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     config=DotConfig({}),
                 )
 
+    def test_cnn_loso_surfaces_fold_failures(self):
+        from eeg_pipeline.analysis.machine_learning import cnn
+
+        X = np.random.default_rng(17).standard_normal((4, 2, 16))
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+
+        with patch.object(
+            cnn,
+            "fit_predict_cnn_binary_classifier",
+            side_effect=RuntimeError("synthetic fold failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "CNN fold 1 failed"):
+                cnn.nested_loso_cnn_classification(
+                    X=X,
+                    y=y,
+                    groups=groups,
+                    seed=42,
+                    config=DotConfig({}),
+                )
+
     def test_cnn_validation_split_stays_group_disjoint_when_group_splitter_fails(self):
         from eeg_pipeline.analysis.machine_learning import cnn
 
@@ -344,6 +365,80 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     feature_families=["power"],
                     target="rating",
                     covariates=["rating"],
+                )
+
+    def test_load_channels_mean_matrix_rejects_empty_active_window(self):
+        from eeg_pipeline.utils.data import machine_learning as ml_data
+
+        class _EpochsStub:
+            def __init__(self):
+                self.info = {"bads": []}
+                self.times = np.array([-0.2, 0.0, 0.2], dtype=float)
+                self.ch_names = ["C3", "C4"]
+                self.baseline = None
+
+            def get_data(self, picks=None):
+                _ = picks
+                return np.ones((2, 2, 3), dtype=float)
+
+        aligned_events = pd.DataFrame({"rating": [10.0, 20.0]})
+        config = DotConfig(
+            {
+                "time_frequency_analysis": {
+                    "baseline_window": [-0.2, 0.0],
+                    "active_window": [1.0, 2.0],
+                }
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.data.epochs.load_epochs_for_analysis",
+            return_value=(_EpochsStub(), aligned_events),
+        ), patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)):
+            with self.assertRaisesRegex(ValueError, "Active window empty"):
+                ml_data.load_channels_mean_matrix(
+                    subjects=["0001"],
+                    task="task",
+                    deriv_root=Path("."),
+                    config=config,
+                    target="rating",
+                )
+
+    def test_load_channels_mean_matrix_rejects_empty_baseline_window_when_epochs_are_not_baselined(self):
+        from eeg_pipeline.utils.data import machine_learning as ml_data
+
+        class _EpochsStub:
+            def __init__(self):
+                self.info = {"bads": []}
+                self.times = np.array([0.0, 0.1, 0.2], dtype=float)
+                self.ch_names = ["C3", "C4"]
+                self.baseline = None
+
+            def get_data(self, picks=None):
+                _ = picks
+                return np.ones((2, 2, 3), dtype=float)
+
+        aligned_events = pd.DataFrame({"rating": [10.0, 20.0]})
+        config = DotConfig(
+            {
+                "time_frequency_analysis": {
+                    "baseline_window": [-2.0, -1.0],
+                    "active_window": [0.0, 0.2],
+                }
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.data.epochs.load_epochs_for_analysis",
+            return_value=(_EpochsStub(), aligned_events),
+        ), patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)):
+            with self.assertRaisesRegex(ValueError, "Baseline window empty"):
+                ml_data.load_channels_mean_matrix(
+                    subjects=["0001"],
+                    task="task",
+                    deriv_root=Path("."),
+                    config=config,
+                    target="rating",
                 )
 
     def test_load_active_matrix_blocks_target_covariate_leakage_for_explicit_target_column(self):
@@ -1152,7 +1247,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     rng_seed=42,
                     results_root=Path(td),
                     logger=Mock(),
-                    baseline_predictors=["temperature"],
+                    baseline_predictors=["predictor"],
                 )
             with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:
                 summary = json.load(f)
@@ -2340,7 +2435,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     rng_seed=42,
                     results_root=Path(td),
                     logger=Mock(),
-                    baseline_predictors=["temperature"],
+                    baseline_predictors=["predictor"],
                 )
 
         self.assertTrue(calls)
@@ -2414,7 +2509,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     rng_seed=42,
                     results_root=Path(td),
                     logger=Mock(),
-                    baseline_predictors=["temperature"],
+                    baseline_predictors=["predictor"],
                 )
 
             with open(out_dir / "metrics" / "incremental_validity_summary.json", "r", encoding="utf-8") as f:

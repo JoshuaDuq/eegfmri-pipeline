@@ -38,6 +38,7 @@ from eeg_pipeline.analysis.features.api import (
 from eeg_pipeline.analysis.features.selection import resolve_feature_categories
 from eeg_pipeline.analysis.features.source_localization import (
     FMRIVoxelSelection,
+    _append_source_band_family_features,
     _compute_eloreta_source_estimates,
     _compute_roi_envelope,
     _compute_roi_power,
@@ -1047,7 +1048,6 @@ class TestScientificValidityGuards(unittest.TestCase):
         def _fake_compute_roi_envelope(data, *_args, **_kwargs):
             captured["n_times_env"] = int(np.asarray(data).shape[-1])
             return np.ones((n_epochs, 2, int(np.asarray(data).shape[-1])), dtype=float)
-
         with patch(
             "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
             return_value=src_cfg,
@@ -1178,6 +1178,99 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertEqual(captured_lengths[1], 40)
         self.assertIn("src_analysis_lcmv_alpha_roi1_power", cols)
         self.assertNotIn("src_active_lcmv_alpha_roi1_power", cols)
+
+    def test_source_localization_rejects_non_finite_roi_power_aggregates(self):
+        n_epochs = 3
+        roi_data = np.ones((n_epochs, 2, 100), dtype=float)
+
+        fmri_cfg = SimpleNamespace(
+            enabled=False,
+            provenance="independent",
+            require_provenance=False,
+        )
+        src_cfg = SimpleNamespace(
+            method="lcmv",
+            fmri_cfg=fmri_cfg,
+            subjects_dir=None,
+            trans_path=None,
+            bem_path=None,
+            parcellation="aparc",
+            spacing="oct6",
+            subject="fsaverage",
+            mindist_mm=5.0,
+            lcmv_reg=0.05,
+            eloreta_loose=0.2,
+            eloreta_depth=0.8,
+            eloreta_snr=3.0,
+            allow_template_fallback=True,
+            save_stc=False,
+        )
+        ctx = SimpleNamespace(
+            epochs=_EpochStub(n_epochs, sfreq=100.0),
+            config=DotConfig({}),
+            logger=logging.getLogger("src-loc-non-finite"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            frequency_bands={"alpha": (8.0, 12.0)},
+            name="active",
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+            return_value=src_cfg,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+            return_value=("fwd", "src", None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_lcmv_source_estimates",
+            return_value=(["stc"] * n_epochs, None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+            return_value=roi_data,
+        ), patch(
+            "mne.read_labels_from_annot",
+            return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+            return_value=np.full((n_epochs, 2), np.nan, dtype=float),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+            return_value=np.ones((n_epochs, 2, 100), dtype=float),
+        ):
+            with self.assertRaisesRegex(ValueError, "non-finite source-localization power features"):
+                extract_source_localization_features(
+                    ctx,
+                    bands=["alpha"],
+                    method="lcmv",
+                )
+
+    def test_fmri_source_feature_helper_rejects_non_finite_family_aggregates(self):
+        records = [{} for _ in range(2)]
+        feature_cols: list[str] = []
+        roi_data = np.ones((2, 2, 50), dtype=float)
+
+        with patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+            return_value=np.full((2, 2), np.nan, dtype=float),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+            return_value=np.ones((2, 2, 50), dtype=float),
+        ):
+            with self.assertRaisesRegex(ValueError, "non-finite source-localization power features"):
+                _append_source_band_family_features(
+                    records=records,
+                    feature_cols=feature_cols,
+                    n_epochs=2,
+                    roi_data=roi_data,
+                    label_names=["roi1", "roi2"],
+                    sfreq=100.0,
+                    fmin=8.0,
+                    fmax=12.0,
+                    segment_label="active",
+                    method="lcmv",
+                    band="alpha",
+                    family_prefix="atlas",
+                )
 
     def test_fmri_output_space_controls_feature_families(self):
         n_epochs = 3
@@ -1409,6 +1502,14 @@ class TestScientificValidityGuards(unittest.TestCase):
                     return_value=True,
                 ),
                 patch(
+                    "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+                    return_value=np.ones((n_epochs, 2), dtype=float),
+                ),
+                patch(
+                    "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+                    return_value=np.ones((n_epochs, 2, n_times), dtype=float),
+                ),
+                patch(
                     "eeg_pipeline.analysis.features.source_localization._write_fmri_constraint_metadata_sidecar",
                     return_value=None,
                 ),
@@ -1518,6 +1619,14 @@ class TestScientificValidityGuards(unittest.TestCase):
             patch(
                 "eeg_pipeline.analysis.features.source_localization._validate_source_localization_duration",
                 return_value=True,
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_power",
+                return_value=np.ones((n_epochs, 2), dtype=float),
+            ),
+            patch(
+                "eeg_pipeline.analysis.features.source_localization._compute_roi_envelope",
+                return_value=np.ones((n_epochs, 2, n_times), dtype=float),
             ),
             patch(
                 "eeg_pipeline.analysis.features.source_localization._write_fmri_constraint_metadata_sidecar",

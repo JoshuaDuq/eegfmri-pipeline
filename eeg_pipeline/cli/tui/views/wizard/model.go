@@ -2031,6 +2031,7 @@ type Model struct {
 	temporalIncludeROIAverages bool   // Include ROI-averaged rows in output
 	temporalIncludeTFGrid      bool   // Include individual frequency (TF grid) rows
 	temporalFeaturesSpec       string // Comma-separated feature filters for temporal
+	temporalFreqsHzSpec        string // Space/comma-separated frequencies (Hz) for temporal TF outputs
 	// ITPC-specific parameters
 	temporalITPCBaselineCorrection bool    // Subtract baseline ITPC
 	temporalITPCBaselineMin        float64 // Baseline window start
@@ -2888,6 +2889,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalIncludeROIAverages:          true,
 		temporalIncludeTFGrid:               true,
 		temporalFeaturesSpec:                "",
+		temporalFreqsHzSpec:                 "",
 		temporalITPCBaselineCorrection:      true,
 		temporalITPCBaselineMin:             -0.5,
 		temporalITPCBaselineMax:             -0.01,
