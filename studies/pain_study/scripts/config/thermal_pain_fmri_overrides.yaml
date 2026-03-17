@@ -1,0 +1,34 @@
+# Thermal pain paradigm override template for fmri_pipeline/utils/config/fmri_config.yaml
+# Apply these values via your fmri config if running the thermal pain paradigm.
+
+paths:
+  signature_maps:
+    - name: "NPS"
+      path: "NPS/weights_NSF_grouppred_cvpcr.nii.gz"
+    - name: "SIIPS1"
+      path: "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+
+fmri_contrast:
+  condition_a:
+    column: "binary_outcome_coded"
+    value: 1
+  condition_b:
+    column: "binary_outcome_coded"
+    value: 0
+  # Optional for phase-level events where per-trial columns repeat across phases.
+  condition_scope_trial_types: ["stimulation"]
+  # Common thermal-pain modeling scope.
+  events_to_model: ["stimulation", "pain_question", "vas_rating"]
+  # Apply stim_phase scoping only to stimulation rows.
+  phase_scope_trial_type: "stimulation"
+
+fmri_constraint:
+  time_windows:
+    window_a:
+      name: "plateau"
+      tmin: 3.0
+      tmax: 10.45
+    window_b:
+      name: "plateau"
+      tmin: 3.0
+      tmax: 10.45

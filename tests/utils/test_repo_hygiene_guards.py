@@ -13,6 +13,15 @@ FORBIDDEN_TRACKED_PREFIXES = (
 )
 
 REMOVED_LEGACY_ENTRYPOINTS = (
+    "paradigm-specific-scripts/run_paradigm_specific.py",
+    "paradigm-specific-scripts/eeg_raw_to_bids.py",
+    "paradigm-specific-scripts/fmri_raw_to_bids.py",
+    "paradigm-specific-scripts/merge_psychopy.py",
+    "paradigm-specific-scripts/fix_fmri_bids_outputs.py",
+    "eeg_pipeline/cli/commands/coupling.py",
+    "eeg_pipeline/analysis/paradigms/pain/eeg_bold_coupling.py",
+    "eeg_pipeline/pipelines/paradigms/pain/eeg_bold_coupling.py",
+    "eeg_pipeline/utils/config/paradigms/pain/eeg_bold_coupling_loader.py",
     "scripts/eeg_raw_to_bids.py",
     "scripts/merge_psychopy.py",
     "eeg_pipeline/pipelines/eeg_raw_to_bids.py",
@@ -26,6 +35,10 @@ REMOVED_LEGACY_ENTRYPOINTS = (
     "eeg_pipeline/preprocessing/scripts/create_config.py",
     "eeg_pipeline/preprocessing/scripts/run_pipeline.py",
     "eeg_pipeline/preprocessing/scripts/__init__.py",
+)
+
+REMOVED_WORKTREE_PATHS = (
+    "paradigm-specific-scripts",
 )
 
 
@@ -72,8 +85,17 @@ def test_removed_legacy_scripts_do_not_reappear() -> None:
     ]
     assert not reintroduced, (
         "Deprecated standalone utility scripts must not be reintroduced. "
-        "Use `python paradigm-specific-scripts/run_paradigm_specific.py ...` instead.\n"
+        "Use `python studies/pain_study/scripts/run_paradigm_specific.py ...` instead.\n"
         f"Found: {reintroduced}"
+    )
+
+
+def test_removed_legacy_worktree_paths_do_not_exist() -> None:
+    present = [path for path in REMOVED_WORKTREE_PATHS if (REPO_ROOT / path).exists()]
+    assert not present, (
+        "Legacy pain-study worktree paths must not exist. "
+        "Use `studies/pain_study/` instead.\n"
+        f"Found: {present}"
     )
 
 
