@@ -611,8 +611,8 @@ r_{ij}^\text{agg} =
 \right).
 ```
 
-Cells with $S_{ij} < \texttt{min\_subjects\_per\_cell}$ or total trial count
-$< \texttt{min\_count\_per\_cell}$ are excluded (set to `NaN`).
+Cells with $S_{ij}$ below `min_subjects_per_cell` or total trial count below
+`min_count_per_cell` are excluded (set to `NaN`).
 
 ### 10.2 Significance Testing
 

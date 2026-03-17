@@ -274,8 +274,8 @@ ICLabel deep learning classifier.
 3. Classify each component via `label_components(epochs, ica, method="iclabel")`.
    ICLabel assigns each component a probability $p_k$ over 7 classes.
 4. Exclude component $i$ when:
-   - $\max_k p_k > \texttt{probability\_threshold}$ (default 0.8), **and**
-   - $\arg\max_k p_k \notin \texttt{labels\_to\_keep}$ (default `["brain", "other"]`).
+   - $\max_k p_k > 0.8$, where `ica.probability_threshold` defaults to `0.8`, **and**
+   - $\arg\max_k p_k \notin$ `ica.labels_to_keep` (default `["brain", "other"]`).
 5. Write component status to `*_proc-ica_components.tsv`:
    - `status`: `"good"` or `"bad"`
    - `status_description`: Reason for exclusion
