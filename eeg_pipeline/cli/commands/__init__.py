@@ -26,7 +26,6 @@ class Command:
 
 
 from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
-from eeg_pipeline.cli.commands.coupling import setup_coupling, run_coupling
 from eeg_pipeline.cli.commands.features import setup_features, run_features
 from eeg_pipeline.cli.commands.info import setup_info, run_info
 from eeg_pipeline.cli.commands.machine_learning import setup_ml, run_ml
@@ -36,6 +35,7 @@ from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
 from fmri_pipeline.cli.commands.fmri import setup_fmri, run_fmri
 from fmri_pipeline.cli.commands.fmri_analysis import setup_fmri_analysis, run_fmri_analysis
+from studies.pain_study.cli.coupling import setup_coupling, run_coupling
 
 
 COMMANDS: List[Command] = [
