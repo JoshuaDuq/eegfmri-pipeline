@@ -466,9 +466,13 @@ def _build_nuisance_trial_type(
     *,
     phase_column: str,
 ) -> str:
+    trial_type = str(row.get("trial_type", "event")).strip()
+    if trial_type.startswith("nuis_"):
+        return trial_type
+
     tokens = [
         "nuis",
-        _safe_slug(str(row.get("trial_type", "event")), default="event"),
+        _safe_slug(trial_type, default="event"),
     ]
     phase_value = row.get(phase_column)
     if phase_value is not None and str(phase_value).strip():
@@ -494,7 +498,16 @@ def _prepare_events_for_glm(
         phase_scope_value=getattr(cfg, "phase_scope_value", None),
     )
     eligible_mask = trial_type_mask & phase_mask
-    return events_df.copy(), eligible_mask
+    if bool(eligible_mask.all()):
+        return events_df, eligible_mask
+
+    events_out = events_df.copy()
+    excluded_rows = events_out.loc[~eligible_mask]
+    events_out.loc[~eligible_mask, "trial_type"] = [
+        _build_nuisance_trial_type(row, phase_column=phase_column_name)
+        for _idx, row in excluded_rows.iterrows()
+    ]
+    return events_out, eligible_mask
 
 
 def _get_bold_run_duration_seconds(bold_path: Path) -> float:
