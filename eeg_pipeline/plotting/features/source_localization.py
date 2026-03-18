@@ -109,10 +109,10 @@ def _resolve_source_views(raw_views: Any) -> list[str]:
 def _resolve_source_plot_subjects_dir(config: Any, logger: logging.Logger) -> Optional[str]:
     """Resolve subjects_dir for source plotting with deterministic priority."""
     configured_candidates = [
-        get_config_value(config, "plotting.plots.features.sourcelocalization.subjects_dir", None),
-        get_config_value(config, "feature_engineering.sourcelocalization.subjects_dir", None),
-        get_config_value(config, "paths.freesurfer_dir", None),
-        get_config_value(config, "fmri_preprocessing.fmriprep.fs_subjects_dir", None),
+        config.get("plotting.plots.features.sourcelocalization.subjects_dir"),
+        config.get("feature_engineering.sourcelocalization.subjects_dir"),
+        config.get("paths.freesurfer_dir"),
+        config.get("fmri_preprocessing.fmriprep.fs_subjects_dir"),
     ]
     for raw_value in configured_candidates:
         resolved = _normalize_optional_path(raw_value)

@@ -261,11 +261,18 @@ def _get_comparison_bands(
 
 def _get_comparison_metrics(config: Any) -> List[str]:
     """Get metrics for comparison from config."""
-    return get_config_value(
-        config,
-        "plotting.plots.features.asymmetry.comparison_metrics",
-        ["index", "logdiff"],
-    )
+    raw = require_config_value(config, "plotting.plots.features.asymmetry.comparison_metrics")
+    if isinstance(raw, str):
+        metrics = [raw]
+    elif isinstance(raw, (list, tuple)):
+        metrics = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        raise TypeError(
+            "plotting.plots.features.asymmetry.comparison_metrics must be a string or list of strings"
+        )
+    if not metrics:
+        raise ValueError("plotting.plots.features.asymmetry.comparison_metrics must be non-empty")
+    return metrics
 
 
 def _get_comparison_roi_names(

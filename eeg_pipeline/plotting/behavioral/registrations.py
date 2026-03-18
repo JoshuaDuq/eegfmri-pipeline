@@ -10,7 +10,7 @@ from eeg_pipeline.plotting.behavioral.registry import BehaviorPlotContext, Behav
 from eeg_pipeline.plotting.behavioral.scatter.behavior_scatter import plot_behavior_scatter
 from eeg_pipeline.plotting.behavioral.scatter.psychometrics import plot_psychometrics
 from eeg_pipeline.plotting.behavioral.temporal.topomaps import plot_temporal_correlation_topomaps_by_condition
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import require_config_value
 
 
 def _record_results(ctx: BehaviorPlotContext, result: Any) -> None:
@@ -28,7 +28,7 @@ def run_psychometrics(ctx: BehaviorPlotContext, saved_plots: dict[str, Any]) -> 
 @BehaviorPlotRegistry.register("scatter", name="behavior_scatter")
 def run_behavior_scatter(ctx: BehaviorPlotContext, saved_plots: dict[str, Any]) -> None:
     """Unified behavior scatter plot supporting multiple features, columns, and aggregation modes."""
-    scatter_config = get_config_value(ctx.config, "plotting.plots.behavior.scatter", {})
+    scatter_config = require_config_value(ctx.config, "plotting.plots.behavior.scatter")
 
     result = plot_behavior_scatter(
         subject=ctx.subject,

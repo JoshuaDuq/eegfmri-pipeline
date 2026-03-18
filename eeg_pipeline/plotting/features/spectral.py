@@ -203,22 +203,27 @@ def _get_comparison_configuration(
             if e.band and e.band != "broadband"
         })
     
-    metrics = get_config_value(
-        config,
-        "plotting.plots.features.spectral.comparison_metrics",
-        None,
+    raw_metrics = require_config_value(
+        config, "plotting.plots.features.spectral.comparison_metrics"
     )
-    if not metrics:
-        metrics = get_config_value(
-            config,
-            "plotting.plots.features.spectral.metrics",
-            _COMPARISON_METRICS_DEFAULT,
+    if isinstance(raw_metrics, str):
+        metrics = [raw_metrics]
+    elif isinstance(raw_metrics, (list, tuple)):
+        metrics = [str(x).strip() for x in raw_metrics if str(x).strip()]
+    else:
+        raise TypeError(
+            "plotting.plots.features.spectral.comparison_metrics must be a string or list of strings"
         )
-    
+    if not metrics:
+        raise ValueError("plotting.plots.features.spectral.comparison_metrics must be non-empty")
+
     metrics = [m for m in metrics if any(e.stat == m for e in entries)]
     if not metrics:
-        all_stats = sorted({e.stat for e in entries if e.stat})
-        metrics = all_stats[:_MAX_METRICS_COMPARISON_FALLBACK]
+        available = sorted({e.stat for e in entries if e.stat})
+        raise ValueError(
+            "No configured spectral comparison metrics were found in the available data. "
+            f"Configured={raw_metrics!r}; available={available}."
+        )
     
     return segments, bands, metrics
 
@@ -730,4 +735,3 @@ def plot_spectral_by_condition(
 __all__ = [
     "plot_spectral_by_condition",
 ]
-

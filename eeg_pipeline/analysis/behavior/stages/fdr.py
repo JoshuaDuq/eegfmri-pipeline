@@ -20,14 +20,19 @@ def compute_unified_fdr_impl(
 ) -> pd.DataFrame:
     """Compute unified FDR corrections (within-family, hierarchical, global) in one pass."""
     from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh, hierarchical_fdr
-    from eeg_pipeline.utils.config.loader import get_config_bool
+    from eeg_pipeline.utils.config.loader import require_config_value
 
     if df.empty or p_col not in df.columns:
         return df
 
     df = df.copy()
-    fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
-    use_hierarchical_fdr = get_config_bool(ctx.config, "behavior_analysis.statistics.hierarchical_fdr", True)
+    fdr_alpha_value = getattr(config, "fdr_alpha", None)
+    if fdr_alpha_value is None:
+        raise ValueError("Missing fdr_alpha in behavior pipeline configuration.")
+    fdr_alpha = float(fdr_alpha_value)
+    use_hierarchical_fdr = bool(
+        require_config_value(ctx.config, "behavior_analysis.statistics.hierarchical_fdr")
+    )
 
     if family_cols is None:
         family_cols_list: List[str] = ["feature_type", "band", "target", "analysis_kind"]

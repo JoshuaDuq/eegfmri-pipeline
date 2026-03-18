@@ -14,7 +14,7 @@ import mne
 from ..config import get_plot_config
 from eeg_pipeline.plotting.io.figures import logratio_to_pct
 from ...utils.analysis.stats import format_cluster_ann
-from ...utils.config.loader import ensure_config, get_config_value
+from ...utils.config.loader import ensure_config, require_config_value
 
 
 ###################################################################
@@ -33,15 +33,10 @@ def _get_cluster_n_permutations(
         tfr_config: Optional TFR-specific config dictionary
     
     Returns:
-        Number of permutations (default: 100)
+        Number of permutations
     """
     config = ensure_config(config)
-    default_value = 100
-    
-    if tfr_config:
-        default_value = tfr_config.get("default_cluster_n_perm", default_value)
-    
-    return get_config_value(config, "statistics.cluster_n_perm", default_value)
+    return int(require_config_value(config, "statistics.cluster_n_perm"))
 
 
 def _build_cluster_annotation_text(
@@ -168,4 +163,3 @@ def create_scalpmean_tfr_from_existing(
     tfr_scalpmean.data = scalpmean_data
     tfr_scalpmean.comment = "Scalp-averaged"
     return tfr_scalpmean
-

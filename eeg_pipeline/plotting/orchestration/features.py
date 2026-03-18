@@ -740,7 +740,11 @@ def visualize_band_power_topomaps_for_group(
         logger = get_logger(__name__)
 
     from eeg_pipeline.infra.tsv import read_table
-    from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
+    from eeg_pipeline.utils.config.loader import (
+        get_config_value,
+        get_frequency_band_names,
+        require_config_value,
+    )
     from eeg_pipeline.plotting.features.power import (
         plot_band_power_topomaps,
         plot_band_power_topomaps_window_contrast,
@@ -749,21 +753,17 @@ def visualize_band_power_topomaps_for_group(
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 
     # Window(s) to plot must match NamingSchema "segment" tokens in features_power columns.
-    topomap_windows = get_config_value(config, "plotting.plots.features.power.topomap_windows", None)
-    if topomap_windows:
-        if isinstance(topomap_windows, str):
-            windows_list = [w.strip() for w in topomap_windows.split() if w.strip()]
-        elif isinstance(topomap_windows, list):
-            windows_list = [str(w).strip() for w in topomap_windows if str(w).strip()]
-        else:
-            windows_list = []
+    raw_windows = require_config_value(config, "plotting.plots.features.power.topomap_windows")
+    if isinstance(raw_windows, str):
+        windows_list = [w.strip() for w in raw_windows.split() if w.strip()]
+    elif isinstance(raw_windows, (list, tuple)):
+        windows_list = [str(w).strip() for w in raw_windows if str(w).strip()]
     else:
-        windows_list = []
-
-    if not windows_list:
-        raise ValueError(
-            "band_power_topomaps requires plotting.plots.features.power.topomap_windows to be set."
+        raise TypeError(
+            "plotting.plots.features.power.topomap_windows must be a string or list of strings"
         )
+    if not windows_list:
+        raise ValueError("plotting.plots.features.power.topomap_windows must be non-empty.")
 
     bands = get_frequency_band_names(config)
     if not bands:

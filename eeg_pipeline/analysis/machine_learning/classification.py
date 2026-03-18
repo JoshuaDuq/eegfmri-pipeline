@@ -65,7 +65,7 @@ from eeg_pipeline.analysis.machine_learning.cv import apply_fold_feature_harmoni
 from eeg_pipeline.analysis.machine_learning.preprocessing import (
     build_base_preprocessing_steps,
 )
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 logger = logging.getLogger(__name__)
 
@@ -720,7 +720,9 @@ def nested_loso_classification(
     failed_fold_count = 0
     n_folds_total = len(outer_splits)
     
-    scoring_metric = str(get_config_value(config, "machine_learning.classification.scoring", "average_precision")).strip()
+    scoring_metric = str(
+        require_config_value(config, "machine_learning.classification.scoring")
+    ).strip()
 
     for fold, (train_idx, test_idx) in enumerate(outer_splits):
         fold_number = int(fold + 1)

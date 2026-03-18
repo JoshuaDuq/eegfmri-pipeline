@@ -47,8 +47,6 @@ from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.manipulation import find_column
 
 
-_DEFAULT_SEGMENT = ""
-_DEFAULT_STAT = "mean"
 _MAX_ROI_PAIR_PLOTS = 30
 
 # Stat equivalence groups: stats that can substitute for each other.
@@ -385,15 +383,11 @@ def _resolve_dose_response_segment(
     logger: logging.Logger,
 ) -> str:
     """Resolve plotting segment with config-first, paradigm-agnostic fallback."""
-    segment = str(
-        get_config_value(config, "plotting.plots.behavior.dose_response.segment", _DEFAULT_SEGMENT)
-    ).strip()
+    segment = str(config.get("plotting.plots.behavior.dose_response.segment") or "").strip()
     if segment:
         return segment
 
-    comparison_segment = str(
-        get_config_value(config, "plotting.comparisons.comparison_segment", "")
-    ).strip()
+    comparison_segment = str(config.get("plotting.comparisons.comparison_segment") or "").strip()
     if comparison_segment:
         return comparison_segment
 
@@ -439,7 +433,7 @@ def _resolve_dose_response_columns(
         defaults: list[str],
         required: bool,
     ) -> Optional[str]:
-        override = str(get_config_value(config, override_key, "") or "").strip()
+        override = str(config.get(override_key) or "").strip()
         if override:
             if override not in trials.columns:
                 suggestions = _suggest_column_names(trials.columns, query=override)
@@ -473,7 +467,7 @@ def _resolve_dose_response_columns(
         defaults=["predictor"],
         required=True,
     )
-    raw_response = get_config_value(config, "plotting.plots.behavior.dose_response.response_column", None)
+    raw_response = config.get("plotting.plots.behavior.dose_response.response_column")
     if isinstance(raw_response, (list, tuple)):
         response_overrides = [str(x).strip() for x in raw_response if str(x).strip()]
     elif raw_response is None:
@@ -504,9 +498,7 @@ def _resolve_dose_response_columns(
 
 
 def _resolve_dose_binary_outcome_columns(trials: pd.DataFrame, config: Any) -> tuple[str, str]:
-    dose_col = str(
-        get_config_value(config, "plotting.plots.behavior.dose_response.dose_column", "") or ""
-    ).strip()
+    dose_col = str(config.get("plotting.plots.behavior.dose_response.dose_column") or "").strip()
     if dose_col:
         if dose_col not in trials.columns:
             raise ValueError(f"Dose column not found in table: {dose_col!r}.")
@@ -518,7 +510,7 @@ def _resolve_dose_binary_outcome_columns(trials: pd.DataFrame, config: Any) -> t
         dose_col = str(resolved)
 
     binary_outcome_col = str(
-        get_config_value(config, "plotting.plots.behavior.dose_response.binary_outcome_column", "") or ""
+        config.get("plotting.plots.behavior.dose_response.binary_outcome_column") or ""
     ).strip()
     if binary_outcome_col:
         if binary_outcome_col not in trials.columns:
@@ -1339,9 +1331,7 @@ def visualize_dose_response(
         allowed_scope_set = {str(s).strip() for s in selected_scopes if str(s).strip()}
 
     segment = _resolve_dose_response_segment(trials, config=config, logger=logger)
-    stat = str(
-        get_config_value(config, "plotting.plots.behavior.dose_response.stat", _DEFAULT_STAT)
-    ).strip()
+    stat = str(config.get("plotting.plots.behavior.dose_response.stat") or "").strip()
     if not stat:
         raise ValueError("dose_response.stat must be non-empty.")
 

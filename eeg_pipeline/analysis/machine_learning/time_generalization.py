@@ -30,7 +30,12 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     is_effective_permutation,
     safe_pearsonr,
 )
-from eeg_pipeline.utils.config.loader import load_config, get_fisher_z_clip_values, get_config_value
+from eeg_pipeline.utils.config.loader import (
+    get_config_value,
+    get_fisher_z_clip_values,
+    load_config,
+    require_config_value,
+)
 from eeg_pipeline.infra.logging import get_logger
 
 logger = get_logger(__name__)
@@ -120,10 +125,14 @@ def _aggregate_time_generalization_matrices(
     subject_coverage_map = np.zeros_like(tg_r, dtype=int)
 
     min_subjects_per_cell = int(
-        get_config_value(config, "machine_learning.analysis.time_generalization.min_subjects_per_cell", 2)
+        require_config_value(
+            config, "machine_learning.analysis.time_generalization.min_subjects_per_cell"
+        )
     )
     min_count_per_cell = int(
-        get_config_value(config, "machine_learning.analysis.time_generalization.min_count_per_cell", 15)
+        require_config_value(
+            config, "machine_learning.analysis.time_generalization.min_count_per_cell"
+        )
     )
     clip_min, clip_max = get_fisher_z_clip_values(config)
 
@@ -202,7 +211,9 @@ def _compute_time_generalization_significance(
     sig_maxstat = tested_mask & (np.abs(tg_r) >= max_stat_threshold)
 
     cluster_alpha = float(
-        get_config_value(config, "machine_learning.analysis.time_generalization.cluster_threshold", 0.05)
+        require_config_value(
+            config, "machine_learning.analysis.time_generalization.cluster_threshold"
+        )
     )
     null_tested_vals = null_r[:, tested_mask]
     finite_null_abs = np.abs(null_tested_vals[np.isfinite(null_tested_vals)])
@@ -357,13 +368,20 @@ def time_generalization_regression(
     trial_blocks_arr = _extract_trial_blocks_from_records(trial_records, subj_to_epochs)
 
     config = config_dict or load_config()
-    min_subjects_for_loso = config.get("analysis.min_subjects_for_group", 2)
+    min_subjects_for_loso = int(require_config_value(config, "analysis.min_subjects_for_group"))
     if len(np.unique(groups_arr)) < min_subjects_for_loso:
         raise RuntimeError(f"Need at least {min_subjects_for_loso} subjects for LOSO.")
 
-    active_window = tuple(config.get("machine_learning.analysis.time_generalization.active_window", [3.0, 10.5]))
-    window_len = config.get("machine_learning.analysis.time_generalization.window_len", 0.75)
-    step = config.get("machine_learning.analysis.time_generalization.step", 0.25)
+    active_window_raw = require_config_value(
+        config, "machine_learning.analysis.time_generalization.active_window"
+    )
+    if not isinstance(active_window_raw, (list, tuple)) or len(active_window_raw) < 2:
+        raise ValueError(
+            "machine_learning.analysis.time_generalization.active_window must be a list/tuple of length 2."
+        )
+    active_window = (float(active_window_raw[0]), float(active_window_raw[1]))
+    window_len = float(require_config_value(config, "machine_learning.analysis.time_generalization.window_len"))
+    step = float(require_config_value(config, "machine_learning.analysis.time_generalization.step"))
 
     tmin_pl, tmax_pl = active_window
     windows = build_time_windows(window_len, step, tmin_pl, tmax_pl)
@@ -424,8 +442,10 @@ def time_generalization_regression(
                 aligned_epochs[subjects_in_fold[0]]
                 window_centers_out = np.array([(w_start + w_end) / 2 for w_start, w_end in windows])
             
-            min_samples_per_window = config.get(
-                "machine_learning.analysis.time_generalization.min_samples_per_window", 15
+            min_samples_per_window = int(
+                require_config_value(
+                    config, "machine_learning.analysis.time_generalization.min_samples_per_window"
+                )
             )
             
             for i in range(n_windows):
@@ -443,8 +463,14 @@ def time_generalization_regression(
                 groups_train_i = groups_arr[train_idx_f][finite_mask_train]
                 y_train_i = y_train[finite_mask_train]
 
-                use_ridgecv = config.get("machine_learning.analysis.time_generalization.use_ridgecv", False)
-                alpha_grid = config.get("machine_learning.analysis.time_generalization.alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0])
+                use_ridgecv = bool(
+                    require_config_value(
+                        config, "machine_learning.analysis.time_generalization.use_ridgecv"
+                    )
+                )
+                alpha_grid = require_config_value(
+                    config, "machine_learning.analysis.time_generalization.alpha_grid"
+                )
 
                 model = None
                 if use_ridgecv and len(y_train_i) >= 5:
@@ -474,7 +500,11 @@ def time_generalization_regression(
                             model = None
 
                 if model is None:
-                    default_alpha = config.get("machine_learning.analysis.time_generalization.default_alpha", 1.0)
+                    default_alpha = float(
+                        require_config_value(
+                            config, "machine_learning.analysis.time_generalization.default_alpha"
+                        )
+                    )
                     model = TransformedTargetRegressor(
                         regressor=Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge(alpha=default_alpha))]),
                         transformer=PowerTransformer(
@@ -508,8 +538,10 @@ def time_generalization_regression(
                         y_pred_finite = y_pred[finite_mask_pred]
                         n_valid = len(y_test_finite)
                         
-                        min_samples_for_corr = config.get(
-                            "machine_learning.analysis.time_generalization.min_samples_for_corr", 10
+                        min_samples_for_corr = int(
+                            require_config_value(
+                                config, "machine_learning.analysis.time_generalization.min_samples_for_corr"
+                            )
                         )
                         if n_valid >= min_samples_for_corr:
                             r_val, _ = safe_pearsonr(y_test_finite, y_pred_finite)

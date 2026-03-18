@@ -35,21 +35,41 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     safe_correlation,
     save_correlation_results,
 )
-from eeg_pipeline.utils.config.loader import get_config_value, get_min_samples
+from eeg_pipeline.utils.config.loader import (
+    get_config_value,
+    get_min_samples,
+    require_config_value,
+)
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_feature_types
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
 
 
 def _build_stats_config_snapshot(config: Any) -> Dict[str, Any]:
     """Build a small, pickle-friendly config subset for parallel stats workers."""
-    predictor_control = str(
-        get_config_value(config, "behavior_analysis.statistics.predictor_control", "spline")
-    ).strip().lower() or "spline"
-    perm_scheme = str(
-        get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")
-    ).strip().lower() or "shuffle"
-    spline_cfg = get_config_value(config, "behavior_analysis.regression.predictor_spline", {}) or {}
-    spline_cfg = dict(spline_cfg) if isinstance(spline_cfg, dict) else {}
+    config = ensure_behavior_config(config)
+    predictor_control_raw = require_config_value(
+        config, "behavior_analysis.statistics.predictor_control"
+    )
+    predictor_control = str(predictor_control_raw).strip().lower()
+    if not predictor_control:
+        raise ValueError("behavior_analysis.statistics.predictor_control must be set.")
+
+    perm_scheme_raw = require_config_value(
+        config, "behavior_analysis.permutation.scheme"
+    )
+    perm_scheme = str(perm_scheme_raw).strip().lower()
+    if not perm_scheme:
+        raise ValueError("behavior_analysis.permutation.scheme must be set.")
+
+    spline_cfg = require_config_value(
+        config, "behavior_analysis.regression.predictor_spline"
+    )
+    if not isinstance(spline_cfg, dict):
+        raise ValueError(
+            "behavior_analysis.regression.predictor_spline must be a mapping."
+        )
+    spline_cfg = dict(spline_cfg)
 
     return {
         "behavior_analysis": {
@@ -100,30 +120,38 @@ class CorrelationConfig:
         ctx : BehaviorContext, optional
             If provided, runtime overrides from context take precedence.
         """
+        config = ensure_behavior_config(config)
         logger = getattr(ctx, "logger", None) if ctx is not None else None
-        method = resolve_correlation_method(
-            config,
-            logger=logger,
-            default="spearman",
-        )
+        method = resolve_correlation_method(config, logger=logger)
         min_samples = get_min_samples(config, "channel")
-        fdr_alpha = float(get_config_value(
-            config, "behavior_analysis.statistics.fdr_alpha",
-            get_config_value(config, "statistics.fdr_alpha", 0.05)
-        ))
-        n_bootstrap = int(get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))
-        n_permutations = int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000))
+        fdr_alpha_value = get_config_value(
+            config, "behavior_analysis.statistics.fdr_alpha", None
+        )
+        if fdr_alpha_value is None:
+            fdr_alpha_value = require_config_value(config, "statistics.fdr_alpha")
+        fdr_alpha = float(fdr_alpha_value)
+
+        n_bootstrap = int(
+            require_config_value(config, "behavior_analysis.statistics.default_n_bootstrap")
+        )
+        n_permutations = int(
+            require_config_value(config, "behavior_analysis.statistics.n_permutations")
+        )
         compute_bayes_factor = bool(
-            get_config_value(config, "behavior_analysis.correlations.compute_bayes_factors", False)
+            require_config_value(
+                config, "behavior_analysis.correlations.compute_bayes_factors"
+            )
         )
         robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
         if robust_method is not None:
             robust_method = str(robust_method).strip().lower() or None
         compute_loso_stability = bool(
-            get_config_value(config, "behavior_analysis.correlations.loso_stability", True)
+            require_config_value(config, "behavior_analysis.correlations.loso_stability")
         )
-        compute_reliability = bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False))
-        n_jobs = int(get_config_value(config, "behavior_analysis.n_jobs", -1))
+        compute_reliability = bool(
+            require_config_value(config, "behavior_analysis.statistics.compute_reliability")
+        )
+        n_jobs = int(require_config_value(config, "behavior_analysis.n_jobs"))
         
         if ctx is not None:
             method = normalize_correlation_method(ctx.method or method, default=method)
@@ -876,7 +904,9 @@ class FeatureBehaviorCorrelator:
         
         n_jobs_actual = effective_config.n_jobs if effective_config.n_jobs != -1 else max(1, cpu_count() - 1)
         
-        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
+        base_seed = int(
+            require_config_value(self.config, "behavior_analysis.statistics.base_seed")
+        )
         if effective_config.rng is not None:
             base_seed = int(effective_config.rng.integers(0, 2**31))
         
@@ -970,7 +1000,9 @@ class FeatureBehaviorCorrelator:
         use_permutation_pvalues = config.n_permutations > 0
         _apply_fdr_correction(record_dicts, config, use_permutation_pvalues, self.config)
 
-        significance_alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
+        significance_alpha = float(
+            require_config_value(self.config, "statistics.sig_alpha")
+        )
         n_significant = sum(
             1
             for record in record_dicts
@@ -1038,10 +1070,11 @@ class FeatureBehaviorCorrelator:
             self.logger.debug("No ROI definitions found in config")
             return None
         
-        bands = self.config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
-        preferred_segment = str(
-            get_config_value(self.config, "behavior_analysis.correlations.power_segment_preference", "")
-        ).strip().lower()
+        bands = require_config_value(self.config, "power.bands_to_use")
+        preferred_segment_value = get_config_value(
+            self.config, "behavior_analysis.correlations.power_segment_preference", None
+        )
+        preferred_segment = str(preferred_segment_value or "").strip().lower()
         if preferred_segment in {"", "auto", "none"}:
             preferred_segment = ""
         
@@ -1177,7 +1210,11 @@ class FeatureBehaviorCorrelator:
                 if effective_config.n_permutations and effective_config.n_permutations > 0:
                     rng = effective_config.rng
                     if rng is None:
-                        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
+                        base_seed = int(
+                            require_config_value(
+                                self.config, "behavior_analysis.statistics.base_seed"
+                            )
+                        )
                         rng = np.random.default_rng(base_seed)
                     _add_permutation_pvalues(
                         record,
@@ -1261,7 +1298,11 @@ class FeatureBehaviorCorrelator:
                 if effective_config.n_permutations and effective_config.n_permutations > 0:
                     rng = effective_config.rng
                     if rng is None:
-                        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
+                        base_seed = int(
+                            require_config_value(
+                                self.config, "behavior_analysis.statistics.base_seed"
+                            )
+                        )
                         rng = np.random.default_rng(base_seed)
                     _add_permutation_pvalues(
                         record,
@@ -1358,9 +1399,10 @@ class FeatureBehaviorCorrelator:
 
         method_suffix = f"_{method_label}" if method_label else ""
         from eeg_pipeline.analysis.behavior.orchestration import _get_stats_subfolder_with_overwrite
-        from eeg_pipeline.utils.config.loader import get_config_bool
 
-        overwrite = get_config_bool(self.config, "behavior_analysis.output.overwrite", True)
+        overwrite = bool(
+            require_config_value(self.config, "behavior_analysis.output.overwrite")
+        )
         corr_dir = _get_stats_subfolder_with_overwrite(self.stats_dir, "correlations", overwrite)
         combined_outcome_df = pd.DataFrame(outcome_records) if outcome_records else pd.DataFrame()
         if not combined_outcome_df.empty:
@@ -1374,7 +1416,9 @@ class FeatureBehaviorCorrelator:
             combined_path = corr_dir / f"corr_stats_all_features_vs_predictor{method_suffix}.tsv"
             save_correlation_results(combined_predictor_df, combined_path)
 
-        significance_alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
+        significance_alpha = float(
+            require_config_value(self.config, "statistics.sig_alpha")
+        )
         n_significant_outcome = sum(
             1 for record in outcome_records
             if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha

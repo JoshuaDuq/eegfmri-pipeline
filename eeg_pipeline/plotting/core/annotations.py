@@ -364,7 +364,7 @@ def get_sig_marker_text(config=None) -> str:
         Significance marker text string, or empty string if diff_annotation_enabled is False
     """
     from eeg_pipeline.plotting.io.figures import get_viz_params
-    from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
+    from eeg_pipeline.utils.config.loader import ensure_config, get_config_value, require_config_value
     
     viz_params = get_viz_params(config)
     if not viz_params["diff_annotation_enabled"]:
@@ -378,13 +378,8 @@ def get_sig_marker_text(config=None) -> str:
         "default_significance_alpha",
         get_config_value(config, "statistics.sig_alpha", 0.05)
     )
-    default_cluster_n_perm = tfr_config.get(
-        "default_cluster_n_perm",
-        get_config_value(config, "statistics.cluster_n_perm", 100)
-    )
-    
     alpha = get_config_value(config, "statistics.sig_alpha", default_sig_alpha)
-    n_perm = get_config_value(config, "statistics.cluster_n_perm", default_cluster_n_perm)
+    n_perm = int(require_config_value(config, "statistics.cluster_n_perm"))
     method = f"cluster permutation (n={n_perm})"
     return f" | Green markers: p < {alpha:.2f} ({method})"
 
@@ -472,7 +467,9 @@ def add_roi_annotations(
             config, "behavior_analysis.statistics.fdr_alpha", fdr_alpha_fallback
         )
     
-    percent_detection_threshold = tfr_config.get("percent_detection_threshold", 5.0)
+    percent_detection_threshold = float(
+        require_config_value(config, "io.constants.percent_threshold")
+    )
     is_percent_format = _detect_data_format(
         data, data_format, percent_threshold=percent_detection_threshold
     )

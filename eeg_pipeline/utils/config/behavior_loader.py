@@ -1,4 +1,4 @@
-"""Runtime loader for fMRI-specific YAML defaults."""
+"""Runtime loader for behavior-specific YAML defaults."""
 
 from __future__ import annotations
 
@@ -9,25 +9,29 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from eeg_pipeline.utils.config.loader import resolve_config_paths
+from eeg_pipeline.utils.config.loader import ConfigDict, resolve_config_paths
 
-FMRI_CONFIG_ENV_VAR = "EEG_PIPELINE_FMRI_CONFIG"
+BEHAVIOR_CONFIG_ENV_VAR = "EEG_PIPELINE_BEHAVIOR_CONFIG"
 
 
-def _resolve_fmri_config_path(config_path: Optional[str | Path] = None) -> Path:
+def _resolve_behavior_config_path(
+    config_path: Optional[str | Path] = None,
+) -> Path:
     if config_path is not None:
         return Path(config_path).expanduser().resolve()
 
-    env_path = os.getenv(FMRI_CONFIG_ENV_VAR)
+    env_path = os.getenv(BEHAVIOR_CONFIG_ENV_VAR)
     if env_path:
         return Path(env_path).expanduser().resolve()
 
-    return (Path(__file__).parent / "fmri_config.yaml").resolve()
+    return (Path(__file__).parent / "behavior_config.yaml").resolve()
 
 
-def load_fmri_config(config_path: Optional[str | Path] = None) -> Dict[str, Any]:
-    """Load the fMRI YAML config as a resolved dictionary."""
-    resolved_path = _resolve_fmri_config_path(config_path)
+def load_behavior_config(
+    config_path: Optional[str | Path] = None,
+) -> Dict[str, Any]:
+    """Load the behavior YAML config as a resolved dictionary."""
+    resolved_path = _resolve_behavior_config_path(config_path)
     if not resolved_path.exists():
         return {}
 
@@ -57,12 +61,22 @@ def _merge_non_null(base: Dict[str, Any], extra: Dict[str, Any]) -> None:
             base[key] = copy.deepcopy(value)
 
 
-def apply_fmri_config_defaults(
+def apply_behavior_config_defaults(
     config: Dict[str, Any],
     config_path: Optional[str | Path] = None,
 ) -> None:
-    """Merge fMRI YAML values into runtime config, skipping null entries."""
-    fmri_defaults = load_fmri_config(config_path=config_path)
-    if not fmri_defaults:
+    """Merge behavior YAML values into runtime config, skipping null entries."""
+    behavior_defaults = load_behavior_config(config_path=config_path)
+    if not behavior_defaults:
         return
-    _merge_non_null(config, fmri_defaults)
+    _merge_non_null(config, behavior_defaults)
+
+
+def ensure_behavior_config(
+    config: Optional[Dict[str, Any]] = None,
+    config_path: Optional[str | Path] = None,
+) -> ConfigDict:
+    """Return a copy of config with behavior defaults merged in."""
+    merged: Dict[str, Any] = copy.deepcopy(config or {})
+    apply_behavior_config_defaults(merged, config_path=config_path)
+    return ConfigDict(merged)

@@ -635,8 +635,7 @@ def contrast_maxmin_predictor(
     fmax_available = float(np.max(tfr_max.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
     
-    from eeg_pipeline.utils.config.loader import get_config_value
-    selected_bands = get_config_value(config, "time_frequency_analysis.selected_bands", None)
+    selected_bands = config.get("time_frequency_analysis.selected_bands")
     if selected_bands and isinstance(selected_bands, (list, tuple)) and len(selected_bands) > 0:
         bands = {k: v for k, v in bands.items() if k in selected_bands}
 
@@ -816,8 +815,7 @@ def contrast_conditions(
     fmax_available = float(np.max(tfr_2.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
     
-    from eeg_pipeline.utils.config.loader import get_config_value
-    selected_bands = get_config_value(config, "time_frequency_analysis.selected_bands", None)
+    selected_bands = config.get("time_frequency_analysis.selected_bands")
     if selected_bands and isinstance(selected_bands, (list, tuple)) and len(selected_bands) > 0:
         bands = {k: v for k, v in bands.items() if k in selected_bands}
     

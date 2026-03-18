@@ -53,7 +53,7 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     compute_correlation,
     format_correlation_method_label,
 )
-from eeg_pipeline.utils.config.loader import get_config_bool
+from eeg_pipeline.utils.config.loader import require_config_value
 from eeg_pipeline.infra.paths import ensure_dir
 
 
@@ -79,7 +79,9 @@ def _write_parquet_with_optional_csv(
 
 def _also_save_csv_from_config(config: Any) -> bool:
     """Resolve whether parquet outputs should also be emitted as CSV."""
-    return bool(get_config_bool(config, "behavior_analysis.output.also_save_csv", False))
+    return bool(
+        require_config_value(config, "behavior_analysis.output.also_save_csv")
+    )
 
 
 ###################################################################
@@ -852,18 +854,59 @@ def run_group_level_correlations(
     deriv_root: Path,
     config: Any,
     logger: Any,
-    use_block_permutation: bool = True,
-    n_perm: int = 1000,
-    fdr_alpha: float = 0.05,
-    target_col: str = "outcome",
-    control_predictor: bool = False,
-    control_trial_order: bool = False,
-    control_run_effects: bool = False,
-    max_run_dummies: int = 20,
+    use_block_permutation: Optional[bool] = None,
+    n_perm: Optional[int] = None,
+    fdr_alpha: Optional[float] = None,
+    target_col: Optional[str] = None,
+    control_predictor: Optional[bool] = None,
+    control_trial_order: Optional[bool] = None,
+    control_run_effects: Optional[bool] = None,
+    max_run_dummies: Optional[int] = None,
     random_state: Optional[int] = None,
     feature_files: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Run multilevel correlations across subjects with block-aware permutations."""
+    multilevel_cfg = require_config_value(
+        config, "behavior_analysis.group_level.multilevel_correlations"
+    )
+    if not isinstance(multilevel_cfg, dict):
+        raise ValueError(
+            "behavior_analysis.group_level.multilevel_correlations must be a mapping."
+        )
+
+    if use_block_permutation is None:
+        use_block_permutation = bool(
+            require_config_value(config, "behavior_analysis.group_level.block_permutation")
+        )
+    if n_perm is None:
+        n_perm = int(
+            require_config_value(config, "behavior_analysis.statistics.n_permutations")
+        )
+    if fdr_alpha is None:
+        fdr_alpha = float(
+            require_config_value(config, "behavior_analysis.statistics.fdr_alpha")
+        )
+    if target_col is None:
+        target_col = str(require_config_value(multilevel_cfg, "target")).strip()
+    if control_predictor is None:
+        control_predictor = bool(
+            require_config_value(multilevel_cfg, "control_predictor")
+        )
+    if control_trial_order is None:
+        control_trial_order = bool(
+            require_config_value(multilevel_cfg, "control_trial_order")
+        )
+    if control_run_effects is None:
+        control_run_effects = bool(
+            require_config_value(multilevel_cfg, "control_run_effects")
+        )
+    if max_run_dummies is None:
+        max_run_dummies = int(
+            require_config_value(multilevel_cfg, "max_run_dummies")
+        )
+    if random_state is None:
+        random_state = int(require_config_value(config, "project.random_state"))
+
     return _group_level.run_group_level_correlations_impl(
         subjects=subjects,
         deriv_root=deriv_root,

@@ -19,7 +19,11 @@ import numpy as np
 import seaborn as sns
 
 from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.utils.config.loader import get_nested_value, load_config
+from eeg_pipeline.utils.config.loader import (
+    get_nested_value,
+    load_config,
+    require_config_value,
+)
 
 
 def build_footer(template_name: str, config: Dict[str, Any], **kwargs) -> str:
@@ -654,11 +658,13 @@ def save_fig(
     save_bbox = bbox_inches or default_bbox
     save_pad = pad_inches if pad_inches is not None else default_pad
 
-    # Determine overwrite setting: explicit > config > default (True)
-    if overwrite is None and config is not None:
-        overwrite = config.get("plotting.overwrite", True)
-    elif overwrite is None:
-        overwrite = True
+    # Determine overwrite setting: explicit > config.
+    if overwrite is None:
+        if config is None:
+            raise ValueError(
+                "save_fig requires either overwrite or config.plotting.overwrite."
+            )
+        overwrite = bool(require_config_value(config, "plotting.overwrite"))
 
     # Check if files already exist
     if not overwrite:

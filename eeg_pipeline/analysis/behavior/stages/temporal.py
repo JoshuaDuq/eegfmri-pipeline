@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
 
-from eeg_pipeline.utils.config.loader import get_config_bool, get_config_float, get_config_value
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
 def stage_temporal_tfr_impl(ctx: Any) -> Optional[Dict[str, Any]]:
@@ -36,11 +37,19 @@ def resolve_temporal_feature_selection_impl(
     selected_features: Optional[List[str]] = None,
 ) -> List[str]:
     """Resolve effective temporal features from config toggles and user filters."""
-    default_cfg = {"power": True, "itpc": False, "erds": False}
-    cfg_raw = get_config_value(ctx.config, "behavior_analysis.temporal.features", {}) or {}
+    ctx.config = ensure_behavior_config(ctx.config)
+    cfg_raw = require_config_value(ctx.config, "behavior_analysis.temporal.features")
+    if not isinstance(cfg_raw, dict):
+        raise ValueError("behavior_analysis.temporal.features must be a mapping.")
+    required_keys = ("power", "itpc", "erds")
+    missing = [key for key in required_keys if key not in cfg_raw]
+    if missing:
+        raise ValueError(
+            "behavior_analysis.temporal.features is missing keys: "
+            f"{', '.join(missing)}."
+        )
     cfg_enabled: Dict[str, bool] = {
-        feature: bool((cfg_raw or {}).get(feature, default_value))
-        for feature, default_value in default_cfg.items()
+        feature: bool(cfg_raw[feature]) for feature in required_keys
     }
 
     raw_filters: List[str] = []
@@ -62,7 +71,7 @@ def resolve_temporal_feature_selection_impl(
             continue
         if item_norm == "all":
             explicit_filter = True
-            requested.update(default_cfg.keys())
+            requested.update(required_keys)
             continue
         normalized = normalize_temporal_feature_name(item_norm)
         if normalized is not None:
@@ -70,7 +79,7 @@ def resolve_temporal_feature_selection_impl(
             requested.add(normalized)
 
     if not explicit_filter:
-        requested = set(default_cfg.keys())
+        requested = set(required_keys)
 
     enabled = [feat for feat in ["power", "itpc", "erds"] if cfg_enabled.get(feat, False) and feat in requested]
     return enabled
@@ -80,19 +89,21 @@ def _resolve_temporal_target_label(ctx: Any) -> str:
     """Resolve the target label used in normalized temporal outputs."""
     from eeg_pipeline.utils.data.columns import resolve_outcome_column
 
-    explicit_target = str(
-        get_config_value(ctx.config, "behavior_analysis.temporal.target_column", "") or ""
-    ).strip()
+    explicit_target_value = get_config_value(
+        ctx.config, "behavior_analysis.temporal.target_column", None
+    )
+    explicit_target = str(explicit_target_value or "").strip()
     if explicit_target:
         return explicit_target
 
-    outcome_column = str(
-        get_config_value(ctx.config, "behavior_analysis.outcome_column", "") or ""
-    ).strip()
+    outcome_column_value = get_config_value(
+        ctx.config, "behavior_analysis.outcome_column", None
+    )
+    outcome_column = str(outcome_column_value or "").strip()
     if outcome_column:
         return outcome_column
 
-    outcome_aliases = get_config_value(ctx.config, "event_columns.outcome", []) or []
+    outcome_aliases = get_config_value(ctx.config, "event_columns.outcome", None) or []
     if isinstance(outcome_aliases, str):
         outcome_aliases = [outcome_aliases]
     for alias in outcome_aliases:
@@ -128,19 +139,26 @@ def stage_temporal_stats_impl(
     from eeg_pipeline.utils.analysis.stats.temporal import compute_itpc_temporal_from_context
     selected_temporal_features = resolve_temporal_feature_selection_fn(ctx, selected_features)
 
-    correction_method = str(get_config_value(ctx.config, "behavior_analysis.temporal.correction_method", "fdr")).strip().lower()
-    fdr_alpha = get_config_float(ctx.config, "behavior_analysis.statistics.fdr_alpha", 0.05)
-    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    correction_method = str(
+        require_config_value(
+            ctx.config, "behavior_analysis.temporal.correction_method"
+        )
+    ).strip().lower()
+    fdr_alpha = float(
+        require_config_value(ctx.config, "behavior_analysis.statistics.fdr_alpha")
+    )
+    allow_iid_trials = bool(
+        require_config_value(ctx.config, "behavior_analysis.statistics.allow_iid_trials")
+    )
     cluster_n_permutations_raw = get_config_value(
         ctx.config,
         "behavior_analysis.cluster.n_permutations",
         None,
     )
     if cluster_n_permutations_raw is None:
-        cluster_n_permutations_raw = get_config_value(
+        cluster_n_permutations_raw = require_config_value(
             ctx.config,
             "behavior_analysis.cluster_correction.n_permutations",
-            0,
         )
     cluster_n_permutations = int(cluster_n_permutations_raw)
     if correction_method == "cluster" and cluster_n_permutations <= 0:
@@ -157,7 +175,9 @@ def stage_temporal_stats_impl(
                 "Set behavior_analysis.temporal.correction_method='cluster' for grouped permutation inference, "
                 "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
             )
-        run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+        run_col = str(
+            require_config_value(ctx.config, "behavior_analysis.run_adjustment.column")
+        ).strip()
         events = getattr(ctx, "aligned_events", None)
         if not isinstance(events, pd.DataFrame) or events.empty or run_col not in events.columns:
             raise ValueError(

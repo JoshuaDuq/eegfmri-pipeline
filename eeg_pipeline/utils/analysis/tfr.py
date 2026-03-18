@@ -12,7 +12,13 @@ import mne
 import numpy as np
 import pandas as pd
 
-from ..config.loader import get_constants, get_config_value, ensure_config, get_frequency_bands
+from ..config.loader import (
+    ensure_config,
+    get_config_value,
+    get_constants,
+    get_frequency_bands,
+    require_config_value,
+)
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.windowing import time_mask
 from eeg_pipeline.utils.analysis.stats import (
@@ -35,13 +41,21 @@ def _get_tfr_constants(config=None):
 
 def _get_min_baseline_samples(config) -> int:
     """Get minimum baseline samples from config.
-    
-    Supports both min_baseline_samples (standard) and min_samples_for_baseline_validation (legacy).
     """
-    val = get_config_value(config, "time_frequency_analysis.constants.min_baseline_samples", None)
-    if val is None:
-        val = get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 10)
-    return int(val)
+    raw = require_config_value(
+        config, "time_frequency_analysis.constants.min_samples_for_baseline_validation"
+    )
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "time_frequency_analysis.constants.min_samples_for_baseline_validation must be an int"
+        ) from exc
+    if value < 1:
+        raise ValueError(
+            "time_frequency_analysis.constants.min_samples_for_baseline_validation must be >= 1"
+        )
+    return value
 
 
 ###################################################################
@@ -892,10 +906,7 @@ def apply_baseline_to_tfr(
     baseline_window = config.get(
         "time_frequency_analysis.baseline_window", [-5.0, -0.01]
     )
-    min_samples_roi = config.get("behavior_analysis.statistics.min_samples_roi", 20)
     min_baseline_samples = _get_min_baseline_samples(config)
-    if min_baseline_samples < min_samples_roi:
-        min_baseline_samples = min_samples_roi
     
     try:
         b_start, b_end, _ = validate_baseline_window(

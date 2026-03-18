@@ -12,7 +12,7 @@ import pandas as pd
 
 from eeg_pipeline.infra.tsv import read_table, read_tsv
 from eeg_pipeline.infra.paths import _find_clean_events_path, deriv_features_path, load_events_df
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.utils.data.columns import (
     find_binary_outcome_column_in_events,
     find_predictor_column_in_events,
@@ -287,12 +287,12 @@ def _target_covariate_aliases(target: Optional[str], config: Optional[Any] = Non
 
 def _fmri_signature_defaults(config: Any) -> dict:
     return {
-        "method": str(get_config_value(config, "machine_learning.fmri_signature.method", "beta-series")).strip().lower(),
-        "contrast_name": str(get_config_value(config, "machine_learning.fmri_signature.contrast_name", "contrast")).strip(),
-        "signature_name": str(get_config_value(config, "machine_learning.fmri_signature.signature_name", "auto")).strip(),
-        "metric": str(get_config_value(config, "machine_learning.fmri_signature.metric", "dot")).strip().lower(),
-        "normalization": str(get_config_value(config, "machine_learning.fmri_signature.normalization", "none")).strip().lower(),
-        "round_decimals": int(get_config_value(config, "machine_learning.fmri_signature.round_decimals", 3)),
+        "method": str(require_config_value(config, "machine_learning.fmri_signature.method")).strip().lower(),
+        "contrast_name": str(require_config_value(config, "machine_learning.fmri_signature.contrast_name")).strip(),
+        "signature_name": str(require_config_value(config, "machine_learning.fmri_signature.signature_name")).strip(),
+        "metric": str(require_config_value(config, "machine_learning.fmri_signature.metric")).strip().lower(),
+        "normalization": str(require_config_value(config, "machine_learning.fmri_signature.normalization")).strip().lower(),
+        "round_decimals": int(require_config_value(config, "machine_learning.fmri_signature.round_decimals")),
     }
 
 

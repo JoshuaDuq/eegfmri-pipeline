@@ -51,7 +51,7 @@ from eeg_pipeline.analysis.machine_learning.pipelines import (
     build_rf_param_grid,
 )
 from eeg_pipeline.utils.data.machine_learning import load_active_matrix, load_epoch_tensor_matrix
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.machine_learning import (
     export_predictions,
@@ -600,20 +600,22 @@ def _maybe_generate_mode_plots(
     try:
         from eeg_pipeline.analysis.machine_learning.plotting import generate_ml_mode_plots
 
-        enabled = bool(get_config_value(config, "machine_learning.plotting.enabled", True))
+        enabled = bool(require_config_value(config, "machine_learning.plotting.enabled"))
         if not enabled:
             return
-        formats_raw = get_config_value(config, "machine_learning.plotting.formats", ["png"])
+        formats_raw = require_config_value(config, "machine_learning.plotting.formats")
         if isinstance(formats_raw, (list, tuple)):
             formats = [str(v).strip() for v in formats_raw if str(v).strip()]
         elif isinstance(formats_raw, str):
             formats = [p for p in formats_raw.replace(",", " ").split() if p]
         else:
-            formats = ["png"]
-        dpi_val = int(get_config_value(config, "machine_learning.plotting.dpi", 300))
-        top_n = int(get_config_value(config, "machine_learning.plotting.top_n_features", 20))
+            raise TypeError(
+                "machine_learning.plotting.formats must be list/tuple/string."
+            )
+        dpi_val = int(require_config_value(config, "machine_learning.plotting.dpi"))
+        top_n = int(require_config_value(config, "machine_learning.plotting.top_n_features"))
         include_diagnostics = bool(
-            get_config_value(config, "machine_learning.plotting.include_diagnostics", True)
+            require_config_value(config, "machine_learning.plotting.include_diagnostics")
         )
         outputs = generate_ml_mode_plots(
             mode=mode,
@@ -903,15 +905,15 @@ def run_regression_ml(
         r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
     )
 
-    if bool(get_config_value(config, "machine_learning.analysis.permutation_importance.enabled", False)):
+    if bool(require_config_value(config, "machine_learning.analysis.permutation_importance.enabled")):
         _run_permutation_importance_stage(
             X, y, groups, _feature_names, config, rng_seed, 
-            int(get_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats", 5)),
+            int(require_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats")),
             results_dir, logger,
             model_name=model_name, covariates=covariates,
         )
 
-    if bool(get_config_value(config, "machine_learning.analysis.shap.enabled", True)):
+    if bool(require_config_value(config, "machine_learning.analysis.shap.enabled")):
         _run_shap_importance_stage(
             X, y, groups, _feature_names, config, rng_seed, results_dir, logger,
             model_name=model_name, covariates=covariates,
@@ -1181,7 +1183,7 @@ def run_within_subject_regression_ml(
             get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
         )
         min_perm_fold_completion = float(
-            get_config_value(config, "machine_learning.cv.min_valid_permutation_fold_fraction", 1.0)
+            require_config_value(config, "machine_learning.cv.min_valid_permutation_fold_fraction")
         )
         
         for perm_idx in range(n_perm):
@@ -1397,15 +1399,15 @@ def run_within_subject_regression_ml(
         r_subj, ci_low, ci_high, p_str, r2_val, pooled_rmse,
     )
 
-    if bool(get_config_value(config, "machine_learning.analysis.permutation_importance.enabled", False)):
+    if bool(require_config_value(config, "machine_learning.analysis.permutation_importance.enabled")):
         _run_permutation_importance_stage(
             X, y, groups, _feature_names, config, rng_seed, 
-            int(get_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats", 5)),
+            int(require_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats")),
             results_dir, logger,
             model_name=model_name, covariates=covariates,
         )
 
-    if bool(get_config_value(config, "machine_learning.analysis.shap.enabled", True)):
+    if bool(require_config_value(config, "machine_learning.analysis.shap.enabled")):
         _run_shap_importance_stage(
             X, y, groups, _feature_names, config, rng_seed, results_dir, logger,
             model_name=model_name, covariates=covariates,
@@ -3599,10 +3601,8 @@ def _run_permutation_importance_stage(
     n_folds_completed = int(len(all_importances))
     completion_rate = float(n_folds_completed / max(n_folds_requested, 1))
     min_completion = float(
-        get_config_value(
-            config,
-            "machine_learning.analysis.permutation_importance.min_valid_fold_fraction",
-            0.8,
+        require_config_value(
+            config, "machine_learning.analysis.permutation_importance.min_valid_fold_fraction"
         )
     )
     if completion_rate < min_completion:
@@ -3733,7 +3733,7 @@ def _run_shap_importance_stage(
         )
         completion_rate = float(n_folds_used / max(n_folds_attempted, 1))
         min_completion = float(
-            get_config_value(config, "machine_learning.analysis.shap.min_valid_fold_fraction", 0.8)
+            require_config_value(config, "machine_learning.analysis.shap.min_valid_fold_fraction")
         )
         if completion_rate < min_completion:
             raise RuntimeError(
@@ -3872,7 +3872,7 @@ def _run_uncertainty_stage(
     n_folds_completed = int(len(all_intervals))
     completion_rate = float(n_folds_completed / max(n_folds_requested, 1))
     min_completion = float(
-        get_config_value(config, "machine_learning.analysis.uncertainty.min_valid_fold_fraction", 0.8)
+        require_config_value(config, "machine_learning.analysis.uncertainty.min_valid_fold_fraction")
     )
     if completion_rate < min_completion:
         raise RuntimeError(

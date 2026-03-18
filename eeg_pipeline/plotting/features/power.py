@@ -144,7 +144,7 @@ def _compute_shared_topomap_vlim(
 
     q_low = float(get_config_value(config, "visualization.robust_vlim.q_low", 0.01))
     q_high = float(get_config_value(config, "visualization.robust_vlim.q_high", 0.99))
-    min_value = float(get_config_value(config, "visualization.robust_vlim.min_v", 1e-6))
+    min_value = float(require_config_value(config, "visualization.robust_vlim.min_v"))
 
     vmin = float(np.nanquantile(finite_data, q_low))
     vmax = float(np.nanquantile(finite_data, q_high))

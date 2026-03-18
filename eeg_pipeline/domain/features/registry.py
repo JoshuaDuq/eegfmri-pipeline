@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import re
 
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.utils.config.loader import get_config_value, load_config
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
+from eeg_pipeline.utils.config.loader import get_config_value, load_config, require_config_value
 
 
 _CHANNEL_NAMES = {
@@ -110,18 +111,23 @@ def load_feature_registry(config: Any) -> FeatureRegistry:
     if config is None:
         raise ValueError("config cannot be None")
 
-    registry_cfg = get_config_value(config, "behavior_analysis.feature_registry", None)
-    if not registry_cfg:
-        raise ValueError("behavior_analysis.feature_registry is required in eeg_config.yaml")
+    config = ensure_behavior_config(config)
+    registry_cfg = require_config_value(config, "behavior_analysis.feature_registry")
+    if not isinstance(registry_cfg, dict):
+        raise ValueError("behavior_analysis.feature_registry must be a mapping.")
 
-    files = registry_cfg.get("files")
+    files = require_config_value(registry_cfg, "files")
     if not files:
         raise ValueError("behavior_analysis.feature_registry.files is required and cannot be empty.")
 
-    source_to_type = registry_cfg.get("source_to_feature_type", {})
-    type_hierarchy = registry_cfg.get("feature_type_hierarchy", {})
-    patterns = _load_feature_patterns(registry_cfg.get("feature_patterns", {}))
-    classifiers = _load_feature_rules(registry_cfg.get("feature_classifiers", []))
+    source_to_type = require_config_value(registry_cfg, "source_to_feature_type")
+    type_hierarchy = require_config_value(registry_cfg, "feature_type_hierarchy")
+    patterns = _load_feature_patterns(
+        require_config_value(registry_cfg, "feature_patterns")
+    )
+    classifiers = _load_feature_rules(
+        require_config_value(registry_cfg, "feature_classifiers")
+    )
 
     return FeatureRegistry(
         files=files,
@@ -137,15 +143,16 @@ def get_feature_registry(config: Any = None) -> FeatureRegistry:
     global _FEATURE_REGISTRY_CACHE
 
     if config is not None:
+        config = ensure_behavior_config(config)
         registry_cfg = get_config_value(config, "behavior_analysis.feature_registry", None)
         if registry_cfg is None:
-            if _FEATURE_REGISTRY_CACHE is None:
-                _FEATURE_REGISTRY_CACHE = load_feature_registry(load_config())
-            return _FEATURE_REGISTRY_CACHE
+            raise ValueError(
+                "behavior_analysis.feature_registry is required in behavior_config.yaml"
+            )
         return load_feature_registry(config)
 
     if _FEATURE_REGISTRY_CACHE is None:
-        _FEATURE_REGISTRY_CACHE = load_feature_registry(load_config())
+        _FEATURE_REGISTRY_CACHE = load_feature_registry(ensure_behavior_config(load_config()))
 
     return _FEATURE_REGISTRY_CACHE
 

@@ -423,9 +423,11 @@ def plot_connectivity_circle_by_condition(
     n_nodes = len(node_names)
     n_edges = len(edges)
     
-    default_top_fraction = float(get_config_value(
-        config, "plotting.plots.features.connectivity.circle_top_fraction", 0.1
-    ))
+    default_top_fraction = float(
+        require_config_value(
+            config, "plotting.plots.features.connectivity.circle_top_fraction"
+        )
+    )
     top_fraction = (significance_threshold if significance_threshold is not None 
                    else default_top_fraction)
     
@@ -443,9 +445,9 @@ def plot_connectivity_circle_by_condition(
         vmin, vmax = 0.0, 1.0
         colormap = "viridis"
     
-    min_lines_config = int(get_config_value(
-        config, "plotting.plots.features.connectivity.circle_min_lines", 20
-    ))
+    min_lines_config = int(
+        require_config_value(config, "plotting.plots.features.connectivity.circle_min_lines")
+    )
     
     width_per_circle = float(plot_cfg.plot_type_configs.get("connectivity", {})
                              .get("width_per_circle", 9.0))
@@ -907,10 +909,17 @@ def plot_connectivity_by_condition(
     compare_columns = get_config_value(config, "plotting.comparisons.compare_columns", False)
     
     segments = _detect_segments_from_data(features_df, config, logger) if compare_windows else []
-    measures = get_config_value(
-        config, "plotting.plots.features.connectivity.measures", 
-        ["aec", "wpli", "pli", "plv", "imcoh"]
-    )
+    raw_measures = require_config_value(config, "plotting.plots.features.connectivity.measures")
+    if isinstance(raw_measures, str):
+        measures = [raw_measures]
+    elif isinstance(raw_measures, (list, tuple)):
+        measures = [str(x).strip() for x in raw_measures if str(x).strip()]
+    else:
+        raise TypeError(
+            "plotting.plots.features.connectivity.measures must be a string or list of strings"
+        )
+    if not measures:
+        raise ValueError("plotting.plots.features.connectivity.measures must be non-empty")
     bands = list(get_frequency_band_names(config) or ['theta', 'alpha', 'beta', 'gamma'])
     requested_segments = list(segments)
     if compare_columns:
@@ -1071,9 +1080,9 @@ def plot_connectivity_network(
     if not np.any(np.isfinite(adjacency_matrix)):
         return
 
-    default_top_fraction = float(get_config_value(
-        config, "plotting.plots.features.connectivity.network_top_fraction", 0.0
-    ))
+    default_top_fraction = float(
+        require_config_value(config, "plotting.plots.features.connectivity.network_top_fraction")
+    )
     if default_top_fraction > 0:
         absolute_weights = np.abs(adjacency_matrix)
         upper_triangle = np.triu(absolute_weights, k=1)
@@ -1216,9 +1225,9 @@ def plot_connectivity_network_by_condition(
                       f"No channel names found for {measure} {band}")
         return
     
-    default_top_fraction = float(get_config_value(
-        config, "plotting.plots.features.connectivity.network_top_fraction", 0.0
-    ))
+    default_top_fraction = float(
+        require_config_value(config, "plotting.plots.features.connectivity.network_top_fraction")
+    )
     
     pooled_connectivity = features_df[columns].mean(axis=0).values
     absolute_connectivity = np.abs(pooled_connectivity)

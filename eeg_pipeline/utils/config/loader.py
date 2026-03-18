@@ -466,10 +466,10 @@ def require_config_value(config: Any, key: str) -> Any:
     if config is None:
         raise ConfigError(f"Missing required config '{key}': config is None")
 
-    if hasattr(config, "get"):
-        value = config.get(key, _MISSING)
-    elif isinstance(config, dict):
+    if isinstance(config, dict):
         value = get_nested_value(config, key, _MISSING)
+    elif hasattr(config, "get"):
+        value = config.get(key, _MISSING)
     else:
         value = _MISSING
 

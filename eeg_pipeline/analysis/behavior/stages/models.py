@@ -6,7 +6,8 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_bool, get_config_int, get_config_value
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
+from eeg_pipeline.utils.config.loader import require_config_value
 
 
 def stage_regression_impl(
@@ -26,6 +27,8 @@ def stage_regression_impl(
     """Trialwise regression stage with optional run-level aggregation."""
     from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
 
+    ctx.config = ensure_behavior_config(ctx.config)
+
     suffix = feature_suffix_from_context_fn(ctx)
     method_label = getattr(config, "method_label", "")
     method_suffix = f"_{method_label}" if method_label else ""
@@ -35,12 +38,22 @@ def stage_regression_impl(
         ctx.logger.warning("Regression: trial table missing; skipping.")
         return pd.DataFrame()
 
-    primary_unit = str(get_config_value(ctx.config, "behavior_analysis.regression.primary_unit", "trial")).strip().lower()
+    primary_unit = str(
+        require_config_value(ctx.config, "behavior_analysis.regression.primary_unit")
+    ).strip().lower()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
-    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
-    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
-    n_perm = get_config_int(ctx.config, "behavior_analysis.regression.n_permutations", 0)
-    include_run_block = get_config_bool(ctx.config, "behavior_analysis.regression.include_run_block", True)
+    run_col = str(
+        require_config_value(ctx.config, "behavior_analysis.run_adjustment.column")
+    ).strip()
+    allow_iid_trials = bool(
+        require_config_value(ctx.config, "behavior_analysis.statistics.allow_iid_trials")
+    )
+    n_perm = int(
+        require_config_value(ctx.config, "behavior_analysis.regression.n_permutations")
+    )
+    include_run_block = bool(
+        require_config_value(ctx.config, "behavior_analysis.regression.include_run_block")
+    )
 
     feature_cols = get_feature_columns_fn(df_trials, ctx)
     min_observations = 2 if use_run_unit else 10

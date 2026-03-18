@@ -23,7 +23,11 @@ from sklearn.base import clone
 from sklearn.pipeline import Pipeline
 
 from eeg_pipeline.infra.logging import get_logger
-from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values, get_config_value
+from eeg_pipeline.utils.config.loader import (
+    get_config_value,
+    get_fisher_z_clip_values,
+    require_config_value,
+)
 
 if TYPE_CHECKING:
     from eeg_pipeline.analysis.features.cv_hygiene import FoldSpecificParams
@@ -812,13 +816,14 @@ def get_inner_cv_splits(n_unique_groups: int, default: Optional[int] = None, con
     return int(np.clip(default, 2, n_unique_groups))
 
 
-def get_min_channels_required(config: Any = None, min_absolute: int = 4) -> int:
+def get_min_channels_required(config: Any) -> int:
     """Get minimum channels required for Riemann analysis."""
-    if config is None:
-        return min_absolute
-
-    riemann_min = config.get("machine_learning.analysis.riemann.min_channels_for_fold", min_absolute)
-    return max(min_absolute, int(riemann_min))
+    value = int(
+        require_config_value(config, "machine_learning.analysis.riemann.min_channels_for_fold")
+    )
+    if value < 1:
+        raise ValueError("machine_learning.analysis.riemann.min_channels_for_fold must be >= 1")
+    return value
 
 
 ###################################################################

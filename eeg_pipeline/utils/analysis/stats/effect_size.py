@@ -20,6 +20,7 @@ from eeg_pipeline.utils.data.columns import (
 )
 from eeg_pipeline.utils.analysis.stats.base import get_config_value, get_epsilon_std
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+from eeg_pipeline.utils.config.loader import require_config_value
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
 
 
@@ -436,9 +437,10 @@ def _get_condition_column(
     config: Any,
 ) -> Optional[str]:
     """Get condition column name from config or configured condition aliases."""
-    compare_col = str(
-        get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
-    ).strip()
+    compare_col_value = get_config_value(
+        config, "behavior_analysis.condition.compare_column", None
+    )
+    compare_col = str(compare_col_value or "").strip()
     
     if compare_col and compare_col in events_df.columns:
         return compare_col
@@ -690,10 +692,9 @@ def _annotate_condition_effect_reportability(
 ) -> Tuple[pd.DataFrame, float]:
     """Annotate condition-effect results with the configured reporting threshold."""
     threshold = float(
-        get_config_value(
+        require_config_value(
             config,
             "behavior_analysis.condition.effect_size_threshold",
-            0.5,
         )
     )
     hedges = pd.to_numeric(df.get("hedges_g", np.nan), errors="coerce")
@@ -734,33 +735,33 @@ def compute_condition_effects(
         )
 
     perm_enabled = bool(
-        get_config_value(
-            config, "behavior_analysis.condition.permutation.enabled", False
+        require_config_value(
+            config, "behavior_analysis.condition.permutation.enabled"
         )
     )
-    n_perm = int(
-        get_config_value(
-            config,
-            "behavior_analysis.condition.permutation.n_permutations",
-            get_config_value(
-                config, "behavior_analysis.statistics.n_permutations", 0
-            ),
-        )
-        or 0
+    n_perm_value = get_config_value(
+        config,
+        "behavior_analysis.condition.permutation.n_permutations",
+        None,
     )
+    if n_perm_value is None:
+        n_perm_value = require_config_value(
+            config, "behavior_analysis.statistics.n_permutations"
+        )
+    n_perm = int(n_perm_value)
     p_primary_mode_value = (
         p_primary_mode
         if p_primary_mode is not None
-        else get_config_value(
-            config, "behavior_analysis.condition.p_primary_mode", "asymptotic"
+        else require_config_value(
+            config, "behavior_analysis.condition.p_primary_mode"
         )
     )
     p_primary_mode_resolved = str(p_primary_mode_value).strip().lower()
     scheme = str(
-        get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")
+        require_config_value(config, "behavior_analysis.permutation.scheme")
     ).strip().lower()
     base_seed = int(
-        get_config_value(config, "behavior_analysis.statistics.base_seed", 42)
+        require_config_value(config, "behavior_analysis.statistics.base_seed")
     )
 
     feature_columns = list(features_df.columns)

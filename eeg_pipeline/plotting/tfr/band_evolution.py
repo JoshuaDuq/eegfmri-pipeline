@@ -54,9 +54,9 @@ def _get_bands_from_config(tfr: mne.time_frequency.EpochsTFR, config: Any) -> Li
     Returns:
         List of band names
     """
-    from eeg_pipeline.utils.config.loader import get_frequency_bands, get_config_value
-    
-    selected_bands = get_config_value(config, "time_frequency_analysis.selected_bands", None)
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+
+    selected_bands = config.get("time_frequency_analysis.selected_bands")
     if selected_bands and isinstance(selected_bands, (list, tuple)) and len(selected_bands) > 0:
         return [b for b in selected_bands if b]
     

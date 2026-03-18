@@ -39,6 +39,55 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             rng=np.random.default_rng(0),
         )
 
+    def _merge_dicts(self, base: dict, updates: dict) -> dict:
+        merged = dict(base)
+        for key, value in updates.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = self._merge_dicts(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    def _base_behavior_config(self) -> dict:
+        return {
+            "project": {"random_state": 7},
+            "event_columns": {
+                "predictor": ["predictor", "temperature"],
+                "outcome": ["outcome", "rating"],
+            },
+            "behavior_analysis": {
+                "statistics": {
+                    "correlation_method": "spearman",
+                    "n_permutations": 10,
+                    "fdr_alpha": 0.05,
+                    "base_seed": 11,
+                },
+                "permutation": {"scheme": "shuffle"},
+                "run_adjustment": {"column": "run_id", "enabled": True},
+                "condition": {
+                    "p_primary_mode": "asymptotic",
+                    "permutation": {"enabled": False},
+                    "effect_size_threshold": 0.2,
+                },
+                "group_level": {
+                    "block_permutation": False,
+                    "multilevel_correlations": {
+                        "target": "rating",
+                        "control_predictor": False,
+                        "control_trial_order": False,
+                        "control_run_effects": False,
+                        "max_run_dummies": 8,
+                    },
+                },
+            },
+        }
+
+    def _behavior_config(self, overrides=None) -> DotConfig:
+        base = self._base_behavior_config()
+        if overrides:
+            base = self._merge_dicts(base, overrides)
+        return DotConfig(base)
+
     def test_stage_registry_includes_validation_and_qc(self):
         from eeg_pipeline.analysis.behavior.orchestration import StageRegistry
 
@@ -696,7 +745,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
 
         fake_trial_path = Path("/tmp/trials.tsv")
-        cfg = DotConfig({})
+        cfg = self._behavior_config()
         logger = Mock()
 
         def _fake_read_table(_path):
@@ -772,7 +821,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({}),
+                config=self._behavior_config(),
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=40,
@@ -841,7 +890,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         features = pd.DataFrame({"power_alpha": [0.1, 0.2, 0.8, 1.0]})
         pain_mask = np.array([True, True, False, False], dtype=bool)
         nonpain_mask = ~pain_mask
-        cfg = DotConfig(
+        cfg = self._behavior_config(
             {
                 "behavior_analysis": {
                     "condition": {
@@ -878,7 +927,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         cond_a_mask = np.array([True, True, False, False], dtype=bool)
         cond_b_mask = ~cond_a_mask
-        cfg = DotConfig(
+        cfg = self._behavior_config(
             {
                 "behavior_analysis": {
                     "condition": {
@@ -1289,7 +1338,14 @@ class TestBehaviorValidityFixes(unittest.TestCase):
                 "run_id": np.repeat([1, 2, 3], 4),
             }
         )
-        cfg = DotConfig({"event_columns": {"outcome": ["rating"]}})
+        cfg = self._behavior_config(
+            {
+                "event_columns": {"outcome": ["rating"]},
+                "behavior_analysis": {
+                    "group_level": {"multilevel_correlations": {"target": "outcome"}}
+                },
+            }
+        )
 
         with patch(
             "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
@@ -2719,7 +2775,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({}),
+                config=self._behavior_config(),
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=0,
@@ -2772,7 +2828,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({"behavior_analysis": {"predictor_column": "temperature"}}),
+                config=self._behavior_config(
+                    {"behavior_analysis": {"predictor_column": "temperature"}}
+                ),
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=0,
@@ -2822,7 +2880,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({}),
+                config=self._behavior_config(),
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=15,
@@ -2868,7 +2926,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({"project": {"random_state": 13}}),
+                config=self._behavior_config({"project": {"random_state": 13}}),
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=2,
@@ -2906,7 +2964,9 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({"behavior_analysis": {"statistics": {"correlation_method": "pearson"}}}),
+                config=self._behavior_config(
+                    {"behavior_analysis": {"statistics": {"correlation_method": "pearson"}}}
+                ),
                 logger=Mock(),
                 use_block_permutation=False,
                 n_perm=0,
@@ -3548,7 +3608,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig(
+                config=self._behavior_config(
                     {
                         "behavior_analysis": {
                             "permutation": {"scheme": "circular_shift"},
@@ -3603,7 +3663,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig({}),
+                config=self._behavior_config(),
                 logger=Mock(),
                 use_block_permutation=True,
                 n_perm=20,
@@ -3874,7 +3934,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             out = run_group_level_correlations(
                 subjects=["0001", "0002"],
                 deriv_root=Path("/tmp"),
-                config=DotConfig(
+                config=self._behavior_config(
                     {"behavior_analysis": {"run_adjustment": {"column": "acq_run"}}}
                 ),
                 logger=Mock(),
@@ -4011,6 +4071,59 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(records, [])
         self.assertEqual(perm_max, [1.5, 2.0, 2.5])
         self.assertAlmostEqual(float(threshold), 2.0, places=12)
+
+    def test_resolve_correlation_method_uses_behavior_defaults(self):
+        from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
+
+        cfg = DotConfig(
+            {"behavior_analysis": {"statistics": {"correlation_method": "pearson"}}}
+        )
+        self.assertEqual(resolve_correlation_method(cfg), "pearson")
+
+    def test_temporal_feature_selection_uses_behavior_defaults(self):
+        from types import SimpleNamespace
+
+        from eeg_pipeline.analysis.behavior.stages.temporal import (
+            resolve_temporal_feature_selection_impl,
+        )
+
+        ctx = SimpleNamespace(
+            config=DotConfig(
+                {
+                    "behavior_analysis": {
+                        "temporal": {"features": {"power": True, "itpc": True, "erds": False}}
+                    }
+                }
+            ),
+            selected_feature_files=None,
+            feature_categories=None,
+            computation_features=None,
+        )
+        self.assertEqual(
+            resolve_temporal_feature_selection_impl(ctx), ["power", "itpc"]
+        )
+
+    def test_resolve_correlation_method_requires_config(self):
+        from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
+
+        cfg = DotConfig({"behavior_analysis": {"statistics": {}}})
+        self.assertEqual(resolve_correlation_method(cfg), "spearman")
+
+    def test_temporal_feature_selection_requires_config(self):
+        from types import SimpleNamespace
+
+        from eeg_pipeline.analysis.behavior.stages.temporal import (
+            resolve_temporal_feature_selection_impl,
+        )
+
+        ctx = SimpleNamespace(
+            config=DotConfig({"behavior_analysis": {"temporal": {"features": "invalid"}}}),
+            selected_feature_files=None,
+            feature_categories=None,
+            computation_features=None,
+        )
+        with self.assertRaises(ValueError):
+            resolve_temporal_feature_selection_impl(ctx)
 
 
 if __name__ == "__main__":

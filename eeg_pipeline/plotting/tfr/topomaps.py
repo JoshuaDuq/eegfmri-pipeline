@@ -318,12 +318,10 @@ def _collect_valid_bands(
     Returns:
         Tuple of (valid_bands dict, all_diff_data list)
     """
-    from eeg_pipeline.utils.config.loader import get_config_value
-    
     fmax_available = float(np.max(tfr_condition_2.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
-    
-    selected_bands = get_config_value(config, "time_frequency_analysis.selected_bands", None)
+
+    selected_bands = config.get("time_frequency_analysis.selected_bands")
     if selected_bands and isinstance(selected_bands, (list, tuple)) and len(selected_bands) > 0:
         bands = {k: v for k, v in bands.items() if k in selected_bands}
 

@@ -25,7 +25,7 @@ from typing import Any, Optional
 import numpy as np
 import mne
 
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
 ###################################################################
@@ -36,7 +36,6 @@ DEFAULT_MIN_EPOCHS = 20
 DEFAULT_MIN_CHANNELS = 10
 DEFAULT_SAMPLING_FREQ = 500
 DEFAULT_MAX_AMPLITUDE_UV = 500
-DEFAULT_PERCENT_THRESHOLD = 5.0
 CRITICAL_NAN_FRACTION = 0.01
 WARNING_EXTREME_FRACTION = 0.1
 ZERO_VARIANCE_THRESHOLD = 1e-12
@@ -274,11 +273,7 @@ def _get_percent_threshold(
     """Extract percent threshold from config or use default."""
     if percent_threshold is not None:
         return percent_threshold
-    return float(
-        get_config_value(
-            config, "io.constants.percent_threshold", DEFAULT_PERCENT_THRESHOLD
-        )
-    )
+    return float(require_config_value(config, "io.constants.percent_threshold"))
 
 
 def detect_data_format(
@@ -394,5 +389,4 @@ def require_epochs_tfr(
             logger.warning(f"{context_msg} requires EpochsTFR; skipping.")
         return False
     return True
-
 

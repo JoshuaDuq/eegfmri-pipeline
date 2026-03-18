@@ -10,7 +10,8 @@ from scipy import stats
 from eeg_pipeline.analysis.behavior.result_types import GroupLevelResult
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
-from eeg_pipeline.utils.config.loader import get_config_bool, get_config_float, get_config_int, get_config_value
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.utils.data.columns import (
     require_predictor_column,
     resolve_outcome_column,
@@ -22,10 +23,8 @@ _PARTIAL_DESIGN_CONDITION_THRESHOLD = 1e10
 
 def _resolve_group_level_permutation_scheme(config: Any) -> str:
     """Resolve the configured permutation scheme for group-level inference."""
-    scheme = str(
-        get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")
-        or "shuffle"
-    ).strip().lower()
+    scheme_raw = require_config_value(config, "behavior_analysis.permutation.scheme")
+    scheme = str(scheme_raw).strip().lower()
     if scheme not in {"shuffle", "circular_shift"}:
         raise ValueError(
             "Unsupported behavior_analysis.permutation.scheme for group-level correlations: "
@@ -36,7 +35,7 @@ def _resolve_group_level_permutation_scheme(config: Any) -> str:
 
 def _resolve_group_level_block_column(df: pd.DataFrame, config: Any) -> Optional[str]:
     configured_run_col = str(
-        get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id"
+        require_config_value(config, "behavior_analysis.run_adjustment.column")
     ).strip()
     candidates: List[str] = []
     for candidate in (configured_run_col, "block", "run_id", "run", "session"):
@@ -75,7 +74,9 @@ def _build_subject_partial_permutation_state(
     x_values = aligned["x"].to_numpy(dtype=float)
     y_values = aligned["y"].to_numpy(dtype=float)
     z_values = aligned[cov_df.columns].to_numpy(dtype=float)
-    method_normalized = str(method or "spearman").strip().lower()
+    method_normalized = str(method or "").strip().lower()
+    if not method_normalized:
+        raise ValueError("Missing correlation method for partial permutation state.")
     if method_normalized == "spearman":
         x_values = stats.rankdata(x_values)
         y_values = stats.rankdata(y_values)
@@ -130,14 +131,14 @@ def run_group_level_correlations_impl(
     deriv_root: Path,
     config: Any,
     logger: Any,
-    use_block_permutation: bool = True,
-    n_perm: int = 1000,
-    fdr_alpha: float = 0.05,
-    target_col: str = "outcome",
-    control_predictor: bool = False,
-    control_trial_order: bool = False,
-    control_run_effects: bool = False,
-    max_run_dummies: int = 20,
+    use_block_permutation: Optional[bool] = None,
+    n_perm: Optional[int] = None,
+    fdr_alpha: Optional[float] = None,
+    target_col: Optional[str] = None,
+    control_predictor: Optional[bool] = None,
+    control_trial_order: Optional[bool] = None,
+    control_run_effects: Optional[bool] = None,
+    max_run_dummies: Optional[int] = None,
     random_state: Optional[int] = None,
     feature_files: Optional[List[str]] = None,
     *,
@@ -147,10 +148,47 @@ def run_group_level_correlations_impl(
     constant_variance_threshold: float,
 ) -> pd.DataFrame:
     """Run multilevel correlations across subjects with block-aware permutations."""
+    config = ensure_behavior_config(config)
     from eeg_pipeline.infra.paths import deriv_stats_path
     from eeg_pipeline.infra.tsv import read_table
     from eeg_pipeline.utils.analysis.stats.fdr import hierarchical_fdr
     from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+    multilevel_cfg = require_config_value(
+        config, "behavior_analysis.group_level.multilevel_correlations"
+    )
+    if not isinstance(multilevel_cfg, dict):
+        raise ValueError(
+            "behavior_analysis.group_level.multilevel_correlations must be a mapping."
+        )
+
+    if use_block_permutation is None:
+        use_block_permutation = bool(
+            require_config_value(config, "behavior_analysis.group_level.block_permutation")
+        )
+    if n_perm is None:
+        n_perm = int(
+            require_config_value(config, "behavior_analysis.statistics.n_permutations")
+        )
+    if fdr_alpha is None:
+        fdr_alpha = float(
+            require_config_value(config, "behavior_analysis.statistics.fdr_alpha")
+        )
+    if target_col is None:
+        target_col = str(require_config_value(multilevel_cfg, "target")).strip()
+    if control_predictor is None:
+        control_predictor = bool(require_config_value(multilevel_cfg, "control_predictor"))
+    if control_trial_order is None:
+        control_trial_order = bool(
+            require_config_value(multilevel_cfg, "control_trial_order")
+        )
+    if control_run_effects is None:
+        control_run_effects = bool(
+            require_config_value(multilevel_cfg, "control_run_effects")
+        )
+    if max_run_dummies is None:
+        max_run_dummies = int(require_config_value(multilevel_cfg, "max_run_dummies"))
+    if random_state is None:
+        random_state = int(require_config_value(config, "project.random_state"))
 
     if isinstance(feature_files, str):
         feature_files = [feature_files]
@@ -184,7 +222,7 @@ def run_group_level_correlations_impl(
         return pd.DataFrame()
 
     combined = pd.concat(all_trials, ignore_index=True)
-    correlation_method = resolve_correlation_method(config, logger=logger, default="spearman")
+    correlation_method = resolve_correlation_method(config, logger=logger)
     permutation_scheme = _resolve_group_level_permutation_scheme(config)
 
     target_column = _resolve_group_level_target_column(combined, config, target_col)
@@ -218,10 +256,7 @@ def run_group_level_correlations_impl(
         z_vals = np.arctanh(clipped)
         return float(np.tanh(np.nanmean(z_vals)))
 
-    if random_state is None:
-        seed = get_config_value(config, "project.random_state", 42)
-    else:
-        seed = random_state
+    seed = random_state
     try:
         seed_int = int(seed) if seed is not None else None
     except (TypeError, ValueError):
@@ -547,30 +582,31 @@ def run_group_level_analysis_impl(
 
     if run_multilevel_correlations:
         logger.info("Running multilevel correlations with block-restricted permutations...")
-        gl_corr_cfg = get_config_value(config, "behavior_analysis.group_level.multilevel_correlations", {})
+        gl_corr_cfg = require_config_value(
+            config, "behavior_analysis.group_level.multilevel_correlations"
+        )
         if not isinstance(gl_corr_cfg, dict):
-            gl_corr_cfg = {}
+            raise ValueError(
+                "behavior_analysis.group_level.multilevel_correlations must be a mapping."
+            )
 
-        default_target = str(get_config_value(config, "behavior_analysis.outcome_column", "") or "").strip()
-        target_col = str(gl_corr_cfg.get("target", default_target) or default_target).strip()
+        target_col = str(require_config_value(gl_corr_cfg, "target")).strip()
         control_predictor = bool(
-            gl_corr_cfg.get("control_predictor", get_config_bool(config, "behavior_analysis.predictor_control_enabled", True))
+            require_config_value(gl_corr_cfg, "control_predictor")
         )
         control_trial_order = bool(
-            gl_corr_cfg.get("control_trial_order", get_config_bool(config, "behavior_analysis.control_trial_order", True))
+            require_config_value(gl_corr_cfg, "control_trial_order")
         )
-        run_adjust_enabled = get_config_bool(config, "behavior_analysis.run_adjustment.enabled", False)
+        _ = bool(
+            require_config_value(config, "behavior_analysis.run_adjustment.enabled")
+        )
         control_run_effects = bool(
-            gl_corr_cfg.get(
-                "control_run_effects",
-                run_adjust_enabled
-                and get_config_bool(config, "behavior_analysis.run_adjustment.include_in_correlations", True),
-            )
+            require_config_value(gl_corr_cfg, "control_run_effects")
         )
-        max_run_dummies = int(
-            gl_corr_cfg.get("max_run_dummies", get_config_int(config, "behavior_analysis.run_adjustment.max_dummies", 20))
-        )
-        random_state = gl_corr_cfg.get("random_state", get_config_value(config, "project.random_state", None))
+        max_run_dummies = int(require_config_value(gl_corr_cfg, "max_run_dummies"))
+        random_state = gl_corr_cfg.get("random_state", None)
+        if random_state is None:
+            random_state = require_config_value(config, "project.random_state")
 
         multilevel_df = run_multilevel_correlations_fn(
             subjects=subjects,
@@ -578,13 +614,14 @@ def run_group_level_analysis_impl(
             config=config,
             logger=logger,
             use_block_permutation=bool(
-                gl_corr_cfg.get(
-                    "block_permutation",
-                    get_config_bool(config, "behavior_analysis.group_level.block_permutation", True),
-                )
+                require_config_value(config, "behavior_analysis.group_level.block_permutation")
             ),
-            n_perm=get_config_int(config, "behavior_analysis.statistics.n_permutations", 1000),
-            fdr_alpha=get_config_float(config, "behavior_analysis.statistics.fdr_alpha", 0.05),
+            n_perm=int(
+                require_config_value(config, "behavior_analysis.statistics.n_permutations")
+            ),
+            fdr_alpha=float(
+                require_config_value(config, "behavior_analysis.statistics.fdr_alpha")
+            ),
             target_col=target_col,
             control_predictor=control_predictor,
             control_trial_order=control_trial_order,

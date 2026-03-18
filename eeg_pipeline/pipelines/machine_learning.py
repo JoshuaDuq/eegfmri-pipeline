@@ -44,6 +44,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional
 
+from eeg_pipeline.utils.config.loader import require_config_value
 from eeg_pipeline.analysis.machine_learning.orchestration import (
     run_regression_ml,
     run_within_subject_regression_ml,
@@ -129,7 +130,9 @@ class MLPipeline(PipelineBase):
             )
         
         if cv_scope == "group":
-            min_subjects = self.config.get("analysis.min_subjects_for_group", 2)
+            min_subjects = int(
+                require_config_value(self.config, "analysis.min_subjects_for_group")
+            )
             if len(subjects) < min_subjects:
                 raise ValueError(
                     f"ML pipeline requires at least {min_subjects} subjects "

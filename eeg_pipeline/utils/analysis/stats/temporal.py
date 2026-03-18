@@ -28,7 +28,8 @@ from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_to_tfr,
 )
 from eeg_pipeline.utils.analysis.windowing import build_time_windows_fixed_size_clamped
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.utils.data.tfr_alignment import compute_aligned_data_length
 from eeg_pipeline.utils.data.columns import (
     get_binary_outcome_column_from_config,
@@ -195,6 +196,7 @@ def _prepare_temporal_covariates(
     idx: np.ndarray,
     config: Any,
 ) -> Tuple[Optional[np.ndarray], Optional[List[str]], int]:
+    config = ensure_behavior_config(config)
     cov_vals = None
     cov_cols: Optional[List[str]] = None
     if cov_df is not None and not cov_df.empty:
@@ -205,10 +207,14 @@ def _prepare_temporal_covariates(
     req_samples = int(MIN_OBSERVATIONS_FOR_CORRELATION)
     if cov_vals is not None and cov_vals.shape[1] > 0:
         min_samples_per_cov = int(
-            get_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate", 5)
+            require_config_value(
+                config, "behavior_analysis.statistics.min_samples_per_covariate"
+            )
         )
         partial_corr_base = int(
-            get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5)
+            require_config_value(
+                config, "behavior_analysis.statistics.partial_corr_base_samples"
+            )
         )
         req_samples = max(
             req_samples,
@@ -235,6 +241,7 @@ def _compute_metric_records_with_cluster(
     groups: Optional[np.ndarray],
     req_samples: int,
 ) -> List[Dict[str, Any]]:
+    config = ensure_behavior_config(config)
     method = "spearman" if use_spearman else "pearson"
     method_label = format_correlation_method_label(method, None)
     corr_fn = spearmanr if use_spearman else pearsonr
@@ -246,14 +253,7 @@ def _compute_metric_records_with_cluster(
     n_cluster_perm = int(
         _get_cluster_n_permutations(config, default=0)
     )
-    cluster_alpha = float(
-        get_config_value(config, "behavior_analysis.cluster.alpha", None)
-        or get_config_value(
-            config,
-            "behavior_analysis.cluster_correction.alpha",
-            get_config_value(config, "statistics.sig_alpha", 0.05),
-        )
-    )
+    cluster_alpha = float(require_config_value(config, "behavior_analysis.cluster.alpha"))
     cluster_forming_threshold = (
         get_config_value(config, "behavior_analysis.cluster.forming_threshold", None)
         or get_config_value(config, "behavior_analysis.cluster_correction.cluster_forming_threshold", None)
@@ -476,6 +476,9 @@ def _compute_tf_correlations_for_bins(
     n_jobs: int = 1, config: Optional[Any] = None
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]]]:
     """Compute correlations for all time-frequency bins."""
+    if config is None:
+        raise ValueError("config must be provided for time-frequency correlations.")
+    config = ensure_behavior_config(config)
     n_bins = len(time_edges) - 1
     corrs = np.full((len(freqs), n_bins), np.nan)
     pvals = np.full_like(corrs, np.nan)
@@ -488,9 +491,15 @@ def _compute_tf_correlations_for_bins(
         cov_mat = cov_df.apply(pd.to_numeric, errors="coerce").to_numpy()
         n_cov = cov_mat.shape[1]
 
-    min_samples_per_cov = int(get_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate", 5))
-    partial_corr_base = int(get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5))
-    min_dof = int(get_config_value(config, "behavior_analysis.statistics.min_dof_for_correlation", 2))
+    min_samples_per_cov = int(
+        require_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate")
+    )
+    partial_corr_base = int(
+        require_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples")
+    )
+    min_dof = int(
+        require_config_value(config, "behavior_analysis.statistics.min_dof_for_correlation")
+    )
 
     tasks = [
         (freq_idx, time_idx)
@@ -616,6 +625,9 @@ def _compute_correlations_for_condition(
     """Compute channel/band/window correlations for a single condition."""
     if mask is None:
         return None
+    if config is None:
+        raise ValueError("config must be provided for temporal correlations.")
+    config = ensure_behavior_config(config)
 
     is_bool_mask = mask.dtype == bool
     idx = np.where(mask)[0] if is_bool_mask else np.asarray(mask)
@@ -642,8 +654,12 @@ def _compute_correlations_for_condition(
     informative_bins = [[] for _ in range(n_b)]
 
     if cov_vals is not None:
-        min_samples_per_cov = int(get_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate", 5))
-        partial_corr_base = int(get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5))
+        min_samples_per_cov = int(
+            require_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate")
+        )
+        partial_corr_base = int(
+            require_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples")
+        )
         req_samples = cov_vals.shape[1] * min_samples_per_cov + partial_corr_base
     else:
         req_samples = 0
@@ -719,10 +735,7 @@ def _compute_correlations_for_condition(
         compute_cluster_correction_2d, compute_cluster_masses_2d
     )
 
-    c_alpha = float(
-        get_config_value(config, "behavior_analysis.cluster.alpha", None) or
-        get_config_value(config, "behavior_analysis.cluster_correction.alpha", alpha)
-    )
+    c_alpha = float(require_config_value(config, "behavior_analysis.cluster.alpha"))
     n_cluster_perm = int(
         _get_cluster_n_permutations(config, default=0)
     )
@@ -950,6 +963,7 @@ def _run_tf_correlations_core(
     logger,
 ) -> None:
     """Run time-frequency correlations and save outputs."""
+    config = ensure_behavior_config(config)
     logger.info("Computing time-frequency correlations...")
     if epochs is None or events is None or y is None:
         return
@@ -991,7 +1005,9 @@ def _run_tf_correlations_core(
     if time_res is None:
         time_res = 0.1
     time_edges = np.arange(times[0], times[-1] + float(time_res), float(time_res))
-    min_pts = int(config.get("behavior_analysis.statistics.min_samples_roi", 20))
+    min_pts = int(
+        require_config_value(config, "behavior_analysis.statistics.min_samples_roi")
+    )
 
     tf_jobs_cfg = temporal_cfg.get("n_jobs", None)
     global_jobs_cfg = config.get("behavior_analysis.n_jobs", 1)
@@ -1027,11 +1043,7 @@ def _run_tf_correlations_core(
         _get_cluster_n_permutations(config, default=100)
     )
     n_perm = max(n_perm_cfg, int(temporal_cfg.get("n_cluster_perm", 0)))
-    c_alpha = float(
-        get_config_value(config, "behavior_analysis.cluster.alpha", None) or
-        get_config_value(config, "behavior_analysis.cluster_correction.alpha", None) or
-        get_config_value(config, "statistics.sig_alpha", 0.05)
-    )
+    c_alpha = float(require_config_value(config, "behavior_analysis.cluster.alpha"))
     rng = np.random.default_rng(int(get_config_value(config, "project.random_state", 42)))
     cov_mat = cov_df.to_numpy() if cov_df is not None and not cov_df.empty else None
 
@@ -1209,17 +1221,23 @@ def _compute_roi_correlations_for_condition(
         cov_vals = cov_df_c.to_numpy()
         cov_cols = list(cov_df_c.columns)
 
+    config = ensure_behavior_config(config)
+
     # Minimum samples for stable correlation / valid t-stat conversion
     min_samples = int(
-        get_config_value(
-            config, "behavior_analysis.statistics.min_observations_for_correlation", MIN_OBSERVATIONS_FOR_CORRELATION
+        require_config_value(
+            config, "behavior_analysis.statistics.min_observations_for_correlation"
         )
     )
     min_samples = max(min_samples, MIN_OBSERVATIONS_FOR_CORRELATION)
 
     if cov_vals is not None:
-        min_samples_per_cov = int(get_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate", 5))
-        partial_corr_base = int(get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5))
+        min_samples_per_cov = int(
+            require_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate")
+        )
+        partial_corr_base = int(
+            require_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples")
+        )
         req_samples = int(cov_vals.shape[1]) * int(min_samples_per_cov) + int(partial_corr_base)
         req_samples = max(req_samples, min_samples)
     else:
@@ -1229,10 +1247,7 @@ def _compute_roi_correlations_for_condition(
     n_cluster_perm = int(
         _get_cluster_n_permutations(config, default=0)
     )
-    c_alpha = float(
-        get_config_value(config, "behavior_analysis.cluster.alpha", None)
-        or get_config_value(config, "behavior_analysis.cluster_correction.alpha", get_config_value(config, "statistics.sig_alpha", 0.05))
-    )
+    c_alpha = float(require_config_value(config, "behavior_analysis.cluster.alpha"))
     cluster_forming_threshold = (
         get_config_value(config, "behavior_analysis.cluster.forming_threshold", None)
         or get_config_value(config, "behavior_analysis.cluster_correction.cluster_forming_threshold", None)

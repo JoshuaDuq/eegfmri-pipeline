@@ -27,12 +27,13 @@ import pandas as pd
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.pipelines.progress import ensure_progress_reporter
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
 from eeg_pipeline.utils.analysis.stats.correlation import (
     format_correlation_method_label,
     normalize_robust_correlation_method,
 )
 from eeg_pipeline.utils.analysis.stats.base import get_subject_seed
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.analysis.behavior.stage_catalog import (
     COMPUTATION_TO_PIPELINE_ATTR,
@@ -90,14 +91,6 @@ def _resolve_behavior_computation_flags(
     return flags
 
 
-def _get_optional_int(config: Any, key: str, default: Optional[int]) -> Optional[int]:
-    """Get optional integer from config, returning None if not set or explicitly None."""
-    value = get_config_value(config, key, default)
-    if value is None:
-        return None
-    return int(value)
-
-
 @dataclass
 class BehaviorPipelineConfig:
     method: str = "spearman"
@@ -144,72 +137,133 @@ class BehaviorPipelineConfig:
     
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
-        method = resolve_correlation_method(config, default="spearman")
+        config = ensure_behavior_config(config)
+        method = resolve_correlation_method(config)
         robust_method = normalize_robust_correlation_method(
             get_config_value(config, "behavior_analysis.robust_correlation", None),
             default=None,
             strict=True,
         )
         method_label = format_correlation_method_label(method, robust_method)
+        bootstrap_value = get_config_value(config, "behavior_analysis.bootstrap", None)
+        if bootstrap_value is None:
+            bootstrap_value = require_config_value(
+                config, "behavior_analysis.statistics.default_n_bootstrap"
+            )
+        n_permutations_value = get_config_value(
+            config, "behavior_analysis.cluster.n_permutations", None
+        )
+        if n_permutations_value is None:
+            n_permutations_value = require_config_value(
+                config, "behavior_analysis.statistics.n_permutations"
+            )
         return cls(
             method=method,
-            min_samples=int(get_config_value(config, "behavior_analysis.min_samples.default", 10)),
-            control_predictor=bool(get_config_value(config, "behavior_analysis.predictor_control_enabled", True)),
-            control_trial_order=bool(get_config_value(config, "behavior_analysis.control_trial_order", True)),
-            compute_change_scores=bool(get_config_value(config, "behavior_analysis.correlations.compute_change_scores", True)),
-            compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
-            compute_bayes_factors=bool(get_config_value(config, "behavior_analysis.correlations.compute_bayes_factors", False)),
-            compute_loso_stability=bool(get_config_value(config, "behavior_analysis.correlations.loso_stability", True)),
-            bootstrap=int(
-                get_config_value(
-                    config,
-                    "behavior_analysis.bootstrap",
-                    get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000),
+            min_samples=int(
+                require_config_value(config, "behavior_analysis.min_samples.default")
+            ),
+            control_predictor=bool(
+                require_config_value(
+                    config, "behavior_analysis.predictor_control_enabled"
                 )
             ),
+            control_trial_order=bool(
+                require_config_value(config, "behavior_analysis.control_trial_order")
+            ),
+            compute_change_scores=bool(
+                require_config_value(
+                    config, "behavior_analysis.correlations.compute_change_scores"
+                )
+            ),
+            compute_reliability=bool(
+                require_config_value(
+                    config, "behavior_analysis.statistics.compute_reliability"
+                )
+            ),
+            compute_bayes_factors=bool(
+                require_config_value(
+                    config, "behavior_analysis.correlations.compute_bayes_factors"
+                )
+            ),
+            compute_loso_stability=bool(
+                require_config_value(
+                    config, "behavior_analysis.correlations.loso_stability"
+                )
+            ),
+            bootstrap=int(bootstrap_value),
             robust_method=robust_method,
             method_label=method_label,
-            correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_predictor"]),
-            run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
-            run_predictor_residual=bool(get_config_value(config, "behavior_analysis.predictor_residual.enabled", True)),
-            run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
+            correlation_types=require_config_value(
+                config, "behavior_analysis.correlations.types"
+            ),
+            run_trial_table=bool(
+                require_config_value(config, "behavior_analysis.trial_table.enabled")
+            ),
+            run_predictor_residual=bool(
+                require_config_value(
+                    config, "behavior_analysis.predictor_residual.enabled"
+                )
+            ),
+            run_regression=bool(
+                require_config_value(config, "behavior_analysis.regression.enabled")
+            ),
             run_icc=bool(
-                get_config_value(
-                    config,
-                    "behavior_analysis.icc.enabled",
-                    True,
-                )
+                require_config_value(config, "behavior_analysis.icc.enabled")
             ),
-            run_validation=bool(get_config_value(config, "behavior_analysis.validation.enabled", True)),
-            run_correlations=bool(get_config_value(config, "behavior_analysis.correlations.enabled", True)),
+            run_validation=bool(
+                require_config_value(config, "behavior_analysis.validation.enabled")
+            ),
+            run_correlations=bool(
+                require_config_value(config, "behavior_analysis.correlations.enabled")
+            ),
             run_multilevel_correlations=bool(
-                get_config_value(
-                    config,
-                    "behavior_analysis.group_level.multilevel_correlations.enabled",
-                    False,
+                require_config_value(
+                    config, "behavior_analysis.group_level.multilevel_correlations.enabled"
                 )
             ),
-            run_condition_comparison=bool(get_config_value(config, "behavior_analysis.condition.enabled", True)),
-            run_temporal_correlations=bool(get_config_value(config, "behavior_analysis.temporal.enabled", True)),
-            run_cluster_tests=bool(get_config_value(config, "behavior_analysis.cluster.enabled", False)),
-            fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
-            n_permutations=int(
-                get_config_value(
-                    config,
-                    "behavior_analysis.cluster.n_permutations",
-                    get_config_value(config, "behavior_analysis.statistics.n_permutations", 0),
-                )
+            run_condition_comparison=bool(
+                require_config_value(config, "behavior_analysis.condition.enabled")
             ),
-            n_jobs=int(get_config_value(config, "behavior_analysis.n_jobs", -1)),
+            run_temporal_correlations=bool(
+                require_config_value(config, "behavior_analysis.temporal.enabled")
+            ),
+            run_cluster_tests=bool(
+                require_config_value(config, "behavior_analysis.cluster.enabled")
+            ),
+            fdr_alpha=float(
+                require_config_value(config, "behavior_analysis.statistics.fdr_alpha")
+            ),
+            n_permutations=int(n_permutations_value),
+            n_jobs=int(require_config_value(config, "behavior_analysis.n_jobs")),
             # Condition-specific
-            condition_effect_threshold=float(get_config_value(config, "behavior_analysis.condition.effect_size_threshold", 0.5)),
+            condition_effect_threshold=float(
+                require_config_value(
+                    config, "behavior_analysis.condition.effect_size_threshold"
+                )
+            ),
             # Temporal-specific
-            temporal_resolution_ms=int(get_config_value(config, "behavior_analysis.temporal.time_resolution_ms", 50)),
-            temporal_smooth_ms=int(get_config_value(config, "behavior_analysis.temporal.smooth_window_ms", 100)),
+            temporal_resolution_ms=int(
+                require_config_value(
+                    config, "behavior_analysis.temporal.time_resolution_ms"
+                )
+            ),
+            temporal_smooth_ms=int(
+                require_config_value(
+                    config, "behavior_analysis.temporal.smooth_window_ms"
+                )
+            ),
             # Cluster-specific
-            cluster_threshold=float(get_config_value(config, "behavior_analysis.cluster.forming_threshold", 0.05)),
-            cluster_min_size=int(get_config_value(config, "behavior_analysis.cluster.min_cluster_size", 2)),
-            cluster_tail=int(get_config_value(config, "behavior_analysis.cluster.tail", 0)),
+            cluster_threshold=float(
+                require_config_value(
+                    config, "behavior_analysis.cluster.forming_threshold"
+                )
+            ),
+            cluster_min_size=int(
+                require_config_value(
+                    config, "behavior_analysis.cluster.min_cluster_size"
+                )
+            ),
+            cluster_tail=int(require_config_value(config, "behavior_analysis.cluster.tail")),
         )
 
 
@@ -423,7 +477,7 @@ class BehaviorPipeline(PipelineBase):
         from eeg_pipeline.infra.logging import get_subject_logger
         import time
         
-        task = task or self.config.get("project.task", "task")
+        task = task or str(require_config_value(self.config, "project.task")).strip()
         progress = ensure_progress_reporter(kwargs.get("progress"))
         stats_dir = deriv_stats_path(self.deriv_root, subject)
         ensure_dir(stats_dir)
@@ -450,15 +504,21 @@ class BehaviorPipeline(PipelineBase):
         
         progress.subject_start(f"sub-{subject}")
 
-        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
+        base_seed = int(
+            require_config_value(self.config, "behavior_analysis.statistics.base_seed")
+        )
         rng = np.random.default_rng(get_subject_seed(base_seed, subject))
 
-        stats_cfg = self.config.get("behavior_analysis.statistics", {})
+        stats_cfg = require_config_value(self.config, "behavior_analysis.statistics")
         partial_covars = stats_cfg.get("partial_covariates", None)
         
-        output_cfg = self.config.get("behavior_analysis.output", {})
-        also_save_csv = bool(output_cfg.get("also_save_csv", False))
-        overwrite = bool(output_cfg.get("overwrite", True))
+        output_cfg = require_config_value(self.config, "behavior_analysis.output")
+        also_save_csv = bool(
+            require_config_value(self.config, "behavior_analysis.output.also_save_csv")
+        )
+        overwrite = bool(
+            require_config_value(self.config, "behavior_analysis.output.overwrite")
+        )
 
         # Build context (step 1)
         ctx = BehaviorContext(

@@ -17,6 +17,7 @@ from eeg_pipeline.utils.config.loader import (
     get_config_value,
     get_constants,
     ensure_config,
+    require_config_value,
 )
 
 __all__ = [
@@ -37,17 +38,9 @@ __all__ = [
 
 def get_statistics_constants(config=None):
     """Load statistics constants from config."""
-    try:
-        constants = get_constants("statistics", config)
-    except ValueError:
-        constants = {
-            "min_samples_for_correlation": 5,
-            "fisher_z_clip_min": -0.999999,
-            "fisher_z_clip_max": 0.999999,
-        }
-    
+    constants = get_constants("statistics", config)
     _normalize_cluster_structure(constants)
-    _ensure_min_samples_default(constants)
+    _require_min_samples_for_correlation(constants)
     return constants
 
 
@@ -59,10 +52,10 @@ def _normalize_cluster_structure(constants: dict) -> None:
         )
 
 
-def _ensure_min_samples_default(constants: dict) -> None:
-    """Ensure min_samples_for_correlation has a default value."""
+def _require_min_samples_for_correlation(constants: dict) -> None:
+    """Require statistics.constants.min_samples_for_correlation."""
     if "min_samples_for_correlation" not in constants:
-        constants["min_samples_for_correlation"] = 5
+        raise ValueError("statistics.constants.min_samples_for_correlation is required.")
 
 
 def get_fdr_alpha(config: Optional[Any] = None) -> float:
@@ -74,7 +67,7 @@ def get_fdr_alpha(config: Optional[Any] = None) -> float:
 
 def get_ci_level(config: Optional[Any] = None) -> float:
     """Get confidence interval level from config."""
-    return float(get_config_value(config, "statistics.ci_level", 0.95))
+    return float(require_config_value(config, "statistics.ci_level"))
 
 
 def get_z_critical_value(ci_level: float) -> float:
@@ -113,7 +106,7 @@ def get_epsilon_std(config: Optional[Any] = None) -> float:
 
 def get_min_samples_for_correlation(config: Optional[Any] = None) -> int:
     """Get minimum samples required for correlation calculations."""
-    return int(get_config_value(config, "statistics.constants.min_samples_for_correlation", 5))
+    return int(require_config_value(config, "statistics.constants.min_samples_for_correlation"))
 
 
 def get_subject_seed(base_seed: int, subject: str) -> int:

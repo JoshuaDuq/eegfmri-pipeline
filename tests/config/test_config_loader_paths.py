@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from eeg_pipeline.utils.config import loader
 from eeg_pipeline.utils.config.overrides import apply_runtime_overrides
 
@@ -114,3 +116,20 @@ def test_get_condition_column_candidates_uses_config_only() -> None:
     config = loader.ConfigDict({"event_columns": {"condition": []}})
 
     assert loader.get_condition_column_candidates(config) == []
+
+
+def test_require_config_value_resolves_nested_keys_from_dict_and_configdict() -> None:
+    plain = {"behavior_analysis": {"statistics": {"correlation_method": "spearman"}}}
+    wrapped = loader.ConfigDict(plain)
+
+    assert loader.require_config_value(
+        plain, "behavior_analysis.statistics.correlation_method"
+    ) == "spearman"
+    assert loader.require_config_value(
+        wrapped, "behavior_analysis.statistics.correlation_method"
+    ) == "spearman"
+
+
+def test_require_config_value_raises_for_missing_nested_key() -> None:
+    with pytest.raises(loader.ConfigError):
+        loader.require_config_value({}, "behavior_analysis.statistics.correlation_method")

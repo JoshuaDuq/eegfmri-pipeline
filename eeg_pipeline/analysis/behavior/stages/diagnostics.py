@@ -6,7 +6,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
 def _normalize_alignment_values(values: pd.Series) -> pd.Series:
@@ -30,9 +31,10 @@ def _resolve_icc_alignment_columns(df_trials: pd.DataFrame, config: Any) -> List
         resolve_predictor_column,
     )
 
-    compare_column = str(
-        get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
-    ).strip()
+    compare_column_value = get_config_value(
+        config, "behavior_analysis.condition.compare_column", None
+    )
+    compare_column = str(compare_column_value or "").strip()
     if not compare_column:
         compare_column = str(get_condition_column_from_config(config, df_trials) or "").strip()
     if not compare_column:
@@ -61,9 +63,11 @@ def _resolve_configured_icc_unit_columns(
         resolve_predictor_column,
     )
 
-    compare_column = str(
-        get_config_value(config, "behavior_analysis.condition.compare_column", "") or ""
-    ).strip()
+    config = ensure_behavior_config(config)
+    compare_column_value = get_config_value(
+        config, "behavior_analysis.condition.compare_column", None
+    )
+    compare_column = str(compare_column_value or "").strip()
     if not compare_column:
         compare_column = str(
             get_condition_column_from_config(config, df_trials) or ""
@@ -74,10 +78,9 @@ def _resolve_configured_icc_unit_columns(
         ).strip()
 
     predictor_column = str(resolve_predictor_column(df_trials, config) or "").strip()
-    configured_specs = get_config_value(
+    configured_specs = require_config_value(
         config,
         "behavior_analysis.icc.unit_columns",
-        [],
     )
     unit_specs = [str(spec).strip() for spec in (configured_specs or [])]
     if not unit_specs:
@@ -194,6 +197,7 @@ def stage_icc_impl(
     """Assess within-subject run-to-run reliability (ICC) of EEG features."""
     from eeg_pipeline.utils.analysis.stats.reliability import compute_icc
 
+    ctx.config = ensure_behavior_config(ctx.config)
     filename = build_output_filename_fn(ctx, config, "icc_reliability")
 
     df_trials = load_trial_table_df_fn(ctx)
@@ -202,8 +206,7 @@ def stage_icc_impl(
         return pd.DataFrame()
 
     run_col = str(
-        get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id")
-        or "run_id"
+        require_config_value(ctx.config, "behavior_analysis.run_adjustment.column")
     ).strip()
     if run_col not in df_trials.columns:
         if "run" in df_trials.columns:

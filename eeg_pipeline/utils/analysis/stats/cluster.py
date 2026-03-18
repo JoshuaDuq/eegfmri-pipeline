@@ -27,6 +27,7 @@ from .base import (
     get_config_value,
     ensure_config,
 )
+from eeg_pipeline.utils.config.loader import require_config_value
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import write_tsv
 from eeg_pipeline.utils.data.columns import (
@@ -42,7 +43,7 @@ from eeg_pipeline.utils.analysis.stats.effect_size import compute_cohens_d_with_
 ###################################################################
 
 
-def _get_config_int(config: Any, *paths: str, default: int) -> int:
+def _require_config_int(config: Any, *paths: str) -> int:
     """Extract integer config value from multiple possible paths."""
     for path in paths:
         val = get_config_value(config, path, None)
@@ -52,10 +53,10 @@ def _get_config_int(config: Any, *paths: str, default: int) -> int:
             return int(val)
         except (TypeError, ValueError):
             continue
-    return int(default)
+    raise ValueError(f"Missing required integer config value for: {paths}.")
 
 
-def _get_config_float(config: Any, *paths: str, default: float) -> float:
+def _require_config_float(config: Any, *paths: str) -> float:
     """Extract float config value from multiple possible paths."""
     for path in paths:
         val = get_config_value(config, path, None)
@@ -65,72 +66,63 @@ def _get_config_float(config: Any, *paths: str, default: float) -> float:
             return float(val)
         except (TypeError, ValueError):
             continue
-    return float(default)
+    raise ValueError(f"Missing required float config value for: {paths}.")
 
 
 def get_cluster_test_config(config: Any) -> Dict[str, Any]:
     """Extract and validate cluster test configuration parameters."""
 
     return {
-        "n_permutations": _get_config_int(
+        "n_permutations": _require_config_int(
             config,
             "behavior_analysis.cluster.n_permutations",
             "behavior_analysis.cluster_correction.n_permutations",
             "behavior_analysis.statistics.n_permutations",
             "statistics.n_permutations",
-            default=1000,
         ),
-        "alpha": _get_config_float(
+        "alpha": _require_config_float(
             config,
             "statistics.alpha",
             "statistics.sig_alpha",
             "behavior_analysis.statistics.alpha",
-            default=0.05,
         ),
-        "fdr_alpha": _get_config_float(
+        "fdr_alpha": _require_config_float(
             config,
             "behavior_analysis.statistics.fdr_alpha",
             "statistics.fdr_alpha",
-            default=0.05,
         ),
-        "cluster_forming_threshold": _get_config_float(
+        "cluster_forming_threshold": _require_config_float(
             config,
             "behavior_analysis.cluster.forming_threshold",
             "behavior_analysis.cluster_correction.cluster_forming_threshold",
-            default=0.05,
         ),
-        "min_timepoints": _get_config_int(
+        "min_timepoints": _require_config_int(
             config,
             "behavior_analysis.cluster.min_timepoints",
             "behavior_analysis.cluster_correction.min_timepoints",
-            default=2,
         ),
-        "min_channels": _get_config_int(
+        "min_channels": _require_config_int(
             config,
             "behavior_analysis.cluster.min_channels",
             "behavior_analysis.cluster_correction.min_channels",
-            default=1,
         ),
-        "min_cluster_size": _get_config_int(
+        "min_cluster_size": _require_config_int(
             config,
             "behavior_analysis.cluster.min_cluster_size",
             "behavior_analysis.cluster_correction.min_cluster_size",
-            default=5,
         ),
-        "tail": _get_config_int(
+        "tail": _require_config_int(
             config,
             "behavior_analysis.cluster.tail",
             "behavior_analysis.cluster_correction.tail",
-            default=0,
         ),
-        "random_seed": _get_config_int(config, "project.random_state", default=42),
+        "random_seed": int(require_config_value(config, "project.random_state")),
         "fwer_method": get_config_value(
             config,
             "behavior_analysis.cluster.fwer_method",
-            get_config_value(
+            require_config_value(
                 config,
                 "behavior_analysis.cluster_correction.fwer_method",
-                "cluster",
             ),
         ),
     }
@@ -307,7 +299,7 @@ def cluster_mask_from_clusters(
     return mask
 
 
-def resolve_cluster_n_jobs(config: Optional[Any] = None) -> int:
+def resolve_cluster_n_jobs(config: Any) -> int:
     """Resolve number of parallel jobs for cluster tests."""
     env_value = os.getenv("EEG_CLUSTER_N_JOBS")
     if env_value and env_value.strip().lower() not in {"auto", ""}:
@@ -315,22 +307,7 @@ def resolve_cluster_n_jobs(config: Optional[Any] = None) -> int:
             return max(1, int(env_value))
         except ValueError:
             pass
-
-    if config is None:
-        try:
-            from eeg_pipeline.utils.config.loader import load_config
-
-            config = load_config()
-        except Exception as exc:
-            logging.getLogger(__name__).warning(
-                "Failed to load config for cluster n_jobs resolution; using defaults: %s",
-                exc,
-            )
-
-    default = -1
-    if config is not None:
-        default = int(get_config_value(config, "statistics.cluster_n_jobs", -1))
-    return default
+    return int(require_config_value(config, "statistics.cluster_n_jobs"))
 
 
 def cluster_test_two_sample(
@@ -356,7 +333,7 @@ def cluster_test_two_sample(
     if alpha is None:
         alpha = get_fdr_alpha(config)
     if n_permutations is None:
-        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", 1000))
+        n_permutations = int(require_config_value(config, "statistics.cluster_n_perm"))
 
     adjacency, eeg_picks, info_eeg = get_eeg_adjacency(info, restrict_picks=restrict_picks)
     if eeg_picks is None:

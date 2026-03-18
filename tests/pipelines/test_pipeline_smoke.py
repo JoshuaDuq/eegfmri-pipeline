@@ -241,7 +241,9 @@ class TestAllPipelines(unittest.TestCase):
 
         pipeline = object.__new__(MLPipeline)
         pipeline.name = "machine_learning"
-        pipeline.config = DotConfig({"project": {"task": "task"}})
+        pipeline.config = DotConfig(
+            {"project": {"task": "task"}, "analysis": {"min_subjects_for_group": 2}}
+        )
         pipeline.logger = Mock()
         pipeline.deriv_root = Path(tempfile.mkdtemp())
 

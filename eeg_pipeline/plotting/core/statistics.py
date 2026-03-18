@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 import numpy as np
 import mne
 
-from eeg_pipeline.utils.config.loader import ensure_config, get_config_value
+from eeg_pipeline.utils.config.loader import ensure_config, require_config_value
 from .utils import log
 from eeg_pipeline.plotting.io.figures import get_viz_params
 from ...utils.analysis.stats import cluster_test_epochs
@@ -33,7 +33,7 @@ def get_strict_mode(config) -> bool:
         Strict mode boolean (default: True)
     """
     config = ensure_config(config)
-    return get_config_value(config, "analysis.strict_mode", True)
+    return bool(require_config_value(config, "analysis.strict_mode"))
 
 
 def _validate_mask_length(
@@ -209,9 +209,7 @@ def build_statistical_title(
     
     config = ensure_config(config)
     alpha = get_config_value(config, "statistics.sig_alpha", DEFAULT_ALPHA)
-    n_perm = get_config_value(
-        config, "statistics.cluster_n_perm", DEFAULT_N_PERMUTATIONS
-    )
+    n_perm = int(require_config_value(config, "statistics.cluster_n_perm"))
     
     parts = []
     test_type = _get_test_type_description(paired)

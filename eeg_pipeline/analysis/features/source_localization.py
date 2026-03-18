@@ -31,7 +31,13 @@ from eeg_pipeline.analysis.features.rest import (
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.data.source_localization_paths import source_localization_estimates_dir
-from eeg_pipeline.utils.config.loader import get_config_float, get_config_int, get_config_value, get_frequency_bands
+from eeg_pipeline.utils.config.loader import (
+    get_config_float,
+    get_config_int,
+    get_config_value,
+    get_frequency_bands,
+    require_config_value,
+)
 
 if TYPE_CHECKING:
     import mne
@@ -2166,16 +2172,20 @@ def _require_lcmv_train_mask_if_trial_safe(
 
 def _resolve_source_connectivity_min_cycles(config: Any) -> float:
     """Resolve minimum cycle count for source connectivity validity checks."""
-    min_cycles = get_config_value(config, "feature_engineering.sourcelocalization.min_cycles_per_band", None)
-    if min_cycles is None:
-        min_cycles = get_config_value(config, "feature_engineering.connectivity.min_cycles_per_band", 3.0)
+    raw = require_config_value(
+        config, "feature_engineering.sourcelocalization.min_cycles_per_band"
+    )
     try:
-        min_cycles_f = float(min_cycles)
-    except (TypeError, ValueError):
-        min_cycles_f = 3.0
-    if not np.isfinite(min_cycles_f) or min_cycles_f <= 0:
-        min_cycles_f = 3.0
-    return max(1.0, float(min_cycles_f))
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.min_cycles_per_band must be a float"
+        ) from exc
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError(
+            "feature_engineering.sourcelocalization.min_cycles_per_band must be finite and > 0"
+        )
+    return float(value)
 
 
 def _validate_source_connectivity_duration(

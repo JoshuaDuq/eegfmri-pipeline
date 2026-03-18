@@ -28,7 +28,6 @@ from .utils import get_fdr_alpha
 
 
 # Constants
-MIN_SAMPLES_PER_CHANNEL_DEFAULT = 5
 MIN_CHANNELS_FOR_APERIODIC_CORR_DEFAULT = 10
 MIN_RUNS_FOR_CORRELATION = 5
 MIN_PERMUTATIONS = 10
@@ -400,11 +399,9 @@ def _compute_channel_pvalues(
     Returns:
         List of p-values (may contain NaN)
     """
-    min_samples = int(
-        get_config_value(
-            config, "statistics.min_samples_per_channel", MIN_SAMPLES_PER_CHANNEL_DEFAULT
-        )
-    )
+    min_samples = int(require_config_value(config, "statistics.min_samples_per_channel"))
+    if min_samples < 1:
+        raise ValueError("statistics.min_samples_per_channel must be >= 1")
     p_values = []
 
     for channel in common_channels:

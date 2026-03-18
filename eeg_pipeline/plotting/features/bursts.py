@@ -176,17 +176,19 @@ def _get_comparison_segments(
 
 
 def _get_burst_metrics(config: Any) -> List[str]:
-    """Get burst metrics from config with fallback defaults."""
-    metrics = get_config_value(
-        config,
-        "plotting.plots.features.bursts.comparison_metrics",
-        None,
-    ) or get_config_value(
-        config,
-        "plotting.plots.features.bursts.metrics",
-        ["rate", "duration_mean", "amp_mean", "fraction"],
-    )
-    return list(metrics) if metrics else ["rate"]
+    """Get burst metrics from config."""
+    raw = require_config_value(config, "plotting.plots.features.bursts.comparison_metrics")
+    if isinstance(raw, str):
+        metrics = [raw]
+    elif isinstance(raw, (list, tuple)):
+        metrics = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        raise TypeError(
+            "plotting.plots.features.bursts.comparison_metrics must be a string or list of strings"
+        )
+    if not metrics:
+        raise ValueError("plotting.plots.features.bursts.comparison_metrics must be non-empty")
+    return metrics
 
 
 def _prepare_window_comparison_data(

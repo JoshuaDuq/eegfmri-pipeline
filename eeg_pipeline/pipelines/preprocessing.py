@@ -700,7 +700,7 @@ class PreprocessingPipeline(PipelineBase):
         # ECG channel typing is handled via BIDS channels.tsv (type=ECG) and MNE.
         
         # Random state
-        random_state = self.config.get("preprocessing.random_state", 42)
+        random_state = self.config.get("preprocessing.random_state")
         if random_state is not None:
             lines.append(f'random_state = {random_state}')
         
@@ -832,7 +832,7 @@ class PreprocessingPipeline(PipelineBase):
                 # - Avoid scanner/housekeeping markers (Volume, Pulse Artifact, SyncStatus, etc.)
                 configured_prefixes = None
                 if config_obj is not None and hasattr(config_obj, "get"):
-                    configured_prefixes = config_obj.get("preprocessing.condition_preferred_prefixes", None)
+                    configured_prefixes = config_obj.get("preprocessing.condition_preferred_prefixes")
                 if isinstance(configured_prefixes, (list, tuple)):
                     preferred_prefixes = tuple(
                         str(p).strip()

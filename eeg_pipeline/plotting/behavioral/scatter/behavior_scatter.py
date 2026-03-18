@@ -34,7 +34,11 @@ from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.utils import get_named_segments
 from eeg_pipeline.plotting.io.figures import get_band_color
 from eeg_pipeline.utils.analysis.stats import compute_partial_residuals, joint_valid_mask
-from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
+from eeg_pipeline.utils.config.loader import (
+    get_config_value,
+    get_frequency_band_names,
+    require_config_value,
+)
 from eeg_pipeline.utils.data import load_subject_scatter_data
 from eeg_pipeline.utils.data.covariates import build_covariate_matrix
 from eeg_pipeline.utils.formatting import sanitize_label
@@ -699,14 +703,20 @@ def plot_behavior_scatter(
     scatter_dir = plots_dir / "scatter"
     ensure_dir(scatter_dir)
 
-    scatter_config = get_config_value(config, "plotting.plots.behavior.scatter", {})
+    scatter_config = require_config_value(config, "plotting.plots.behavior.scatter")
     if features is None:
-        features = scatter_config.get("features", ["power"])
+        features = require_config_value(scatter_config, "features")
     if columns is None:
-        columns = scatter_config.get("columns", ["outcome"])
+        columns = require_config_value(scatter_config, "columns")
     if aggregation_modes is None:
-        agg_str = scatter_config.get("aggregation_modes", ["roi", "global"])
-        aggregation_modes = agg_str if isinstance(agg_str, list) else [agg_str]
+        aggregation_modes = require_config_value(scatter_config, "aggregation_modes")
+    if isinstance(aggregation_modes, str):
+        aggregation_modes = [aggregation_modes]
+    if not isinstance(aggregation_modes, (list, tuple)):
+        raise TypeError("plotting.plots.behavior.scatter.aggregation_modes must be a list of strings")
+    aggregation_modes = [str(x).strip() for x in aggregation_modes if str(x).strip()]
+    if not aggregation_modes:
+        raise ValueError("plotting.plots.behavior.scatter.aggregation_modes must be non-empty")
 
     modes = []
     for mode_str in aggregation_modes:

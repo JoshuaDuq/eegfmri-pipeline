@@ -10,6 +10,7 @@ from eeg_pipeline.cli.commands.behavior_config import (
     _build_computation_features,
     _configure_behavior_compute_mode,
 )
+from eeg_pipeline.utils.config.behavior_loader import apply_behavior_config_defaults
 from eeg_pipeline.utils.config.overrides import apply_set_overrides
 
 def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
@@ -53,6 +54,8 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         print(f"\nExpected outputs: {', '.join(dry_run_result['expected_outputs'])}")
         return
     
+    apply_behavior_config_defaults(config)
+
     categories = getattr(args, "categories", None)
     progress = create_progress_reporter(args)
     

@@ -6,7 +6,8 @@ from typing import Any, Callable, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_bool, get_config_value
+from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
+from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
 def _resolve_condition_permutation_count(config: Any, *, perm_enabled: bool) -> int:
@@ -22,15 +23,11 @@ def _resolve_condition_permutation_count(config: Any, *, perm_enabled: bool) -> 
     if scoped is not None:
         return int(scoped)
 
-    statistics = get_config_value(
+    statistics = require_config_value(
         config,
         "behavior_analysis.statistics.n_permutations",
-        None,
     )
-    if statistics is not None:
-        return int(statistics)
-
-    return 1000
+    return int(statistics)
 
 
 def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> str:
@@ -49,7 +46,10 @@ def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> st
         get_condition_column_from_config,
     )
 
-    compare_col = str(get_config_value(config, "behavior_analysis.condition.compare_column", "") or "").strip()
+    compare_col_value = get_config_value(
+        config, "behavior_analysis.condition.compare_column", None
+    )
+    compare_col = str(compare_col_value or "").strip()
     if compare_col and compare_col in df_trials.columns:
         return compare_col
 
@@ -93,7 +93,11 @@ def stage_condition_column_impl(
     from eeg_pipeline.analysis.behavior.api import compute_condition_effects, split_by_condition
     from eeg_pipeline.utils.analysis.stats.effect_size import resolve_binary_condition_values
 
-    compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
+    ctx.config = ensure_behavior_config(ctx.config)
+
+    compare_values = require_config_value(
+        ctx.config, "behavior_analysis.condition.compare_values"
+    )
     use_multigroup = isinstance(compare_values, (list, tuple)) and len(compare_values) > 2
     if use_multigroup:
         ctx.logger.info(
@@ -102,10 +106,20 @@ def stage_condition_column_impl(
         )
         return stage_condition_multigroup_fn(ctx, config, df_trials=df_trials, feature_cols=feature_cols)
 
-    fail_fast = get_config_value(ctx.config, "behavior_analysis.condition.fail_fast", True)
-    primary_unit = str(get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial")).strip().lower()
-    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
-    perm_enabled = get_config_bool(ctx.config, "behavior_analysis.condition.permutation.enabled", False)
+    fail_fast = bool(
+        require_config_value(ctx.config, "behavior_analysis.condition.fail_fast")
+    )
+    primary_unit = str(
+        require_config_value(ctx.config, "behavior_analysis.condition.primary_unit")
+    ).strip().lower()
+    allow_iid_trials = bool(
+        require_config_value(ctx.config, "behavior_analysis.statistics.allow_iid_trials")
+    )
+    perm_enabled = bool(
+        require_config_value(
+            ctx.config, "behavior_analysis.condition.permutation.enabled"
+        )
+    )
     n_perm = _resolve_condition_permutation_count(ctx.config, perm_enabled=perm_enabled)
     if primary_unit in {"trial", "trialwise"} and (not perm_enabled or n_perm <= 0) and not allow_iid_trials:
         raise ValueError(
@@ -118,7 +132,9 @@ def stage_condition_column_impl(
         )
 
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
-    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    run_col = str(
+        require_config_value(ctx.config, "behavior_analysis.run_adjustment.column")
+    ).strip()
 
     if df_trials is None:
         df_trials = load_trial_table_df_fn(ctx)
@@ -130,7 +146,9 @@ def stage_condition_column_impl(
         feature_cols = get_feature_columns_fn(df_trials, ctx, "condition")
 
     compare_col = resolve_condition_compare_column_fn(df_trials, ctx.config)
-    _ = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
+    _ = bool(
+        require_config_value(ctx.config, "behavior_analysis.condition.overwrite")
+    )
     if use_run_unit and run_col in df_trials.columns and compare_col in df_trials.columns:
         ctx.logger.info("Condition: aggregating to run×condition level (primary_unit=%s)", primary_unit)
         group_keys = [run_col, compare_col]
@@ -190,7 +208,9 @@ def stage_condition_column_impl(
                 )
 
         if groups is None:
-            run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+            run_col = str(
+                require_config_value(ctx.config, "behavior_analysis.run_adjustment.column")
+            ).strip()
             if run_col and run_col in df_trials.columns:
                 groups = df_trials[run_col].to_numpy()
 
@@ -209,7 +229,7 @@ def stage_condition_column_impl(
             features,
             cond_a_mask,
             cond_b_mask,
-            min_samples=max(int(getattr(config, "min_samples", 10)), 2),
+            min_samples=max(int(getattr(config, "min_samples", None)), 2),
             fdr_alpha=config.fdr_alpha,
             logger=ctx.logger,
             n_jobs=config.n_jobs,
@@ -267,6 +287,8 @@ def stage_condition_impl(
     stage_condition_column_fn: Callable[..., pd.DataFrame],
 ) -> pd.DataFrame:
     """Backward-compatible condition stage (column or multigroup)."""
+    ctx.config = ensure_behavior_config(ctx.config)
+
     df_trials = load_trial_table_df_fn(ctx)
     if not is_dataframe_valid_fn(df_trials):
         ctx.logger.warning("Condition: trial table missing; skipping.")
@@ -279,7 +301,9 @@ def stage_condition_impl(
 
     result_dfs: List[pd.DataFrame] = []
 
-    compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
+    compare_values = require_config_value(
+        ctx.config, "behavior_analysis.condition.compare_values"
+    )
     use_multigroup = isinstance(compare_values, (list, tuple)) and len(compare_values) > 2
 
     if use_multigroup:
@@ -315,6 +339,8 @@ def stage_condition_multigroup_impl(
     """Run multi-group condition comparison (3+ groups)."""
     from eeg_pipeline.utils.analysis.stats.effect_size import compute_multigroup_condition_effects
 
+    ctx.config = ensure_behavior_config(ctx.config)
+
     if df_trials is None:
         df_trials = load_trial_table_df_fn(ctx)
     if not is_dataframe_valid_fn(df_trials):
@@ -328,9 +354,11 @@ def stage_condition_multigroup_impl(
         return pd.DataFrame()
 
     primary_unit = str(
-        get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial") or "trial"
+        require_config_value(ctx.config, "behavior_analysis.condition.primary_unit")
     ).strip().lower()
-    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    allow_iid_trials = bool(
+        require_config_value(ctx.config, "behavior_analysis.statistics.allow_iid_trials")
+    )
     if primary_unit in {"trial", "trialwise"} and not allow_iid_trials:
         raise ValueError(
             "Trial-level multigroup condition comparisons assume i.i.d trials. "
@@ -339,9 +367,15 @@ def stage_condition_multigroup_impl(
         )
 
     compare_column = resolve_condition_compare_column_fn(df_trials, ctx.config)
-    compare_values = get_config_value(ctx.config, "behavior_analysis.condition.compare_values", [])
-    _ = get_config_bool(ctx.config, "behavior_analysis.condition.overwrite", True)
-    compare_labels = get_config_value(ctx.config, "behavior_analysis.condition.compare_labels", None)
+    compare_values = require_config_value(
+        ctx.config, "behavior_analysis.condition.compare_values"
+    )
+    _ = bool(
+        require_config_value(ctx.config, "behavior_analysis.condition.overwrite")
+    )
+    compare_labels = get_config_value(
+        ctx.config, "behavior_analysis.condition.compare_labels", None
+    )
 
     if not isinstance(compare_values, (list, tuple)) or len(compare_values) < 3:
         ctx.logger.info("Condition multigroup: requires 3+ compare_values; skipping.")
@@ -351,7 +385,9 @@ def stage_condition_multigroup_impl(
         ctx.logger.warning("Condition multigroup: column '%s' not found; skipping.", compare_column)
         return pd.DataFrame()
 
-    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    run_col = str(
+        require_config_value(ctx.config, "behavior_analysis.run_adjustment.column")
+    ).strip()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     if use_run_unit:
         if run_col not in df_trials.columns:

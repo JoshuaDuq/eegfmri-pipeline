@@ -18,6 +18,16 @@ paths:
   signature_dir: null  # Root directory for multivariate signature weight maps
   signature_maps: []  # List of {name, path} entries relative to signature_dir
 
+analysis:
+  strict_mode: true
+  min_subjects_for_group: 2
+
+###################################################################
+# 1a. ENVIRONMENT
+###################################################################
+environment:
+  thread_limits: {}
+
 ###################################################################
 # 1b. fMRI PREPROCESSING (fMRIPrep-style)
 ###################################################################
@@ -197,6 +207,10 @@ preprocessing:
   notch_freq: 60
   line_freq: 60
   n_jobs: 1
+  random_state: 42
+  # Heuristics for condition auto-detection in BIDS events.tsv.
+  # Empty disables prefix preference filtering.
+  condition_preferred_prefixes: []
   task_is_rest: false              # True = fixed-length resting-state epochs, no event conditions
   rest_epochs_duration: 10.0       # Fixed-length resting-state epoch duration [s]
   rest_epochs_overlap: 0.0         # Resting-state epoch overlap [s]
@@ -257,12 +271,19 @@ epochs:
 # 4. ANALYSIS PARAMETERS
 ###################################################################
 
+analysis:
+  # Minimum subject count used by pipelines that operate at group scope.
+  min_subjects_for_group: 2
+  strict_mode: true
+
 
 # 4.2 Time-Frequency (TFR)
 time_frequency_analysis:
   baseline_mode: "logratio"
   baseline_window: *baseline_window_tfr
   active_window: *active_window
+  # Optional restriction for plotting/exports (null = use all configured bands).
+  selected_bands: null
   bands: *frequency_bands
   tfr:
     freq_min: 1.0
@@ -288,7 +309,6 @@ time_frequency_analysis:
     # Baseline processing
     epsilon_baseline: 1.0e-10
     min_epochs_for_tfr: 10
-    min_baseline_samples: 10
     baseline_precision: 1.0e-6
     baseline_sentinel: "BASELINED:"
     min_log_value: 1.0e-12
@@ -300,6 +320,10 @@ time_frequency_analysis:
     freq_threshold_for_time_res: 8.0
     # Statistics
     min_samples_for_stats: 5
+    min_samples_for_baseline_validation: 10
+
+power:
+  bands_to_use: ["delta", "theta", "alpha", "beta", "gamma"]
 
 # 4.3 Feature Extraction
 feature_engineering:
@@ -558,6 +582,8 @@ feature_engineering:
     spacing: "oct6"                # "oct5" | "oct6" | "ico4" | "ico5"
     parcellation: "aparc"          # "aparc" | "aparc.a2009s" | "HCPMMP1"
     connectivity_method: "aec"     # "aec" | "wpli" | "plv"
+    # Validity gate used by EEG source connectivity checks (min cycles at band fmin).
+    min_cycles_per_band: 3.0
     mindist_mm: 5.0
     reg: 0.05                      # LCMV regularization
     snr: 3.0                       # eLORETA SNR
@@ -613,6 +639,11 @@ feature_engineering:
         output_type: "z-score"     # "z-score" | "t-stat" | "cope" | "beta"
         resample_to_freesurfer: true
 
+    # Plotting-only contrast labels (used to build condition contrasts from precomputed STCs).
+    contrast:
+      condition_a: null
+      condition_b: null
+
   pac:
     source: "precomputed"        # "precomputed" (Hilbert PAC, recommended) or "tfr" (wavelet PAC, prone to spurious coupling)
     method: "mvl"
@@ -655,6 +686,8 @@ feature_engineering:
 
   erp:
     baseline_correction: true
+    # Baseline window (seconds) for ERP plotting and baseline correction.
+    baseline_window: [-0.2, 0.0]
     allow_no_baseline: false
     smooth_ms: 0.0
     peak_prominence_uv: null
@@ -723,304 +756,6 @@ feature_engineering:
     gfp_peak_prominence: 0.0
     random_state: 42
 
-# 4.4 Behavioral Correlation
-behavior_analysis:
-  predictor_type: "continuous"  # "continuous" | "binary" | "categorical"
-  # Canonical behavior columns used across stages. If empty, auto-resolve from
-  # event_columns.* aliases and existing trial-table columns.
-  predictor_column: ""   # e.g., stimulus intensity / dose / temperature
-  outcome_column: ""     # e.g., rating / arousal / detection score
-  predictor_control_enabled: true  # Partial-out predictor in correlations
-
-  # Optional robust estimator for correlations:
-  # - null/"none": standard Spearman/Pearson
-  # - "percentage_bend" | "winsorized" | "shepherd"
-  robust_correlation: null
-  control_trial_order: true
-  bootstrap: 1000
-  n_jobs: -1
-  # Optional overrides for feature selection (null = auto-discover all available)
-  feature_files: null
-  feature_categories: null
-
-  # Optional run adjustment (subject-level): enable run-aware covariates / aggregation.
-  # Set enabled=false for paradigms with no runs (trial-only designs).
-  run_adjustment:
-    enabled: false
-    column: "run_id"                 # e.g., "run_id", "run", "block"
-    include_in_correlations: true    # when enabled=true, add run dummies to partial correlations
-    max_dummies: 20                  # fail if run dummy expansion would exceed this limit
-
-  # Canonical per-trial table export (clean events.tsv + feature columns)
-  trial_table:
-    enabled: true
-    format: "parquet"   # "parquet" (default, recommended) or "tsv"
-    # If true, fail when feature/event alignment can only be verified by positional
-    # row order (no canonical trial_id available).
-    disallow_positional_alignment: true
-
-  # Trial order validation (used when control_trial_order=true)
-  trial_order:
-    max_missing_fraction: 0.1
-
-  # Pain residual = rating - f(temperature) for "pain beyond stimulus intensity"
-  predictor_residual:
-    enabled: true
-    method: "spline"          # "spline" (requires statsmodels) or "poly"
-    min_samples: 10
-    spline_df_candidates: [3, 4, 5]
-    poly_degree: 2
-    crossfit:
-      enabled: true
-      group_column: ""        # "" -> use behavior_analysis.run_adjustment.column
-      n_splits: 5
-      method: "spline"        # "spline" | "poly" (crossfit uses sklearn splines/poly + ridge)
-      spline_n_knots: 5
-
-  
-  # Trialwise regression (complements correlations)
-  regression:
-    enabled: false
-    primary_unit: "trial"            # "trial" | "run_mean"
-    outcome: "outcome"               # "outcome" | "predictor_residual" | "predictor"
-    include_predictor: true
-    predictor_control: "linear"      # "linear" | "outcome_hat" | "spline"
-    predictor_spline:
-      n_knots: 4
-      quantile_low: 0.05
-      quantile_high: 0.95
-      min_samples: 12
-    include_trial_order: true
-    include_prev_terms: false      # uses prev_/delta_ columns from trial table
-    include_run_block: true
-    include_interaction: true      # feature × temperature
-    standardize: true
-    min_samples: 15
-    n_permutations: 0
-    max_features: null
-
-  validation:
-    enabled: true
-  
-  # Output options
-  output:
-    also_save_csv: false
-    overwrite: true
-  
-  # Permutation testing configuration
-  permutation:
-    # Permutation scheme for trialwise inference.
-    # - "circular_shift": preserves within-run autocorrelation (recommended for pain paradigms)
-    # - "shuffle": simple exchangeability within groups (faster, less realistic)
-    scheme: "circular_shift"
-    # Group column preference for within-group permutation
-    # Order matters: first available column is used
-    # Default: block → run → session (more conservative for within-subject tests)
-    group_column_preference: ["block", "run_id", "run", "session", "subject"]
-  
-  # Statistics
-  statistics:
-    correlation_method: "spearman"
-    fdr_alpha: 0.05
-    n_permutations: 1000
-    compute_reliability: false
-    default_n_bootstrap: 1000
-    base_seed: 42
-    hierarchical_fdr: true
-    # Temperature control used in partial correlations / permutation tests for correlations.
-    # "spline" uses a restricted cubic spline basis (linear regression on nonlinear terms).
-    predictor_control: "spline"  # "linear" | "spline"
-    # If false, trial-level tests require permutation or aggregation.
-    # Set true only if you explicitly accept i.i.d. trial assumptions.
-    allow_iid_trials: false
-
-  # Feature validity gates (prevents pseudo-replication)
-  features:
-    exclude_non_trialwise_features: true  # Drop broadcast/cross-trial features when primary_unit="trial"
-  
-  # Correlations computation
-  correlations:
-    enabled: true
-    types: ["partial_cov_predictor"]
-    target_column: ""                 # Empty = auto-resolve from event_columns.outcome
-    power_segment_preference: ""      # Empty = default/auto segment selection
-    targets: []                     # Empty = auto-resolve outcome column and optional residual target
-    compute_change_scores: true
-    loso_stability: true
-    compute_bayes_factors: false
-    prefer_predictor_residual: true
-    use_crossfit_predictor_residual: true
-    primary_unit: "trial"            # "trial" | "run_mean"
-    min_runs: 5                      # Minimum run count when primary_unit="run_mean"
-    p_primary_mode: "perm_if_available"  # "asymptotic" | "perm_if_available"
-    permutation:
-      enabled: true
-      n_permutations: 1000
-  
-  # Condition comparison computation
-  condition:
-    enabled: true
-    fail_fast: true
-    effect_size_threshold: 0.5  # Minimum |Hedges' g| flagged as reportable/highlighted in condition reports
-    compare_column: ""          # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
-    compare_values: []           # Explicit values to compare. Leave empty only for binary columns with exactly 2 observed levels.
-    compare_labels: null         # Optional labels for compare_values (same length)
-    primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
-    overwrite: true
-    p_primary_mode: "perm_if_available"   # "asymptotic" | "perm_if_available"
-    permutation:
-      enabled: true
-      n_permutations: 1000
-  
-  # Temporal correlations computation  
-  temporal:
-    enabled: true
-    target_column: ""                 # Empty = use event_columns.outcome
-    time_resolution_ms: 50
-    time_range_ms: [-200, 1000]
-    smooth_window_ms: 100
-    correction_method: "cluster"      # "fdr" | "bonferroni" | "cluster"
-    # Condition-based splitting (similar to condition comparison)
-    split_by_condition: true           # If true, compute separate correlations per condition value
-    condition_column: ""               # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
-    condition_values: []               # Specific values to compute for (empty = all unique values in column)
-    # Output options for unified temporal correlations file
-    include_roi_averages: true         # Include ROI-averaged rows (replaces power_topomap_correlations)
-    include_tf_grid: true              # Include individual frequency rows (replaces corr_stats_tf_*)
-    # Feature selection for temporal correlations
-    features:
-      power: true                      # Power (spectral power in bands) - default, already implemented
-      itpc: false                      # Inter-trial phase coherence - phase locking strength
-      erds: false                      # Event-related desynchronization/synchronization
-    # ITPC-specific parameters
-    itpc:
-      baseline_correction: true        # Subtract baseline ITPC
-      baseline_window: [-0.5, -0.01]   # Baseline window for ITPC normalization
-    # ERDS-specific parameters
-    erds:
-      baseline_window: [-0.5, -0.1]    # Baseline window for ERDS (seconds)
-      method: "percent"                # ERDS computation method: "percent" or "zscore"
-
-  temporal_correlation_topomaps:
-    window_size_ms: 500                # Fixed temporal bin width for by-condition topomap summaries
-  
-  # Cluster permutation tests
-  cluster:
-    enabled: false
-    n_permutations: 1000
-    forming_threshold: 0.05
-    min_cluster_size: 2
-    tail: 0  # 0=two-tailed, 1=upper, -1=lower
-    condition_column: ""         # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
-    condition_values: []         # Exactly 2 values to compare (default [0, 1] if empty)
-
-  cluster_correction:
-    n_permutations: 1000
-    alpha: 0.05
-    cluster_forming_threshold: 0.05
-    min_timepoints: 2
-    min_channels: 1
-    min_cluster_size: 2
-    tail: 0
-  
-  # Group-level analysis controls
-  group_level:
-    block_permutation: true
-    multilevel_correlations:
-      enabled: false
-      target: "outcome"
-      control_predictor: false
-      control_trial_order: false
-      control_run_effects: false
-      max_run_dummies: 20
-
-  # Run-to-run reliability
-  icc:
-    enabled: true
-    unit_columns: []             # required; aliases: predictor | condition | trial_type | trial_position | explicit columns
-  
-  min_samples:
-    channel: 10
-    roi: 20
-    default: 5
-    edge: 15
-  feature_registry:
-    files:
-      power: "features_power.parquet"
-      connectivity: "features_connectivity.parquet"
-      aperiodic: "features_aperiodic.parquet"
-      erp: "features_erp.parquet"
-      bursts: "features_bursts.parquet"
-      itpc: "features_itpc.parquet"
-      pac: "features_pac_trials.parquet"
-      complexity: "features_complexity.parquet"
-      quality: "features_quality.parquet"
-      microstates: "features_microstates.parquet"
-      erds: "features_erds.parquet"
-      spectral: "features_spectral.parquet"
-      ratios: "features_ratios.parquet"
-      asymmetry: "features_asymmetry.parquet"
-    source_to_feature_type:
-      power: "power"
-      connectivity: "connectivity"
-      aperiodic: "aperiodic"
-      erp: "erp"
-      bursts: "bursts"
-      itpc: "itpc"
-      pac: "pac"
-      complexity: "complexity"
-      quality: "quality"
-      microstates: "microstates"
-      erds: "erds"
-      spectral: "spectral"
-      ratios: "ratios"
-      asymmetry: "asymmetry"
-    feature_type_hierarchy:
-      power:
-        subtypes: ["baseline", "ramp", "active", "change", "roi", "global"]
-      connectivity:
-        subtypes: ["roi", "graph", "edge", "baseline", "active"]
-      aperiodic:
-        subtypes: ["slope", "offset"]
-      spectral:
-        subtypes: ["peak", "edge", "iaf"]
-      erp:
-        subtypes: ["n1", "p2", "n2", "p3", "ptp"]
-      itpc:
-        subtypes: ["baseline", "ramp", "active", "time"]
-      pac:
-        subtypes: ["trial", "time"]
-      complexity:
-        subtypes: ["lzc", "pe", "hjorth"]
-      quality:
-        subtypes: ["snr", "artifact"]
-      microstates:
-        subtypes: ["coverage", "duration", "occurrence", "trans"]
-      erds:
-        subtypes: ["percent", "db", "slope"]
-      ratios:
-        subtypes: ["ratio"]
-      asymmetry:
-        subtypes: ["hemisphere", "roi"]
-      bursts:
-        subtypes: ["rate", "duration", "amplitude"]
-    feature_patterns:
-      erds: "^erds_([^_]+)_ch_([^_]+)_.+$"
-      band_ratio: "^ratio_([^_]+)_([^_]+)_ch_([^_]+)_.+$"
-      hjorth: "^hjorth_([^_]+)_([^_]+)$"
-      roi_power: "^power_([^_]+)_roi_([^_]+)_.+$"
-      roi_asymmetry: "^asym_([^_]+)_([^_]+)_.+$"
-      itpc: "^itpc_([^_]+)_ch_([^_]+)_([^_]+)_.+$"
-      aperiodic: "^aperiodic_([^_]+)_ch_([^_]+)_.+$"
-      powcorr: "^powcorr_([^_]+)_([^_]+)$"
-      conn_graph: "^conn_graph_([^_]+)_([^_]+)_([^_]+)$"
-      gfp: "^gfp_([^_]+)$"
-      microstates: "^microstates_([^_]+)_broadband_global_.+$"
-      power_segmented: "^power_([^_]+)_([^_]+)_ch_([^_]+)_.+$"
-      connectivity_segmented: "^conn_([^_]+)_([^_]+)_([^_]+)_chpair_([^_]+)_.+$"
-      itpc_segmented: "^itpc_([^_]+)_ch_([^_]+)_([^_]+)_.+$"
-      dynamics_burst_segmented: "^bursts_([^_]+)_([^_]+)_([^_]+)_.+$"
-
 # 4.5 Machine Learning
 machine_learning:
   # Data loading for ML:
@@ -1054,11 +789,13 @@ machine_learning:
 
   cv:
     inner_splits: 5
+    outer_splits: 5
     hygiene_enabled: true
     within_subject_ordered_blocks: true  # If true, within-subject CV uses forward block splits when block labels are ordered.
     permutation_scheme: "within_subject_within_block"  # "within_subject" | "within_subject_within_block"
     min_label_shuffle_fraction: 0.01     # Minimum fraction of labels that must change for a permutation to be considered effective
     min_valid_permutation_fraction: 0.5  # Minimum completed/requested permutations required for valid p-values
+    min_valid_permutation_fold_fraction: 1.0
     default_n_splits: 5
     default_n_bins: 5
 
@@ -1088,6 +825,7 @@ machine_learning:
 
   classification:
     model: "svm"                         # "svm" | "lr" | "rf" | "cnn"
+    scoring: "average_precision"
     min_subjects_with_auc_for_inference: 2  # Require at least this many subjects with defined held-out AUC
     max_failed_fold_fraction: 0.25       # Abort classification if failed folds exceed this fraction of total folds
     calibrate_ensemble: false            # Calibrate SVM/RF probability outputs using CalibratedClassifierCV
@@ -1096,10 +834,48 @@ machine_learning:
 
   interpretability:
     grouped_outputs: true                # Write band/ROI grouped importance tables when available
+
+  fmri_signature:
+    method: "beta-series"
+    contrast_name: "contrast"
+    signature_name: "auto"
+    metric: "dot"
+    normalization: "none"
+    round_decimals: 3
+
+  plotting:
+    enabled: true
+    formats: ["png"]
+    dpi: 300
+    top_n_features: 20
+    include_diagnostics: true
+
   analysis:
+    riemann:
+      min_channels_for_fold: 4
+    permutation_importance:
+      enabled: false
+      n_repeats: 5
+      min_valid_fold_fraction: 0.8
+    shap:
+      enabled: true
+      min_valid_fold_fraction: 0.8
+    uncertainty:
+      min_valid_fold_fraction: 0.8
     time_generalization:
       min_subjects_per_cell: 2           # Require at least this many held-out subjects with finite cell scores
       min_valid_permutation_fraction: 0.8  # Minimum valid permutations required for TG inferential outputs
+      min_valid_fold_fraction: 0.8
+      active_window: *active_window
+      window_len: 0.75
+      step: 0.25
+      use_ridgecv: false
+      alpha_grid: [0.01, 0.1, 1.0, 10.0, 100.0]
+      default_alpha: 1.0
+      cluster_threshold: 0.05
+      min_count_per_cell: 15
+      min_samples_for_corr: 10
+      min_samples_per_window: 15
   models:
     elasticnet:
       alpha_grid: [0.001, 0.01, 0.1, 1, 10]
@@ -1146,13 +922,18 @@ statistics:
   alpha: &default_alpha 0.05
   sig_alpha: *default_alpha
   fdr_alpha: *default_alpha
+  ci_level: 0.95
   n_permutations: 1000
   n_bootstrap: 1000
+  cluster_n_jobs: -1
+  cluster_n_perm: 1000
+  min_samples_per_channel: 5
   
   constants:
     fisher_z_clip_min: -0.999999
     fisher_z_clip_max: 0.999999
     min_samples_for_stats: 2
+    min_samples_for_correlation: 5
     min_samples_per_covariate: 5
     partial_corr_base_samples: 5
     min_dof_for_correlation: 2
@@ -1184,6 +965,7 @@ visualization:
   robust_vlim:
     q_low: 0.01
     q_high: 0.99
+    min_v: 1.0e-6
     cap: 0.25
   
   footer_templates:
@@ -1192,6 +974,7 @@ visualization:
 
 # New Orchestrated Plotting Config
 plotting:
+  overwrite: true
   defaults:
     dpi: 300
     savefig_dpi: 600
@@ -1312,20 +1095,53 @@ plotting:
     features:
       spectral:
         metrics: ["peak_freq", "center_freq", "bandwidth", "entropy", "peak_power", "logratio_mean", "logratio_std", "slope"]
+        comparison_metrics: ["peak_freq", "peak_power", "center_freq", "bandwidth", "entropy"]
       asymmetry:
         stat: "index"
+        comparison_metrics: ["index", "logdiff"]
       bursts:
         metrics: ["rate", "count", "duration_mean", "amp_mean", "fraction"]
+        comparison_metrics: ["rate", "duration_mean", "amp_mean", "fraction"]
       pac_pairs: ["theta_beta", "theta_gamma", "alpha_beta", "alpha_gamma"]
+      power:
+        topomap_windows: ["baseline", "active"]
+      connectivity:
+        measures: ["aec", "wpli", "pli", "plv", "imcoh"]
+        circle_top_fraction: 0.1
+        circle_min_lines: 20
+        network_top_fraction: 0.0
+      sourcelocalization:
+        plot_stc: true
+        subjects_dir: null
+        segment: null
+        condition: null
+        bands: []
+        source_condition_a: null
+        source_condition_b: null
+
+    behavior:
+      scatter:
+        features: ["power"]
+        columns: ["outcome"]
+        aggregation_modes: ["roi", "global"]
+        segment: null
+      temporal_topomaps:
+        stats_feature_folder: null
+      dose_response:
+        dose_column: ""
+        response_column: []
+        binary_outcome_column: ""
+        segment: ""
+        stat: "mean"
 
 ###################################################################
 # 7. SYSTEM
 ###################################################################
 system:
   n_jobs: -1
-  strict_mode: true
 
 io:
   constants:
     temperature_range: [35.0, 55.0]
     max_missing_channels_fraction: 0.5
+    percent_threshold: 5.0

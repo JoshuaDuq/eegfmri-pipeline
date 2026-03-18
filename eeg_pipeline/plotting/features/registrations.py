@@ -18,7 +18,11 @@ from eeg_pipeline.plotting.features.context import FeaturePlotContext, Visualiza
 from eeg_pipeline.plotting.core.runner import safe_plot
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
 from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
-from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
+from eeg_pipeline.utils.config.loader import (
+    get_config_value,
+    get_frequency_band_names,
+    require_config_value,
+)
 from eeg_pipeline.utils.data.source_localization_paths import (
     resolve_source_localization_method,
     source_localization_estimates_dir,
@@ -147,9 +151,19 @@ def plot_connectivity_mne_suite(ctx: FeaturePlotContext, saved_files):
         return
 
     power_bands = get_frequency_band_names(ctx.config)
-    conn_measures = get_config_value(
-        ctx.config, "plotting.plots.features.connectivity.measures", ["wpli", "aec"]
+    raw_measures = require_config_value(
+        ctx.config, "plotting.plots.features.connectivity.measures"
     )
+    if isinstance(raw_measures, str):
+        conn_measures = [raw_measures]
+    elif isinstance(raw_measures, (list, tuple)):
+        conn_measures = [str(x).strip() for x in raw_measures if str(x).strip()]
+    else:
+        raise TypeError(
+            "plotting.plots.features.connectivity.measures must be a string or list of strings"
+        )
+    if not conn_measures:
+        raise ValueError("plotting.plots.features.connectivity.measures must be non-empty")
 
     for measure in conn_measures:
         for band in power_bands:
@@ -645,28 +659,25 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
     power_bands = get_frequency_band_names(ctx.config)
 
     if ctx.power_df is not None and ctx.epochs_info is not None:
-        topomap_windows = get_config_value(
-            ctx.config, "plotting.plots.features.power.topomap_windows", None
+        raw_windows = require_config_value(
+            ctx.config, "plotting.plots.features.power.topomap_windows"
         )
-        
-        ctx.logger.info(f"topomap_windows config value: {topomap_windows} (type: {type(topomap_windows)})")
-        
-        if topomap_windows:
-            if isinstance(topomap_windows, str):
-                windows_list = [w.strip() for w in topomap_windows.split() if w.strip()]
-            elif isinstance(topomap_windows, list):
-                windows_list = [str(w).strip() for w in topomap_windows if str(w).strip()]
-            else:
-                windows_list = []
+        if isinstance(raw_windows, str):
+            windows_list = [w.strip() for w in raw_windows.split() if w.strip()]
+        elif isinstance(raw_windows, (list, tuple)):
+            windows_list = [str(w).strip() for w in raw_windows if str(w).strip()]
         else:
-            windows_list = []
-        
-        ctx.logger.info(f"windows_list after parsing: {windows_list}")
+            raise TypeError(
+                "plotting.plots.features.power.topomap_windows must be a string or list of strings"
+            )
+        if not windows_list:
+            raise ValueError(
+                "plotting.plots.features.power.topomap_windows must be non-empty."
+            )
         
         if windows_list:
             for window in windows_list:
                 plot_name = f"band_power_topomaps_{window}"
-                ctx.logger.info(f"Generating topomap plot for window: {window} (plot_name: {plot_name})")
                 safe_plot(
                     ctx,
                     saved_files,
@@ -689,9 +700,6 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
             if compare_windows and len(windows_list) == 2:
                 window1, window2 = windows_list[0], windows_list[1]
                 plot_name = f"band_power_topomaps_contrast_{window2}_minus_{window1}"
-                ctx.logger.info(
-                    f"Generating topomap window contrast: {window2} - {window1} (plot_name: {plot_name})"
-                )
                 safe_plot(
                     ctx,
                     saved_files,
@@ -864,8 +872,8 @@ def sourcelocalization_suite(ctx: FeaturePlotContext, saved_files):
     source_dir = ctx.subdir("sourcelocalization")
     source_dir.mkdir(parents=True, exist_ok=True)
 
-    stc_plot_enabled = get_config_value(
-        ctx.config, "plotting.plots.features.sourcelocalization.plot_stc", True
+    stc_plot_enabled = bool(
+        require_config_value(ctx.config, "plotting.plots.features.sourcelocalization.plot_stc")
     )
     if not stc_plot_enabled:
         return
