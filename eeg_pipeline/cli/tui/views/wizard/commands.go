@@ -127,9 +127,9 @@ func (m Model) GetFrequencyBandDefinitions() []string {
 
 func (m Model) SelectedSpatialModes() []string {
 	var result []string
-	for i, sel := range m.spatialSelected {
-		if sel && i < len(spatialModes) {
-			result = append(result, spatialModes[i].Key)
+	for i, mode := range spatialModes {
+		if m.spatialSelected[i] {
+			result = append(result, mode.Key)
 		}
 	}
 	return result
@@ -266,6 +266,10 @@ func (m Model) selectedConnectivityMeasures() []string {
 		}
 	}
 	return result
+}
+
+func (m Model) selectedPlotConnectivityMeasures() []string {
+	return normalizeConnectivityMeasureTokens(strings.Fields(m.plotConnectivityMeasuresSpec))
 }
 
 func (m Model) selectedDirectedConnectivityMeasures() []string {
@@ -826,7 +830,7 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 
 	// Selection overrides
 	ab.addSpaceListFlag("--pac-pairs", m.plotPacPairsSpec)
-	measures := m.selectedConnectivityMeasures()
+	measures := m.selectedPlotConnectivityMeasures()
 	ab.addListFlag("--connectivity-measures", measures)
 	ab.addSpaceListFlag("--spectral-metrics", m.plotSpectralMetricsSpec)
 	ab.addSpaceListFlag("--bursts-metrics", m.plotBurstsMetricsSpec)

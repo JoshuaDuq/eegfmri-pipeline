@@ -93,6 +93,14 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="tight_layout rect: left bottom right top (default from config)",
     )
     defaults_overrides.add_argument(
+        "--layout-tight-rect-microstate",
+        nargs=4,
+        type=float,
+        default=None,
+        metavar=("LEFT", "BOTTOM", "RIGHT", "TOP"),
+        help="microstate tight_layout rect: left bottom right top (default from config)",
+    )
+    defaults_overrides.add_argument(
         "--gridspec-width-ratios",
         nargs="+",
         type=float,
@@ -218,6 +226,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     defaults_overrides.add_argument("--text-channel-annotation-x", type=float, default=None, help="Channel annotation x position (default from config)")
     defaults_overrides.add_argument("--text-channel-annotation-y", type=float, default=None, help="Channel annotation y position (default from config)")
     defaults_overrides.add_argument("--text-title-y", type=float, default=None, help="Title y position (default from config)")
+    defaults_overrides.add_argument("--text-residual-qc-title-y", type=float, default=None, help="Residual QC title y position (default from config)")
 
     # Validation thresholds (plotting.validation.*)
     defaults_overrides.add_argument("--validation-min-bins-for-calibration", type=int, default=None, help="Min bins for calibration (default from config)")
@@ -247,6 +256,16 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     # TFR controls (plotting.plots.tfr.*)
     overrides.add_argument("--tfr-log-base", type=float, default=None, help="Log base for log-ratio conversions (default from config)")
     overrides.add_argument("--tfr-percentage-multiplier", type=float, default=None, help="Percent multiplier for log-ratio conversions (default from config)")
+    overrides.add_argument("--tfr-topomap-window-size-ms", type=float, default=None, help="TFR topomap temporal window size in ms")
+    overrides.add_argument("--tfr-topomap-window-count", type=int, default=None, help="TFR topomap temporal window count")
+    overrides.add_argument("--tfr-topomap-label-x-position", type=float, default=None, help="TFR topomap label x position")
+    overrides.add_argument("--tfr-topomap-label-y-position-bottom", type=float, default=None, help="TFR topomap bottom label y position")
+    overrides.add_argument("--tfr-topomap-label-y-position", type=float, default=None, help="TFR topomap label y position")
+    overrides.add_argument("--tfr-topomap-title-y", type=float, default=None, help="TFR topomap title y position")
+    overrides.add_argument("--tfr-topomap-title-pad", type=int, default=None, help="TFR topomap title pad")
+    overrides.add_argument("--tfr-topomap-subplots-right", type=float, default=None, help="TFR topomap subplots right margin")
+    overrides.add_argument("--tfr-topomap-temporal-hspace", type=float, default=None, help="TFR topomap temporal hspace")
+    overrides.add_argument("--tfr-topomap-temporal-wspace", type=float, default=None, help="TFR topomap temporal wspace")
 
     # Figure sizing controls (plotting.plots.<plot_type>.*)
     overrides.add_argument("--roi-width-per-band", type=float, default=None, help="ROI plot width per band (default from config)")
@@ -278,6 +297,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     overrides.add_argument("--connectivity-height-per-measure", type=float, default=None, help="Connectivity plot height per measure (default from config)")
     overrides.add_argument("--connectivity-circle-top-fraction", type=float, default=None, help="Connectivity circle top fraction (default from config)")
     overrides.add_argument("--connectivity-circle-min-lines", type=int, default=None, help="Connectivity circle min lines (default from config)")
+    overrides.add_argument("--connectivity-network-top-fraction", type=float, default=None, help="Connectivity network top fraction (default from config)")
 
     overrides.add_argument("--source-subjects-dir", type=str, default=None, help="FreeSurfer subjects directory for 3D plotting")
 

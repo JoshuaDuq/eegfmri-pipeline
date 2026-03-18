@@ -317,7 +317,7 @@ func (m Model) getTextFieldValue(field textField) string {
 	case textFieldPlotPacPairs:
 		return m.plotPacPairsSpec
 	case textFieldPlotConnectivityMeasures:
-		return strings.Join(m.selectedConnectivityMeasures(), " ")
+		return m.plotConnectivityMeasuresSpec
 	case textFieldPlotSpectralMetrics:
 		return m.plotSpectralMetricsSpec
 	case textFieldPlotBurstsMetrics:
@@ -785,18 +785,7 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 	case textFieldPlotPacPairs:
 		m.plotPacPairsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotConnectivityMeasures:
-		// Parse space-separated measure keys (e.g. "aec wpli") and map to the
-		// checkbox model used elsewhere in the wizard.
-		for i := range connectivityMeasures {
-			m.connectivityMeasures[i] = false
-		}
-		for _, token := range strings.Fields(value) {
-			for i, measure := range connectivityMeasures {
-				if strings.EqualFold(token, measure.Key) || strings.EqualFold(token, measure.Name) {
-					m.connectivityMeasures[i] = true
-				}
-			}
-		}
+		m.plotConnectivityMeasuresSpec = normalizeConnectivityMeasureSpec(value)
 	case textFieldPlotSpectralMetrics:
 		m.plotSpectralMetricsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotBurstsMetrics:

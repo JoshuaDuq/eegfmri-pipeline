@@ -75,6 +75,10 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	m.saveState()
 
 	m.wizard = wizard.New(m.selectedPipeline, m.repoRoot)
+	if m.width > 0 && m.height > 0 {
+		sizedWizard, _ := m.wizard.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+		m.wizard = sizedWizard.(wizard.Model)
+	}
 	m.wizard.SetTask(m.task)
 	m.wizard.SetTimeRanges(m.persistentState.TimeRanges)
 	m.restoreWizardConfig()

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/types"
 	"github.com/eeg-pipeline/tui/views/execution"
@@ -87,6 +88,44 @@ func TestHandlePipelineSmokeUtilityOpensSelector(t *testing.T) {
 	}
 	if updated.state != StatePipelineSmoke {
 		t.Fatalf("expected state %v, got %v", StatePipelineSmoke, updated.state)
+	}
+}
+
+func TestHandlePipelineSelectedSizesWizardImmediately(t *testing.T) {
+	m := New()
+	m.state = StateMainMenu
+	m.width = 80
+	m.height = 20
+	m.task = "task"
+	m.mainMenu.SelectedPipeline = int(types.PipelineFeatures)
+
+	next, cmd := m.handleMainMenuUpdate(tea.KeyMsg{})
+	if cmd == nil {
+		t.Fatalf("expected wizard init command")
+	}
+
+	updated, ok := next.(Model)
+	if !ok {
+		t.Fatalf("expected Model, got %T", next)
+	}
+	if updated.state != StatePipelineWizard {
+		t.Fatalf("expected state %v, got %v", StatePipelineWizard, updated.state)
+	}
+
+	view := updated.View()
+	lineCount := strings.Count(view, "\n") + 1
+	if lineCount > 30 {
+		t.Fatalf("expected wizard view to avoid fallback height, got %d lines", lineCount)
+	}
+
+	maxLineWidth := 0
+	for _, line := range strings.Split(view, "\n") {
+		if width := lipgloss.Width(line); width > maxLineWidth {
+			maxLineWidth = width
+		}
+	}
+	if maxLineWidth > 80 {
+		t.Fatalf("expected wizard view to fit current terminal width, got line width %d", maxLineWidth)
 	}
 }
 

@@ -177,6 +177,44 @@ func (m *Model) SetSpatialSelected(selected []bool) {
 	}
 }
 
+// SetSelectedCategories restores feature category selection from config keys.
+func (m *Model) SetSelectedCategories(selected []string) {
+	if m.selected == nil {
+		m.selected = make(map[int]bool, len(m.categories))
+	}
+
+	selectedSet := make(map[string]bool, len(selected))
+	for _, category := range selected {
+		category = strings.TrimSpace(category)
+		if category != "" {
+			selectedSet[category] = true
+		}
+	}
+
+	for i, category := range m.categories {
+		m.selected[i] = selectedSet[category]
+	}
+}
+
+// SetSelectedSpatialModes restores spatial mode selection from config keys.
+func (m *Model) SetSelectedSpatialModes(selected []string) {
+	if m.spatialSelected == nil {
+		m.spatialSelected = make(map[int]bool, len(spatialModes))
+	}
+
+	selectedSet := make(map[string]bool, len(selected))
+	for _, mode := range selected {
+		mode = strings.TrimSpace(mode)
+		if mode != "" {
+			selectedSet[mode] = true
+		}
+	}
+
+	for i, mode := range spatialModes {
+		m.spatialSelected[i] = selectedSet[mode.Key]
+	}
+}
+
 // GetSpatialSelected returns spatial selection states for persistence.
 func (m Model) GetSpatialSelected() []bool {
 	result := make([]bool, len(spatialModes))

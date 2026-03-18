@@ -1467,12 +1467,13 @@ type Model struct {
 	plotConnectivityCircleMinLines     int
 	plotConnectivityNetworkTopFraction float64
 
-	plotPacPairsSpec           string
-	plotSpectralMetricsSpec    string
-	plotBurstsMetricsSpec      string
-	plotTemporalTimeBinsSpec   string
-	plotTemporalTimeLabelsSpec string
-	plotAsymmetryStatSpec      string
+	plotConnectivityMeasuresSpec string
+	plotPacPairsSpec             string
+	plotSpectralMetricsSpec      string
+	plotBurstsMetricsSpec        string
+	plotTemporalTimeBinsSpec     string
+	plotTemporalTimeLabelsSpec   string
+	plotAsymmetryStatSpec        string
 
 	plotSourceHemi        string
 	plotSourceViews       string

@@ -64,6 +64,8 @@ def _apply_layout_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply layout-related config overrides."""
     if _get_arg_value(args, "layout_tight_rect"):
         _apply_config_override(config, "plotting.defaults.layout.tight_rect", list(args.layout_tight_rect))
+    if _get_arg_value(args, "layout_tight_rect_microstate"):
+        _apply_config_override(config, "plotting.defaults.layout.tight_rect_microstate", list(args.layout_tight_rect_microstate))
     if _get_arg_value(args, "gridspec_width_ratios"):
         _apply_config_override(config, "plotting.defaults.layout.gridspec.width_ratios", list(args.gridspec_width_ratios))
     if _get_arg_value(args, "gridspec_height_ratios"):
@@ -264,6 +266,8 @@ def _apply_text_position_overrides(args: argparse.Namespace, config: Any) -> Non
         _apply_config_override(config, "plotting.styling.text_position.channel_annotation_y", float(args.text_channel_annotation_y))
     if _get_arg_value(args, "text_title_y") is not None:
         _apply_config_override(config, "plotting.styling.text_position.title_y", float(args.text_title_y))
+    if _get_arg_value(args, "text_residual_qc_title_y") is not None:
+        _apply_config_override(config, "plotting.styling.text_position.residual_qc_title_y", float(args.text_residual_qc_title_y))
 
 
 def _apply_validation_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -422,6 +426,8 @@ def _apply_plot_sizing_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "plotting.plots.features.connectivity.circle_top_fraction", float(args.connectivity_circle_top_fraction))
     if _get_arg_value(args, "connectivity_circle_min_lines") is not None:
         _apply_config_override(config, "plotting.plots.features.connectivity.circle_min_lines", int(args.connectivity_circle_min_lines))
+    if _get_arg_value(args, "connectivity_network_top_fraction") is not None:
+        _apply_config_override(config, "plotting.plots.features.connectivity.network_top_fraction", float(args.connectivity_network_top_fraction))
 
 
 def _apply_feature_selection_overrides(args: argparse.Namespace, config: Any) -> None:

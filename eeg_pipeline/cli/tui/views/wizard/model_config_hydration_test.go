@@ -19,6 +19,43 @@ func TestApplyConfigKeys_HydratesFeatureRestFlagFromFeatureConfig(t *testing.T) 
 	}
 }
 
+func TestApplyConfigKeys_HydratesFeatureEngineeringDefaultsFromConfig(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+
+	m.ApplyConfigKeys(map[string]interface{}{
+		"feature_engineering.analysis_mode":                     "trial_ml_safe",
+		"feature_engineering.constants.min_epochs_for_features": float64(14),
+		"feature_engineering.compute_change_scores":             false,
+		"feature_engineering.save_tfr_with_sidecar":             true,
+		"feature_engineering.output.also_save_csv":              true,
+		"feature_engineering.feature_categories":                []interface{}{"power", "connectivity"},
+		"feature_engineering.spatial_modes":                     []interface{}{"roi", "channels"},
+	})
+
+	if m.featAnalysisMode != 1 {
+		t.Fatalf("expected featAnalysisMode=1 (trial_ml_safe), got %d", m.featAnalysisMode)
+	}
+	if m.minEpochsForFeatures != 14 {
+		t.Fatalf("expected minEpochsForFeatures=14, got %d", m.minEpochsForFeatures)
+	}
+	if m.featComputeChangeScores {
+		t.Fatalf("expected featComputeChangeScores=false")
+	}
+	if !m.featSaveTfrWithSidecar {
+		t.Fatalf("expected featSaveTfrWithSidecar=true")
+	}
+	if !m.featAlsoSaveCsv {
+		t.Fatalf("expected featAlsoSaveCsv=true")
+	}
+
+	if got := m.SelectedCategories(); len(got) != 2 || got[0] != "connectivity" || got[1] != "power" {
+		t.Fatalf("expected selected feature categories [connectivity power], got %#v", got)
+	}
+	if got := m.SelectedSpatialModes(); len(got) != 2 || got[0] != "roi" || got[1] != "channels" {
+		t.Fatalf("expected selected spatial modes [roi channels], got %#v", got)
+	}
+}
+
 func TestApplyConfigKeys_HydratesPreprocessingRestFlagFromPreprocessingConfig(t *testing.T) {
 	m := New(types.PipelinePreprocessing, ".")
 
@@ -287,6 +324,152 @@ func TestApplyConfigKeys_HydratesAdditionalFeatureAndPreprocessingConfig(t *test
 	}
 }
 
+func TestApplyConfigKeys_HydratesConnectivityFeatureConfig(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+
+	values := map[string]interface{}{
+		"feature_engineering.connectivity.measures":                     []interface{}{"imcoh", "plv"},
+		"feature_engineering.connectivity.output_level":                 "global_only",
+		"feature_engineering.connectivity.enable_graph_metrics":         true,
+		"feature_engineering.connectivity.graph_top_prop":               0.25,
+		"feature_engineering.connectivity.sliding_window_len":           1.5,
+		"feature_engineering.connectivity.sliding_window_step":          0.75,
+		"feature_engineering.connectivity.aec_mode":                     "sym",
+		"feature_engineering.connectivity.mode":                         "multitaper",
+		"feature_engineering.connectivity.aec_absolute":                 false,
+		"feature_engineering.connectivity.enable_aec":                   false,
+		"feature_engineering.connectivity.n_freqs_per_band":             float64(11),
+		"feature_engineering.connectivity.n_cycles":                     6.5,
+		"feature_engineering.connectivity.decim":                        float64(3),
+		"feature_engineering.connectivity.min_segment_samples":          float64(80),
+		"feature_engineering.connectivity.small_world_n_rand":           float64(150),
+		"feature_engineering.connectivity.aec_output":                   []interface{}{"r", "z"},
+		"feature_engineering.connectivity.force_within_epoch_for_ml":    false,
+		"feature_engineering.connectivity.granularity":                  "condition",
+		"feature_engineering.connectivity.condition_column":             "trial_type",
+		"feature_engineering.connectivity.condition_values":             []interface{}{"pain", "nonpain"},
+		"feature_engineering.connectivity.min_epochs_per_group":         float64(7),
+		"feature_engineering.connectivity.min_cycles_per_band":          4.5,
+		"feature_engineering.connectivity.warn_if_no_spatial_transform": false,
+		"feature_engineering.connectivity.phase_estimator":              "across_epochs",
+		"feature_engineering.connectivity.min_segment_sec":              2.5,
+		"feature_engineering.connectivity.dynamic_enabled":              true,
+		"feature_engineering.connectivity.dynamic_measures":             []interface{}{"aec"},
+		"feature_engineering.connectivity.dynamic_autocorr_lag":         float64(2),
+		"feature_engineering.connectivity.dynamic_min_windows":          float64(5),
+		"feature_engineering.connectivity.dynamic_include_roi_pairs":    false,
+		"feature_engineering.connectivity.dynamic_state_enabled":        false,
+		"feature_engineering.connectivity.dynamic_state_n_states":       float64(4),
+		"feature_engineering.connectivity.dynamic_state_min_windows":    float64(10),
+		"feature_engineering.connectivity.dynamic_state_random_state":   float64(17),
+	}
+
+	m.ApplyConfigKeys(values)
+
+	if got := m.selectedConnectivityMeasures(); len(got) != 2 || got[0] != "imcoh" || got[1] != "plv" {
+		t.Fatalf("expected connectivity measures [imcoh plv], got %#v", got)
+	}
+	if m.connOutputLevel != 1 {
+		t.Fatalf("expected connOutputLevel=1 (global_only), got %d", m.connOutputLevel)
+	}
+	if !m.connGraphMetrics {
+		t.Fatalf("expected connGraphMetrics=true")
+	}
+	if m.connGraphProp != 0.25 {
+		t.Fatalf("expected connGraphProp=0.25, got %v", m.connGraphProp)
+	}
+	if m.connWindowLen != 1.5 {
+		t.Fatalf("expected connWindowLen=1.5, got %v", m.connWindowLen)
+	}
+	if m.connWindowStep != 0.75 {
+		t.Fatalf("expected connWindowStep=0.75, got %v", m.connWindowStep)
+	}
+	if m.connAECMode != 2 {
+		t.Fatalf("expected connAECMode=2 (sym), got %d", m.connAECMode)
+	}
+	if m.connMode != 1 {
+		t.Fatalf("expected connMode=1 (multitaper), got %d", m.connMode)
+	}
+	if m.connAECAbsolute {
+		t.Fatalf("expected connAECAbsolute=false")
+	}
+	if m.connEnableAEC {
+		t.Fatalf("expected connEnableAEC=false")
+	}
+	if m.connNFreqsPerBand != 11 {
+		t.Fatalf("expected connNFreqsPerBand=11, got %d", m.connNFreqsPerBand)
+	}
+	if m.connNCycles != 6.5 {
+		t.Fatalf("expected connNCycles=6.5, got %v", m.connNCycles)
+	}
+	if m.connDecim != 3 {
+		t.Fatalf("expected connDecim=3, got %d", m.connDecim)
+	}
+	if m.connMinSegSamples != 80 {
+		t.Fatalf("expected connMinSegSamples=80, got %d", m.connMinSegSamples)
+	}
+	if m.connSmallWorldNRand != 150 {
+		t.Fatalf("expected connSmallWorldNRand=150, got %d", m.connSmallWorldNRand)
+	}
+	if m.connAECOutput != 2 {
+		t.Fatalf("expected connAECOutput=2 (r+z), got %d", m.connAECOutput)
+	}
+	if m.connForceWithinEpochML {
+		t.Fatalf("expected connForceWithinEpochML=false")
+	}
+	if m.connGranularity != 1 {
+		t.Fatalf("expected connGranularity=1 (condition), got %d", m.connGranularity)
+	}
+	if m.connConditionColumn != "trial_type" {
+		t.Fatalf("expected connConditionColumn='trial_type', got %q", m.connConditionColumn)
+	}
+	if m.connConditionValues != "pain nonpain" {
+		t.Fatalf("expected connConditionValues='pain nonpain', got %q", m.connConditionValues)
+	}
+	if m.connMinEpochsPerGroup != 7 {
+		t.Fatalf("expected connMinEpochsPerGroup=7, got %d", m.connMinEpochsPerGroup)
+	}
+	if m.connMinCyclesPerBand != 4.5 {
+		t.Fatalf("expected connMinCyclesPerBand=4.5, got %v", m.connMinCyclesPerBand)
+	}
+	if m.connWarnNoSpatialTransform {
+		t.Fatalf("expected connWarnNoSpatialTransform=false")
+	}
+	if m.connPhaseEstimator != 1 {
+		t.Fatalf("expected connPhaseEstimator=1 (across_epochs), got %d", m.connPhaseEstimator)
+	}
+	if m.connMinSegmentSec != 2.5 {
+		t.Fatalf("expected connMinSegmentSec=2.5, got %v", m.connMinSegmentSec)
+	}
+	if !m.connDynamicEnabled {
+		t.Fatalf("expected connDynamicEnabled=true")
+	}
+	if m.connDynamicMeasures != 2 {
+		t.Fatalf("expected connDynamicMeasures=2 (aec), got %d", m.connDynamicMeasures)
+	}
+	if m.connDynamicAutocorrLag != 2 {
+		t.Fatalf("expected connDynamicAutocorrLag=2, got %d", m.connDynamicAutocorrLag)
+	}
+	if m.connDynamicMinWindows != 5 {
+		t.Fatalf("expected connDynamicMinWindows=5, got %d", m.connDynamicMinWindows)
+	}
+	if m.connDynamicIncludeROIPairs {
+		t.Fatalf("expected connDynamicIncludeROIPairs=false")
+	}
+	if m.connDynamicStateEnabled {
+		t.Fatalf("expected connDynamicStateEnabled=false")
+	}
+	if m.connDynamicStateNStates != 4 {
+		t.Fatalf("expected connDynamicStateNStates=4, got %d", m.connDynamicStateNStates)
+	}
+	if m.connDynamicStateMinWindows != 10 {
+		t.Fatalf("expected connDynamicStateMinWindows=10, got %d", m.connDynamicStateMinWindows)
+	}
+	if m.connDynamicStateRandomSeed != 17 {
+		t.Fatalf("expected connDynamicStateRandomSeed=17, got %d", m.connDynamicStateRandomSeed)
+	}
+}
+
 func TestApplyConfigKeys_HydratesPlottingSourceLocalizationAndComparisons(t *testing.T) {
 	m := New(types.PipelinePlotting, ".")
 	values := map[string]interface{}{
@@ -348,5 +531,201 @@ func TestApplyConfigKeys_HydratesPlottingSourceLocalizationAndComparisons(t *tes
 	}
 	if m.plotOverwrite == nil || !*m.plotOverwrite {
 		t.Fatalf("expected plotOverwrite=true")
+	}
+}
+
+func TestApplyConfigKeys_HydratesPlottingConnectivityAndSelectionOverrides(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+
+	values := map[string]interface{}{
+		"plotting.plots.connectivity.width_per_circle":              10.5,
+		"plotting.plots.connectivity.width_per_band":                6.75,
+		"plotting.plots.connectivity.height_per_measure":            4.25,
+		"plotting.plots.features.connectivity.circle_top_fraction":  0.2,
+		"plotting.plots.features.connectivity.circle_min_lines":     float64(12),
+		"plotting.plots.features.connectivity.network_top_fraction": 0.35,
+		"plotting.plots.features.pac_pairs":                         []interface{}{"theta_gamma", "alpha_beta"},
+		"plotting.plots.features.connectivity.measures":             []interface{}{"imcoh", "pli"},
+		"plotting.plots.features.spectral.metrics":                  []interface{}{"peak_frequency", "iaf"},
+		"plotting.plots.features.bursts.metrics":                    []interface{}{"rate", "duration"},
+		"plotting.plots.features.asymmetry.stat":                    "effect_size_d",
+		"plotting.plots.features.temporal.time_bins":                []interface{}{"early", "late"},
+		"plotting.plots.features.temporal.time_labels":              []interface{}{"Early", "Late"},
+	}
+
+	m.ApplyConfigKeys(values)
+
+	if m.plotConnectivityWidthPerCircle != 10.5 {
+		t.Fatalf("expected plotConnectivityWidthPerCircle=10.5, got %v", m.plotConnectivityWidthPerCircle)
+	}
+	if m.plotConnectivityWidthPerBand != 6.75 {
+		t.Fatalf("expected plotConnectivityWidthPerBand=6.75, got %v", m.plotConnectivityWidthPerBand)
+	}
+	if m.plotConnectivityHeightPerMeasure != 4.25 {
+		t.Fatalf("expected plotConnectivityHeightPerMeasure=4.25, got %v", m.plotConnectivityHeightPerMeasure)
+	}
+	if m.plotConnectivityCircleTopFraction != 0.2 {
+		t.Fatalf("expected plotConnectivityCircleTopFraction=0.2, got %v", m.plotConnectivityCircleTopFraction)
+	}
+	if m.plotConnectivityCircleMinLines != 12 {
+		t.Fatalf("expected plotConnectivityCircleMinLines=12, got %d", m.plotConnectivityCircleMinLines)
+	}
+	if m.plotConnectivityNetworkTopFraction != 0.35 {
+		t.Fatalf("expected plotConnectivityNetworkTopFraction=0.35, got %v", m.plotConnectivityNetworkTopFraction)
+	}
+	if m.plotPacPairsSpec != "theta_gamma alpha_beta" {
+		t.Fatalf("expected plotPacPairsSpec='theta_gamma alpha_beta', got %q", m.plotPacPairsSpec)
+	}
+	if m.plotConnectivityMeasuresSpec != "imcoh pli" {
+		t.Fatalf("expected plotConnectivityMeasuresSpec='imcoh pli', got %q", m.plotConnectivityMeasuresSpec)
+	}
+	if m.plotSpectralMetricsSpec != "peak_frequency iaf" {
+		t.Fatalf("expected plotSpectralMetricsSpec='peak_frequency iaf', got %q", m.plotSpectralMetricsSpec)
+	}
+	if m.plotBurstsMetricsSpec != "rate duration" {
+		t.Fatalf("expected plotBurstsMetricsSpec='rate duration', got %q", m.plotBurstsMetricsSpec)
+	}
+	if m.plotAsymmetryStatSpec != "effect_size_d" {
+		t.Fatalf("expected plotAsymmetryStatSpec='effect_size_d', got %q", m.plotAsymmetryStatSpec)
+	}
+	if m.plotTemporalTimeBinsSpec != "early late" {
+		t.Fatalf("expected plotTemporalTimeBinsSpec='early late', got %q", m.plotTemporalTimeBinsSpec)
+	}
+	if m.plotTemporalTimeLabelsSpec != "Early Late" {
+		t.Fatalf("expected plotTemporalTimeLabelsSpec='Early Late', got %q", m.plotTemporalTimeLabelsSpec)
+	}
+}
+
+func TestApplyConfigKeys_HydratesPlottingDefaultsStylingAndTfrConfig(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+
+	values := map[string]interface{}{
+		"plotting.defaults.formats":                                      []interface{}{"png", "pdf"},
+		"plotting.defaults.dpi":                                          float64(150),
+		"plotting.defaults.savefig_dpi":                                  float64(600),
+		"plotting.defaults.bbox_inches":                                  "tight",
+		"plotting.defaults.pad_inches":                                   0.15,
+		"plotting.defaults.font.family":                                  "Arial",
+		"plotting.defaults.font.weight":                                  "bold",
+		"plotting.defaults.font.sizes.small":                             float64(9),
+		"plotting.defaults.font.sizes.ylabel":                            float64(13),
+		"plotting.defaults.font.sizes.figure_title":                      float64(21),
+		"plotting.defaults.layout.tight_rect":                            []interface{}{0.0, 0.02, 1.0, 0.98},
+		"plotting.defaults.layout.gridspec.width_ratios":                 []interface{}{1.0, 2.0, 1.0},
+		"plotting.defaults.layout.gridspec.hspace":                       0.4,
+		"plotting.figure_sizes.standard":                                 []interface{}{12.0, 8.0},
+		"plotting.styling.colors.condition_1":                            "#111111",
+		"plotting.styling.colors.network_node":                           "#333333",
+		"plotting.styling.alpha.grid":                                    0.25,
+		"plotting.styling.scatter.marker_size.small":                     float64(12),
+		"plotting.styling.scatter.edgecolor":                             "black",
+		"plotting.styling.bar.capsize_large":                             float64(8),
+		"plotting.styling.line.width.bold":                               3.5,
+		"plotting.styling.histogram.bins_tfr":                            float64(30),
+		"plotting.styling.kde.points":                                    float64(256),
+		"plotting.styling.errorbar.capsize":                              float64(4),
+		"plotting.styling.text_position.title_y":                         0.97,
+		"plotting.styling.text_position.residual_qc_title_y":             0.88,
+		"plotting.validation.min_bins_for_calibration":                   float64(4),
+		"plotting.plots.itpc.shared_colorbar":                            false,
+		"plotting.plots.topomap.contours":                                float64(8),
+		"plotting.plots.topomap.colormap":                                "RdBu_r",
+		"plotting.plots.topomap.diff_annotation_enabled":                 false,
+		"plotting.plots.topomap.sig_mask_params.markersize":              6.5,
+		"plotting.plots.tfr.log_base":                                    10.0,
+		"plotting.plots.tfr.percentage_multiplier":                       100.0,
+		"time_frequency_analysis.topomap.temporal.window_size_ms":        75.0,
+		"time_frequency_analysis.topomap.temporal.window_count":          float64(5),
+		"plotting.plots.tfr.topomap.label_x_position":                    0.33,
+		"plotting.plots.tfr.topomap.title_pad":                           float64(12),
+		"time_frequency_analysis.topomap.temporal.single_subject.hspace": 0.2,
+		"time_frequency_analysis.topomap.temporal.single_subject.wspace": 0.15,
+		"plotting.plots.roi.width_per_band":                              4.0,
+		"plotting.plots.power.height_per_segment":                        5.5,
+		"plotting.plots.itpc.width_per_bin":                              2.2,
+		"plotting.plots.pac.cmap":                                        "magma",
+		"plotting.plots.aperiodic.n_perm":                                float64(2000),
+		"plotting.plots.complexity.width_per_measure":                    3.3,
+	}
+
+	m.ApplyConfigKeys(values)
+
+	if !m.plotFormatSelected["png"] || !m.plotFormatSelected["pdf"] || m.plotFormatSelected["svg"] {
+		t.Fatalf("expected plot formats png/pdf selected and svg unselected, got %#v", m.plotFormatSelected)
+	}
+	if m.plotDpiIndex != 0 {
+		t.Fatalf("expected plotDpiIndex=0 (150 dpi), got %d", m.plotDpiIndex)
+	}
+	if m.plotSavefigDpiIndex != 2 {
+		t.Fatalf("expected plotSavefigDpiIndex=2 (600 dpi), got %d", m.plotSavefigDpiIndex)
+	}
+	if m.plotBboxInches != "tight" {
+		t.Fatalf("expected plotBboxInches='tight', got %q", m.plotBboxInches)
+	}
+	if m.plotPadInches != 0.15 {
+		t.Fatalf("expected plotPadInches=0.15, got %v", m.plotPadInches)
+	}
+	if m.plotFontFamily != "Arial" || m.plotFontWeight != "bold" {
+		t.Fatalf("expected font settings hydrated, got family=%q weight=%q", m.plotFontFamily, m.plotFontWeight)
+	}
+	if m.plotFontSizeSmall != 9 || m.plotFontSizeYLabel != 13 || m.plotFontSizeFigureTitle != 21 {
+		t.Fatalf("expected font sizes hydrated, got small=%d ylabel=%d figureTitle=%d", m.plotFontSizeSmall, m.plotFontSizeYLabel, m.plotFontSizeFigureTitle)
+	}
+	if m.plotLayoutTightRectSpec != "0 0.02 1 0.98" {
+		t.Fatalf("expected plotLayoutTightRectSpec='0 0.02 1 0.98', got %q", m.plotLayoutTightRectSpec)
+	}
+	if m.plotGridSpecWidthRatiosSpec != "1 2 1" || m.plotGridSpecHspace != 0.4 {
+		t.Fatalf("expected gridspec settings hydrated, got ratios=%q hspace=%v", m.plotGridSpecWidthRatiosSpec, m.plotGridSpecHspace)
+	}
+	if m.plotFigureSizeStandardSpec != "12 8" {
+		t.Fatalf("expected plotFigureSizeStandardSpec='12 8', got %q", m.plotFigureSizeStandardSpec)
+	}
+	if m.plotColorCondA != "#111111" || m.plotColorNetworkNode != "#333333" {
+		t.Fatalf("expected color settings hydrated, got condA=%q network=%q", m.plotColorCondA, m.plotColorNetworkNode)
+	}
+	if m.plotAlphaGrid != 0.25 {
+		t.Fatalf("expected plotAlphaGrid=0.25, got %v", m.plotAlphaGrid)
+	}
+	if m.plotScatterMarkerSizeSmall != 12 || m.plotScatterEdgeColor != "black" {
+		t.Fatalf("expected scatter settings hydrated, got size=%d edge=%q", m.plotScatterMarkerSizeSmall, m.plotScatterEdgeColor)
+	}
+	if m.plotBarCapsizeLarge != 8 || m.plotLineWidthBold != 3.5 {
+		t.Fatalf("expected bar/line settings hydrated, got capsizeLarge=%d lineBold=%v", m.plotBarCapsizeLarge, m.plotLineWidthBold)
+	}
+	if m.plotHistBinsTFR != 30 || m.plotKdePoints != 256 || m.plotErrorbarCapsize != 4 {
+		t.Fatalf("expected hist/kde/errorbar settings hydrated, got histTFR=%d kde=%d err=%d", m.plotHistBinsTFR, m.plotKdePoints, m.plotErrorbarCapsize)
+	}
+	if m.plotTextTitleY != 0.97 || m.plotTextResidualQcTitleY != 0.88 {
+		t.Fatalf("expected text positions hydrated, got titleY=%v residual=%v", m.plotTextTitleY, m.plotTextResidualQcTitleY)
+	}
+	if m.plotValidationMinBinsForCalibration != 4 {
+		t.Fatalf("expected plotValidationMinBinsForCalibration=4, got %d", m.plotValidationMinBinsForCalibration)
+	}
+	if m.plotSharedColorbar {
+		t.Fatalf("expected plotSharedColorbar=false")
+	}
+	if m.plotTopomapContours != 8 || m.plotTopomapColormap != "RdBu_r" || m.plotTopomapDiffAnnotation == nil || *m.plotTopomapDiffAnnotation {
+		t.Fatalf("expected topomap settings hydrated, got contours=%d cmap=%q diff=%v", m.plotTopomapContours, m.plotTopomapColormap, m.plotTopomapDiffAnnotation)
+	}
+	if m.plotTopomapSigMaskMarkerSize != 6.5 {
+		t.Fatalf("expected plotTopomapSigMaskMarkerSize=6.5, got %v", m.plotTopomapSigMaskMarkerSize)
+	}
+	if m.plotTFRLogBase != 10.0 || m.plotTFRPercentageMultiplier != 100.0 {
+		t.Fatalf("expected TFR settings hydrated, got logBase=%v pct=%v", m.plotTFRLogBase, m.plotTFRPercentageMultiplier)
+	}
+	if m.plotTFRTopomapWindowSizeMs != 75.0 || m.plotTFRTopomapWindowCount != 5 {
+		t.Fatalf("expected TFR topomap window settings hydrated, got size=%v count=%d", m.plotTFRTopomapWindowSizeMs, m.plotTFRTopomapWindowCount)
+	}
+	if m.plotTFRTopomapLabelXPosition != 0.33 || m.plotTFRTopomapTitlePad != 12 {
+		t.Fatalf("expected TFR topomap label/title settings hydrated, got labelX=%v titlePad=%d", m.plotTFRTopomapLabelXPosition, m.plotTFRTopomapTitlePad)
+	}
+	if m.plotTFRTopomapTemporalHspace != 0.2 || m.plotTFRTopomapTemporalWspace != 0.15 {
+		t.Fatalf("expected TFR topomap spacing hydrated, got hspace=%v wspace=%v", m.plotTFRTopomapTemporalHspace, m.plotTFRTopomapTemporalWspace)
+	}
+	if m.plotRoiWidthPerBand != 4.0 || m.plotPowerHeightPerSegment != 5.5 || m.plotItpcWidthPerBin != 2.2 {
+		t.Fatalf("expected sizing settings hydrated, got roi=%v power=%v itpc=%v", m.plotRoiWidthPerBand, m.plotPowerHeightPerSegment, m.plotItpcWidthPerBin)
+	}
+	if m.plotPacCmap != "magma" || m.plotAperiodicNPerm != 2000 || m.plotComplexityWidthPerMeasure != 3.3 {
+		t.Fatalf("expected pac/aperiodic/complexity settings hydrated, got pac=%q aper=%d comp=%v", m.plotPacCmap, m.plotAperiodicNPerm, m.plotComplexityWidthPerMeasure)
 	}
 }

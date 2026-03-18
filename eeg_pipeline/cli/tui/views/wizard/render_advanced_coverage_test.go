@@ -113,7 +113,7 @@ func TestBehaviorAdvancedConfigScrollsExpandedLists(t *testing.T) {
 	if !strings.Contains(rendered, "col6") {
 		t.Fatalf("expected scrolled behavior config to include focused expanded-list item:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "› □ col6") {
+	if !strings.Contains(rendered, "▸ □ col6") {
 		t.Fatalf("expected focused expanded-list item to show a visible cursor:\n%s", rendered)
 	}
 }

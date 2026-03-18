@@ -203,6 +203,260 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.prepTaskIsRest = b
 			}
 		}},
+		{key: "feature_engineering.feature_categories", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok {
+				m.SetSelectedCategories(list)
+			}
+		}},
+		{key: "feature_engineering.spatial_modes", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok {
+				m.SetSelectedSpatialModes(list)
+			}
+		}},
+		{key: "feature_engineering.analysis_mode", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "trial_ml_safe":
+					m.featAnalysisMode = 1
+				default:
+					m.featAnalysisMode = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.constants.min_epochs_for_features", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.minEpochsForFeatures = n
+			}
+		}},
+		{key: "feature_engineering.compute_change_scores", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.featComputeChangeScores = b
+			}
+		}},
+		{key: "feature_engineering.save_tfr_with_sidecar", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.featSaveTfrWithSidecar = b
+			}
+		}},
+		{key: "feature_engineering.output.also_save_csv", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.featAlsoSaveCsv = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.measures", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.setSelectedConnectivityMeasures(list)
+			}
+		}},
+		{key: "feature_engineering.connectivity.output_level", apply: func(v interface{}) {
+			if s, ok := asString(v); ok && strings.EqualFold(strings.TrimSpace(s), "global_only") {
+				m.connOutputLevel = 1
+			} else {
+				m.connOutputLevel = 0
+			}
+		}},
+		{key: "feature_engineering.connectivity.enable_graph_metrics", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.connGraphMetrics = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.graph_top_prop", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.connGraphProp = f
+			}
+		}},
+		{key: "feature_engineering.connectivity.sliding_window_len", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.connWindowLen = f
+			}
+		}},
+		{key: "feature_engineering.connectivity.sliding_window_step", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.connWindowStep = f
+			}
+		}},
+		{key: "feature_engineering.connectivity.aec_mode", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "none":
+					m.connAECMode = 1
+				case "sym":
+					m.connAECMode = 2
+				default:
+					m.connAECMode = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.connectivity.mode", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "multitaper":
+					m.connMode = 1
+				case "fourier":
+					m.connMode = 2
+				default:
+					m.connMode = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.connectivity.aec_absolute", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.connAECAbsolute = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.enable_aec", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.connEnableAEC = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.n_freqs_per_band", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connNFreqsPerBand = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.n_cycles", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.connNCycles = f
+			}
+		}},
+		{key: "feature_engineering.connectivity.decim", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connDecim = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.min_segment_samples", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connMinSegSamples = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.small_world_n_rand", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connSmallWorldNRand = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.aec_output", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				hasR := false
+				hasZ := false
+				for _, item := range list {
+					switch strings.ToLower(strings.TrimSpace(item)) {
+					case "r":
+						hasR = true
+					case "z":
+						hasZ = true
+					}
+				}
+				switch {
+				case hasR && hasZ:
+					m.connAECOutput = 2
+				case hasZ:
+					m.connAECOutput = 1
+				default:
+					m.connAECOutput = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.connectivity.force_within_epoch_for_ml", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.connForceWithinEpochML = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.granularity", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "condition":
+					m.connGranularity = 1
+				case "subject":
+					m.connGranularity = 2
+				default:
+					m.connGranularity = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.connectivity.condition_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.connConditionColumn = strings.TrimSpace(s)
+			}
+		}},
+		{key: "feature_engineering.connectivity.condition_values", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.connConditionValues = strings.Join(list, " ")
+			}
+		}},
+		{key: "feature_engineering.connectivity.min_epochs_per_group", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connMinEpochsPerGroup = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.min_cycles_per_band", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.connMinCyclesPerBand = f
+			}
+		}},
+		{key: "feature_engineering.connectivity.warn_if_no_spatial_transform", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.connWarnNoSpatialTransform = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.phase_estimator", apply: func(v interface{}) {
+			if s, ok := asString(v); ok && strings.EqualFold(strings.TrimSpace(s), "across_epochs") {
+				m.connPhaseEstimator = 1
+			} else {
+				m.connPhaseEstimator = 0
+			}
+		}},
+		{key: "feature_engineering.connectivity.min_segment_sec", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.connMinSegmentSec = f
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.connDynamicEnabled = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_measures", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				if idx, ok := connectivityDynamicMeasuresIndex(list); ok {
+					m.connDynamicMeasures = idx
+				}
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_autocorr_lag", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connDynamicAutocorrLag = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_min_windows", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connDynamicMinWindows = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_include_roi_pairs", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.connDynamicIncludeROIPairs = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_state_enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.connDynamicStateEnabled = b
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_state_n_states", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connDynamicStateNStates = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_state_min_windows", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connDynamicStateMinWindows = n
+			}
+		}},
+		{key: "feature_engineering.connectivity.dynamic_state_random_state", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.connDynamicStateRandomSeed = n
+			}
+		}},
 		// Behavior pipeline hydration (YAML -> TUI model)
 		{key: "behavior_analysis.statistics.correlation_method", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
@@ -928,6 +1182,71 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "plotting.plots.features.sourcelocalization.subjects_dir", apply: func(v interface{}) {
 			if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
 				m.plotSourceSubjectsDir = s
+			}
+		}},
+		{key: "plotting.plots.connectivity.width_per_circle", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.plotConnectivityWidthPerCircle = f
+			}
+		}},
+		{key: "plotting.plots.connectivity.width_per_band", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.plotConnectivityWidthPerBand = f
+			}
+		}},
+		{key: "plotting.plots.connectivity.height_per_measure", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.plotConnectivityHeightPerMeasure = f
+			}
+		}},
+		{key: "plotting.plots.features.connectivity.circle_top_fraction", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.plotConnectivityCircleTopFraction = f
+			}
+		}},
+		{key: "plotting.plots.features.connectivity.circle_min_lines", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.plotConnectivityCircleMinLines = n
+			}
+		}},
+		{key: "plotting.plots.features.connectivity.network_top_fraction", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.plotConnectivityNetworkTopFraction = f
+			}
+		}},
+		{key: "plotting.plots.features.pac_pairs", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotPacPairsSpec = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.plots.features.connectivity.measures", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotConnectivityMeasuresSpec = strings.Join(normalizeConnectivityMeasureTokens(list), " ")
+			}
+		}},
+		{key: "plotting.plots.features.spectral.metrics", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotSpectralMetricsSpec = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.plots.features.bursts.metrics", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotBurstsMetricsSpec = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.plots.features.asymmetry.stat", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.plotAsymmetryStatSpec = strings.TrimSpace(s)
+			}
+		}},
+		{key: "plotting.plots.features.temporal.time_bins", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotTemporalTimeBinsSpec = strings.Join(list, " ")
+			}
+		}},
+		{key: "plotting.plots.features.temporal.time_bin_labels", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.plotTemporalTimeLabelsSpec = strings.Join(list, " ")
 			}
 		}},
 		{key: "plotting.comparisons.compare_windows", apply: func(v interface{}) {
@@ -2194,6 +2513,207 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 			}
 		}},
 	}
+
+	bindString := func(key string, setter func(string)) keyBinder {
+		return keyBinder{key: key, apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				setter(s)
+			}
+		}}
+	}
+	bindBool := func(key string, setter func(bool)) keyBinder {
+		return keyBinder{key: key, apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				setter(b)
+			}
+		}}
+	}
+	bindInt := func(key string, setter func(int)) keyBinder {
+		return keyBinder{key: key, apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				setter(n)
+			}
+		}}
+	}
+	bindFloat := func(key string, setter func(float64)) keyBinder {
+		return keyBinder{key: key, apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				setter(f)
+			}
+		}}
+	}
+	bindStringList := func(key string, setter func([]string)) keyBinder {
+		return keyBinder{key: key, apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				setter(list)
+			}
+		}}
+	}
+	bindListSpec := func(key string, setter func(string)) keyBinder {
+		return keyBinder{key: key, apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok && strings.TrimSpace(spec) != "" {
+				setter(spec)
+			}
+		}}
+	}
+
+	binders = append(
+		binders,
+		bindStringList("plotting.defaults.formats", m.applyPlotFormats),
+		bindInt("plotting.defaults.dpi", m.setPlotDpiIndexFromValue),
+		bindInt("plotting.defaults.savefig_dpi", m.setPlotSavefigDpiIndexFromValue),
+		bindString("plotting.defaults.bbox_inches", func(s string) { m.plotBboxInches = s }),
+		bindFloat("plotting.defaults.pad_inches", func(f float64) { m.plotPadInches = f }),
+		bindString("plotting.defaults.font.family", func(s string) { m.plotFontFamily = s }),
+		bindString("plotting.defaults.font.weight", func(s string) { m.plotFontWeight = s }),
+		bindInt("plotting.defaults.font.sizes.small", func(n int) { m.plotFontSizeSmall = n }),
+		bindInt("plotting.defaults.font.sizes.medium", func(n int) { m.plotFontSizeMedium = n }),
+		bindInt("plotting.defaults.font.sizes.large", func(n int) { m.plotFontSizeLarge = n }),
+		bindInt("plotting.defaults.font.sizes.title", func(n int) { m.plotFontSizeTitle = n }),
+		bindInt("plotting.defaults.font.sizes.annotation", func(n int) { m.plotFontSizeAnnotation = n }),
+		bindInt("plotting.defaults.font.sizes.label", func(n int) { m.plotFontSizeLabel = n }),
+		bindInt("plotting.defaults.font.sizes.ylabel", func(n int) { m.plotFontSizeYLabel = n }),
+		bindInt("plotting.defaults.font.sizes.suptitle", func(n int) { m.plotFontSizeSuptitle = n }),
+		bindInt("plotting.defaults.font.sizes.figure_title", func(n int) { m.plotFontSizeFigureTitle = n }),
+		bindListSpec("plotting.defaults.layout.tight_rect", func(spec string) { m.plotLayoutTightRectSpec = spec }),
+		bindListSpec("plotting.defaults.layout.tight_rect_microstate", func(spec string) { m.plotLayoutTightRectMicrostateSpec = spec }),
+		bindListSpec("plotting.defaults.layout.gridspec.width_ratios", func(spec string) { m.plotGridSpecWidthRatiosSpec = spec }),
+		bindListSpec("plotting.defaults.layout.gridspec.height_ratios", func(spec string) { m.plotGridSpecHeightRatiosSpec = spec }),
+		bindFloat("plotting.defaults.layout.gridspec.hspace", func(f float64) { m.plotGridSpecHspace = f }),
+		bindFloat("plotting.defaults.layout.gridspec.wspace", func(f float64) { m.plotGridSpecWspace = f }),
+		bindFloat("plotting.defaults.layout.gridspec.left", func(f float64) { m.plotGridSpecLeft = f }),
+		bindFloat("plotting.defaults.layout.gridspec.right", func(f float64) { m.plotGridSpecRight = f }),
+		bindFloat("plotting.defaults.layout.gridspec.top", func(f float64) { m.plotGridSpecTop = f }),
+		bindFloat("plotting.defaults.layout.gridspec.bottom", func(f float64) { m.plotGridSpecBottom = f }),
+		bindListSpec("plotting.figure_sizes.standard", func(spec string) { m.plotFigureSizeStandardSpec = spec }),
+		bindListSpec("plotting.figure_sizes.medium", func(spec string) { m.plotFigureSizeMediumSpec = spec }),
+		bindListSpec("plotting.figure_sizes.small", func(spec string) { m.plotFigureSizeSmallSpec = spec }),
+		bindListSpec("plotting.figure_sizes.square", func(spec string) { m.plotFigureSizeSquareSpec = spec }),
+		bindListSpec("plotting.figure_sizes.wide", func(spec string) { m.plotFigureSizeWideSpec = spec }),
+		bindListSpec("plotting.figure_sizes.tfr", func(spec string) { m.plotFigureSizeTFRSpec = spec }),
+		bindListSpec("plotting.figure_sizes.topomap", func(spec string) { m.plotFigureSizeTopomapSpec = spec }),
+		bindString("plotting.styling.colors.condition_2", func(s string) { m.plotColorCondB = s }),
+		bindString("plotting.styling.colors.condition_1", func(s string) { m.plotColorCondA = s }),
+		bindString("plotting.styling.colors.significant", func(s string) { m.plotColorSignificant = s }),
+		bindString("plotting.styling.colors.nonsignificant", func(s string) { m.plotColorNonsignificant = s }),
+		bindString("plotting.styling.colors.gray", func(s string) { m.plotColorGray = s }),
+		bindString("plotting.styling.colors.light_gray", func(s string) { m.plotColorLightGray = s }),
+		bindString("plotting.styling.colors.black", func(s string) { m.plotColorBlack = s }),
+		bindString("plotting.styling.colors.blue", func(s string) { m.plotColorBlue = s }),
+		bindString("plotting.styling.colors.red", func(s string) { m.plotColorRed = s }),
+		bindString("plotting.styling.colors.network_node", func(s string) { m.plotColorNetworkNode = s }),
+		bindFloat("plotting.styling.alpha.grid", func(f float64) { m.plotAlphaGrid = f }),
+		bindFloat("plotting.styling.alpha.fill", func(f float64) { m.plotAlphaFill = f }),
+		bindFloat("plotting.styling.alpha.ci", func(f float64) { m.plotAlphaCI = f }),
+		bindFloat("plotting.styling.alpha.ci_line", func(f float64) { m.plotAlphaCILine = f }),
+		bindFloat("plotting.styling.alpha.text_box", func(f float64) { m.plotAlphaTextBox = f }),
+		bindFloat("plotting.styling.alpha.violin_body", func(f float64) { m.plotAlphaViolinBody = f }),
+		bindFloat("plotting.styling.alpha.ridge_fill", func(f float64) { m.plotAlphaRidgeFill = f }),
+		bindInt("plotting.styling.scatter.marker_size.small", func(n int) { m.plotScatterMarkerSizeSmall = n }),
+		bindInt("plotting.styling.scatter.marker_size.large", func(n int) { m.plotScatterMarkerSizeLarge = n }),
+		bindInt("plotting.styling.scatter.marker_size.default", func(n int) { m.plotScatterMarkerSizeDefault = n }),
+		bindFloat("plotting.styling.scatter.alpha", func(f float64) { m.plotScatterAlpha = f }),
+		bindString("plotting.styling.scatter.edgecolor", func(s string) { m.plotScatterEdgeColor = s }),
+		bindFloat("plotting.styling.scatter.edgewidth", func(f float64) { m.plotScatterEdgeWidth = f }),
+		bindFloat("plotting.styling.bar.alpha", func(f float64) { m.plotBarAlpha = f }),
+		bindFloat("plotting.styling.bar.width", func(f float64) { m.plotBarWidth = f }),
+		bindInt("plotting.styling.bar.capsize", func(n int) { m.plotBarCapsize = n }),
+		bindInt("plotting.styling.bar.capsize_large", func(n int) { m.plotBarCapsizeLarge = n }),
+		bindFloat("plotting.styling.line.width.thin", func(f float64) { m.plotLineWidthThin = f }),
+		bindFloat("plotting.styling.line.width.standard", func(f float64) { m.plotLineWidthStandard = f }),
+		bindFloat("plotting.styling.line.width.thick", func(f float64) { m.plotLineWidthThick = f }),
+		bindFloat("plotting.styling.line.width.bold", func(f float64) { m.plotLineWidthBold = f }),
+		bindFloat("plotting.styling.line.alpha.standard", func(f float64) { m.plotLineAlphaStandard = f }),
+		bindFloat("plotting.styling.line.alpha.dim", func(f float64) { m.plotLineAlphaDim = f }),
+		bindFloat("plotting.styling.line.alpha.zero_line", func(f float64) { m.plotLineAlphaZeroLine = f }),
+		bindFloat("plotting.styling.line.alpha.fit_line", func(f float64) { m.plotLineAlphaFitLine = f }),
+		bindFloat("plotting.styling.line.alpha.diagonal", func(f float64) { m.plotLineAlphaDiagonal = f }),
+		bindFloat("plotting.styling.line.alpha.reference", func(f float64) { m.plotLineAlphaReference = f }),
+		bindFloat("plotting.styling.line.regression_width", func(f float64) { m.plotLineRegressionWidth = f }),
+		bindFloat("plotting.styling.line.residual_width", func(f float64) { m.plotLineResidualWidth = f }),
+		bindFloat("plotting.styling.line.qq_width", func(f float64) { m.plotLineQQWidth = f }),
+		bindInt("plotting.styling.histogram.bins", func(n int) { m.plotHistBins = n }),
+		bindInt("plotting.styling.histogram.bins_behavioral", func(n int) { m.plotHistBinsBehavioral = n }),
+		bindInt("plotting.styling.histogram.bins_residual", func(n int) { m.plotHistBinsResidual = n }),
+		bindInt("plotting.styling.histogram.bins_tfr", func(n int) { m.plotHistBinsTFR = n }),
+		bindString("plotting.styling.histogram.edgecolor", func(s string) { m.plotHistEdgeColor = s }),
+		bindFloat("plotting.styling.histogram.edgewidth", func(f float64) { m.plotHistEdgeWidth = f }),
+		bindFloat("plotting.styling.histogram.alpha", func(f float64) { m.plotHistAlpha = f }),
+		bindFloat("plotting.styling.histogram.alpha_residual", func(f float64) { m.plotHistAlphaResidual = f }),
+		bindFloat("plotting.styling.histogram.alpha_tfr", func(f float64) { m.plotHistAlphaTFR = f }),
+		bindInt("plotting.styling.kde.points", func(n int) { m.plotKdePoints = n }),
+		bindString("plotting.styling.kde.color", func(s string) { m.plotKdeColor = s }),
+		bindFloat("plotting.styling.kde.linewidth", func(f float64) { m.plotKdeLinewidth = f }),
+		bindFloat("plotting.styling.kde.alpha", func(f float64) { m.plotKdeAlpha = f }),
+		bindInt("plotting.styling.errorbar.markersize", func(n int) { m.plotErrorbarMarkerSize = n }),
+		bindInt("plotting.styling.errorbar.capsize", func(n int) { m.plotErrorbarCapsize = n }),
+		bindInt("plotting.styling.errorbar.capsize_large", func(n int) { m.plotErrorbarCapsizeLarge = n }),
+		bindFloat("plotting.styling.text_position.stats_x", func(f float64) { m.plotTextStatsX = f }),
+		bindFloat("plotting.styling.text_position.stats_y", func(f float64) { m.plotTextStatsY = f }),
+		bindFloat("plotting.styling.text_position.p_value_x", func(f float64) { m.plotTextPvalueX = f }),
+		bindFloat("plotting.styling.text_position.p_value_y", func(f float64) { m.plotTextPvalueY = f }),
+		bindFloat("plotting.styling.text_position.bootstrap_x", func(f float64) { m.plotTextBootstrapX = f }),
+		bindFloat("plotting.styling.text_position.bootstrap_y", func(f float64) { m.plotTextBootstrapY = f }),
+		bindFloat("plotting.styling.text_position.channel_annotation_x", func(f float64) { m.plotTextChannelAnnotationX = f }),
+		bindFloat("plotting.styling.text_position.channel_annotation_y", func(f float64) { m.plotTextChannelAnnotationY = f }),
+		bindFloat("plotting.styling.text_position.title_y", func(f float64) { m.plotTextTitleY = f }),
+		bindFloat("plotting.styling.text_position.residual_qc_title_y", func(f float64) { m.plotTextResidualQcTitleY = f }),
+		bindInt("plotting.validation.min_bins_for_calibration", func(n int) { m.plotValidationMinBinsForCalibration = n }),
+		bindInt("plotting.validation.max_bins_for_calibration", func(n int) { m.plotValidationMaxBinsForCalibration = n }),
+		bindInt("plotting.validation.samples_per_bin", func(n int) { m.plotValidationSamplesPerBin = n }),
+		bindInt("plotting.validation.min_rois_for_fdr", func(n int) { m.plotValidationMinRoisForFDR = n }),
+		bindInt("plotting.validation.min_pvalues_for_fdr", func(n int) { m.plotValidationMinPvaluesForFDR = n }),
+		bindBool("plotting.plots.itpc.shared_colorbar", func(b bool) { m.plotSharedColorbar = b }),
+		bindInt("plotting.plots.topomap.contours", func(n int) { m.plotTopomapContours = n }),
+		bindString("plotting.plots.topomap.colormap", func(s string) { m.plotTopomapColormap = s }),
+		bindFloat("plotting.plots.topomap.colorbar_fraction", func(f float64) { m.plotTopomapColorbarFraction = f }),
+		bindFloat("plotting.plots.topomap.colorbar_pad", func(f float64) { m.plotTopomapColorbarPad = f }),
+		bindBool("plotting.plots.topomap.diff_annotation_enabled", func(b bool) {
+			value := b
+			m.plotTopomapDiffAnnotation = &value
+		}),
+		bindBool("plotting.plots.topomap.annotate_descriptive", func(b bool) {
+			value := b
+			m.plotTopomapAnnotateDesc = &value
+		}),
+		bindString("plotting.plots.topomap.sig_mask_params.marker", func(s string) { m.plotTopomapSigMaskMarker = s }),
+		bindString("plotting.plots.topomap.sig_mask_params.markerfacecolor", func(s string) { m.plotTopomapSigMaskMarkerFaceColor = s }),
+		bindString("plotting.plots.topomap.sig_mask_params.markeredgecolor", func(s string) { m.plotTopomapSigMaskMarkerEdgeColor = s }),
+		bindFloat("plotting.plots.topomap.sig_mask_params.linewidth", func(f float64) { m.plotTopomapSigMaskLinewidth = f }),
+		bindFloat("plotting.plots.topomap.sig_mask_params.markersize", func(f float64) { m.plotTopomapSigMaskMarkerSize = f }),
+		bindFloat("plotting.plots.tfr.log_base", func(f float64) { m.plotTFRLogBase = f }),
+		bindFloat("plotting.plots.tfr.percentage_multiplier", func(f float64) { m.plotTFRPercentageMultiplier = f }),
+		bindFloat("time_frequency_analysis.topomap.temporal.window_size_ms", func(f float64) { m.plotTFRTopomapWindowSizeMs = f }),
+		bindInt("time_frequency_analysis.topomap.temporal.window_count", func(n int) { m.plotTFRTopomapWindowCount = n }),
+		bindFloat("plotting.plots.tfr.topomap.label_x_position", func(f float64) { m.plotTFRTopomapLabelXPosition = f }),
+		bindFloat("plotting.plots.tfr.topomap.label_y_position_bottom", func(f float64) { m.plotTFRTopomapLabelYPositionBottom = f }),
+		bindFloat("plotting.plots.tfr.topomap.label_y_position", func(f float64) { m.plotTFRTopomapLabelYPosition = f }),
+		bindFloat("plotting.plots.tfr.topomap.title_y", func(f float64) { m.plotTFRTopomapTitleY = f }),
+		bindInt("plotting.plots.tfr.topomap.title_pad", func(n int) { m.plotTFRTopomapTitlePad = n }),
+		bindFloat("plotting.plots.tfr.topomap.subplots_right", func(f float64) { m.plotTFRTopomapSubplotsRight = f }),
+		bindFloat("time_frequency_analysis.topomap.temporal.single_subject.hspace", func(f float64) { m.plotTFRTopomapTemporalHspace = f }),
+		bindFloat("time_frequency_analysis.topomap.temporal.single_subject.wspace", func(f float64) { m.plotTFRTopomapTemporalWspace = f }),
+		bindFloat("plotting.plots.roi.width_per_band", func(f float64) { m.plotRoiWidthPerBand = f }),
+		bindFloat("plotting.plots.roi.width_per_metric", func(f float64) { m.plotRoiWidthPerMetric = f }),
+		bindFloat("plotting.plots.roi.height_per_roi", func(f float64) { m.plotRoiHeightPerRoi = f }),
+		bindFloat("plotting.plots.power.width_per_band", func(f float64) { m.plotPowerWidthPerBand = f }),
+		bindFloat("plotting.plots.power.height_per_segment", func(f float64) { m.plotPowerHeightPerSegment = f }),
+		bindFloat("plotting.plots.itpc.width_per_bin", func(f float64) { m.plotItpcWidthPerBin = f }),
+		bindFloat("plotting.plots.itpc.height_per_band", func(f float64) { m.plotItpcHeightPerBand = f }),
+		bindFloat("plotting.plots.itpc.width_per_band_box", func(f float64) { m.plotItpcWidthPerBandBox = f }),
+		bindFloat("plotting.plots.itpc.height_box", func(f float64) { m.plotItpcHeightBox = f }),
+		bindString("plotting.plots.pac.cmap", func(s string) { m.plotPacCmap = s }),
+		bindFloat("plotting.plots.pac.width_per_roi", func(f float64) { m.plotPacWidthPerRoi = f }),
+		bindFloat("plotting.plots.pac.height_box", func(f float64) { m.plotPacHeightBox = f }),
+		bindFloat("plotting.plots.aperiodic.width_per_column", func(f float64) { m.plotAperiodicWidthPerColumn = f }),
+		bindFloat("plotting.plots.aperiodic.height_per_row", func(f float64) { m.plotAperiodicHeightPerRow = f }),
+		bindInt("plotting.plots.aperiodic.n_perm", func(n int) { m.plotAperiodicNPerm = n }),
+		bindFloat("plotting.plots.complexity.width_per_measure", func(f float64) { m.plotComplexityWidthPerMeasure = f }),
+		bindFloat("plotting.plots.complexity.height_per_segment", func(f float64) { m.plotComplexityHeightPerSegment = f }),
+		bindStringList("plotting.plots.features.temporal.time_labels", func(list []string) {
+			m.plotTemporalTimeLabelsSpec = strings.Join(list, " ")
+		}),
+	)
 
 	for _, b := range binders {
 		if v, ok := values[b.key]; ok {

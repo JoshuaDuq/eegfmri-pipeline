@@ -1237,6 +1237,33 @@ func TestBuildFeaturesAdvancedArgs_ConnectivityMeasuresIncludeImcoh(t *testing.T
 	}
 }
 
+func TestBuildPlottingAdvancedArgs_UsesDedicatedPlotConnectivityMeasures(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.plotConnectivityMeasuresSpec = "imcoh pli"
+	m.plotConnectivityNetworkTopFraction = 0.25
+
+	for i := range m.connectivityMeasures {
+		m.connectivityMeasures[i] = false
+	}
+	for i, measure := range connectivityMeasures {
+		if measure.Key == "wpli" || measure.Key == "aec" {
+			m.connectivityMeasures[i] = true
+		}
+	}
+
+	args := m.buildPlottingAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--connectivity-measures", "imcoh", "pli"}) {
+		t.Fatalf("expected plotting args to include dedicated connectivity measures, got: %#v", args)
+	}
+	if containsSubsequence(args, []string{"--connectivity-measures", "wpli", "aec"}) {
+		t.Fatalf("did not expect plotting args to reuse feature connectivity selections: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--connectivity-network-top-fraction", "0.2500"}) {
+		t.Fatalf("expected plotting args to include --connectivity-network-top-fraction 0.2500, got: %#v", args)
+	}
+}
+
 func TestBuildFeaturesAdvancedArgs_IncludesSourceSubjectsDirFlag(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, cat := range m.categories {

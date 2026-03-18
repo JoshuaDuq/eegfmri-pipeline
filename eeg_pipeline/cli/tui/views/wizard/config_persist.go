@@ -897,6 +897,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["plotConnectivityCircleTopFraction"] = m.plotConnectivityCircleTopFraction
 	cfg["plotConnectivityCircleMinLines"] = m.plotConnectivityCircleMinLines
 	cfg["plotConnectivityNetworkTopFraction"] = m.plotConnectivityNetworkTopFraction
+	cfg["plotConnectivityMeasuresSpec"] = m.plotConnectivityMeasuresSpec
 	cfg["plotPacPairsSpec"] = m.plotPacPairsSpec
 	cfg["plotSpectralMetricsSpec"] = m.plotSpectralMetricsSpec
 	cfg["plotBurstsMetricsSpec"] = m.plotBurstsMetricsSpec
@@ -2075,6 +2076,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.plotConnectivityCircleTopFraction = getFloat("plotConnectivityCircleTopFraction", m.plotConnectivityCircleTopFraction)
 	m.plotConnectivityCircleMinLines = getInt("plotConnectivityCircleMinLines", m.plotConnectivityCircleMinLines)
 	m.plotConnectivityNetworkTopFraction = getFloat("plotConnectivityNetworkTopFraction", m.plotConnectivityNetworkTopFraction)
+	m.plotConnectivityMeasuresSpec = getString("plotConnectivityMeasuresSpec", m.plotConnectivityMeasuresSpec)
 	m.plotPacPairsSpec = getString("plotPacPairsSpec", m.plotPacPairsSpec)
 	m.plotSpectralMetricsSpec = getString("plotSpectralMetricsSpec", m.plotSpectralMetricsSpec)
 	m.plotBurstsMetricsSpec = getString("plotBurstsMetricsSpec", m.plotBurstsMetricsSpec)
