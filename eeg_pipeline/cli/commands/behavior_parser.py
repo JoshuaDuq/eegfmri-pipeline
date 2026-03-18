@@ -441,7 +441,59 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     temporal_group.add_argument("--temporal-erds-baseline-min", type=float, default=None, help="ERDS baseline window start (seconds)")
     temporal_group.add_argument("--temporal-erds-baseline-max", type=float, default=None, help="ERDS baseline window end (seconds)")
     temporal_group.add_argument("--temporal-erds-method", choices=["percent", "zscore"], default=None, help="ERDS computation method")
-    
+
+    cluster_correction_group = parser.add_argument_group("Cluster correction options")
+    cluster_correction_group.add_argument(
+        "--cluster-correction-n-permutations",
+        type=int,
+        default=None,
+        dest="cluster_correction_n_permutations",
+        help="Permutation count for cluster correction",
+    )
+    cluster_correction_group.add_argument(
+        "--cluster-correction-alpha",
+        type=float,
+        default=None,
+        dest="cluster_correction_alpha",
+        help="Cluster correction alpha threshold",
+    )
+    cluster_correction_group.add_argument(
+        "--cluster-correction-forming-threshold",
+        type=float,
+        default=None,
+        dest="cluster_correction_forming_threshold",
+        help="Cluster-forming threshold",
+    )
+    cluster_correction_group.add_argument(
+        "--cluster-correction-min-timepoints",
+        type=int,
+        default=None,
+        dest="cluster_correction_min_timepoints",
+        help="Minimum contiguous timepoints per cluster",
+    )
+    cluster_correction_group.add_argument(
+        "--cluster-correction-min-channels",
+        type=int,
+        default=None,
+        dest="cluster_correction_min_channels",
+        help="Minimum channels per cluster",
+    )
+    cluster_correction_group.add_argument(
+        "--cluster-correction-min-cluster-size",
+        type=int,
+        default=None,
+        dest="cluster_correction_min_cluster_size",
+        help="Minimum cluster size",
+    )
+    cluster_correction_group.add_argument(
+        "--cluster-correction-tail",
+        type=int,
+        choices=[-1, 0, 1],
+        default=None,
+        dest="cluster_correction_tail",
+        help="Tail for cluster correction: 0=two-tailed, 1=upper, -1=lower",
+    )
+
     # Cluster-specific options
     cluster_group = parser.add_argument_group("Cluster permutation options")
     cluster_group.add_argument("--cluster-threshold", type=float, default=None, help="Cluster forming threshold")

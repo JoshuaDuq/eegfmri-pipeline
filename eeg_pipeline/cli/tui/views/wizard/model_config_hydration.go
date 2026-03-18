@@ -53,6 +53,22 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 			},
 		},
 		{
+			key: "paths.signature_dir",
+			apply: func(v interface{}) {
+				if s, ok := asString(v); ok {
+					m.fmriAnalysisSignatureDir = s
+				}
+			},
+		},
+		{
+			key: "paths.signature_maps",
+			apply: func(v interface{}) {
+				if spec, ok := asSignatureMapSpec(v); ok {
+					m.fmriAnalysisSignatureMaps = spec
+				}
+			},
+		},
+		{
 			key: "fmri_preprocessing.engine",
 			apply: func(v interface{}) {
 				if s, ok := asString(v); ok {
@@ -155,6 +171,402 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "fmri_preprocessing.fmriprep.omp_nthreads", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.fmriOmpNThreads = n
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.level", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "resampling":
+					m.fmriLevelIndex = 1
+				case "minimal":
+					m.fmriLevelIndex = 2
+				default:
+					m.fmriLevelIndex = 0
+				}
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.cifti_output", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "91k":
+					m.fmriCiftiOutputIndex = 1
+				case "170k":
+					m.fmriCiftiOutputIndex = 2
+				default:
+					m.fmriCiftiOutputIndex = 0
+				}
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.task_id", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriTaskId = s
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.low_mem", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriLowMem = b
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.longitudinal", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriLongitudinal = b
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.skull_strip_template", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSkullStripTemplate = s
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.skull_strip_fixed_seed", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriSkullStripFixedSeed = b
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.bold2t1w_init", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "header":
+					m.fmriBold2T1wInitIndex = 1
+				default:
+					m.fmriBold2T1wInitIndex = 0
+				}
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.bold2t1w_dof", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.fmriBold2T1wDof = n
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.slice_time_ref", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriSliceTimeRef = f
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.dummy_scans", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.fmriDummyScans = n
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.fd_spike_threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriFdSpikeThreshold = f
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.dvars_spike_threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriDvarsSpikeThreshold = f
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.medial_surface_nan", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriMedialSurfaceNan = b
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.no_msm", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriNoMsm = b
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.me_output_echos", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriMeOutputEchos = b
+			}
+		}},
+		{key: "fmri_preprocessing.fmriprep.random_seed", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.fmriRandomSeed = n
+			}
+		}},
+		{key: "fmri_contrast.input_source", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "bids_raw":
+					m.fmriAnalysisInputSourceIndex = 1
+				default:
+					m.fmriAnalysisInputSourceIndex = 0
+				}
+			}
+		}},
+		{key: "fmri_contrast.fmriprep_space", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisFmriprepSpace = s
+			}
+		}},
+		{key: "fmri_contrast.require_fmriprep", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriAnalysisRequireFmriprep = b
+			}
+		}},
+		{key: "fmri_contrast.type", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "custom":
+					m.fmriAnalysisContrastType = 1
+				default:
+					m.fmriAnalysisContrastType = 0
+				}
+			}
+		}},
+		{key: "fmri_contrast.condition_a.column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisCondAColumn = s
+			}
+		}},
+		{key: "fmri_contrast.condition_a.value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisCondAValue = s
+			}
+		}},
+		{key: "fmri_contrast.condition_b.column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisCondBColumn = s
+			}
+		}},
+		{key: "fmri_contrast.condition_b.value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisCondBValue = s
+			}
+		}},
+		{key: "fmri_contrast.condition_scope_trial_types", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.fmriAnalysisScopeTrialTypes = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "fmri_contrast.condition_scope_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisScopeColumn = s
+			}
+		}},
+		{key: "fmri_contrast.events_to_model", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.fmriAnalysisEventsToModel = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "fmri_contrast.events_to_model_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisEventsToModelColumn = s
+			}
+		}},
+		{key: "fmri_contrast.phase_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisPhaseColumn = s
+			}
+		}},
+		{key: "fmri_contrast.phase_scope_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisPhaseScopeColumn = s
+			}
+		}},
+		{key: "fmri_contrast.phase_scope_value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisPhaseScopeValue = s
+			}
+		}},
+		{key: "fmri_contrast.stim_phases_to_model", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.fmriAnalysisStimPhasesToModel = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "fmri_contrast.formula", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisFormula = s
+			}
+		}},
+		{key: "fmri_contrast.name", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisContrastName = s
+			}
+		}},
+		{key: "fmri_contrast.runs", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.fmriAnalysisRunsSpec = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "fmri_contrast.hrf_model", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "flobs":
+					m.fmriAnalysisHrfModel = 1
+				case "fir":
+					m.fmriAnalysisHrfModel = 2
+				default:
+					m.fmriAnalysisHrfModel = 0
+				}
+			}
+		}},
+		{key: "fmri_contrast.drift_model", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "none":
+					m.fmriAnalysisDriftModel = 0
+				case "polynomial":
+					m.fmriAnalysisDriftModel = 2
+				default:
+					m.fmriAnalysisDriftModel = 1
+				}
+			}
+		}},
+		{key: "fmri_contrast.high_pass_hz", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriAnalysisHighPassHz = f
+			}
+		}},
+		{key: "fmri_contrast.low_pass_hz", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriAnalysisLowPassHz = f
+			}
+		}},
+		{key: "fmri_contrast.smoothing_fwhm", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriAnalysisSmoothingFwhm = f
+			}
+		}},
+		{key: "fmri_contrast.confounds_strategy", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "none":
+					m.fmriAnalysisConfoundsStrategy = 1
+				case "motion6":
+					m.fmriAnalysisConfoundsStrategy = 2
+				case "motion12":
+					m.fmriAnalysisConfoundsStrategy = 3
+				case "motion24":
+					m.fmriAnalysisConfoundsStrategy = 4
+				case "motion24+wmcsf":
+					m.fmriAnalysisConfoundsStrategy = 5
+				case "motion24+wmcsf+fd":
+					m.fmriAnalysisConfoundsStrategy = 6
+				default:
+					m.fmriAnalysisConfoundsStrategy = 0
+				}
+			}
+		}},
+		{key: "fmri_contrast.write_design_matrix", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriAnalysisWriteDesignMatrix = b
+			}
+		}},
+		{key: "fmri_contrast.output_type", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "t-stat":
+					m.fmriAnalysisOutputType = 1
+				case "cope":
+					m.fmriAnalysisOutputType = 2
+				case "beta":
+					m.fmriAnalysisOutputType = 3
+				default:
+					m.fmriAnalysisOutputType = 0
+				}
+			}
+		}},
+		{key: "fmri_contrast.resample_to_freesurfer", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriAnalysisResampleToFS = b
+			}
+		}},
+		{key: "fmri_contrast.output_dir", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisOutputDir = s
+			}
+		}},
+		{key: "fmri_contrast.freesurfer_dir", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisFreesurferDir = s
+			}
+		}},
+		{key: "fmri_group_level.model", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "two-sample":
+					m.fmriSecondLevelModelIndex = 1
+				case "paired":
+					m.fmriSecondLevelModelIndex = 2
+				case "repeated-measures":
+					m.fmriSecondLevelModelIndex = 3
+				default:
+					m.fmriSecondLevelModelIndex = 0
+				}
+			}
+		}},
+		{key: "fmri_group_level.input_root", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelInputRoot = s
+			}
+		}},
+		{key: "fmri_group_level.contrast_names", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.fmriSecondLevelContrastNames = strings.Join(list, " ")
+			}
+		}},
+		{key: "fmri_group_level.condition_labels", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.fmriSecondLevelConditionLabels = strings.Join(list, " ")
+			}
+		}},
+		{key: "fmri_group_level.formula", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelFormula = s
+			}
+		}},
+		{key: "fmri_group_level.output_name", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelOutputName = s
+			}
+		}},
+		{key: "fmri_group_level.output_dir", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelOutputDir = s
+			}
+		}},
+		{key: "fmri_group_level.write_design_matrix", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriSecondLevelWriteDesignMatrix = b
+			}
+		}},
+		{key: "fmri_group_level.covariates_file", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelCovariatesFile = s
+			}
+		}},
+		{key: "fmri_group_level.subject_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelSubjectColumn = s
+			}
+		}},
+		{key: "fmri_group_level.covariate_columns", apply: func(v interface{}) {
+			if list, ok := asStringList(v); ok && len(list) > 0 {
+				m.fmriSecondLevelCovariateColumns = strings.Join(list, " ")
+			}
+		}},
+		{key: "fmri_group_level.group_column", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelGroupColumn = s
+			}
+		}},
+		{key: "fmri_group_level.group_a_value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelGroupAValue = s
+			}
+		}},
+		{key: "fmri_group_level.group_b_value", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriSecondLevelGroupBValue = s
+			}
+		}},
+		{key: "fmri_group_level.permutation.enabled", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriSecondLevelPermutationEnabled = b
+			}
+		}},
+		{key: "fmri_group_level.permutation.n_permutations", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.fmriSecondLevelPermutationCount = n
+			}
+		}},
+		{key: "fmri_group_level.permutation.two_sided", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriSecondLevelTwoSided = b
 			}
 		}},
 		{key: "event_columns.predictor", apply: func(v interface{}) {
@@ -501,6 +913,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "behavior_analysis.cluster.n_permutations", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.nPermutations = n
+			}
+		}},
+		{key: "behavior_analysis.cluster_correction.n_permutations", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterCorrectionNPermutations = n
 			}
 		}},
 		{key: "project.random_state", apply: func(v interface{}) {
@@ -1158,6 +1575,37 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.clusterConditionValues = strings.Join(splitLooseList(spec), " ")
 			}
 		}},
+		// Cluster correction
+		{key: "behavior_analysis.cluster_correction.alpha", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.clusterCorrectionAlpha = f
+			}
+		}},
+		{key: "behavior_analysis.cluster_correction.cluster_forming_threshold", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.clusterCorrectionFormingThreshold = f
+			}
+		}},
+		{key: "behavior_analysis.cluster_correction.min_timepoints", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterCorrectionMinTimepoints = n
+			}
+		}},
+		{key: "behavior_analysis.cluster_correction.min_channels", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterCorrectionMinChannels = n
+			}
+		}},
+		{key: "behavior_analysis.cluster_correction.min_cluster_size", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterCorrectionMinClusterSize = n
+			}
+		}},
+		{key: "behavior_analysis.cluster_correction.tail", apply: func(v interface{}) {
+			if n, ok := asInt(v); ok {
+				m.clusterCorrectionTail = n
+			}
+		}},
 		{key: "feature_engineering.sourcelocalization.subjects_dir", apply: func(v interface{}) {
 			if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
 				m.sourceLocSubjectsDir = s
@@ -1457,6 +1905,21 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.sourceLocFmriThreshold = f
 			}
 		}},
+		{key: "feature_engineering.sourcelocalization.fmri.thresholding.mode", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "fdr":
+					m.sourceLocFmriThresholdMode = 1
+				default:
+					m.sourceLocFmriThresholdMode = 0
+				}
+			}
+		}},
+		{key: "feature_engineering.sourcelocalization.fmri.thresholding.fdr_q", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.sourceLocFmriFdrQ = f
+			}
+		}},
 		{key: "feature_engineering.sourcelocalization.fmri.tail", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(strings.TrimSpace(s)) {
@@ -1651,16 +2114,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "feature_engineering.sourcelocalization.fmri.contrast.stim_phases_to_model", apply: func(v interface{}) {
 			if spec, ok := asListSpec(v); ok {
 				m.sourceLocFmriStimPhasesToModel = strings.Join(splitLooseList(spec), " ")
-			}
-		}},
-		{key: "feature_engineering.sourcelocalization.fmri.contrast.cluster_correction", apply: func(v interface{}) {
-			if b, ok := asBool(v); ok {
-				m.sourceLocFmriClusterCorrection = b
-			}
-		}},
-		{key: "feature_engineering.sourcelocalization.fmri.contrast.cluster_p_threshold", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.sourceLocFmriClusterPThreshold = f
 			}
 		}},
 		{key: "feature_engineering.sourcelocalization.fmri.contrast.output_type", apply: func(v interface{}) {
@@ -2802,6 +3255,53 @@ func asListSpec(v interface{}) (string, bool) {
 			}
 		}
 		return strings.Join(out, " "), true
+	}
+	return "", false
+}
+
+func asSignatureMapSpec(v interface{}) (string, bool) {
+	switch specs := v.(type) {
+	case []interface{}:
+		out := make([]string, 0, len(specs))
+		for _, item := range specs {
+			switch entry := item.(type) {
+			case map[string]interface{}:
+				name := strings.TrimSpace(fmt.Sprintf("%v", entry["name"]))
+				path := strings.TrimSpace(fmt.Sprintf("%v", entry["path"]))
+				if name != "" && path != "" && name != "<nil>" && path != "<nil>" {
+					out = append(out, name+":"+path)
+				}
+			case map[string]string:
+				name := strings.TrimSpace(entry["name"])
+				path := strings.TrimSpace(entry["path"])
+				if name != "" && path != "" {
+					out = append(out, name+":"+path)
+				}
+			case string:
+				if s := strings.TrimSpace(entry); s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+		if len(out) == 0 {
+			return "", false
+		}
+		return strings.Join(out, " "), true
+	case []string:
+		out := make([]string, 0, len(specs))
+		for _, item := range specs {
+			if s := strings.TrimSpace(item); s != "" {
+				out = append(out, s)
+			}
+		}
+		if len(out) == 0 {
+			return "", false
+		}
+		return strings.Join(out, " "), true
+	case string:
+		if s := strings.TrimSpace(specs); s != "" {
+			return s, true
+		}
 	}
 	return "", false
 }

@@ -1362,6 +1362,29 @@ func TestBuildFeaturesAdvancedArgs_EmitsSourceFmriEventsToModelFlags(t *testing.
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_EmitsSourceFmriThresholdingFlags(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i, cat := range m.categories {
+		if cat == "sourcelocalization" {
+			m.selected[i] = true
+			break
+		}
+	}
+	m.sourceLocMode = 1
+	m.sourceLocFmriEnabled = true
+	m.sourceLocFmriThresholdMode = 1
+	m.sourceLocFmriFdrQ = 0.025
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--source-fmri-threshold-mode", "fdr"}) {
+		t.Fatalf("expected --source-fmri-threshold-mode fdr in args, got: %#v", args)
+	}
+	if !containsSubsequence(args, []string{"--source-fmri-fdr-q", "0.0250"}) {
+		t.Fatalf("expected --source-fmri-fdr-q 0.0250 in args, got: %#v", args)
+	}
+}
+
 func TestBuildFeaturesAdvancedArgs_IncludesPACRandomSeedFlag(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, cat := range m.categories {
@@ -1496,6 +1519,40 @@ func TestBuildBehaviorAdvancedArgs_IncludesMinSampleFlags(t *testing.T) {
 	}
 	if !containsSubsequence(args, []string{"--condition-min-trials", "6"}) {
 		t.Fatalf("expected --condition-min-trials 6 in args, got: %#v", args)
+	}
+}
+
+func TestBuildBehaviorAdvancedArgs_EmitsClusterCorrectionFlags(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	for i, comp := range m.computations {
+		if comp.Key == "temporal" {
+			m.computationSelected[i] = true
+		}
+	}
+
+	m.clusterCorrectionNPermutations = 2500
+	m.clusterCorrectionAlpha = 0.01
+	m.clusterCorrectionFormingThreshold = 0.025
+	m.clusterCorrectionMinTimepoints = 4
+	m.clusterCorrectionMinChannels = 2
+	m.clusterCorrectionMinClusterSize = 3
+	m.clusterCorrectionTail = -1
+
+	args := m.buildBehaviorAdvancedArgs()
+
+	expected := [][]string{
+		{"--cluster-correction-n-permutations", "2500"},
+		{"--cluster-correction-alpha", "0.0100"},
+		{"--cluster-correction-forming-threshold", "0.0250"},
+		{"--cluster-correction-min-timepoints", "4"},
+		{"--cluster-correction-min-channels", "2"},
+		{"--cluster-correction-min-cluster-size", "3"},
+		{"--cluster-correction-tail", "-1"},
+	}
+	for _, seq := range expected {
+		if !containsSubsequence(args, seq) {
+			t.Fatalf("expected %v in args, got: %#v", seq, args)
+		}
 	}
 }
 

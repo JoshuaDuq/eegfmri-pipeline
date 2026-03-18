@@ -159,6 +159,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--source-fmri-require-provenance", action="store_true", default=None, dest="source_fmri_require_provenance", help="Require explicit fMRI provenance when using fMRI constraints.")
     parser.add_argument("--no-source-fmri-require-provenance", action="store_false", dest="source_fmri_require_provenance", help="Allow unknown fMRI provenance (not recommended).")
     parser.add_argument("--source-fmri-threshold", type=float, default=None, help="Threshold applied to fMRI stats map (default: 3.1).")
+    parser.add_argument("--source-fmri-threshold-mode", choices=["z", "fdr"], default=None, help="Thresholding mode for fMRI stats map (default: z).")
+    parser.add_argument("--source-fmri-fdr-q", type=float, default=None, help="FDR q-value when threshold mode is fdr (default: 0.05).")
     parser.add_argument("--source-fmri-tail", choices=["pos", "abs"], default=None, help="Threshold tail: pos (positive only) or abs (absolute value) (default: pos).")
     parser.add_argument("--source-fmri-cluster-min-voxels", type=int, default=None, help="Minimum cluster size in voxels after thresholding (default: 50).")
     parser.add_argument("--source-fmri-cluster-min-mm3", type=float, default=None, dest="source_fmri_cluster_min_mm3", help="Minimum cluster volume in mm^3 after thresholding (preferred; overrides --source-fmri-cluster-min-voxels when set).")

@@ -143,6 +143,8 @@ fmri_contrast:
   input_source: "fmriprep"     # "fmriprep" (recommended) or "bids_raw"
   fmriprep_space: "T1w"        # fMRIPrep output space
   require_fmriprep: true       # Fail if preproc BOLD is missing
+  output_dir: null             # Optional first-level output root
+  freesurfer_dir: null         # Optional FreeSurfer SUBJECTS_DIR override
   
   # Contrast type and conditions
   type: "t-test"               # "t-test" | "custom"
@@ -198,6 +200,9 @@ fmri_contrast:
   drift_model: "cosine"        # "none" | "cosine" | "polynomial"
   high_pass_hz: 0.008          # High-pass filter (128s period)
   low_pass_hz: null            # Optional; avoid unless you know you need it
+  smoothing_fwhm: null         # Optional spatial smoothing kernel FWHM in mm
+  confounds_strategy: "auto"    # "auto" | "none" | "motion6" | "motion12" | "motion24" | "motion24+wmcsf" | "motion24+wmcsf+fd"
+  write_design_matrix: false    # Write design matrix TSV/PNG under qc/
   
   # Output format
   output_type: "z-score"       # "z-score" | "t-stat" | "cope" | "beta"

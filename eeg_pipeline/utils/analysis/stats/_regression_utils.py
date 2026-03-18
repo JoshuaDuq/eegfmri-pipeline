@@ -209,8 +209,8 @@ def _build_covariate_design(
     for col in covariate_cols:
         s = use[col]
         is_categorical = (
-            pd.api.types.is_categorical_dtype(s) or 
-            pd.api.types.is_object_dtype(s)
+            isinstance(s.dtype, pd.CategoricalDtype)
+            or pd.api.types.is_object_dtype(s)
         )
         
         if is_categorical:

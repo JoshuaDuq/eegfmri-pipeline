@@ -248,6 +248,12 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         fmri_cfg["require_provenance"] = bool(args.source_fmri_require_provenance)
     if getattr(args, "source_fmri_threshold", None) is not None:
         fmri_cfg["threshold"] = args.source_fmri_threshold
+    thresholding_cfg = fmri_cfg.setdefault("thresholding", {})
+    thresholding_cfg["stat_type"] = "z"
+    if getattr(args, "source_fmri_threshold_mode", None) is not None:
+        thresholding_cfg["mode"] = args.source_fmri_threshold_mode
+    if getattr(args, "source_fmri_fdr_q", None) is not None:
+        thresholding_cfg["fdr_q"] = args.source_fmri_fdr_q
     if getattr(args, "source_fmri_tail", None) is not None:
         fmri_cfg["tail"] = args.source_fmri_tail
     if getattr(args, "source_fmri_cluster_min_voxels", None) is not None:
@@ -754,6 +760,7 @@ def _apply_rest_mode_overrides(args: argparse.Namespace, config: Any) -> None:
         return
 
     task_is_rest = bool(args.task_is_rest)
+    config.setdefault("preprocessing", {})["task_is_rest"] = task_is_rest
     config.setdefault("feature_engineering", {})["task_is_rest"] = task_is_rest
     if not task_is_rest:
         return

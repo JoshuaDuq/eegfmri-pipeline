@@ -47,7 +47,8 @@ func TestFeaturesAdvancedConfigRendersMaximalState(t *testing.T) {
 	m.sourceLocFmriContrastEnabled = true
 	m.sourceLocFmriContrastType = 0
 	m.sourceLocFmriAutoDetectRuns = false
-	m.sourceLocFmriClusterCorrection = true
+	m.sourceLocFmriThresholdMode = 1
+	m.sourceLocFmriFdrQ = 0.025
 
 	rendered := m.renderFeaturesAdvancedConfig()
 	if strings.Contains(rendered, "Unknown:") {

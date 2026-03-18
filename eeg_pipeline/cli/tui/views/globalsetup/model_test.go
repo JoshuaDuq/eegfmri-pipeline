@@ -16,6 +16,20 @@ func TestDefaultConfigKeys_IncludesBidsRestRoot(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigKeys_IncludesFreesurferLicense(t *testing.T) {
+	keys := DefaultConfigKeys()
+	found := false
+	for _, key := range keys {
+		if key == "paths.freesurfer_license" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected paths.freesurfer_license in default config keys, got %#v", keys)
+	}
+}
+
 func TestSetConfigValuesAndBuildOverrides_HandleBidsRestRoot(t *testing.T) {
 	m := New(".")
 	m.SetConfigValues(map[string]interface{}{
@@ -42,5 +56,29 @@ func TestSetConfigValuesAndBuildOverrides_HandleBidsRestRoot(t *testing.T) {
 	}
 	if paths["deriv_rest_root"] != "/data/derivatives/rest-updated" {
 		t.Fatalf("expected deriv_rest_root override, got %#v", paths["deriv_rest_root"])
+	}
+}
+
+func TestSetConfigValuesAndBuildOverrides_HandleFreesurferLicense(t *testing.T) {
+	m := New(".")
+	m.SetConfigValues(map[string]interface{}{
+		"paths.freesurfer_license": "/data/licenses/license.txt",
+	})
+
+	if m.freesurferLicense != "/data/licenses/license.txt" {
+		t.Fatalf("expected freesurferLicense to hydrate, got %q", m.freesurferLicense)
+	}
+
+	m.freesurferLicense = "/data/licenses/license-updated.txt"
+	overrides := m.buildOverrides()
+	paths, ok := overrides["paths"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected paths overrides, got %#v", overrides)
+	}
+	if paths["freesurfer_license"] != "/data/licenses/license-updated.txt" {
+		t.Fatalf(
+			"expected freesurfer_license override, got %#v",
+			paths["freesurfer_license"],
+		)
 	}
 }

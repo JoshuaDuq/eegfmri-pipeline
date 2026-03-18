@@ -103,8 +103,10 @@ def _resolve_paths_recursive(obj: Any, config_dir: Path, project_root: Path) -> 
             elif isinstance(value, (dict, list)):
                 _resolve_paths_recursive(value, config_dir, project_root)
     elif isinstance(obj, list):
-        for item in obj:
-            if isinstance(item, (dict, list)):
+        for index, item in enumerate(obj):
+            if isinstance(item, str):
+                obj[index] = _resolve_single_path(item, config_dir, project_root)
+            elif isinstance(item, (dict, list)):
                 _resolve_paths_recursive(item, config_dir, project_root)
 
 

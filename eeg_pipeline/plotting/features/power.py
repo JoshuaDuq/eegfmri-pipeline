@@ -737,7 +737,7 @@ def _compute_window_effect_summary(
     qvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
     if finite_mask.any():
         rejected, qvals, _ = apply_fdr_correction(finite_pvalues[finite_mask].tolist(), config=config)
-        qvalue_values = qvalue_df.to_numpy(dtype=float)
+        qvalue_values = qvalue_df.to_numpy(dtype=float, copy=True)
         qvalue_values[finite_mask] = qvals
         qvalue_df.iloc[:, :] = qvalue_values
 
@@ -792,7 +792,7 @@ def _compute_column_effect_summary(
     qvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
     if finite_mask.any():
         rejected, qvals, _ = apply_fdr_correction(finite_pvalues[finite_mask].tolist(), config=config)
-        qvalue_values = qvalue_df.to_numpy(dtype=float)
+        qvalue_values = qvalue_df.to_numpy(dtype=float, copy=True)
         qvalue_values[finite_mask] = qvals
         qvalue_df.iloc[:, :] = qvalue_values
 
@@ -858,7 +858,7 @@ def _compute_group_paired_effect_summary(
     qvalue_df = pd.DataFrame(np.nan, index=roi_names, columns=bands, dtype=float)
     if finite_mask.any():
         _, qvalues, _ = apply_fdr_correction(finite_pvalues[finite_mask].tolist(), config=config)
-        qvalue_values = qvalue_df.to_numpy(dtype=float)
+        qvalue_values = qvalue_df.to_numpy(dtype=float, copy=True)
         qvalue_values[finite_mask] = qvalues
         qvalue_df.iloc[:, :] = qvalue_values
 

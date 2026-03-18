@@ -350,6 +350,8 @@ func (m Model) getFeaturesOptions() []optionType {
 						optSourceLocFmriProvenance,
 						optSourceLocFmriRequireProvenance,
 						optSourceLocFmriThreshold,
+						optSourceLocFmriThresholdMode,
+						optSourceLocFmriFdrQ,
 						optSourceLocFmriTail,
 						optSourceLocFmriMaxClusters,
 						optSourceLocFmriMaxVoxPerClus,

@@ -61,7 +61,10 @@ def _update_preprocessing_config(args: argparse.Namespace, config: Any) -> None:
     if args.random_state is not None:
         preprocessing_config["random_state"] = args.random_state
     if args.task_is_rest is not None:
-        preprocessing_config["task_is_rest"] = bool(args.task_is_rest)
+        task_is_rest = bool(args.task_is_rest)
+        preprocessing_config["task_is_rest"] = task_is_rest
+        feature_config = config.setdefault("feature_engineering", {})
+        feature_config["task_is_rest"] = task_is_rest
     if args.resample:
         preprocessing_config["resample_freq"] = args.resample
     if args.l_freq is not None:

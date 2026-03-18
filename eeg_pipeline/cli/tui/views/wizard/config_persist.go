@@ -247,6 +247,8 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocFmriProvenance"] = m.sourceLocFmriProvenance
 	cfg["sourceLocFmriRequireProv"] = m.sourceLocFmriRequireProv
 	cfg["sourceLocFmriThreshold"] = m.sourceLocFmriThreshold
+	cfg["sourceLocFmriThresholdMode"] = m.sourceLocFmriThresholdMode
+	cfg["sourceLocFmriFdrQ"] = m.sourceLocFmriFdrQ
 	cfg["sourceLocFmriTail"] = m.sourceLocFmriTail
 	cfg["sourceLocFmriMinClusterVox"] = m.sourceLocFmriMinClusterVox
 	cfg["sourceLocFmriMinClusterMM3"] = m.sourceLocFmriMinClusterMM3
@@ -283,8 +285,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocFmriPhaseScopeColumn"] = m.sourceLocFmriPhaseScopeColumn
 	cfg["sourceLocFmriPhaseScopeValue"] = m.sourceLocFmriPhaseScopeValue
 	cfg["sourceLocFmriStimPhasesToModel"] = m.sourceLocFmriStimPhasesToModel
-	cfg["sourceLocFmriClusterCorrection"] = m.sourceLocFmriClusterCorrection
-	cfg["sourceLocFmriClusterPThreshold"] = m.sourceLocFmriClusterPThreshold
 	cfg["sourceLocFmriOutputType"] = m.sourceLocFmriOutputType
 	cfg["sourceLocFmriResampleToFS"] = m.sourceLocFmriResampleToFS
 	cfg["sourceLocFmriInputSource"] = m.sourceLocFmriInputSource
@@ -488,6 +488,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["clusterTail"] = m.clusterTail
 	cfg["clusterConditionColumn"] = m.clusterConditionColumn
 	cfg["clusterConditionValues"] = m.clusterConditionValues
+	cfg["clusterCorrectionNPermutations"] = m.clusterCorrectionNPermutations
+	cfg["clusterCorrectionAlpha"] = m.clusterCorrectionAlpha
+	cfg["clusterCorrectionFormingThreshold"] = m.clusterCorrectionFormingThreshold
+	cfg["clusterCorrectionMinTimepoints"] = m.clusterCorrectionMinTimepoints
+	cfg["clusterCorrectionMinChannels"] = m.clusterCorrectionMinChannels
+	cfg["clusterCorrectionMinClusterSize"] = m.clusterCorrectionMinClusterSize
+	cfg["clusterCorrectionTail"] = m.clusterCorrectionTail
 
 	// Temporal
 	cfg["temporalResolutionMs"] = m.temporalResolutionMs
@@ -1416,6 +1423,8 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.sourceLocFmriProvenance = getInt("sourceLocFmriProvenance", m.sourceLocFmriProvenance)
 	m.sourceLocFmriRequireProv = getBool("sourceLocFmriRequireProv", m.sourceLocFmriRequireProv)
 	m.sourceLocFmriThreshold = getFloat("sourceLocFmriThreshold", m.sourceLocFmriThreshold)
+	m.sourceLocFmriThresholdMode = getInt("sourceLocFmriThresholdMode", m.sourceLocFmriThresholdMode)
+	m.sourceLocFmriFdrQ = getFloat("sourceLocFmriFdrQ", m.sourceLocFmriFdrQ)
 	m.sourceLocFmriTail = getInt("sourceLocFmriTail", m.sourceLocFmriTail)
 	m.sourceLocFmriMinClusterVox = getInt("sourceLocFmriMinClusterVox", m.sourceLocFmriMinClusterVox)
 	m.sourceLocFmriMinClusterMM3 = getFloat("sourceLocFmriMinClusterMM3", m.sourceLocFmriMinClusterMM3)
@@ -1455,8 +1464,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.sourceLocFmriPhaseScopeColumn = getString("sourceLocFmriPhaseScopeColumn", m.sourceLocFmriPhaseScopeColumn)
 	m.sourceLocFmriPhaseScopeValue = getString("sourceLocFmriPhaseScopeValue", m.sourceLocFmriPhaseScopeValue)
 	m.sourceLocFmriStimPhasesToModel = getString("sourceLocFmriStimPhasesToModel", m.sourceLocFmriStimPhasesToModel)
-	m.sourceLocFmriClusterCorrection = getBool("sourceLocFmriClusterCorrection", m.sourceLocFmriClusterCorrection)
-	m.sourceLocFmriClusterPThreshold = getFloat("sourceLocFmriClusterPThreshold", m.sourceLocFmriClusterPThreshold)
 	m.sourceLocFmriOutputType = getInt("sourceLocFmriOutputType", m.sourceLocFmriOutputType)
 	m.sourceLocFmriResampleToFS = getBool("sourceLocFmriResampleToFS", m.sourceLocFmriResampleToFS)
 	m.sourceLocFmriInputSource = getInt("sourceLocFmriInputSource", m.sourceLocFmriInputSource)
@@ -1663,6 +1670,13 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.clusterTail = getInt("clusterTail", m.clusterTail)
 	m.clusterConditionColumn = getString("clusterConditionColumn", m.clusterConditionColumn)
 	m.clusterConditionValues = getString("clusterConditionValues", m.clusterConditionValues)
+	m.clusterCorrectionNPermutations = getInt("clusterCorrectionNPermutations", m.clusterCorrectionNPermutations)
+	m.clusterCorrectionAlpha = getFloat("clusterCorrectionAlpha", m.clusterCorrectionAlpha)
+	m.clusterCorrectionFormingThreshold = getFloat("clusterCorrectionFormingThreshold", m.clusterCorrectionFormingThreshold)
+	m.clusterCorrectionMinTimepoints = getInt("clusterCorrectionMinTimepoints", m.clusterCorrectionMinTimepoints)
+	m.clusterCorrectionMinChannels = getInt("clusterCorrectionMinChannels", m.clusterCorrectionMinChannels)
+	m.clusterCorrectionMinClusterSize = getInt("clusterCorrectionMinClusterSize", m.clusterCorrectionMinClusterSize)
+	m.clusterCorrectionTail = getInt("clusterCorrectionTail", m.clusterCorrectionTail)
 
 	// Temporal
 	m.temporalResolutionMs = getInt("temporalResolutionMs", m.temporalResolutionMs)

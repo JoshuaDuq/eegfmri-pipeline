@@ -393,6 +393,32 @@ _TEMPORAL_FEATURES_OVERRIDE_RULES = (
     ConfigOverrideRule("temporal_feature_erds", "behavior_analysis.temporal.features.erds", _to_bool),
 )
 
+_CLUSTER_CORRECTION_OVERRIDE_RULES = (
+    ConfigOverrideRule(
+        "cluster_correction_n_permutations",
+        "behavior_analysis.cluster_correction.n_permutations",
+        _to_int,
+    ),
+    ConfigOverrideRule("cluster_correction_alpha", "behavior_analysis.cluster_correction.alpha", _to_float),
+    ConfigOverrideRule(
+        "cluster_correction_forming_threshold",
+        "behavior_analysis.cluster_correction.cluster_forming_threshold",
+        _to_float,
+    ),
+    ConfigOverrideRule(
+        "cluster_correction_min_timepoints",
+        "behavior_analysis.cluster_correction.min_timepoints",
+        _to_int,
+    ),
+    ConfigOverrideRule("cluster_correction_min_channels", "behavior_analysis.cluster_correction.min_channels", _to_int),
+    ConfigOverrideRule(
+        "cluster_correction_min_cluster_size",
+        "behavior_analysis.cluster_correction.min_cluster_size",
+        _to_int,
+    ),
+    ConfigOverrideRule("cluster_correction_tail", "behavior_analysis.cluster_correction.tail", _to_int),
+)
+
 _CLUSTER_OVERRIDE_RULES = (
     ConfigOverrideRule("cluster_threshold", "behavior_analysis.cluster.forming_threshold", _to_float),
     ConfigOverrideRule("cluster_min_size", "behavior_analysis.cluster.min_cluster_size", _to_int),
@@ -442,6 +468,7 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         n_perm = int(args.n_perm)
         _set_nested_config_value(config, "behavior_analysis.statistics.n_permutations", n_perm)
         _set_nested_config_value(config, "behavior_analysis.cluster.n_permutations", n_perm)
+        _set_nested_config_value(config, "behavior_analysis.cluster_correction.n_permutations", n_perm)
 
     perm_group_column_preference = getattr(args, "perm_group_column_preference", None)
     if perm_group_column_preference:
@@ -531,6 +558,7 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     _apply_override_rules(args, config, _TEMPORAL_ERDS_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _TEMPORAL_FEATURES_OVERRIDE_RULES)
+    _apply_override_rules(args, config, _CLUSTER_CORRECTION_OVERRIDE_RULES)
 
     _apply_override_rules(args, config, _CLUSTER_OVERRIDE_RULES)
 

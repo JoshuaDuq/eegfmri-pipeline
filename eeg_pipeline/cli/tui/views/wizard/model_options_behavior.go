@@ -203,6 +203,17 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTemporalIncludeROIAverages,
 				optTemporalIncludeTFGrid,
 			)
+			options = append(
+				options,
+				optBehaviorSubClusterCorrection,
+				optClusterCorrectionNPermutations,
+				optClusterCorrectionAlpha,
+				optClusterCorrectionFormingThreshold,
+				optClusterCorrectionMinTimepoints,
+				optClusterCorrectionMinChannels,
+				optClusterCorrectionMinClusterSize,
+				optClusterCorrectionTail,
+			)
 			if m.featureFileSelected["itpc"] {
 				options = append(options,
 					optBehaviorSubITPC,

@@ -61,6 +61,7 @@ func (m *Model) browseCurrentPath() (tea.Model, tea.Cmd) {
 func (m Model) browseForPath(field fieldKey) tea.Cmd {
 	return func() tea.Msg {
 		prompt := "Select folder"
+		useFilePicker := false
 		switch field {
 		case fieldBidsRoot:
 			prompt = "Select BIDS root folder"
@@ -74,11 +75,21 @@ func (m Model) browseForPath(field fieldKey) tea.Cmd {
 			prompt = "Select resting-state derivatives root folder"
 		case fieldSourceRoot:
 			prompt = "Select source data folder"
+		case fieldFreesurferLicense:
+			prompt = "Select FreeSurfer license file"
+			useFilePicker = true
 		}
 
-		result := executor.PickFolder(prompt, fmt.Sprintf("%d", field))()
-		if msg, ok := result.(executor.PickFolderMsg); ok {
-			return pathPickedMsg{field: field, path: msg.Path, err: msg.Error}
+		if useFilePicker {
+			result := executor.PickFile(prompt, fmt.Sprintf("%d", field))()
+			if msg, ok := result.(executor.PickFileMsg); ok {
+				return pathPickedMsg{field: field, path: msg.Path, err: msg.Error}
+			}
+		} else {
+			result := executor.PickFolder(prompt, fmt.Sprintf("%d", field))()
+			if msg, ok := result.(executor.PickFolderMsg); ok {
+				return pathPickedMsg{field: field, path: msg.Path, err: msg.Error}
+			}
 		}
 		return pathPickedMsg{field: field, err: fmt.Errorf("unexpected result type")}
 	}
@@ -101,6 +112,7 @@ func (m Model) sectionFields(section sectionKey) []fieldDef {
 			{fieldDerivRestRoot, "Deriv Rest Root", "Resting-state EEG derivatives output", true},
 			{fieldSourceRoot, "Source Root", "Raw source data", true},
 			{fieldFreesurferDir, "FreeSurfer Dir", "FreeSurfer SUBJECTS_DIR", true},
+			{fieldFreesurferLicense, "FreeSurfer License", "FreeSurfer license.txt", true},
 		}
 	default:
 		return []fieldDef{}
@@ -129,6 +141,8 @@ func (m Model) fieldValue(key fieldKey) string {
 		return m.sourceRoot
 	case fieldFreesurferDir:
 		return m.freesurferDir
+	case fieldFreesurferLicense:
+		return m.freesurferLicense
 	default:
 		return ""
 	}
@@ -157,6 +171,8 @@ func (m *Model) setFieldValue(key fieldKey, value string) {
 		m.sourceRoot = value
 	case fieldFreesurferDir:
 		m.freesurferDir = value
+	case fieldFreesurferLicense:
+		m.freesurferLicense = value
 	}
 }
 
@@ -288,6 +304,9 @@ func (m *Model) buildOverrides() map[string]interface{} {
 	}
 	if strings.TrimSpace(m.freesurferDir) != "" {
 		paths["freesurfer_dir"] = m.freesurferDir
+	}
+	if strings.TrimSpace(m.freesurferLicense) != "" {
+		paths["freesurfer_license"] = m.freesurferLicense
 	}
 	if len(paths) > 0 {
 		overrides["paths"] = paths

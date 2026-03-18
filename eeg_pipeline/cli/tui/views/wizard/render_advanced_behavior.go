@@ -120,7 +120,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.behaviorGroupTemporalExpanded {
 				label = "▾ Temporal"
 			}
-			return label, "", "time window · resolution · ITPC · ERDS"
+			return label, "", "time window · resolution · cluster correction · ITPC · ERDS"
 		case optBehaviorGroupCluster:
 			label := "▸ Cluster"
 			if m.behaviorGroupClusterExpanded {
@@ -176,6 +176,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "  ── ITPC", "", ""
 		case optBehaviorSubERDS:
 			return "  ── ERDS", "", ""
+		case optBehaviorSubClusterCorrection:
+			return "  ── Cluster Correction", "", ""
 		case optBehaviorSubMultilevel:
 			return "  ── Group-Level", "", ""
 		case optBehaviorSubFeatureRegistry:
@@ -715,6 +717,53 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "percent"
 			}
 			return "ERDS Method", v, "ERDS normalization"
+
+		// Temporal cluster correction
+		case optClusterCorrectionNPermutations:
+			val := fmt.Sprintf("%d", m.clusterCorrectionNPermutations)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionNPermutations) {
+				val = numberDisplay
+			}
+			return "Permutations", val, "cluster correction permutations"
+		case optClusterCorrectionAlpha:
+			val := fmt.Sprintf("%.4f", m.clusterCorrectionAlpha)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionAlpha) {
+				val = numberDisplay
+			}
+			return "Alpha", val, "cluster correction alpha threshold"
+		case optClusterCorrectionFormingThreshold:
+			val := fmt.Sprintf("%.4f", m.clusterCorrectionFormingThreshold)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionFormingThreshold) {
+				val = numberDisplay
+			}
+			return "Forming Threshold", val, "cluster-forming threshold"
+		case optClusterCorrectionMinTimepoints:
+			val := fmt.Sprintf("%d", m.clusterCorrectionMinTimepoints)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionMinTimepoints) {
+				val = numberDisplay
+			}
+			return "Min Timepoints", val, "minimum contiguous timepoints"
+		case optClusterCorrectionMinChannels:
+			val := fmt.Sprintf("%d", m.clusterCorrectionMinChannels)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionMinChannels) {
+				val = numberDisplay
+			}
+			return "Min Channels", val, "minimum channels per cluster"
+		case optClusterCorrectionMinClusterSize:
+			val := fmt.Sprintf("%d", m.clusterCorrectionMinClusterSize)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterCorrectionMinClusterSize) {
+				val = numberDisplay
+			}
+			return "Min Cluster Size", val, "minimum cluster size"
+		case optClusterCorrectionTail:
+			v := "two-tailed"
+			switch m.clusterCorrectionTail {
+			case 1:
+				v = "upper"
+			case -1:
+				v = "lower"
+			}
+			return "Tail", v, "cluster correction tail"
 
 		// TF Heatmap options
 		case optTemporalTfHeatmapEnabled:

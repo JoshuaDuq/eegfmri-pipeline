@@ -7,12 +7,12 @@ eeg_bold_coupling:
       - name: "right_operculo_periinsular"
         template_subject: "fsaverage"
         label_files:
-          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/config/roi_library/study2/fsaverage/label/rh.study2_right_operculo_parietal.label"
+          - "roi_library/study2/fsaverage/label/rh.study2_right_operculo_parietal.label"
       - name: "midcingulate_pre_sma"
         template_subject: "fsaverage"
         label_files:
-          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/config/roi_library/study2/fsaverage/label/lh.study2_cingulo_pre_sma.label"
-          - "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/config/roi_library/study2/fsaverage/label/rh.study2_cingulo_pre_sma.label"
+          - "roi_library/study2/fsaverage/label/lh.study2_cingulo_pre_sma.label"
+          - "roi_library/study2/fsaverage/label/rh.study2_cingulo_pre_sma.label"
 
   covariates:
     model_terms: ["temperature", "temperature_sq", "fd", "eeg_artifact", "exp_site", "exp_global", "block_start"]

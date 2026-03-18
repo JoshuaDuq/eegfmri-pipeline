@@ -371,22 +371,24 @@ def _unpack_feature_results(features: FeatureExtractionResult) -> Dict[str, Any]
 def _build_extra_blocks(unpacked: Dict[str, Any], features: FeatureExtractionResult) -> Dict[str, pd.DataFrame]:
     """Build extra blocks dictionary for alignment, filtering out None/empty DataFrames."""
     extra_blocks = {
-        "itpc": unpacked["itpc_df"],
-        "itpc_trial": unpacked["itpc_trial_df"],
+        "itpc": unpacked.get("itpc_df"),
+        "itpc_trial": unpacked.get("itpc_trial_df"),
         # Align PAC at the per-trial level when available.
-        "pac_trials": unpacked["pac_trials_df"] if unpacked["pac_trials_df"] is not None else unpacked["pac_df"],
-        "pac_time": unpacked["pac_time_df"],
-        "complexity": unpacked["comp_df"],
-        "spectral": unpacked["spectral_df"],
-        "erp": unpacked["erp_df"],
-        "bursts": unpacked["bursts_df"],
-        "erds": unpacked["erds_df"],
-        "dconn": unpacked["dconn_df"],
-        "source": unpacked["source_df"],
-        "ratios": features.ratios_df,
-        "asymmetry": features.asymmetry_df,
+        "pac_trials": unpacked.get("pac_trials_df")
+        if unpacked.get("pac_trials_df") is not None
+        else unpacked.get("pac_df"),
+        "pac_time": unpacked.get("pac_time_df"),
+        "complexity": unpacked.get("comp_df"),
+        "spectral": unpacked.get("spectral_df"),
+        "erp": unpacked.get("erp_df"),
+        "bursts": unpacked.get("bursts_df"),
+        "erds": unpacked.get("erds_df"),
+        "dconn": unpacked.get("dconn_df"),
+        "source": unpacked.get("source_df"),
+        "ratios": getattr(features, "ratios_df", None),
+        "asymmetry": getattr(features, "asymmetry_df", None),
         "microstates": unpacked.get("microstates_df"),
-        "quality": features.quality_df,
+        "quality": getattr(features, "quality_df", None),
     }
     return {
         k: v
@@ -401,23 +403,23 @@ def _update_from_aligned_extra(
     extra_blocks: Dict[str, pd.DataFrame],
 ) -> None:
     """Update unpacked dict and features object with filtered extra blocks."""
-    unpacked["itpc_df"] = extra_blocks.get("itpc", unpacked["itpc_df"])
-    unpacked["itpc_trial_df"] = extra_blocks.get("itpc_trial", unpacked["itpc_trial_df"])
+    unpacked["itpc_df"] = extra_blocks.get("itpc", unpacked.get("itpc_df"))
+    unpacked["itpc_trial_df"] = extra_blocks.get("itpc_trial", unpacked.get("itpc_trial_df"))
     aligned_pac_trials = extra_blocks.get("pac_trials")
     if aligned_pac_trials is not None:
         unpacked["pac_trials_df"] = aligned_pac_trials
-    unpacked["pac_time_df"] = extra_blocks.get("pac_time", unpacked["pac_time_df"])
-    unpacked["comp_df"] = extra_blocks.get("complexity", unpacked["comp_df"])
-    unpacked["spectral_df"] = extra_blocks.get("spectral", unpacked["spectral_df"])
-    unpacked["erp_df"] = extra_blocks.get("erp", unpacked["erp_df"])
-    unpacked["bursts_df"] = extra_blocks.get("bursts", unpacked["bursts_df"])
-    unpacked["erds_df"] = extra_blocks.get("erds", unpacked["erds_df"])
-    unpacked["dconn_df"] = extra_blocks.get("dconn", unpacked["dconn_df"])
-    unpacked["source_df"] = extra_blocks.get("source", unpacked["source_df"])
+    unpacked["pac_time_df"] = extra_blocks.get("pac_time", unpacked.get("pac_time_df"))
+    unpacked["comp_df"] = extra_blocks.get("complexity", unpacked.get("comp_df"))
+    unpacked["spectral_df"] = extra_blocks.get("spectral", unpacked.get("spectral_df"))
+    unpacked["erp_df"] = extra_blocks.get("erp", unpacked.get("erp_df"))
+    unpacked["bursts_df"] = extra_blocks.get("bursts", unpacked.get("bursts_df"))
+    unpacked["erds_df"] = extra_blocks.get("erds", unpacked.get("erds_df"))
+    unpacked["dconn_df"] = extra_blocks.get("dconn", unpacked.get("dconn_df"))
+    unpacked["source_df"] = extra_blocks.get("source", unpacked.get("source_df"))
     unpacked["microstates_df"] = extra_blocks.get("microstates", unpacked.get("microstates_df"))
-    features.ratios_df = extra_blocks.get("ratios", features.ratios_df)
-    features.asymmetry_df = extra_blocks.get("asymmetry", features.asymmetry_df)
-    features.quality_df = extra_blocks.get("quality", features.quality_df)
+    features.ratios_df = extra_blocks.get("ratios", getattr(features, "ratios_df", None))
+    features.asymmetry_df = extra_blocks.get("asymmetry", getattr(features, "asymmetry_df", None))
+    features.quality_df = extra_blocks.get("quality", getattr(features, "quality_df", None))
     if hasattr(features, "microstates_df"):
         features.microstates_df = extra_blocks.get("microstates", features.microstates_df)
 
@@ -443,22 +445,24 @@ def _accumulate_features(
         "power": aligned.get("pow_df_aligned"),
         "baseline": aligned.get("baseline_df_aligned"),
         "connectivity": aligned.get("conn_df_aligned"),
-        "directedconnectivity": unpacked["dconn_df"],
-        "sourcelocalization": unpacked["source_df"],
-        "sourcecontrast": unpacked["source_contrast_df"],
+        "directedconnectivity": unpacked.get("dconn_df"),
+        "sourcelocalization": unpacked.get("source_df"),
+        "sourcecontrast": unpacked.get("source_contrast_df"),
         "aperiodic": aligned.get("aper_df_aligned"),
-        "erp": unpacked["erp_df"],
-        "itpc": unpacked["itpc_df"],
-        "pac": unpacked["pac_trials_df"] if unpacked["pac_trials_df"] is not None else unpacked["pac_df"],
-        "pac_time": unpacked["pac_time_df"],
-        "complexity": unpacked["comp_df"],
-        "bursts": unpacked["bursts_df"],
-        "spectral": unpacked["spectral_df"],
-        "erds": unpacked["erds_df"],
-        "ratios": features.ratios_df,
-        "asymmetry": features.asymmetry_df,
+        "erp": unpacked.get("erp_df"),
+        "itpc": unpacked.get("itpc_df"),
+        "pac": unpacked.get("pac_trials_df")
+        if unpacked.get("pac_trials_df") is not None
+        else unpacked.get("pac_df"),
+        "pac_time": unpacked.get("pac_time_df"),
+        "complexity": unpacked.get("comp_df"),
+        "bursts": unpacked.get("bursts_df"),
+        "spectral": unpacked.get("spectral_df"),
+        "erds": unpacked.get("erds_df"),
+        "ratios": getattr(features, "ratios_df", None),
+        "asymmetry": getattr(features, "asymmetry_df", None),
         "microstates": unpacked.get("microstates_df"),
-        "quality": features.quality_df,
+        "quality": getattr(features, "quality_df", None),
     }
     
     for key, df in feature_mapping.items():
@@ -670,7 +674,7 @@ def _collect_trial_table_feature_tables(
         ("aperiodic", aper_df_aligned),
         ("directedconnectivity", unpacked.get("dconn_df")),
         ("sourcelocalization", unpacked.get("source_df")),
-        ("sourcecontrast", unpacked["source_contrast_df"]),
+        ("sourcecontrast", unpacked.get("source_contrast_df")),
         ("erp", unpacked.get("erp_df")),
         ("itpc", itpc_trial_or_standard),
         ("pac", pac_trial_or_standard),
@@ -846,7 +850,6 @@ class FeaturePipeline(PipelineBase):
 
         validate_rest_configuration(self.config)
         task_is_rest = is_resting_state_feature_mode(self.config)
-        input_bids_root = resolve_eeg_bids_root(self.config, task_is_rest=task_is_rest)
         feature_categories = resolve_feature_categories(
             self.config, kwargs.get("feature_categories")
         )
@@ -898,6 +901,8 @@ class FeaturePipeline(PipelineBase):
             self.logger.warning("No events available; skipping")
             progress.error("no_events", "No aligned events")
             return
+
+        input_bids_root = resolve_eeg_bids_root(self.config, task_is_rest=task_is_rest)
 
         try:
             n_trials = len(epochs)
@@ -1120,40 +1125,40 @@ class FeaturePipeline(PipelineBase):
                 conn_cols=unpacked["conn_cols"],
                 aper_df=aper_df_aligned,
                 aper_cols=unpacked["aper_cols"],
-                erp_df=unpacked["erp_df"],
-                erp_cols=unpacked["erp_cols"],
-                itpc_df=unpacked["itpc_df"],
-                itpc_cols=unpacked["itpc_cols"],
-                pac_df=unpacked["pac_df"],
-                pac_trials_df=unpacked["pac_trials_df"],
-                pac_time_df=unpacked["pac_time_df"],
-                aper_qc=features.aper_qc,
+                erp_df=unpacked.get("erp_df"),
+                erp_cols=unpacked.get("erp_cols"),
+                itpc_df=unpacked.get("itpc_df"),
+                itpc_cols=unpacked.get("itpc_cols"),
+                pac_df=unpacked.get("pac_df"),
+                pac_trials_df=unpacked.get("pac_trials_df"),
+                pac_time_df=unpacked.get("pac_time_df"),
+                aper_qc=getattr(features, "aper_qc", None),
                 y=y_aligned,
                 features_dir=features_dir,
                 logger=self.logger,
                 config=self.config,
-                comp_df=unpacked["comp_df"],
-                comp_cols=unpacked["comp_cols"],
-                bursts_df=unpacked["bursts_df"],
-                bursts_cols=unpacked["bursts_cols"],
-                spectral_df=unpacked["spectral_df"],
-                spectral_cols=unpacked["spectral_cols"],
-                erds_df=unpacked["erds_df"],
-                erds_cols=unpacked["erds_cols"],
-                ratios_df=features.ratios_df,
-                ratios_cols=features.ratios_cols,
-                asymmetry_df=features.asymmetry_df,
-                asymmetry_cols=features.asymmetry_cols,
+                comp_df=unpacked.get("comp_df"),
+                comp_cols=unpacked.get("comp_cols"),
+                bursts_df=unpacked.get("bursts_df"),
+                bursts_cols=unpacked.get("bursts_cols"),
+                spectral_df=unpacked.get("spectral_df"),
+                spectral_cols=unpacked.get("spectral_cols"),
+                erds_df=unpacked.get("erds_df"),
+                erds_cols=unpacked.get("erds_cols"),
+                ratios_df=getattr(features, "ratios_df", None),
+                ratios_cols=getattr(features, "ratios_cols", None),
+                asymmetry_df=getattr(features, "asymmetry_df", None),
+                asymmetry_cols=getattr(features, "asymmetry_cols", None),
                 microstates_df=unpacked.get("microstates_df"),
                 microstates_cols=unpacked.get("microstates_cols"),
-                quality_df=features.quality_df,
-                quality_cols=features.quality_cols,
-                dconn_df=unpacked["dconn_df"],
-                dconn_cols=unpacked["dconn_cols"],
-                source_df=unpacked["source_df"],
-                source_cols=unpacked["source_cols"],
-                source_contrast_df=unpacked["source_contrast_df"],
-                source_contrast_cols=unpacked["source_contrast_cols"],
+                quality_df=getattr(features, "quality_df", None),
+                quality_cols=getattr(features, "quality_cols", None),
+                dconn_df=unpacked.get("dconn_df"),
+                dconn_cols=unpacked.get("dconn_cols"),
+                source_df=unpacked.get("source_df"),
+                source_cols=unpacked.get("source_cols"),
+                source_contrast_df=unpacked.get("source_contrast_df"),
+                source_contrast_cols=unpacked.get("source_contrast_cols"),
                 feature_qc=feature_qc or None,
                 suffix=suffix,
                 aligned_events=aligned_events,

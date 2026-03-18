@@ -356,6 +356,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSourceLocFmriThreshold:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optSourceLocFmriThresholdMode:
+		m.sourceLocFmriThresholdMode = (m.sourceLocFmriThresholdMode + 1) % 2 // 0: z, 1: fdr
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriFdrQ:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optSourceLocFmriTail:
 		m.sourceLocFmriTail = (m.sourceLocFmriTail + 1) % 2 // 0: pos, 1: abs
 		m.useDefaultAdvanced = false
@@ -500,12 +506,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSourceLocFmriStimPhasesToModel:
 		m.expandedOption = expandedSourceLocFmriStimPhases
 		m.subCursor = 0
-		m.useDefaultAdvanced = false
-	case optSourceLocFmriClusterCorrection:
-		m.sourceLocFmriClusterCorrection = !m.sourceLocFmriClusterCorrection
-		m.useDefaultAdvanced = false
-	case optSourceLocFmriClusterPThreshold:
-		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optSourceLocFmriOutputType:
 		m.sourceLocFmriOutputType = (m.sourceLocFmriOutputType + 1) % 4 // 0: z-score, 1: t-stat, 2: cope, 3: beta
@@ -2019,6 +2019,37 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optTemporalERDSMethod:
 		m.temporalERDSMethod = (m.temporalERDSMethod + 1) % 2 // Toggle between percent and zscore
+		m.useDefaultAdvanced = false
+	// Temporal cluster correction options
+	case optClusterCorrectionNPermutations:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionAlpha:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionFormingThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionMinTimepoints:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionMinChannels:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionMinClusterSize:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterCorrectionTail:
+		switch m.clusterCorrectionTail {
+		case 0:
+			m.clusterCorrectionTail = 1
+		case 1:
+			m.clusterCorrectionTail = -1
+		case -1:
+			m.clusterCorrectionTail = 0
+		default:
+			m.clusterCorrectionTail = 0
+		}
 		m.useDefaultAdvanced = false
 	// TF Heatmap options
 	case optTemporalTfHeatmapEnabled:

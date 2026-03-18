@@ -753,6 +753,10 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val > 0 {
 			m.sourceLocFmriThreshold = val
 		}
+	case optSourceLocFmriFdrQ:
+		if val > 0 && val < 1 {
+			m.sourceLocFmriFdrQ = val
+		}
 	case optSourceLocFmriMinClusterMM3:
 		if val >= 0 {
 			m.sourceLocFmriMinClusterMM3 = val
@@ -784,10 +788,6 @@ func (m *Model) commitFeaturesNumber(val float64) {
 	case optSourceLocFmriLowPassHz:
 		if val >= 0 {
 			m.sourceLocFmriLowPassHz = val
-		}
-	case optSourceLocFmriClusterPThreshold:
-		if val >= 0 && val <= 1 {
-			m.sourceLocFmriClusterPThreshold = val
 		}
 	// ITPC options
 	case optItpcMinTrialsPerCondition:
@@ -1182,6 +1182,31 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		m.temporalERDSBaselineMin = val
 	case optTemporalERDSBaselineMax:
 		m.temporalERDSBaselineMax = val
+	// Temporal cluster correction options
+	case optClusterCorrectionNPermutations:
+		if val >= 1 {
+			m.clusterCorrectionNPermutations = int(val)
+		}
+	case optClusterCorrectionAlpha:
+		if val > 0 && val <= 1 {
+			m.clusterCorrectionAlpha = val
+		}
+	case optClusterCorrectionFormingThreshold:
+		if val > 0 && val <= 1 {
+			m.clusterCorrectionFormingThreshold = val
+		}
+	case optClusterCorrectionMinTimepoints:
+		if val >= 1 {
+			m.clusterCorrectionMinTimepoints = int(val)
+		}
+	case optClusterCorrectionMinChannels:
+		if val >= 1 {
+			m.clusterCorrectionMinChannels = int(val)
+		}
+	case optClusterCorrectionMinClusterSize:
+		if val >= 1 {
+			m.clusterCorrectionMinClusterSize = int(val)
+		}
 	// TF Heatmap options
 	case optTemporalTfHeatmapTimeResMs:
 		if val >= 1 {

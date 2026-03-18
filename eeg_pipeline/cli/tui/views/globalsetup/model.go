@@ -40,6 +40,7 @@ const (
 	fieldDerivRestRoot
 	fieldSourceRoot
 	fieldFreesurferDir
+	fieldFreesurferLicense
 )
 
 type sectionDef struct {
@@ -76,16 +77,17 @@ type Model struct {
 	width  int
 	height int
 
-	task          string
-	randomState   string
-	subjectList   string
-	bidsRoot      string
-	bidsRestRoot  string
-	bidsFmriRoot  string
-	derivRoot     string
-	derivRestRoot string
-	sourceRoot    string
-	freesurferDir string
+	task              string
+	randomState       string
+	subjectList       string
+	bidsRoot          string
+	bidsRestRoot      string
+	bidsFmriRoot      string
+	derivRoot         string
+	derivRestRoot     string
+	sourceRoot        string
+	freesurferDir     string
+	freesurferLicense string
 
 	isLoading     bool
 	isSaving      bool
@@ -115,6 +117,7 @@ func DefaultConfigKeys() []string {
 		"paths.deriv_rest_root",
 		"paths.source_data",
 		"paths.freesurfer_dir",
+		"paths.freesurfer_license",
 	}
 }
 
@@ -186,6 +189,9 @@ func (m *Model) SetConfigValues(values map[string]interface{}) {
 	}
 	if v, ok := values["paths.freesurfer_dir"]; ok {
 		m.freesurferDir = toString(v, m.freesurferDir)
+	}
+	if v, ok := values["paths.freesurfer_license"]; ok {
+		m.freesurferLicense = toString(v, m.freesurferLicense)
 	}
 }
 

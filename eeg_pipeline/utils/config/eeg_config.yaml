@@ -15,6 +15,8 @@ paths:
   source_data: "../../../data/source_data"  # Raw source data directory
   freesurfer_dir: "../../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
   freesurfer_license: null  # Path to FreeSurfer license.txt (otherwise use EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt)
+  signature_dir: null  # Root directory for multivariate signature weight maps
+  signature_maps: []  # List of {name, path} entries relative to signature_dir
 
 ###################################################################
 # 1b. fMRI PREPROCESSING (fMRIPrep-style)
@@ -30,13 +32,92 @@ fmri_preprocessing:
     output_spaces: ["MNI152NLin2009cAsym", "T1w"]
     ignore: []  # e.g., ["fieldmaps", "slicetiming"]
     bids_filter_file: null  # Optional BIDS filter JSON (path)
+    level: "full"  # "full", "resampling", or "minimal"
+    cifti_output: null  # Optional dense timeseries output: null, "91k", or "170k"
+    task_id: null  # Optional task filter for preprocessing
+    nthreads: 0  # 0 = auto
+    omp_nthreads: 0  # 0 = auto
+    low_mem: false
+    longitudinal: false
+    skull_strip_template: "OASIS30ANTs"
+    skull_strip_fixed_seed: false
+    bold2t1w_init: "register"  # "register" or "header"
+    bold2t1w_dof: 6
+    slice_time_ref: 0.5
+    dummy_scans: 0
+    fd_spike_threshold: 0.5
+    dvars_spike_threshold: 1.5
     use_aroma: false
     skip_bids_validation: false
     clean_workdir: true
     stop_on_first_crash: false
     fs_no_reconall: false
     mem_mb: 0  # 0 = fMRIPrep default
+    medial_surface_nan: false
+    no_msm: false
+    me_output_echos: false
+    random_seed: 0
     extra_args: ""  # Parsed with shlex and appended verbatim to fMRIPrep CLI
+
+###################################################################
+# 1c. fMRI ANALYSIS
+###################################################################
+
+fmri_contrast:
+  enabled: false
+  input_source: "fmriprep"
+  fmriprep_space: "T1w"
+  require_fmriprep: true
+  type: "t-test"
+  output_dir: null
+  freesurfer_dir: null
+  condition_a:
+    column: "trial_type"
+    value: null
+  condition_b:
+    column: "trial_type"
+    value: null
+  condition_scope_trial_types: null
+  condition_scope_column: "trial_type"
+  events_to_model: null
+  events_to_model_column: "trial_type"
+  phase_column: "stim_phase"
+  stim_phases_to_model: null
+  phase_scope_column: "trial_type"
+  phase_scope_value: null
+  formula: null
+  name: "contrast"
+  runs: null
+  hrf_model: "spm"
+  drift_model: "cosine"
+  high_pass_hz: 0.008
+  low_pass_hz: null
+  smoothing_fwhm: null
+  confounds_strategy: "auto"
+  write_design_matrix: false
+  output_type: "z-score"
+  resample_to_freesurfer: true
+
+fmri_group_level:
+  enabled: false
+  model: "one-sample"
+  contrast_names: []
+  condition_labels: null
+  input_root: null
+  formula: null
+  output_name: null
+  output_dir: null
+  write_design_matrix: true
+  covariates_file: null
+  subject_column: "subject"
+  covariate_columns: []
+  group_column: null
+  group_a_value: null
+  group_b_value: null
+  permutation:
+    enabled: false
+    n_permutations: 5000
+    two_sided: true
 
 ###################################################################
 # 2. DEFINITIONS & ANCHORS
@@ -492,10 +573,11 @@ feature_engineering:
       provenance: "independent"    # "independent" (recommended) or "same_dataset" (circularity risk)
       require_provenance: true     # If true, error when provenance is unknown
       threshold: 3.1
+      thresholding:
+        mode: "z"                  # "z" or "fdr"
+        fdr_q: 0.05
+        stat_type: "z"
       tail: "pos"                  # "pos" or "abs"
-      threshold_mode: "z"          # "z" or "fdr"
-      fdr_q: 0.05
-      stat_type: "z"
       cluster_min_voxels: 50
       # Preferred: stable across voxel sizes/resampling. When set, overrides cluster_min_voxels.
       # Example: 50 vox @ 2mm isotropic ≈ 50 * 8 = 400 mm^3.
@@ -833,10 +915,11 @@ behavior_analysis:
     condition_values: []         # Exactly 2 values to compare (default [0, 1] if empty)
 
   cluster_correction:
-    enabled: false
     n_permutations: 1000
     alpha: 0.05
-    forming_threshold: 0.05
+    cluster_forming_threshold: 0.05
+    min_timepoints: 2
+    min_channels: 1
     min_cluster_size: 2
     tail: 0
   

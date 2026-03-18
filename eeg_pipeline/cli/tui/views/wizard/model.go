@@ -1802,6 +1802,8 @@ type Model struct {
 	sourceLocFmriProvenance     int     // 0: independent, 1: same_dataset
 	sourceLocFmriRequireProv    bool    // Require explicit provenance
 	sourceLocFmriThreshold      float64 // Threshold (e.g., z>=3.1)
+	sourceLocFmriThresholdMode  int     // 0: z, 1: fdr
+	sourceLocFmriFdrQ           float64 // FDR q-value when threshold mode is fdr
 	sourceLocFmriTail           int     // 0: pos, 1: abs
 	sourceLocFmriMinClusterVox  int     // Minimum cluster size (voxels)
 	sourceLocFmriMinClusterMM3  float64 // Minimum cluster volume (mm^3); preferred when > 0
@@ -1843,8 +1845,6 @@ type Model struct {
 	sourceLocFmriPhaseScopeColumn         string   // Events column used to scope phase filtering to subset rows
 	sourceLocFmriPhaseScopeValue          string   // Optional value in sourceLocFmriPhaseScopeColumn for scoped phase filtering
 	sourceLocFmriStimPhasesToModel        string   // Optional: phase allow-list from sourceLocFmriPhaseColumn (empty = no scoping)
-	sourceLocFmriClusterCorrection        bool     // Enable cluster-extent filtering heuristic (NOT cluster-level FWE correction)
-	sourceLocFmriClusterPThreshold        float64  // Cluster-forming p-threshold
 	sourceLocFmriOutputType               int      // 0: z-score, 1: t-stat, 2: cope, 3: beta
 	sourceLocFmriResampleToFS             bool     // Auto-resample to FreeSurfer space
 	sourceLocFmriInputSource              int      // 0: fmriprep, 1: bids_raw
@@ -2055,6 +2055,14 @@ type Model struct {
 	clusterConditionColumn string  // events.tsv column to split by (empty=event_columns.condition, then event_columns.binary_outcome)
 	clusterConditionValues string  // Exactly 2 values (space/comma-separated) to compare
 	clusterFeaturesSpec    string  // Comma-separated feature filters for cluster
+	// Cluster correction-specific
+	clusterCorrectionNPermutations    int
+	clusterCorrectionAlpha            float64
+	clusterCorrectionFormingThreshold float64
+	clusterCorrectionMinTimepoints    int
+	clusterCorrectionMinChannels      int
+	clusterCorrectionMinClusterSize   int
+	clusterCorrectionTail             int
 	// Condition-specific
 	conditionEffectThreshold float64 // Min effect size to report
 	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.condition, then event_columns.binary_outcome)
@@ -2666,6 +2674,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriProvenance:     0,
 		sourceLocFmriRequireProv:    true,
 		sourceLocFmriThreshold:      3.1,
+		sourceLocFmriThresholdMode:  0,
+		sourceLocFmriFdrQ:           0.05,
 		sourceLocFmriTail:           0, // 0: pos
 		sourceLocFmriMinClusterVox:  50,
 		sourceLocFmriMinClusterMM3:  400.0,
@@ -2698,9 +2708,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocFmriPhaseScopeColumn:         "",
 		sourceLocFmriPhaseScopeValue:          "",
 		sourceLocFmriStimPhasesToModel:        "", // no default scoping
-		sourceLocFmriClusterCorrection:        true,
-		sourceLocFmriClusterPThreshold:        0.001,
-		sourceLocFmriOutputType:               0, // 0: z-score
+		sourceLocFmriOutputType:               0,  // 0: z-score
 		sourceLocFmriResampleToFS:             true,
 		sourceLocFmriInputSource:              0, // 0: fmriprep
 		sourceLocFmriRequireFmriprep:          true,
@@ -2901,12 +2909,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalERDSBaselineMax: -0.1,
 		temporalERDSMethod:      0, // 0=percent, 1=zscore
 		// Cluster defaults
-		clusterThreshold:       0.05,
-		clusterMinSize:         2,
-		clusterTail:            0,
-		clusterConditionColumn: "",
-		clusterConditionValues: "",
-		clusterFeaturesSpec:    "",
+		clusterThreshold:                  0.05,
+		clusterMinSize:                    2,
+		clusterTail:                       0,
+		clusterConditionColumn:            "",
+		clusterConditionValues:            "",
+		clusterFeaturesSpec:               "",
+		clusterCorrectionNPermutations:    1000,
+		clusterCorrectionAlpha:            0.05,
+		clusterCorrectionFormingThreshold: 0.05,
+		clusterCorrectionMinTimepoints:    2,
+		clusterCorrectionMinChannels:      1,
+		clusterCorrectionMinClusterSize:   2,
+		clusterCorrectionTail:             0,
 		// Condition defaults
 		conditionEffectThreshold:    0.5,
 		conditionFailFast:           true,

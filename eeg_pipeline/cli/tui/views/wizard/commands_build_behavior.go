@@ -476,6 +476,31 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 	}
 
+	// Temporal cluster correction options
+	if m.isComputationSelected("temporal") || m.isComputationSelected("cluster") {
+		if m.clusterCorrectionNPermutations != 1000 {
+			args = append(args, "--cluster-correction-n-permutations", fmt.Sprintf("%d", m.clusterCorrectionNPermutations))
+		}
+		if m.clusterCorrectionAlpha != 0.05 {
+			args = append(args, "--cluster-correction-alpha", fmt.Sprintf("%.4f", m.clusterCorrectionAlpha))
+		}
+		if m.clusterCorrectionFormingThreshold != 0.05 {
+			args = append(args, "--cluster-correction-forming-threshold", fmt.Sprintf("%.4f", m.clusterCorrectionFormingThreshold))
+		}
+		if m.clusterCorrectionMinTimepoints != 2 {
+			args = append(args, "--cluster-correction-min-timepoints", fmt.Sprintf("%d", m.clusterCorrectionMinTimepoints))
+		}
+		if m.clusterCorrectionMinChannels != 1 {
+			args = append(args, "--cluster-correction-min-channels", fmt.Sprintf("%d", m.clusterCorrectionMinChannels))
+		}
+		if m.clusterCorrectionMinClusterSize != 2 {
+			args = append(args, "--cluster-correction-min-cluster-size", fmt.Sprintf("%d", m.clusterCorrectionMinClusterSize))
+		}
+		if m.clusterCorrectionTail != 0 {
+			args = append(args, "--cluster-correction-tail", fmt.Sprintf("%d", m.clusterCorrectionTail))
+		}
+	}
+
 	// Cluster-specific options
 	if m.isComputationSelected("cluster") {
 		appendFeatureSpec("--cluster-features", m.clusterFeaturesSpec)

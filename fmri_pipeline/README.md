@@ -95,7 +95,7 @@ BIDS ──► fMRIPrep ──► First-Level GLM ──► Contrast Maps ──
 | 5 | `analysis/reporting.py` | HTML report generation with QC diagnostics |
 
 Runtime configuration is loaded from `eeg_pipeline/utils/config/eeg_config.yaml`
-(sections `fmri_preprocessing`, `fmri_contrast`, `fmri_constraint`).
+(sections `fmri_preprocessing`, `fmri_contrast`, `fmri_group_level`).
 
 ---
 

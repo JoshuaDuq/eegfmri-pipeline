@@ -265,6 +265,8 @@ const (
 	optSourceLocFmriProvenance
 	optSourceLocFmriRequireProvenance
 	optSourceLocFmriThreshold
+	optSourceLocFmriThresholdMode
+	optSourceLocFmriFdrQ
 	optSourceLocFmriTail
 	optSourceLocFmriMinClusterVox
 	optSourceLocFmriMinClusterMM3
@@ -300,8 +302,6 @@ const (
 	optSourceLocFmriPhaseScopeColumn
 	optSourceLocFmriPhaseScopeValue
 	optSourceLocFmriStimPhasesToModel
-	optSourceLocFmriClusterCorrection
-	optSourceLocFmriClusterPThreshold
 	optSourceLocFmriOutputType
 	optSourceLocFmriResampleToFS
 	optSourceLocFmriInputSource
@@ -430,6 +430,15 @@ const (
 	optTemporalERDSBaselineMin
 	optTemporalERDSBaselineMax
 	optTemporalERDSMethod
+	// Temporal cluster correction options
+	optBehaviorSubClusterCorrection
+	optClusterCorrectionNPermutations
+	optClusterCorrectionAlpha
+	optClusterCorrectionFormingThreshold
+	optClusterCorrectionMinTimepoints
+	optClusterCorrectionMinChannels
+	optClusterCorrectionMinClusterSize
+	optClusterCorrectionTail
 	// TF Heatmap options
 	optTemporalTfHeatmapEnabled
 	optTemporalTfHeatmapFreqs

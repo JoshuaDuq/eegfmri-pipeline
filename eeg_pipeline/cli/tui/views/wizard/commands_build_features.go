@@ -329,6 +329,13 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 				if m.sourceLocFmriThreshold != 3.1 {
 					args = append(args, "--source-fmri-threshold", fmt.Sprintf("%.2f", m.sourceLocFmriThreshold))
 				}
+				thresholdModes := []string{"z", "fdr"}
+				if m.sourceLocFmriThresholdMode != 0 {
+					args = append(args, "--source-fmri-threshold-mode", thresholdModes[m.sourceLocFmriThresholdMode%len(thresholdModes)])
+				}
+				if m.sourceLocFmriFdrQ != 0.05 {
+					args = append(args, "--source-fmri-fdr-q", fmt.Sprintf("%.4f", m.sourceLocFmriFdrQ))
+				}
 				if m.sourceLocFmriTail == 1 {
 					args = append(args, "--source-fmri-tail", "abs")
 				}

@@ -63,6 +63,8 @@ class PreprocessingPipeline(PipelineBase):
             self.config,
             task_is_rest=self._resolve_task_is_rest(),
         )
+        if self._resolve_task_is_rest() and not hasattr(self, "deriv_root"):
+            self.deriv_root = self._resolve_pipeline_deriv_root()
 
     def _resolve_pipeline_deriv_root(self) -> Path:
         """Resolve EEG preprocessing derivatives root."""

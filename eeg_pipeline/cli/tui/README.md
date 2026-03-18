@@ -116,7 +116,7 @@ Edit project-level configuration persisted to `.tui_overrides.json`:
 | Section | Fields |
 |---|---|
 | **Project** | Task name, random state, subject list |
-| **Paths** | BIDS root, BIDS fMRI root, derivatives root, source data, FreeSurfer dir |
+| **Paths** | BIDS root, BIDS rest root, BIDS fMRI root, derivatives root, derivatives rest root, source data, FreeSurfer dir, FreeSurfer license |
 
 Supports inline text editing and native folder-picker dialogs (`B` key).
 

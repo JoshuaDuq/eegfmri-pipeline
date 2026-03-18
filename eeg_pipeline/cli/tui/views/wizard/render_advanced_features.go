@@ -1130,6 +1130,18 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "e.g., z>=3.10"
+		case optSourceLocFmriThresholdMode:
+			label = "Threshold Mode"
+			modes := []string{"z", "fdr"}
+			value = modes[m.sourceLocFmriThresholdMode%len(modes)]
+			hint = "z or fdr"
+		case optSourceLocFmriFdrQ:
+			label = "FDR q"
+			value = fmt.Sprintf("%.4f", m.sourceLocFmriFdrQ)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriFdrQ) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "only used when Threshold Mode=fdr"
 		case optSourceLocFmriTail:
 			label = "fMRI Tail"
 			tails := []string{"pos", "abs"}
@@ -1527,21 +1539,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				expandIndicator = " [+]"
 			}
-		case optSourceLocFmriClusterCorrection:
-			label = "Cluster Correction"
-			if m.sourceLocFmriClusterCorrection {
-				value = "on"
-			} else {
-				value = "off"
-			}
-			hint = "cluster-extent heuristic (not FWE)"
-		case optSourceLocFmriClusterPThreshold:
-			label = "Cluster p-threshold"
-			value = fmt.Sprintf("%.4f", m.sourceLocFmriClusterPThreshold)
-			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriClusterPThreshold) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "cluster-forming threshold"
 		case optSourceLocFmriOutputType:
 			label = "Output Type"
 			outputTypes := []string{"z-score", "t-stat", "cope", "beta"}

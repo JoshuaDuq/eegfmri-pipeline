@@ -75,6 +75,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
 
         self.assertEqual(config.get("eeg.ecg_channels"), ["ECG1", "ECG2"])
         self.assertTrue(config.get("preprocessing.task_is_rest"))
+        self.assertTrue(config.get("feature_engineering.task_is_rest"))
         self.assertEqual(config.get("epochs.autoreject_n_interpolate"), [4, 8, 16])
         self.assertTrue(config.get("alignment.allow_misaligned_trim", False))
         self.assertEqual(config.get("alignment.min_alignment_samples"), 7)
@@ -92,11 +93,17 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         subparsers = parser.add_subparsers(dest="command")
         setup_preprocessing(subparsers)
         args = parser.parse_args(["preprocessing", "full", "--no-task-is-rest"])
-        config = ConfigDict({"preprocessing": {"task_is_rest": True}})
+        config = ConfigDict(
+            {
+                "preprocessing": {"task_is_rest": True},
+                "feature_engineering": {"task_is_rest": True},
+            }
+        )
 
         _update_preprocessing_config(args, config)
 
         self.assertFalse(config.get("preprocessing.task_is_rest"))
+        self.assertFalse(config.get("feature_engineering.task_is_rest"))
 
 
 class TestFeaturesTUIWiring(unittest.TestCase):
@@ -109,6 +116,7 @@ class TestFeaturesTUIWiring(unittest.TestCase):
 
         _apply_feature_config_overrides(args, config)
 
+        self.assertTrue(config.get("preprocessing.task_is_rest"))
         self.assertTrue(config.get("feature_engineering.task_is_rest"))
         self.assertFalse(config.get("feature_engineering.power.require_baseline"))
         self.assertFalse(config.get("feature_engineering.power.subtract_evoked"))
@@ -135,10 +143,16 @@ class TestFeaturesTUIWiring(unittest.TestCase):
         subparsers = parser.add_subparsers(dest="command")
         setup_features(subparsers)
         args = parser.parse_args(["features", "compute", "--no-task-is-rest"])
-        config = ConfigDict({"feature_engineering": {"task_is_rest": True}})
+        config = ConfigDict(
+            {
+                "preprocessing": {"task_is_rest": True},
+                "feature_engineering": {"task_is_rest": True},
+            }
+        )
 
         _apply_feature_config_overrides(args, config)
 
+        self.assertFalse(config.get("preprocessing.task_is_rest"))
         self.assertFalse(config.get("feature_engineering.task_is_rest"))
 
     def test_features_rest_flag_rejects_trial_ml_safe_analysis_mode(self):
