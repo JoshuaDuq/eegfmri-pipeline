@@ -238,7 +238,8 @@ def test_compute_shared_topomap_vlim_uses_descriptive_range_for_positive_data() 
         np.array([0.09, 0.11, 0.13, 0.15]),
     ]
 
-    vmin, vmax = _compute_shared_topomap_vlim(arrays, config={}, symmetric=False)
+    config = {"visualization": {"robust_vlim": {"min_v": 1e-6}}}
+    vmin, vmax = _compute_shared_topomap_vlim(arrays, config=config, symmetric=False)
 
     assert vmin >= 0
     assert vmax > vmin

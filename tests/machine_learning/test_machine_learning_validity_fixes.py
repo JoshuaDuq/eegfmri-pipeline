@@ -615,14 +615,23 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 "analysis": {"min_subjects_for_group": 2},
                 "machine_learning": {
                     "analysis": {
+                        "permutation_importance": {"enabled": False},
+                        "shap": {"enabled": False},
                         "time_generalization": {
                             "active_window": [0.0, 0.1],
                             "window_len": 0.1,
                             "step": 0.1,
                             "min_samples_per_window": 1,
                             "min_samples_for_corr": 1,
-                        }
-                    }
+                            "min_valid_fold_fraction": 0.8,
+                            "min_subjects_per_cell": 2,
+                            "min_count_per_cell": 1,
+                            "cluster_threshold": 0.05,
+                            "use_ridgecv": False,
+                            "alpha_grid": [0.01, 0.1, 1.0],
+                            "default_alpha": 1.0,
+                        },
+                    },
                 },
             }
         )
@@ -1137,7 +1146,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         X = np.array([[0.0], [1.0], [2.0], [3.0]], dtype=float)
         y = np.array([0.0, 1.0, 2.0, 3.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
-        cfg = DotConfig({"machine_learning": {"cv": {"min_valid_permutation_fraction": 0.75}}})
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "analysis": {
+                        "permutation_importance": {"enabled": False},
+                        "shap": {"enabled": False},
+                    },
+                    "cv": {
+                        "min_valid_permutation_fraction": 0.75,
+                        "min_valid_permutation_fold_fraction": 0.75,
+                    },
+                }
+            }
+        )
         call_counter = {"n": 0}
 
         def _fake_nested_loso_predictions_matrix(**_kwargs):
@@ -1362,7 +1384,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 }
             )
 
-        cfg = DotConfig({"machine_learning": {"cv": {"min_valid_permutation_fraction": 0.75}}})
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "analysis": {
+                        "permutation_importance": {"enabled": False},
+                        "shap": {"enabled": False},
+                    },
+                    "cv": {
+                        "min_valid_permutation_fraction": 0.75,
+                        "min_valid_permutation_fold_fraction": 0.75,
+                    },
+                }
+            }
+        )
         with tempfile.TemporaryDirectory() as td:
             with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
                 orch, "create_within_subject_folds", return_value=folds
@@ -1420,7 +1455,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         X = np.array([[0.0], [1.0], [2.0], [3.0]], dtype=float)
         y = np.array([0.0, 1.0, 2.0, 3.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
-        cfg = DotConfig({"machine_learning": {"cv": {"min_valid_permutation_fraction": 0.75}}})
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "analysis": {
+                        "permutation_importance": {"enabled": False},
+                        "shap": {"enabled": False},
+                    },
+                    "cv": {
+                        "min_valid_permutation_fraction": 0.75,
+                        "min_valid_permutation_fold_fraction": 0.75,
+                    },
+                }
+            }
+        )
         call_counter = {"n": 0}
 
         def _fake_nested_loso_predictions_matrix(**_kwargs):
@@ -1501,6 +1549,8 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 "analysis": {"min_subjects_for_group": 2},
                 "machine_learning": {
                     "analysis": {
+                        "permutation_importance": {"enabled": False},
+                        "shap": {"enabled": False},
                         "time_generalization": {
                             "active_window": [0.0, 0.1],
                             "window_len": 0.1,
@@ -1508,6 +1558,12 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                             "min_samples_per_window": 1,
                             "min_samples_for_corr": 1,
                             "min_valid_fold_fraction": 0.8,
+                            "min_subjects_per_cell": 2,
+                            "min_count_per_cell": 1,
+                            "cluster_threshold": 0.05,
+                            "use_ridgecv": False,
+                            "alpha_grid": [0.01, 0.1, 1.0],
+                            "default_alpha": 1.0,
                         }
                     }
                 },
@@ -1689,7 +1745,20 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 }
             )
 
-        cfg = DotConfig({"machine_learning": {"cv": {"min_valid_permutation_fraction": 0.75}}})
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "analysis": {
+                        "permutation_importance": {"enabled": False},
+                        "shap": {"enabled": False},
+                    },
+                    "cv": {
+                        "min_valid_permutation_fraction": 0.75,
+                        "min_valid_permutation_fold_fraction": 0.75,
+                    },
+                }
+            }
+        )
         with tempfile.TemporaryDirectory() as td:
             with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
                 orch, "create_within_subject_folds", return_value=folds
@@ -1773,7 +1842,16 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 }
             )
 
-        cfg = DotConfig({})
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "analysis": {
+                        "permutation_importance": {"enabled": False},
+                        "shap": {"enabled": False},
+                    }
+                }
+            }
+        )
         with tempfile.TemporaryDirectory() as td:
             captured_groups_used = {}
 
@@ -1861,7 +1939,16 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             captured["param_grid"] = param_grid
             return _FakeEstimator()
 
-        cfg = DotConfig({})
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "analysis": {
+                        "permutation_importance": {"enabled": False},
+                        "shap": {"enabled": False},
+                    }
+                }
+            }
+        )
         with tempfile.TemporaryDirectory() as td:
             with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)), patch.object(
                 orch, "create_within_subject_folds", return_value=folds
@@ -1970,7 +2057,16 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     subjects=["0001"],
                     task="task",
                     deriv_root=Path(td),
-                    config=DotConfig({}),
+                    config=DotConfig(
+                        {
+                            "machine_learning": {
+                                "analysis": {
+                                    "permutation_importance": {"enabled": False},
+                                    "shap": {"enabled": False},
+                                }
+                            }
+                        }
+                    ),
                     n_perm=0,
                     inner_splits=2,
                     outer_jobs=1,

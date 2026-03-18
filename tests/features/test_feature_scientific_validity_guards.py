@@ -1207,7 +1207,13 @@ class TestScientificValidityGuards(unittest.TestCase):
         )
         ctx = SimpleNamespace(
             epochs=_EpochStub(n_epochs, sfreq=100.0),
-            config=DotConfig({}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
             logger=logging.getLogger("src-loc-non-finite"),
             analysis_mode="group_stats",
             train_mask=None,
@@ -1326,7 +1332,13 @@ class TestScientificValidityGuards(unittest.TestCase):
             )
             ctx = SimpleNamespace(
                 epochs=_EpochStub(n_epochs, sfreq=100.0),
-                config=DotConfig({}),
+                config=DotConfig(
+                    {
+                        "feature_engineering": {
+                            "sourcelocalization": {"min_cycles_per_band": 3.0},
+                        }
+                    }
+                ),
                 logger=logging.getLogger(f"src-loc-output-space-{output_space}"),
                 analysis_mode="group_stats",
                 train_mask=None,
@@ -1459,7 +1471,13 @@ class TestScientificValidityGuards(unittest.TestCase):
             )
             ctx = SimpleNamespace(
                 epochs=_EpochStub(n_epochs, sfreq=100.0),
-                config=DotConfig({}),
+                config=DotConfig(
+                    {
+                        "feature_engineering": {
+                            "sourcelocalization": {"min_cycles_per_band": 3.0},
+                        }
+                    }
+                ),
                 logger=logging.getLogger(f"src-loc-atlas-align-{subject_label}"),
                 analysis_mode="group_stats",
                 train_mask=None,
@@ -1573,7 +1591,13 @@ class TestScientificValidityGuards(unittest.TestCase):
         )
         ctx = SimpleNamespace(
             epochs=_EpochStub(n_epochs, sfreq=100.0),
-            config=DotConfig({}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
             logger=logging.getLogger("src-loc-cluster-rows"),
             analysis_mode="group_stats",
             train_mask=None,
@@ -1658,7 +1682,13 @@ class TestScientificValidityGuards(unittest.TestCase):
         src_cfg = SimpleNamespace(method="eloreta", fmri_cfg=fmri_cfg)
         ctx = SimpleNamespace(
             epochs=_EpochStub(5),
-            config=DotConfig({}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
             logger=logging.getLogger("src-loc-provenance"),
             analysis_mode="group_stats",
             train_mask=None,
@@ -1687,7 +1717,13 @@ class TestScientificValidityGuards(unittest.TestCase):
         src_cfg = SimpleNamespace(method="eloreta", fmri_cfg=fmri_cfg)
         ctx = SimpleNamespace(
             epochs=_EpochStub(5),
-            config=DotConfig({}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
             logger=logging.getLogger("src-conn-provenance"),
             analysis_mode="group_stats",
             train_mask=None,
@@ -1934,6 +1970,7 @@ class TestScientificValidityGuards(unittest.TestCase):
             {
                 "time_frequency_analysis": {
                     "baseline_window": [-0.2, 0.05],
+                    "constants": {"min_samples_for_baseline_validation": 1},
                 }
             }
         )
@@ -1974,6 +2011,7 @@ class TestScientificValidityGuards(unittest.TestCase):
                 "time_frequency_analysis": {
                     "baseline_window": [-0.2, 0.05],
                     "strict_baseline_validation": False,
+                    "constants": {"min_samples_for_baseline_validation": 1},
                 }
             }
         )
@@ -1989,6 +2027,9 @@ class TestScientificValidityGuards(unittest.TestCase):
         ), patch(
             "eeg_pipeline.utils.analysis.tfr.compute_adaptive_n_cycles",
             side_effect=lambda freqs, **_kwargs: np.ones_like(freqs, dtype=float),
+        ), patch(
+            "eeg_pipeline.utils.analysis.tfr._extract_baseline_power_features",
+            return_value=(pd.DataFrame(), []),
         ):
             tfr_out, baseline_df, baseline_cols, _b_start, _b_end = compute_tfr_for_subject(
                 epochs=object(),
@@ -2014,6 +2055,7 @@ class TestScientificValidityGuards(unittest.TestCase):
                 "time_frequency_analysis": {
                     "baseline_window": [-0.5, -0.1],
                     "strict_baseline_validation": True,
+                    "constants": {"min_samples_for_baseline_validation": 1},
                 }
             }
         )

@@ -15,6 +15,18 @@ _NoopBatchProgress = NoopBatchProgress
 _NoopProgress = NoopProgress
 
 
+def _behavior_process_config() -> DotConfig:
+    return DotConfig(
+        {
+            "project": {"task": "task"},
+            "behavior_analysis": {
+                "statistics": {"base_seed": 42},
+                "output": {"also_save_csv": False, "overwrite": True},
+            },
+        }
+    )
+
+
 class TestBehaviorDeep(unittest.TestCase):
         def test_behavior_process_subject_success_path(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline
@@ -37,7 +49,7 @@ class TestBehaviorDeep(unittest.TestCase):
             p.feature_files = None
             p.computation_features = {}
             p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = DotConfig({"project": {"task": "task"}})
+            p.config = _behavior_process_config()
             p.logger = Mock()
 
             fake_paths = types.SimpleNamespace(
@@ -140,7 +152,7 @@ class TestBehaviorDeep(unittest.TestCase):
             p.feature_files = None
             p.computation_features = {}
             p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = DotConfig({"project": {"task": "task"}})
+            p.config = _behavior_process_config()
             p.logger = Mock()
 
             fake_paths = types.SimpleNamespace(
@@ -347,7 +359,7 @@ class TestBehaviorGapfill(unittest.TestCase):
             p.feature_files = None
             p.computation_features = {}
             p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = DotConfig({"project": {"task": "task"}})
+            p.config = _behavior_process_config()
             p.logger = Mock()
 
             stats_dir = Path(tempfile.mkdtemp())
@@ -394,7 +406,7 @@ class TestBehaviorGapfill(unittest.TestCase):
             p.feature_files = None
             p.computation_features = {}
             p.deriv_root = Path(tempfile.mkdtemp())
-            p.config = DotConfig({"project": {"task": "task"}})
+            p.config = _behavior_process_config()
             p.logger = Mock()
 
             stats_dir = Path(tempfile.mkdtemp())

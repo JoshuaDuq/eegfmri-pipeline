@@ -56,6 +56,13 @@ BEHAVIOR_COMPUTATION_FLAGS = list(COMPUTATION_TO_PIPELINE_ATTR)
 BEHAVIOR_COMPUTATION_BUNDLES: dict[str, list[str]] = {}
 
 
+def _get_optional_int(config: Any, key: str, default: Optional[int]) -> Optional[int]:
+    value = get_config_value(config, key, default)
+    if value is None:
+        return None
+    return int(value)
+
+
 def _resolve_behavior_computation_flags(
     requested: Optional[List[str]],
     logger: Optional[logging.Logger] = None,
@@ -512,7 +519,6 @@ class BehaviorPipeline(PipelineBase):
         stats_cfg = require_config_value(self.config, "behavior_analysis.statistics")
         partial_covars = stats_cfg.get("partial_covariates", None)
         
-        output_cfg = require_config_value(self.config, "behavior_analysis.output")
         also_save_csv = bool(
             require_config_value(self.config, "behavior_analysis.output.also_save_csv")
         )

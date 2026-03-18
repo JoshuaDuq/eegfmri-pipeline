@@ -11,7 +11,11 @@ from typing import Optional, Tuple
 import numpy as np
 import mne
 
-from eeg_pipeline.utils.config.loader import ensure_config, require_config_value
+from eeg_pipeline.utils.config.loader import (
+    ensure_config,
+    get_config_value,
+    require_config_value,
+)
 from .utils import log
 from eeg_pipeline.plotting.io.figures import get_viz_params
 from ...utils.analysis.stats import cluster_test_epochs

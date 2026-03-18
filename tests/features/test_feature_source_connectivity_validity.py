@@ -432,7 +432,13 @@ class TestSourceConnectivityValidity(unittest.TestCase):
 
         ctx = SimpleNamespace(
             epochs=_EpochStub(n_epochs),
-            config=DotConfig({}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
             logger=logging.getLogger("source-connectivity-validity"),
             analysis_mode="trial_ml_safe",
             train_mask=train_mask,
@@ -514,7 +520,13 @@ class TestSourceConnectivityValidity(unittest.TestCase):
 
         ctx = SimpleNamespace(
             epochs=epochs,
-            config=DotConfig({}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
             logger=logging.getLogger("source-connectivity-no-prefilter"),
             analysis_mode="group_stats",
             train_mask=None,
@@ -600,7 +612,14 @@ class TestSourceConnectivityValidity(unittest.TestCase):
                 times=epochs.times,
                 name="active",
             ),
-            config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "task_is_rest": True,
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
             logger=logging.getLogger("source-connectivity-rest"),
             analysis_mode="group_stats",
             train_mask=None,
@@ -687,7 +706,13 @@ class TestSourceConnectivityValidity(unittest.TestCase):
 
         ctx = SimpleNamespace(
             epochs=epochs,
-            config=DotConfig({}),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
+                    }
+                }
+            ),
             logger=logging.getLogger("source-connectivity-aec-prefilter"),
             analysis_mode="group_stats",
             train_mask=None,
@@ -859,6 +884,7 @@ class TestSourceConnectivityValidity(unittest.TestCase):
             config=DotConfig(
                 {
                     "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 3.0},
                         "connectivity": {
                             "min_cycles_per_band": 3.0,
                         }
@@ -963,7 +989,13 @@ class TestSourceConnectivityValidity(unittest.TestCase):
 
             ctx = SimpleNamespace(
                 epochs=_EpochStub(n_epochs, sfreq=100.0),
-                config=DotConfig({}),
+                config=DotConfig(
+                    {
+                        "feature_engineering": {
+                            "sourcelocalization": {"min_cycles_per_band": 3.0},
+                        }
+                    }
+                ),
                 logger=logging.getLogger("source-connectivity-fmri-resolve"),
                 analysis_mode="group_stats",
                 train_mask=None,

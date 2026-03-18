@@ -65,7 +65,7 @@ from eeg_pipeline.analysis.machine_learning.cv import apply_fold_feature_harmoni
 from eeg_pipeline.analysis.machine_learning.preprocessing import (
     build_base_preprocessing_steps,
 )
-from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
+from eeg_pipeline.utils.config.loader import require_config_value
 
 logger = logging.getLogger(__name__)
 

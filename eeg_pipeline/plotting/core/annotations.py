@@ -454,11 +454,14 @@ def add_roi_annotations(
             data_group_a = None
             data_group_b = None
     
-    from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
-    
+    from eeg_pipeline.utils.config.loader import (
+        ensure_config,
+        get_config_value,
+        require_config_value,
+    )
+
     config = ensure_config(config)
     plot_cfg = get_plot_config(config)
-    tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
     
     if fdr_alpha is None:
         default_alpha = get_config_value(config, "statistics.sig_alpha", 0.05)

@@ -79,10 +79,17 @@ def test_column_connectivity_comparison_ignores_precomputed_stats() -> None:
 
 
 def test_connectivity_plot_defaults_exclude_unsupported_coherence() -> None:
-    source = CONNECTIVITY_PLOTTING_PATH.read_text()
+    import yaml
 
-    assert '["aec", "wpli", "pli", "plv", "imcoh"]' in source
-    assert '["aec", "wpli", "pli", "plv", "coherence"]' not in source
+    config = yaml.safe_load(
+        CONNECTIVITY_PLOTTING_PATH.parents[3]
+        .joinpath("eeg_pipeline", "utils", "config", "eeg_config.yaml")
+        .read_text()
+    )
+    measures = config["plotting"]["plots"]["features"]["connectivity"]["measures"]
+
+    assert measures == ["aec", "wpli", "pli", "plv", "imcoh"]
+    assert "coherence" not in measures
 
 
 def test_connectivity_plot_validates_requested_segments_and_measures() -> None:
