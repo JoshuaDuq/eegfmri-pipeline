@@ -67,6 +67,15 @@ agents.md
 .copilot/
 docs/superpowers/
 
+# Ignore documentation by default, but keep the approved public docs folders
+docs/*
+!docs/screenshots/
+!docs/screenshots/**
+!docs/eeg/
+!docs/eeg/**
+!docs/fmri/
+!docs/fmri/**
+
 ### Development planning docs ###
 docs/plans/
 
