@@ -76,3 +76,79 @@ func TestHandleEnter_RunsConfigureOptionsEnterHook(t *testing.T) {
 		t.Fatalf("expected configure-options enter hook to refresh feature availability")
 	}
 }
+
+func TestStepDefinition_UnknownStepHasNoHooks(t *testing.T) {
+	m := Model{}
+
+	definition := m.stepDefinition(types.WizardStep(9999))
+	if definition.render != nil ||
+		definition.validate != nil ||
+		definition.onEnter != nil ||
+		definition.onExit != nil {
+		t.Fatalf("expected unknown step definition to be empty, got %#v", definition)
+	}
+
+	m.runStepEnterHook(types.WizardStep(9999))
+	m.runStepExitHook(types.WizardStep(9999))
+}
+
+func TestApplyPostModeSelectionDefaults_OnlyMutatesFmriTrialSignatures(t *testing.T) {
+	tests := []struct {
+		name         string
+		pipeline     types.Pipeline
+		modeOptions  []string
+		modeIndex    int
+		initialSpace string
+		wantSpace    string
+	}{
+		{
+			name:         "non-fmri pipeline is ignored",
+			pipeline:     types.PipelineFeatures,
+			modeOptions:  []string{"trial-signatures"},
+			modeIndex:    0,
+			initialSpace: "T1w",
+			wantSpace:    "T1w",
+		},
+		{
+			name:         "non-trial-signatures mode is ignored",
+			pipeline:     types.PipelineFmriAnalysis,
+			modeOptions:  []string{"first-level", "trial-signatures"},
+			modeIndex:    0,
+			initialSpace: "T1w",
+			wantSpace:    "T1w",
+		},
+		{
+			name:         "blank space defaults to MNI",
+			pipeline:     types.PipelineFmriAnalysis,
+			modeOptions:  []string{"first-level", "trial-signatures"},
+			modeIndex:    1,
+			initialSpace: "",
+			wantSpace:    "MNI152NLin2009cAsym",
+		},
+		{
+			name:         "custom non-T1w space is preserved",
+			pipeline:     types.PipelineFmriAnalysis,
+			modeOptions:  []string{"first-level", "trial-signatures"},
+			modeIndex:    1,
+			initialSpace: "fsaverage",
+			wantSpace:    "fsaverage",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model{
+				Pipeline:                  tc.pipeline,
+				modeOptions:               tc.modeOptions,
+				modeIndex:                 tc.modeIndex,
+				fmriAnalysisFmriprepSpace: tc.initialSpace,
+			}
+
+			m.applyPostModeSelectionDefaults()
+
+			if m.fmriAnalysisFmriprepSpace != tc.wantSpace {
+				t.Fatalf("unexpected fMRI space: got %q want %q", m.fmriAnalysisFmriprepSpace, tc.wantSpace)
+			}
+		})
+	}
+}

@@ -5,11 +5,10 @@
 [![BIDS](https://img.shields.io/badge/data-BIDS-orange.svg)](https://bids-specification.readthedocs.io/)
 [![MNE-Python](https://img.shields.io/badge/MNE--Python-1.9.0-informational.svg)](https://mne.tools)
 
-A modular, end-to-end EEG & fMRI pipeline for multimodal neuroimaging research.
-Covers raw data conversion, preprocessing, feature extraction, behavioral analysis,
-machine learning, fMRI first-level and second-level GLM, and publication-ready visualization —
-all from a unified CLI and interactive TUI.
-Under active development.
+A modular EEG/fMRI analysis suite for multimodal neuroimaging research.
+It covers EEG preprocessing, feature extraction, behavioral analysis,
+machine learning, fMRI preprocessing, first-level and second-level GLM,
+trial-wise beta/signature extraction — all available from a unified CLI and an interactive TUI.
 
 
 
@@ -51,18 +50,21 @@ Under active development.
 
 ## 1. Documentation
 
-Each pipeline module has a dedicated README with full methods, formulas, configuration
+Each major module has a dedicated README with methods, formulas, configuration
 references, and output schemas. Start here for orientation, then follow the link
 relevant to your workflow:
 
 | Module | README |
 |--------|--------|
+| Architecture boundaries | [docs/architecture/README.md](docs/architecture/README.md) |
 | EEG Preprocessing | [eeg_pipeline/preprocessing/README.md](eeg_pipeline/preprocessing/README.md) |
 | Feature Extraction | [eeg_pipeline/analysis/features/README.md](eeg_pipeline/analysis/features/README.md) |
 | Behavioral Analysis | [eeg_pipeline/analysis/behavior/README.md](eeg_pipeline/analysis/behavior/README.md) |
 | Machine Learning | [eeg_pipeline/analysis/machine_learning/README.md](eeg_pipeline/analysis/machine_learning/README.md) |
 | fMRI Analysis | [fmri_pipeline/README.md](fmri_pipeline/README.md) |
+| EEG–BOLD coupling study | [studies/pain_study/scripts/README.md](studies/pain_study/scripts/README.md) |
 | Interactive TUI | [eeg_pipeline/cli/tui/README.md](eeg_pipeline/cli/tui/README.md) |
+| Tests | [tests/README.md](tests/README.md) |
 
 
 ---
@@ -72,11 +74,16 @@ relevant to your workflow:
 ```bash
 # 1. Clone and install
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git && cd eegfmri-pipeline
-pip install -e .
+python -m venv .venv311
+source .venv311/bin/activate
+pip install -e ".[dev,ml]"
 
 # 2. Place your data (see §4 Data Requirements)
 
-# 3. Launch the interactive TUI
+# 3. Inspect the CLI
+eeg-pipeline --help
+
+# 4. Launch the interactive TUI
 cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 ```
 
@@ -84,38 +91,41 @@ cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 
 ## 3. Installation
 
-**Requirements:** Python ≥ 3.11
+**Requirements:** Python ≥ 3.11.
 
 ```bash
 python -m venv .venv311
 source .venv311/bin/activate
+pip install -e ".[dev,ml]"
+```
+
+The repository also ships a `requirements.txt` shim for tooling that expects one:
+
+```bash
 pip install -r requirements.txt
 ```
 
-After installation, the `eeg-pipeline` command is available in the active environment.
-`requirements.txt` installs with optional `[ml]` extras (PyTorch). To add ML after a base install:
-
-```bash
-pip install -e ".[ml]"
-```
+After installation, the `eeg-pipeline` console script and `python -m eeg_pipeline`
+entry point are both available in the active environment.
 
 ---
 
 ## 4. Data Requirements
 
 The pipeline expects data organized under `data/` at the repository root.
-All paths are configurable in `eeg_pipeline/utils/config/eeg_config.yaml`.
+All paths are configurable in `eeg_pipeline/utils/config/eeg_config.yaml`, with
+fMRI-specific defaults in `fmri_pipeline/utils/config/fmri_config.yaml` where applicable.
 
 ### 4.1 Minimum Required Inputs by Workflow
 
 | Workflow | Minimum required inputs |
 |----------|-------------------------|
 | EEG preprocessing / features from BIDS | `data/bids_output/eeg/sub-XXXX/eeg/*_eeg.<format>` plus matching BIDS sidecars |
-| Behavioral analysis / ML | EEG `*_events.tsv` with at least `onset`, `duration`, `trial_type`; plus study-specific predictor/target columns |
-| EEG raw-to-BIDS | `data/source_data/sub-XXXX/eeg/*.vhdr` (+ `.vmrk` and `.eeg`) |
-| External event-log merge into EEG events | Study event logs (e.g., PsychoPy `*TrialSummary.csv`) + BIDS `*_events.tsv` |
-| fMRI raw-to-BIDS | `data/source_data/sub-XXXX/fmri/<dicom-series-dir>/` |
-| fMRI first-level analysis | `data/bids_output/fmri/sub-XXXX/func/*_bold.nii.gz` + `*_events.tsv` |
+| Behavioral analysis / ML | EEG `*_events.tsv` with at least `onset`, `duration`, `trial_type`, plus study-specific predictor/target columns |
+| EEG raw input | `data/source_data/sub-XXXX/eeg/*.vhdr` with matching `.vmrk` and `.eeg` files |
+| External event-log merge | Study logs such as PsychoPy `*TrialSummary.csv` plus BIDS `*_events.tsv` |
+| fMRI raw input | `data/source_data/sub-XXXX/fmri/<dicom-series-dir>/` |
+| fMRI first-level analysis | `data/bids_output/fmri/sub-XXXX/func/*_bold.nii.gz` plus `*_events.tsv` |
 
 ### 4.2 Starting from Raw Recordings
 
@@ -227,43 +237,33 @@ paths:
 
 ```
 eegfmri-pipeline/
-├── eeg_pipeline/               # Core EEG pipeline package
-│   ├── analysis/
-│   │   ├── features/           # Feature extraction (16 categories)
-│   │   ├── behavior/           # Behavioral correlation analysis
-│   │   ├── machine_learning/   # ML models and evaluation
-│   │   └── utilities/          # Data conversion helpers
-│   ├── cli/
-│   │   ├── commands/           # CLI command definitions
-│   │   ├── tui/                # Go-based interactive TUI (Bubble Tea)
-│   │   └── main.py             # CLI entry point
-│   ├── pipelines/              # Pipeline orchestration and batch processing
+├── eeg_pipeline/               # EEG analysis package and shared CLI
+│   ├── analysis/               # EEG feature, behavior, and ML modules
+│   ├── cli/                    # Command-line entry points and Go TUI
+│   ├── context/                # Context builders for downstream pipelines
+│   ├── domain/                 # Feature naming schema, registry, and constants
+│   ├── infra/                  # Paths, logging, TSV/Parquet I/O helpers
+│   ├── pipelines/              # Pipeline orchestration
 │   ├── plotting/               # Visualization modules and plot catalog
-│   ├── domain/                 # Domain types, constants, naming schema
-│   ├── infra/                  # Path resolution, TSV/Parquet I/O
-│   ├── utils/
-│   │   ├── config/             # YAML configuration (eeg_config.yaml)
-│   │   └── data/               # Subject discovery, feature I/O
-│   └── docker_setup/           # Dockerfile for FreeSurfer + MNE
-├── fmri_pipeline/              # fMRI preprocessing and analysis
-│   ├── analysis/               # GLM, contrasts, beta-series, signatures
-│   ├── cli/commands/           # fMRI CLI commands
-│   └── pipelines/              # fMRI pipeline orchestration
+│   ├── preprocessing/          # EEG preprocessing stages (bad channels, ICA, epochs)
+│   └── utils/                  # Configuration, data discovery, validation
+├── fmri_pipeline/              # fMRI preprocessing and analysis package
+├── studies/                    # Study-specific workflows and utilities
 ├── scripts/                    # Standalone utility scripts
-├── tests/                      # Test suite (pytest)
-├── docs/                       # Extended tutorials and guides
-├── pyproject.toml
-└── requirements.txt
+├── tests/                      # Test suite and repository guards
+├── docs/                       # Architecture notes and guides
+├── pyproject.toml              # Single source of truth for packaging
+└── requirements.txt            # Editable-install shim for tooling compatibility
 ```
 
 ---
 
 ## 6. CLI Reference
 
-All processing commands follow this pattern:
+Most commands follow this pattern:
 
 ```bash
-eeg-pipeline <command> <mode> [--subject XXXX | --all-subjects] [options]
+eeg-pipeline <command> [mode] [--subject XXXX | --all-subjects] [options]
 ```
 
 Use `--help` on any command for full option details:
@@ -276,16 +276,17 @@ eeg-pipeline <command> --help
 
 | Command | Primary role |
 |---------|-------------|
-| `preprocessing` | EEG cleaning: filtering, bad channels, ICA, epoching → cleaned `epo.fif` |
-| `features` | Compute 16 EEG feature families → trial-wise feature tables |
-| `behavior` | Relate features to behavior → effect sizes, statistical summaries |
-| `ml` | Trial-level predictive models → cross-validated performance and diagnostics |
-| `fmri` | fMRIPrep-based BOLD preprocessing → preprocessed derivatives |
-| `fmri-analysis` | First-level and second-level GLM plus trial-wise betas → contrast maps, group maps, beta-series |
-| `plotting` | Visualization suites over existing derivatives → figures (PNG/SVG/PDF) |
-| `validate` | Data and derivative integrity checks → structured validation reports |
-| `stats` | Pipeline-wide coverage summary → aggregate statistics dashboard |
-| `info` | Inspect configuration, subjects, ROIs, feature space → summaries |
+| `preprocessing` | EEG cleaning, bad channels, ICA, and epoching (`full`, `bad-channels`, `ica`, `epochs`) |
+| `features` | EEG feature extraction and visualization (`compute`, `visualize`) |
+| `behavior` | Behavioral statistics and plots (`compute`, `visualize`) |
+| `ml` | Trial-level predictive modeling (`regression`, `timegen`, `classify`, `model_comparison`, `incremental_validity`, `uncertainty`, `shap`, `permutation`) |
+| `fmri` | Containerized fMRIPrep preprocessing (`preprocess`) |
+| `fmri-analysis` | First-level GLM, second-level inference, beta-series, and LSS (`first-level`, `second-level`, `beta-series`, `lss`) |
+| `plotting` | Visualization suites and TFR plots (`visualize`, `tfr`) |
+| `validate` | Data and derivative integrity checks |
+| `stats` | Pipeline-wide coverage summaries |
+| `info` | Read-only inspection of configuration and derived state |
+| `coupling` | Study-specific EEG–BOLD coupling workflow |
 
 ---
 
@@ -311,8 +312,23 @@ eeg-pipeline preprocessing bad-channels --subject 0001 --ransac
 eeg-pipeline preprocessing epochs --subject 0001 \
   --tmin -7.0 --tmax 15.0 --reject-method autoreject_local
 
-# Without ICALabel
+# Without ICALabel (fall back to MNE-BIDS pipeline detection)
 eeg-pipeline preprocessing full --subject 0001 --no-icalabel
+
+# SSP instead of ICA for artifact removal
+eeg-pipeline preprocessing full --subject 0001 --spatial-filter ssp
+
+# Resting-state mode (fixed-length epochs; no event conditions required)
+eeg-pipeline preprocessing full --subject 0001 --task-is-rest
+
+# Write clean events.tsv aligned to kept epochs (for downstream alignment)
+eeg-pipeline preprocessing full --subject 0001 --write-clean-events
+
+# EEG–fMRI simultaneous acquisition: trim EEG to first fMRI volume
+eeg-pipeline preprocessing epochs --subject 0001 --trim-to-first-volume
+
+# Disable automatic break detection
+eeg-pipeline preprocessing full --subject 0001 --no-find-breaks
 ```
 
 Full pipeline steps, CLI options, and configuration details:
@@ -432,10 +448,10 @@ Trial-level predictive modeling with leave-one-subject-out (LOSO) cross-validati
 | Mode | Description |
 |------|-------------|
 | `regression` | LOSO or within-subject regression for continuous outcomes (e.g., pain ratings) |
-| `classify` | Binary pain classification (SVM, logistic regression, random forest, CNN) |
+| `classify` | Binary classification (SVM, logistic regression, random forest, CNN) |
 | `timegen` | Temporal generalization: train at one time window, evaluate across all windows |
-| `model_comparison` | Compare model families under a shared CV scheme |
-| `incremental_validity` | Quantify change in explained variance (ΔR²) when adding EEG features over a baseline predictor |
+| `model_comparison` | Compare ElasticNet vs Ridge vs RandomForest under a shared CV scheme |
+| `incremental_validity` | Quantify ΔR² when adding EEG features over a baseline predictor |
 | `uncertainty` | Conformal prediction intervals for calibrated uncertainty estimates |
 | `shap` | SHAP-based feature importance |
 | `permutation` | Permutation-based feature importance |
@@ -447,8 +463,12 @@ see [eeg_pipeline/analysis/machine_learning/README.md](eeg_pipeline/analysis/mac
 # LOSO regression (requires ≥2 subjects)
 eeg-pipeline ml regression --subject 0001 --subject 0002 --subject 0003
 
-# SVM classification
-eeg-pipeline ml classify --subject 0001 --subject 0002 --classification-model svm
+# Model family selection: elasticnet (default), ridge, or rf
+eeg-pipeline ml regression --subject 0001 --subject 0002 --model ridge
+
+# SVM classification with explicit binary threshold
+eeg-pipeline ml classify --subject 0001 --subject 0002 \
+  --classification-model svm --binary-threshold 30
 
 # SHAP importance
 eeg-pipeline ml shap --subject 0001 --subject 0002
@@ -468,6 +488,32 @@ eeg-pipeline ml model_comparison --subject 0001 --subject 0002 \
 # Restrict to specific feature families and bands
 eeg-pipeline ml regression --subject 0001 --subject 0002 \
   --feature-families power connectivity --feature-bands alpha beta
+
+# Fine-grained feature filtering: scope, segment, stat
+eeg-pipeline ml regression --subject 0001 --subject 0002 \
+  --feature-scopes roi global --feature-segments active \
+  --feature-stats wpli aec
+
+# Feature harmonization across subjects (default: intersection)
+eeg-pipeline ml regression --all-subjects \
+  --feature-harmonization union_impute
+
+# Append meta covariates to the feature matrix
+eeg-pipeline ml regression --subject 0001 --subject 0002 \
+  --covariates predictor trial_index
+
+# Incremental validity: EEG over temperature baseline
+eeg-pipeline ml incremental_validity --subject 0001 --subject 0002 \
+  --baseline-predictors predictor
+
+# Enforce ML-safe mode (prevents CV leakage from cross-trial features)
+eeg-pipeline ml regression --subject 0001 --subject 0002 \
+  --require-trial-ml-safe
+
+# Pipeline preprocessing overrides
+eeg-pipeline ml regression --subject 0001 --subject 0002 \
+  --imputer mean --pca-enabled --pca-n-components 0.95 \
+  --feature-selection-percentile 50
 ```
 
 ---
@@ -498,6 +544,21 @@ eeg-pipeline fmri preprocess --subject 0001 \
 | `--fs-license-file` | FreeSurfer license path | `paths.freesurfer_license`, else `EEG_PIPELINE_FREESURFER_LICENSE`, else `~/license.txt` |
 | `--fs-subjects-dir` | FreeSurfer `SUBJECTS_DIR` | auto |
 | `--ignore` | Skip steps (e.g., `fieldmaps slicetiming`) | none |
+| `--bids-filter-file` | Optional BIDS filter JSON for subject/task/run selection | none |
+| `--level` | Processing level: `full`, `resampling`, or `minimal` | `full` |
+| `--cifti-output` | Output CIFTI dense timeseries: `91k` or `170k` | none |
+| `--task-id` | Process only a specific task ID | all |
+| `--nthreads` | Max threads across all processes (`0` = auto) | `0` |
+| `--omp-nthreads` | Max threads per process (`0` = auto) | `0` |
+| `--dummy-scans` | Non-steady-state volumes to discard | `0` |
+| `--fd-spike-threshold` | Framewise displacement spike threshold (mm) | `0.5` |
+| `--dvars-spike-threshold` | Standardized DVARS spike threshold | `1.5` |
+| `--mem-mb` | Memory limit in MB | fMRIPrep default |
+| `--fmriprep-extra-args` | Raw extra fMRIPrep CLI arguments (parsed with `shlex`) | none |
+| `--use-aroma` / `--no-use-aroma` | Enable/disable ICA-AROMA | disabled |
+| `--skip-bids-validation` | Skip bids-validator step | disabled |
+| `--fs-no-reconall` | Disable FreeSurfer `recon-all` | enabled |
+| `--longitudinal` | Create unbiased structural template (longitudinal mode) | disabled |
 
 Note: for container runs, the pipeline automatically ignores macOS metadata files (`._*`, `.DS_Store`) by mounting a sanitized temporary BIDS view.
 
@@ -655,12 +716,24 @@ eeg-pipeline stats
 
 ---
 
+### 6.10 Coupling
+
+Study-specific EEG–BOLD coupling is exposed through the `coupling` command.
+It is configured through the `studies/pain_study/` package and is meant for the
+pain study workflow rather than the generic EEG/fMRI pipeline.
+
+```bash
+eeg-pipeline coupling compute --subject 0001 --subject 0002
+```
+
+---
+
 ## 7. Interactive TUI
 
 A terminal UI built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 providing menu-driven access to the full Python CLI.
 
-**Prerequisites:** Go 1.21+, Python environment with pipeline dependencies installed.
+**Prerequisites:** Go 1.21+, plus the Python environment used for the pipeline.
 
 ```bash
 cd eeg_pipeline/cli/tui
@@ -674,7 +747,7 @@ go build -o eeg-tui .
 - Subject selection with auto-discovery from BIDS and derivatives.
 - Parameter configuration with validation and sensible defaults.
 - Real-time execution with progress reporting and log streaming.
-- Source localization wizard with Docker-based BEM and coregistration auto-generation.
+- Source localization and fMRI-aware workflows with guided configuration.
 
 The TUI calls the Python CLI directly; all results are identical to CLI execution.
 
@@ -682,34 +755,61 @@ The TUI calls the Python CLI directly; all results are identical to CLI executio
 
 ## 8. Configuration
 
-All defaults live in `eeg_pipeline/utils/config/eeg_config.yaml`.
+Primary defaults live in `eeg_pipeline/utils/config/eeg_config.yaml`.
+Behavioral analysis defaults live in `eeg_pipeline/utils/config/behavior_config.yaml`.
+fMRI-specific defaults live in `fmri_pipeline/utils/config/fmri_config.yaml`.
 CLI flags override config values at runtime.
+
+### `eeg_config.yaml` sections
 
 | Section | Controls |
 |---------|---------|
-| `project` | Task name, random seed |
-| `paths` | BIDS root, derivatives root, source data, FreeSurfer directories |
-| `eeg` | Montage, reference electrode, EOG/ECG channel names |
-| `preprocessing` | Filter settings, resampling, break detection, clean events |
-| `pyprep` | PyPREP bad channel detection (RANSAC, repeats) |
-| `ica` | Method, component count, probability threshold, labels to retain |
-| `epochs` | Time window, baseline, rejection method (autoreject) |
-| `frequency_bands` | Band definitions (delta through gamma) |
-| `time_windows` | Active and baseline window definitions |
+| `project` | Task name and reproducibility settings |
+| `paths` | BIDS root, derivatives root, source data, resting-state roots, FreeSurfer dirs, and signature maps |
+| `analysis` | Strict mode and minimum subject count for group operations |
+| `environment` | Per-library thread limits (`thread_limits`) |
+| `event_columns` | Canonical column aliases for predictor, outcome, condition, and binary outcome |
+| `alignment` | EEG↔fMRI trial alignment settings (trim-to-volume, onset reference, misalignment tolerance) |
+| `eeg` | Montage, reference, and EOG/ECG channels |
+| `preprocessing` | Filtering, resampling, break detection, resting-state mode, and clean events |
+| `pyprep` | PyPREP bad-channel detection settings |
+| `ica` | ICA method, component count, thresholds, and labels |
+| `epochs` | Epoch window, baseline, and rejection policy |
+| `frequency_bands` | Band definitions from delta through gamma |
+| `time_windows` | Active and baseline windows |
 | `rois` | ROI channel groupings |
-| `feature_engineering` | Per-category settings, spatial transforms, parallelization |
-| `time_frequency_analysis` | TFR parameters, baseline normalization mode |
-| `behavior_analysis` | Correlation method, permutation count, temperature control, stage toggles |
-| `machine_learning` | Models, CV scheme, evaluation, importance settings |
-| `fmri_preprocessing` | fMRIPrep engine, image, output spaces |
-| `fmri_contrast` | GLM specification, confound strategy, cluster correction |
-| `fmri_constraint` | Source localization fMRI constraint threshold and mask |
+| `feature_engineering` | Feature-category settings, spatial transforms, parallelization, and per-family options |
+| `time_frequency_analysis` | TFR parameters and baseline normalization |
+| `machine_learning` | Models, CV scheme, evaluation, importance, and preprocessing settings |
+| `fmri_preprocessing` | fMRIPrep engine, image, spaces, and all runtime settings |
+| `fmri_contrast` | Subject-level GLM specification, confound strategy, and output format |
+| `fmri_group_level` | Group GLM model, covariates, permutation inference settings |
+| `statistics` | Global alpha, permutation count, bootstrap, and cluster correction defaults |
+| `visualization` | Band colors, robust limits, and footer templates |
+| `plotting` | DPI, formats, figure sizes, styling, comparison windows, and per-plot settings |
+| `system` | Global `n_jobs` |
+
+### `behavior_config.yaml` sections
+
+| Section | Controls |
+|---------|---------|
+| `behavior_analysis` | Predictor type, robust correlation, bootstrap, run adjustment, trial table export |
+| `behavior_analysis.correlations` | Partial correlation targets, LOSO stability, Bayes factors |
+| `behavior_analysis.condition` | Condition comparison columns, effect-size threshold, permutation |
+| `behavior_analysis.temporal` | Time-resolved correlations, smoothing, and cluster correction |
+| `behavior_analysis.regression` | Trialwise regression model, covariates, and permutation |
+| `behavior_analysis.statistics` | Alpha, FDR, permutation scheme, and circular-shift settings |
+| `behavior_analysis.icc` | Run-to-run reliability (ICC) configuration |
+| `behavior_analysis.predictor_residual` | Spline/polynomial predictor residualization and cross-fit |
+
+The source localization fMRI-constraint settings live under
+`feature_engineering.sourcelocalization.fmri` in `eeg_config.yaml`.
 
 ### 8.1 Universal Runtime Overrides (`--set`)
 
 For long-tail or rarely used parameters, use universal config overrides instead of
-adding dedicated flags/widgets. This keeps CLI and TUI maintainable while preserving
-full configurability.
+adding dedicated flags/widgets. This keeps the CLI and TUI maintainable while
+preserving full configurability.
 
 - CLI: repeat `--set KEY=VALUE`
 - TUI: use `Config Overrides` in Advanced settings (`key=value;key2=value2`)
@@ -741,16 +841,23 @@ Notes:
 
 ## 9. Subject Selection
 
-Most commands accept these subject selection options:
+Most commands accept these shared subject and runtime options:
 
 | Option | Description |
 |--------|-------------|
-| `--subject XXXX` / `-s XXXX` | Single subject (repeatable for multiple) |
-| `--all-subjects` | Process all discovered subjects |
-| `--group all` or `--group A,B,C` | Named group or comma-separated list |
-| `--task` / `-t` | Override task label (default from config) |
-| `--dry-run` | Preview what would run without executing |
-| `--json` | Output in JSON format (for TUI or scripting) |
+| `--subject XXXX` / `-s XXXX` | Single subject; repeat the flag for multiple subjects |
+| `--all-subjects` | Process every discovered subject |
+| `--group all` or `--group A,B,C` | Select a named group or comma-separated subject list |
+| `--task` / `-t` | Override the task label from config |
+| `--dry-run` | Preview work without executing |
+| `--json` | Emit JSON output for scripting or the TUI |
+| `--progress-json` | Emit progress events as JSON lines |
+| `--set KEY=VALUE` | Override config values at runtime |
+| `--bids-root` | Override `paths.bids_root` at runtime |
+| `--bids-fmri-root` | Override `paths.bids_fmri_root` at runtime |
+| `--bids-rest-root` | Override `paths.bids_rest_root` at runtime (resting-state EEG) |
+| `--deriv-root` | Override `paths.deriv_root` at runtime |
+| `--deriv-rest-root` | Override `paths.deriv_rest_root` at runtime (resting-state EEG) |
 
 ```bash
 # Multiple subjects
@@ -795,8 +902,9 @@ derivatives/sub-XXXX/eeg/features/
 └── ...
 ```
 
-Source localization outputs may appear under `sourcelocalization/eeg_only/` or
-`sourcelocalization/fmri_informed/` depending on `feature_engineering.sourcelocalization.mode`.
+Source localization outputs live under `sourcelocalization/<method>/source_estimates/`.
+The final mode-specific subdirectory is `eeg_only/` or `fmri_informed/` depending on
+`feature_engineering.sourcelocalization.mode`.
 
 Plots are saved as PNG by default:
 
@@ -881,33 +989,78 @@ eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
 
 For the full list of CV-safety guardrails, see the features README.
 
+### 11.8 Resting-State Workflows
+
+The pipeline supports resting-state EEG as a first-class workflow alongside task-based paradigms.
+Enable resting-state mode via the CLI flag or in `eeg_config.yaml`:
+
+```yaml
+preprocessing:
+  task_is_rest: true
+  rest_epochs_duration: 10.0    # fixed-length epoch duration (seconds)
+  rest_epochs_overlap: 0.0      # overlap between consecutive epochs
+```
+
+When `task_is_rest: true`:
+- Preprocessing creates fixed-length epochs instead of event-locked epochs.
+- No `events.tsv` conditions are required.
+- Feature extraction runs in `group_stats` mode by default (no trial-level behavioral targets).
+- A separate BIDS root and derivatives root can be pointed to via `paths.bids_rest_root` and
+  `paths.deriv_rest_root` so task and resting-state derivatives coexist without conflicts.
+
+```bash
+# Resting-state preprocessing
+eeg-pipeline preprocessing full --subject 0001 --task-is-rest
+
+# Override resting-state BIDS and derivatives roots at runtime
+eeg-pipeline features compute --subject 0001 \
+  --bids-rest-root ../data/bids_output/eeg_rest \
+  --deriv-rest-root ../data/derivatives_rest
+
+# Resting-state feature extraction (spectral + connectivity)
+eeg-pipeline features compute --subject 0001 \
+  --categories power connectivity aperiodic spectral
+```
+
 ---
 
 ## 12. Dependencies
 
 | Package | Version | Role |
 |---------|---------|------|
-| **MNE-Python** | 1.9.0 | EEG processing, source localization |
-| **MNE-BIDS** | 0.16.0 | BIDS I/O |
-| **MNE-Connectivity** | 0.7.0 | Functional connectivity |
-| **MNE-ICALabel** | 0.7.0 | Automatic ICA classification |
-| **PyPREP** | 0.4.3 | Bad channel detection |
-| **specparam** | 2.0.0rc3 | Aperiodic (1/f) fitting |
-| **Nilearn** | 0.11.1 | fMRI GLM and neuroimaging |
-| **NiBabel** | ≥ 3.2.0 | NIfTI/CIFTI I/O |
-| **scikit-learn** | ≥ 1.0.0 | Machine learning models |
+| **MNE-Python** | ≥ 1.9.0 | EEG processing, source localization |
+| **MNE-BIDS** | ≥ 0.16.0 | BIDS I/O |
+| **MNE-Connectivity** | ≥ 0.7.0 | Functional connectivity |
+| **MNE-ICALabel** | ≥ 0.7.0 | Automatic ICA classification |
+| **MNE-BIDS-Pipeline** | ≥ 1.9.0 | ICA detection fallback |
+| **PyPREP** | ≥ 0.4.3 | Bad channel detection |
+| **pybv** | ≥ 0.7.5 | BrainVision format I/O |
+| **specparam** | ≥ 2.0.0rc3 | Aperiodic (1/f) fitting |
+| **Nilearn** | ≥ 0.11.1 | fMRI GLM and neuroimaging |
+| **NiBabel** | ≥ 3.2.0, < 6.0 | NIfTI/CIFTI I/O |
+| **scikit-learn** | ≥ 1.0.0, < 2.0 | Machine learning models |
+| **imbalanced-learn** | ≥ 0.12.0 | Class resampling (SMOTE, undersample) |
 | **SHAP** | ≥ 0.40.0 | Feature importance |
-| **PyTorch** | ≥ 2.7.1 | Deep learning (EEGNet CNN) |
+| **PyTorch** | ≥ 2.7.1 *(optional, `ml` extra)* | Deep learning (EEGNet CNN) |
 | **NetworkX** | ≥ 3.5 | Graph-theoretic connectivity metrics |
 | **bctpy** | ≥ 0.6.1 | Brain Connectivity Toolbox |
-| **statsmodels** | ≥ 0.13.0 | Statistical models, FDR correction |
+| **statsmodels** | ≥ 0.13.0, < 1.0 | Statistical models, FDR correction |
+| **sympy** | ≥ 1.14.0 | Symbolic math (spline knot computation) |
 | **antropy** | ≥ 0.1.9 | Complexity measures |
 | **NumPy** | ≥ 1.24, < 2.0 | Array computation |
 | **SciPy** | ≥ 1.15.3 | Scientific computing |
 | **pandas** | ≥ 2.3.0 | Data manipulation |
+| **pyarrow** | ≥ 17.0.0 | Parquet I/O for feature tables |
+| **h5io** | ≥ 0.1.0 | HDF5 I/O helpers |
+| **joblib** | ≥ 1.5.1 | Parallel computation |
+| **matplotlib** | ≥ 3.10.3 | Plotting backend |
+| **seaborn** | ≥ 0.13.2 | Statistical visualizations |
+| **PyYAML** | ≥ 6.0, < 7.0 | Configuration file parsing |
 
-`pyproject.toml` is the single source of truth for dependencies.
-`requirements.txt` installs `-e ".[ml]"`.
+`pyproject.toml` is the single source of truth for all dependencies and version bounds.
+`requirements.txt` installs the editable package with `dev` and `ml` extras.
+PyTorch is only required for the CNN classifier (`ml classify --classification-model cnn`);
+install with `pip install -e ".[ml]"` or omit for all other workflows.
 
 ---
 

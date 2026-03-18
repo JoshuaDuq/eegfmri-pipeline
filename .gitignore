@@ -67,6 +67,9 @@ agents.md
 .copilot/
 docs/superpowers/
 
+### Development planning docs ###
+docs/plans/
+
 ### IDEs & OS ###
 .vscode/
 .idea/

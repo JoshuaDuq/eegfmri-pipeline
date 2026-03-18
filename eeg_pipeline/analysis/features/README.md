@@ -19,11 +19,17 @@ but is applicable to any EEG study with the same structure.
 6. [Precomputed Intermediates and Spatial Transforms](#6-precomputed-intermediates-and-spatial-transforms)
 7. [Extraction Pipelines](#7-extraction-pipelines)
 8. [Feature Definitions](#8-feature-definitions)
+   - [8.5.1 Laterality-Aware Pain Markers (ERDS)](#851-laterality-aware-pain-markers)
+   - [8.8.1 Connectivity Granularity](#881-connectivity-granularity)
+   - [8.8.2 Phase Estimator Modes](#882-phase-estimator-modes)
+   - [8.8.3 Dynamic Connectivity](#883-dynamic-connectivity)
+   - [8.12.6 Source Condition Contrasts](#8126-source-condition-contrasts)
 9. [Change Scores](#9-change-scores)
 10. [Normalization](#10-normalization)
 11. [Cross-Validation Hygiene](#11-cross-validation-hygiene)
 12. [Result Containers](#12-result-containers)
-13. [Dependencies](#13-dependencies)
+13. [Output & I/O Options](#13-output--io-options)
+14. [Dependencies](#14-dependencies)
 
 ---
 
@@ -57,17 +63,18 @@ features/
 ├── preparation.py          # Epoch validation, TFR setup, precompute_data (band filtering, PSD, GFP, evoked subtraction), baseline metrics
 ├── cv_hygiene.py           # Cross-validation guards: fold-specific IAF, train-mask enforcement
 ├── normalization.py        # Train/test-separated normalization schemes
+├── rest.py                 # Resting-state guards: configuration validation, segment selection, category restrictions
 ├── results.py              # FeatureExtractionResult, ExtractionResult dataclasses
 ├── spectral.py             # Power (TFR-based), spectral descriptors
 ├── aperiodic.py            # 1/f aperiodic component decomposition
 ├── erp.py                  # ERP components (peak, mean, AUC, latency)
-├── connectivity.py         # Undirected and directed connectivity
+├── connectivity.py         # Undirected connectivity, directed connectivity, dynamic connectivity
 ├── phase.py                # ITPC, PLV, PAC, phase-amplitude coupling
 ├── complexity.py           # LZC, permutation entropy, sample entropy, MSE
 ├── bursts.py               # Transient oscillation detection
 ├── microstates.py          # EEG microstate segmentation and statistics
 ├── quality.py              # Trial- and channel-level QC metrics
-├── source_localization.py  # LCMV / eLORETA source-space features
+├── source_localization.py  # LCMV / eLORETA source-space features and condition contrasts
 └── precomputed/
     ├── __init__.py         # Package init
     ├── erds.py             # ERDS extraction from precomputed band envelopes
@@ -277,13 +284,15 @@ Entry point in `api.py`. Performs the following steps in order:
 
 1. Optionally crop epochs to $[t_\text{min}, t_\text{max}]$ and rebuild `TimeWindows`.
 2. Precompute band data when any of the following categories are requested:
-   `connectivity`, `directedconnectivity`, `erds`, `ratios`, `asymmetry`, `complexity`, `bursts`, `spectral`, `aperiodic`.
+   `connectivity`, `directedconnectivity`, `erds`, `ratios`, `asymmetry`, `complexity`, `bursts`, `spectral`, `aperiodic`, `quality`.
 3. Validate epochs (montage, sampling rate, duration).
 4. Compute TFR and baseline metrics once for categories `power`, `itpc`, `pac`.
 5. Call per-category extractors via `_extract_feature_with_error_handling`, which enforces:
    - Strict trial-count matching between output and input.
    - Timing and logging per category.
    - Immediate surfacing of shape mismatches or unexpected return types.
+   When `sourcelocalization` is requested and `feature_engineering.sourcelocalization.contrast.enabled = true`,
+   `extract_source_contrast_features` is called after the main localization to produce condition-contrast summaries.
 6. Apply spatial-mode filtering to the following feature DataFrames: power, ERP, aperiodic, connectivity, complexity, bursts, spectral. (Directed connectivity, phase, ITPC, PAC, ERDS, ratios, asymmetry, microstates, quality, and source are not passed through this filter.)
 7. Append change scores (see §9).
 
@@ -529,7 +538,41 @@ P^{B,\text{active}}_{e,c} =
 Very low baseline power is treated as invalid; no clamping is applied.
 
 Additional outputs include per-channel ERDS, ROI/global aggregates, slopes, onset and peak
-latencies, and pain-specific markers (contralateral somatosensory ERD, rebound magnitude).
+latencies, and laterality-aware pain markers (see §8.5.1).
+
+#### 8.5.1 Laterality-Aware Pain Markers
+
+When `feature_engineering.erds.laterality_columns` is configured and the events data
+contains a matching column (e.g. `stim_side`, `stimulated_side`, `pain_side`), the pipeline
+infers which hemisphere is contralateral to the stimulus and computes somatosensory-specific
+ERD features.
+
+**Contralateral hemisphere inference:**
+- Configured channels for left somatosensory cortex: `somatosensory_left_channels` (C1, C3, C5, CP1, …).
+- Configured channels for right somatosensory cortex: `somatosensory_right_channels` (C2, C4, C6, CP2, …).
+- When laterality metadata is absent and `infer_contralateral_when_missing = true`, inference
+  falls back to bilateral averaging.
+
+**Kinetic onset detection** (configurable per-band):
+
+Threshold crossing for ERD onset:
+```math
+\theta_\text{onset} = \sigma_\text{baseline} \cdot \texttt{onset\_threshold\_sigma},
+\quad \text{with floor} = \texttt{onset\_min\_threshold\_percent}.
+```
+The onset time $t_\text{onset}$ is the first time point where the ERDS% exceeds $\theta_\text{onset}$
+for at least `onset_min_duration_ms` consecutive milliseconds.
+
+**Rebound detection:**
+```math
+\theta_\text{rebound} = \sigma_\text{baseline} \cdot \texttt{rebound\_threshold\_sigma},
+\quad \text{with floor} = \texttt{rebound\_min\_threshold\_percent}.
+```
+Rebound is detected after `rebound_min_latency_ms` from the ERD peak.
+
+**Outputs:** `erds_{band}_{scope}_onset_ms`, `erds_{band}_{scope}_rebound_ms`,
+`erds_{band}_contralateral_{scope}_{stat}`, and condition-level marker summaries
+for bands configured in `pain_marker_bands`.
 
 ---
 
@@ -626,6 +669,48 @@ Optional graph metrics (clustering coefficient, global efficiency, small-world i
 derived from thresholded or weighted connectivity matrices.
 Phase-based measures computed without a spatial transform (CSD/Laplacian) emit a
 volume-conduction warning.
+
+#### 8.8.1 Connectivity Granularity
+
+The `granularity` parameter controls how trials are pooled before connectivity estimation:
+
+| Granularity | Pooling | CV safety |
+|-------------|---------|-----------|
+| `trial` | One connectivity matrix per epoch | CV-safe by default |
+| `condition` | Pool epochs sharing a condition label | Cross-trial; use `train_mask` in `trial_ml_safe` mode |
+| `subject` | Pool all epochs for one subject | Cross-trial |
+
+When `granularity = condition`, configure `conn_condition_column` and optionally
+`conn_condition_values` to restrict which condition levels are estimated.
+
+#### 8.8.2 Phase Estimator Modes
+
+Phase-based measures (wPLI, PLI, imCoh, PLV) support two internal estimators:
+
+| Estimator | When used | Notes |
+|-----------|-----------|-------|
+| `within_epoch` | Recommended for `trial_ml_safe` mode | Phase estimated per-trial; no cross-trial pooling |
+| `across_epochs` | Default; required for stable low-frequency estimates | Cross-trial; configure with `trial` granularity only |
+
+`--conn-force-within-epoch-for-ml` (or `feature_engineering.connectivity.force_within_epoch_for_ml`)
+automatically switches to `within_epoch` when a `train_mask` is detected.
+
+#### 8.8.3 Dynamic Connectivity
+
+When `feature_engineering.connectivity.dynamic.enabled = true`, the pipeline computes
+sliding-window connectivity and optionally clusters the resulting state sequence.
+
+**Sliding-window measures** (`wpli` and/or `aec`):
+- Window length and step configured via `conn_window_len` (s) and `conn_window_step` (s).
+- One connectivity matrix per window per trial.
+- Summary features: mean, variance, and autocorrelation (`conn_dynamic_autocorr_lag`) of the
+  window-wise connectivity series; optional ROI-pair summaries.
+
+**Connectivity state analysis** (`conn_dynamic_states`):
+- K-means clustering of all window-wise connectivity matrices (flattened) into $K$ states
+  (`conn_dynamic_n_states`, default 4).
+- In `trial_ml_safe` mode, clustering is restricted to training-fold windows.
+- **Outputs:** state coverage fraction, mean dwell time per state, and state-transition entropy.
 
 ---
 
@@ -816,6 +901,28 @@ via `allow_same_dataset_provenance = true`.
   cluster-space outputs are per-subject and not directly comparable across subjects.
 - Columns use the `src_*` prefix for fMRI pipeline compatibility (see §3.2).
 
+#### 8.12.6 Source Condition Contrasts
+
+When `feature_engineering.sourcelocalization.contrast.enabled = true`,
+`extract_source_contrast_features` computes condition-contrast summaries over the
+source-space ROI time courses.
+
+**Configuration keys:** `contrast.condition_column`, `contrast.condition_a`, `contrast.condition_b`,
+`contrast.min_trials_per_condition` (default 5).
+
+For each ROI and band, the contrast is the difference between the mean ROI band power
+under condition A and condition B:
+
+```math
+\Delta\text{src\_power}^{B}_\text{ROI} =
+\text{src\_power}^{B,\text{cond\_A}}_\text{ROI} - \text{src\_power}^{B,\text{cond\_B}}_\text{ROI}.
+```
+
+> **Note:** Trial-level within-subject Welch t/p statistics
+> (`--source-contrast-welch-stats`) are explicitly disabled and will raise an error if
+> requested — per-trial comparisons within a single subject violate i.i.d. assumptions.
+> Use group-level models (see §6.6 fMRI Analysis in the main README) for inferential statistics.
+
 ---
 
 ### 8.13 Complexity
@@ -939,7 +1046,7 @@ columns when `feature_engineering.compute_change_scores = true`.
 
 For a feature column $X$ with baseline and active variants, the transform is configured
 via `feature_engineering.change_scores.transform` (or `--change-scores-transform`):
-`difference` (default), `percent`, `log_ratio`, or `ratio` (CLI alias for `percent`). Example (difference):
+`difference` (default), `percent`, `log_ratio`, or `ratio` (`ratio` is a CLI alias for `percent`). Example (difference):
 
 ```math
 X_\Delta = X^\text{active} - X^\text{baseline}.
@@ -949,6 +1056,16 @@ X_\Delta = X^\text{active} - X^\text{baseline}.
 consistent columns with segment name `change` (or `pct_change`/`log_ratio`) without recomputing
 the underlying features.
 Change scores are stored alongside original features to avoid redundant derivation downstream.
+
+By default, paired segments are inferred automatically (the baseline segment is paired with
+every non-baseline segment). Custom pairings can be specified via
+`feature_engineering.change_scores.window_pairs` (or `--change-scores-window-pairs`):
+
+```bash
+# Explicit window pairs: baseline vs plateau, baseline vs active
+eeg-pipeline features compute --subject 0001 \
+  --change-scores-window-pairs baseline:plateau baseline:active
+```
 
 Supported families: power, connectivity, directedconnectivity, aperiodic, itpc (in `phase_df`), pac, erds,
 spectral, ratios, asymmetry, complexity, microstates, sourcelocalization.
@@ -1121,7 +1238,50 @@ which features were extracted and under what preprocessing choices.
 
 ---
 
-## 13. Dependencies
+## 13. Output & I/O Options
+
+### 13.1 Feature Tables
+
+Feature DataFrames are saved as Parquet files by default:
+
+```
+derivatives/<study>/sub-<id>/<task>/eeg/features/<family>/features_<family>.parquet
+```
+
+Optionally save CSV copies alongside Parquet (larger, but human-readable):
+
+```bash
+eeg-pipeline features compute --subject 0001 --also-save-csv
+```
+
+### 13.2 TFR Sidecar Files
+
+When `--save-tfr-with-sidecar` is set, raw TFR arrays are saved alongside the feature
+tables. This is useful for recomputing features with different windows without re-running
+the full wavelet transform.
+
+### 13.3 Subject-Level Features
+
+`--save-subject-level-features` emits an additional file for features that are constant
+within a subject (e.g. subject-mean spectral slope). These are separated from trial-level
+tables to avoid spuriously constant columns in ML feature matrices.
+
+### 13.4 Per-Family Parallelization
+
+Fine-grained job control to balance CPU load across pipeline stages:
+
+| Flag | Controls |
+|------|---------|
+| `--n-jobs-bands` | Band-filtering in `precompute_data` |
+| `--n-jobs-connectivity` | Connectivity estimation |
+| `--n-jobs-aperiodic` | Aperiodic fitting (specparam) |
+| `--n-jobs-complexity` | Complexity measures (LZC, PE, SampEn) |
+
+All default to `-1` (use all available CPUs). Set `1` to disable parallelism for debugging.
+
+---
+
+## 14. Dependencies
 
 | Library | Role |
 |---------|------|
@@ -1131,4 +1291,6 @@ which features were extracted and under what preprocessing choices.
 | **scikit-learn** | Clustering (microstates, dynamic connectivity states) |
 | **NetworkX** | Graph-theoretic connectivity metrics |
 | **NiBabel** | NIfTI reading for fMRI-constrained source localization |
+| **specparam** | Aperiodic (1/f) component fitting and peak extraction |
+| **antropy** | LZC, permutation entropy, sample entropy implementations |
 | **joblib** | Parallelization for band precomputation, aperiodic fitting, ITPC, asymmetry |

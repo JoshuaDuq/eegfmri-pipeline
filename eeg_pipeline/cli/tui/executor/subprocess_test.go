@@ -1,6 +1,12 @@
 package executor
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/eeg-pipeline/tui/messages"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func TestFlattenConfigValues_FlattensNestedSections(t *testing.T) {
 	values := map[string]interface{}{
@@ -31,5 +37,55 @@ func TestFlattenConfigValues_FlattensNestedSections(t *testing.T) {
 	}
 	if got["machine_learning.targets.regression"] != "value" {
 		t.Fatalf("expected dotted key to be preserved, got %v", got["machine_learning.targets.regression"])
+	}
+}
+
+func TestFlattenConfigValues_HandlesScalarsAndEmptyKeys(t *testing.T) {
+	values := map[string]interface{}{
+		"":        "ignored",
+		"project": "rest",
+		"paths": map[string]interface{}{
+			"bids_root": "/data/bids",
+		},
+	}
+
+	got := flattenConfigValues(values)
+
+	if _, ok := got[""]; ok {
+		t.Fatal("expected empty key to be ignored")
+	}
+	if got["project"] != "rest" {
+		t.Fatalf("expected scalar project value, got %v", got["project"])
+	}
+	if got["paths.bids_root"] != "/data/bids" {
+		t.Fatalf("expected nested path flattening, got %v", got["paths.bids_root"])
+	}
+}
+
+func TestProgressStreamerEmptyCommandEmitsDone(t *testing.T) {
+	ps := NewProgressStreamer(t.TempDir(), "")
+	cmd := ps.Start()
+	if msg := cmd(); msg != nil {
+		t.Fatalf("expected nil immediate msg, got %T", msg)
+	}
+
+	eventCmd := ps.WaitForEvent()
+	event := eventCmd()
+	done, ok := event.(messages.CommandDoneMsg)
+	if !ok {
+		t.Fatalf("expected CommandDoneMsg, got %T", event)
+	}
+	if done.ExitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", done.ExitCode)
+	}
+}
+
+func TestProgressStreamerWaitForEventWhenClosed(t *testing.T) {
+	ps := &ProgressStreamer{Events: make(chan tea.Msg)}
+	close(ps.Events)
+
+	msg := ps.WaitForEvent()()
+	if msg != nil {
+		t.Fatalf("expected nil message when channel closed, got %T", msg)
 	}
 }

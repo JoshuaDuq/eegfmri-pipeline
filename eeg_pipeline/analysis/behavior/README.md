@@ -34,6 +34,8 @@ binary, or categorical predictors and any scalar outcome measure. See §4 for ho
    - 5.11 [Report and Export](#511-report-and-export)
 6. [Group-Level Analysis](#6-group-level-analysis)
 7. [Multiple Comparison Correction](#7-multiple-comparison-correction)
+8. [Feature Registry](#8-feature-registry)
+9. [Output & I/O Options](#9-output--io-options)
 
 ---
 
@@ -124,6 +126,20 @@ load
 
 Group-level computations run outside the subject DAG via `BehaviorPipeline.run_group_level(...)`.
 
+**Available `--computations` values** (passed to restrict which stages run):
+
+| Computation | Stages enabled |
+|-------------|----------------|
+| `trial_table` | `trial_table` |
+| `predictor_residual` | `predictor_residual` |
+| `regression` | `regression` |
+| `icc` | `icc` |
+| `correlations` | full `correlate_*` chain |
+| `condition` | `condition_column` |
+| `temporal` | `temporal_tfr`, `temporal_stats` |
+| `cluster` | `cluster` |
+| `multilevel_correlations` | group-level multilevel correlations (outside subject DAG) |
+
 ---
 
 ## 4. Statistical Safeguards
@@ -147,6 +163,13 @@ Requested run adjustment is treated as part of the analysis design, not an optio
 best-effort covariate. If the run column is missing or would require more dummy
 terms than allowed by `behavior_analysis.run_adjustment.max_dummies`, the pipeline
 raises instead of silently dropping the control.
+
+The permutation group column is inferred from the trial table in priority order;
+use `--perm-group-column-preference run_id block` to override this preference.
+
+**Global toggles:**
+- `--stats-hierarchical-fdr` / `--no-stats-hierarchical-fdr` — enable/disable the unified hierarchical FDR summary stage.
+- `--stats-compute-reliability` / `--no-stats-compute-reliability` — enable/disable the ICC reliability stage globally.
 
 ### 4.2 Predictor Control
 
@@ -216,6 +239,16 @@ Behavior loading is strict about this contract:
 - row-order-only alignment is not considered valid scientific evidence of
   correspondence
 
+**Additional options:**
+
+| Flag | Description |
+|------|-------------|
+| `--trial-table-format {parquet,tsv}` | Output format for the saved trial table |
+| `--trial-table-disallow-positional-alignment` | Fail if alignment falls back to row-position matching |
+| `--trial-order-max-missing-fraction` | Max fraction of missing trial-order values before disabling trial-order control (default `0.1`) |
+| `--feature-files` | Selective feature file loading (e.g., `power aperiodic`) instead of all available |
+| `--exclude-non-trialwise-features` | Drop feature columns that are not trialwise-varying |
+
 ---
 
 ### 5.3 Predictor Residual
@@ -233,9 +266,19 @@ by stimulus intensity:
 
 Model selection procedure:
 
-1. Fit spline OLS candidates `outcome ~ bs(predictor, df=d, degree=3)` for increasing $d$; retain the model with lowest AIC.
-2. If no spline model converges, fit a polynomial: $\hat{y} = \sum_j a_j P^j$.
-3. Optionally compute cross-fit residuals (`predictor_residual_cv`) via `GroupKFold` to avoid in-sample bias.
+1. Fit spline OLS candidates `outcome ~ bs(predictor, df=d, degree=3)` for degrees of freedom in `--predictor-residual-spline-df-candidates` (default `3 4 5`); retain the model with lowest AIC.
+2. If no spline model converges, fall back to polynomial of degree `--predictor-residual-poly-degree`.
+3. Optionally compute cross-fit residuals (`predictor_residual_cv`) via `GroupKFold` to avoid in-sample bias:
+
+| Cross-fit flag | Description |
+|----------------|-------------|
+| `--predictor-residual-crossfit` | Enable cross-fit residualization |
+| `--predictor-residual-crossfit-group-column` | Column to use as `GroupKFold` groups (default: run/block) |
+| `--predictor-residual-crossfit-n-splits` | Number of CV splits |
+| `--predictor-residual-crossfit-method {spline,poly}` | Model family for cross-fit |
+| `--predictor-residual-crossfit-spline-n-knots` | Spline knot count for cross-fit |
+
+Cross-fit residuals are stored as `predictor_residual_cv` and used preferentially by downstream correlations when `--correlations-use-crossfit-predictor-residual` is set.
 
 ---
 
@@ -246,6 +289,20 @@ Model selection procedure:
 #### 5.4.1 Design (`correlate_design`)
 
 Defines analysis targets, covariate sets, and permutation group assignments.
+
+**Correlation types** (configured via `--correlations-types`):
+
+| Type | Description |
+|------|-------------|
+| `raw` | Simple Pearson or Spearman $r$ with no covariate control |
+| `partial_cov` | Partial $r$ controlling for user-specified covariates |
+| `partial_predictor` | Partial $r$ controlling for the predictor variable |
+| `partial_cov_predictor` | Partial $r$ controlling for both covariates and predictor |
+| `run_mean` | Correlations on run-aggregated means (reduces within-run autocorrelation) |
+
+**Correlation target** (`--correlations-target-column`): override the default outcome column with any events.tsv column.
+**Segment restriction** (`--correlations-power-segment`): restrict ROI power correlations to a named epoch segment (e.g. `active`).
+**Predictor residual preference** (`--correlations-prefer-predictor-residual`): preferentially target `predictor_residual` or `predictor_residual_cv` over the raw outcome.
 
 #### 5.4.2 Effect Sizes (`correlate_effect_sizes`)
 
@@ -261,7 +318,15 @@ t = r\sqrt{\frac{n - k - 2}{1 - r^2}}, \qquad
 p = 2\, P\!\left(|T_{n-k-2}| \ge |t|\right).
 ```
 
-Run-mean mode computes correlations on run-aggregated means rather than trial-level values.
+**LOSO stability** (`--loso-stability`): leave-one-subject-out replication of effect sizes.
+When enabled, correlations are recomputed on $N-1$ subjects; the mean LOSO $r$ and its
+SD across folds are appended as `r_loso_mean` / `r_loso_sd`.
+
+**Bayes factors** (`--compute-bayes-factors`): JZS Bayes factor $\mathrm{BF}_{10}$ approximation
+for each correlation. Enables Bayesian evidence categorization alongside classical p-values.
+
+Run-mean mode (`primary_unit = run_mean` or `--correlations-primary-unit run_mean`) computes
+correlations on run-aggregated means rather than trial-level values.
 
 #### 5.4.3 P-values (`correlate_pvalues`)
 
@@ -273,11 +338,14 @@ p_\text{perm} = \frac{N_{\text{extreme}} + 1}{n_\text{perm} + 1}.
 
 Grouped permutation schemes: shuffle or circular-shift within groups (`permute_within_groups`).
 Partial permutation uses Freedman–Lane residual permutation.
+Permutation count can be overridden per-analysis via `--correlations-permutations`.
 
 #### 5.4.4 Primary Selection (`correlate_primary_selection`)
 
 Selects the primary effect size and p-value according to control path (partial vs. simple),
 analysis unit (trial vs. run), and non-i.i.d. enforcement status.
+`--correlations-permutation-primary` forces within-run/block permutation p-values as the primary
+p-value when available.
 
 #### 5.4.5 FDR Correction (`correlate_fdr`)
 
@@ -316,6 +384,23 @@ w_i = \frac{e_i^2}{(1 - h_i)^2},
 
 **Inference:** $t = \hat\beta / \mathrm{SE}$, two-sided $t$ p-values.
 Feature-term permutation uses reduced-model residual permutation (Freedman–Lane).
+
+**Key options:**
+
+| Flag | Description |
+|------|-------------|
+| `--regression-outcome {outcome,predictor_residual,predictor}` | Dependent variable target |
+| `--regression-primary-unit {trial,run_mean}` | Aggregation unit before fitting |
+| `--regression-predictor-control {linear,outcome_hat,spline}` | Predictor control strategy |
+| `--regression-predictor-spline-knots` | Spline knot count for `spline` control |
+| `--regression-predictor-spline-quantile-low/high` | Quantile trim for spline knot placement |
+| `--regression-include-interaction` | Add $x_f \cdot P$ interaction term |
+| `--regression-standardize` | Z-score features before fitting |
+| `--regression-include-trial-order` | Include trial-position covariate |
+| `--regression-include-prev-terms` | Include previous-trial EEG features as autoregressive terms |
+| `--regression-include-run-block` | Include run/block dummy covariates |
+| `--regression-permutations` | Per-regression permutation count |
+| `--regression-max-features` | Cap number of features to prevent memory exhaustion |
 
 ---
 
@@ -367,6 +452,19 @@ does not auto-select an arbitrary two-level subset. Pairwise tests only (no omni
 - Unpaired: Mann–Whitney U.
 - Paired run-level: Wilcoxon signed-rank.
 
+**Key options:**
+
+| Flag | Description |
+|------|-------------|
+| `--condition-compare-column` | events.tsv column to split on (default: `event_columns.condition`, then `event_columns.binary_outcome`) |
+| `--condition-compare-values VALUE…` | Exactly the values to compare (e.g., `0 1` or `condA condB`) |
+| `--condition-compare-labels LABEL…` | Optional display labels aligned to `--condition-compare-values` |
+| `--condition-primary-unit {trial,run_mean}` | Aggregation unit |
+| `--condition-permutation-primary` | Use permutation p-values as the primary p-value |
+| `--condition-effect-threshold` | Minimum Cohen's $d$ to include in report |
+| `--condition-min-trials` | Minimum trials per condition to run comparison |
+| `--condition-overwrite` / `--no-condition-overwrite` | Include `compare_column` in output filename to avoid overwriting prior results |
+
 ---
 
 ### 5.8 Temporal Statistics
@@ -403,6 +501,27 @@ Temporal multiple-comparison correction: `fdr`, `bonferroni`, `cluster`, or `non
 \frac{P_\text{active} - P_\text{base}}{\sigma_\text{base}}.
 ```
 
+**Key options:**
+
+| Flag | Description |
+|------|-------------|
+| `--temporal-target-column` | events.tsv column to correlate against (default: `event_columns.outcome`) |
+| `--temporal-correction-method {fdr,cluster}` | Multiple-comparison method for temporal maps |
+| `--temporal-time-resolution-ms` | Bin width in ms |
+| `--temporal-time-min-ms` / `--temporal-time-max-ms` | Temporal window bounds |
+| `--temporal-smooth-window-ms` | Smoothing window applied before correlation |
+| `--temporal-topomap-window-ms` | Window for topomap summary output |
+| `--temporal-split-by-condition` | Compute separate time-series correlations per condition level |
+| `--temporal-condition-column` | Column to split/filter by for condition-stratified outputs |
+| `--temporal-condition-values VALUE…` | Subset of condition values to include |
+| `--temporal-include-roi-averages` | Include ROI-averaged rows in output |
+| `--temporal-include-tf-grid` | Include individual frequency (TF-grid) rows in output |
+| `--temporal-feature-power/itpc/erds` | Enable/disable specific temporal feature families |
+| `--temporal-itpc-baseline-min/max` | ITPC baseline window bounds (seconds) |
+| `--temporal-itpc-baseline-correction` | Enable ITPC baseline correction |
+| `--temporal-erds-baseline-min/max` | ERDS baseline window bounds (seconds) |
+| `--temporal-erds-method {percent,zscore}` | ERDS normalization method |
+
 ---
 
 ### 5.9 Cluster Tests
@@ -416,6 +535,20 @@ d = \frac{\mu_A - \mu_B}{s_\text{pooled}}, \qquad
 M_c = \sum_{i \in c} |t_i|, \qquad
 p_c = \frac{\#\{M_\text{max}^\text{perm} \ge M_c\} + 1}{n_\text{perm} + 1}.
 ```
+
+**Key options:**
+
+| Flag | Description |
+|------|-------------|
+| `--cluster-condition-column` | events.tsv column defining A/B conditions |
+| `--cluster-condition-values VALUE VALUE` | Exactly 2 values to compare |
+| `--cluster-threshold` | Cluster-forming threshold (t-statistic) |
+| `--cluster-min-size` | Minimum cluster size to report |
+| `--cluster-tail {-1,0,1}` | Test directionality: `-1` lower, `0` two-tailed, `1` upper |
+| `--cluster-correction-min-timepoints` | Minimum contiguous timepoints per cluster |
+| `--cluster-correction-min-channels` | Minimum channels per cluster |
+| `--cluster-correction-n-permutations` | Permutation count for cluster correction |
+| `--cluster-correction-alpha` | Alpha threshold for cluster inference |
 
 ---
 
@@ -453,6 +586,8 @@ a random effect, then applies hierarchical FDR across features.
 
 **Module:** `group_level.py` → `run_group_level_correlations_impl`
 
+**Computation key:** `multilevel_correlations` (pass via `--computations multilevel_correlations`).
+
 Per-subject correlation estimates $r_s$ are aggregated using Fisher $z$-averaging:
 
 ```math
@@ -464,6 +599,17 @@ Group-level permutation p-value:
 ```math
 p_\text{perm} = \frac{N_{\text{extreme}} + 1}{n_\text{perm} + 1}.
 ```
+
+**Key options:**
+
+| Flag | Description |
+|------|-------------|
+| `--group-level-target` | Target column for multilevel group correlations |
+| `--group-level-control-predictor` | Control predictor variable in group-level models |
+| `--group-level-control-trial-order` | Control trial-order slope in group-level models |
+| `--group-level-control-run-effects` | Control run effects (run dummy variables) in group-level models |
+| `--group-level-max-run-dummies` | Maximum run dummy columns for run-effects control |
+| `--group-level-block-permutation` | Use block-restricted permutations when a run/block column is available (default: `true`) |
 
 ---
 
@@ -488,3 +634,68 @@ p_\text{Simes} = \min_i \frac{m_f}{i}\, p_{(i,\text{family})}.
 
 Within-family rejections are retained only when the family gate rejects at the
 configured FDR level $\alpha$.
+
+---
+
+## 8. Feature Registry
+
+The feature registry maps raw feature file identifiers to feature-type categories,
+enabling the behavior pipeline to correctly classify and route features across
+analyses without hard-coded column patterns.
+
+It is configured under `behavior_analysis.feature_registry` in `behavior_config.yaml`
+and can be overridden at the CLI via JSON-string arguments (useful for study-specific
+feature layouts without modifying the config file):
+
+| Flag | Config key | Content |
+|------|-----------|---------|
+| `--feature-registry-files-json` | `feature_registry.files` | JSON object: `{file_key: path_glob}` |
+| `--feature-registry-source-to-feature-type-json` | `feature_registry.source_to_feature_type` | JSON object: `{source_name: feature_type_label}` |
+| `--feature-registry-type-hierarchy-json` | `feature_registry.feature_type_hierarchy` | JSON object: parent→child type relationships |
+| `--feature-registry-patterns-json` | `feature_registry.feature_patterns` | JSON object: `{pattern_name: regex_or_glob}` for column classification |
+| `--feature-registry-classifiers-json` | `feature_registry.feature_classifiers` | JSON array of classifier rule objects |
+
+The registry is consumed by `feature_filters.py` to determine which columns participate
+in each analysis (e.g. exclude non-trialwise features via `--exclude-non-trialwise-features`,
+scope correlations to specific feature types via `--correlations-features`).
+
+---
+
+## 9. Output & I/O Options
+
+### 9.1 Stage Discoverability
+
+```bash
+eeg-pipeline behavior compute --list-stages
+```
+
+Prints all registered pipeline stages with their descriptions, dependencies, and
+`config_key` gating flags. Useful for auditing which stages are active for a given
+configuration.
+
+### 9.2 Output Format
+
+Results are written as TSV files by default. CSV copies can be saved alongside:
+
+```bash
+eeg-pipeline behavior compute --subject 0001 --also-save-csv
+```
+
+### 9.3 Output Folder Management
+
+| Flag | Behaviour |
+|------|-----------|
+| `--overwrite` (default) | Overwrite the existing output folder |
+| `--no-overwrite` | Append a timestamp suffix to the output folder instead of overwriting |
+
+### 9.4 Scoping Analyses
+
+| Flag | Effect |
+|------|--------|
+| `--computations trial_table correlations …` | Run only the listed computation groups; skip all others |
+| `--categories power connectivity …` | Restrict feature categories processed in `visualize` mode |
+| `--correlations-features power aperiodic …` | Restrict feature categories for correlations analysis |
+| `--condition-features power erp …` | Restrict feature categories for condition comparisons |
+| `--temporal-features power itpc …` | Restrict feature categories for temporal analyses |
+| `--cluster-features power …` | Restrict feature categories for cluster permutation tests |
+| `--bands delta theta …` | Restrict frequency bands included in any analysis |

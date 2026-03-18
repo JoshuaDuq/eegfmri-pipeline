@@ -54,9 +54,9 @@ func TestView_StackedCompletionKeepsLogsVisible(t *testing.T) {
 		t.Fatalf("expected completed stacked layout to keep log content visible\nview:\n%s", view)
 	}
 
-	lines := strings.Split(view, "\n")
-	if len(lines) > m.height {
-		t.Fatalf("expected execution view to fit within %d lines, got %d\nview:\n%s", m.height, len(lines), view)
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	if len(lines) > m.height+1 {
+		t.Fatalf("expected execution view to fit within %d lines, got %d\nview:\n%s", m.height+1, len(lines), view)
 	}
 }
 

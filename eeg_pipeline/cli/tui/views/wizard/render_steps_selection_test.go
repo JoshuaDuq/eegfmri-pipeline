@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
 )
 
@@ -66,5 +67,93 @@ func TestSetSubjectLoadError_ClearsStaleSubjectState(t *testing.T) {
 	}
 	if strings.Contains(rendered, "sub-0001") {
 		t.Fatalf("did not expect stale subject to remain visible after load error")
+	}
+}
+
+func TestFormatChannelList_WrapsLongChannelLists(t *testing.T) {
+	m := Model{contentWidth: 20}
+	channels := []string{"A01", "A02", "A03", "A04", "A05", "A06", "A07", "A08"}
+
+	rendered := m.formatChannelList(channels, styles.Accent)
+	if rendered == "" {
+		t.Fatalf("expected wrapped channel list, got empty string")
+	}
+	if !strings.Contains(rendered, "\n") {
+		t.Fatalf("expected wrapped channel list to span multiple lines, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "A01") || !strings.Contains(rendered, "A08") {
+		t.Fatalf("expected channel list to preserve first and last entries, got %q", rendered)
+	}
+}
+
+func TestFormatChannelList_ReturnsEmptyForNoChannels(t *testing.T) {
+	m := Model{contentWidth: 80}
+
+	if got := m.formatChannelList(nil, styles.Accent); got != "" {
+		t.Fatalf("expected empty channel list for nil input, got %q", got)
+	}
+}
+
+func TestRenderSpatialSelection_ShowsSelectionCountAndModes(t *testing.T) {
+	m := Model{
+		contentWidth:    80,
+		spatialSelected: map[int]bool{0: true, 1: false, 2: true},
+		spatialCursor:   1,
+	}
+
+	rendered := m.renderSpatialSelection()
+	if !strings.Contains(rendered, "2/3") {
+		t.Fatalf("expected selection count in spatial renderer, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "ROI") ||
+		!strings.Contains(rendered, "All Channels") ||
+		!strings.Contains(rendered, "Global") {
+		t.Fatalf("expected all spatial modes to be rendered, got %q", rendered)
+	}
+}
+
+func TestRenderFeatureFileSelection_ShowsApplicableFilesAndAvailability(t *testing.T) {
+	m := New(types.PipelineBehavior, "/tmp")
+	m.contentWidth = 100
+	for i := range m.computationSelected {
+		m.computationSelected[i] = false
+	}
+	for i, comp := range m.computations {
+		if comp.Key == "temporal" {
+			m.computationSelected[i] = true
+			break
+		}
+	}
+	m.featureAvailability = map[string]bool{
+		"power": true,
+		"itpc":  false,
+		"erds":  true,
+	}
+	m.featureLastModified = map[string]string{
+		"power": "",
+		"erds":  "",
+	}
+	m.featureFileCursor = 99
+
+	rendered := m.renderFeatureFileSelection()
+	if !strings.Contains(rendered, "Showing applicable features only") {
+		t.Fatalf("expected applicable-feature notice, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "3/3") {
+		t.Fatalf("expected selected count for applicable files, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "2 available") {
+		t.Fatalf("expected available count for applicable files, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "Power Features") ||
+		!strings.Contains(rendered, "ITPC") ||
+		!strings.Contains(rendered, "ERDS") {
+		t.Fatalf("expected applicable feature names to be rendered, got %q", rendered)
+	}
+	if !strings.Contains(rendered, styles.CheckMark) {
+		t.Fatalf("expected available feature marker, got %q", rendered)
+	}
+	if !strings.Contains(rendered, styles.CrossMark) {
+		t.Fatalf("expected unavailable feature marker, got %q", rendered)
 	}
 }
