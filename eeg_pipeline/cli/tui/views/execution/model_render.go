@@ -287,44 +287,15 @@ func (m Model) renderHeader() string {
 		statusColor = styles.Warning
 	}
 
-	bar := lipgloss.NewStyle().Foreground(statusColor).Render(styles.SectionIcon)
+	bar := lipgloss.NewStyle().Foreground(statusColor).Render(styles.SectionIconActive)
 	headerText := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render(" " + title)
-	headerLine := lipgloss.PlaceHorizontal(m.width-4, lipgloss.Center, bar+headerText)
+	headerLine := "  " + bar + headerText
 
 	lineWidth := m.width - 4
 	if lineWidth < 0 {
 		lineWidth = 0
 	}
 	return headerLine + "\n" + styles.RenderDivider(lineWidth)
-}
-
-// renderInfoPanel renders a compact timing card with elapsed and ETA.
-// Subject details are in the progress section.
-func (m Model) renderInfoPanel() string {
-	var rows []string
-
-	const labelW = 6
-	iw := m.sidebarInnerWidth()
-
-	if m.StartTime.Unix() > 0 {
-		duration := m.getDuration()
-		timeLine := styles.RenderKeyValue("Time", formatDuration(duration), labelW)
-		if m.Status == StatusRunning && m.EstimatedRemaining > 0 {
-			etaStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-			timeLine += lipgloss.NewStyle().Foreground(styles.TextDim).Render("  ETA ") + etaStyle.Render(formatDuration(m.EstimatedRemaining))
-		}
-		rows = append(rows, styles.TruncateLine(timeLine, iw))
-	}
-
-	if len(m.FailedSubjects) > 0 {
-		failStyle := lipgloss.NewStyle().Foreground(styles.Error).Bold(true)
-		line := lipgloss.NewStyle().Foreground(styles.Error).Render(styles.PadRight("Fail", labelW)) +
-			failStyle.Render(fmt.Sprintf("%d subject(s)", len(m.FailedSubjects)))
-		rows = append(rows, styles.TruncateLine(line, iw))
-	}
-
-	content := strings.Join(rows, "\n")
-	return m.renderSidebarCard(content)
 }
 
 func (m *Model) calculateETA() {
@@ -355,13 +326,21 @@ func (m Model) averageSubjectDuration() time.Duration {
 }
 
 // renderProgressSection renders the main progress overview including
-// overall completion, current subject/step, and metrics.
+// overall completion, current subject/step, timing, and metrics.
 func (m Model) renderProgressSection() string {
 	var b strings.Builder
 
 	iw := m.sidebarInnerWidth()
 
-	b.WriteString(styles.TruncateLine(m.renderStatus()+"  "+styles.RenderSectionLabel("Progress"), iw) + "\n")
+	headerLine := m.renderStatus() + "  " + styles.RenderSectionLabel("Progress")
+	if m.StartTime.Unix() > 0 {
+		dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+		headerLine += dimStyle.Render("  " + formatDuration(m.getDuration()))
+		if m.Status == StatusRunning && m.EstimatedRemaining > 0 {
+			headerLine += dimStyle.Render("  ETA ") + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(formatDuration(m.EstimatedRemaining))
+		}
+	}
+	b.WriteString(styles.TruncateLine(headerLine, iw) + "\n")
 
 	// Overall progress bar
 	barWidth := iw - 10
@@ -514,8 +493,12 @@ func (m Model) renderCPUHeatmap() string {
 
 // renderMemoryGauge renders a compact memory usage gauge bar.
 func (m Model) renderMemoryGauge(width int) string {
-	// Estimate usage fraction (cap at 32 GB as "full" for visualization)
-	const maxMemGB = 32.0
+	// Cap at the higher of 32 GB and 2× the observed peak, so the gauge
+	// remains meaningful on high-memory neuroimaging workstations.
+	maxMemGB := 32.0
+	if m.PeakMemoryUsage > maxMemGB*0.75 {
+		maxMemGB = m.PeakMemoryUsage * 2.0
+	}
 	fraction := m.MemoryUsage / maxMemGB
 	if fraction > 1.0 {
 		fraction = 1.0
@@ -639,7 +622,7 @@ func (m Model) renderStatus() string {
 	case StatusCancelled:
 		return style.Background(styles.Warning).Foreground(styles.BgDark).Render(styles.CrossMark + " Cancelled")
 	default:
-		return style.Foreground(styles.Muted).Render(" Pending ")
+		return style.Background(styles.Surface).Foreground(styles.Muted).Render(" Pending ")
 	}
 }
 

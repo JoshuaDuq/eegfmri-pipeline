@@ -22,6 +22,11 @@ import (
 // State transition and per-view delegation flow.
 
 func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Quick Actions overlay intercepts all input when visible.
+	if m.quickActions.Visible {
+		return m.handleQuickActionsOverlay(msg)
+	}
+
 	switch m.state {
 	case StateMainMenu:
 		return m.handleMainMenuUpdate(msg)
@@ -37,11 +42,6 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDashboardUpdate(msg)
 	case StateHistory:
 		return m.handleHistoryUpdate(msg)
-	}
-
-	// Handle Quick Actions overlay (can be shown on top of other views)
-	if m.quickActions.Visible {
-		return m.handleQuickActionsOverlay(msg)
 	}
 
 	return m, nil
@@ -188,10 +188,13 @@ func (m Model) handleWizardUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.persistentState.TimeRanges = m.wizard.TimeRanges
 
-	// Only save on key messages to avoid redundant disk I/O on ticks
-	if _, ok := msg.(tea.KeyMsg); ok {
-		m.saveWizardConfig()
-		m.saveState()
+	// Save only on step-transition keys to avoid disk I/O on every keystroke.
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "enter", "esc", "space":
+			m.saveWizardConfig()
+			m.saveState()
+		}
 	}
 
 	if m.wizard.ReadyToExecute {
@@ -212,7 +215,8 @@ func (m Model) handleGlobalSetupUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	m.state = StateMainMenu
+	popped, _ := m.popState()
+	m = popped.(Model)
 	return m, executor.LoadConfigSummary(m.repoRoot)
 }
 
@@ -339,8 +343,7 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 		}
 		return m.popState()
 	case StateGlobalSetup:
-		m.state = StateMainMenu
-		return m, nil
+		return m.popState()
 	case StateExecution:
 		if m.execution.IsDone() {
 			return m.popState()

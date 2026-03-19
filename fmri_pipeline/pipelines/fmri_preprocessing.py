@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from eeg_pipeline.pipelines.base import PipelineBase
+from eeg_pipeline.utils.config.roots import (
+    resolve_fmri_bids_root,
+    resolve_fmri_deriv_root,
+)
 
 FS_LICENSE_ENV_VAR = "EEG_PIPELINE_FREESURFER_LICENSE"
 FS_LICENSE_DEFAULT_PATH = "~/license.txt"
@@ -131,6 +135,15 @@ class FmriPreprocessingPipeline(PipelineBase):
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="fmri_preprocessing", config=config)
 
+    def _resolve_task_is_rest(self) -> bool:
+        return bool(self.config.get("fmri_preprocessing.task_is_rest", False))
+
+    def _resolve_pipeline_deriv_root(self) -> Path:
+        return resolve_fmri_deriv_root(
+            self.config,
+            task_is_rest=self._resolve_task_is_rest(),
+        )
+
     def _validate_batch_inputs(self, subjects: List[str], task: Optional[str]) -> str:
         if not subjects:
             raise ValueError("No subjects specified")
@@ -151,9 +164,10 @@ class FmriPreprocessingPipeline(PipelineBase):
         success = False
         bids_mount_tmp: Optional[tempfile.TemporaryDirectory] = None
         try:
-            fmri_root = self.config.get("paths.bids_fmri_root")
-            if not fmri_root:
-                raise FileNotFoundError("Missing required config value: paths.bids_fmri_root")
+            fmri_root = resolve_fmri_bids_root(
+                self.config,
+                task_is_rest=self._resolve_task_is_rest(),
+            )
 
             engine = self.config.get("fmri_preprocessing.engine", "docker")
             if engine not in {"docker", "apptainer"}:

@@ -87,11 +87,12 @@ type Model struct {
 	FailedSubjects     []string          // List of failed subject IDs
 
 	// Resource metrics
-	CPUUsage      float64
-	MemoryUsage   float64
-	CPUCoreUsages []float64 // Per-core CPU usage percentages
-	NumCPUCores   int       // Total number of CPU cores
-	EpochInfo     string
+	CPUUsage        float64
+	MemoryUsage     float64
+	PeakMemoryUsage float64
+	CPUCoreUsages   []float64 // Per-core CPU usage percentages
+	NumCPUCores     int       // Total number of CPU cores
+	EpochInfo       string
 
 	// Error tracking
 	ErrorLines         []string
@@ -143,7 +144,7 @@ func New(command string) Model {
 		Status:           StatusPending,
 		Progress:         0,
 		OutputLines:      []string{},
-		MaxOutputLines:   styles.MaxScrollbackLines,
+		MaxOutputLines:   styles.UnlimitedScrollback,
 		StartTime:        time.Now(),
 		width:            80,
 		height:           24,
@@ -497,6 +498,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case messages.ResourceUpdateMsg:
 		m.CPUUsage = msg.CPUUsage
 		m.MemoryUsage = msg.MemoryUsage
+		if msg.MemoryUsage > m.PeakMemoryUsage {
+			m.PeakMemoryUsage = msg.MemoryUsage
+		}
 		m.CPUCoreUsages = msg.CPUCoreUsages
 		m.NumCPUCores = msg.NumCPUCores
 		return m, m.listenForResourceUpdates()

@@ -4,10 +4,18 @@ from eeg_pipeline.utils.config.overrides import apply_runtime_overrides, apply_s
 
 
 def test_apply_runtime_overrides_updates_only_provided_values() -> None:
-    cfg: dict[str, object] = {"project": {"task": "old"}, "paths": {"bids_root": "/old"}}
+    cfg: dict[str, object] = {
+        "project": {"task": "old"},
+        "paths": {"bids_root": "/old"},
+        "preprocessing": {},
+        "feature_engineering": {},
+        "fmri_preprocessing": {},
+        "fmri_resting_state": {},
+    }
     apply_runtime_overrides(
         cfg,
         task="new_task",
+        task_is_rest=True,
         source_root="/src",
         bids_root="/bids",
         bids_rest_root="/bids-rest",
@@ -17,6 +25,10 @@ def test_apply_runtime_overrides_updates_only_provided_values() -> None:
     )
 
     assert cfg["project"]["task"] == "new_task"
+    assert cfg["preprocessing"]["task_is_rest"] is True
+    assert cfg["feature_engineering"]["task_is_rest"] is True
+    assert cfg["fmri_preprocessing"]["task_is_rest"] is True
+    assert cfg["fmri_resting_state"]["task_is_rest"] is True
     assert cfg["paths"]["source_data"] == "/src"
     assert cfg["paths"]["bids_root"] == "/bids"
     assert cfg["paths"]["bids_rest_root"] == "/bids-rest"

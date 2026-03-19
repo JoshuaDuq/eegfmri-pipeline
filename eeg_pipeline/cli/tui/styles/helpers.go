@@ -93,16 +93,18 @@ func RenderScrollUpIndicator(count int) string {
 	if count <= 0 {
 		return ""
 	}
-	text := fmt.Sprintf("  ↑ %d more above", count)
-	return lipgloss.NewStyle().Foreground(TextDim).Render(text)
+	arrow := lipgloss.NewStyle().Foreground(Primary).Render("  ↑")
+	text := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf(" %d more above", count))
+	return arrow + text
 }
 
 func RenderScrollDownIndicator(count int) string {
 	if count <= 0 {
 		return ""
 	}
-	text := fmt.Sprintf("  ↓ %d more below", count)
-	return lipgloss.NewStyle().Foreground(TextDim).Render(text)
+	arrow := lipgloss.NewStyle().Foreground(Primary).Render("  ↓")
+	text := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf(" %d more below", count))
+	return arrow + text
 }
 
 func IsTerminalTooSmall(width, height int) bool {
@@ -186,9 +188,9 @@ func RenderRadio(selected, focused bool) string {
 	return lipgloss.NewStyle().Foreground(Muted).Render("○")
 }
 
-// RenderSectionLabel renders a section label with a steel-blue bar and bold white title.
+// RenderSectionLabel renders a section label with a thick steel-blue bar and bold white title.
 func RenderSectionLabel(title string) string {
-	bar := lipgloss.NewStyle().Foreground(Primary).Render(SectionIcon)
+	bar := lipgloss.NewStyle().Foreground(Primary).Render(SectionIconActive)
 	label := lipgloss.NewStyle().Bold(true).Foreground(Text).Render(" " + title)
 	return bar + label
 }
@@ -198,9 +200,9 @@ func RenderActiveSectionLabel(title string) string {
 	return RenderSectionLabel(title)
 }
 
-// RenderDimSectionLabel renders an inactive section label: muted bar and text.
+// RenderDimSectionLabel renders an inactive section label: thin muted bar and text.
 func RenderDimSectionLabel(title string) string {
-	bar := lipgloss.NewStyle().Foreground(Border).Render(SectionIcon)
+	bar := lipgloss.NewStyle().Foreground(Secondary).Render(SectionIcon)
 	label := lipgloss.NewStyle().Foreground(Muted).Render(" " + title)
 	return bar + label
 }
@@ -212,14 +214,21 @@ func RenderPreviewSubHeader(title string) string {
 	return bar + label
 }
 
-// RenderPreviewSubHeaderWithRule renders a preview sub-header followed by a thin rule.
+// RenderPreviewSubHeaderWithRule renders a single-line titled rule: "─── TITLE ──────".
 func RenderPreviewSubHeaderWithRule(title string, width int) string {
-	header := RenderPreviewSubHeader(title)
 	if width <= 0 {
-		return header
+		return RenderPreviewSubHeader(title)
 	}
-	rule := lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat(SectionDividerChar, width))
-	return header + "\n" + rule
+	label := lipgloss.NewStyle().Foreground(TextDim).Bold(true).Render(title)
+	ruleStyle := lipgloss.NewStyle().Foreground(Border)
+	prefix := ruleStyle.Render(strings.Repeat(SectionDividerChar, 2) + " ")
+	visibleLabel := lipgloss.Width(prefix) + lipgloss.Width(label)
+	trailing := width - visibleLabel - 1
+	if trailing < 1 {
+		trailing = 1
+	}
+	suffix := ruleStyle.Render(" " + strings.Repeat(SectionDividerChar, trailing))
+	return prefix + label + suffix
 }
 
 // RenderSectionBlock renders a section label followed by a thin separator line.
@@ -251,7 +260,7 @@ func RenderDivider(width int) string {
 	if width <= 0 {
 		return ""
 	}
-	return lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat(SectionDividerChar, width))
+	return lipgloss.NewStyle().Foreground(Secondary).Render(strings.Repeat(SectionDividerChar, width))
 }
 
 // TruncateLine truncates a string to maxWidth visible characters, appending
@@ -299,6 +308,28 @@ func RenderStepHeader(title string, width int) string {
 		return header + "\n" + RenderDivider(width)
 	}
 	return header
+}
+
+// RenderProgressBar renders a static filled/empty progress bar with a percentage label.
+// progress is clamped to [0.0, 1.0]; width is clamped to [MinProgressBarWidth, MaxProgressBarWidth].
+func RenderProgressBar(progress float64, width int) string {
+	if width < MinProgressBarWidth {
+		width = MinProgressBarWidth
+	}
+	if width > MaxProgressBarWidth {
+		width = MaxProgressBarWidth
+	}
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 1 {
+		progress = 1
+	}
+	filled := int(progress * float64(width))
+	bar := ProgressFilledStyle.Render(strings.Repeat("█", filled)) +
+		ProgressEmptyStyle.Render(strings.Repeat("░", width-filled))
+	pct := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(fmt.Sprintf(" %3.0f%%", progress*100))
+	return bar + pct
 }
 
 // RenderStatusCount renders a count badge + summary line.

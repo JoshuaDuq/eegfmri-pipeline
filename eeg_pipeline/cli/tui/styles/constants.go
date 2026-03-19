@@ -13,8 +13,8 @@ const (
 )
 
 const (
-	MaxScrollbackLines = 0
-	LogBufferChannels  = 1000
+	UnlimitedScrollback = 0
+	LogBufferChannels   = 1000
 
 	ScrollStepSize        = 3
 	MouseWheelScrollLines = 1
@@ -60,7 +60,8 @@ const (
 	HeaderSeparatorChar = "━"
 	SectionDividerChar  = "─"
 
-	SectionIcon = "│"
+	SectionIcon       = "│"
+	SectionIconActive = "┃"
 )
 
 const (

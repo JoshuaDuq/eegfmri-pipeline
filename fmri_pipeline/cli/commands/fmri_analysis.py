@@ -14,6 +14,7 @@ from eeg_pipeline.cli.common import (
     create_progress_reporter,
     resolve_task,
 )
+from eeg_pipeline.utils.config.roots import resolve_fmri_bids_root
 from eeg_pipeline.utils.config.overrides import apply_set_overrides
 from fmri_pipeline.cli.commands.subject_selection import resolve_subjects
 from fmri_pipeline.utils.config import apply_fmri_config_defaults
@@ -31,14 +32,26 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
     )
     parser.add_argument(
         "mode",
-        choices=["first-level", "second-level", "beta-series", "lss"],
-        help="Operation to run (first-level | second-level | beta-series | lss)",
+        choices=["first-level", "second-level", "beta-series", "lss", "rest"],
+        help="Operation to run (first-level | second-level | beta-series | lss | rest)",
     )
 
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
     add_path_args(parser)
+    rest_group = parser.add_mutually_exclusive_group()
+    rest_group.add_argument(
+        "--task-is-rest",
+        dest="task_is_rest",
+        action="store_true",
+        default=None,
+    )
+    rest_group.add_argument(
+        "--no-task-is-rest",
+        dest="task_is_rest",
+        action="store_false",
+    )
 
     in_group = parser.add_argument_group("Input selection")
     in_group.add_argument(
@@ -245,6 +258,48 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
         dest="write_design_matrix",
         action="store_false",
         help="Do not write design matrices",
+    )
+
+    rest_cfg_group = parser.add_argument_group("Resting-state analysis")
+    rest_cfg_group.add_argument(
+        "--atlas-labels-img",
+        type=str,
+        default=None,
+        help="Atlas/parcellation label image for ROI time-series extraction",
+    )
+    rest_cfg_group.add_argument(
+        "--atlas-labels-tsv",
+        type=str,
+        default=None,
+        help="Optional atlas label TSV aligned to the ROI labels image",
+    )
+    rest_cfg_group.add_argument(
+        "--connectivity-kind",
+        choices=["correlation"],
+        default=None,
+        help="Connectivity estimator for resting-state ROI time series",
+    )
+    rest_cfg_group.add_argument(
+        "--standardize",
+        dest="standardize",
+        action="store_true",
+        default=None,
+    )
+    rest_cfg_group.add_argument(
+        "--no-standardize",
+        dest="standardize",
+        action="store_false",
+    )
+    rest_cfg_group.add_argument(
+        "--detrend",
+        dest="detrend",
+        action="store_true",
+        default=None,
+    )
+    rest_cfg_group.add_argument(
+        "--no-detrend",
+        dest="detrend",
+        action="store_false",
     )
 
     out_group = parser.add_argument_group("Output settings")
@@ -773,10 +828,17 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
     progress = create_progress_reporter(args)
     apply_fmri_config_defaults(config)
 
+    mode = str(getattr(args, "mode", "first-level") or "first-level").strip().lower()
+    rest_mode_enabled = mode == "rest"
+
     if args.bids_fmri_root:
         config.setdefault("paths", {})["bids_fmri_root"] = args.bids_fmri_root
+    if getattr(args, "bids_rest_root", None):
+        config.setdefault("paths", {})["bids_rest_root"] = args.bids_rest_root
     if args.deriv_root:
         config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+    if getattr(args, "deriv_rest_root", None):
+        config.setdefault("paths", {})["deriv_rest_root"] = args.deriv_rest_root
     if args.freesurfer_dir:
         config.setdefault("paths", {})["freesurfer_dir"] = args.freesurfer_dir
     if getattr(args, "signature_dir", None):
@@ -792,18 +854,37 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
                     parsed_specs.append({"name": name, "path": rel_path})
         if parsed_specs:
             config.setdefault("paths", {})["signature_maps"] = parsed_specs
+    if getattr(args, "task_is_rest", None) is not None or rest_mode_enabled:
+        resolved_task_is_rest = (
+            True if rest_mode_enabled else bool(getattr(args, "task_is_rest", False))
+        )
+        config.setdefault("fmri_preprocessing", {})["task_is_rest"] = resolved_task_is_rest
+        config.setdefault("fmri_resting_state", {})["task_is_rest"] = resolved_task_is_rest
     apply_set_overrides(config, getattr(args, "set_overrides", None))
 
-    bids_fmri_root = config.get("paths.bids_fmri_root")
-    if not bids_fmri_root:
-        raise ValueError("Missing required config value: paths.bids_fmri_root")
+    task_is_rest = bool(
+        config.get("fmri_resting_state.task_is_rest", False)
+        if rest_mode_enabled
+        else config.get("fmri_preprocessing.task_is_rest", False)
+    )
+    if task_is_rest and not rest_mode_enabled:
+        raise ValueError(
+            "Resting-state fMRI analysis requires 'fmri-analysis rest'. "
+            "Event-based first-level, second-level, and trial-wise modes are not valid when task_is_rest is enabled."
+        )
 
-    base_task = resolve_task(args.task, config)
+    bids_fmri_root = resolve_fmri_bids_root(
+        config,
+        task_is_rest=task_is_rest,
+    )
+
+    rest_task_label = str(config.get("fmri_resting_state.task_label") or "").strip()
+    base_task = (
+        rest_task_label if rest_mode_enabled and not getattr(args, "task", None) and rest_task_label else resolve_task(args.task, config)
+    )
     fmri_task = _map_task_to_fmri(base_task)
 
     subjects = resolve_subjects(args, Path(bids_fmri_root), config)
-
-    mode = str(getattr(args, "mode", "first-level") or "first-level").strip().lower()
 
     def _cfg_value(*path: str) -> Any:
         current: Any = {}
@@ -841,6 +922,97 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
         if not items:
             return None
         return [int(item) for item in items]
+
+    if mode == "rest":
+        from fmri_pipeline.analysis.resting_state import (
+            RestingStateAnalysisConfig,
+            load_resting_state_config_section,
+        )
+        from fmri_pipeline.pipelines.fmri_resting_state import (
+            FmriRestingStatePipeline,
+        )
+
+        rest_cfg_section = load_resting_state_config_section(config)
+
+        def _rest_cfg_value(*path: str) -> Any:
+            current: Any = rest_cfg_section
+            for key in path:
+                if not isinstance(current, dict) or key not in current:
+                    return None
+                current = current[key]
+            return current
+
+        low_pass_hz = _coalesce(args.low_pass_hz, _rest_cfg_value("low_pass_hz"))
+        if low_pass_hz is not None and low_pass_hz <= 0:
+            low_pass_hz = None
+
+        rest_cfg = RestingStateAnalysisConfig(
+            input_source=str(
+                _coalesce(args.input_source, _rest_cfg_value("input_source"), "fmriprep")
+            ).strip(),
+            fmriprep_space=str(
+                _coalesce(
+                    args.fmriprep_space,
+                    _rest_cfg_value("fmriprep_space"),
+                    "MNI152NLin2009cAsym",
+                )
+            ).strip(),
+            require_fmriprep=(
+                bool(args.require_fmriprep)
+                if args.require_fmriprep is not None
+                else bool(_coalesce(_rest_cfg_value("require_fmriprep"), True))
+            ),
+            runs=list(args.runs) if args.runs else _normalize_runs(_rest_cfg_value("runs")),
+            confounds_strategy=str(
+                _coalesce(
+                    args.confounds_strategy,
+                    _rest_cfg_value("confounds_strategy"),
+                    "auto",
+                )
+            ).strip(),
+            high_pass_hz=_coalesce(args.high_pass_hz, _rest_cfg_value("high_pass_hz"), 0.008),
+            low_pass_hz=low_pass_hz,
+            smoothing_fwhm=args.smoothing_fwhm
+            if args.smoothing_fwhm is not None
+            else _rest_cfg_value("smoothing_fwhm"),
+            atlas_labels_img=_coalesce(
+                getattr(args, "atlas_labels_img", None),
+                _rest_cfg_value("atlas_labels_img"),
+            ),
+            atlas_labels_tsv=_coalesce(
+                getattr(args, "atlas_labels_tsv", None),
+                _rest_cfg_value("atlas_labels_tsv"),
+            ),
+            connectivity_kind=str(
+                _coalesce(
+                    getattr(args, "connectivity_kind", None),
+                    _rest_cfg_value("connectivity_kind"),
+                    "correlation",
+                )
+            ).strip(),
+            standardize=(
+                bool(args.standardize)
+                if getattr(args, "standardize", None) is not None
+                else bool(_coalesce(_rest_cfg_value("standardize"), True))
+            ),
+            detrend=(
+                bool(args.detrend)
+                if getattr(args, "detrend", None) is not None
+                else bool(_coalesce(_rest_cfg_value("detrend"), True))
+            ),
+        ).normalized()
+
+        out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
+        pipeline = FmriRestingStatePipeline(config=config)
+        pipeline.run_batch(
+            subjects=subjects,
+            task=fmri_task,
+            progress=progress,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            rest_cfg=rest_cfg,
+            output_dir=out_dir,
+        )
+        return
 
     if mode == "second-level":
         from fmri_pipeline.analysis.second_level import (

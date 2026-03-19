@@ -31,8 +31,8 @@ func TestBuildProgressBarFillsCurrentStep(t *testing.T) {
 	m.stepIndex = 0
 
 	progress := stripWizardHeaderANSI(m.buildProgressBar(20))
-	filledCount := strings.Count(progress, "█")
-	emptyCount := strings.Count(progress, "░")
+	filledCount := strings.Count(progress, "━")
+	emptyCount := strings.Count(progress, "─")
 
 	if filledCount == 0 {
 		t.Fatalf("expected current step to contribute visible filled progress, got %q", progress)
@@ -47,7 +47,7 @@ func TestBuildProgressBarFullyFillsFinalStep(t *testing.T) {
 	m.stepIndex = len(m.steps) - 1
 
 	progress := stripWizardHeaderANSI(m.buildProgressBar(20))
-	emptyCount := strings.Count(progress, "░")
+	emptyCount := strings.Count(progress, "─")
 
 	if emptyCount != 0 {
 		t.Fatalf("expected final step to fully fill progress bar, got %q", progress)

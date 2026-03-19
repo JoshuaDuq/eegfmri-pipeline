@@ -22,7 +22,7 @@ func (m Model) renderPreprocessingStageSelection() string {
 	}
 
 	b.WriteString("  " + styles.RenderStatusCount(selectedCount, len(m.prepStages), "stages"))
-	b.WriteString("\n\n\n")
+	b.WriteString("\n")
 
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 	for i, stage := range m.prepStages {

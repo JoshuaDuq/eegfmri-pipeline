@@ -48,7 +48,7 @@ func (m Model) renderComputationSelection() string {
 	}
 
 	b.WriteString("  " + styles.RenderStatusCount(count, len(m.computations), "selected"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	groups := map[string][]Computation{
 		"DataPrep": {}, "Core": {}, "Group": {}, "Advanced": {}, "Quality": {},
@@ -106,12 +106,10 @@ func (m Model) renderComputationSelection() string {
 				timestamp := m.computationLastModified[comp.Key]
 				relTime := formatRelativeTime(timestamp)
 				if relTime != "" {
-					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  [" + relTime + "]")
+					line += lipgloss.NewStyle().Foreground(styles.TextDim).Render("  " + relTime)
 				} else {
-					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  [" + styles.CheckMark + "]")
+					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  " + styles.CheckMark)
 				}
-			} else {
-				line += descStyle.Render("  [--]")
 			}
 
 			line += descStyle.Render("  " + comp.Description)
@@ -143,7 +141,7 @@ func (m Model) renderCategorySelection() string {
 	}
 
 	b.WriteString("  " + styles.RenderStatusCount(count, len(m.categories), "selected"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 	for i, cat := range m.categories {
@@ -173,19 +171,17 @@ func (m Model) renderCategorySelection() string {
 			}
 			if i < len(categories) {
 				total, selected := m.plotCountsForGroup(categories[i].Key)
-				line += descStyle.Render(fmt.Sprintf("  [%d/%d]", selected, total))
+				line += descStyle.Render(fmt.Sprintf("  %d/%d", selected, total))
 			}
 		} else if m.featureAvailability != nil {
 			if m.featureAvailability[cat] {
 				timestamp := m.featureLastModified[cat]
 				relTime := formatRelativeTime(timestamp)
 				if relTime != "" {
-					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  [" + relTime + "]")
+					line += lipgloss.NewStyle().Foreground(styles.TextDim).Render("  " + relTime)
 				} else {
-					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  [" + styles.CheckMark + "]")
+					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  " + styles.CheckMark)
 				}
-			} else {
-				line += descStyle.Render("  [--]")
 			}
 		}
 		b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
@@ -225,7 +221,7 @@ func (m Model) renderBandSelection() string {
 		}
 	}
 	b.WriteString("  " + styles.RenderStatusCount(count, len(m.bands), "selected"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	for i, band := range m.bands {
 		isSelected := m.bandSelected[i]
@@ -280,7 +276,7 @@ func (m Model) renderROISelection() string {
 		}
 	}
 	b.WriteString("  " + styles.RenderStatusCount(count, len(m.rois), "selected"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	for i, roi := range m.rois {
 		isSelected := m.roiSelected[i]
@@ -344,16 +340,11 @@ func (m Model) renderROISelection() string {
 }
 
 func (m Model) renderSubjectMarker(isSelected, isFocused bool) string {
-	switch {
-	case isFocused && isSelected:
-		return lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▶ ▣")
-	case isFocused:
-		return lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▶ □")
-	case isSelected:
-		return lipgloss.NewStyle().Foreground(styles.Success).Render("  ▣")
-	default:
-		return lipgloss.NewStyle().Foreground(styles.Muted).Render("  □")
+	cursor := "  "
+	if isFocused {
+		cursor = styles.RenderCursor()
 	}
+	return cursor + styles.RenderCheckbox(isSelected, isFocused)
 }
 
 func (m Model) buildSubjectStatusFlags(hasSource, hasBids, hasDerivatives bool) string {
@@ -361,7 +352,7 @@ func (m Model) buildSubjectStatusFlags(hasSource, hasBids, hasDerivatives bool) 
 		if has {
 			return lipgloss.NewStyle().Foreground(styles.Success).Render(letter)
 		}
-		return lipgloss.NewStyle().Foreground(styles.Muted).Render("·")
+		return lipgloss.NewStyle().Foreground(styles.Border).Render(letter)
 	}
 	return flag(hasSource, "S") + flag(hasBids, "B") + flag(hasDerivatives, "D")
 }
@@ -500,7 +491,7 @@ func (m Model) renderSpatialSelection() string {
 			count++
 		}
 	}
-	b.WriteString("  " + styles.RenderStatusCount(count, len(spatialModes), "selected") + "\n\n")
+	b.WriteString("  " + styles.RenderStatusCount(count, len(spatialModes), "selected") + "\n")
 
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 	for i, mode := range spatialModes {
@@ -546,7 +537,7 @@ func (m Model) renderFeatureFileSelection() string {
 		b.WriteString("  " + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
 			fmt.Sprintf("%d available", availableCount)))
 	}
-	b.WriteString("\n\n\n")
+	b.WriteString("\n")
 
 	displayCursor := m.featureFileCursor
 	if displayCursor >= len(applicableFeatures) {
@@ -576,12 +567,12 @@ func (m Model) renderFeatureFileSelection() string {
 				timestamp := m.featureLastModified[file.Key]
 				relTime := formatRelativeTime(timestamp)
 				if relTime != "" {
-					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  [" + relTime + "]")
+					line += lipgloss.NewStyle().Foreground(styles.TextDim).Render("  " + relTime)
 				} else {
-					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  [" + styles.CheckMark + "]")
+					line += lipgloss.NewStyle().Foreground(styles.Success).Render("  " + styles.CheckMark)
 				}
 			} else {
-				line += lipgloss.NewStyle().Foreground(styles.Error).Render("  [" + styles.CrossMark + "]")
+				line += lipgloss.NewStyle().Foreground(styles.Error).Render("  " + styles.CrossMark)
 			}
 		}
 		b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
@@ -674,7 +665,7 @@ func (m Model) renderSubjectSelection() string {
 	if m.subjectFilter != "" {
 		b.WriteString("  " + dimStyle.Render(fmt.Sprintf("%d shown", len(filteredSubjects))))
 	}
-	b.WriteString("\n\n\n")
+	b.WriteString("\n")
 
 	if len(filteredSubjects) == 0 {
 		if m.subjectLoadError != "" {

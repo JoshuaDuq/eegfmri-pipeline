@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,40 +112,40 @@ func (m *Model) getStatePath() string {
 	return filepath.Join(m.repoRoot, "eeg_pipeline", "data", "derivatives", ".tui_state.json")
 }
 
-func (m *Model) loadState() {
+func (m *Model) loadState() error {
 	path := m.getStatePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// State file doesn't exist or can't be read - use defaults
-		return
+		// State file doesn't exist yet (first run) — not an error.
+		return nil
 	}
 
 	var state TUIState
 	if err := json.Unmarshal(data, &state); err != nil {
-		// Invalid state file - use defaults
-		return
+		// Corrupted state file: reset to defaults and warn the caller.
+		return fmt.Errorf("saved session corrupted and was reset (%w)", err)
 	}
 
 	m.persistentState = state
+	return nil
 }
 
 func (m *Model) saveState() {
 	path := m.getStatePath()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		// Cannot create directory - state won't be saved
+		fmt.Fprintf(os.Stderr, "tui: cannot create state dir: %v\n", err)
 		return
 	}
 
 	data, err := json.MarshalIndent(m.persistentState, "", "  ")
 	if err != nil {
-		// Cannot serialize state - state won't be saved
+		fmt.Fprintf(os.Stderr, "tui: cannot serialize state: %v\n", err)
 		return
 	}
 
 	if err := os.WriteFile(path, data, 0644); err != nil {
-		// Cannot write state file - state won't be saved
-		return
+		fmt.Fprintf(os.Stderr, "tui: cannot write state file: %v\n", err)
 	}
 }
 

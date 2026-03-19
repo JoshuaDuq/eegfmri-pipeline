@@ -57,6 +57,7 @@ type Model struct {
 	SelectedAction ActionType
 	Done           bool
 	ticker         int
+	width          int
 	animQueue      animation.Queue
 }
 
@@ -85,6 +86,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ticker++
 		m.animQueue.Tick()
 		return m, m.tick()
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
 
 	case tea.KeyMsg:
 		switch key := msg.String(); key {
@@ -136,7 +140,14 @@ func (m Model) View() string {
 		styles.RenderKeyHint("\u23ce", "select")
 	b.WriteString(footer)
 
-	return styles.CardStyle.Width(42).Render(b.String())
+	overlayw := 42
+	if m.width > 0 && m.width-8 < overlayw {
+		overlayw = m.width - 8
+	}
+	if overlayw < 30 {
+		overlayw = 30
+	}
+	return styles.CardStyle.Width(overlayw).Render(b.String())
 }
 
 func (m Model) renderAction(action Action, isCursor bool) string {

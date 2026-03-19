@@ -539,6 +539,9 @@ func (m *Model) toggleFmriAdvancedOption() {
 	case optFmriTaskId:
 		m.startTextEdit(textFieldFmriTaskId)
 		m.useDefaultAdvanced = false
+	case optFmriTaskIsRest:
+		m.fmriTaskIsRest = !m.fmriTaskIsRest
+		m.useDefaultAdvanced = false
 
 	// Performance
 	case optFmriNThreads:
@@ -797,6 +800,21 @@ func (m *Model) toggleFmriAnalysisAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optFmriAnalysisFreesurferDir:
 		m.startTextEdit(textFieldFmriAnalysisFreesurferDir)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisAtlasLabelsImg:
+		m.startTextEdit(textFieldFmriAnalysisAtlasLabelsImg)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisAtlasLabelsTsv:
+		m.startTextEdit(textFieldFmriAnalysisAtlasLabelsTsv)
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisConnectivityKind:
+		m.fmriAnalysisConnectivityKind = 0
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisStandardize:
+		m.fmriAnalysisStandardize = !m.fmriAnalysisStandardize
+		m.useDefaultAdvanced = false
+	case optFmriAnalysisDetrend:
+		m.fmriAnalysisDetrend = !m.fmriAnalysisDetrend
 		m.useDefaultAdvanced = false
 
 	// Plotting / Report

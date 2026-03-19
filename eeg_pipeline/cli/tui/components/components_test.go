@@ -82,3 +82,48 @@ func TestInfoPanelView(t *testing.T) {
 	}
 }
 
+func TestDotsLoader(t *testing.T) {
+	loader := NewDotsLoader("Computing")
+
+	// Frame 0: label + "   " (blank dots)
+	view0 := stripComponentsANSI(loader.View())
+	if !strings.Contains(view0, "Computing") {
+		t.Fatalf("DotsLoader frame 0 = %q, want label present", view0)
+	}
+
+	// Advance 3 ticks → frame 1: "·  "
+	for i := 0; i < 3; i++ {
+		loader.Advance()
+	}
+	view1 := stripComponentsANSI(loader.View())
+	if !strings.Contains(view1, "·") {
+		t.Fatalf("DotsLoader frame 1 = %q, want at least one dot", view1)
+	}
+
+	// Advance 3 more ticks → frame 2: "·· "
+	for i := 0; i < 3; i++ {
+		loader.Advance()
+	}
+	view2 := stripComponentsANSI(loader.View())
+	if strings.Count(view2, "·") < 2 {
+		t.Fatalf("DotsLoader frame 2 = %q, want at least two dots", view2)
+	}
+
+	// Advance 3 more ticks → frame 3: "···"
+	for i := 0; i < 3; i++ {
+		loader.Advance()
+	}
+	view3 := stripComponentsANSI(loader.View())
+	if strings.Count(view3, "·") < 3 {
+		t.Fatalf("DotsLoader frame 3 = %q, want three dots", view3)
+	}
+
+	// Advance 3 more ticks → wraps back to frame 0
+	for i := 0; i < 3; i++ {
+		loader.Advance()
+	}
+	view4 := stripComponentsANSI(loader.View())
+	if view4 != view0 {
+		t.Fatalf("DotsLoader wrap: frame 4 = %q, want same as frame 0 %q", view4, view0)
+	}
+}

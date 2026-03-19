@@ -133,6 +133,14 @@ func TestApplyPostModeSelectionDefaults_OnlyMutatesFmriTrialSignatures(t *testin
 			initialSpace: "fsaverage",
 			wantSpace:    "fsaverage",
 		},
+		{
+			name:         "rest mode also defaults blank T1w to MNI",
+			pipeline:     types.PipelineFmriAnalysis,
+			modeOptions:  []string{"first-level", "trial-signatures", "rest"},
+			modeIndex:    2,
+			initialSpace: "",
+			wantSpace:    "MNI152NLin2009cAsym",
+		},
 	}
 
 	for _, tc := range tests {

@@ -139,19 +139,11 @@ func (m Model) stackedSupplementarySections() []string {
 		return nil
 	}
 
-	info := m.renderInfoPanel()
 	progress := m.renderSidebarCard(m.renderProgressSection())
-	infoLines := renderedLineCount(info)
 	progressLines := renderedLineCount(progress)
 
-	if infoLines+progressLines <= available {
-		return []string{info, progress}
-	}
 	if progressLines <= available {
 		return []string{progress}
-	}
-	if infoLines <= available {
-		return []string{info}
 	}
 	return nil
 }

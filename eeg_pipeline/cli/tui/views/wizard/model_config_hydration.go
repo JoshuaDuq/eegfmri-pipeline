@@ -277,6 +277,11 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.fmriRandomSeed = n
 			}
 		}},
+		{key: "fmri_preprocessing.task_is_rest", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriTaskIsRest = b
+			}
+		}},
 		{key: "fmri_contrast.input_source", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				switch strings.ToLower(strings.TrimSpace(s)) {
@@ -473,6 +478,104 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "fmri_contrast.freesurfer_dir", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				m.fmriAnalysisFreesurferDir = s
+			}
+		}},
+		{key: "fmri_resting_state.task_is_rest", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok && b && m.Pipeline == types.PipelineFmriAnalysis {
+				for idx, mode := range m.modeOptions {
+					if mode == "rest" {
+						m.modeIndex = idx
+						break
+					}
+				}
+			}
+		}},
+		{key: "fmri_resting_state.input_source", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "bids_raw":
+					m.fmriAnalysisInputSourceIndex = 1
+				default:
+					m.fmriAnalysisInputSourceIndex = 0
+				}
+			}
+		}},
+		{key: "fmri_resting_state.fmriprep_space", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisFmriprepSpace = s
+			}
+		}},
+		{key: "fmri_resting_state.require_fmriprep", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriAnalysisRequireFmriprep = b
+			}
+		}},
+		{key: "fmri_resting_state.runs", apply: func(v interface{}) {
+			if spec, ok := asListSpec(v); ok {
+				m.fmriAnalysisRunsSpec = strings.Join(splitLooseList(spec), " ")
+			}
+		}},
+		{key: "fmri_resting_state.confounds_strategy", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "none":
+					m.fmriAnalysisConfoundsStrategy = 1
+				case "motion6":
+					m.fmriAnalysisConfoundsStrategy = 2
+				case "motion12":
+					m.fmriAnalysisConfoundsStrategy = 3
+				case "motion24":
+					m.fmriAnalysisConfoundsStrategy = 4
+				case "motion24+wmcsf":
+					m.fmriAnalysisConfoundsStrategy = 5
+				case "motion24+wmcsf+fd":
+					m.fmriAnalysisConfoundsStrategy = 6
+				default:
+					m.fmriAnalysisConfoundsStrategy = 0
+				}
+			}
+		}},
+		{key: "fmri_resting_state.high_pass_hz", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriAnalysisHighPassHz = f
+			}
+		}},
+		{key: "fmri_resting_state.low_pass_hz", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriAnalysisLowPassHz = f
+			}
+		}},
+		{key: "fmri_resting_state.smoothing_fwhm", apply: func(v interface{}) {
+			if f, ok := asFloat(v); ok {
+				m.fmriAnalysisSmoothingFwhm = f
+			}
+		}},
+		{key: "fmri_resting_state.atlas_labels_img", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisAtlasLabelsImg = s
+			}
+		}},
+		{key: "fmri_resting_state.atlas_labels_tsv", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				m.fmriAnalysisAtlasLabelsTsv = s
+			}
+		}},
+		{key: "fmri_resting_state.connectivity_kind", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				default:
+					m.fmriAnalysisConnectivityKind = 0
+				}
+			}
+		}},
+		{key: "fmri_resting_state.standardize", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriAnalysisStandardize = b
+			}
+		}},
+		{key: "fmri_resting_state.detrend", apply: func(v interface{}) {
+			if b, ok := asBool(v); ok {
+				m.fmriAnalysisDetrend = b
 			}
 		}},
 		{key: "fmri_group_level.model", apply: func(v interface{}) {

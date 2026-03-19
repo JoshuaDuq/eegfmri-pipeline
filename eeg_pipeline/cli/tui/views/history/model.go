@@ -58,6 +58,7 @@ type Model struct {
 	loadError   error
 	animQueue   animation.Queue
 	spinner     components.Spinner
+	width       int
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -225,6 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
 	}
 
 	return m, nil
@@ -256,10 +258,18 @@ func (m Model) View() string {
 	return styles.BoxStyle.Render(b.String())
 }
 
+func (m Model) innerWidth() int {
+	w := m.width - 8
+	if w < 50 {
+		return 50
+	}
+	return w
+}
+
 func (m Model) renderHeader() string {
 	title := styles.RenderSectionLabel("Execution History")
 	count := lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("  %d records", len(m.records)))
-	return title + count + "\n" + styles.RenderDivider(55)
+	return title + count + "\n" + styles.RenderDivider(m.innerWidth())
 }
 
 func (m Model) renderLoading() string {
@@ -358,13 +368,14 @@ func FormatTimeAgo(t time.Time) string {
 
 func (m Model) renderFooter() string {
 	hints := []string{
-		styles.RenderKeyHint("\u2191\u2193", "Navigate"),
+		styles.RenderKeyHint("↑↓", "Navigate"),
 		styles.RenderKeyHint("D", "Delete"),
 		styles.RenderKeyHint("C", "Clear All"),
 		styles.RenderKeyHint("Esc", "Back"),
 	}
 
-	divider := styles.RenderDivider(50)
-	bar := styles.FooterStyle.Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	w := m.innerWidth()
+	divider := styles.RenderDivider(w)
+	bar := styles.FooterStyle.Width(w).Render(strings.Join(hints, styles.RenderFooterSeparator()))
 	return divider + "\n" + bar
 }

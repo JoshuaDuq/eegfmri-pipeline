@@ -40,6 +40,10 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.fmriSkullStripTemplate
 	case textFieldFmriTaskId:
 		return m.fmriTaskId
+	case textFieldFmriAnalysisAtlasLabelsImg:
+		return m.fmriAnalysisAtlasLabelsImg
+	case textFieldFmriAnalysisAtlasLabelsTsv:
+		return m.fmriAnalysisAtlasLabelsTsv
 	case textFieldFmriAnalysisFmriprepSpace:
 		return m.fmriAnalysisFmriprepSpace
 	case textFieldFmriAnalysisRuns:
@@ -499,6 +503,10 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.fmriSkullStripTemplate = strings.TrimSpace(value)
 	case textFieldFmriTaskId:
 		m.fmriTaskId = strings.TrimSpace(value)
+	case textFieldFmriAnalysisAtlasLabelsImg:
+		m.fmriAnalysisAtlasLabelsImg = strings.TrimSpace(value)
+	case textFieldFmriAnalysisAtlasLabelsTsv:
+		m.fmriAnalysisAtlasLabelsTsv = strings.TrimSpace(value)
 	case textFieldFmriAnalysisFmriprepSpace:
 		m.fmriAnalysisFmriprepSpace = strings.TrimSpace(value)
 	case textFieldFmriAnalysisRuns:

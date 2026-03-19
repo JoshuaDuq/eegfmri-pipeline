@@ -113,3 +113,81 @@ def resolve_eeg_deriv_root(config: Any, *, task_is_rest: Optional[bool] = None) 
             "or pass --deriv-root."
         ),
     )
+
+
+def resolve_resting_state_fmri_mode(config: Any) -> bool:
+    """Resolve whether fMRI inputs should come from the resting-state dataset."""
+    preprocessing_raw = get_config_value(config, "fmri_preprocessing.task_is_rest", _MISSING)
+    resting_state_raw = get_config_value(config, "fmri_resting_state.task_is_rest", _MISSING)
+
+    if preprocessing_raw is _MISSING and resting_state_raw is _MISSING:
+        return False
+    if preprocessing_raw is _MISSING:
+        return bool(resting_state_raw)
+    if resting_state_raw is _MISSING:
+        return bool(preprocessing_raw)
+
+    preprocessing_task_is_rest = bool(preprocessing_raw)
+    resting_state_task_is_rest = bool(resting_state_raw)
+    if preprocessing_task_is_rest != resting_state_task_is_rest:
+        raise ValueError(
+            "Resting-state fMRI input selection requires fmri_preprocessing.task_is_rest "
+            "and fmri_resting_state.task_is_rest to match."
+        )
+    return preprocessing_task_is_rest
+
+
+def resolve_fmri_bids_root(config: Any, *, task_is_rest: Optional[bool] = None) -> Path:
+    """Resolve the fMRI BIDS input root for task or resting-state processing."""
+    use_rest_root = (
+        resolve_resting_state_fmri_mode(config)
+        if task_is_rest is None
+        else bool(task_is_rest)
+    )
+    if use_rest_root:
+        return _resolve_required_path(
+            config,
+            dotted_key="paths.bids_rest_root",
+            legacy_key="bids_rest_root",
+            error_message=(
+                "Resting-state fMRI input root is not configured. Set paths.bids_rest_root "
+                "in eeg_config.yaml or pass --bids-rest-root."
+            ),
+        )
+    return _resolve_required_path(
+        config,
+        dotted_key="paths.bids_fmri_root",
+        legacy_key="bids_fmri_root",
+        error_message=(
+            "fMRI BIDS root is not configured. Set paths.bids_fmri_root in eeg_config.yaml "
+            "or pass --bids-fmri-root."
+        ),
+    )
+
+
+def resolve_fmri_deriv_root(config: Any, *, task_is_rest: Optional[bool] = None) -> Path:
+    """Resolve the fMRI derivatives root for task or resting-state processing."""
+    use_rest_root = (
+        resolve_resting_state_fmri_mode(config)
+        if task_is_rest is None
+        else bool(task_is_rest)
+    )
+    if use_rest_root:
+        return _resolve_required_path(
+            config,
+            dotted_key="paths.deriv_rest_root",
+            legacy_key="deriv_rest_root",
+            error_message=(
+                "Resting-state fMRI derivatives root is not configured. Set paths.deriv_rest_root "
+                "in eeg_config.yaml or pass --deriv-rest-root."
+            ),
+        )
+    return _resolve_required_path(
+        config,
+        dotted_key="paths.deriv_root",
+        legacy_key="deriv_root",
+        error_message=(
+            "fMRI derivatives root is not configured. Set paths.deriv_root in eeg_config.yaml "
+            "or pass --deriv-root."
+        ),
+    )

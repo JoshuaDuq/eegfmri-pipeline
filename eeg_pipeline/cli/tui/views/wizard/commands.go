@@ -438,6 +438,10 @@ func (m Model) BuildCommand() string {
 		parts = append(parts, cliMode)
 	}
 
+	usesFmriRestRoots :=
+		(m.Pipeline == types.PipelineFmri && m.fmriTaskIsRest) ||
+			(m.Pipeline == types.PipelineFmriAnalysis && modeToUse == "rest")
+
 	if m.Pipeline == types.PipelineML {
 		parts = append(parts, "--cv-scope", m.mlScope.CLIValue())
 	}
@@ -559,6 +563,9 @@ func (m Model) BuildCommand() string {
 			if m.bidsFmriRoot != "" {
 				parts = append(parts, "--bids-fmri-root", expandUserPath(m.bidsFmriRoot))
 			}
+			if usesFmriRestRoots && m.bidsRestRoot != "" {
+				parts = append(parts, "--bids-rest-root", expandUserPath(m.bidsRestRoot))
+			}
 		} else {
 			if m.bidsRoot != "" {
 				parts = append(parts, "--bids-root", expandUserPath(m.bidsRoot))
@@ -570,7 +577,9 @@ func (m Model) BuildCommand() string {
 		if m.derivRoot != "" {
 			parts = append(parts, "--deriv-root", expandUserPath(m.derivRoot))
 		}
-		if m.Pipeline != types.PipelineFmri && m.Pipeline != types.PipelineFmriAnalysis && m.derivRestRoot != "" {
+		if usesFmriRestRoots && m.derivRestRoot != "" {
+			parts = append(parts, "--deriv-rest-root", expandUserPath(m.derivRestRoot))
+		} else if m.Pipeline != types.PipelineFmri && m.Pipeline != types.PipelineFmriAnalysis && m.derivRestRoot != "" {
 			parts = append(parts, "--deriv-rest-root", expandUserPath(m.derivRestRoot))
 		}
 	}

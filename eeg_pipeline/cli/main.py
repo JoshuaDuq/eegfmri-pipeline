@@ -88,12 +88,15 @@ def update_config_from_args(config: dict[str, Any], args: argparse.Namespace) ->
     """Update configuration dictionary with values from command-line arguments."""
     apply_runtime_overrides(
         config,
+        task=getattr(args, "task", None),
+        task_is_rest=getattr(args, "task_is_rest", None),
         source_root=getattr(args, "source_root", None),
         bids_root=getattr(args, "bids_root", None),
         bids_rest_root=getattr(args, "bids_rest_root", None),
         bids_fmri_root=getattr(args, "bids_fmri_root", None),
         deriv_root=getattr(args, "deriv_root", None),
         deriv_rest_root=getattr(args, "deriv_rest_root", None),
+        set_overrides=getattr(args, "set_overrides", None),
     )
 
 

@@ -357,6 +357,10 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		// Runtime options (indented)
+		case optFmriTaskIsRest:
+			label = "Rest Roots"
+			value = m.boolToOnOff(m.fmriTaskIsRest)
+			hint = "Use bids_rest_root / deriv_rest_root"
 		case optFmriEngine:
 			label = "Engine"
 			value = engineVal

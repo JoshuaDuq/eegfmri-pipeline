@@ -1,6 +1,7 @@
 package components
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -14,6 +15,12 @@ const (
 	ToastSuccess
 	ToastWarning
 	ToastError
+)
+
+const (
+	ToastDurationShort  = 16 // ~1.6s at 100ms tick interval
+	ToastDurationMedium = 24 // ~2.4s
+	ToastDurationLong   = 40 // ~4.0s
 )
 
 type Toast struct {
@@ -119,14 +126,31 @@ func (h HelpOverlay) View() string {
 	sectionStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 
 	sectionOrder := []string{"Navigation", "Selection", "Actions", "General"}
+	rendered := make(map[string]bool)
 	for _, sectionName := range sectionOrder {
 		items, exists := h.Sections[sectionName]
 		if !exists || len(items) == 0 {
 			continue
 		}
-
 		content.WriteString(sectionStyle.Render(sectionName) + "\n")
 		for _, item := range items {
+			keyText := lipgloss.NewStyle().Width(helpKeyWidth).Render(keyStyle.Render(item.Key))
+			content.WriteString(keyText + " " + descStyle.Render(item.Description) + "\n")
+		}
+		content.WriteString("\n")
+		rendered[sectionName] = true
+	}
+
+	var extra []string
+	for name := range h.Sections {
+		if !rendered[name] && len(h.Sections[name]) > 0 {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(extra)
+	for _, sectionName := range extra {
+		content.WriteString(sectionStyle.Render(sectionName) + "\n")
+		for _, item := range h.Sections[sectionName] {
 			keyText := lipgloss.NewStyle().Width(helpKeyWidth).Render(keyStyle.Render(item.Key))
 			content.WriteString(keyText + " " + descStyle.Render(item.Description) + "\n")
 		}
@@ -194,14 +218,14 @@ func (s ScrollIndicator) View() string {
 }
 
 type InfoRow struct {
-	Label string
-	Value string
-	Style lipgloss.Style
+	Label    string
+	Value    string
+	Style    lipgloss.Style
+	HasStyle bool
 }
 
 func (r InfoRow) hasCustomStyle() bool {
-	emptyStyle := lipgloss.Style{}
-	return r.Style.String() != emptyStyle.String()
+	return r.HasStyle
 }
 
 type InfoPanel struct {
@@ -222,7 +246,7 @@ func (p *InfoPanel) AddRow(label, value string) {
 }
 
 func (p *InfoPanel) AddStyledRow(label, value string, style lipgloss.Style) {
-	p.Rows = append(p.Rows, InfoRow{Label: label, Value: value, Style: style})
+	p.Rows = append(p.Rows, InfoRow{Label: label, Value: value, Style: style, HasStyle: true})
 }
 
 func (p InfoPanel) View() string {
@@ -247,4 +271,29 @@ func (p InfoPanel) View() string {
 	}
 
 	return content.String()
+}
+
+// DotsLoader is a lightweight animated "·  / ··  / ···" loader.
+// Call Advance() on each tick (driven by the parent model's tick loop).
+type DotsLoader struct {
+	Label string
+	tick  int
+}
+
+func NewDotsLoader(label string) DotsLoader {
+	return DotsLoader{Label: label}
+}
+
+func (d *DotsLoader) Advance() {
+	d.tick++
+}
+
+// View renders the current animation frame: label followed by 0–3 animated dots.
+// Each frame lasts 3 ticks (~300 ms at 100 ms/tick); the full cycle is ~1.2 s.
+func (d DotsLoader) View() string {
+	frames := [4]string{"   ", "·  ", "·· ", "···"}
+	frame := frames[(d.tick/3)%4]
+	dotsStyle := lipgloss.NewStyle().Foreground(styles.Accent)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	return labelStyle.Render(d.Label) + dotsStyle.Render(frame)
 }

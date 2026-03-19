@@ -124,7 +124,7 @@ func (m *Model) applyPostModeSelectionDefaults() {
 	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
 		mode = m.modeOptions[m.modeIndex]
 	}
-	if mode != "trial-signatures" {
+	if mode != "trial-signatures" && mode != "rest" {
 		return
 	}
 

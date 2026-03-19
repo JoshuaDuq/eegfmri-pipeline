@@ -89,6 +89,10 @@ func (m *Model) SetSubjectsLoading() {
 	m.subjectLoadError = ""
 }
 
+func (m Model) IsOnSubjectSelectionStep() bool {
+	return m.CurrentStep == types.StepSelectSubjects
+}
+
 func (m *Model) SetSubjectLoadError(message string) {
 	m.subjects = nil
 	m.subjectSelected = make(map[string]bool)

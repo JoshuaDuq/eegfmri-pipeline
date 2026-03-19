@@ -1,7 +1,6 @@
 package app
 
 import (
-	"github.com/eeg-pipeline/tui/types"
 	"github.com/eeg-pipeline/tui/views/history"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
 )
@@ -21,23 +20,10 @@ func (m *Model) syncMainMenuConfigSummary() {
 
 func (m *Model) syncMainMenuSessionData() {
 	m.mainMenu.SetLastPipeline(m.persistentState.LastPipeline)
-	m.mainMenu.SetSavedConfigCounts(m.savedConfigCounts())
 }
 
 func (m *Model) refreshMainMenuRecentRuns() {
 	m.mainMenu.SetRecentRuns(m.loadRecentRuns())
-}
-
-func (m Model) savedConfigCounts() map[int]int {
-	counts := make(map[int]int)
-	for pipelineIdx := 0; pipelineIdx <= maxPipelineIndex; pipelineIdx++ {
-		pipelineName := types.Pipeline(pipelineIdx).String()
-		config := m.persistentState.PipelineConfigs[pipelineName]
-		if len(config) > 0 {
-			counts[pipelineIdx] = len(config)
-		}
-	}
-	return counts
 }
 
 func (m Model) loadRecentRuns() []mainmenu.RecentRunSummary {

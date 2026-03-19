@@ -101,7 +101,7 @@ func TestFormattingRenderers(t *testing.T) {
 	if got := stripStylesANSI(RenderPreviewSubHeader("Gamma")); !strings.Contains(got, "Gamma") {
 		t.Fatalf("RenderPreviewSubHeader() = %q", got)
 	}
-	if got := stripStylesANSI(RenderPreviewSubHeaderWithRule("Gamma", 3)); !strings.Contains(got, "Gamma") || !strings.Contains(got, "───") {
+	if got := stripStylesANSI(RenderPreviewSubHeaderWithRule("Gamma", 10)); !strings.Contains(got, "Gamma") || !strings.Contains(got, "─") {
 		t.Fatalf("RenderPreviewSubHeaderWithRule() = %q", got)
 	}
 	if got := stripStylesANSI(RenderSectionBlock("Delta", 3)); !strings.Contains(got, "Delta") || !strings.Contains(got, "───") {
@@ -146,5 +146,42 @@ func TestFormattingRenderers(t *testing.T) {
 	}
 	if got := stripStylesANSI(RenderStatusCount(2, 3, "subjects")); !strings.Contains(got, "2/3") {
 		t.Fatalf("RenderStatusCount(2, 3) = %q", got)
+	}
+}
+
+func TestRenderProgressBar(t *testing.T) {
+	// Width clamp: width below MinProgressBarWidth is raised to MinProgressBarWidth
+	got := stripStylesANSI(RenderProgressBar(0.5, 5))
+	if !strings.Contains(got, "50%") {
+		t.Fatalf("RenderProgressBar(0.5, 5) = %q", got)
+	}
+	if strings.Count(got, "█") != MinProgressBarWidth/2 {
+		t.Fatalf("RenderProgressBar(0.5, 5): expected %d filled cells, got %q", MinProgressBarWidth/2, got)
+	}
+
+	// Zero progress: no filled cells
+	zero := stripStylesANSI(RenderProgressBar(0, MinProgressBarWidth))
+	if strings.Contains(zero, "█") {
+		t.Fatalf("RenderProgressBar(0) should have no filled cells, got %q", zero)
+	}
+	if !strings.Contains(zero, "0%") {
+		t.Fatalf("RenderProgressBar(0) should contain 0%%, got %q", zero)
+	}
+
+	// Full progress: no empty cells
+	full := stripStylesANSI(RenderProgressBar(1.0, MinProgressBarWidth))
+	if strings.Contains(full, "░") {
+		t.Fatalf("RenderProgressBar(1.0) should have no empty cells, got %q", full)
+	}
+	if !strings.Contains(full, "100%") {
+		t.Fatalf("RenderProgressBar(1.0) should contain 100%%, got %q", full)
+	}
+
+	// Clamping: values outside [0, 1] behave like boundary values
+	if stripStylesANSI(RenderProgressBar(-0.5, MinProgressBarWidth)) != stripStylesANSI(RenderProgressBar(0, MinProgressBarWidth)) {
+		t.Fatal("RenderProgressBar(-0.5) should equal RenderProgressBar(0)")
+	}
+	if stripStylesANSI(RenderProgressBar(1.5, MinProgressBarWidth)) != stripStylesANSI(RenderProgressBar(1.0, MinProgressBarWidth)) {
+		t.Fatal("RenderProgressBar(1.5) should equal RenderProgressBar(1.0)")
 	}
 }

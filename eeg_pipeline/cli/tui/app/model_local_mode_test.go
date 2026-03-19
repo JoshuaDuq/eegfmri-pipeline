@@ -14,14 +14,14 @@ import (
 )
 
 func TestNewStartsInMainMenu(t *testing.T) {
-	m := New()
+	m := New("dev")
 	if m.state != StateMainMenu {
 		t.Fatalf("expected initial state %v, got %v", StateMainMenu, m.state)
 	}
 }
 
 func TestEscapeFromMainMenuQuits(t *testing.T) {
-	m := New()
+	m := New("dev")
 	m.state = StateMainMenu
 
 	next, cmd := m.handleEscape()
@@ -72,7 +72,7 @@ func TestHandleConfigKeysLoaded_ReappliesPersistedWizardConfig(t *testing.T) {
 }
 
 func TestHandlePipelineSmokeUtilityOpensSelector(t *testing.T) {
-	m := New()
+	m := New("dev")
 	m.state = StateMainMenu
 	m.task = "task"
 	m.mainMenu.SelectedUtility = mainmenu.UtilityPipelineSmokeTest
@@ -92,7 +92,7 @@ func TestHandlePipelineSmokeUtilityOpensSelector(t *testing.T) {
 }
 
 func TestHandlePipelineSelectedSizesWizardImmediately(t *testing.T) {
-	m := New()
+	m := New("dev")
 	m.state = StateMainMenu
 	m.width = 80
 	m.height = 20
@@ -130,7 +130,7 @@ func TestHandlePipelineSelectedSizesWizardImmediately(t *testing.T) {
 }
 
 func TestView_ExecutionBypassesGlobalTooSmallScreen(t *testing.T) {
-	m := New()
+	m := New("dev")
 	m.state = StateExecution
 	m.width = 50
 	m.height = 16

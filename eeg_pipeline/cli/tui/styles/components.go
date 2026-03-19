@@ -17,7 +17,7 @@ var (
 	CardStyle = lipgloss.NewStyle().
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Primary)
+			BorderForeground(Border)
 
 	CardStyleFocused = lipgloss.NewStyle().
 				Padding(1, 2).

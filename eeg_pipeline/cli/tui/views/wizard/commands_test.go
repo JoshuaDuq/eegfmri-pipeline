@@ -136,6 +136,105 @@ func TestBuildCommand_IncludesBidsRestRootForFeatures(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_FmriPreprocessingRestModeIncludesRestRootsAndFlag(t *testing.T) {
+	m := New(types.PipelineFmri, ".")
+	m.bidsFmriRoot = "/data/bids/fmri"
+	m.bidsRestRoot = "/data/bids/rest"
+	m.derivRoot = "/data/derivatives/fmri"
+	m.derivRestRoot = "/data/derivatives/rest"
+	m.fmriTaskIsRest = true
+
+	cmd := m.BuildCommand()
+	for _, fragment := range []string{
+		"--bids-rest-root /data/bids/rest",
+		"--deriv-rest-root /data/derivatives/rest",
+		"--task-is-rest",
+	} {
+		if !strings.Contains(cmd, fragment) {
+			t.Fatalf("expected %q in command, got: %s", fragment, cmd)
+		}
+	}
+}
+
+func TestBuildFmriAnalysisAdvancedArgs_RestEmitsAtlasAndRestFlags(t *testing.T) {
+	m := New(types.PipelineFmriAnalysis, ".")
+	m.modeIndex = 3
+	m.fmriAnalysisAtlasLabelsImg = "/tmp/atlas_labels.nii.gz"
+	m.fmriAnalysisAtlasLabelsTsv = "/tmp/atlas_labels.tsv"
+	m.fmriAnalysisOutputDir = "/tmp/rest-out"
+	m.fmriAnalysisStandardize = true
+	m.fmriAnalysisDetrend = true
+
+	args := m.buildFmriAnalysisAdvancedArgs()
+
+	for _, subseq := range [][]string{
+		{"--task-is-rest"},
+		{"--atlas-labels-img", "/tmp/atlas_labels.nii.gz"},
+		{"--atlas-labels-tsv", "/tmp/atlas_labels.tsv"},
+		{"--connectivity-kind", "correlation"},
+		{"--output-dir", "/tmp/rest-out"},
+	} {
+		if !containsSubsequence(args, subseq) {
+			t.Fatalf("expected %#v in args: %#v", subseq, args)
+		}
+	}
+	if !containsString(args, "--standardize") {
+		t.Fatalf("expected --standardize in args: %#v", args)
+	}
+	if !containsString(args, "--detrend") {
+		t.Fatalf("expected --detrend in args: %#v", args)
+	}
+	for _, flag := range []string{"--contrast-type", "--cond-a-column", "--cond-a-value"} {
+		if containsString(args, flag) {
+			t.Fatalf("did not expect %s in rest args: %#v", flag, args)
+		}
+	}
+}
+
+func TestBuildCommand_FmriAnalysisRestIncludesRestRoots(t *testing.T) {
+	m := New(types.PipelineFmriAnalysis, ".")
+	m.modeIndex = 3
+	m.bidsFmriRoot = "/data/bids/fmri"
+	m.bidsRestRoot = "/data/bids/rest"
+	m.derivRoot = "/data/derivatives/fmri"
+	m.derivRestRoot = "/data/derivatives/rest"
+	m.fmriAnalysisAtlasLabelsImg = "/tmp/atlas_labels.nii.gz"
+	m.subjects = []types.SubjectStatus{{ID: "sub-01", HasFeatures: true}}
+	m.subjectSelected = map[string]bool{"sub-01": true}
+
+	cmd := m.BuildCommand()
+	for _, fragment := range []string{
+		"fmri-analysis rest",
+		"--bids-rest-root /data/bids/rest",
+		"--deriv-rest-root /data/derivatives/rest",
+		"--atlas-labels-img /tmp/atlas_labels.nii.gz",
+		"--task-is-rest",
+	} {
+		if !strings.Contains(cmd, fragment) {
+			t.Fatalf("expected %q in command, got: %s", fragment, cmd)
+		}
+	}
+}
+
+func TestValidate_FmriRestRequiresRestRootsAndAtlas(t *testing.T) {
+	m := New(types.PipelineFmriAnalysis, ".")
+	m.modeIndex = 3
+	m.subjects = []types.SubjectStatus{{ID: "sub-01", HasFeatures: true}}
+	m.subjectSelected = map[string]bool{"sub-01": true}
+
+	errors := m.validate()
+
+	for _, want := range []string{
+		"fMRI resting-state: bids_rest_root is required",
+		"fMRI resting-state: deriv_rest_root is required",
+		"fMRI resting-state: atlas labels image is required",
+	} {
+		if !containsString(errors, want) {
+			t.Fatalf("expected %q in validation errors: %#v", want, errors)
+		}
+	}
+}
+
 func TestBuildCommand_IncludesBidsRestRootForPreprocessing(t *testing.T) {
 	m := New(types.PipelinePreprocessing, ".")
 	m.bidsRestRoot = "/data/bids/rest"

@@ -20,11 +20,10 @@ import (
 )
 
 const (
-	defaultWidth       = 120
-	defaultHeight      = 32
-	boxFrameWidth      = 6
-	dashboardColumnGap = 2
-	minSectionWidth    = 28
+	defaultWidth    = 120
+	defaultHeight   = 32
+	boxFrameWidth   = 6
+	minSectionWidth = 28
 )
 
 type sectionLayout struct {
@@ -254,9 +253,11 @@ func (m Model) renderContent(width int) string {
 }
 
 func (m Model) renderHeader(width int) string {
-	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Render("◈")
+	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("◈")
 	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("Project Dashboard")
-	return "  " + glyph + "  " + title + "\n" + styles.RenderDivider(width) + "\n"
+	headerLine := "  " + glyph + "  " + title
+	sep := lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat(styles.HeaderSeparatorChar, width))
+	return headerLine + "\n" + sep + "\n"
 }
 
 func (m Model) renderLoading(width int) string {
@@ -287,17 +288,22 @@ func (m Model) renderStats(width int) string {
 }
 
 func (m Model) renderSummaryStrip(width int) string {
+	taskPill := lipgloss.NewStyle().
+		Foreground(styles.BgDark).Background(styles.Accent).Bold(true).Padding(0, 1).
+		Render(m.stats.Task)
 	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("Task")
-	taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.stats.Task)
 
-	totalLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("Subjects")
-	totalValue := lipgloss.NewStyle().Foreground(styles.Text).Bold(true).Render(fmt.Sprintf("%d", m.stats.TotalSubjects))
+	countPill := lipgloss.NewStyle().
+		Foreground(styles.BgDark).Background(styles.Primary).Bold(true).Padding(0, 1).
+		Render(fmt.Sprintf("%d", m.stats.TotalSubjects))
+	subjectsLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("Subjects")
 
-	left := "  " + taskLabel + "  " + taskValue + "    " + totalLabel + "  " + totalValue
+	left := "  " + taskLabel + " " + taskPill + "    " + subjectsLabel + " " + countPill
 
 	updatedAt := ""
 	if !m.lastUpdate.IsZero() {
-		updatedAt = lipgloss.NewStyle().Foreground(styles.Muted).Render("Updated " + m.lastUpdate.Format("15:04:05"))
+		updatedAt = lipgloss.NewStyle().Foreground(styles.Muted).
+			Render("Updated " + m.lastUpdate.Format("15:04:05"))
 	}
 
 	spacer := lipgloss.NewStyle().Width(max(width-lipgloss.Width(left)-lipgloss.Width(updatedAt), 0)).Render("")
@@ -325,9 +331,11 @@ func (m Model) subjectRowColor(label string, count, total int) lipgloss.Color {
 	return styles.Primary
 }
 
+const columnSepWidth = 3 // " │ "
+
 func (m Model) statsColumnWidths(width int) (int, int) {
-	leftWidth := (width - dashboardColumnGap) * 54 / 100
-	rightWidth := width - dashboardColumnGap - leftWidth
+	leftWidth := (width - columnSepWidth) * 54 / 100
+	rightWidth := width - columnSepWidth - leftWidth
 	return leftWidth, rightWidth
 }
 
@@ -341,55 +349,45 @@ func (m Model) renderStatsSections(width int) string {
 	leftWidth, rightWidth := m.statsColumnWidths(width)
 	left := lipgloss.NewStyle().Width(leftWidth).Render(strings.TrimRight(m.renderEegSection(leftWidth), "\n"))
 	right := lipgloss.NewStyle().Width(rightWidth).Render(strings.TrimRight(m.renderFmriSection(rightWidth), "\n"))
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat(styles.SectionDividerChar, 1))
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", dashboardColumnGap), right)
-}
-
-func (m Model) maxCountWidth() int {
-	maxCount := m.stats.TotalSubjects
-	for _, count := range m.stats.FeatureCategories {
-		if count > maxCount {
-			maxCount = count
-		}
-	}
-	width := len(fmt.Sprintf("%d", maxCount))
-	if width < 3 {
-		width = 3
-	}
-	return width
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, " "+sep+" ", right)
 }
 
 func (m Model) layoutForSection(width int) sectionLayout {
-	countWidth := max(m.maxCountWidth(), 3)
-	featureCountWidth := max(len(fmt.Sprintf("%d/%d", m.stats.TotalSubjects, m.stats.TotalSubjects)), 3)
-	subjectLabelWidth := min(max(width/4, 10), 14)
-	featureLabelWidth := min(max(width/2, 14), 24)
-	showPercent := width >= 44
-	showIndicators := width >= 34
+	fractionWidth := max(len(fmt.Sprintf("%d/%d", m.stats.TotalSubjects, m.stats.TotalSubjects)), 3)
+	subjectLabelWidth := min(max(width/4, 12), 18)
+	featureLabelWidth := min(max(width/3, 20), 32)
+	showPercent := width >= 50
+	showIndicators := width >= 40
 
+	// percent column: " (100%)" = 7 chars; always reserved when shown
 	percentWidth := 0
 	if showPercent {
-		percentWidth = len(" (100%)")
+		percentWidth = 7
 	}
+	// indicator: " —" = 2 chars, only on feature rows
 	indicatorWidth := 0
 	if showIndicators {
 		indicatorWidth = 2
 	}
 
-	subjectBarWidth := width - subjectLabelWidth - countWidth - 1 - percentWidth - indicatorWidth
+	// subject rows: label + sp + fraction + sp + bar + percent
+	subjectBarWidth := width - subjectLabelWidth - 1 - fractionWidth - 1 - percentWidth
 	if subjectBarWidth < 6 {
 		subjectBarWidth = 6
 	}
 
-	featureBarWidth := width - featureLabelWidth - 1 - featureCountWidth - indicatorWidth
+	// feature rows: label + sp + fraction + sp + bar + indicator
+	featureBarWidth := width - featureLabelWidth - 1 - fractionWidth - 1 - indicatorWidth
 	if featureBarWidth < 6 {
 		featureBarWidth = 6
 	}
 
 	return sectionLayout{
 		width:             width,
-		countWidth:        countWidth,
-		featureCountWidth: featureCountWidth,
+		countWidth:        fractionWidth,
+		featureCountWidth: fractionWidth,
 		subjectLabelWidth: subjectLabelWidth,
 		subjectBarWidth:   subjectBarWidth,
 		featureLabelWidth: featureLabelWidth,
@@ -400,16 +398,27 @@ func (m Model) layoutForSection(width int) sectionLayout {
 }
 
 func (m Model) renderPipelineSectionHeader(title string, width int) string {
-	bar := lipgloss.NewStyle().Foreground(styles.Primary).Render(styles.SectionIcon)
-	label := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render(" " + strings.ToUpper(title))
-	totalBadge := lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("  %d subjects", m.stats.TotalSubjects))
-	left := "  " + bar + label + totalBadge
-	spacer := lipgloss.NewStyle().Width(max(width-lipgloss.Width(left), 0)).Render("")
-	return left + spacer + "\n"
+	icon := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(styles.SectionIconActive)
+	label := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(" " + title)
+	subjectsBadge := lipgloss.NewStyle().
+		Foreground(styles.BgDark).Background(styles.Muted).Bold(true).Padding(0, 1).
+		Render(fmt.Sprintf("%d subjects", m.stats.TotalSubjects))
+	left := "  " + icon + label
+	spacer := lipgloss.NewStyle().Width(max(width-lipgloss.Width(left)-lipgloss.Width(subjectsBadge)-1, 0)).Render("")
+	return left + spacer + subjectsBadge + "\n" + "\n"
 }
 
-func (m Model) renderSubSectionHeader(title string, _ int) string {
-	return "  " + lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render(title) + "\n"
+func (m Model) renderSubSectionHeader(title string, width int) string {
+	label := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render(title)
+	ruleStyle := lipgloss.NewStyle().Foreground(styles.Border)
+	prefix := ruleStyle.Render(strings.Repeat(styles.SectionDividerChar, 2) + " ")
+	visibleW := lipgloss.Width(prefix) + lipgloss.Width(label) + 4
+	trailing := width - visibleW
+	if trailing < 1 {
+		trailing = 1
+	}
+	suffix := ruleStyle.Render(" " + strings.Repeat(styles.SectionDividerChar, trailing))
+	return "  " + prefix + label + suffix + "\n" + "\n"
 }
 
 func (m Model) renderEegSection(width int) string {
@@ -462,6 +471,7 @@ func (m Model) renderFmriSection(width int) string {
 		color := m.subjectRowColor(row.label, row.count, totalSubjects)
 		b.WriteString(m.renderSubjectItem(row.label, row.count, color, totalSubjects, layout))
 	}
+	b.WriteString("\n")
 
 	return b.String()
 }
@@ -469,28 +479,19 @@ func (m Model) renderFmriSection(width int) string {
 func (m Model) renderSubjectItem(label string, count int, color lipgloss.Color, totalSubjects int, layout sectionLayout) string {
 	percentage := m.calculatePercentage(count, totalSubjects, false)
 
-	labelText := lipgloss.NewStyle().
-		Foreground(styles.TextDim).
-		Width(layout.subjectLabelWidth).
-		Render(styles.TruncateLine("  "+label, layout.subjectLabelWidth))
+	labelText := lipgloss.NewStyle().Foreground(styles.Text).Render(
+		styles.PadRight(styles.TruncateLine("  "+label, layout.subjectLabelWidth), layout.subjectLabelWidth),
+	)
 
-	progressBar := m.renderBlockBar(percentage, layout.subjectBarWidth, color)
+	fractionStr := fmt.Sprintf("%d/%d", count, totalSubjects)
+	fractionText := lipgloss.NewStyle().Foreground(color).Bold(count > 0).Render(
+		styles.PadRight(fractionStr, layout.countWidth),
+	)
 
-	fractionText := lipgloss.NewStyle().
-		Foreground(color).
-		Bold(count > 0).
-		Width(layout.countWidth).
-		Align(lipgloss.Right).
-		Render(fmt.Sprintf("%d/%d", count, totalSubjects))
-
+	progressBar := m.renderSmoothBar(percentage, layout.subjectBarWidth, color)
 	percentageText := m.formatPercentageText(percentage, false, layout.showPercent)
 
-	zeroIndicator := ""
-	if layout.showIndicators && totalSubjects > 0 && count == 0 {
-		zeroIndicator = " " + lipgloss.NewStyle().Foreground(styles.Warning).Render("—")
-	}
-
-	line := labelText + fractionText + " " + progressBar + percentageText + zeroIndicator
+	line := labelText + " " + fractionText + " " + progressBar + percentageText
 	return styles.TruncateLine(line, layout.width) + "\n"
 }
 
@@ -509,28 +510,58 @@ func (m Model) formatPercentageText(percentage float64, isTotal, showPercent boo
 		return ""
 	}
 	percentageValue := percentage * 100
+	color := styles.TextDim
+	if percentage >= 1.0 {
+		color = styles.Success
+	} else if percentage == 0 {
+		color = styles.Warning
+	}
 	return lipgloss.NewStyle().
-		Foreground(styles.Muted).
-		Render(fmt.Sprintf(" (%.0f%%)", percentageValue))
+		Foreground(color).
+		Render(fmt.Sprintf(" (%3.0f%%)", percentageValue))
 }
 
-func (m Model) renderBlockBar(percentage float64, width int, color lipgloss.Color) string {
+func (m Model) renderSmoothBar(percentage float64, width int, color lipgloss.Color) string {
 	if width <= 0 {
 		return ""
 	}
-	filledWidth := int(percentage * float64(width))
-	if filledWidth < 0 {
-		filledWidth = 0
+	if percentage < 0 {
+		percentage = 0
 	}
-	if filledWidth > width {
-		filledWidth = width
+	if percentage > 1 {
+		percentage = 1
 	}
-	emptyWidth := width - filledWidth
 
-	filledBar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("█", filledWidth))
-	emptyBar := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("░", emptyWidth))
+	subBlocks := []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"}
+	exact := percentage * float64(width)
+	filled := int(exact)
+	remainder := exact - float64(filled)
+	subIdx := int(remainder * float64(len(subBlocks)-1))
 
-	return filledBar + emptyBar
+	if filled > width {
+		filled = width
+	}
+	emptyWidth := width - filled
+	hasPartial := subIdx > 0 && filled < width
+	if hasPartial {
+		emptyWidth--
+	}
+
+	filledStyle := lipgloss.NewStyle().Foreground(color)
+	emptyStyle := lipgloss.NewStyle().Foreground(styles.Border)
+
+	var sb strings.Builder
+	if filled > 0 {
+		sb.WriteString(filledStyle.Render(strings.Repeat("█", filled)))
+	}
+	if hasPartial {
+		sb.WriteString(filledStyle.Render(subBlocks[subIdx]))
+	}
+	if emptyWidth > 0 {
+		sb.WriteString(emptyStyle.Render(strings.Repeat("░", emptyWidth)))
+	}
+
+	return sb.String()
 }
 
 func (m Model) featureCategoryRowColor(count, total int) lipgloss.Color {
@@ -611,26 +642,23 @@ func (m Model) renderFeatureCategory(category string, totalSubjects int, layout 
 	percentage := m.calculatePercentage(count, totalSubjects, false)
 	color := m.featureCategoryRowColor(count, totalSubjects)
 
-	label := lipgloss.NewStyle().
-		Foreground(styles.TextDim).
-		Width(layout.featureLabelWidth).
-		Render(styles.TruncateLine("    "+category, layout.featureLabelWidth))
+	label := lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		styles.PadRight(styles.TruncateLine("    "+category, layout.featureLabelWidth), layout.featureLabelWidth),
+	)
 
-	progressBar := m.renderBlockBar(percentage, layout.featureBarWidth, color)
+	fractionStr := fmt.Sprintf("%d/%d", count, totalSubjects)
+	fractionText := lipgloss.NewStyle().Foreground(color).Bold(count > 0).Render(
+		styles.PadRight(fractionStr, layout.featureCountWidth),
+	)
 
-	fractionText := lipgloss.NewStyle().
-		Foreground(color).
-		Bold(count > 0).
-		Width(layout.featureCountWidth).
-		Align(lipgloss.Right).
-		Render(fmt.Sprintf("%d/%d", count, totalSubjects))
+	progressBar := m.renderSmoothBar(percentage, layout.featureBarWidth, color)
 
 	zeroIndicator := ""
 	if layout.showIndicators && totalSubjects > 0 && count == 0 {
 		zeroIndicator = " " + lipgloss.NewStyle().Foreground(styles.Warning).Render("—")
 	}
 
-	line := label + fractionText + " " + progressBar + zeroIndicator
+	line := label + " " + fractionText + " " + progressBar + zeroIndicator
 	return styles.TruncateLine(line, layout.width) + "\n"
 }
 

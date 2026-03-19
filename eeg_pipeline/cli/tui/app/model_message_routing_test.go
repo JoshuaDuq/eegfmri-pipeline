@@ -52,6 +52,7 @@ func TestHandleKeyMessageRoutesShortcuts(t *testing.T) {
 	t.Run("escape-and-enter", func(t *testing.T) {
 		m := base
 		m.state = StateGlobalSetup
+		m.navStack = []AppState{StateMainMenu}
 		next, cmd := m.handleKeyMessage(tea.KeyMsg{Type: tea.KeyEsc})
 		if cmd != nil {
 			t.Fatalf("expected nil cmd from escape, got %T", cmd)
@@ -122,18 +123,18 @@ func TestHandleKeyMessageRoutesShortcuts(t *testing.T) {
 func TestHandleGlobalMessagesRoutesDiscoveryAndConfigUpdates(t *testing.T) {
 	repoRoot := t.TempDir()
 	m := Model{
-		state:         StatePipelineWizard,
-		repoRoot:      repoRoot,
-		task:          "task",
+		state:            StatePipelineWizard,
+		repoRoot:         repoRoot,
+		task:             "task",
 		selectedPipeline: types.PipelineBehavior,
-		subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
-		wizard:        wizard.New(types.PipelineBehavior, repoRoot),
-		pipelineSmoke: pipelinesmoke.New("task"),
-		execution:     execution.New("echo test"),
-		global:        globalsetup.New(repoRoot),
-		dashboard:     dashboard.New(repoRoot),
-		historyMdl:    history.New(repoRoot),
-		quickActions:  quickactions.New(),
+		subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
+		wizard:           wizard.New(types.PipelineBehavior, repoRoot),
+		pipelineSmoke:    pipelinesmoke.New("task"),
+		execution:        execution.New("echo test"),
+		global:           globalsetup.New(repoRoot),
+		dashboard:        dashboard.New(repoRoot),
+		historyMdl:       history.New(repoRoot),
+		quickActions:     quickactions.New(),
 	}
 
 	plottersNext, plottersCmd := m.handleGlobalMessages(messages.PlottersLoadedMsg{

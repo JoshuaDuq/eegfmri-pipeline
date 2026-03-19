@@ -1,7 +1,7 @@
 package mainmenu
 
 import (
-	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -157,14 +157,10 @@ const (
 )
 
 const (
-	mainMenuWideThreshold            = 118
-	mainMenuCompactWidth             = 84
-	mainMenuCompactHeight            = 22
-	mainMenuStandardTopHeight        = 7
-	mainMenuStandardSummaryMinHeight = 28
-	mainMenuColumnGap                = 2
-	mainMenuPreviewMinWidth          = 42
-	mainMenuPreviewLabelWidth        = 10
+	mainMenuWideThreshold     = 118
+	mainMenuColumnGap         = 2
+	mainMenuPreviewMinWidth   = 42
+	mainMenuPreviewLabelWidth = 10
 )
 
 type HomeConfigSummary struct {
@@ -199,31 +195,25 @@ type Model struct {
 	width            int
 	height           int
 
-	Task string
+	Task    string
+	version string
 
-	configSummary     HomeConfigSummary
-	recentRuns        []RecentRunSummary
-	savedConfigCounts map[int]int
+	configSummary HomeConfigSummary
+	recentRuns    []RecentRunSummary
 
 	// Toast notification
 	toast components.Toast
 
 	// Animation
-	ticker    int
 	animQueue animation.Queue
 }
 
 func New() Model {
 	m := Model{
-		currentSection:    SectionPreprocessing,
-		prepCursor:        0,
-		analysisCursor:    0,
-		utilityCursor:     0,
-		lastPipelineIdx:   -1,
-		SelectedPipeline:  -1,
-		SelectedUtility:   -1,
-		Task:              "task",
-		savedConfigCounts: make(map[int]int),
+		currentSection:   SectionPreprocessing,
+		lastPipelineIdx:  -1,
+		SelectedPipeline: -1,
+		SelectedUtility:  -1,
 	}
 	m.animQueue.Push(animation.CursorBlinkLoop())
 	return m
@@ -270,11 +260,12 @@ func (m *Model) SetRecentRuns(runs []RecentRunSummary) {
 	m.recentRuns = append([]RecentRunSummary(nil), runs...)
 }
 
-func (m *Model) SetSavedConfigCounts(counts map[int]int) {
-	m.savedConfigCounts = make(map[int]int, len(counts))
-	for pipelineIdx, count := range counts {
-		m.savedConfigCounts[pipelineIdx] = count
-	}
+func (m *Model) SetVersion(v string) {
+	m.version = v
+}
+
+func (m *Model) SetToast(t components.Toast) {
+	m.toast = t
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -296,7 +287,6 @@ type tickMsg struct{}
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
-		m.ticker++
 		m.animQueue.Tick()
 		m.toast.Tick()
 		return m, m.tick()
@@ -323,7 +313,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleResumeLastSession() (tea.Model, tea.Cmd) {
 	if !m.hasLastPipeline() {
-		m.toast = components.NewToast("No saved session yet", components.ToastWarning, 24)
+		m.toast = components.NewToast("No saved session yet", components.ToastWarning, components.ToastDurationMedium)
 		return m, nil
 	}
 	m.SelectedPipeline = m.lastPipelineIdx
@@ -410,10 +400,10 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	header := m.renderHeader()
-	headerHeight := strings.Count(header, "\n") + 2
+	headerHeight := lipgloss.Height(header) + 1
 
 	footer := m.renderFooter()
-	footerHeight := strings.Count(footer, "\n") + 2
+	footerHeight := lipgloss.Height(footer) + 1
 
 	mainHeight := m.height - headerHeight - footerHeight
 	if mainHeight < 10 {
@@ -442,8 +432,12 @@ func (m Model) renderHeader() string {
 
 	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Render("◆")
 	logo := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("eegfmri-pipeline")
-	version := lipgloss.NewStyle().Foreground(styles.Muted).Render("v1.0")
-	titleRow := "  " + glyph + " " + logo + "  " + version
+	v := m.version
+	if v == "" {
+		v = "dev"
+	}
+	version := lipgloss.NewStyle().Foreground(styles.Muted).Render(v)
+	titleRow := "  " + glyph + " " + logo + "   " + version
 
 	return titleRow + "\n" + styles.RenderHeaderSeparator(lineWidth)
 }
@@ -470,7 +464,11 @@ type menuPaneConfig struct {
 
 func (m Model) renderItem(name, description string, selected bool, config sectionRenderConfig) string {
 	if selected {
-		cursor := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(styles.Highlight).Render(styles.SelectedMark + " ")
+		cursorChar := styles.SelectedMark + " "
+		if !m.animQueue.CursorVisible() {
+			cursorChar = "  "
+		}
+		cursor := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(styles.Highlight).Render(cursorChar)
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(styles.Highlight)
 		sepStyle := lipgloss.NewStyle().Foreground(styles.Muted).Background(styles.Highlight)
 		descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Background(styles.Highlight)
@@ -485,7 +483,7 @@ func (m Model) renderItem(name, description string, selected bool, config sectio
 	}
 
 	sep := lipgloss.NewStyle().Foreground(styles.Muted).Render(" " + styles.BulletMark + " ")
-	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
 	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	var rawLine string
 	if config.showDescriptions {
@@ -494,14 +492,6 @@ func (m Model) renderItem(name, description string, selected bool, config sectio
 		rawLine = "  " + nameStyle.Render(name)
 	}
 	return styles.TruncateLine(rawLine, config.width)
-}
-
-func (m Model) renderPipelineItem(p pipelineItem, selected bool, config sectionRenderConfig) string {
-	return m.renderItem(p.name, p.description, selected, config)
-}
-
-func (m Model) renderUtilityItem(u utilityItem, selected bool, config sectionRenderConfig) string {
-	return m.renderItem(u.name, u.description, selected, config)
 }
 
 func (m Model) renderFooter() string {
@@ -518,7 +508,7 @@ func (m Model) renderFooter() string {
 	if width < 20 {
 		width = 20
 	}
-	divider := styles.RenderHeaderSeparator(width)
+	divider := styles.RenderDivider(width)
 	bar := styles.FooterStyle.Width(width).Render(m.renderFooterHints(width, hints))
 	return divider + "\n" + bar
 }
@@ -549,14 +539,7 @@ func (m Model) renderContent(width, height int) string {
 	if width >= mainMenuWideThreshold {
 		return m.renderWideContent(width, height)
 	}
-	if m.useCompactLayout(width, height) {
-		return m.renderCompactContent(width, height)
-	}
-	return m.renderStandardContent(width, height)
-}
-
-func (m Model) useCompactLayout(width, height int) bool {
-	return width < mainMenuCompactWidth || height < mainMenuCompactHeight
+	return m.renderCompactContent(width, height)
 }
 
 func (m Model) renderCompactContent(width, height int) string {
@@ -589,69 +572,13 @@ func (m Model) renderWideContent(width, height int) string {
 	)
 }
 
-func (m Model) renderStandardContent(width, height int) string {
-	if width < 20 {
-		width = 20
-	}
-	if height < 12 {
-		height = 12
-	}
-	if height < mainMenuStandardSummaryMinHeight {
-		return styles.CardStyle.Width(width).Height(height).Render(m.renderStandardMenuPane(width-6, height-4))
-	}
-
-	topHeight := mainMenuStandardTopHeight
-	menuHeight := height - topHeight - 1
-	if menuHeight < 10 {
-		return styles.CardStyle.Width(width).Height(height).Render(m.renderStandardMenuPane(width-6, height-4))
-	}
-
-	summaryRow := m.renderStandardSummaryRow(width, topHeight)
-	menuPane := styles.CardStyle.Width(width).Height(menuHeight).Render(m.renderStandardMenuPane(width-6, menuHeight-4))
-
-	return summaryRow + "\n" + menuPane
-}
-
-func (m Model) renderStandardSummaryRow(width, height int) string {
-	leftWidth := width * 46 / 100
-	if leftWidth < 36 {
-		leftWidth = 36
-	}
-	rightWidth := width - leftWidth - mainMenuColumnGap
-	if rightWidth < 36 {
-		rightWidth = 36
-		leftWidth = width - rightWidth - mainMenuColumnGap
-	}
-
-	sessionPane := styles.PanelStyle.Width(leftWidth).Height(height).Render(m.renderSessionSummaryBlock(leftWidth - 6))
-	selectedPane := styles.PanelStyle.Width(rightWidth).Height(height).Render(m.renderSelectedSummaryBlock(rightWidth - 6))
-
-	return lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		sessionPane,
-		strings.Repeat(" ", mainMenuColumnGap),
-		selectedPane,
-	)
-}
-
 func (m Model) renderMenuPane(innerWidth, innerHeight int) string {
 	lines, selectedLine := m.buildMenuLines(menuPaneConfig{
 		width:            innerWidth,
 		showDescriptions: true,
 		showTitle:        true,
 		showSubtitle:     false,
-		showDividers:     false,
-	})
-	return m.renderMenuViewport(lines, innerHeight, selectedLine)
-}
-
-func (m Model) renderStandardMenuPane(innerWidth, innerHeight int) string {
-	lines, selectedLine := m.buildMenuLines(menuPaneConfig{
-		width:            innerWidth,
-		showDescriptions: false,
-		showTitle:        true,
-		showSubtitle:     false,
-		showDividers:     false,
+		showDividers:     true,
 	})
 	return m.renderMenuViewport(lines, innerHeight, selectedLine)
 }
@@ -742,7 +669,7 @@ func (m Model) appendPipelineSectionLines(
 		if isSelected {
 			*selectedLine = len(lines)
 		}
-		lines = append(lines, m.renderPipelineItem(item, isSelected, config))
+		lines = append(lines, m.renderItem(item.name, item.description, isSelected, config))
 	}
 	return lines
 }
@@ -762,7 +689,7 @@ func (m Model) appendUtilitySectionLines(
 		if isSelected {
 			*selectedLine = len(lines)
 		}
-		lines = append(lines, m.renderUtilityItem(item, isSelected, config))
+		lines = append(lines, m.renderItem(item.name, item.description, isSelected, config))
 	}
 	return lines
 }
@@ -823,7 +750,7 @@ func (m Model) renderPreviewPane(innerWidth int) string {
 	kindLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render(detail.kind)
 	if detail.lastUsed {
 		lastUsedMark := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " last used")
-		kindLabel += "  " + lastUsedMark
+		kindLabel += styles.RenderFooterSeparator() + lastUsedMark
 	}
 
 	var b strings.Builder
@@ -851,15 +778,15 @@ func (m Model) renderPreviewPane(innerWidth int) string {
 func (m Model) selectedDetail() selectionDetail {
 	switch m.currentSection {
 	case SectionPreprocessing:
-		return m.pipelineDetail(preprocessingPipelines[m.prepCursor], "Preprocessing")
+		return m.pipelineDetail(preprocessingPipelines[m.prepCursor])
 	case SectionAnalysis:
-		return m.pipelineDetail(analysisPipelines[m.analysisCursor], "Analysis")
+		return m.pipelineDetail(analysisPipelines[m.analysisCursor])
 	default:
 		return m.utilityDetail(utilities[m.utilityCursor])
 	}
 }
 
-func (m Model) pipelineDetail(item pipelineItem, group string) selectionDetail {
+func (m Model) pipelineDetail(item pipelineItem) selectionDetail {
 	pipeline := types.Pipeline(item.pipelineIdx)
 	return selectionDetail{
 		title:       item.name,
@@ -868,7 +795,6 @@ func (m Model) pipelineDetail(item pipelineItem, group string) selectionDetail {
 		focusAreas:  item.focusAreas,
 		lastUsed:    m.lastPipelineIdx == item.pipelineIdx,
 		rows: []detailRow{
-			{label: "Group", value: group},
 			{label: "Source", value: pipeline.GetDataSource()},
 			{label: "Command", value: "eeg-pipeline " + pipeline.CLICommand()},
 			{label: "Task", value: m.currentTaskLabel(), accent: m.hasConfiguredTask()},
@@ -886,7 +812,6 @@ func (m Model) utilityDetail(item utilityItem) selectionDetail {
 			focusAreas:  item.focusAreas,
 			lastUsed:    m.lastPipelineIdx == item.pipelineIdx,
 			rows: []detailRow{
-				{label: "Group", value: "Utilities"},
 				{label: "Source", value: pipeline.GetDataSource()},
 				{label: "Command", value: item.command},
 				{label: "Task", value: m.currentTaskLabel(), accent: m.hasConfiguredTask()},
@@ -900,7 +825,6 @@ func (m Model) utilityDetail(item utilityItem) selectionDetail {
 		kind:        "Utility",
 		focusAreas:  item.focusAreas,
 		rows: []detailRow{
-			{label: "Group", value: "Utilities"},
 			{label: "Scope", value: item.scope},
 			{label: "Entry", value: item.command},
 			{label: "Task", value: m.currentTaskLabel(), accent: m.hasConfiguredTask()},
@@ -909,8 +833,7 @@ func (m Model) utilityDetail(item utilityItem) selectionDetail {
 }
 
 func (m Model) hasConfiguredTask() bool {
-	task := strings.TrimSpace(m.Task)
-	return task != "" && task != "task"
+	return strings.TrimSpace(m.Task) != ""
 }
 
 func (m Model) currentTaskLabel() string {
@@ -929,99 +852,6 @@ func (m Model) lastPipeline() (types.Pipeline, bool) {
 		return 0, false
 	}
 	return types.Pipeline(m.lastPipelineIdx), true
-}
-
-func (m Model) savedConfigCount(pipelineIdx int) int {
-	if m.savedConfigCounts == nil {
-		return 0
-	}
-	return m.savedConfigCounts[pipelineIdx]
-}
-
-func (m Model) renderSessionSummaryBlock(width int) string {
-	if width < 20 {
-		width = 20
-	}
-
-	lines := []string{styles.RenderSectionLabel("Session")}
-	lines = append(lines, styles.TruncateLine(m.renderLastSessionLine(), width))
-	lines = append(lines, styles.TruncateLine(m.renderSessionStatusLine(), width))
-	return strings.Join(lines, "\n")
-}
-
-func (m Model) renderSelectedSummaryBlock(width int) string {
-	if width < 20 {
-		width = 20
-	}
-
-	detail := m.selectedDetail()
-	lines := []string{styles.RenderSectionLabel("Selected")}
-	lines = append(lines, styles.TruncateLine(m.renderSelectedTitleLine(detail), width))
-	lines = append(lines, styles.TruncateLine(m.renderSelectedMetaLine(detail), width))
-	return strings.Join(lines, "\n")
-}
-
-func (m Model) renderLastSessionLine() string {
-	if !m.hasLastPipeline() {
-		return lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("No saved session yet.")
-	}
-
-	pipeline, _ := m.lastPipeline()
-	line := lipgloss.NewStyle().Foreground(styles.TextDim).Render("Last ") +
-		lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(pipeline.String())
-	if count := m.savedConfigCount(m.lastPipelineIdx); count > 0 {
-		line += lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("  %d saved", count))
-	}
-	return line
-}
-
-func (m Model) renderSessionStatusLine() string {
-	taskLine := styles.RenderKeyValue("Task", m.currentTaskLabel(), 5)
-	if m.hasConfiguredTask() {
-		taskLine = styles.RenderKeyValueAccent("Task", m.currentTaskLabel(), 5)
-	}
-	if len(m.recentRuns) == 0 {
-		return taskLine
-	}
-
-	recentLine := lipgloss.NewStyle().Foreground(styles.Muted).Render("Recent ") + m.renderRecentRunLine(m.recentRuns[0])
-	return taskLine + "  " + styles.RenderFooterSeparator() + "  " + recentLine
-}
-
-func (m Model) renderSelectedTitleLine(detail selectionDetail) string {
-	title := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(detail.title)
-	kind := lipgloss.NewStyle().Foreground(styles.Muted).Render(detail.kind)
-	line := title + "  " + kind
-	if detail.lastUsed {
-		lastUsed := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " last used")
-		line += "  " + lastUsed
-	}
-	return line
-}
-
-func (m Model) renderSelectedMetaLine(detail selectionDetail) string {
-	var parts []string
-	if value := m.detailValue(detail, "Command"); value != "" {
-		parts = append(parts, value)
-	} else if value := m.detailValue(detail, "Entry"); value != "" {
-		parts = append(parts, value)
-	}
-	if value := m.detailValue(detail, "Scope"); value != "" {
-		parts = append(parts, value)
-	}
-	if len(parts) == 0 {
-		parts = append(parts, detail.description)
-	}
-	return strings.Join(parts, "  "+styles.RenderFooterSeparator()+"  ")
-}
-
-func (m Model) detailValue(detail selectionDetail, label string) string {
-	for _, row := range detail.rows {
-		if row.label == label {
-			return row.value
-		}
-	}
-	return ""
 }
 
 func (m Model) previewWorkspaceRows() []detailRow {
@@ -1046,9 +876,6 @@ func (m Model) renderPreviewDetailsBlock(detail selectionDetail, width int) stri
 	b.WriteString(styles.RenderPreviewSubHeaderWithRule("DETAILS", width))
 	b.WriteString("\n")
 	for _, row := range detail.rows {
-		if row.label == "Group" {
-			continue
-		}
 		b.WriteString("\n")
 		line := styles.RenderKeyValue(row.label, row.value, mainMenuPreviewLabelWidth)
 		if row.accent {
@@ -1076,10 +903,15 @@ func (m Model) renderPreviewWorkspaceBlock(width int) string {
 		}
 		b.WriteString(styles.TruncateLine(line, width))
 	}
-	if len(m.recentRuns) > 0 {
+	recentLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(mainMenuPreviewLabelWidth).Render("Recent")
+	blankLabel := strings.Repeat(" ", mainMenuPreviewLabelWidth)
+	for i, run := range m.recentRuns {
 		b.WriteString("\n")
-		label := lipgloss.NewStyle().Foreground(styles.TextDim).Width(mainMenuPreviewLabelWidth).Render("Recent")
-		b.WriteString(styles.TruncateLine(label+m.renderRecentRunLine(m.recentRuns[0]), width))
+		if i == 0 {
+			b.WriteString(styles.TruncateLine(recentLabel+m.renderRecentRunLine(run), width))
+		} else {
+			b.WriteString(styles.TruncateLine(blankLabel+m.renderRecentRunLine(run), width))
+		}
 	}
 	return b.String()
 }
@@ -1121,9 +953,7 @@ func (m Model) renderRecentRunLine(run RecentRunSummary) string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Age))
 	}
 	if run.Duration != "" {
-		durationLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("- Duration")
-		durationValue := lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Duration)
-		parts = append(parts, durationLabel, durationValue)
+		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Duration))
 	}
 
 	return strings.Join(parts, "  ")
@@ -1135,13 +965,24 @@ func (m Model) shortPath(path string) string {
 		return ""
 	}
 
+	home := homeDir()
 	clean := filepath.Clean(path)
+	if home != "" && strings.HasPrefix(clean, home) {
+		return "~/" + strings.TrimPrefix(clean, home+string(filepath.Separator))
+	}
 	parent := filepath.Base(filepath.Dir(clean))
 	base := filepath.Base(clean)
 	if parent == "." || parent == string(filepath.Separator) || parent == base {
 		return clean
 	}
-	return filepath.Join("...", parent, base)
+	return filepath.Join("..", parent, base)
+}
+
+func homeDir() string {
+	if h, err := os.UserHomeDir(); err == nil {
+		return h
+	}
+	return ""
 }
 
 func (m Model) renderFooterHints(width int, hints []footerHint) string {

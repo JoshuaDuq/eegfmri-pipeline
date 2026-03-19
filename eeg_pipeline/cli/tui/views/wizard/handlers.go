@@ -777,6 +777,18 @@ func (m *Model) validate() []string {
 			}
 			return errors
 		}
+		if mode == "rest" {
+			if strings.TrimSpace(m.bidsRestRoot) == "" {
+				errors = append(errors, "fMRI resting-state: bids_rest_root is required")
+			}
+			if strings.TrimSpace(m.derivRestRoot) == "" {
+				errors = append(errors, "fMRI resting-state: deriv_rest_root is required")
+			}
+			if strings.TrimSpace(m.fmriAnalysisAtlasLabelsImg) == "" {
+				errors = append(errors, "fMRI resting-state: atlas labels image is required")
+			}
+			return errors
+		}
 		groupingEnabled := strings.TrimSpace(m.fmriTrialSigGroupColumn) != "" && strings.TrimSpace(m.fmriTrialSigGroupValuesSpec) != ""
 
 		if mode == "trial-signatures" {
@@ -801,6 +813,15 @@ func (m *Model) validate() []string {
 		}
 		if mode == "first-level" && m.fmriAnalysisContrastType%2 == 1 && strings.TrimSpace(m.fmriAnalysisFormula) == "" {
 			errors = append(errors, "fMRI first-level: custom contrast requires a formula")
+		}
+	}
+
+	if m.Pipeline == types.PipelineFmri && m.fmriTaskIsRest {
+		if strings.TrimSpace(m.bidsRestRoot) == "" {
+			errors = append(errors, "fMRI preprocessing: bids_rest_root is required when Rest Roots is enabled")
+		}
+		if strings.TrimSpace(m.derivRestRoot) == "" {
+			errors = append(errors, "fMRI preprocessing: deriv_rest_root is required when Rest Roots is enabled")
 		}
 	}
 

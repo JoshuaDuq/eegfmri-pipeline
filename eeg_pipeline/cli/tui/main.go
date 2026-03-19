@@ -10,6 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Version is set at build time via -ldflags "-X main.Version=x.y.z".
+var Version = "dev"
+
 const (
 	ansiDisableMouseTracking = "\033[?1000l\033[?1002l\033[?1003l\033[?1006l"
 	ansiExitAlternateScreen  = "\033[?1049l"
@@ -48,7 +51,7 @@ func handlePanic() {
 func main() {
 	defer handlePanic()
 
-	appModel := app.New()
+	appModel := app.New(Version)
 	program := tea.NewProgram(
 		appModel,
 		tea.WithAltScreen(),

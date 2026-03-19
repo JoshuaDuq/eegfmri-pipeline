@@ -123,6 +123,11 @@ func (m Model) buildFmriAdvancedArgs() []string {
 	if !m.fmriCleanWorkdir {
 		ab.args = append(ab.args, "--no-clean-workdir")
 	}
+	if m.fmriTaskIsRest {
+		ab.args = append(ab.args, "--task-is-rest")
+	} else {
+		ab.args = append(ab.args, "--no-task-is-rest")
+	}
 
 	// Advanced
 	ab.addIfNonEmpty("--fmriprep-extra-args", m.fmriExtraArgs)
@@ -191,6 +196,8 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	}
 
 	isFirstLevel := mode == "first-level"
+	isRest := mode == "rest"
+	isTrialSignatures := mode == "trial-signatures"
 	trialMethod := "beta-series"
 	if m.fmriTrialSigMethodIndex%2 == 1 {
 		trialMethod = "lss"
@@ -219,14 +226,21 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 			ab.args = append(ab.args, runs...)
 		}
 	}
+	if isRest {
+		ab.args = append(ab.args, "--task-is-rest")
+	} else {
+		ab.args = append(ab.args, "--no-task-is-rest")
+	}
 
 	// Contrast
-	ab.addIfNonEmpty("--contrast-name", strings.TrimSpace(m.fmriAnalysisContrastName))
+	if !isRest {
+		ab.addIfNonEmpty("--contrast-name", strings.TrimSpace(m.fmriAnalysisContrastName))
+	}
 
 	if isFirstLevel && m.fmriAnalysisContrastType%2 == 1 {
 		ab.args = append(ab.args, "--contrast-type", "custom")
 		ab.addIfNonEmpty("--formula", strings.TrimSpace(m.fmriAnalysisFormula))
-	} else {
+	} else if !isRest {
 		ab.args = append(ab.args, "--contrast-type", "t-test")
 		ab.addIfNonEmpty("--cond-a-column", m.resolveFmriConditionColumn(m.fmriAnalysisCondAColumn))
 		ab.addIfNonEmpty("--cond-a-value", strings.TrimSpace(m.fmriAnalysisCondAValue))
@@ -235,10 +249,12 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	}
 
 	// GLM
-	hrfOptions := []string{"spm", "flobs", "fir"}
-	ab.args = append(ab.args, "--hrf-model", hrfOptions[m.fmriAnalysisHrfModel%len(hrfOptions)])
-	driftOptions := []string{"none", "cosine", "polynomial"}
-	ab.args = append(ab.args, "--drift-model", driftOptions[m.fmriAnalysisDriftModel%len(driftOptions)])
+	if !isRest {
+		hrfOptions := []string{"spm", "flobs", "fir"}
+		ab.args = append(ab.args, "--hrf-model", hrfOptions[m.fmriAnalysisHrfModel%len(hrfOptions)])
+		driftOptions := []string{"none", "cosine", "polynomial"}
+		ab.args = append(ab.args, "--drift-model", driftOptions[m.fmriAnalysisDriftModel%len(driftOptions)])
+	}
 
 	ab.args = append(ab.args, "--high-pass-hz", fmt.Sprintf("%.6f", m.fmriAnalysisHighPassHz))
 	ab.args = append(ab.args, "--low-pass-hz", fmt.Sprintf("%.6f", m.fmriAnalysisLowPassHz))
@@ -289,6 +305,22 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	if isFirstLevel && m.fmriAnalysisWriteDesignMatrix {
 		ab.args = append(ab.args, "--write-design-matrix")
 	}
+	if isRest {
+		connectivityKinds := []string{"correlation"}
+		ab.addIfNonEmpty("--atlas-labels-img", expandUserPath(strings.TrimSpace(m.fmriAnalysisAtlasLabelsImg)))
+		ab.addIfNonEmpty("--atlas-labels-tsv", expandUserPath(strings.TrimSpace(m.fmriAnalysisAtlasLabelsTsv)))
+		ab.args = append(ab.args, "--connectivity-kind", connectivityKinds[m.fmriAnalysisConnectivityKind])
+		if m.fmriAnalysisStandardize {
+			ab.args = append(ab.args, "--standardize")
+		} else {
+			ab.args = append(ab.args, "--no-standardize")
+		}
+		if m.fmriAnalysisDetrend {
+			ab.args = append(ab.args, "--detrend")
+		} else {
+			ab.args = append(ab.args, "--no-detrend")
+		}
+	}
 
 	// Output
 	ab.addIfNonEmpty("--output-dir", expandUserPath(strings.TrimSpace(m.fmriAnalysisOutputDir)))
@@ -304,7 +336,7 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	}
 
 	// Trial-wise signatures (beta-series / lss)
-	if !isFirstLevel {
+	if isTrialSignatures {
 		if !m.fmriTrialSigIncludeOtherEvents {
 			ab.args = append(ab.args, "--no-include-other-events")
 		}
@@ -380,7 +412,7 @@ func (m Model) buildFmriAnalysisAdvancedArgs() []string {
 	}
 
 	// Plotting / Report (CLI defaults are off)
-	if m.fmriAnalysisPlotsEnabled {
+	if isFirstLevel && m.fmriAnalysisPlotsEnabled {
 		ab.args = append(ab.args, "--plots")
 
 		if m.fmriAnalysisPlotHTML {

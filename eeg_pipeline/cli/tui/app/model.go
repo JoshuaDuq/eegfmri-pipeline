@@ -3,6 +3,7 @@ package app
 import (
 	"time"
 
+	"github.com/eeg-pipeline/tui/components"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/styles"
@@ -118,7 +119,7 @@ type Model struct {
 	pendingSubjectsCacheKey string
 }
 
-func New() Model {
+func New(version string) Model {
 	repoRoot := findRepoRoot()
 
 	m := Model{
@@ -130,8 +131,13 @@ func New() Model {
 		repoRoot:      repoRoot,
 		subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
 	}
+	m.mainMenu.SetVersion(version)
 
-	m.loadState()
+	if err := m.loadState(); err != nil {
+		m.mainMenu.SetToast(components.NewToast(
+			err.Error(), components.ToastWarning, components.ToastDurationLong,
+		))
+	}
 	m.syncMainMenuSessionData()
 	m.refreshMainMenuRecentRuns()
 	m.syncMainMenuConfigSummary()
@@ -225,15 +231,16 @@ func (m Model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, m.handleQuit()
+		return m.handleQuit()
 	case "esc":
 		return m.handleEscape()
 	case "enter":
-		return m, m.handleEnter()
+		return m.handleEnter()
 	case "r":
+		if m.state == StatePipelineWizard && m.wizard.IsOnSubjectSelectionStep() {
+			return m, nil
+		}
 		return m.handleRestart()
-	case "p":
-		return m.handlePullResults()
 	case "d", "D":
 		return m.handleOpenDashboard()
 	case "h", "H":
@@ -244,29 +251,30 @@ func (m Model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleQuit() tea.Cmd {
+func (m Model) handleQuit() (tea.Model, tea.Cmd) {
 	if m.state == StateExecution && !m.execution.IsDone() {
-		return nil
+		m.execution.AddOutput(
+			lipgloss.NewStyle().Foreground(styles.Warning).Render(
+				styles.WarningMark + " Press Ctrl+C to cancel the running pipeline first"),
+		)
+		return m, nil
 	}
-	return tea.Quit
+	return m, tea.Quit
 }
 
-func (m *Model) handleEnter() tea.Cmd {
+func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	if m.state == StateExecution && m.execution.IsDone() {
 		m.state = StateMainMenu
-		return nil
+		m.navStack = nil
+		return m, nil
 	}
-	return nil
+	return m, nil
 }
 
 func (m Model) handleRestart() (tea.Model, tea.Cmd) {
 	if m.state == StateExecution && m.execution.IsDone() {
 		return m.startExecution(m.wizard.BuildCommand())
 	}
-	return m, nil
-}
-
-func (m Model) handlePullResults() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
@@ -321,6 +329,15 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) {
 
 	newGlobal, _ := m.global.Update(msg)
 	m.global = *newGlobal.(*globalsetup.Model)
+
+	newDash, _ := m.dashboard.Update(msg)
+	m.dashboard = newDash.(dashboard.Model)
+
+	newHist, _ := m.historyMdl.Update(msg)
+	m.historyMdl = newHist.(history.Model)
+
+	newQA, _ := m.quickActions.Update(msg)
+	m.quickActions = newQA.(quickactions.Model)
 }
 
 func (m Model) View() string {

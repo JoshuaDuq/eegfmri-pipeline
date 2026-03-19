@@ -606,6 +606,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriNoMsm"] = m.fmriNoMsm
 	cfg["fmriLevelIndex"] = m.fmriLevelIndex
 	cfg["fmriTaskId"] = m.fmriTaskId
+	cfg["fmriTaskIsRest"] = m.fmriTaskIsRest
 
 	// fMRI Analysis
 	cfg["fmriAnalysisInputSourceIndex"] = m.fmriAnalysisInputSourceIndex
@@ -637,6 +638,11 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriAnalysisFreesurferDir"] = m.fmriAnalysisFreesurferDir
 	cfg["fmriAnalysisConfoundsStrategy"] = m.fmriAnalysisConfoundsStrategy
 	cfg["fmriAnalysisWriteDesignMatrix"] = m.fmriAnalysisWriteDesignMatrix
+	cfg["fmriAnalysisAtlasLabelsImg"] = m.fmriAnalysisAtlasLabelsImg
+	cfg["fmriAnalysisAtlasLabelsTsv"] = m.fmriAnalysisAtlasLabelsTsv
+	cfg["fmriAnalysisConnectivityKind"] = m.fmriAnalysisConnectivityKind
+	cfg["fmriAnalysisStandardize"] = m.fmriAnalysisStandardize
+	cfg["fmriAnalysisDetrend"] = m.fmriAnalysisDetrend
 
 	cfg["fmriAnalysisGroupInputExpanded"] = m.fmriAnalysisGroupInputExpanded
 	cfg["fmriAnalysisGroupContrastExpanded"] = m.fmriAnalysisGroupContrastExpanded
@@ -1788,6 +1794,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.fmriNoMsm = getBool("fmriNoMsm", m.fmriNoMsm)
 	m.fmriLevelIndex = getInt("fmriLevelIndex", m.fmriLevelIndex)
 	m.fmriTaskId = getString("fmriTaskId", m.fmriTaskId)
+	m.fmriTaskIsRest = getBool("fmriTaskIsRest", m.fmriTaskIsRest)
 
 	// fMRI Analysis
 	m.fmriAnalysisInputSourceIndex = getInt("fmriAnalysisInputSourceIndex", m.fmriAnalysisInputSourceIndex)
@@ -1819,6 +1826,11 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.fmriAnalysisFreesurferDir = getString("fmriAnalysisFreesurferDir", m.fmriAnalysisFreesurferDir)
 	m.fmriAnalysisConfoundsStrategy = getInt("fmriAnalysisConfoundsStrategy", m.fmriAnalysisConfoundsStrategy)
 	m.fmriAnalysisWriteDesignMatrix = getBool("fmriAnalysisWriteDesignMatrix", m.fmriAnalysisWriteDesignMatrix)
+	m.fmriAnalysisAtlasLabelsImg = getString("fmriAnalysisAtlasLabelsImg", m.fmriAnalysisAtlasLabelsImg)
+	m.fmriAnalysisAtlasLabelsTsv = getString("fmriAnalysisAtlasLabelsTsv", m.fmriAnalysisAtlasLabelsTsv)
+	m.fmriAnalysisConnectivityKind = getInt("fmriAnalysisConnectivityKind", m.fmriAnalysisConnectivityKind)
+	m.fmriAnalysisStandardize = getBool("fmriAnalysisStandardize", m.fmriAnalysisStandardize)
+	m.fmriAnalysisDetrend = getBool("fmriAnalysisDetrend", m.fmriAnalysisDetrend)
 
 	m.fmriAnalysisGroupInputExpanded = getBool("fmriAnalysisGroupInputExpanded", m.fmriAnalysisGroupInputExpanded)
 	m.fmriAnalysisGroupContrastExpanded = getBool("fmriAnalysisGroupContrastExpanded", m.fmriAnalysisGroupContrastExpanded)

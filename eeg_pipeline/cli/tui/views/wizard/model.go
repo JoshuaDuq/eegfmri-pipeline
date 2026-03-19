@@ -619,6 +619,8 @@ const (
 	textFieldFmriExtraArgs
 	textFieldFmriSkullStripTemplate
 	textFieldFmriTaskId
+	textFieldFmriAnalysisAtlasLabelsImg
+	textFieldFmriAnalysisAtlasLabelsTsv
 	// fMRI analysis text fields
 	textFieldFmriAnalysisFmriprepSpace
 	textFieldFmriAnalysisRuns
@@ -1094,6 +1096,7 @@ type Model struct {
 	plotConfigCursor    int
 
 	// fMRI preprocessing (fMRIPrep-style) configuration
+	fmriTaskIsRest            bool   // Whether fMRI preprocessing should use resting-state roots
 	fmriEngineIndex           int    // 0: docker, 1: apptainer
 	fmriFmriprepImage         string // Docker image or Apptainer URI/path
 	fmriFmriprepOutputDir     string // Host path; default: deriv_root
@@ -1176,6 +1179,11 @@ type Model struct {
 	fmriAnalysisFreesurferDir       string // Optional FreeSurfer SUBJECTS_DIR override
 	fmriAnalysisConfoundsStrategy   int    // 0..N (see render/command builder options)
 	fmriAnalysisWriteDesignMatrix   bool   // Write design matrices to <output>/qc/
+	fmriAnalysisAtlasLabelsImg      string // Required for resting-state ROI extraction
+	fmriAnalysisAtlasLabelsTsv      string // Optional atlas labels TSV
+	fmriAnalysisConnectivityKind    int    // 0: correlation
+	fmriAnalysisStandardize         bool
+	fmriAnalysisDetrend             bool
 
 	// fMRI analysis UI group expansion states
 	fmriAnalysisGroupInputExpanded     bool
@@ -3187,6 +3195,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		prepEogChannels:  "",
 		prepRandomState:  42,
 		prepTaskIsRest:   false,
+		fmriTaskIsRest:   false,
 		prepZaplineFline: 60.0,
 		prepFindBreaks:   true,
 		// PyPREP advanced defaults
@@ -3449,11 +3458,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriGroupAdvancedExpanded = false
 
 	case types.PipelineFmriAnalysis:
-		m.modeOptions = []string{"first-level", "second-level", "trial-signatures"}
+		m.modeOptions = []string{"first-level", "second-level", "trial-signatures", "rest"}
 		m.modeDescriptions = []string{
 			"First-level GLM contrasts (per subject)",
 			"Explicit second-level group inference from first-level contrast maps",
 			"Trial-wise betas + multivariate signature readouts (beta-series or LSS)",
+			"Resting-state ROI time-series extraction + connectivity",
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectMode,
@@ -3493,6 +3503,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.fmriAnalysisFreesurferDir = ""
 		m.fmriAnalysisConfoundsStrategy = 0 // auto
 		m.fmriAnalysisWriteDesignMatrix = false
+		m.fmriAnalysisAtlasLabelsImg = ""
+		m.fmriAnalysisAtlasLabelsTsv = ""
+		m.fmriAnalysisConnectivityKind = 0
+		m.fmriAnalysisStandardize = true
+		m.fmriAnalysisDetrend = true
 
 		m.fmriAnalysisGroupInputExpanded = true
 		m.fmriAnalysisGroupContrastExpanded = true
@@ -4035,6 +4050,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "n":
 			m.selectNone()
+
+		case "r", "R":
+			if m.CurrentStep == types.StepSelectSubjects && !m.subjectsLoading {
+				m.subjectsLoading = true
+				m.subjectLoadError = ""
+				return m, executor.LoadSubjectsRefresh(m.repoRoot, m.task, m.Pipeline)
+			}
 
 		case "g", "G":
 			// Toggle global styling panel in plot categories page

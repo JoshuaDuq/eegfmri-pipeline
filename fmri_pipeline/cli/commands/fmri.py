@@ -13,6 +13,7 @@ from eeg_pipeline.cli.common import (
     add_task_arg,
     create_progress_reporter,
 )
+from eeg_pipeline.utils.config.roots import resolve_fmri_bids_root
 from eeg_pipeline.utils.config.overrides import apply_set_overrides
 from fmri_pipeline.cli.commands.subject_selection import resolve_subjects
 from fmri_pipeline.utils.config import apply_fmri_config_defaults
@@ -34,6 +35,18 @@ def setup_fmri(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     add_task_arg(parser)  # accepted for TUI consistency; not required by fMRIPrep
     add_output_format_args(parser)
     add_path_args(parser)
+    rest_group = parser.add_mutually_exclusive_group()
+    rest_group.add_argument(
+        "--task-is-rest",
+        dest="task_is_rest",
+        action="store_true",
+        default=None,
+    )
+    rest_group.add_argument(
+        "--no-task-is-rest",
+        dest="task_is_rest",
+        action="store_false",
+    )
 
     grp = parser.add_argument_group("fMRIPrep options")
     grp.add_argument(
@@ -292,6 +305,9 @@ def _update_fmri_config_from_args(args: argparse.Namespace, config: Any) -> None
     fmri_cfg = config.setdefault("fmri_preprocessing", {})
     fmriprep_cfg = fmri_cfg.setdefault("fmriprep", {})
 
+    if getattr(args, "task_is_rest", None) is not None:
+        fmri_cfg["task_is_rest"] = bool(args.task_is_rest)
+
     if args.engine:
         fmri_cfg["engine"] = args.engine
     if args.fmriprep_image:
@@ -377,15 +393,20 @@ def run_fmri(args: argparse.Namespace, _subjects: List[str], config: Any) -> Non
 
     if args.bids_fmri_root:
         config.setdefault("paths", {})["bids_fmri_root"] = args.bids_fmri_root
+    if getattr(args, "bids_rest_root", None):
+        config.setdefault("paths", {})["bids_rest_root"] = args.bids_rest_root
     if args.deriv_root:
         config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+    if getattr(args, "deriv_rest_root", None):
+        config.setdefault("paths", {})["deriv_rest_root"] = args.deriv_rest_root
 
     _update_fmri_config_from_args(args, config)
     apply_set_overrides(config, getattr(args, "set_overrides", None))
 
-    bids_fmri_root = config.get("paths.bids_fmri_root")
-    if not bids_fmri_root:
-        raise ValueError("Missing required config value: paths.bids_fmri_root")
+    bids_fmri_root = resolve_fmri_bids_root(
+        config,
+        task_is_rest=getattr(args, "task_is_rest", None),
+    )
 
     subjects = resolve_subjects(args, Path(bids_fmri_root), config)
 

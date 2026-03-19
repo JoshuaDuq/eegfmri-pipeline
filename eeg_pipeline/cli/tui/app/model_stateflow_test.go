@@ -140,7 +140,7 @@ func TestHandleMainMenuUpdate_UtilityDispatchesToGlobalSetup(t *testing.T) {
 }
 
 func TestHandleEscape_FromGlobalSetup_ReturnsMainMenu(t *testing.T) {
-	m := Model{state: StateGlobalSetup}
+	m := Model{state: StateGlobalSetup, navStack: []AppState{StateMainMenu}}
 
 	next, cmd := m.handleEscape()
 	if cmd != nil {

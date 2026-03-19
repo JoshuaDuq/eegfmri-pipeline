@@ -8,7 +8,7 @@ func (m Model) getFmriPreprocessingOptions() []optionType {
 	// Runtime group
 	options = append(options, optFmriGroupRuntime)
 	if m.fmriGroupRuntimeExpanded {
-		options = append(options, optFmriEngine, optFmriFmriprepImage)
+		options = append(options, optFmriTaskIsRest, optFmriEngine, optFmriFmriprepImage)
 	}
 
 	// Output group
@@ -147,6 +147,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 		return options
 	}
 
+	isRest := mode == "rest"
 	isFirstLevel := mode == "" || mode == "first-level"
 
 	options = append(options, optFmriAnalysisGroupInput)
@@ -159,28 +160,34 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 		)
 	}
 
-	options = append(options, optFmriAnalysisGroupContrast)
-	if m.fmriAnalysisGroupContrastExpanded {
-		if isFirstLevel {
-			options = append(options, optFmriAnalysisContrastType)
-		}
-		options = append(options,
-			optFmriAnalysisCondAColumn,
-			optFmriAnalysisCondAValue,
-			optFmriAnalysisCondBColumn,
-			optFmriAnalysisCondBValue,
-			optFmriAnalysisContrastName,
-		)
-		if isFirstLevel && m.fmriAnalysisContrastType == 1 {
-			options = append(options, optFmriAnalysisFormula)
+	if !isRest {
+		options = append(options, optFmriAnalysisGroupContrast)
+		if m.fmriAnalysisGroupContrastExpanded {
+			if isFirstLevel {
+				options = append(options, optFmriAnalysisContrastType)
+			}
+			options = append(options,
+				optFmriAnalysisCondAColumn,
+				optFmriAnalysisCondAValue,
+				optFmriAnalysisCondBColumn,
+				optFmriAnalysisCondBValue,
+				optFmriAnalysisContrastName,
+			)
+			if isFirstLevel && m.fmriAnalysisContrastType == 1 {
+				options = append(options, optFmriAnalysisFormula)
+			}
 		}
 	}
 
 	options = append(options, optFmriAnalysisGroupGLM)
 	if m.fmriAnalysisGroupGLMExpanded {
+		if !isRest {
+			options = append(options,
+				optFmriAnalysisHrfModel,
+				optFmriAnalysisDriftModel,
+			)
+		}
 		options = append(options,
-			optFmriAnalysisHrfModel,
-			optFmriAnalysisDriftModel,
 			optFmriAnalysisHighPassHz,
 			optFmriAnalysisLowPassHz,
 			optFmriAnalysisSmoothingFwhm,
@@ -206,11 +213,21 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 		if isFirstLevel {
 			options = append(options, optFmriAnalysisWriteDesignMatrix)
 		}
+		if isRest {
+			options = append(options, optFmriAnalysisStandardize, optFmriAnalysisDetrend)
+		}
 	}
 
 	options = append(options, optFmriAnalysisGroupOutput)
 	if m.fmriAnalysisGroupOutputExpanded {
-		if isFirstLevel {
+		if isRest {
+			options = append(options,
+				optFmriAnalysisOutputDir,
+				optFmriAnalysisAtlasLabelsImg,
+				optFmriAnalysisAtlasLabelsTsv,
+				optFmriAnalysisConnectivityKind,
+			)
+		} else if isFirstLevel {
 			options = append(options,
 				optFmriAnalysisOutputType,
 				optFmriAnalysisOutputDir,
@@ -263,7 +280,7 @@ func (m Model) getFmriAnalysisOptions() []optionType {
 				optFmriAnalysisSignatureMaps,
 			)
 		}
-	} else {
+	} else if mode == "trial-signatures" {
 		options = append(options, optFmriTrialSigGroup)
 		if m.fmriTrialSigGroupExpanded {
 			trialMethod := "beta-series"

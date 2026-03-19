@@ -828,6 +828,7 @@ const (
 	optFmriNoMsm
 	optFmriLevel
 	optFmriTaskId
+	optFmriTaskIsRest
 	// fMRI analysis (first-level GLM + contrasts) group headers
 	optFmriAnalysisGroupInput
 	optFmriAnalysisGroupContrast
@@ -866,6 +867,11 @@ const (
 	optFmriAnalysisOutputDir
 	optFmriAnalysisResampleToFS
 	optFmriAnalysisFreesurferDir
+	optFmriAnalysisAtlasLabelsImg
+	optFmriAnalysisAtlasLabelsTsv
+	optFmriAnalysisConnectivityKind
+	optFmriAnalysisStandardize
+	optFmriAnalysisDetrend
 	// fMRI analysis plotting/report options
 	optFmriAnalysisPlotsEnabled
 	optFmriAnalysisPlotHTML

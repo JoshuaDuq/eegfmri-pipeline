@@ -201,7 +201,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
                 "preprocessing": {
                     "task_is_rest": True,
                     "rest_epochs_duration": 12.0,
-                    "rest_epochs_overlap": 3.0,
+                    "rest_epochs_overlap": 0.0,
                 },
                 "epochs": {"baseline": [-0.2, 0.0], "tmin": -7.0, "tmax": 15.0},
             }
@@ -216,8 +216,28 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertIn("epochs_tmin = 0.0", cfg)
         self.assertIn("baseline = None", cfg)
         self.assertIn("rest_epochs_duration = 12.0", cfg)
-        self.assertIn("rest_epochs_overlap = 3.0", cfg)
+        self.assertIn("rest_epochs_overlap = 0.0", cfg)
         self.assertNotIn("epochs_tmax =", cfg)
+
+    def test_generate_mne_bids_config_rejects_overlapping_rest_epochs(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.bids_root = Path("/tmp/bids")
+        p.deriv_root = Path("/tmp/deriv")
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "preprocessing": {
+                    "task_is_rest": True,
+                    "rest_epochs_duration": 12.0,
+                    "rest_epochs_overlap": 3.0,
+                },
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "rest_epochs_overlap > 0"):
+            p._generate_mne_bids_config("preprocessing/_07_make_epochs", subjects=["0001"])
 
     def test_generate_mne_bids_config_requires_conditions_for_task_data(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -314,6 +334,44 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         )
         with patch("eeg_pipeline.pipelines.preprocessing.PipelineBase.__init__", lambda self, name, config=None: setattr(self, "config", config or cfg)):
             p = PreprocessingPipeline(config=cfg)
+
+        self.assertEqual(str(p.bids_root), "/tmp/bids-rest")
+        self.assertEqual(str(p.deriv_root), "/tmp/derivatives-rest")
+
+    def test_run_batch_updates_roots_for_runtime_rest_override(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        cfg = DotConfig(
+            {
+                "paths": {
+                    "bids_root": "/tmp/bids-task",
+                    "bids_rest_root": "/tmp/bids-rest",
+                    "deriv_root": "/tmp/derivatives-task",
+                    "deriv_rest_root": "/tmp/derivatives-rest",
+                },
+                "preprocessing": {"task_is_rest": False},
+            }
+        )
+
+        def _fake_init(self, name, config=None):
+            self.name = name
+            self.config = config or cfg
+            self.logger = Mock()
+
+        with patch("eeg_pipeline.pipelines.preprocessing.PipelineBase.__init__", _fake_init):
+            p = PreprocessingPipeline(config=cfg)
+
+        self.assertEqual(str(p.bids_root), "/tmp/bids-task")
+        self.assertEqual(str(p.deriv_root), "/tmp/derivatives-task")
+
+        with patch.object(PreprocessingPipeline, "_execute_steps"):
+            p.run_batch(
+                subjects=["0001"],
+                task="rest",
+                mode="epochs",
+                task_is_rest=True,
+                progress=_NoopProgress(),
+            )
 
         self.assertEqual(str(p.bids_root), "/tmp/bids-rest")
         self.assertEqual(str(p.deriv_root), "/tmp/derivatives-rest")

@@ -59,18 +59,25 @@ class PreprocessingPipeline(PipelineBase):
     
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="preprocessing", config=config)
-        self.bids_root = resolve_eeg_bids_root(
-            self.config,
-            task_is_rest=self._resolve_task_is_rest(),
-        )
-        if self._resolve_task_is_rest() and not hasattr(self, "deriv_root"):
-            self.deriv_root = self._resolve_pipeline_deriv_root()
+        self._apply_processing_roots(self._resolve_task_is_rest())
 
     def _resolve_pipeline_deriv_root(self) -> Path:
         """Resolve EEG preprocessing derivatives root."""
         return resolve_eeg_deriv_root(
             self.config,
             task_is_rest=self._resolve_task_is_rest(),
+        )
+
+    def _apply_processing_roots(self, task_is_rest: bool) -> None:
+        """Resolve and assign BIDS and derivatives roots for the active processing mode."""
+        resolved_task_is_rest = bool(task_is_rest)
+        self.bids_root = resolve_eeg_bids_root(
+            self.config,
+            task_is_rest=resolved_task_is_rest,
+        )
+        self.deriv_root = resolve_eeg_deriv_root(
+            self.config,
+            task_is_rest=resolved_task_is_rest,
         )
     
     def _extract_preprocessing_params(
@@ -134,6 +141,7 @@ class PreprocessingPipeline(PipelineBase):
                 - progress: ProgressReporter for TUI feedback
         """
         resolved_task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
+        self._apply_processing_roots(task_is_rest)
         
         progress.subject_start(f"sub-{subject}")
         
@@ -174,6 +182,7 @@ class PreprocessingPipeline(PipelineBase):
             List of per-subject status dictionaries
         """
         resolved_task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
+        self._apply_processing_roots(task_is_rest)
         run_context = self._create_run_metadata_context(
             subjects=subjects,
             task=resolved_task,
@@ -573,6 +582,12 @@ class PreprocessingPipeline(PipelineBase):
         if overlap < 0:
             raise ValueError(
                 "preprocessing.rest_epochs_overlap must be greater than or equal to 0."
+            )
+        if overlap > 0:
+            raise ValueError(
+                "Resting-state preprocessing does not support preprocessing.rest_epochs_overlap > 0, "
+                "because overlapping epochs would be treated as independent trial rows. "
+                "Set preprocessing.rest_epochs_overlap = 0."
             )
         if overlap >= duration:
             raise ValueError(

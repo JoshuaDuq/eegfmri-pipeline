@@ -191,7 +191,7 @@ func (m Model) renderHeader(width int) string {
 	breadcrumb := m.buildBreadcrumbRow(width)
 	progress := m.buildProgressBar(width)
 	divider := styles.RenderDivider(width)
-	return titleRow + "\n" + divider + "\n\n" + breadcrumb + "\n\n" + progress
+	return titleRow + "\n" + divider + "\n\n" + breadcrumb + "\n" + progress
 }
 
 func (m Model) buildTitleRow(width int) string {
@@ -250,16 +250,15 @@ func (m Model) buildProgressBar(width int) string {
 	if filled > total {
 		filled = total
 	}
-	barWidth := width
-	if barWidth < 4 {
-		barWidth = 4
+	if width < 4 {
+		width = 4
 	}
 
-	filledW := barWidth * filled / total
-	emptyW := barWidth - filledW
+	filledW := width * filled / total
+	emptyW := width - filledW
 
-	filledStr := lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("█", filledW))
-	emptyStr := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("░", emptyW))
+	filledStr := lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("━", filledW))
+	emptyStr := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("─", emptyW))
 	return filledStr + emptyStr
 }
 
@@ -308,12 +307,15 @@ func (m Model) buildBreadcrumbRow(width int) string {
 			if isCompact {
 				segment = check
 			} else {
-				segment = check + lipgloss.NewStyle().Foreground(styles.Muted).Render(" "+name)
+				segment = check + lipgloss.NewStyle().Foreground(styles.TextDim).Render(" "+name)
 			}
 		case i == m.stepIndex:
-			segment = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Underline(true).Render(name)
+			segment = lipgloss.NewStyle().
+				Foreground(styles.BgDark).Background(styles.Primary).
+				Bold(true).
+				Render(" " + name + " ")
 		default:
-			segment = lipgloss.NewStyle().Foreground(styles.Muted).Faint(true).Render(name)
+			segment = lipgloss.NewStyle().Foreground(styles.Border).Render(name)
 		}
 		parts = append(parts, segment)
 	}
@@ -517,6 +519,7 @@ func (m Model) getStepHints() []footerHint {
 		return []footerHint{
 			{key: "Space", label: "Toggle", compact: "Toggle", priority: 0},
 			{key: "A/N", label: "All/None", compact: "All/None", priority: 1},
+			{key: "R", label: "Reload", compact: "Reload", priority: 1},
 			{key: "Enter", label: "Next", compact: "Next", priority: 0},
 		}
 	default:

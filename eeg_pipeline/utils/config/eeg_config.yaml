@@ -32,6 +32,7 @@ environment:
 # 1b. fMRI PREPROCESSING (fMRIPrep-style)
 ###################################################################
 fmri_preprocessing:
+  task_is_rest: false
   engine: "docker"  # "docker" or "apptainer"
   fmriprep:
     image: "nipreps/fmriprep:25.2.4"  # Docker image tag or apptainer URI/path
@@ -68,6 +69,23 @@ fmri_preprocessing:
     me_output_echos: false
     random_seed: 0
     extra_args: ""  # Parsed with shlex and appended verbatim to fMRIPrep CLI
+
+fmri_resting_state:
+  task_is_rest: false
+  task_label: "rest"
+  input_source: "fmriprep"
+  fmriprep_space: "MNI152NLin2009cAsym"
+  require_fmriprep: true
+  runs: null
+  confounds_strategy: "auto"
+  high_pass_hz: 0.008
+  low_pass_hz: 0.1
+  smoothing_fwhm: null
+  atlas_labels_img: null
+  atlas_labels_tsv: null
+  connectivity_kind: "correlation"
+  standardize: true
+  detrend: true
 
 ###################################################################
 # 1c. fMRI ANALYSIS

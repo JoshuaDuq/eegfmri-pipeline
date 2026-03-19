@@ -1,4 +1,5 @@
 import sys
+import json
 import tempfile
 import types
 import unittest
@@ -219,7 +220,6 @@ def _feature_import_stubs() -> dict[str, types.ModuleType]:
             "eeg_pipeline.context.features",
             FeatureContext=_StubFeatureContext,
         ),
-        "eeg_pipeline.infra": _make_package("eeg_pipeline.infra"),
         "eeg_pipeline.domain": _make_package("eeg_pipeline.domain"),
         "eeg_pipeline.domain.features": _make_package("eeg_pipeline.domain.features"),
         "eeg_pipeline.domain.features.naming": _make_module(
@@ -232,7 +232,6 @@ def _feature_import_stubs() -> dict[str, types.ModuleType]:
             "eeg_pipeline.domain.features.constants",
             FEATURE_CATEGORIES=["power"],
         ),
-        "eeg_pipeline.infra": _make_package("eeg_pipeline.infra"),
         "eeg_pipeline.infra.paths": _make_module(
             "eeg_pipeline.infra.paths",
             _load_events_df=lambda *args, **kwargs: None,

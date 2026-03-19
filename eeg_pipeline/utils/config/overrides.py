@@ -10,6 +10,7 @@ def apply_runtime_overrides(
     config: dict[str, Any],
     *,
     task: Optional[str] = None,
+    task_is_rest: Optional[bool] = None,
     source_root: Optional[str] = None,
     bids_root: Optional[str] = None,
     bids_rest_root: Optional[str] = None,
@@ -38,6 +39,13 @@ def apply_runtime_overrides(
 
     if task:
         config.setdefault("project", {})["task"] = task
+
+    if task_is_rest is not None:
+        resolved_task_is_rest = bool(task_is_rest)
+        config.setdefault("preprocessing", {})["task_is_rest"] = resolved_task_is_rest
+        config.setdefault("feature_engineering", {})["task_is_rest"] = resolved_task_is_rest
+        config.setdefault("fmri_preprocessing", {})["task_is_rest"] = resolved_task_is_rest
+        config.setdefault("fmri_resting_state", {})["task_is_rest"] = resolved_task_is_rest
 
     apply_set_overrides(config, set_overrides)
 

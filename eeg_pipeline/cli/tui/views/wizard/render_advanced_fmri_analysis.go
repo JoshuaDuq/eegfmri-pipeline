@@ -245,6 +245,25 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 		fsDirVal = "(from config)"
 	}
 
+	atlasLabelsImgVal := strings.TrimSpace(m.fmriAnalysisAtlasLabelsImg)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisAtlasLabelsImg {
+		atlasLabelsImgVal = m.textBuffer + "█"
+	}
+	if atlasLabelsImgVal == "" {
+		atlasLabelsImgVal = "(required)"
+	}
+
+	atlasLabelsTsvVal := strings.TrimSpace(m.fmriAnalysisAtlasLabelsTsv)
+	if m.editingText && m.editingTextField == textFieldFmriAnalysisAtlasLabelsTsv {
+		atlasLabelsTsvVal = m.textBuffer + "█"
+	}
+	if atlasLabelsTsvVal == "" {
+		atlasLabelsTsvVal = "(optional)"
+	}
+
+	connectivityKindOptions := []string{"correlation"}
+	connectivityKindVal := connectivityKindOptions[m.fmriAnalysisConnectivityKind%len(connectivityKindOptions)]
+
 	secondLevelModels := []string{"one-sample", "two-sample", "paired", "repeated-measures"}
 	secondLevelModelVal := secondLevelModels[m.fmriSecondLevelModelIndex%len(secondLevelModels)]
 
@@ -885,6 +904,14 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 				value = "false"
 			}
 			hint = "Space to toggle"
+		case optFmriAnalysisStandardize:
+			label = "Standardize"
+			value = m.boolToOnOff(m.fmriAnalysisStandardize)
+			hint = "Space to toggle"
+		case optFmriAnalysisDetrend:
+			label = "Detrend"
+			value = m.boolToOnOff(m.fmriAnalysisDetrend)
+			hint = "Space to toggle"
 
 		// Output
 		case optFmriAnalysisOutputType:
@@ -907,6 +934,18 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 			label = "FreeSurfer Dir"
 			value = fsDirVal
 			hint = "Space to edit"
+		case optFmriAnalysisAtlasLabelsImg:
+			label = "Atlas Labels Img"
+			value = atlasLabelsImgVal
+			hint = "Space to edit"
+		case optFmriAnalysisAtlasLabelsTsv:
+			label = "Atlas Labels TSV"
+			value = atlasLabelsTsvVal
+			hint = "Space to edit"
+		case optFmriAnalysisConnectivityKind:
+			label = "Connectivity"
+			value = connectivityKindVal
+			hint = "ROI connectivity estimator"
 
 		// Plotting / report
 		case optFmriAnalysisPlotsEnabled:

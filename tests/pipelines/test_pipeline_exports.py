@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import types
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 
 class TestPipelineExports(unittest.TestCase):
