@@ -8,7 +8,10 @@
 A modular EEG/fMRI analysis suite for multimodal neuroimaging research.
 It covers EEG preprocessing, feature extraction, behavioral analysis,
 machine learning, fMRI preprocessing, first-level and second-level GLM,
-trial-wise beta/signature extraction — all available from a unified CLI and an interactive TUI.
+trial-wise beta/signature extraction — all available from a unified CLI and an interactive TUI. 
+
+This pipeline is still in very early development and is subject to change. 
+Please send any suggestions my way :)
 
 
 

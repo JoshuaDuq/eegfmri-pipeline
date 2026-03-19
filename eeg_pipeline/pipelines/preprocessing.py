@@ -79,6 +79,11 @@ class PreprocessingPipeline(PipelineBase):
             self.config,
             task_is_rest=resolved_task_is_rest,
         )
+
+    def _refresh_processing_roots_if_initialized(self, task_is_rest: bool) -> None:
+        """Refresh processing roots only when the pipeline was fully initialized."""
+        if hasattr(self, "bids_root") and hasattr(self, "deriv_root"):
+            self._apply_processing_roots(task_is_rest)
     
     def _extract_preprocessing_params(
         self,
@@ -141,7 +146,7 @@ class PreprocessingPipeline(PipelineBase):
                 - progress: ProgressReporter for TUI feedback
         """
         resolved_task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
-        self._apply_processing_roots(task_is_rest)
+        self._refresh_processing_roots_if_initialized(task_is_rest)
         
         progress.subject_start(f"sub-{subject}")
         
@@ -182,7 +187,7 @@ class PreprocessingPipeline(PipelineBase):
             List of per-subject status dictionaries
         """
         resolved_task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = self._extract_preprocessing_params(task, kwargs)
-        self._apply_processing_roots(task_is_rest)
+        self._refresh_processing_roots_if_initialized(task_is_rest)
         run_context = self._create_run_metadata_context(
             subjects=subjects,
             task=resolved_task,

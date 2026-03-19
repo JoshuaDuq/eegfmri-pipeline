@@ -164,10 +164,15 @@ class FmriPreprocessingPipeline(PipelineBase):
         success = False
         bids_mount_tmp: Optional[tempfile.TemporaryDirectory] = None
         try:
-            fmri_root = resolve_fmri_bids_root(
-                self.config,
-                task_is_rest=self._resolve_task_is_rest(),
-            )
+            try:
+                fmri_root = resolve_fmri_bids_root(
+                    self.config,
+                    task_is_rest=self._resolve_task_is_rest(),
+                )
+            except ValueError as exc:
+                raise FileNotFoundError(
+                    "fMRI BIDS root is not configured."
+                ) from exc
 
             engine = self.config.get("fmri_preprocessing.engine", "docker")
             if engine not in {"docker", "apptainer"}:
