@@ -48,6 +48,9 @@ class NoopProgress:
     def complete(self, *_a, **_k):
         return None
 
+    def error(self, *_a, **_k):
+        return None
+
     def step(self, *_a, **_k):
         return None
 

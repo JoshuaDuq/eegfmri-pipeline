@@ -15,7 +15,140 @@ _NoopBatchProgress = NoopBatchProgress
 _NoopProgress = NoopProgress
 
 
-class TestPreprocessingHelpers(unittest.TestCase):
+def _make_package(name: str) -> types.ModuleType:
+    module = types.ModuleType(name)
+    module.__path__ = []  # type: ignore[attr-defined]
+    return module
+
+
+def _make_module(name: str, **attrs: object) -> types.ModuleType:
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+def _make_pipeline_base_class() -> type:
+    class _PipelineBase:
+        def __init__(self, name, config=None):
+            self.name = name
+            self.config = config
+            self.logger = Mock()
+            self.deriv_root = Path(tempfile.mkdtemp())
+
+        def _create_run_metadata_context(self, *, subjects, task, kwargs):
+            return {
+                "run_id": "test-run",
+                "started_at": 0,
+                "task": task,
+                "subjects": list(subjects),
+                "specifications": {k: v for k, v in kwargs.items() if k != "progress"},
+            }
+
+        def _write_run_metadata(self, run_context, *, status, error=None, outputs=None, summary=None):
+            metadata_dir = Path(self.deriv_root) / "logs" / "run_metadata" / self.name
+            metadata_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "status": status,
+                "task": run_context.get("task"),
+                "subjects": run_context.get("subjects", []),
+                "specifications": run_context.get("specifications", {}),
+                "outputs": outputs or {},
+                "summary": summary or {},
+            }
+            if error:
+                payload["error"] = error
+            out_path = metadata_dir / "run_test-run.json"
+            out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            return out_path
+
+    return _PipelineBase
+
+
+def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
+    def _get_config_value(config, key, default=None):
+        return config.get(key, default) if hasattr(config, "get") else default
+
+    return {
+        "eeg_pipeline.pipelines.base": _make_module(
+            "eeg_pipeline.pipelines.base",
+            PipelineBase=_make_pipeline_base_class(),
+        ),
+        "eeg_pipeline.pipelines.progress": _make_module(
+            "eeg_pipeline.pipelines.progress",
+            ensure_progress_reporter=lambda progress=None: progress or _NoopProgress(),
+        ),
+        "eeg_pipeline.utils": _make_package("eeg_pipeline.utils"),
+        "eeg_pipeline.utils.config": _make_package("eeg_pipeline.utils.config"),
+        "eeg_pipeline.utils.config.loader": _make_module(
+            "eeg_pipeline.utils.config.loader",
+            get_condition_column_candidates=lambda config: config.get("event_columns.condition", [])
+            if hasattr(config, "get")
+            else [],
+        ),
+        "eeg_pipeline.utils.config.roots": _make_module(
+            "eeg_pipeline.utils.config.roots",
+            resolve_eeg_bids_root=lambda config, task_is_rest=False: Path(
+                _get_config_value(config, "paths.bids_rest_root" if task_is_rest else "paths.bids_root", "/tmp/bids")
+            ),
+            resolve_eeg_deriv_root=lambda config, task_is_rest=False: Path(
+                _get_config_value(config, "paths.deriv_rest_root" if task_is_rest else "paths.deriv_root", "/tmp/deriv")
+            ),
+        ),
+        "eeg_pipeline.preprocessing": _make_package("eeg_pipeline.preprocessing"),
+        "eeg_pipeline.preprocessing.pipeline": _make_package(
+            "eeg_pipeline.preprocessing.pipeline"
+        ),
+    }
+
+
+class _PreprocessingImportMixin:
+    def setUp(self):
+        patcher = patch.dict(sys.modules, _preprocessing_import_stubs())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
+    def test_preprocessing_helper_defaults_and_validation_edges(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "preprocessing": {"task_is_rest": True},
+            }
+        )
+
+        self.assertTrue(p._resolve_task_is_rest())
+        self.assertFalse(p._resolve_task_is_rest(False))
+        self.assertEqual(p._normalize_subjects(["all"]), "all")
+        self.assertEqual(p._normalize_subjects(["0001"]), ["0001"])
+        self.assertIn("preprocessing/_06a2_find_ica_artifacts", p._get_ica_fitting_steps(use_icalabel=False))
+        self.assertNotIn("preprocessing/_06a2_find_ica_artifacts", p._get_ica_fitting_steps(use_icalabel=True))
+
+        resolved = p._extract_preprocessing_params(
+            "task",
+            {
+                "mode": "ica",
+                "use_pyprep": False,
+                "use_icalabel": False,
+                "task_is_rest": False,
+                "n_jobs": 4,
+                "progress": _NoopProgress(),
+            },
+        )
+        self.assertEqual(resolved[0], "task")
+        self.assertEqual(resolved[1], "ica")
+        self.assertFalse(resolved[2])
+        self.assertFalse(resolved[3])
+        self.assertFalse(resolved[4])
+        self.assertEqual(resolved[5], 4)
+
+        with self.assertRaisesRegex(ValueError, "Unknown preprocessing mode"):
+            p._get_steps_for_mode("bogus")
+
     def test_detect_conditions_from_bids(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -150,7 +283,7 @@ class TestPreprocessingHelpers(unittest.TestCase):
         self.assertTrue(mock_preproc.run_bads_detection.called)
         self.assertTrue(mock_ica.run_ica_label.called)
 
-class TestPreprocessingCompletion(unittest.TestCase):
+class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
     def test_preprocessing_init_and_ica_helpers(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -408,7 +541,7 @@ class TestPreprocessingCompletion(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 p._write_clean_events_tsv(subjects=["0001"], task="t")
 
-class TestPreprocessingGapfill(unittest.TestCase):
+class TestPreprocessingGapfill(_PreprocessingImportMixin, unittest.TestCase):
         def test_preprocessing_config_generation_and_condition_detection_branches(self):
             from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 

@@ -16,7 +16,108 @@ _NoopBatchProgress = NoopBatchProgress
 _NoopProgress = NoopProgress
 
 
-class TestMachineLearningCompletion(unittest.TestCase):
+def _make_package(name: str) -> types.ModuleType:
+    module = types.ModuleType(name)
+    module.__path__ = []  # type: ignore[attr-defined]
+    return module
+
+
+def _make_module(name: str, **attrs: object) -> types.ModuleType:
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+def _make_pipeline_base_class() -> type:
+    class _PipelineBase:
+        def __init__(self, name, config=None):
+            self.name = name
+            self.config = config
+            self.logger = Mock()
+            self.deriv_root = Path(tempfile.mkdtemp())
+
+        def _create_run_metadata_context(self, *, subjects, task, kwargs):
+            return {
+                "run_id": "test-run",
+                "started_at": 0,
+                "task": task,
+                "subjects": list(subjects),
+                "specifications": {k: v for k, v in kwargs.items() if k != "progress"},
+            }
+
+        def _write_run_metadata(self, run_context, *, status, error=None, outputs=None, summary=None):
+            metadata_dir = Path(self.deriv_root) / "logs" / "run_metadata" / self.name
+            metadata_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "status": status,
+                "task": run_context.get("task"),
+                "subjects": run_context.get("subjects", []),
+                "specifications": run_context.get("specifications", {}),
+                "outputs": outputs or {},
+                "summary": summary or {},
+            }
+            if error:
+                payload["error"] = error
+            out_path = metadata_dir / "run_test-run.json"
+            out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            return out_path
+
+    return _PipelineBase
+
+
+def _machine_learning_import_stubs() -> dict[str, types.ModuleType]:
+    def _get_config_value(config, key, default=None):
+        return config.get(key, default) if hasattr(config, "get") else default
+
+    def _require_config_value(config, key):
+        value = _get_config_value(config, key, None)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+    return {
+        "eeg_pipeline.analysis.machine_learning": _make_package(
+            "eeg_pipeline.analysis.machine_learning"
+        ),
+        "eeg_pipeline.analysis.machine_learning.orchestration": _make_module(
+            "eeg_pipeline.analysis.machine_learning.orchestration",
+            run_regression_ml=lambda **kwargs: None,
+            run_within_subject_regression_ml=lambda **kwargs: None,
+            run_time_generalization=lambda **kwargs: None,
+            run_classification_ml=lambda **kwargs: None,
+            run_within_subject_classification_ml=lambda **kwargs: None,
+            run_model_comparison_ml=lambda **kwargs: None,
+            run_incremental_validity_ml=lambda **kwargs: None,
+            _run_uncertainty_stage=lambda **kwargs: None,
+            _run_shap_importance_stage=lambda **kwargs: None,
+            _run_permutation_importance_stage=lambda **kwargs: None,
+        ),
+        "eeg_pipeline.pipelines.base": _make_module(
+            "eeg_pipeline.pipelines.base",
+            PipelineBase=_make_pipeline_base_class(),
+        ),
+        "eeg_pipeline.pipelines.progress": _make_module(
+            "eeg_pipeline.pipelines.progress",
+            ensure_progress_reporter=lambda progress=None: progress or _NoopProgress(),
+        ),
+        "eeg_pipeline.utils": _make_package("eeg_pipeline.utils"),
+        "eeg_pipeline.utils.config": _make_package("eeg_pipeline.utils.config"),
+        "eeg_pipeline.utils.config.loader": _make_module(
+            "eeg_pipeline.utils.config.loader",
+            require_config_value=_require_config_value,
+        ),
+    }
+
+
+class _MachineLearningImportMixin:
+    def setUp(self):
+        patcher = patch.dict(sys.modules, _machine_learning_import_stubs())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class TestMachineLearningCompletion(_MachineLearningImportMixin, unittest.TestCase):
     def test_ml_init_extract_params_process_subject(self):
         from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
@@ -60,7 +161,7 @@ class TestMachineLearningCompletion(unittest.TestCase):
             self.assertEqual(p._run_shap(["0001"], "t", 42), Path("/tmp/s"))
             self.assertEqual(p._run_permutation_importance(["0001"], "t", 42), Path("/tmp/p"))
 
-class TestMachineLearningDeep(unittest.TestCase):
+class TestMachineLearningDeep(_MachineLearningImportMixin, unittest.TestCase):
         def test_ml_pipeline_mode_executors(self):
             from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
@@ -122,7 +223,7 @@ class TestMachineLearningDeep(unittest.TestCase):
                 self.assertEqual(p._execute_shap(["0001"], "t", "group", params, progress), Path("/tmp/s"))
                 self.assertEqual(p._execute_permutation(["0001"], "t", "group", params, progress), Path("/tmp/p"))
 
-class TestMachineLearningGapfill(unittest.TestCase):
+class TestMachineLearningGapfill(_MachineLearningImportMixin, unittest.TestCase):
     def test_ml_missing_task_and_visualize(self):
         from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
@@ -132,6 +233,67 @@ class TestMachineLearningGapfill(unittest.TestCase):
             p._validate_inputs(["0001", "0002"], None, "group")
         with self.assertRaises(NotImplementedError):
             p.visualize(Path(tempfile.mkdtemp()))
+
+    def test_ml_validation_and_parameter_helpers(self):
+        from eeg_pipeline.pipelines.machine_learning import MLPipeline, VALID_CV_SCOPES
+
+        self.assertEqual(VALID_CV_SCOPES, {"group", "subject"})
+
+        p = object.__new__(MLPipeline)
+        p.config = DotConfig(
+            {
+                "project": {"task": "task", "random_state": 7},
+                "analysis": {"min_subjects_for_group": 3},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "No subjects specified"):
+            p._validate_inputs([], None, "group")
+
+        p_no_task = object.__new__(MLPipeline)
+        p_no_task.config = DotConfig({})
+        with self.assertRaisesRegex(ValueError, "Missing required config value: project.task"):
+            p_no_task._validate_inputs(["0001", "0002", "0003"], None, "group")
+
+        with self.assertRaisesRegex(ValueError, "Invalid cv_scope"):
+            p._validate_inputs(["0001"], "task", "invalid")
+
+        with self.assertRaisesRegex(ValueError, "at least 3 subjects"):
+            p._validate_inputs(["0001", "0002"], "task", "group")
+
+        self.assertEqual(p._validate_inputs(["0001", "0002", "0003"], None, "group"), "task")
+        self.assertEqual(p._validate_inputs(["0001"], "explicit", "subject"), "explicit")
+
+        params = p._extract_ml_parameters(
+            {
+                "progress": _NoopProgress(),
+                "cv_scope": "subject",
+                "n_perm": 5,
+                "inner_splits": 4,
+                "outer_jobs": 2,
+                "rng_seed": 11,
+                "model": "ridge",
+                "uncertainty_alpha": 0.2,
+                "perm_n_repeats": 7,
+                "classification_model": "svm",
+                "feature_families": ["power"],
+                "feature_bands": ["alpha"],
+                "feature_segments": ["early"],
+                "feature_scopes": ["global"],
+                "feature_stats": ["mean"],
+                "feature_harmonization": "zscore",
+                "target": "score",
+                "binary_threshold": 0.5,
+                "baseline_predictors": ["age"],
+                "covariates": ["sex"],
+            }
+        )
+        self.assertEqual(params["cv_scope"], "subject")
+        self.assertEqual(params["rng_seed"], 11)
+        self.assertEqual(params["model"], "ridge")
+        self.assertEqual(params["classification_model"], "svm")
+        self.assertEqual(params["feature_families"], ["power"])
+        self.assertEqual(params["baseline_predictors"], ["age"])
 
     def test_run_batch_raises_when_mode_returns_none(self):
         from eeg_pipeline.pipelines.machine_learning import MLPipeline
@@ -196,3 +358,27 @@ class TestMachineLearningGapfill(unittest.TestCase):
         payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["specifications"]["mode"], "regression")
+
+    def test_run_batch_rejects_unknown_mode(self):
+        from eeg_pipeline.pipelines.machine_learning import MLPipeline
+
+        p = object.__new__(MLPipeline)
+        p.name = "machine_learning"
+        p.config = DotConfig({})
+        p.logger = Mock()
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.results_root = p.deriv_root / "machine_learning"
+
+        params = {
+            "progress": _NoopProgress(),
+            "cv_scope": "group",
+            "model": "elasticnet",
+            "n_perm": 0,
+            "inner_splits": 3,
+        }
+
+        with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
+            MLPipeline, "_validate_inputs", return_value="task"
+        ):
+            with self.assertRaisesRegex(ValueError, "Unknown mode: bogus"):
+                p.run_batch(["0001"], task="task", mode="bogus")

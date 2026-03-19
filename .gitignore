@@ -69,6 +69,7 @@ docs/superpowers/
 
 # Ignore documentation by default, but keep the approved public docs folders
 docs/*
+!docs/index.md
 !docs/screenshots/
 !docs/screenshots/**
 !docs/eeg/

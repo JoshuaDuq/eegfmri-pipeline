@@ -17,7 +17,424 @@ _NoopBatchProgress = NoopBatchProgress
 _NoopProgress = NoopProgress
 
 
-class TestFeatureHelpers(unittest.TestCase):
+def _make_package(name: str) -> types.ModuleType:
+    module = types.ModuleType(name)
+    module.__path__ = []  # type: ignore[attr-defined]
+    return module
+
+
+def _make_module(name: str, **attrs: object) -> types.ModuleType:
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+def _make_pipeline_base_class() -> type:
+    class _PipelineBase:
+        def __init__(self, name, config=None):
+            self.name = name
+            self.config = config
+            self.logger = Mock()
+            self.deriv_root = Path(tempfile.mkdtemp())
+
+        def _setup(self):
+            self.deriv_root = self._resolve_pipeline_deriv_root()
+            return None
+
+        def _create_run_metadata_context(self, *, subjects, task, kwargs):
+            return {
+                "run_id": "test-run",
+                "started_at": 0,
+                "task": task,
+                "subjects": list(subjects),
+                "specifications": {k: v for k, v in kwargs.items() if k != "progress"},
+            }
+
+        def _write_run_metadata(self, run_context, *, status, error=None, outputs=None, summary=None):
+            metadata_dir = Path(self.deriv_root) / "logs" / "run_metadata" / self.name
+            metadata_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "status": status,
+                "task": run_context.get("task"),
+                "subjects": run_context.get("subjects", []),
+                "specifications": run_context.get("specifications", {}),
+                "outputs": outputs or {},
+                "summary": summary or {},
+            }
+            if error:
+                payload["error"] = error
+            out_path = metadata_dir / "run_test-run.json"
+            out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            return out_path
+
+        def run_batch(self, subjects, task=None, **kwargs):
+            results = []
+            for subject in subjects:
+                self.process_subject(subject, task=task, **kwargs)
+                results.append({"subject": subject, "status": "success"})
+            return results
+
+    return _PipelineBase
+
+
+class _StubFeatureContext:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class _StubTimeWindowSpec:
+    def __init__(
+        self,
+        times,
+        sfreq=None,
+        window_name=None,
+        explicit_windows=None,
+        sampling_rate=None,
+        **_kwargs,
+    ):
+        self.times = times
+        self.sfreq = sfreq if sfreq is not None else sampling_rate
+        self.window_name = window_name
+        self.explicit_windows = explicit_windows
+
+
+class _StubEpochs:
+    def __init__(self, n_epochs):
+        self._n_epochs = int(n_epochs)
+
+    def __len__(self):
+        return self._n_epochs
+
+
+def _stub_find_clean_epochs_path(*_args, **_kwargs):
+    return None
+
+
+def _stub_find_clean_events_path(*_args, **_kwargs):
+    return None
+
+
+def _lookup_config_value(config, dotted_key, default=None):
+    if not hasattr(config, "get"):
+        return default
+    value = config.get(dotted_key, None)
+    if value is not None:
+        return value
+    current = config
+    for part in dotted_key.split("."):
+        if not hasattr(current, "get"):
+            return default
+        current = current.get(part, None)
+        if current is None:
+            return default
+    return current
+
+
+def _mkdir_path(path):
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def _stub_load_epochs_for_analysis(
+    subject,
+    task,
+    *,
+    align,
+    deriv_root,
+    config,
+    task_is_rest=None,
+    **_kwargs,
+):
+    import pandas as pd
+
+    rest_mode = (
+        bool(task_is_rest)
+        if task_is_rest is not None
+        else bool(config.get("preprocessing.task_is_rest", False))
+    )
+    if rest_mode and float(config.get("preprocessing.rest_epochs_overlap", 0) or 0) > 0:
+        raise ValueError("rest_epochs_overlap > 0 is not supported")
+
+    from eeg_pipeline.utils.data import epochs as epochs_module
+
+    epochs_path = epochs_module.find_clean_epochs_path(
+        subject,
+        task,
+        deriv_root=deriv_root,
+        config=config,
+    )
+    if epochs_path is None:
+        return None, None
+
+    epochs = epochs_module.mne.read_epochs(epochs_path)
+    if rest_mode:
+        return epochs, pd.DataFrame({"trial_id": list(range(1, len(epochs) + 1))})
+    return epochs, None
+
+
+def _feature_import_stubs() -> dict[str, types.ModuleType]:
+    return {
+        "eeg_pipeline.analysis": _make_package("eeg_pipeline.analysis"),
+        "eeg_pipeline.analysis.features": _make_package("eeg_pipeline.analysis.features"),
+        "eeg_pipeline.analysis.features.api": _make_module(
+            "eeg_pipeline.analysis.features.api",
+            extract_all_features=lambda *args, **kwargs: None,
+            extract_precomputed_features=lambda *args, **kwargs: None,
+        ),
+        "eeg_pipeline.analysis.features.preparation": _make_module(
+            "eeg_pipeline.analysis.features.preparation",
+            precompute_data=lambda *args, **kwargs: None,
+            _apply_spatial_transform=lambda *args, **kwargs: None,
+            _get_spatial_transform_type=lambda *args, **kwargs: "none",
+        ),
+        "eeg_pipeline.analysis.features.rest": _make_module(
+            "eeg_pipeline.analysis.features.rest",
+            is_resting_state_feature_mode=lambda config: bool(
+                config.get("feature_engineering.task_is_rest", False)
+            )
+            if hasattr(config, "get")
+            else False,
+            validate_rest_configuration=lambda config: (
+                (_ for _ in ()).throw(
+                    ValueError("task_is_rest values must match")
+                )
+                if hasattr(config, "get")
+                and bool(config.get("preprocessing.task_is_rest", False))
+                != bool(config.get("feature_engineering.task_is_rest", False))
+                else None
+            ),
+        ),
+        "eeg_pipeline.analysis.features.results": _make_module(
+            "eeg_pipeline.analysis.features.results",
+            ExtractionResult=object,
+            FeatureSet=object,
+            FeatureExtractionResult=object,
+        ),
+        "eeg_pipeline.analysis.features.selection": _make_module(
+            "eeg_pipeline.analysis.features.selection",
+            resolve_feature_categories=lambda config, requested=None: requested or [],
+        ),
+        "eeg_pipeline.context": _make_package("eeg_pipeline.context"),
+        "eeg_pipeline.context.features": _make_module(
+            "eeg_pipeline.context.features",
+            FeatureContext=_StubFeatureContext,
+        ),
+        "eeg_pipeline.infra": _make_package("eeg_pipeline.infra"),
+        "eeg_pipeline.domain": _make_package("eeg_pipeline.domain"),
+        "eeg_pipeline.domain.features": _make_package("eeg_pipeline.domain.features"),
+        "eeg_pipeline.domain.features.naming": _make_module(
+            "eeg_pipeline.domain.features.naming",
+            generate_manifest=lambda **kwargs: {"feature_columns": kwargs.get("feature_columns", [])},
+            save_features_organized=lambda *args, **kwargs: None,
+            infer_feature_provenance=lambda **kwargs: {"columns": {}},
+        ),
+        "eeg_pipeline.domain.features.constants": _make_module(
+            "eeg_pipeline.domain.features.constants",
+            FEATURE_CATEGORIES=["power"],
+        ),
+        "eeg_pipeline.infra": _make_package("eeg_pipeline.infra"),
+        "eeg_pipeline.infra.paths": _make_module(
+            "eeg_pipeline.infra.paths",
+            _load_events_df=lambda *args, **kwargs: None,
+            deriv_features_path=lambda *args, **kwargs: Path(tempfile.mkdtemp()),
+            deriv_stats_path=lambda *args, **kwargs: Path(tempfile.mkdtemp()),
+            ensure_dir=lambda path: Path(path).mkdir(parents=True, exist_ok=True),
+        ),
+        "eeg_pipeline.infra.tsv": _make_module(
+            "eeg_pipeline.infra.tsv",
+            write_parquet=lambda *args, **kwargs: None,
+        ),
+        "eeg_pipeline.pipelines.base": _make_module(
+            "eeg_pipeline.pipelines.base",
+            PipelineBase=_make_pipeline_base_class(),
+        ),
+        "eeg_pipeline.pipelines.progress": _make_module(
+            "eeg_pipeline.pipelines.progress",
+            ensure_progress_reporter=lambda progress=None: progress or _NoopProgress(),
+        ),
+        "eeg_pipeline.plotting": _make_package("eeg_pipeline.plotting"),
+        "eeg_pipeline.plotting.io": _make_package("eeg_pipeline.plotting.io"),
+        "eeg_pipeline.plotting.io.figures": _make_module(
+            "eeg_pipeline.plotting.io.figures",
+            setup_matplotlib=lambda *args, **kwargs: None,
+        ),
+        "eeg_pipeline.types": _make_module(
+            "eeg_pipeline.types",
+            PrecomputedData=object,
+            TimeWindowSpec=_StubTimeWindowSpec,
+        ),
+        "eeg_pipeline.utils": _make_package("eeg_pipeline.utils"),
+        "eeg_pipeline.utils.analysis": _make_package("eeg_pipeline.utils.analysis"),
+        "eeg_pipeline.utils.analysis.tfr": _make_module(
+            "eeg_pipeline.utils.analysis.tfr",
+            compute_complex_tfr=lambda *args, **kwargs: None,
+            compute_tfr_morlet=lambda *args, **kwargs: None,
+        ),
+        "eeg_pipeline.utils.analysis.windowing": _make_module(
+            "eeg_pipeline.utils.analysis.windowing",
+            TimeWindowSpec=_StubTimeWindowSpec,
+        ),
+        "eeg_pipeline.utils.config": _make_package("eeg_pipeline.utils.config"),
+        "eeg_pipeline.utils.config.loader": _make_module(
+            "eeg_pipeline.utils.config.loader",
+            get_condition_column_candidates=lambda config: config.get("event_columns.required", []) if hasattr(config, "get") else [],
+            get_config_value=lambda config, key, default=None: config.get(key, default) if hasattr(config, "get") else default,
+            get_frequency_band_names=lambda config: [],
+        ),
+        "eeg_pipeline.utils.config.roots": _make_module(
+            "eeg_pipeline.utils.config.roots",
+            resolve_eeg_bids_root=lambda config, task_is_rest=False: Path(
+                _lookup_config_value(
+                    config,
+                    "paths.bids_rest_root" if task_is_rest else "paths.bids_root",
+                    "/tmp/bids",
+                )
+            ),
+            resolve_eeg_deriv_root=lambda config, task_is_rest=False: Path(
+                _lookup_config_value(
+                    config,
+                    "paths.deriv_rest_root" if task_is_rest else "paths.deriv_root",
+                    "/tmp/deriv",
+                )
+            ),
+        ),
+        "eeg_pipeline.utils.data": _make_package("eeg_pipeline.utils.data"),
+        "eeg_pipeline.utils.data.epochs": _make_module(
+            "eeg_pipeline.utils.data.epochs",
+            load_epochs_for_analysis=_stub_load_epochs_for_analysis,
+            find_clean_epochs_path=_stub_find_clean_epochs_path,
+            _find_clean_events_path=_stub_find_clean_events_path,
+            mne=types.SimpleNamespace(read_epochs=lambda *args, **kwargs: _StubEpochs(1)),
+        ),
+        "eeg_pipeline.utils.data.features": _make_module(
+            "eeg_pipeline.utils.data.features",
+            align_feature_dataframes=lambda *args, **kwargs: (None, None, None, None, None, {}),
+        ),
+        "eeg_pipeline.utils.data.feature_io": _make_module(
+            "eeg_pipeline.utils.data.feature_io",
+            save_all_features=lambda *args, **kwargs: None,
+            save_dropped_trials_log=lambda *args, **kwargs: None,
+            _get_folder_for_feature=lambda name, config=None: name,
+        ),
+        "eeg_pipeline.utils.data.feature_alignment": _make_module(
+            "eeg_pipeline.utils.data.feature_alignment",
+            attach_feature_alignment_columns=lambda df, aligned_events: df,
+            filter_feature_payload_columns=lambda columns: list(columns),
+        ),
+        "eeg_pipeline.utils.data.trial_table": _make_module(
+            "eeg_pipeline.utils.data.trial_table",
+            build_trial_table_contract=lambda *args, **kwargs: {},
+            combine_feature_tables=lambda tables: pd.concat(
+                [df for _, df in tables if df is not None and not df.empty], axis=1
+            )
+            if any(df is not None and not df.empty for _, df in tables)
+            else None,
+            save_trial_table=lambda *args, **kwargs: None,
+        ),
+    }
+
+
+class _FeatureImportMixin:
+    def setUp(self):
+        sys.modules.pop("eeg_pipeline.pipelines.features", None)
+        patcher = patch.dict(sys.modules, _feature_import_stubs())
+        patcher.start()
+        import eeg_pipeline
+
+        setattr(eeg_pipeline, "infra", sys.modules["eeg_pipeline.infra"])
+        self.addCleanup(patcher.stop)
+
+
+class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
+    def test_feature_small_helpers_cover_edge_cases(self):
+        with patch.dict(sys.modules, _feature_import_stubs()):
+            from eeg_pipeline.pipelines.features import (
+                _calculate_total_steps,
+                _features_required_event_groups,
+                _infer_retained_trial_count,
+                _resolve_condition_labels_for_events,
+                _resolve_time_ranges,
+            )
+
+            self.assertEqual(
+                _resolve_time_ranges(None, 0.0, 1.0),
+                [{"name": None, "tmin": 0.0, "tmax": 1.0}],
+            )
+            explicit = [{"name": "early", "tmin": -0.2, "tmax": 0.4}]
+            self.assertEqual(_resolve_time_ranges(explicit, None, None), explicit)
+            self.assertEqual(_calculate_total_steps(0), 1)
+            self.assertEqual(_calculate_total_steps(2), 7)
+
+            config = DotConfig({"event_columns": {"required": ["outcome", "condition", "trial_type"]}})
+            self.assertEqual(_features_required_event_groups(config), ["condition", "trial_type"])
+
+            self.assertEqual(_infer_retained_trial_count({"n_retained": 3}), 3)
+            self.assertEqual(
+                _infer_retained_trial_count(
+                    None,
+                    y_aligned=pd.Series([1, 2]),
+                    pow_df_aligned=pd.DataFrame({"a": [1, 2, 3]}),
+                ),
+                2,
+            )
+            self.assertEqual(_infer_retained_trial_count(None), 0)
+
+            events = pd.DataFrame({"Condition": ["a", "b"], "other": [1, 2]})
+            labels = _resolve_condition_labels_for_events(events, DotConfig({"event_columns": {"required": ["condition"]}}))
+            self.assertEqual(labels.tolist(), ["a", "b"])
+            self.assertIsNone(_resolve_condition_labels_for_events(pd.DataFrame(), config))
+
+    def test_feature_saved_range_and_trial_table_helpers(self):
+        with patch.dict(sys.modules, _feature_import_stubs()):
+            from eeg_pipeline.pipelines.features import (
+                _collect_trial_table_feature_tables,
+                _count_saved_range_columns,
+            )
+
+            one_col = pd.DataFrame({"x": [1]})
+            empty = pd.DataFrame()
+            unpacked = {
+                "dconn_df": one_col,
+                "source_df": one_col,
+                "source_contrast_df": one_col,
+                "erp_df": one_col,
+                "itpc_df": one_col,
+                "itpc_trial_df": empty,
+                "pac_df": one_col,
+                "pac_trials_df": empty,
+                "pac_time_df": one_col,
+                "comp_df": one_col,
+                "bursts_df": one_col,
+                "spectral_df": one_col,
+                "erds_df": one_col,
+                "microstates_df": one_col,
+            }
+            features = SimpleNamespace(
+                ratios_df=one_col,
+                asymmetry_df=one_col,
+                quality_df=one_col,
+            )
+
+            count = _count_saved_range_columns(
+                direct_df=one_col,
+                conn_df=one_col,
+                aper_df=None,
+                unpacked=unpacked,
+                features=features,
+            )
+            self.assertEqual(count, 17)
+
+            tables = _collect_trial_table_feature_tables(
+                direct_df=one_col,
+                conn_df_aligned=one_col,
+                aper_df_aligned=None,
+                unpacked=unpacked,
+                features=features,
+            )
+            self.assertEqual(tables[0], ("power", one_col))
+            self.assertEqual(tables[7], ("itpc", one_col))
+            self.assertEqual(tables[8], ("pac", one_col))
+
     def test_load_epochs_for_analysis_synthesizes_alignment_for_rest(self):
         from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 
@@ -294,7 +711,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "features"
-        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
             "eeg_pipeline.pipelines.features.setup_matplotlib"
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned_events)
@@ -348,9 +765,15 @@ class TestFeatureHelpers(unittest.TestCase):
         pipeline.logger = Mock()
         pipeline.deriv_root = tmp / "deriv"
         pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
+        progress = SimpleNamespace(
+            subject_start=lambda *a, **k: None,
+            step=lambda *a, **k: None,
+            subject_done=lambda *a, **k: None,
+            error=lambda *a, **k: None,
+        )
 
         with self.assertRaisesRegex(ValueError, "task_is_rest.*must match"):
-            pipeline.process_subject("0001", task="rest", progress=SimpleNamespace())
+            pipeline.process_subject("0001", task="rest", progress=progress)
 
     def test_unpack_feature_results_and_merge_single(self):
         from eeg_pipeline.pipelines.features import _unpack_feature_results, _merge_dataframes
@@ -387,7 +810,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "f"
-        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
             "eeg_pipeline.pipelines.features.setup_matplotlib"
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(None, None)
@@ -396,7 +819,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "f"
-        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
             "eeg_pipeline.pipelines.features.setup_matplotlib"
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(SimpleNamespace(times=np.array([0.0]), info={"sfreq": 100.0}), None)
@@ -462,7 +885,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "f"
-        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
             "eeg_pipeline.pipelines.features.setup_matplotlib"
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned)
@@ -546,7 +969,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "f"
-        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
             "eeg_pipeline.pipelines.features.setup_matplotlib"
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned)
@@ -588,12 +1011,10 @@ class TestFeatureHelpers(unittest.TestCase):
         self.assertTrue(save_merged.called)
         self.assertGreaterEqual(save_cfg.call_count, 2)
 
-        with patch.object(fmod, "FeaturePipeline") as mock_cls:
-            inst = mock_cls.return_value
-            inst.run_batch.return_value = [{"ok": True}]
+        with patch.dict(fmod.__dict__, {"FeaturePipeline": FeaturePipeline}):
             wrap_ps("0001", task="t")
             out = extract_features_for_subjects(["0001"], task="t")
-        self.assertEqual(out, [{"ok": True}])
+        self.assertEqual(out, [{"subject": "0001", "status": "success"}])
 
     def test_pipeline_constants_and_exports(self):
         import eeg_pipeline.pipelines as p
@@ -686,7 +1107,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=features_dir
-        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
             "eeg_pipeline.pipelines.features.setup_matplotlib"
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned_events)
@@ -736,30 +1157,7 @@ class TestFeatureHelpers(unittest.TestCase):
         self.assertEqual(ctx_used.analysis_mode, "trial_ml_safe")
 
     def test_feature_pipeline_auto_writes_canonical_trial_table(self):
-        fake_mne_bids = types.ModuleType("mne_bids")
-        fake_mne_bids.BIDSPath = object
-        fake_pyarrow = types.ModuleType("pyarrow")
-        fake_pyarrow.Table = types.SimpleNamespace(from_pandas=lambda *args, **kwargs: None)
-        fake_pyarrow_csv = types.ModuleType("pyarrow.csv")
-        fake_pyarrow_csv.WriteOptions = lambda **kwargs: None
-        fake_pyarrow_csv.write_csv = lambda *args, **kwargs: None
-        fake_mne = types.ModuleType("mne")
-        fake_seaborn = types.ModuleType("seaborn")
-        with patch.dict(
-            sys.modules,
-            {
-                "yaml": types.ModuleType("yaml"),
-                "mne_bids": fake_mne_bids,
-                "mne": fake_mne,
-                "seaborn": fake_seaborn,
-                "pyarrow": fake_pyarrow,
-                "pyarrow.csv": fake_pyarrow_csv,
-            },
-        ):
-            try:
-                from eeg_pipeline.pipelines.features import FeaturePipeline
-            except ModuleNotFoundError as exc:
-                self.skipTest(f"FeaturePipeline import unavailable in test environment: {exc}")
+        from eeg_pipeline.pipelines.features import FeaturePipeline
 
         tmp = Path(tempfile.mkdtemp())
         pipeline = object.__new__(FeaturePipeline)
@@ -837,7 +1235,7 @@ class TestFeatureHelpers(unittest.TestCase):
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=features_dir
-        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
             "eeg_pipeline.pipelines.features.setup_matplotlib"
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned_events)
@@ -901,6 +1299,20 @@ class TestFeatureHelpers(unittest.TestCase):
         with patch(
             "eeg_pipeline.utils.data.trial_table.save_trial_table",
             side_effect=_fake_save_trial_table,
+        ), patch(
+            "eeg_pipeline.domain.features.naming.infer_feature_provenance",
+            return_value={
+                "columns": {
+                    "power_active_alpha_global_mean": {
+                        "trialwise_valid": True,
+                        "broadcasted": False,
+                    },
+                    "conn_active_alpha_global_wpli_mean": {
+                        "trialwise_valid": False,
+                        "broadcasted": True,
+                    },
+                }
+            },
         ):
             _save_canonical_trial_table_artifact(
                 deriv_root=deriv_root,
@@ -1158,7 +1570,7 @@ class TestFeatureHelpers(unittest.TestCase):
         cfg_file = features_dir / "features_power" / "metadata" / "extraction_config_x.json"
         self.assertTrue(cfg_file.exists())
 
-class TestFeatureGapfill(unittest.TestCase):
+class TestFeatureGapfill(_FeatureImportMixin, unittest.TestCase):
     def test_feature_pipeline_init_and_precompute_early_returns(self):
         from eeg_pipeline.pipelines.features import (
             FeaturePipeline,
@@ -1353,7 +1765,7 @@ class TestFeatureGapfill(unittest.TestCase):
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "f"
-        ), patch("eeg_pipeline.pipelines.features.ensure_dir"), patch(
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
             "eeg_pipeline.pipelines.features.setup_matplotlib"
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned)

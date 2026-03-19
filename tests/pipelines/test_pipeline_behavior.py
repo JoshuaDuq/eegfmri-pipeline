@@ -15,6 +15,227 @@ _NoopBatchProgress = NoopBatchProgress
 _NoopProgress = NoopProgress
 
 
+def _make_package(name: str) -> types.ModuleType:
+    module = types.ModuleType(name)
+    module.__path__ = []  # type: ignore[attr-defined]
+    return module
+
+
+def _make_module(name: str, **attrs: object) -> types.ModuleType:
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+def _make_pipeline_base_class() -> type:
+    class _PipelineBase:
+        def __init__(self, name, config=None):
+            self.name = name
+            self.config = config
+            self.logger = Mock()
+            self.deriv_root = Path(tempfile.mkdtemp())
+
+        def _setup(self):
+            return None
+
+        def _create_run_metadata_context(self, *, subjects, task, kwargs):
+            return {
+                "run_id": "test-run",
+                "started_at": 0,
+                "task": task,
+                "subjects": list(subjects),
+                "specifications": {k: v for k, v in kwargs.items() if k != "progress"},
+            }
+
+        def _write_run_metadata(self, run_context, *, status, error=None, outputs=None, summary=None):
+            metadata_dir = Path(self.deriv_root) / "logs" / "run_metadata" / self.name
+            metadata_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "status": status,
+                "task": run_context.get("task"),
+                "subjects": run_context.get("subjects", []),
+                "specifications": run_context.get("specifications", {}),
+                "outputs": outputs or {},
+                "summary": summary or {},
+            }
+            if error:
+                payload["error"] = error
+            out_path = metadata_dir / "run_test-run.json"
+            out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            return out_path
+
+    return _PipelineBase
+
+
+class _StubBehaviorContext:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def _make_pipeline_base_class() -> type:
+    class _PipelineBase:
+        def __init__(self, name, config=None):
+            self.name = name
+            self.config = config
+            self.logger = Mock()
+            self.deriv_root = Path(tempfile.mkdtemp())
+
+        def _create_run_metadata_context(self, *, subjects, task, kwargs):
+            return {
+                "run_id": "test-run",
+                "started_at": 0,
+                "task": task,
+                "subjects": list(subjects),
+                "specifications": {k: v for k, v in kwargs.items() if k != "progress"},
+            }
+
+        def _write_run_metadata(self, run_context, *, status, error=None, outputs=None, summary=None):
+            metadata_dir = Path(self.deriv_root) / "logs" / "run_metadata" / self.name
+            metadata_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "status": status,
+                "task": run_context.get("task"),
+                "subjects": run_context.get("subjects", []),
+                "specifications": run_context.get("specifications", {}),
+                "outputs": outputs or {},
+                "summary": summary or {},
+            }
+            if error:
+                payload["error"] = error
+            out_path = metadata_dir / "run_test-run.json"
+            out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            return out_path
+
+    return _PipelineBase
+
+
+def _behavior_import_stubs() -> dict[str, types.ModuleType]:
+    def _get_config_value(config, key, default=None):
+        return config.get(key, default) if hasattr(config, "get") else default
+
+    def _require_config_value(config, key):
+        value = _get_config_value(config, key, None)
+        if value is None:
+            defaults = {
+                "behavior_analysis.statistics.default_n_bootstrap": 0,
+                "behavior_analysis.statistics.n_permutations": 0,
+                "behavior_analysis.min_samples.default": 10,
+                "behavior_analysis.predictor_control_enabled": True,
+                "behavior_analysis.control_trial_order": True,
+                "behavior_analysis.correlations.compute_change_scores": True,
+                "behavior_analysis.statistics.compute_reliability": False,
+                "behavior_analysis.correlations.compute_bayes_factors": False,
+                "behavior_analysis.correlations.loso_stability": True,
+                "behavior_analysis.correlations.types": ["partial_cov_predictor"],
+                "behavior_analysis.trial_table.enabled": True,
+                "behavior_analysis.predictor_residual.enabled": True,
+                "behavior_analysis.regression.enabled": False,
+                "behavior_analysis.icc.enabled": True,
+                "behavior_analysis.validation.enabled": True,
+                "behavior_analysis.correlations.enabled": True,
+                "behavior_analysis.group_level.multilevel_correlations.enabled": False,
+                "behavior_analysis.condition.enabled": True,
+                "behavior_analysis.temporal.enabled": True,
+                "behavior_analysis.cluster.enabled": False,
+                "behavior_analysis.statistics.fdr_alpha": 0.05,
+                "behavior_analysis.n_jobs": -1,
+                "behavior_analysis.condition.effect_size_threshold": 0.5,
+                "behavior_analysis.temporal.time_resolution_ms": 50,
+                "behavior_analysis.temporal.smooth_window_ms": 100,
+                "behavior_analysis.cluster.forming_threshold": 0.05,
+                "behavior_analysis.cluster.min_cluster_size": 2,
+                "behavior_analysis.cluster.tail": 0,
+            }
+            value = defaults.get(key)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+    return {
+        "eeg_pipeline.analysis": _make_package("eeg_pipeline.analysis"),
+        "eeg_pipeline.analysis.behavior": _make_package("eeg_pipeline.analysis.behavior"),
+        "eeg_pipeline.analysis.behavior.config_resolver": _make_module(
+            "eeg_pipeline.analysis.behavior.config_resolver",
+            resolve_correlation_method=lambda config: config.get(
+                "behavior_analysis.statistics.correlation_method", "spearman"
+            )
+            if hasattr(config, "get")
+            else "spearman",
+        ),
+        "eeg_pipeline.analysis.behavior.stage_catalog": _make_module(
+            "eeg_pipeline.analysis.behavior.stage_catalog",
+            COMPUTATION_TO_PIPELINE_ATTR={"icc": "run_icc", "regression": "run_regression"},
+            apply_computation_flags_impl=lambda *args, **kwargs: None,
+        ),
+        "eeg_pipeline.analysis.behavior.orchestration": _make_module(
+            "eeg_pipeline.analysis.behavior.orchestration",
+            create_behavior_runtime=lambda *args, **kwargs: None,
+            run_behavior_stages=lambda *args, **kwargs: None,
+            write_analysis_metadata=lambda *args, **kwargs: None,
+            write_outputs_manifest=lambda *args, **kwargs: None,
+            get_behavior_output_dir=lambda *args, **kwargs: Path(tempfile.mkdtemp()),
+            run_group_level_analysis=lambda *args, **kwargs: None,
+        ),
+        "eeg_pipeline.context": _make_package("eeg_pipeline.context"),
+        "eeg_pipeline.context.behavior": _make_module(
+            "eeg_pipeline.context.behavior",
+            BehaviorContext=_StubBehaviorContext,
+        ),
+        "eeg_pipeline.pipelines.base": _make_module(
+            "eeg_pipeline.pipelines.base",
+            PipelineBase=_make_pipeline_base_class(),
+        ),
+        "eeg_pipeline.pipelines.progress": _make_module(
+            "eeg_pipeline.pipelines.progress",
+            ensure_progress_reporter=lambda progress=None: progress or _NoopProgress(),
+        ),
+        "eeg_pipeline.infra": _make_package("eeg_pipeline.infra"),
+        "eeg_pipeline.infra.paths": _make_module(
+            "eeg_pipeline.infra.paths",
+            deriv_stats_path=lambda *args, **kwargs: Path(tempfile.mkdtemp()),
+            ensure_dir=lambda path: Path(path).mkdir(parents=True, exist_ok=True),
+        ),
+        "eeg_pipeline.utils": _make_package("eeg_pipeline.utils"),
+        "eeg_pipeline.utils.analysis": _make_package("eeg_pipeline.utils.analysis"),
+        "eeg_pipeline.utils.analysis.stats": _make_package("eeg_pipeline.utils.analysis.stats"),
+        "eeg_pipeline.utils.analysis.stats.base": _make_module(
+            "eeg_pipeline.utils.analysis.stats.base",
+            get_subject_seed=lambda *args, **kwargs: 0,
+        ),
+        "eeg_pipeline.utils.analysis.stats.correlation": _make_module(
+            "eeg_pipeline.utils.analysis.stats.correlation",
+            format_correlation_method_label=lambda method, robust_method=None: method,
+            normalize_robust_correlation_method=lambda value, default=None, strict=False: value.strip() if isinstance(value, str) else value,
+        ),
+        "eeg_pipeline.utils.config": _make_package("eeg_pipeline.utils.config"),
+        "eeg_pipeline.utils.config.behavior_loader": _make_module(
+            "eeg_pipeline.utils.config.behavior_loader",
+            ensure_behavior_config=lambda config: config,
+        ),
+        "eeg_pipeline.utils.config.loader": _make_module(
+            "eeg_pipeline.utils.config.loader",
+            get_config_value=_get_config_value,
+            require_config_value=_require_config_value,
+        ),
+        "eeg_pipeline.analysis.behavior.trial_table_helpers": _make_module(
+            "eeg_pipeline.analysis.behavior.trial_table_helpers",
+            find_trial_table_path=lambda *args, **kwargs: Path("/tmp/trials.parquet"),
+        ),
+    }
+
+
+class _BehaviorImportMixin:
+    def setUp(self):
+        sys.modules.pop("eeg_pipeline.pipelines.behavior", None)
+        patcher = patch.dict(sys.modules, _behavior_import_stubs())
+        patcher.start()
+        import eeg_pipeline
+
+        setattr(eeg_pipeline, "infra", sys.modules["eeg_pipeline.infra"])
+        self.addCleanup(patcher.stop)
+
+
 def _behavior_process_config() -> DotConfig:
     return DotConfig(
         {
@@ -27,7 +248,7 @@ def _behavior_process_config() -> DotConfig:
     )
 
 
-class TestBehaviorDeep(unittest.TestCase):
+class TestBehaviorDeep(_BehaviorImportMixin, unittest.TestCase):
         def test_behavior_process_subject_success_path(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 
@@ -166,6 +387,11 @@ class TestBehaviorDeep(unittest.TestCase):
                 error=lambda *a, **k: None,
             ))
             fake_orch = types.SimpleNamespace(_cache={}, run_behavior_stages=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+            progress = SimpleNamespace(
+                subject_start=lambda *a, **k: None,
+                subject_done=lambda *a, **k: None,
+                error=lambda *a, **k: None,
+            )
 
             with patch.dict(
                 sys.modules,
@@ -175,11 +401,14 @@ class TestBehaviorDeep(unittest.TestCase):
                     "eeg_pipeline.cli.common": fake_cli,
                     "eeg_pipeline.analysis.behavior.orchestration": fake_orch,
                 },
+            ), patch(
+                "eeg_pipeline.pipelines.behavior.run_behavior_stages",
+                side_effect=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
             ):
                 with self.assertRaises(RuntimeError):
-                    p.process_subject("0001")
+                    p.process_subject("0001", progress=progress)
 
-class TestBehaviorCompletion(unittest.TestCase):
+class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
         def test_behavior_init_and_group_level_logging_branches(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
             import pandas as pd
@@ -300,7 +529,56 @@ class TestBehaviorCompletion(unittest.TestCase):
 
             run_group_level_analysis_mock.assert_not_called()
 
-class TestBehaviorGapfill(unittest.TestCase):
+class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
+        def test_behavior_small_helpers_cover_counts_and_defaults(self):
+            with patch.dict(sys.modules, _behavior_import_stubs()):
+                from eeg_pipeline.pipelines.behavior import (
+                    _get_optional_int,
+                    _summarize_nested_result_counts,
+                )
+
+                cfg = DotConfig({"behavior_analysis": {"n_jobs": "4"}})
+                self.assertEqual(_get_optional_int(cfg, "behavior_analysis.n_jobs", None), 4)
+                self.assertIsNone(_get_optional_int(cfg, "behavior_analysis.missing", None))
+
+                self.assertEqual(_summarize_nested_result_counts(None), (0, 0, 0))
+                self.assertEqual(
+                    _summarize_nested_result_counts({"n_tests": 5, "n_sig_raw": 2, "n_sig_fdr": 1}),
+                    (5, 2, 1),
+                )
+                self.assertEqual(
+                    _summarize_nested_result_counts(
+                        {
+                            "alpha": {"n_tests": 3, "n_sig_raw": 1, "n_sig_fdr": 1},
+                            "beta": {"n_tests": 2, "n_sig_raw": 0, "n_sig_fdr": 0},
+                        }
+                    ),
+                    (5, 1, 1),
+                    )
+
+        def test_behavior_computation_flags_expand_bundles_and_warn(self):
+            with patch.dict(sys.modules, _behavior_import_stubs()):
+                from eeg_pipeline.pipelines.behavior import (
+                    BEHAVIOR_COMPUTATION_BUNDLES,
+                    _resolve_behavior_computation_flags,
+                )
+
+                original_bundles = dict(BEHAVIOR_COMPUTATION_BUNDLES)
+                try:
+                    BEHAVIOR_COMPUTATION_BUNDLES.clear()
+                    BEHAVIOR_COMPUTATION_BUNDLES["bundle"] = ["icc", "regression"]
+
+                    logger = Mock()
+                    flags = _resolve_behavior_computation_flags(["bundle", "unknown"], logger=logger)
+
+                    self.assertTrue(flags["icc"])
+                    self.assertTrue(flags["regression"])
+                    self.assertFalse(flags.get("run_cluster_tests", False))
+                    self.assertTrue(logger.warning.called)
+                finally:
+                    BEHAVIOR_COMPUTATION_BUNDLES.clear()
+                    BEHAVIOR_COMPUTATION_BUNDLES.update(original_bundles)
+
         def test_behavior_helpers_and_init_logging(self):
             from eeg_pipeline.pipelines.behavior import (
                 _resolve_behavior_computation_flags,

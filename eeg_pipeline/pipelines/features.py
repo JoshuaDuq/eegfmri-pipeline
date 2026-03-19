@@ -98,6 +98,8 @@ def _resolve_time_ranges(explicit_windows: Optional[List[Dict[str, Any]]], tmin:
 
 def _features_required_event_groups(config: Any) -> Optional[List[str]]:
     """Resolve required event groups for features loading."""
+    if config is None or not hasattr(config, "get"):
+        return None
     required_groups = list(config.get("event_columns.required", []) or [])
     return [name for name in required_groups if str(name).strip() != "outcome"]
 
