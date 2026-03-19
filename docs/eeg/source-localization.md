@@ -72,7 +72,7 @@ before running this mode.
 Run feature extraction with source localization enabled:
 
 ```bash
-python -m eeg_pipeline.cli.main features compute \
+eeg-pipeline features compute \
   --subject 0000 \
   --categories sourcelocalization \
   --spatial roi global
@@ -83,7 +83,7 @@ python -m eeg_pipeline.cli.main features compute \
 Edit `eeg_pipeline/utils/config/eeg_config.yaml` or use CLI flags:
 
 ```bash
-python -m eeg_pipeline.cli.main features compute \
+eeg-pipeline features compute \
   --subject 0000 \
   --categories sourcelocalization \
   --source-method lcmv \
@@ -112,7 +112,7 @@ Feature columns will be named like:
 ### Step 4: Visualize (optional)
 
 ```bash
-python -m eeg_pipeline.cli.main features visualize --subject 0000
+eeg-pipeline features visualize --subject 0000
 ```
 
 ---
@@ -175,7 +175,7 @@ The pipeline can **automatically generate BEM model, BEM solution, and coregistr
 #### CLI Equivalent
 
 ```bash
-python -m eeg_pipeline.cli.main features compute \
+eeg-pipeline features compute \
   --subject 0000 \
   --categories sourcelocalization \
   --source-fmri \
@@ -342,7 +342,7 @@ The pipeline can automatically build the fMRI contrast from your BIDS-formatted 
 Enable the contrast builder in the TUI advanced configuration or via CLI:
 
 ```bash
-python -m eeg_pipeline.cli.main features compute \
+eeg-pipeline features compute \
   --subject 0000 \
   --categories sourcelocalization \
   --source-fmri \
@@ -395,7 +395,7 @@ z_map_resampled.to_filename("sub-pilot001_pain_vs_baseline_zmap.nii.gz")
 #### Step 11: Run fMRI-constrained source localization
 
 ```bash
-python -m eeg_pipeline.cli.main features compute \
+eeg-pipeline features compute \
   --subject 0000 \
   --categories sourcelocalization \
   --source-fmri \

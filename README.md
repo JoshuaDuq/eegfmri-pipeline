@@ -284,7 +284,7 @@ eeg-pipeline <command> --help
 | `behavior` | Behavioral statistics and plots (`compute`, `visualize`) |
 | `ml` | Trial-level predictive modeling (`regression`, `timegen`, `classify`, `model_comparison`, `incremental_validity`, `uncertainty`, `shap`, `permutation`) |
 | `fmri` | Containerized fMRIPrep preprocessing (`preprocess`) |
-| `fmri-analysis` | First-level GLM, second-level inference, beta-series, and LSS (`first-level`, `second-level`, `beta-series`, `lss`) |
+| `fmri-analysis` | First-level GLM, second-level inference, beta-series, LSS, and resting-state connectivity (`first-level`, `second-level`, `beta-series`, `lss`, `rest`) |
 | `plotting` | Visualization suites and TFR plots (`visualize`, `tfr`) |
 | `validate` | Data and derivative integrity checks |
 | `stats` | Pipeline-wide coverage summaries |
@@ -572,11 +572,12 @@ Note: for container runs, the pipeline automatically ignores macOS metadata file
 Subject-level and group-level GLM analysis plus trial-wise beta estimation via nilearn.
 
 | Mode | Description |
-|------|-------------|
+|------|--------------|
 | `first-level` | First-level GLM with user-defined contrasts → contrast maps |
 | `second-level` | Explicit group GLM from existing first-level MNI effect-size maps |
 | `beta-series` | Trial-wise beta-series estimation (LSA method) |
 | `lss` | Least-squares-separate (LSS) trial betas |
+| `rest` | Resting-state ROI connectivity analysis (atlas-based, Fisher-z averaged across runs) |
 
 For full methods, see [fmri_pipeline/README.md](fmri_pipeline/README.md).
 
@@ -604,7 +605,17 @@ eeg-pipeline fmri-analysis beta-series --subject 0001 \
 eeg-pipeline fmri-analysis lss --subject 0001 \
   --cond-a-value stimulation --cond-b-value fixation_rest
 
-# With HTML report
+# Resting-state ROI connectivity (atlas required)
+eeg-pipeline fmri-analysis rest --subject 0001 \
+  --atlas-labels-img /path/to/atlas_parc.nii.gz \
+  --atlas-labels-tsv /path/to/atlas_labels.tsv
+
+# Resting-state with custom bandpass and smoothing
+eeg-pipeline fmri-analysis rest --subject 0001 \
+  --atlas-labels-img /path/to/atlas_parc.nii.gz \
+  --high-pass-hz 0.01 --low-pass-hz 0.08 --smoothing-fwhm 6.0
+
+# With HTML report (task-based modes)
 eeg-pipeline fmri-analysis first-level --subject 0001 \
   --cond-a-value stimulation --cond-b-value fixation_rest \
   --plots --plot-html-report
@@ -787,6 +798,7 @@ CLI flags override config values at runtime.
 | `fmri_preprocessing` | fMRIPrep engine, image, spaces, and all runtime settings |
 | `fmri_contrast` | Subject-level GLM specification, confound strategy, and output format |
 | `fmri_group_level` | Group GLM model, covariates, permutation inference settings |
+| `fmri_resting_state` | Resting-state ROI connectivity (atlas, bandpass, confound strategy, Fisher-z averaging) |
 | `statistics` | Global alpha, permutation count, bootstrap, and cluster correction defaults |
 | `visualization` | Band colors, robust limits, and footer templates |
 | `plotting` | DPI, formats, figure sizes, styling, comparison windows, and per-plot settings |
@@ -1008,6 +1020,8 @@ When `task_is_rest: true`:
 - Preprocessing creates fixed-length epochs instead of event-locked epochs.
 - No `events.tsv` conditions are required.
 - Feature extraction runs in `group_stats` mode by default (no trial-level behavioral targets).
+- Event-locked feature categories (`erp`, `erds`, `itpc`, `phase`) are blocked and raise a
+  `ValueError` if requested.
 - A separate BIDS root and derivatives root can be pointed to via `paths.bids_rest_root` and
   `paths.deriv_rest_root` so task and resting-state derivatives coexist without conflicts.
 
@@ -1020,10 +1034,18 @@ eeg-pipeline features compute --subject 0001 \
   --bids-rest-root ../data/bids_output/eeg_rest \
   --deriv-rest-root ../data/derivatives_rest
 
-# Resting-state feature extraction (spectral + connectivity)
+# Resting-state EEG feature extraction (spectral + connectivity; event-locked categories excluded)
 eeg-pipeline features compute --subject 0001 \
   --categories power connectivity aperiodic spectral
+
+# Resting-state fMRI connectivity (atlas-based ROI time series + Fisher-z matrix)
+eeg-pipeline fmri-analysis rest --subject 0001 \
+  --atlas-labels-img /path/to/atlas_parc.nii.gz \
+  --atlas-labels-tsv /path/to/atlas_labels.tsv
 ```
+
+For fMRI resting-state methods (atlas masking, confound scrubbing, Fisher-z run aggregation),
+see [fmri_pipeline/README.md §9](fmri_pipeline/README.md).
 
 ---
 

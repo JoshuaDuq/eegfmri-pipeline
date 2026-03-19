@@ -480,11 +480,10 @@ pipeline.process_subject("001", task="task", mode="full")
 ### 13.2 Unified CLI Interface
 
 ```bash
-python -m eeg_pipeline.cli.main preprocessing full --all-subjects --task <task>
+eeg-pipeline preprocessing full --all-subjects --task <task>
 ```
 
-Use the unified CLI (`eeg_pipeline.cli.main`) for preprocessing runs. Runtime
-overrides are supported via repeatable `--set KEY=VALUE`.
+Runtime overrides are supported via repeatable `--set KEY=VALUE`.
 
 ---
 

@@ -106,6 +106,118 @@ def atlas_output_name(atlas_labels_img: Path | str) -> str:
     return safe_slug(name, default="atlas")
 
 
+def _prepare_confounds_and_sample_mask(
+    confounds_df: Optional[pd.DataFrame],
+) -> tuple[Optional[pd.DataFrame], Optional[np.ndarray], list[str]]:
+    if confounds_df is None or confounds_df.empty:
+        return None, None, []
+
+    scrub_columns = [
+        column
+        for column in confounds_df.columns
+        if column.startswith("motion_outlier")
+        or column.startswith("non_steady_state_outlier")
+        or column.startswith("outlier")
+    ]
+
+    sample_mask: Optional[np.ndarray] = None
+    if scrub_columns:
+        scrub_values = (
+            confounds_df[scrub_columns]
+            .apply(pd.to_numeric, errors="coerce")
+            .fillna(0.0)
+            .to_numpy(dtype=float)
+        )
+        retained_mask = ~(scrub_values > 0).any(axis=1)
+        retained_indices = np.flatnonzero(retained_mask)
+        if retained_indices.size == 0:
+            sample_mask = retained_indices.astype(int, copy=False)
+        elif retained_indices.size < confounds_df.shape[0]:
+            sample_mask = retained_indices.astype(int, copy=False)
+
+    cleaned_confounds = confounds_df.drop(columns=scrub_columns) if scrub_columns else confounds_df.copy()
+    if cleaned_confounds.shape[1] == 0:
+        cleaned_confounds = None
+
+    return cleaned_confounds, sample_mask, scrub_columns
+
+
+def _validate_filter_settings(
+    repetition_time: float,
+    cfg: RestingStateAnalysisConfig,
+) -> None:
+    tr = float(repetition_time)
+    if not math.isfinite(tr) or tr <= 0:
+        raise ValueError(f"TR must be positive and finite, got {repetition_time!r}.")
+
+    nyquist_hz = 0.5 / tr
+    for field_name, value in (
+        ("high_pass_hz", cfg.high_pass_hz),
+        ("low_pass_hz", cfg.low_pass_hz),
+    ):
+        if value is None:
+            continue
+        if value >= nyquist_hz:
+            raise ValueError(
+                f"{field_name}={value} Hz is invalid for TR={tr:.6f}s; it must be below the Nyquist frequency {nyquist_hz:.6f} Hz."
+            )
+
+
+def _validate_roi_timeseries(
+    timeseries: np.ndarray,
+    roi_labels: list[str],
+    *,
+    subject: str,
+    run_num: int,
+) -> None:
+    if timeseries.ndim != 2 or timeseries.shape[1] == 0:
+        raise ValueError(f"No ROI timeseries were extracted for {subject}, run {run_num}.")
+    if timeseries.shape[0] < 2:
+        raise ValueError(
+            f"Not enough retained frames for {subject}, run {run_num} after confound censoring."
+        )
+    if not np.isfinite(timeseries).all():
+        invalid = np.flatnonzero(~np.isfinite(timeseries).all(axis=0))
+        invalid_labels = [roi_labels[index] for index in invalid[:5]]
+        raise ValueError(
+            f"Non-finite ROI timeseries detected for {subject}, run {run_num}: {invalid_labels}."
+        )
+
+    roi_std = np.std(timeseries, axis=0)
+    degenerate = np.flatnonzero(~np.isfinite(roi_std) | (roi_std <= 1e-12))
+    if degenerate.size > 0:
+        degenerate_labels = [roi_labels[index] for index in degenerate[:5]]
+        raise ValueError(
+            f"Degenerate ROI timeseries detected for {subject}, run {run_num}: {degenerate_labels}. Check atlas/BOLD overlap and censoring."
+        )
+
+
+def _aggregate_connectivity_matrices(
+    run_matrices: list[np.ndarray],
+    run_weights: list[int],
+) -> tuple[np.ndarray, np.ndarray]:
+    if not run_matrices:
+        raise ValueError("run_matrices must contain at least one connectivity matrix.")
+    if len(run_matrices) != len(run_weights):
+        raise ValueError("run_matrices and run_weights must have the same length.")
+
+    weights = np.asarray(run_weights, dtype=float)
+    if weights.ndim != 1 or weights.size != len(run_matrices):
+        raise ValueError("run_weights must define exactly one weight per connectivity matrix.")
+    if np.any(~np.isfinite(weights)) or np.any(weights <= 0):
+        raise ValueError("run_weights must be finite and strictly positive.")
+
+    if len(run_matrices) == 1:
+        matrix = np.asarray(run_matrices[0], dtype=float)
+        return matrix, _fisher_z_matrix(matrix)
+
+    fisher_stack = np.stack([_fisher_z_matrix(matrix) for matrix in run_matrices], axis=0)
+    fisher_mean = np.average(fisher_stack, axis=0, weights=weights)
+    connectivity = np.tanh(fisher_mean)
+    np.fill_diagonal(connectivity, 1.0)
+    return connectivity, fisher_mean
+
+
 def run_resting_state_analysis_for_subject(
     *,
     bids_fmri_root: Path,
@@ -135,6 +247,8 @@ def run_resting_state_analysis_for_subject(
     roi_labels: Optional[list[str]] = None
     run_summaries: list[dict[str, Any]] = []
     concatenated_timeseries: list[np.ndarray] = []
+    run_connectivity_matrices: list[np.ndarray] = []
+    run_connectivity_weights: list[int] = []
 
     for bold_path, run_num in discovered_runs:
         confounds_df, confound_columns = _load_rest_confounds(
@@ -146,6 +260,13 @@ def run_resting_state_analysis_for_subject(
             strategy=normalized_cfg.confounds_strategy,
         )
         repetition_time = get_tr_from_bold(bold_path)
+        _validate_filter_settings(repetition_time, normalized_cfg)
+        masker_confounds, sample_mask, scrub_columns = _prepare_confounds_and_sample_mask(confounds_df)
+        original_n_volumes = int(confounds_df.shape[0]) if confounds_df is not None else None
+        if sample_mask is not None and sample_mask.size == 0:
+            raise ValueError(
+                f"All frames were censored for {sub_label}, run {run_num}."
+            )
         masker = NiftiLabelsMasker(
             labels_img=str(normalized_cfg.atlas_labels_img),
             smoothing_fwhm=normalized_cfg.smoothing_fwhm,
@@ -155,11 +276,11 @@ def run_resting_state_analysis_for_subject(
             high_pass=normalized_cfg.high_pass_hz,
             t_r=float(repetition_time),
         )
-        timeseries = masker.fit_transform(str(bold_path), confounds=confounds_df)
-        if timeseries.ndim != 2 or timeseries.shape[1] == 0:
-            raise ValueError(
-                f"No ROI timeseries were extracted for {sub_label}, run {run_num}."
-            )
+        timeseries = masker.fit_transform(
+            str(bold_path),
+            confounds=masker_confounds,
+            sample_mask=sample_mask,
+        )
         if roi_labels is None:
             roi_labels = _resolve_roi_labels(
                 normalized_cfg.atlas_labels_tsv,
@@ -169,6 +290,7 @@ def run_resting_state_analysis_for_subject(
             raise ValueError(
                 "Atlas label count does not match extracted ROI time series count."
             )
+        _validate_roi_timeseries(timeseries, roi_labels, subject=sub_label, run_num=run_num)
 
         frame_df = pd.DataFrame(timeseries, columns=roi_labels)
         frame_df.index.name = "frame"
@@ -178,13 +300,24 @@ def run_resting_state_analysis_for_subject(
             encoding="utf-8",
         )
         concatenated_timeseries.append(timeseries)
+        run_connectivity_matrices.append(_compute_connectivity_matrix(timeseries))
+        run_connectivity_weights.append(int(timeseries.shape[0]))
+        retained_n_volumes = int(timeseries.shape[0])
+        scrubbed_n_volumes = (
+            int(original_n_volumes - retained_n_volumes)
+            if original_n_volumes is not None
+            else 0
+        )
         run_summaries.append(
             {
                 "run": int(run_num),
                 "bold_path": str(bold_path),
-                "n_volumes": int(timeseries.shape[0]),
+                "n_volumes": retained_n_volumes,
+                "n_original_volumes": original_n_volumes or retained_n_volumes,
+                "n_scrubbed_volumes": scrubbed_n_volumes,
                 "tr": float(repetition_time),
                 "confounds_columns": confound_columns,
+                "scrubbing_columns": scrub_columns,
             }
         )
 
@@ -197,7 +330,10 @@ def run_resting_state_analysis_for_subject(
     concatenated_path = timeseries_dir / f"{sub_label}_task-{task}_timeseries_concat.tsv"
     concatenated_df.to_csv(concatenated_path, sep="\t", encoding="utf-8")
 
-    connectivity_matrix = _compute_connectivity_matrix(concatenated)
+    connectivity_matrix, fisher_z_matrix = _aggregate_connectivity_matrices(
+        run_connectivity_matrices,
+        run_connectivity_weights,
+    )
     connectivity_df = pd.DataFrame(
         connectivity_matrix,
         index=roi_labels,
@@ -212,7 +348,7 @@ def run_resting_state_analysis_for_subject(
     fisher_z_df: Optional[pd.DataFrame] = None
     if normalized_cfg.connectivity_kind == "correlation":
         fisher_z_df = pd.DataFrame(
-            _fisher_z_matrix(connectivity_matrix),
+            fisher_z_matrix,
             index=roi_labels,
             columns=roi_labels,
         )
@@ -283,6 +419,7 @@ def _discover_rest_runs(
     if not func_dir.exists():
         raise FileNotFoundError(f"fMRI func directory not found: {func_dir}")
 
+    runless_bold_path: Optional[Path] = None
     run_nums: list[int] = []
     for bold_file in sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_bold.nii.gz")):
         try:
@@ -290,6 +427,24 @@ def _discover_rest_runs(
             run_nums.append(int(run_str))
         except Exception:
             continue
+
+    if not run_nums:
+        runless_candidates = sorted(func_dir.glob(f"{sub_label}_task-{task}_*_bold.nii.gz"))
+        runless_candidates += sorted(func_dir.glob(f"{sub_label}_task-{task}_bold.nii.gz"))
+        runless_candidates = [
+            candidate
+            for candidate in runless_candidates
+            if "_run-" not in candidate.name
+        ]
+        runless_candidates = list(dict.fromkeys(runless_candidates))
+        if len(runless_candidates) > 1:
+            raise FileNotFoundError(
+                "Multiple resting-state BOLD files were found without explicit run entities. "
+                f"Add BIDS run labels or request specific runs explicitly: {[path.name for path in runless_candidates]}."
+            )
+        if runless_candidates:
+            runless_bold_path = runless_candidates[0]
+            run_nums = [1]
 
     run_nums = sorted(set(run_nums))
     if cfg.runs is not None:
@@ -322,10 +477,14 @@ def _discover_rest_runs(
             bold_path = preproc_by_run.get(int(run_num))
         else:
             bold_path = None
+            if runless_bold_path is not None and int(run_num) == 1:
+                bold_path = runless_bold_path
             for pattern in (
                 f"{sub_label}_task-{task}_run-{run_num:02d}_bold.nii.gz",
                 f"{sub_label}_task-{task}_run-{run_num}_bold.nii.gz",
             ):
+                if bold_path is not None:
+                    break
                 candidate = func_dir / pattern
                 if candidate.exists():
                     bold_path = candidate
@@ -441,9 +600,17 @@ def _resolve_roi_labels(
 def _compute_connectivity_matrix(timeseries: np.ndarray) -> np.ndarray:
     if timeseries.ndim != 2 or timeseries.shape[1] == 0:
         raise ValueError("timeseries must be a 2D array with at least one ROI column.")
+    if timeseries.shape[0] < 2:
+        raise ValueError("timeseries must contain at least two retained frames.")
+    if not np.isfinite(timeseries).all():
+        raise ValueError("timeseries contains non-finite values.")
     if timeseries.shape[1] == 1:
         return np.array([[1.0]], dtype=float)
-    return np.corrcoef(timeseries, rowvar=False)
+    matrix = np.corrcoef(timeseries, rowvar=False)
+    if not np.isfinite(matrix).all():
+        raise ValueError("connectivity matrix contains non-finite values.")
+    np.fill_diagonal(matrix, 1.0)
+    return matrix
 
 
 def _fisher_z_matrix(matrix: np.ndarray) -> np.ndarray:

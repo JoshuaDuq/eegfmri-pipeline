@@ -74,6 +74,11 @@ def discover_fmriprep_preproc_bold(
                 f"{sub_label}_task-{task}_{run_tok}_space-{space}_desc-preproc_bold.nii.gz"
             )
         patterns.append(f"{sub_label}_task-{task}_{run_tok}_desc-preproc_bold.nii.gz")
+    if space:
+        patterns.append(
+            f"{sub_label}_task-{task}_space-{space}_desc-preproc_bold.nii.gz"
+        )
+    patterns.append(f"{sub_label}_task-{task}_desc-preproc_bold.nii.gz")
 
     for func_dir in search_dirs:
         if not func_dir.exists():

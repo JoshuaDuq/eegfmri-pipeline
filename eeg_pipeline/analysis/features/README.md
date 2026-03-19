@@ -27,9 +27,10 @@ but is applicable to any EEG study with the same structure.
 9. [Change Scores](#9-change-scores)
 10. [Normalization](#10-normalization)
 11. [Cross-Validation Hygiene](#11-cross-validation-hygiene)
-12. [Result Containers](#12-result-containers)
-13. [Output & I/O Options](#13-output--io-options)
-14. [Dependencies](#14-dependencies)
+12. [Resting-State Feature Extraction](#12-resting-state-feature-extraction)
+13. [Result Containers](#13-result-containers)
+14. [Output & I/O Options](#14-output--io-options)
+15. [Dependencies](#15-dependencies)
 
 ---
 
@@ -63,7 +64,7 @@ features/
 ├── preparation.py          # Epoch validation, TFR setup, precompute_data (band filtering, PSD, GFP, evoked subtraction), baseline metrics
 ├── cv_hygiene.py           # Cross-validation guards: fold-specific IAF, train-mask enforcement
 ├── normalization.py        # Train/test-separated normalization schemes
-├── rest.py                 # Resting-state guards: configuration validation, segment selection, category restrictions
+├── rest.py                 # Resting-state mode: configuration validation, category restrictions, segment selection helpers
 ├── results.py              # FeatureExtractionResult, ExtractionResult dataclasses
 ├── spectral.py             # Power (TFR-based), spectral descriptors
 ├── aperiodic.py            # 1/f aperiodic component decomposition
@@ -1190,9 +1191,64 @@ Any configuration that would silently mix training and test information is rejec
 
 ---
 
-## 12. Result Containers
+## 12. Resting-State Feature Extraction
 
-### 12.1 `FeatureExtractionResult` (TFR-Based)
+**Module:** `rest.py`
+
+Resting-state mode is enabled by setting `feature_engineering.task_is_rest = true` in configuration
+or by running preprocessing with `--task-is-rest`. The flag must agree between `preprocessing.task_is_rest`
+and `feature_engineering.task_is_rest` when both are set (mismatch raises `ValueError`).
+
+### 12.1 Incompatible Feature Categories
+
+The following categories require event-locked epochs and are rejected in resting-state mode:
+
+```
+erp, erds, itpc, phase
+```
+
+Requesting any of these categories raises a `ValueError` before extraction begins.
+All other categories (`power`, `spectral`, `aperiodic`, `connectivity`, `directedconnectivity`,
+`ratios`, `asymmetry`, `complexity`, `bursts`, `microstates`, `quality`, `sourcelocalization`)
+are supported.
+
+### 12.2 Analysis Mode Restriction
+
+Resting-state extraction requires `feature_engineering.analysis_mode = group_stats`.
+Specifying `trial_ml_safe` raises a `ValueError` because there are no behavioral trial targets.
+
+### 12.3 Evoked Subtraction Guard
+
+`subtract_evoked = true` is rejected in resting-state mode via `raise_if_rest_evoked_subtraction`.
+Evoked subtraction is event-locked by definition and has no meaning for rest epochs.
+
+### 12.4 Segment Selection in Rest Mode
+
+When a feature extractor targets a specific time window that may be empty (e.g., a
+non-existent `active` window in a continuous rest epoch), the pipeline resolves the
+analysis segment via `select_single_rest_analysis_segment`:
+
+- Collects all non-`baseline` masks with at least one `True` sample.
+- Raises if zero or more than one valid segment is found.
+- Returns the single unambiguous segment name and mask for use by the extractor.
+
+This ensures feature extraction remains unambiguous without requiring users to
+configure task-specific time windows for rest.
+
+### 12.5 Configuration Keys
+
+| Key | Description |
+|-----|-------------|
+| `feature_engineering.task_is_rest` | Enable resting-state feature extraction mode |
+| `preprocessing.task_is_rest` | Must match `feature_engineering.task_is_rest` when both set |
+| `feature_engineering.analysis_mode` | Must be `group_stats` in rest mode |
+| `feature_engineering.power.subtract_evoked` | Must be `false` in rest mode |
+
+---
+
+## 13. Result Containers
+
+### 13.1 `FeatureExtractionResult` (TFR-Based)
 
 Flat dataclass in `results.py`. One DataFrame per feature domain:
 
@@ -1208,7 +1264,7 @@ ITPC and phase features are stored in `phase_df` / `phase_cols`. The dataclass a
 
 Also stores associated column lists and baseline/TFR metadata.
 
-### 12.2 `ExtractionResult` (Precomputed-Based)
+### 13.2 `ExtractionResult` (Precomputed-Based)
 
 Stores feature groups as:
 
@@ -1224,7 +1280,7 @@ Key methods:
 | `get_feature_group_df(group, include_condition=True)` | DataFrame for one group |
 | `get_qc_summary()` | Aggregated QC across groups |
 
-### 12.3 Feature Manifests
+### 13.3 Feature Manifests
 
 `generate_manifest` and `save_features_organized` (in `eeg_pipeline.domain.features.naming`)
 produce:
@@ -1238,9 +1294,9 @@ which features were extracted and under what preprocessing choices.
 
 ---
 
-## 13. Output & I/O Options
+## 14. Output & I/O Options
 
-### 13.1 Feature Tables
+### 14.1 Feature Tables
 
 Feature DataFrames are saved as Parquet files by default:
 
@@ -1254,19 +1310,19 @@ Optionally save CSV copies alongside Parquet (larger, but human-readable):
 eeg-pipeline features compute --subject 0001 --also-save-csv
 ```
 
-### 13.2 TFR Sidecar Files
+### 14.2 TFR Sidecar Files
 
 When `--save-tfr-with-sidecar` is set, raw TFR arrays are saved alongside the feature
 tables. This is useful for recomputing features with different windows without re-running
 the full wavelet transform.
 
-### 13.3 Subject-Level Features
+### 14.3 Subject-Level Features
 
 `--save-subject-level-features` emits an additional file for features that are constant
 within a subject (e.g. subject-mean spectral slope). These are separated from trial-level
 tables to avoid spuriously constant columns in ML feature matrices.
 
-### 13.4 Per-Family Parallelization
+### 14.4 Per-Family Parallelization
 
 Fine-grained job control to balance CPU load across pipeline stages:
 
@@ -1281,7 +1337,7 @@ All default to `-1` (use all available CPUs). Set `1` to disable parallelism for
 
 ---
 
-## 14. Dependencies
+## 15. Dependencies
 
 | Library | Role |
 |---------|------|

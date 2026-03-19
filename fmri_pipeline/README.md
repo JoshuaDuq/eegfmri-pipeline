@@ -23,11 +23,12 @@ source localization stage of the EEG pipeline.
 6. [Stage 3 — First-Level GLM Contrast Analysis](#6-stage-3--first-level-glm-contrast-analysis)
 7. [Stage 4 — Trial-Wise Beta Estimation](#7-stage-4--trial-wise-beta-estimation)
 8. [Stage 5 — Reporting and Quality Control](#8-stage-5--reporting-and-quality-control)
-9. [BEM and Coregistration](#9-bem-and-coregistration)
-10. [Multivariate Signature Readouts](#10-multivariate-signature-readouts)
-11. [Output Layout](#11-output-layout)
-12. [Configuration Reference](#12-configuration-reference)
-13. [Dependencies](#13-dependencies)
+9. [Stage 6 — Resting-State fMRI Connectivity Analysis](#9-stage-6--resting-state-fmri-connectivity-analysis)
+10. [BEM and Coregistration](#10-bem-and-coregistration)
+11. [Multivariate Signature Readouts](#11-multivariate-signature-readouts)
+12. [Output Layout](#12-output-layout)
+13. [Configuration Reference](#13-configuration-reference)
+14. [Dependencies](#14-dependencies)
 
 ---
 
@@ -65,10 +66,12 @@ source localization stage of the EEG pipeline.
 | `analysis/events_selection.py` | Trial-type normalization and filtering |
 | `analysis/bem_generation.py` | Docker-based BEM model, solution, and coregistration transform |
 | `analysis/reporting.py` | HTML report generation with QC visualizations |
+| `analysis/resting_state.py` | Resting-state ROI connectivity analysis (`RestingStateAnalysisConfig`, Fisher-z run aggregation) |
 | `analysis/smoothing.py` | Spatial smoothing FWHM normalization |
 | `analysis/plotting_config.py` | Plot configuration dataclass and validation |
 | `cli/commands/fmri.py` | CLI entry point for fMRIPrep preprocessing |
-| `cli/commands/fmri_analysis.py` | CLI entry point for first-level, second-level, and trial-wise analysis |
+| `cli/commands/fmri_analysis.py` | CLI entry point for first-level, second-level, trial-wise, and resting-state analysis |
+| `pipelines/fmri_resting_state.py` | Resting-state pipeline orchestrator |
 | `utils/bold_discovery.py` | BOLD run and confound file discovery |
 | `utils/signature_paths.py` | Signature weight map path resolution |
 | `utils/config/fmri_config.yaml` | Reference fMRI-only config template |
@@ -79,10 +82,12 @@ source localization stage of the EEG pipeline.
 
 ```
 BIDS ──► fMRIPrep ──► First-Level GLM ──► Contrast Maps ──► EEG Source Localization
-                           │                    │
-                           │                    └──► Second-Level GLM ──► Group Inference Maps
-                           │
-                           └──► Trial-Wise Betas ──► Signature Expression (configured weight maps)
+           │                │                    │
+           │                │                    └──► Second-Level GLM ──► Group Inference Maps
+           │                │
+           │                └──► Trial-Wise Betas ──► Signature Expression (configured weight maps)
+           │
+           └──► Resting-State ──► ROI Timeseries ──► Connectivity Matrix (Fisher-z averaged)
 ```
 
 | Stage | Module | Purpose |
@@ -93,9 +98,10 @@ BIDS ──► fMRIPrep ──► First-Level GLM ──► Contrast Maps ──
 | 3b | `pipelines/fmri_second_level.py` + `analysis/second_level.py` | Explicit group-level inference from first-level MNI effect-size maps |
 | 4 | `pipelines/fmri_trial_signatures.py` + `analysis/trial_signatures.py` | Trial-wise beta estimation and signature readout |
 | 5 | `analysis/reporting.py` | HTML report generation with QC diagnostics |
+| 6 | `pipelines/fmri_resting_state.py` + `analysis/resting_state.py` | Resting-state ROI connectivity analysis |
 
 Runtime configuration is loaded from `eeg_pipeline/utils/config/eeg_config.yaml`
-(sections `fmri_preprocessing`, `fmri_contrast`, `fmri_group_level`).
+(sections `fmri_preprocessing`, `fmri_contrast`, `fmri_group_level`, `fmri_resting_state`).
 
 ---
 
@@ -148,7 +154,7 @@ Thread/memory limits, anatomical options (`fs_no_reconall`, `longitudinal`,
 `skull_strip_template`), BOLD processing (`bold2t1w_init`, `bold2t1w_dof`,
 `slice_time_ref`, `dummy_scans`), QC thresholds (`fd_spike_threshold`,
 `dvars_spike_threshold`), denoising (`use_aroma`), and arbitrary extra arguments
-via `extra_args`. See §12 for all keys.
+via `extra_args`. See §13 for all keys.
 
 ---
 
@@ -381,7 +387,7 @@ Condition maps produced:
 ### 7.4 Signature Readout
 
 For each trial beta map and condition-averaged map, multivariate signature
-expression is computed (see §10).
+expression is computed (see §11).
 
 **Spatial constraint:** Trial-wise signature extraction requires MNI-space images.
 The pipeline raises a `ValueError` if `fmriprep_space` does not include `"mni"`,
@@ -468,14 +474,77 @@ Pearson $r$, and voxel count.
 
 ---
 
-## 9. BEM and Coregistration
+## 9. Stage 6 — Resting-State fMRI Connectivity Analysis
+
+**Module:** `pipelines/fmri_resting_state.py` → `analysis/resting_state.py`
+
+Atlas-based ROI connectivity analysis from fMRIPrep (or raw BIDS) resting-state BOLD data.
+Invoked via `eeg-pipeline fmri-analysis rest`.
+
+### 9.1 Overview
+
+For each subject and task:
+
+1. Discover BOLD runs (with or without explicit `run-*` entities).
+2. Load and select fMRIPrep confound regressors using the shared confound strategy.
+3. Build a `NiftiLabelsMasker` for the configured atlas; extract per-ROI time series
+   with simultaneous denoising (band-pass filtering, standardization, detrending).
+4. Scrub motion-outlier frames via a `sample_mask` (frames flagged by `motion_outlier*`,
+   `non_steady_state_outlier*`, or `outlier*` columns are removed before masking).
+5. Compute per-run Pearson correlation connectivity matrices.
+6. Aggregate multi-run matrices via **Fisher-z weighted averaging**
+   (weights = number of retained frames per run):
+
+```math
+\bar{Z}_{ij} = \frac{\sum_r n_r \cdot \mathrm{arctanh}(r_{ij}^{(r)})}{\sum_r n_r},
+\qquad
+\hat{r}_{ij} = \tanh(\bar{Z}_{ij}).
+```
+
+### 9.2 Configuration (`RestingStateAnalysisConfig`)
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `input_source` | `fmriprep` | BOLD source (`fmriprep` or `bids_raw`) |
+| `fmriprep_space` | `MNI152NLin2009cAsym` | fMRIPrep output space |
+| `require_fmriprep` | `true` | Raise error when preprocessed BOLD is absent |
+| `runs` | `null` (auto) | Specific run numbers; explicit requests fail if any run is missing |
+| `confounds_strategy` | `auto` | fMRIPrep confound strategy (same options as task-based GLM) |
+| `high_pass_hz` | `0.008` | High-pass filter (Hz) |
+| `low_pass_hz` | `0.1` | Low-pass filter (Hz); must be above `high_pass_hz` |
+| `smoothing_fwhm` | `null` | Spatial smoothing kernel FWHM (mm) |
+| `atlas_labels_img` | required | NIfTI atlas parcellation image |
+| `atlas_labels_tsv` | `null` | Optional TSV with ROI names (`name`/`label`/`region`/`roi` column) |
+| `connectivity_kind` | `correlation` | Connectivity estimator (currently `correlation` only) |
+| `standardize` | `true` | Z-score ROI time series |
+| `detrend` | `true` | Remove linear trend before filtering |
+
+Filter validity is checked against the BOLD TR (frequencies must be below Nyquist).
+
+### 9.3 Outputs
+
+| File | Content |
+|------|---------|
+| `timeseries/<sub>_task-<task>_run-<NN>_timeseries.tsv` | Per-run ROI time series (frames × ROIs) |
+| `timeseries/<sub>_task-<task>_timeseries_concat.tsv` | Concatenated across all runs |
+| `<sub>_task-<task>_correlation_connectivity.tsv` | ROI × ROI Pearson correlation matrix |
+| `<sub>_task-<task>_correlation_connectivity_fisher_z.tsv` | Fisher-z transformed matrix |
+| `roi_labels.tsv` | Index–label mapping for the atlas ROIs |
+| `provenance.json` | Full config, per-run summary (volumes, TR, confounds, scrubbing) |
+
+Outputs are written to:
+`<deriv_root>/sub-<ID>/fmri/rest/task-<task>/atlas-<atlas_name>/`
+
+---
+
+## 10. BEM and Coregistration
 
 **Module:** `analysis/bem_generation.py`
 
 BEM surfaces, solutions, and EEG↔MRI coregistration transforms via Docker with
 FreeSurfer and MNE-Python.
 
-### 9.1 BEM Model
+### 10.1 BEM Model
 
 1. **Watershed BEM** — Runs `mne watershed_bem` inside Docker to create inner skull,
    outer skull, and outer skin surfaces from the FreeSurfer `recon-all` output.
@@ -488,7 +557,7 @@ FreeSurfer and MNE-Python.
 3. **BEM solution** — `mne.make_bem_solution()` computes the forward model matrix
    from the BEM surfaces.
 
-### 9.2 Coregistration Transform
+### 10.2 Coregistration Transform
 
 MNE fiducial-based coregistration is used. When subject-specific digitized fiducials
 are unavailable, fsaverage fiducials are scaled to the subject's head size.
@@ -497,20 +566,20 @@ are unavailable, fsaverage fiducials are scaled to the subject's head size.
 default (`allow_identity_trans = false`) because it is scientifically invalid without
 proper digitization. Set to `true` only for debugging purposes.
 
-### 9.3 Docker Image
+### 10.3 Docker Image
 
 Default: `freesurfer-mne:7.4.1` (FreeSurfer 7.4.1 + MNE-Python).
 Dockerfile: `eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne`.
 
 ---
 
-## 10. Multivariate Signature Readouts
+## 11. Multivariate Signature Readouts
 
 **Module:** `analysis/multivariate_signatures.py`
 
 Expression of configured multivariate reference patterns on statistical or beta maps.
 
-### 10.1 Configuration-Driven Signature Maps
+### 11.1 Configuration-Driven Signature Maps
 
 No signatures are hard-coded in the pipeline. Instead, signature maps are supplied
 through configuration:
@@ -531,7 +600,7 @@ Each configured signature must define:
 - a `path` relative to `paths.signature_dir`
 - a weight map in the same standard space expected by the workflow
 
-### 10.2 Computation
+### 11.2 Computation
 
 For signature weight map $\mathbf{w}$ and input image $\mathbf{x}$:
 
@@ -557,7 +626,7 @@ Voxel count $V$ (finite, unmasked voxels used in computation) is recorded for QC
 
 ---
 
-## 11. Output Layout
+## 12. Output Layout
 
 ```
 <deriv_root>/
@@ -599,16 +668,25 @@ Voxel count $V$ (finite, unmasked voxels used in computation) is recorded for QC
             │   ├── condition_signature_expression.tsv
             │   └── group_signature_expression.tsv
             └── provenance.json
+└── sub-XXXX/fmri/rest/
+    └── task-<task>/atlas-<atlas_name>/
+        ├── timeseries/
+        │   ├── *_run-<NN>_timeseries.tsv   # Per-run ROI time series
+        │   └── *_timeseries_concat.tsv     # Concatenated across runs
+        ├── *_correlation_connectivity.tsv       # ROI × ROI Pearson matrix
+        ├── *_correlation_connectivity_fisher_z.tsv  # Fisher-z transformed
+        ├── roi_labels.tsv
+        └── provenance.json
 ```
 
 ---
 
-## 12. Configuration Reference
+## 13. Configuration Reference
 
 Settings are loaded from `eeg_pipeline/utils/config/eeg_config.yaml`.
 A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.yaml`.
 
-### 12.1 Paths
+### 13.1 Paths
 
 | Key | Description |
 |-----|-------------|
@@ -617,7 +695,7 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `paths.freesurfer_license` | Path to FreeSurfer `license.txt` (if unset: `EEG_PIPELINE_FREESURFER_LICENSE`, then `~/license.txt`) |
 | `paths.signature_dir` | Root directory containing configured multivariate signature weight maps; explicit paths must exist |
 
-### 12.2 fMRI Preprocessing (`fmri_preprocessing.fmriprep`)
+### 13.2 fMRI Preprocessing (`fmri_preprocessing.fmriprep`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -633,7 +711,7 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `random_seed` | `0` | Reproducibility seed (0 = non-deterministic) |
 | `extra_args` | `null` | Additional fMRIPrep CLI arguments |
 
-### 12.3 First-Level Contrast (`fmri_contrast`)
+### 13.3 First-Level Contrast (`fmri_contrast`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -662,7 +740,7 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `resample_to_freesurfer` | `true` | Resample contrast map to FreeSurfer space |
 | `write_design_matrix` | `false` | Write design matrices to disk for QC |
 
-### 12.4 Second-Level Group Analysis (`fmri_group_level`)
+### 13.4 Second-Level Group Analysis (`fmri_group_level`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -685,7 +763,7 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `permutation.n_permutations` | `5000` | Number of permutations |
 | `permutation.two_sided` | `true` | Use two-sided permutation inference |
 
-### 12.5 fMRI Constraint (EEG Source Localization)
+### 13.5 fMRI Constraint (EEG Source Localization)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -698,7 +776,27 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 | `fmri_constraint.cluster_min_volume_mm3` | `null` | Minimum cluster volume (overrides voxel count) |
 | `fmri_constraint.max_clusters` | `20` | Maximum number of clusters to retain |
 
-### 12.6 BEM Generation
+### 13.6 Resting-State (`fmri_resting_state`)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `task_is_rest` | `false` | Mark this task as resting-state; enforces `fmri-analysis rest` mode |
+| `task_label` | `null` | Default task label for resting-state runs (overrides `--task`) |
+| `input_source` | `fmriprep` | BOLD source (`fmriprep` or `bids_raw`) |
+| `fmriprep_space` | `MNI152NLin2009cAsym` | fMRIPrep output space |
+| `require_fmriprep` | `true` | Raise when preprocessed BOLD is missing |
+| `runs` | `null` | Specific run numbers to process |
+| `confounds_strategy` | `auto` | Confound selection strategy |
+| `high_pass_hz` | `0.008` | High-pass filter cutoff (Hz) |
+| `low_pass_hz` | `0.1` | Low-pass filter cutoff (Hz) |
+| `smoothing_fwhm` | `null` | Spatial smoothing FWHM (mm) |
+| `atlas_labels_img` | required | Path to NIfTI atlas parcellation image |
+| `atlas_labels_tsv` | `null` | Optional TSV with ROI label names |
+| `connectivity_kind` | `correlation` | Connectivity estimator |
+| `standardize` | `true` | Z-score ROI time series |
+| `detrend` | `true` | Detrend ROI time series |
+
+### 13.7 BEM Generation
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -712,7 +810,8 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 
 ---
 
-## 13. Dependencies
+## 14. Dependencies
+
 
 ### Python Packages
 
