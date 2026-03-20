@@ -10,6 +10,7 @@ Domain-organized test suite under `tests/`:
 | `behavior/` | Behavioral analysis stages |
 | `machine_learning/` | ML pipelines, CV, metrics |
 | `fmri/` | fMRI analysis modules |
+| `plotting/` | Plotting and figure-generation modules |
 | `pipelines/` | Pipeline orchestration |
 | `scripts/` | Standalone utility scripts |
 | `utils/` | Shared utilities, architecture guards, repo hygiene |

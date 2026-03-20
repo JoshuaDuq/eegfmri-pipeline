@@ -66,12 +66,8 @@ MLMode = Literal[
 
 
 DEFAULT_N_PERM = 0
-DEFAULT_INNER_SPLITS = 3
 DEFAULT_OUTER_JOBS = 1
 DEFAULT_RNG_SEED = 42
-DEFAULT_MODEL = "elasticnet"
-DEFAULT_UNCERTAINTY_ALPHA = 0.1
-DEFAULT_PERM_N_REPEATS = 10
 VALID_CV_SCOPES = {"group", "subject"}
 
 
@@ -147,12 +143,12 @@ class MLPipeline(PipelineBase):
             "cv_scope": kwargs.get("cv_scope", "group"),
             "progress": ensure_progress_reporter(kwargs.get("progress")),
             "n_perm": kwargs.get("n_perm", DEFAULT_N_PERM),
-            "inner_splits": kwargs.get("inner_splits", DEFAULT_INNER_SPLITS),
+            "inner_splits": kwargs.get("inner_splits", self.config.get("machine_learning.cv.inner_splits", 5)),
             "outer_jobs": kwargs.get("outer_jobs", DEFAULT_OUTER_JOBS),
             "rng_seed": kwargs.get("rng_seed") or self.config.get("project.random_state", DEFAULT_RNG_SEED),
-            "model": kwargs.get("model", DEFAULT_MODEL),
-            "uncertainty_alpha": kwargs.get("uncertainty_alpha", DEFAULT_UNCERTAINTY_ALPHA),
-            "perm_n_repeats": kwargs.get("perm_n_repeats", DEFAULT_PERM_N_REPEATS),
+            "model": kwargs.get("model", self.config.get("machine_learning.models.regression_default", "elasticnet")),
+            "uncertainty_alpha": kwargs.get("uncertainty_alpha", self.config.get("machine_learning.analysis.uncertainty.alpha", 0.1)),
+            "perm_n_repeats": kwargs.get("perm_n_repeats", self.config.get("machine_learning.analysis.permutation_importance.n_repeats", 5)),
             "classification_model": kwargs.get("classification_model"),
             # Data/target controls (kept out of core config for CLI override friendliness)
             "feature_families": kwargs.get("feature_families"),

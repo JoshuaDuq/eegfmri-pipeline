@@ -58,12 +58,12 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
         "elasticnet_max_iter": elasticnet_config.get("max_iter", 10000),
         "elasticnet_tol": elasticnet_config.get("tol", 1e-4),
         "elasticnet_selection": elasticnet_config.get("selection", "cyclic"),
-        "elasticnet_alpha_grid": elasticnet_config.get("alpha_grid", [0.01, 0.1, 1.0, 10.0]),
-        "elasticnet_l1_ratio_grid": elasticnet_config.get("l1_ratio_grid", [0.1, 0.5, 0.9]),
+        "elasticnet_alpha_grid": elasticnet_config.get("alpha_grid", [0.001, 0.01, 0.1, 1, 10]),
+        "elasticnet_l1_ratio_grid": elasticnet_config.get("l1_ratio_grid", [0.2, 0.5, 0.8]),
         # Ridge regression
         "ridge_alpha_grid": ridge_config.get("alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0]),
         # Random Forest (shared)
-        "rf_n_estimators": random_forest_config.get("n_estimators", 100),
+        "rf_n_estimators": random_forest_config.get("n_estimators", 500),
         "rf_bootstrap": random_forest_config.get("bootstrap", True),
         "rf_max_depth_grid": random_forest_config.get("max_depth_grid", [5, 10, 20, None]),
         "rf_min_samples_split_grid": random_forest_config.get("min_samples_split_grid", [2, 5, 10]),

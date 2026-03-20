@@ -1,5 +1,5 @@
 eeg_bold_coupling:
-  output_dir: "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/data/derivatives/eeg_bold_coupling_smoke_robustness"
+  output_dir: null
 
   rois:
     template_subject: "fsaverage"

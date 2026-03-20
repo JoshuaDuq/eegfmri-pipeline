@@ -1204,7 +1204,7 @@ and `feature_engineering.task_is_rest` when both are set (mismatch raises `Value
 The following categories require event-locked epochs and are rejected in resting-state mode:
 
 ```
-erp, erds, itpc, phase
+erp, erds, itpc
 ```
 
 Requesting any of these categories raises a `ValueError` before extraction begins.

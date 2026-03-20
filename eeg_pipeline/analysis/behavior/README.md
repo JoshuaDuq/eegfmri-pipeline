@@ -94,7 +94,6 @@ behavior/
     ├── temporal.py          # temporal_tfr, temporal_stats, cluster
     ├── diagnostics.py       # icc
     ├── fdr.py               # hierarchical_fdr_summary
-    ├── report.py            # report stage
     └── export.py            # export stage
 ```
 
@@ -561,9 +560,9 @@ multiple-comparison summary (see §7).
 
 ---
 
-### 5.11 Report and Export
+### 5.11 Export
 
-**Modules:** `stages/report.py`, `stages/export.py`
+**Module:** `stages/export.py`
 
 Serialize and normalize per-stage outputs into standardized files for downstream
 use (fMRI integration, ML pipeline, group-level aggregation).

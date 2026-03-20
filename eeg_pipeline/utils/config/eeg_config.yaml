@@ -261,6 +261,7 @@ pyprep:
   breaks_min_length: 20
   t_start_after_previous: 2
   t_stop_before_next: 2
+  random_state: null  # null = inherit project.random_state
 
 ica:
   algorithm: "extended_infomax"
@@ -879,6 +880,7 @@ machine_learning:
       enabled: true
       min_valid_fold_fraction: 0.8
     uncertainty:
+      alpha: 0.1                        # Significance level for conformal prediction intervals (0.1 = 90% coverage)
       min_valid_fold_fraction: 0.8
     time_generalization:
       min_subjects_per_cell: 2           # Require at least this many held-out subjects with finite cell scores
@@ -895,9 +897,13 @@ machine_learning:
       min_samples_for_corr: 10
       min_samples_per_window: 15
   models:
+    regression_default: "elasticnet"    # Default regression model: "elasticnet" | "ridge" | "rf"
     elasticnet:
       alpha_grid: [0.001, 0.01, 0.1, 1, 10]
       l1_ratio_grid: [0.2, 0.5, 0.8]
+      max_iter: 10000
+      tol: 1.0e-4
+      selection: "cyclic"           # "cyclic" or "random"
     ridge:
       alpha_grid: [0.01, 0.1, 1.0, 10.0, 100.0]
     random_forest:
@@ -915,6 +921,7 @@ machine_learning:
     logistic_regression:
       penalty: "l2"
       C_grid: [0.01, 0.1, 1.0, 10.0]
+      l1_ratio_grid: [0.1, 0.5, 0.9]  # used when penalty="elasticnet"
       max_iter: 1000
       class_weight: "balanced"
     cnn:

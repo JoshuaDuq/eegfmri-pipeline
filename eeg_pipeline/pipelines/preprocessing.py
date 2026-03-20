@@ -342,6 +342,7 @@ class PreprocessingPipeline(PipelineBase):
             t_stop_before_next=pyprep_cfg.get("t_stop_before_next", 2),
             rename_anot_dict=pyprep_cfg.get("rename_anot_dict"),
             custom_bad_dict=pyprep_cfg.get("custom_bad_dict"),
+            random_state=pyprep_cfg.get("random_state") or self.config.get("project.random_state", 42),
         )
         
         synchronize_bad_channels_across_runs(

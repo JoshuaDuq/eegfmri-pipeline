@@ -40,6 +40,7 @@ Please send any suggestions my way :)
    - 6.7 [Plotting](#67-plotting)
    - 6.8 [Validation](#68-validation)
    - 6.9 [Stats and Info](#69-stats-and-info)
+   - 6.10 [Coupling](#610-coupling)
 7. [Interactive TUI](#7-interactive-tui)
 8. [Configuration](#8-configuration)
 9. [Subject Selection](#9-subject-selection)
@@ -384,7 +385,7 @@ eeg-pipeline features compute --subject 0001 \
   --spatial roi global
 
 # When --spatial is omitted, config's feature_engineering.spatial_modes is used
-# (default: roi, channels, global). Use --spatial to restrict to a subset.
+# (default: roi, global). Use --spatial to restrict to a subset.
 
 # Custom frequency bands and ROIs
 eeg-pipeline features compute --subject 0001 \

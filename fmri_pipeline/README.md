@@ -828,7 +828,7 @@ A standalone reference template is at `fmri_pipeline/utils/config/fmri_config.ya
 
 | Tool | Role |
 |------|------|
-| **dcm2niix** | DICOM-to-NIfTI conversion (Stage 1) |
+| **dcm2niix** | Upstream raw-to-BIDS conversion utility (not part of core BIDS-in fMRI analysis stages in this module) |
 | **Docker** or **Apptainer** | Container runtime for fMRIPrep and BEM generation |
 | **fMRIPrep** (container) | BOLD preprocessing (Stage 2) |
 | **FreeSurfer** (via Docker) | Watershed BEM surfaces, `recon-all` output |

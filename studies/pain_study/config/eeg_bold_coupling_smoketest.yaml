@@ -25,7 +25,7 @@ frequency_bands:
   low_gamma: [30.0, 45.0]
 
 eeg_bold_coupling:
-  output_dir: "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/data/derivatives/eeg_bold_coupling_smoketest"
+  output_dir: null
 
   rois:
     template_subject: "fsaverage"

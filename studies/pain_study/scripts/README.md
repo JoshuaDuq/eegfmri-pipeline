@@ -1,6 +1,8 @@
 # Paradigm-Specific Scripts (CLI Only)
 
-Scripts specific to the simultaneous EEG–fMRI pain paradigm. **Not integrated into the TUI or `eeg-pipeline` CLI** — must be run manually before any downstream analysis.
+Scripts specific to the simultaneous EEG–fMRI pain paradigm. These raw-conversion and event-merging utilities are **not integrated into the TUI or `eeg-pipeline` CLI** and must be run manually before downstream analysis.
+
+These scripts cover raw conversion and event merging only. The study coupling analysis itself is integrated in the main CLI as `eeg-pipeline coupling compute`.
 
 ## Required Workflow Order
 
@@ -233,11 +235,15 @@ python studies/pain_study/scripts/run_paradigm_specific.py merge-psychopy \
   --task task
 
 # 4. Run downstream analysis (TUI or CLI)
-eeg-pipeline preprocessing --subjects 0001 0002 --task task
-eeg-pipeline features      --subjects 0001 0002 --task task
-eeg-pipeline behavior      --subjects 0001 0002 --task task
-eeg-pipeline fmri          --task task
-eeg-pipeline fmri-analysis --task task
+eeg-pipeline preprocessing full --subject 0001 --subject 0002 --task task
+eeg-pipeline features compute --subject 0001 --subject 0002 --task task
+eeg-pipeline behavior compute --subject 0001 --subject 0002 --task task
+eeg-pipeline fmri preprocess --subject 0001 --subject 0002 --task task
+eeg-pipeline fmri-analysis first-level --subject 0001 --subject 0002 --task task \
+  --cond-a-value stimulation --cond-b-value fixation_rest
+
+# 5. Run EEG–BOLD coupling (integrated CLI)
+eeg-pipeline coupling compute --subject 0001 --subject 0002 --task task
 ```
 
 ---

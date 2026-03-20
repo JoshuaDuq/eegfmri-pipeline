@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Tuple
-
-if TYPE_CHECKING:
-    pass
+from typing import Any, Tuple
 
 ###################################################################
 # Feature Categories and Groups

@@ -37,6 +37,7 @@ app/
   model.go               Root Model (state machine, nav stack, persistence)
   model_stateflow.go     Per-view update delegation and navigation flow
   model_messages.go      Subject/config message handlers
+  model_home.go          Main menu sync helpers (config summary, recent runs)
   model_persistence.go   Repo-root discovery and JSON state file
 views/
   mainmenu/              Pipeline selector (three sections)
@@ -111,7 +112,7 @@ Runs the Python subprocess and streams output in real time:
 
 ### Global Setup
 
-Edit project-level configuration persisted to `.tui_overrides.json`:
+Edit project-level configuration persisted to `data/derivatives/.tui_overrides.json`:
 
 | Section | Fields |
 |---|---|
@@ -131,7 +132,7 @@ Read-only overview of project progress:
 
 ### History
 
-Browsable list of past pipeline executions (persisted in `.cache/history.json`):
+Browsable list of past pipeline executions (persisted in `eeg_pipeline/cli/tui/.cache/history.json`):
 
 - Pipeline name, mode, duration, relative timestamp, success/failure icon
 - Delete individual records (`D`) or clear all (`C`)
@@ -257,8 +258,8 @@ The TUI persists state across sessions in two locations:
 
 - **`eeg_pipeline/data/derivatives/.tui_state.json`** — last selected pipeline, time ranges,
   band/ROI/spatial selections, per-pipeline advanced configuration
-- **`eeg_pipeline/data/derivatives/.tui_overrides.json`** — global setup overrides (task, paths)
-- **`.cache/history.json`** — execution history (up to 50 records)
+- **`data/derivatives/.tui_overrides.json`** — global setup overrides (task, paths)
+- **`eeg_pipeline/cli/tui/.cache/history.json`** — execution history (up to 50 records)
 
 Subject discovery results are cached in memory per session (keyed by
 `task|data_source`) and can be force-refreshed from the wizard.

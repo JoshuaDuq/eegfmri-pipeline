@@ -33,6 +33,7 @@ def run_bads_detection_single_file(
     notch=None,
     custom_bad_dict=None,
     file_extension=".vhdr",
+    random_state=42,
 ):
     bads_frame = pd.DataFrame(
         data=None,
@@ -201,7 +202,7 @@ def run_bads_detection_single_file(
             all_bads = []
 
             for _ in range(repeats):
-                nc = pyprep.NoisyChannels(raw=raw, random_state=42)
+                nc = pyprep.NoisyChannels(raw=raw, random_state=random_state)
                 nc.find_bad_by_deviation()
                 nc.find_bad_by_correlation()
                 if ransac:
@@ -333,7 +334,8 @@ def run_bads_detection(
     l_pass=100,
     notch=None,
     subjects='all',
-    custom_bad_dict=None
+    custom_bad_dict=None,
+    random_state=42,
 ):
     eeg_files = utils.find_bids_files(
         root=bids_path,
@@ -367,6 +369,7 @@ def run_bads_detection(
                 notch=notch,
                 custom_bad_dict=custom_bad_dict,
                 file_extension=file_extension,
+                random_state=random_state,
             ) for file in eeg_files
         )
     else:
@@ -390,6 +393,7 @@ def run_bads_detection(
                 notch=notch,
                 custom_bad_dict=custom_bad_dict,
                 file_extension=file_extension,
+                random_state=random_state,
             )
             bads_frame_list.append(bframe)
 
