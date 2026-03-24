@@ -10,6 +10,9 @@ The frozen production specification is:
 studies/pain_study/study2/config/eeg_bold_coupling_study2.yaml
 ```
 
+The repository's pain-paradigm examples and override templates use the BIDS task label
+`thermalactive`.
+
 Study 2 asks whether trial-wise fluctuations in source-localized cortical EEG power
 predict trial-wise cortical BOLD responses estimated from subject-surface fMRI in a
 small set of a priori cortical regions of interest (ROIs). EEG and fMRI are summarized
@@ -78,6 +81,24 @@ The expected preparation order is:
 
 Study 2 itself does not perform those conversions.
 
+When the repository's pain-paradigm conversion utilities are used, the upstream
+repository contract is:
+
+- EEG raw-to-BIDS expects BrainVision input, defaults to the `easycap-M1` montage,
+  defaults to `60.0` Hz line frequency, filters annotations on the thermode trigger
+  prefix `Trig_therm/T  1`, and can trim the EEG recording to the first fMRI volume
+  trigger for multimodal alignment.
+- fMRI raw-to-BIDS expects DICOM input, writes BIDS events from PsychoPy timing,
+  defaults to phase-level event granularity, and uses `first_iti_start` as the default
+  onset reference in the paradigm CLI.
+- PsychoPy merging expects `TrialSummary.csv`, matches behavioral rows to trigger events
+  using the same thermode prefix, and by default fails rather than silently trimming row
+  mismatches.
+
+These repository defaults define the supported upstream data contract. They are not a
+substitute for reporting the actual acquisition and conversion settings used for the
+cohort in the manuscript.
+
 ### 2.2 Required Derived Inputs
 
 Before coupling can run, the following derived assets must already exist:
@@ -122,7 +143,38 @@ event-level artifact columns exported by upstream preprocessing:
 These are carried forward into the coupling table as `events_*` metadata and reused in
 the EEG artifact composite.
 
-### 2.4 Surface and Forward-Model Contract
+### 2.4 Task Event Semantics and Behavioral Fields
+
+Study 2 depends on the pain-paradigm event schema because plateau selection,
+temperature/site covariates, and full-trial history reconstruction all reference these
+upstream fields. When the repository's phase-level event generator is used, the BIDS
+events contract is:
+
+| Event field | Implemented meaning |
+| --- | --- |
+| `trial_type == "fixation_rest"` | pre-stimulation fixation interval at `35°C` baseline |
+| `trial_type == "fixation_poststim"` | fixation interval between stimulation end and pain-question onset; the generator documents a random `4.5-8.5` s interval |
+| `trial_type == "stimulation"` | thermal stimulation event of total duration `12.5` s |
+| `stim_phase == "ramp_up"` | first `3.0` s of the stimulation row when phase-level events are enabled |
+| `stim_phase == "plateau"` | middle `7.5` s of the stimulation row when phase-level events are enabled |
+| `stim_phase == "ramp_down"` | final `2.0` s of the stimulation row when phase-level events are enabled |
+| `trial_type == "pain_question"` | binary pain question window, maximum `4.0` s, can terminate early on response |
+| `trial_type == "vas_rating"` | visual-analogue-scale rating window, maximum `7.0` s, can terminate early on response |
+| `onset` | seconds from BOLD run start after the configured onset-reference transformation |
+| `run_id` | one-based run index from PsychoPy |
+| `trial_number` | one-based within-run trial index |
+| `stimulus_temp` | thermode target temperature in `°C` |
+| `selected_surface` | experiment-defined stimulation-site index |
+| `pain_binary_coded` | pain yes/no response coded `1` or `0` |
+| `vas_final_coded_rating` | final coded rating; non-pain trials use `0-99`, pain trials use `100-200` |
+| `vas_scale_min`, `vas_scale_max` | trial-specific rating-scale bounds written by the event generator |
+
+The production Study 2 coupling analysis selects plateau-phase stimulation rows through
+`stim_phase == "plateau"`, but the broader task history is preserved because the
+underlying events tables also include the non-selected fixation, question, and rating
+rows.
+
+### 2.5 Surface and Forward-Model Contract
 
 The subject-specific surface and BEM prerequisites are strict. The workflow fails fast
 if any of the following are missing:
@@ -314,6 +366,11 @@ The main analysis is therefore restricted to plateau trials:
 stim_phase == "plateau"
 ```
 
+In the repository's pain-paradigm event generator, `stim_phase` is attached only to
+`trial_type == "stimulation"` rows. The associated pain-paradigm fMRI override template
+models `stimulation`, `pain_question`, and `vas_rating`, while applying phase scoping
+only to stimulation rows.
+
 ### 5.2 Trial-Wise Surface GLM
 
 Study 2 invokes the shared trial-signature extraction machinery in least-squares
@@ -424,13 +481,15 @@ The derived covariates are:
 
 Their implemented definitions are:
 
-- `temperature`: resolved numeric temperature column from the selected source events,
+- `temperature`: resolved numeric temperature column from the selected source events;
+  in production this is fixed to `events_stimulus_temp`,
 - `temperature_sq`: squared temperature, when enabled,
 - `delta_temperature`: within-run difference from the immediately preceding selected
   trial,
 - `exp_global`: zero-based cumulative exposure count over all selected trials after
   sorting by run, onset, and duration,
-- `exp_site`: cumulative count within stimulation site,
+- `exp_site`: cumulative count within stimulation site; in production the site identity
+  is taken from `events_selected_surface`,
 - `block_start`: indicator that the current selected trial is the first selected trial in
   its run,
 - `trial_position`: one-based within-run index after sorting selected trials by onset.
@@ -803,29 +862,64 @@ Common explicit stop conditions include:
 Study 2 deliberately surfaces these conditions as explicit errors rather than attempting
 fallback behavior or backward-compatibility shims.
 
-## 10. Manuscript-Only Reporting Items Still Required Before Submission
+## 10. Article-Writing Completion Inventory
 
-This repository can define the computational contract, but a submission-quality
-manuscript still requires scientific reporting elements that are not encoded in the
-pipeline and therefore cannot be inferred automatically from the Study 2 code alone.
-Before treating this document as journal-ready, the following items should be inserted
-from the study record:
+Sections 1-9 define the full repository-grounded computational methods contract for
+Study 2. A manuscript writer still needs a second class of information: facts that are
+required in a journal Methods section but cannot be inferred from code or configuration
+alone. To make article drafting operationally complete, those required non-code inputs
+are enumerated here rather than left implicit.
 
-- participant flow: recruited, excluded, analyzed, and exact exclusion reasons,
-- ethics and consent statement,
-- EEG acquisition details: montage, amplifier, sampling rate, reference, impedance
-  policy, synchronization method,
-- MRI acquisition details: scanner, field strength, sequence parameters, voxel size,
-  TR, TE, multiband factor if used,
-- paradigm reporting: stimulus hardware, temperature calibration, run structure,
-  inter-trial timing, pain-rating procedure,
-- cohort descriptors: age, sex, handedness, clinical/exclusion criteria when relevant,
-- preregistration or analysis-plan provenance if applicable,
-- justification for ROI selection, time windows, nuisance thresholds, and band choices,
-- exact sample sizes entering each confirmatory cell and each sensitivity analysis,
-- a QC and attrition figure or table suitable for the supplement,
-- an explicit limitations paragraph covering source leakage, dependence on trial
-  selection, residual autocorrelation assumptions, and non-causal interpretation.
+### 10.1 What This Document Already Fixes
 
-Those additions are the main difference between a rigorous computational Methods file and
-a submission-ready journal Methods section.
+The present file already supplies the implementation-grounded material needed for an
+article Methods section:
+
+- the confirmatory objective and inferential family,
+- the frozen ROI definitions and source/surface extraction rules,
+- the EEG, fMRI, alignment, censoring, and nuisance specifications,
+- the exact mixed-effects model and multiplicity rule,
+- the enabled sensitivity, negative-control, and robustness branches,
+- the execution contract, output locations, and explicit hard-failure conditions.
+
+### 10.2 Study-Record Information That Must Be Added Manually
+
+The following manuscript-critical facts are not discoverable from the repository and
+must be transcribed from the study record before a full article can be written:
+
+| Category | Required facts | Typical source outside the repository |
+| --- | --- | --- |
+| ethics and governance | IRB/REB approval body, approval identifier, consent procedure, preregistration or SAP provenance if any | ethics submission, protocol, preregistration record |
+| participant flow | recruited `n`, excluded `n`, analyzed `n`, and exact exclusion reasons by stage | screening log, QC log, final cohort spreadsheet |
+| cohort descriptors | age summary, sex/gender reporting, handedness, inclusion/exclusion criteria, clinical descriptors if relevant | demographics sheet, protocol |
+| EEG acquisition | amplifier/manufacturer, cap layout, sampling rate, online reference, impedance policy, recording environment, synchronization method | acquisition SOP, amplifier export, lab protocol |
+| MRI acquisition | scanner/vendor, field strength, head coil, sequence names, voxel size, TR, TE, flip angle, multiband factor, fieldmap strategy | scan protocol, DICOM header summary |
+| thermal stimulation paradigm | thermode hardware, stimulation site definitions, temperature calibration procedure, trial count per run, run count, question wording, rating instructions | experiment script, protocol, lab notebook |
+| timing details | actual inter-trial timing, duration tolerances, whether early responses truncated question/rating windows in practice, any run-to-run deviations | PsychoPy task code, behavioral exports |
+| preprocessing attrition | subjects/runs/trials removed at each preprocessing and QC stage, including plateau-trial retention after censoring | pipeline QC outputs, manual adjudication log |
+| analysis justification | scientific rationale for selected ROIs, EEG bands, time windows, nuisance thresholds, and robustness branches | analysis plan, manuscript discussion notes |
+| software provenance | repository commit hash, package versions, container/environment details if reported | git metadata, environment export |
+| result-linked counts | exact eligible-subject count and retained-trial count for each confirmatory cell and sensitivity branch | `group_results.tsv`, sensitivity summaries, QC tables |
+| supplement material | QC/attrition figure, ROI visualization figure, design-matrix diagnostics if reported | manuscript figures, exported QC summaries |
+| limitations | explicit statement of source leakage risk, ROI dependence, residual autocorrelation assumptions, trial-selection dependence, and non-causal interpretation | manuscript discussion draft |
+
+### 10.3 Minimal Fill-In Blocks for the Final Methods Section
+
+When converting this repository specification into article prose, the following
+manuscript blocks must be completed with study-record facts:
+
+- `Participants and ethics`: insert recruitment source, final analyzed sample, exclusion
+  flow, ethics approval, and consent language.
+- `EEG acquisition`: insert hardware, sampling rate, reference, impedance policy, and
+  synchronization details.
+- `MRI acquisition`: insert scanner and sequence parameters.
+- `Thermal pain paradigm`: insert thermode hardware, calibration procedure, number of
+  runs and trials, stimulation sites, and rating instructions.
+- `Quality control and attrition`: insert counts removed by subject, run, and trial,
+  plus confirmatory-cell sample sizes.
+- `Limitations`: insert the study-specific interpretation limits that cannot be read from
+  code alone.
+
+Until those external facts are inserted, this file should be treated as a complete
+computational methods specification and an article-writing scaffold, not as a fully
+submission-ready journal Methods section.

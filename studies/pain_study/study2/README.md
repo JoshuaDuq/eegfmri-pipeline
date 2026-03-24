@@ -89,7 +89,7 @@ and group results under:
 
 ## Notes
 
-- For the scientific rationale, formulas, inferential hierarchy, and manuscript-only
-  reporting gaps, read [METHODS.md](METHODS.md).
+- For the scientific rationale, formulas, inferential hierarchy, and article-writing
+  completion inventory, read [METHODS.md](METHODS.md).
 - Study 2 intentionally fails fast on missing or invalid inputs. It does not implement
   fallback behavior or backward-compatibility shims.
