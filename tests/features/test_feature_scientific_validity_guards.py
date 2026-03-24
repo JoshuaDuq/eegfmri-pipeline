@@ -130,6 +130,29 @@ class TestScientificValidityGuards(unittest.TestCase):
                 analysis_mode="trial_ml_safe",
             )
 
+    def test_feature_context_allows_trial_safe_bursts_without_train_mask(self):
+        ctx = FeatureContext(
+            subject="0001",
+            task="pain",
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "analysis_mode": "trial_ml_safe",
+                        "bursts": {"threshold_reference": "trial"},
+                    }
+                }
+            ),
+            deriv_root=Path(tempfile.mkdtemp()),
+            logger=logging.getLogger("feature-context-bursts-trial-safe"),
+            epochs=_EpochStub(n_epochs=4, sfreq=100.0, n_times=40),
+            aligned_events=pd.DataFrame({"trial": [0, 1, 2, 3]}),
+            feature_categories=["bursts"],
+            train_mask=None,
+            analysis_mode="trial_ml_safe",
+        )
+
+        self.assertEqual(ctx.analysis_mode, "trial_ml_safe")
+
     def test_rest_mode_rejects_event_locked_feature_categories(self):
         config = DotConfig({"feature_engineering": {"task_is_rest": True}})
         with self.assertRaisesRegex(ValueError, "event-locked categories: erp, itpc"):
@@ -444,6 +467,42 @@ class TestScientificValidityGuards(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "requires explicitly configured segments"):
             extract_spectral_features(ctx, ["alpha"])
+
+    def test_power_uses_analysis_window_when_segment_name_is_missing(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "power": {
+                        "require_baseline": False,
+                        "exclude_line_noise": False,
+                    }
+                },
+                "frequency_bands": {"alpha": [8.0, 12.0]},
+                "rois": {},
+            }
+        )
+        tfr = SimpleNamespace(
+            data=np.full((2, 1, 1, 2), 10.0, dtype=float),
+            freqs=np.array([10.0], dtype=float),
+            times=np.array([0.0, 0.5], dtype=float),
+            info={"ch_names": ["Cz"]},
+            comment=None,
+        )
+        ctx = SimpleNamespace(
+            results={"tfr": tfr},
+            config=config,
+            frequency_bands={"alpha": (8.0, 12.0)},
+            spatial_modes=["global"],
+            windows=SimpleNamespace(ranges={"analysis": (0.0, 1.0)}),
+            name=None,
+            logger=logging.getLogger("power-analysis-default"),
+            baseline_df=None,
+        )
+
+        features_df, columns = extract_power_features(ctx, ["alpha"])
+
+        self.assertEqual(columns, ["power_analysis_alpha_global_log10raw_mean"])
+        self.assertTrue(np.allclose(features_df.iloc[:, 0].to_numpy(dtype=float), 1.0))
 
     def test_pac_api_path_resolves_single_rest_segment_window(self):
         epochs = _EpochStub(n_epochs=2, sfreq=100.0, n_times=80)

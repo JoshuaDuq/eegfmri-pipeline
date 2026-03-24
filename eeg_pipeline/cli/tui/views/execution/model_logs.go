@@ -65,7 +65,6 @@ func (m *Model) processOutputLine(line string) {
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent-1) / float64(m.SubjectTotal))
 				}
-				m.calculateETA()
 				m.addLog(fmt.Sprintf("[%d/%d] %s", m.SubjectCurrent, m.SubjectTotal, event.Subject))
 			case "progress":
 				m.CurrentOperation = event.Step
@@ -94,13 +93,11 @@ func (m *Model) processOutputLine(line string) {
 				}
 			case "subject_done":
 				m.finishCurrentSubject(subjectDone)
-				m.calculateETA()
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent) / float64(m.SubjectTotal))
 				}
 			case "subject_failed":
 				m.finishCurrentSubject(subjectFailed)
-				m.calculateETA()
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent) / float64(m.SubjectTotal))
 				}

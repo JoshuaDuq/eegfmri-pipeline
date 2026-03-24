@@ -653,6 +653,24 @@ def _save_extraction_config(
         logger.info("Saved extraction config to %d feature category folders", len(saved_to))
 
 
+def _feature_provenance_config(config: Any) -> Dict[str, Any]:
+    return {
+        "power_subtract_evoked": bool(
+            config.get("feature_engineering.power.subtract_evoked", False)
+        ),
+        "precomputed_subtract_evoked": bool(
+            config.get("feature_engineering.precomputed.subtract_evoked", False)
+        ),
+        "aperiodic_subtract_evoked": bool(
+            config.get("feature_engineering.aperiodic.subtract_evoked", False)
+        ),
+        "bands_use_iaf": bool(config.get("feature_engineering.bands.use_iaf", False)),
+        "bursts_threshold_reference": str(
+            config.get("feature_engineering.bursts.threshold_reference", "trial")
+        ).strip(),
+    }
+
+
 def _collect_trial_table_feature_tables(
     *,
     direct_df: Optional[pd.DataFrame],
@@ -838,6 +856,21 @@ class FeaturePipeline(PipelineBase):
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="feature_extraction", config=config)
 
+    def _subject_feature_output_dir(
+        self,
+        subject: str,
+        *,
+        feature_output_root: Path | None,
+    ) -> Path:
+        if feature_output_root is None:
+            return deriv_features_path(self.deriv_root, subject)
+        subject_label = str(subject).strip()
+        if not subject_label:
+            raise ValueError("Subject identifiers must be non-empty.")
+        if not subject_label.startswith("sub-"):
+            subject_label = f"sub-{subject_label}"
+        return Path(feature_output_root) / subject_label / "eeg" / "features"
+
     def _resolve_pipeline_deriv_root(self) -> Path:
         """Resolve EEG feature derivatives root."""
         return resolve_eeg_deriv_root(
@@ -863,7 +896,10 @@ class FeaturePipeline(PipelineBase):
         )
         progress.subject_start(f"sub-{subject}")
 
-        features_dir = deriv_features_path(self.deriv_root, subject)
+        features_dir = self._subject_feature_output_dir(
+            subject,
+            feature_output_root=kwargs.get("feature_output_root"),
+        )
         ensure_dir(features_dir)
         setup_matplotlib(self.config)
 
@@ -1001,7 +1037,15 @@ class FeaturePipeline(PipelineBase):
 
             suffix = name
             range_info = f"range '{name}'" if name else "default range"
-            self.logger.info("--- Processing %s (%.3f to %.3fs) ---", range_info, tmin, tmax)
+            if tmin is None or tmax is None:
+                self.logger.info("--- Processing %s ---", range_info)
+            else:
+                self.logger.info(
+                    "--- Processing %s (%.3f to %.3fs) ---",
+                    range_info,
+                    tmin,
+                    tmax,
+                )
 
             spatial_modes = kwargs.get("spatial_modes") or self.config.get(
                 "feature_engineering.spatial_modes", ["roi", "channels", "global"]
@@ -1166,24 +1210,25 @@ class FeaturePipeline(PipelineBase):
                 aligned_events=aligned_events,
             )
 
-            trial_table_suffix = suffix if len(time_ranges) > 1 else None
-            trial_feature_tables = _collect_trial_table_feature_tables(
-                direct_df=combined_df,
-                conn_df_aligned=conn_df_aligned,
-                aper_df_aligned=aper_df_aligned,
-                unpacked=unpacked,
-                features=features,
-            )
-            _save_canonical_trial_table_artifact(
-                deriv_root=self.deriv_root,
-                subject=subject,
-                task=task,
-                aligned_events=aligned_events,
-                feature_tables=trial_feature_tables,
-                config=self.config,
-                logger=self.logger,
-                suffix=trial_table_suffix,
-            )
+            if kwargs.get("save_canonical_trial_table", True):
+                trial_table_suffix = suffix if len(time_ranges) > 1 else None
+                trial_feature_tables = _collect_trial_table_feature_tables(
+                    direct_df=combined_df,
+                    conn_df_aligned=conn_df_aligned,
+                    aper_df_aligned=aper_df_aligned,
+                    unpacked=unpacked,
+                    features=features,
+                )
+                _save_canonical_trial_table_artifact(
+                    deriv_root=self.deriv_root,
+                    subject=subject,
+                    task=task,
+                    aligned_events=aligned_events,
+                    feature_tables=trial_feature_tables,
+                    config=self.config,
+                    logger=self.logger,
+                    suffix=trial_table_suffix,
+                )
 
             if len(time_ranges) > 1:
                 aligned_dict = {
@@ -1229,6 +1274,7 @@ class FeaturePipeline(PipelineBase):
                 "subject": subject,
                 "task": task,
             }
+            extraction_config.update(_feature_provenance_config(self.config))
             _save_extraction_config(extraction_config, features_dir, suffix, self.logger, feature_categories, pipeline_config=self.config)
 
             self.logger.info(
@@ -1274,6 +1320,7 @@ class FeaturePipeline(PipelineBase):
                 "subject": subject,
                 "task": task,
             }
+            merged_extraction_config.update(_feature_provenance_config(self.config))
             _save_extraction_config(
                 merged_extraction_config, features_dir, None, self.logger, feature_categories,
                 pipeline_config=self.config,

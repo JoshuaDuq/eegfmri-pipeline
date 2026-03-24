@@ -66,6 +66,30 @@ def _maybe_import_nilearn_image():
         return None
 
 
+def _sanitize_nonfinite_for_resampling(img: Any) -> Any:
+    """
+    Replace non-finite voxels before resampling.
+
+    Some valid upstream maps encode unsupported voxels as NaN. Nilearn warns and slows down
+    when those maps are passed directly into resampling. Downstream signature expression already
+    restricts to finite voxels and optional masks, so sanitizing only the temporary resampling
+    image preserves the intended valid support while avoiding non-finite interpolation input.
+    """
+    import numpy as np  # type: ignore
+
+    nib = _maybe_import_nibabel()
+    if nib is None:
+        raise RuntimeError("Signature expression requires nibabel to sanitize resampling inputs.")
+
+    data = np.asanyarray(img.dataobj, dtype=np.float32)
+    if np.isfinite(data).all():
+        return img
+
+    sanitized = np.array(data, copy=True)
+    sanitized[~np.isfinite(sanitized)] = 0.0
+    return nib.Nifti1Image(sanitized, img.affine, img.header)
+
+
 def _maybe_resample_to_img(
     *,
     moving_img: Any,
@@ -80,6 +104,7 @@ def _maybe_resample_to_img(
     """
     nilearn_image = _maybe_import_nilearn_image()
     if nilearn_image is not None:
+        moving_img = _sanitize_nonfinite_for_resampling(moving_img)
         return nilearn_image.resample_to_img(
             moving_img,
             target_img,
@@ -92,6 +117,7 @@ def _maybe_resample_to_img(
         from nibabel.processing import resample_from_to  # type: ignore
 
         order = 0 if interpolation == "nearest" else 1
+        moving_img = _sanitize_nonfinite_for_resampling(moving_img)
         return resample_from_to(moving_img, (target_img.shape, target_img.affine), order=order)
     except Exception as exc:
         raise ValueError(

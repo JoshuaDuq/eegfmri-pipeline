@@ -13,6 +13,14 @@ EXPECTED_INIT_FILES = (
     "studies/pain_study/config/__init__.py",
     "studies/pain_study/pipelines/__init__.py",
     "studies/pain_study/scripts/__init__.py",
+    "studies/pain_study/study1/__init__.py",
+    "studies/pain_study/study1/config/__init__.py",
+    "studies/pain_study/study1/deep_regression/__init__.py",
+    "studies/pain_study/study2/__init__.py",
+    "studies/pain_study/study2/analysis/__init__.py",
+    "studies/pain_study/study2/cli/__init__.py",
+    "studies/pain_study/study2/config/__init__.py",
+    "studies/pain_study/study2/pipelines/__init__.py",
 )
 
 def test_pain_study_package_layout_and_metadata() -> None:
@@ -25,10 +33,15 @@ def test_pain_study_package_layout_and_metadata() -> None:
     package_data = setuptools["package-data"]
 
     assert "studies*" in package_find["include"]
-    assert package_data["studies.pain_study"] == [
+    assert package_data["studies.pain_study"] == ["scripts/config/*.yaml"]
+    assert package_data["studies.pain_study.study1"] == [
+        "config/*.yaml",
+        "README.md",
+    ]
+    assert package_data["studies.pain_study.study2"] == [
         "analysis/*.R",
         "config/*.yaml",
         "config/**/*.json",
         "config/**/*.label",
-        "scripts/config/*.yaml",
+        "README.md",
     ]

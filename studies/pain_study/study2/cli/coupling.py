@@ -13,10 +13,10 @@ from eeg_pipeline.cli.common import (
     create_progress_reporter,
     resolve_task,
 )
-from studies.pain_study.pipelines.eeg_bold_coupling import (
+from studies.pain_study.study2.pipelines.eeg_bold_coupling import (
     EEGBOLDCouplingPipeline,
 )
-from studies.pain_study.config.eeg_bold_coupling_loader import (
+from studies.pain_study.study2.config.eeg_bold_coupling_loader import (
     apply_eeg_bold_coupling_config_defaults,
 )
 from eeg_pipeline.utils.config.overrides import apply_set_overrides

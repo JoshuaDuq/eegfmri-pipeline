@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
+import nibabel as nib
+import numpy as np
 import pytest
 
 from fmri_pipeline.analysis.multivariate_signatures import (
+    _maybe_resample_to_img,
     compute_signature_expression,
     discover_signature_files,
 )
@@ -92,3 +96,29 @@ def test_compute_signature_expression_rejects_missing_requested_signature(tmp_pa
             signature_specs=[{"name": "NPS", "path": "nps.nii.gz"}],
             signatures=["SIIPS1"],
         )
+
+
+def test_resample_to_img_ignores_nonfinite_voxels_in_moving_image() -> None:
+    effect_data = np.ones((2, 2, 2), dtype=np.float32)
+    effect_data[0, 0, 0] = np.nan
+    effect_img = nib.Nifti1Image(effect_data, np.eye(4))
+
+    target_affine = np.eye(4, dtype=float)
+    target_affine[:3, 3] = 0.1
+    target_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), target_affine)
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        resampled = _maybe_resample_to_img(
+            moving_img=effect_img,
+            target_img=target_img,
+            interpolation="continuous",
+        )
+
+    resampled_data = resampled.get_fdata()
+    assert np.isfinite(resampled_data).all()
+    warning_messages = [str(w.message) for w in captured]
+    assert not any(
+        "NaNs or infinite values are present in the data passed to resample" in msg
+        for msg in warning_messages
+    )

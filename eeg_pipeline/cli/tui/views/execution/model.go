@@ -78,13 +78,12 @@ type Model struct {
 	OperationCurrent int
 	OperationTotal   int
 
-	// ETA and timing
-	SubjectStartTime   time.Time         // When current subject started
-	SubjectDurations   []time.Duration   // History of completed subject durations
-	EstimatedRemaining time.Duration     // Calculated ETA
-	SubjectOrder       []string          // Ordered subject IDs as announced by the pipeline
-	SubjectStatuses    map[string]string // Per-subject status: "pending", "running", "done", "failed"
-	FailedSubjects     []string          // List of failed subject IDs
+	// Subject timing and tracking
+	SubjectStartTime time.Time         // When current subject started
+	SubjectDurations []time.Duration   // History of completed subject durations
+	SubjectOrder     []string          // Ordered subject IDs as announced by the pipeline
+	SubjectStatuses  map[string]string // Per-subject status: "pending", "running", "done", "failed"
+	FailedSubjects   []string          // List of failed subject IDs
 
 	// Resource metrics
 	CPUUsage        float64

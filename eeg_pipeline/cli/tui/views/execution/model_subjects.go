@@ -29,7 +29,6 @@ func (m *Model) resetSubjects(subjects []string) {
 	m.OperationTotal = 0
 	m.SubjectStartTime = time.Time{}
 	m.SubjectDurations = nil
-	m.EstimatedRemaining = 0
 
 	for _, subject := range subjects {
 		m.trackSubject(subject)

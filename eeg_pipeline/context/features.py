@@ -25,7 +25,6 @@ VALID_ANALYSIS_MODES = {ANALYSIS_MODE_TRIAL_ML_SAFE, ANALYSIS_MODE_GROUP_STATS}
 CROSS_TRIAL_FEATURES = {
     "itpc",
     "connectivity",
-    "bursts",
     "microstates",
     "aperiodic_evoked",
     "sourcelocalization",
@@ -102,7 +101,7 @@ class FeatureContext:
         if self.analysis_mode != ANALYSIS_MODE_TRIAL_ML_SAFE:
             return
         
-        cross_trial_requested = set(self.feature_categories) & CROSS_TRIAL_FEATURES
+        cross_trial_requested = self._cross_trial_features_requested()
         if not cross_trial_requested:
             return
         
@@ -113,6 +112,18 @@ class FeatureContext:
                 f"cross-trial features ({requested}). "
                 "Provide train_mask or use analysis_mode='group_stats'."
             )
+
+    def _cross_trial_features_requested(self) -> set[str]:
+        requested = set(self.feature_categories) & CROSS_TRIAL_FEATURES
+        if "bursts" not in set(self.feature_categories):
+            return requested
+
+        threshold_reference = str(
+            self.config.get("feature_engineering.bursts.threshold_reference", "trial")
+        ).strip().lower()
+        if threshold_reference in {"subject", "condition"}:
+            requested.add("bursts")
+        return requested
     
     def _resolve_spatial_modes(self) -> None:
         """Resolve spatial modes from config if using default."""
