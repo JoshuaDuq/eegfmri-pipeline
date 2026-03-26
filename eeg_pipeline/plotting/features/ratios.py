@@ -27,6 +27,9 @@ from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
+_PLOT_RATIO_STATISTIC = "power_ratio"
+
+
 def _order_ratio_pairs_by_config(pairs: List[str], config: Any) -> List[str]:
     """Order ratio pairs according to config, preserving config order."""
     config_pairs = get_config_value(config, "feature_engineering.spectral.ratio_pairs", [])
@@ -71,7 +74,7 @@ def _get_ratio_columns_for_segment_pair_roi(
     pair: str,
     roi_name: str,
 ) -> List[str]:
-    """Get ratio columns matching segment, pair, and ROI criteria."""
+    """Get ratio columns matching segment, pair, ROI, and plotting statistic."""
     matching_columns = []
     
     for column in features_df.columns:
@@ -82,6 +85,9 @@ def _get_ratio_columns_for_segment_pair_roi(
         parsed_segment = str(parsed.get("segment") or "")
         parsed_band = str(parsed.get("band") or "")
         if parsed_segment != segment or parsed_band != pair:
+            continue
+
+        if str(parsed.get("stat") or "") != _PLOT_RATIO_STATISTIC:
             continue
         
         scope = parsed.get("scope") or ""

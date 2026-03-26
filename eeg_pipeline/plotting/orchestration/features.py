@@ -1136,9 +1136,18 @@ def _resolve_group_conditions(
 ) -> List[Tuple[str, np.ndarray]]:
     """Resolve configured comparison conditions into (label, mask) pairs."""
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
-    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
+    from eeg_pipeline.utils.config.loader import get_config_value
 
-    comparison_column = str(require_config_value(config, "plotting.comparisons.comparison_column")).strip()
+    comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+
+    if (
+        is_resting_state_feature_mode(config)
+        and comparison_column == ""
+        and (not isinstance(values_spec, (list, tuple)) or len(values_spec) == 0)
+    ):
+        return [("Rest", np.ones(len(events_df), dtype=bool))]
+
     if comparison_column == "":
         raise ValueError("plotting.comparisons.comparison_column must be a non-empty string.")
     if comparison_column not in events_df.columns:
@@ -1146,7 +1155,6 @@ def _resolve_group_conditions(
             f"Comparison column '{comparison_column}' not found in events DataFrame."
         )
 
-    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
     labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
 
     if not isinstance(values_spec, (list, tuple)):
@@ -1253,7 +1261,7 @@ def _compute_subject_condition_psd(
     logger: logging.Logger,
 ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     """Compute one subject-level PSD vector for a selected condition."""
-    from eeg_pipeline.utils.analysis.tfr import apply_baseline_and_crop
+    from eeg_pipeline.utils.analysis.tfr import extract_trial_spectral_profiles
 
     n_epochs = min(len(tfr_epochs), len(mask))
     if n_epochs <= 0:
@@ -1267,23 +1275,17 @@ def _compute_subject_condition_psd(
     if len(tfr_condition) == 0:
         return None
 
-    tfr_condition_avg = tfr_condition.average()
-    apply_baseline_and_crop(
-        tfr_condition_avg,
+    spectral_profiles = extract_trial_spectral_profiles(
+        tfr_condition,
         baseline=baseline_window,
-        mode="logratio",
+        active_window=active_window,
         logger=logger,
     )
-
-    times = np.asarray(tfr_condition_avg.times)
-    tmin = max(float(times.min()), float(active_window[0]))
-    tmax = min(float(times.max()), float(active_window[1]))
-    if tmax <= tmin:
+    if spectral_profiles is None:
         return None
 
-    tfr_window = tfr_condition_avg.copy().crop(tmin=tmin, tmax=tmax)
-    freqs = np.asarray(tfr_window.freqs, dtype=float)
-    psd_vector = np.asarray(tfr_window.data.mean(axis=(0, 2)), dtype=float)
+    freqs, trial_profiles = spectral_profiles
+    psd_vector = np.nanmean(np.asarray(trial_profiles, dtype=float), axis=0)
 
     if freqs.ndim != 1 or psd_vector.ndim != 1 or len(freqs) != len(psd_vector):
         return None
@@ -1388,6 +1390,10 @@ def visualize_power_by_condition_for_group(
         raise ValueError("No subjects specified")
 
     config = _load_config_if_needed(config)
+    if is_resting_state_feature_mode(config):
+        raise ValueError(
+            "visualize_power_by_condition_for_group is not scientifically valid for resting-state plotting."
+        )
     setup_matplotlib(config)
     task = _resolve_task(task, config)
     effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
@@ -1875,6 +1881,10 @@ def visualize_power_timecourse_for_group(
         raise ValueError("No subjects specified")
 
     config = _load_config_if_needed(config)
+    if is_resting_state_feature_mode(config):
+        raise ValueError(
+            "visualize_power_timecourse_for_group is not scientifically valid for resting-state plotting."
+        )
     setup_matplotlib(config)
     task = _resolve_task(task, config)
     effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
@@ -2105,6 +2115,242 @@ def visualize_power_timecourse_for_group(
         raise ValueError(
             "Group power_timecourse generated no plots. "
             "Check epochs availability and comparison configuration."
+        )
+
+    _save_plot_manifest(plots_dir=plots_dir, subject="group", logger=logger)
+
+
+def visualize_power_cross_frequency_correlation_for_group(
+    *,
+    subjects: List[str],
+    task: Optional[str] = None,
+    deriv_root: Optional[Path] = None,
+    config: Any = None,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Render group-level cross-frequency power correlations from subject summaries."""
+    if not subjects:
+        raise ValueError("No subjects specified")
+
+    config = _load_config_if_needed(config)
+    setup_matplotlib(config)
+    task = _resolve_task(task, config)
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
+
+    if logger is None:
+        logger = get_logger(__name__)
+
+    from eeg_pipeline.infra.tsv import read_table
+    from eeg_pipeline.plotting.features.power import (
+        _compute_cross_frequency_power_matrix,
+        _extract_cross_frequency_band_values,
+        _format_sample_count_summary,
+        _save_cross_frequency_power_correlation_figure,
+    )
+    from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
+    from eeg_pipeline.utils.config.loader import get_frequency_bands, require_config_value
+    from eeg_pipeline.utils.formatting import sanitize_label
+
+    segment = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
+    if segment == "":
+        raise ValueError("plotting.comparisons.comparison_segment must be a non-empty string.")
+
+    bands = [str(band_name) for band_name in get_frequency_bands(config).keys()]
+    if len(bands) < 2:
+        raise ValueError("Group cross-frequency power correlation requires at least 2 configured bands.")
+
+    rois = get_roi_definitions(config)
+    roi_names = _resolve_power_roi_names(config=config, rois=rois)
+    roi_subject_conditions: Dict[str, Dict[str, Dict[str, pd.Series]]] = {}
+    condition_labels: Optional[List[str]] = None
+
+    for subject in subjects:
+        features_dir = deriv_features_path(effective_deriv_root, subject)
+        power_df = _load_features_power_df(features_dir=features_dir, read_table=read_table, logger=logger)
+        if power_df is None or power_df.empty:
+            logger.warning(
+                "Group cross-frequency power correlation: missing power features for sub-%s; skipping",
+                subject,
+            )
+            continue
+
+        _epochs, events_df = load_epochs_for_analysis(
+            subject=subject,
+            task=task,
+            align="strict",
+            preload=False,
+            deriv_root=effective_deriv_root,
+            config=config,
+            task_is_rest=is_resting_state_feature_mode(config),
+            logger=logger,
+        )
+        if events_df is None or events_df.empty:
+            logger.warning(
+                "Group cross-frequency power correlation: missing events for sub-%s; skipping",
+                subject,
+            )
+            continue
+        if len(power_df) != len(events_df):
+            logger.warning(
+                "Group cross-frequency power correlation: length mismatch for sub-%s "
+                "(power=%d, events=%d); skipping",
+                subject,
+                len(power_df),
+                len(events_df),
+            )
+            continue
+
+        try:
+            conditions = _resolve_group_conditions(
+                events_df=events_df,
+                config=config,
+                allow_single_value=True,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Group cross-frequency power correlation: could not resolve conditions for sub-%s; "
+                "skipping (%s)",
+                subject,
+                exc,
+            )
+            continue
+
+        labels = [label for label, _ in conditions]
+        if condition_labels is None:
+            condition_labels = labels
+        elif labels != condition_labels:
+            raise ValueError(
+                "Inconsistent condition labels across subjects in group cross-frequency power correlation."
+            )
+
+        available_channels = _extract_power_channels(list(power_df.columns))
+        if not available_channels:
+            logger.warning(
+                "Group cross-frequency power correlation: no power channels found for sub-%s; skipping",
+                subject,
+            )
+            continue
+
+        for roi_name in roi_names:
+            if roi_name == "all":
+                roi_channels = available_channels
+            else:
+                roi_channels = get_roi_channels(rois.get(roi_name, []), available_channels)
+                if not roi_channels:
+                    continue
+
+            subject_condition_means: Dict[str, pd.Series] = {}
+            for label, mask in conditions:
+                n_rows = min(len(power_df), len(mask))
+                if n_rows <= 0:
+                    continue
+
+                row_mask = np.asarray(mask[:n_rows], dtype=bool)
+                if int(row_mask.sum()) == 0:
+                    continue
+
+                condition_mean = power_df.iloc[:n_rows].loc[row_mask].mean(numeric_only=True)
+                if condition_mean.empty:
+                    continue
+                subject_condition_means[label] = condition_mean
+
+            if subject_condition_means:
+                roi_subject_conditions.setdefault(roi_name, {})[subject] = subject_condition_means
+
+    if condition_labels is None:
+        raise ValueError(
+            "Group cross-frequency power correlation could not resolve configured conditions for any subject."
+        )
+
+    plots_dir = deriv_plots_path(effective_deriv_root, "group", subdir="features")
+    power_plots_dir = plots_dir / "power"
+    ensure_dir(power_plots_dir)
+
+    rendered_plots = 0
+
+    for roi_name in roi_names:
+        subject_condition_map = roi_subject_conditions.get(roi_name, {})
+        if not subject_condition_map:
+            continue
+
+        complete_subjects = [
+            subject_id
+            for subject_id, label_map in subject_condition_map.items()
+            if all(label in label_map for label in condition_labels)
+        ]
+        if len(complete_subjects) < 2:
+            logger.warning(
+                "Group cross-frequency power correlation: ROI %s has fewer than 2 complete subjects; skipping",
+                roi_name,
+            )
+            continue
+
+        condition_frames: Dict[str, pd.DataFrame] = {
+            label: pd.DataFrame([subject_condition_map[subject_id][label] for subject_id in complete_subjects])
+            for label in condition_labels
+        }
+        combined_df = pd.concat(condition_frames.values(), axis=0, ignore_index=True, sort=False)
+        available_channels = _extract_power_channels(list(combined_df.columns))
+        if roi_name == "all":
+            roi_channels = available_channels
+        else:
+            roi_channels = get_roi_channels(rois.get(roi_name, []), available_channels)
+        if not roi_channels:
+            continue
+
+        matrices_by_label: Dict[str, pd.DataFrame] = {}
+        sample_counts: Dict[str, int] = {}
+        for label, condition_df in condition_frames.items():
+            band_values = _extract_cross_frequency_band_values(
+                condition_df,
+                bands=bands,
+                segment=segment,
+                roi_channels=roi_channels,
+                sample_mask=np.ones(len(condition_df), dtype=bool),
+            )
+            if len(band_values) < 2:
+                continue
+
+            matrix = _compute_cross_frequency_power_matrix(
+                band_values,
+                band_order=bands,
+            )
+            if not np.isfinite(matrix.to_numpy(dtype=float)).any():
+                continue
+            matrices_by_label[label] = matrix
+            sample_counts[label] = len(condition_df)
+
+        if not matrices_by_label:
+            logger.warning(
+                "Group cross-frequency power correlation: ROI %s had no usable matrices; skipping",
+                roi_name,
+            )
+            continue
+
+        roi_display = "All Channels" if roi_name == "all" else roi_name.replace("_", " ").title()
+        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else "all"
+        save_path = power_plots_dir / f"sub-group_cross_frequency_power_correlation_roi-{roi_safe}"
+        footer_parts = [
+            "Group summary",
+            f"ROI: {roi_display}",
+            f"Segment: {segment}",
+            _format_sample_count_summary(sample_counts, sample_unit="subjects"),
+            "Descriptive Pearson correlation across subjects",
+        ]
+        _save_cross_frequency_power_correlation_figure(
+            matrices_by_label=matrices_by_label,
+            save_path=save_path,
+            logger=logger,
+            config=config,
+            title=f"Group cross-frequency power correlation | {roi_display}",
+            footer=" | ".join(part for part in footer_parts if part),
+        )
+        rendered_plots += 1
+
+    if rendered_plots == 0:
+        raise ValueError(
+            "Group cross_frequency_power_correlation generated no plots. "
+            "Check available power features and comparison configuration."
         )
 
     _save_plot_manifest(plots_dir=plots_dir, subject="group", logger=logger)
@@ -2439,6 +2685,7 @@ __all__ = [
     "visualize_features_for_subjects",
     "visualize_band_power_topomaps_for_group",
     "visualize_power_by_condition_for_group",
+    "visualize_power_cross_frequency_correlation_for_group",
     "visualize_power_timecourse_for_group",
     "visualize_power_spectral_density_for_group",
 ]

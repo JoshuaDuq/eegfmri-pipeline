@@ -219,6 +219,121 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertIn("rest_epochs_overlap = 0.0", cfg)
         self.assertNotIn("epochs_tmax =", cfg)
 
+    def test_preprocessing_helper_failure_validation_and_config_branches(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.name = "preprocessing"
+        p.logger = Mock()
+        p.bids_root = Path(tempfile.mkdtemp())
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.config = DotConfig(
+            {
+                "project": {"task": "task"},
+                "paths": {"deriv_root": "/tmp/deriv-task"},
+                "preprocessing": {"task_is_rest": False},
+            }
+        )
+
+        self.assertEqual(p._resolve_pipeline_deriv_root(), Path("/tmp/deriv-task"))
+
+        progress = Mock()
+        with patch.object(
+            PreprocessingPipeline,
+            "_extract_preprocessing_params",
+            return_value=("task", "epochs", True, True, False, 1, progress),
+        ), patch.object(
+            PreprocessingPipeline,
+            "_get_steps_for_mode",
+            return_value=["epochs"],
+        ), patch.object(
+            PreprocessingPipeline,
+            "_execute_steps",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                p.run_batch(subjects=["0001"], task="task", mode="epochs")
+
+        payload = json.loads(
+            (p.deriv_root / "logs" / "run_metadata" / "preprocessing" / "run_test-run.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["error"], "boom")
+
+        p.config = DotConfig({"preprocessing": {"task_is_rest": True}})
+        with self.assertRaisesRegex(ValueError, "requires preprocessing.rest_epochs_duration"):
+            p._get_rest_epoch_parameters()
+
+        p.config = DotConfig(
+            {"preprocessing": {"task_is_rest": True, "rest_epochs_duration": 0.0, "rest_epochs_overlap": 0.0}}
+        )
+        with self.assertRaisesRegex(ValueError, "must be greater than 0"):
+            p._get_rest_epoch_parameters()
+
+        p.config = DotConfig(
+            {"preprocessing": {"task_is_rest": True, "rest_epochs_duration": 12.0, "rest_epochs_overlap": -1.0}}
+        )
+        with self.assertRaisesRegex(ValueError, "greater than or equal to 0"):
+            p._get_rest_epoch_parameters()
+
+        p.config = DotConfig(
+            {
+                "eeg": {"ch_types": "eeg"},
+                "preprocessing": {"task_is_rest": False, "random_state": 7},
+                "epochs": {"conditions": ["stim"]},
+            }
+        )
+        cfg = p._generate_mne_bids_config("preprocessing/_07_make_epochs", subjects=["0001"])
+        self.assertIn("random_state = 7", cfg)
+
+    def test_write_clean_events_and_condition_preference_branches(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.bids_root = Path(tempfile.mkdtemp())
+        p.deriv_root = Path(tempfile.mkdtemp())
+        epochs_path = p.deriv_root / "sub-0001-epo.fif"
+        epochs_path.write_text("x", encoding="utf-8")
+
+        p.config = DotConfig(
+            {
+                "epochs": {"conditions": ["a"]},
+                "event_columns": {"condition": "condition_value"},
+                "preprocessing": {"clean_events_overwrite": False, "clean_events_strict": True},
+            }
+        )
+        fake_paths = types.SimpleNamespace(find_clean_epochs_path=lambda *a, **k: epochs_path)
+        fake_preproc = types.SimpleNamespace(write_clean_events_tsv_for_epochs=Mock())
+        with patch.dict(
+            sys.modules,
+            {
+                "eeg_pipeline.infra.paths": fake_paths,
+                "eeg_pipeline.utils.data.preprocessing": fake_preproc,
+            },
+        ):
+            p._write_clean_events_tsv(subjects=["0001"], task="t")
+
+        kwargs = fake_preproc.write_clean_events_tsv_for_epochs.call_args.kwargs
+        self.assertEqual(kwargs["condition_columns"], ["condition_value"])
+        self.assertFalse(kwargs["overwrite"])
+
+        ev_dir = p.bids_root / "sub-0001" / "eeg"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        events_path = ev_dir / "sub-0001_task-task_run-01_events.tsv"
+        events_path.write_text(
+            "trial_type\tonset\nCueA\t0\nVolume\t1\nCueB\t2\n",
+            encoding="utf-8",
+        )
+
+        p.config = DotConfig({"preprocessing": {"condition_preferred_prefixes": ["Cue"]}})
+        self.assertEqual(p._detect_conditions_from_bids(), ["CueA", "CueB"])
+
+        p.config = DotConfig({"preprocessing": {"condition_preferred_prefixes": "Cue"}})
+        self.assertEqual(p._detect_conditions_from_bids(), ["CueA", "CueB"])
+
     def test_generate_mne_bids_config_rejects_overlapping_rest_epochs(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 

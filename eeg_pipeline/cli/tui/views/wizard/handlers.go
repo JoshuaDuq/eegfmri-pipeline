@@ -29,10 +29,11 @@ const (
 )
 
 var groupSupportedPlotIDs = map[string]struct{}{
-	"band_power_topomaps":    {},
-	"power_by_condition":     {},
-	"power_spectral_density": {},
-	"power_timecourse":       {},
+	"band_power_topomaps":               {},
+	"cross_frequency_power_correlation": {},
+	"power_by_condition":                {},
+	"power_spectral_density":            {},
+	"power_timecourse":                  {},
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -1113,6 +1114,23 @@ func (m Model) countSelectedVisiblePlots() int {
 		}
 	}
 	return count
+}
+
+func (m Model) selectedRestTaskOnlyPlots() []string {
+	if m.Pipeline != types.PipelinePlotting || !m.prepTaskIsRest {
+		return nil
+	}
+
+	var plotIDs []string
+	for i, plot := range m.plotItems {
+		if !m.plotSelected[i] || !m.IsPlotVisibleForSelection(plot) {
+			continue
+		}
+		if plot.RestCompatibility == plotRestTaskOnly {
+			plotIDs = append(plotIDs, strings.TrimSpace(plot.ID))
+		}
+	}
+	return plotIDs
 }
 
 // SelectedPlotCategoryKeys returns the keys of selected plot categories

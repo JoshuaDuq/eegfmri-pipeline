@@ -20,6 +20,7 @@ from mne.viz import plot_topomap
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
 from eeg_pipeline.plotting.io.figures import get_viz_params, robust_sym_vlim
+from eeg_pipeline.analysis.features.rest import is_resting_state_feature_mode
 from eeg_pipeline.utils.data.columns import (
     find_predictor_column_in_events,
 )
@@ -31,6 +32,7 @@ from eeg_pipeline.plotting.features.roi import (
 )
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_and_crop,
+    extract_trial_spectral_profiles,
 )
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_bands, require_config_value
 from scipy.stats import mannwhitneyu
@@ -1568,13 +1570,13 @@ def _plot_column_comparison(
             plot_data[col_idx] = {"v1": v1, "v2": v2}
         
         if use_precomputed:
-            qvalues = get_precomputed_qvalues(precomputed_column_stats, bands, roi_name or "all")
-            n_significant = sum(1 for v in qvalues.values() if v[3])
-            
-            for col_idx, band in enumerate(bands):
-                if band in qvalues:
-                    p, q, d, sig = qvalues[band]
-                    qvalues[col_idx] = (p, q, d, sig)
+            band_qvalues = get_precomputed_qvalues(precomputed_column_stats, bands, roi_name or "all")
+            n_significant = sum(1 for stats_tuple in band_qvalues.values() if stats_tuple[3])
+            qvalues = {
+                col_idx: band_qvalues[band]
+                for col_idx, band in enumerate(bands)
+                if band in band_qvalues
+            }
         else:
             qvalues, n_significant = _compute_column_comparison_statistics(
                 cell_data, m1, m2, bands, config
@@ -1728,13 +1730,14 @@ def plot_power_by_condition(
     """
     if power_df is None or power_df.empty or events_df is None:
         return
+    if is_resting_state_feature_mode(config):
+        raise ValueError("plot_power_by_condition is not scientifically valid for resting-state plotting.")
 
     from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
 
     compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
     compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
     
-    segments = _get_comparison_segments(power_df, config, logger)
     bands = list(get_frequency_band_names(config) or ["delta", "theta", "alpha", "beta", "gamma"])
     
     rois = get_roi_definitions(config)
@@ -1743,13 +1746,17 @@ def plot_power_by_condition(
     
     if logger:
         logger.debug(
-            "Power comparison: segments=%s, ROIs=%s, compare_windows=%s, compare_columns=%s",
-            segments,
+            "Power comparison: ROIs=%s, compare_windows=%s, compare_columns=%s",
             roi_names,
             compare_wins,
             compare_cols,
         )
     
+    if compare_wins:
+        segments = _get_comparison_segments(power_df, config, logger)
+    else:
+        segments = []
+
     if compare_wins and len(segments) >= 2:
         _plot_window_comparison(
             power_df, events_df, subject, save_dir, logger, config,
@@ -1811,6 +1818,375 @@ def plot_power_by_condition(
 
 
 
+
+
+def _resolve_power_plot_conditions(
+    events_df: pd.DataFrame,
+    config: Any,
+    *,
+    context: str,
+) -> List[Tuple[str, np.ndarray]]:
+    """Resolve configured power-plot comparison masks into label/mask pairs."""
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+
+    comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
+    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
+
+    if (
+        is_resting_state_feature_mode(config)
+        and comparison_column == ""
+        and (not isinstance(values_spec, (list, tuple)) or len(values_spec) == 0)
+    ):
+        return [("Rest", np.ones(len(events_df), dtype=bool))]
+
+    if comparison_column == "":
+        raise ValueError(f"{context} requires plotting.comparisons.comparison_column.")
+    if comparison_column not in events_df.columns:
+        raise ValueError(f"{context} comparison column {comparison_column!r} is not present in events_df.")
+
+    labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
+    if not isinstance(values_spec, (list, tuple)) or len(values_spec) < 1:
+        raise ValueError(f"{context} requires plotting.comparisons.comparison_values with at least 1 value.")
+
+    if len(values_spec) == 1:
+        value = values_spec[0]
+        label = (
+            str(labels_spec[0]).strip()
+            if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 1 and str(labels_spec[0]).strip()
+            else str(value)
+        )
+        column_values = events_df[comparison_column]
+        try:
+            numeric_value = float(value)
+            mask = (pd.to_numeric(column_values, errors="coerce") == numeric_value).to_numpy()
+        except (TypeError, ValueError):
+            value_string = str(value).strip().lower()
+            mask = (column_values.astype(str).str.strip().str.lower() == value_string).to_numpy()
+
+        mask_bool = np.asarray(mask, dtype=bool)
+        if int(mask_bool.sum()) == 0:
+            raise ValueError(
+                f"{context}: no trials found for value {value!r} in column {comparison_column!r}"
+            )
+        return [(label, mask_bool)]
+
+    if len(values_spec) == 2:
+        comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
+        if not comp_mask_info:
+            raise ValueError(f"{context} could not resolve configured comparison masks.")
+        mask1, mask2, label1, label2 = comp_mask_info
+        return [(str(label1), np.asarray(mask1, dtype=bool)), (str(label2), np.asarray(mask2, dtype=bool))]
+
+    multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
+    if not multi_group_info:
+        raise ValueError(f"{context} could not resolve configured multi-group masks.")
+    masks_dict, group_labels = multi_group_info
+    return [(str(label), np.asarray(masks_dict[label], dtype=bool)) for label in group_labels]
+
+
+def _extract_cross_frequency_band_values(
+    power_df: pd.DataFrame,
+    *,
+    bands: List[str],
+    segment: str,
+    roi_channels: List[str],
+    sample_mask: np.ndarray,
+) -> Dict[str, np.ndarray]:
+    """Extract aligned per-sample band values for cross-frequency correlation plots."""
+    n_rows = min(len(power_df), len(sample_mask))
+    if n_rows <= 0:
+        return {}
+
+    row_mask = np.asarray(sample_mask[:n_rows], dtype=bool)
+    if int(row_mask.sum()) == 0:
+        return {}
+
+    values_by_band: Dict[str, np.ndarray] = {}
+    power_subset = power_df.iloc[:n_rows]
+    for band in bands:
+        columns = _get_power_columns_for_roi(power_subset, segment, band, roi_channels)
+        if not columns:
+            continue
+        value_series = power_subset[columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+        values_by_band[band] = value_series[row_mask].to_numpy(dtype=float, copy=False)
+
+    return values_by_band
+
+
+def _compute_cross_frequency_power_matrix(
+    band_values: Dict[str, np.ndarray],
+    *,
+    band_order: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Return a symmetric band x band Pearson-correlation matrix."""
+    ordered_bands = [band for band in (band_order or []) if band in band_values]
+    ordered_bands.extend([band for band in band_values if band not in ordered_bands])
+    if len(ordered_bands) < 2:
+        raise ValueError("Cross-frequency power correlation requires at least 2 bands with data.")
+
+    matrix = pd.DataFrame(np.nan, index=ordered_bands, columns=ordered_bands, dtype=float)
+    for band in ordered_bands:
+        values = np.asarray(band_values[band], dtype=float).ravel()
+        if int(np.isfinite(values).sum()) >= MIN_TRIALS_FOR_STATISTICS:
+            matrix.loc[band, band] = 1.0
+
+    for band_index, band_name in enumerate(ordered_bands):
+        first = np.asarray(band_values[band_name], dtype=float).ravel()
+        for other_band in ordered_bands[band_index + 1 :]:
+            second = np.asarray(band_values[other_band], dtype=float).ravel()
+            if first.shape != second.shape:
+                raise ValueError(
+                    "Cross-frequency power correlation requires aligned sample vectors for each band."
+                )
+
+            finite_mask = np.isfinite(first) & np.isfinite(second)
+            if int(finite_mask.sum()) < MIN_TRIALS_FOR_STATISTICS:
+                continue
+
+            first_valid = first[finite_mask]
+            second_valid = second[finite_mask]
+            if np.allclose(first_valid, first_valid[0]) or np.allclose(second_valid, second_valid[0]):
+                correlation = np.nan
+            else:
+                correlation = float(np.corrcoef(first_valid, second_valid)[0, 1])
+
+            matrix.loc[band_name, other_band] = correlation
+            matrix.loc[other_band, band_name] = correlation
+
+    return matrix
+
+
+def _compute_cross_frequency_difference_matrix(
+    condition1_matrix: pd.DataFrame,
+    condition2_matrix: pd.DataFrame,
+) -> pd.DataFrame:
+    """Return a descriptive difference matrix using condition2 - condition1."""
+    if list(condition1_matrix.index) != list(condition2_matrix.index):
+        raise ValueError("Cross-frequency difference matrices must share identical band ordering.")
+    if list(condition1_matrix.columns) != list(condition2_matrix.columns):
+        raise ValueError("Cross-frequency difference matrices must share identical band ordering.")
+    return condition2_matrix - condition1_matrix
+
+
+def _format_sample_count_summary(
+    sample_counts: Dict[str, int],
+    *,
+    sample_unit: str,
+) -> str:
+    """Return a compact sample-count summary for figure footers."""
+    if not sample_counts:
+        return ""
+
+    unique_counts = sorted({int(count) for count in sample_counts.values()})
+    if len(unique_counts) == 1:
+        count_label = str(unique_counts[0])
+    else:
+        count_label = f"{unique_counts[0]}-{unique_counts[-1]}"
+    return f"N: {count_label} {sample_unit}"
+
+
+def _cross_frequency_matrix_has_finite_values(matrix: pd.DataFrame) -> bool:
+    """Return True when a correlation matrix contains at least one finite entry."""
+    values = matrix.to_numpy(dtype=float, copy=False)
+    return bool(np.isfinite(values).any())
+
+
+def _save_cross_frequency_power_correlation_figure(
+    *,
+    matrices_by_label: Dict[str, pd.DataFrame],
+    save_path: Path,
+    logger: logging.Logger,
+    config: Any,
+    title: str,
+    footer: str,
+) -> None:
+    """Render one cross-frequency power-correlation figure."""
+    plot_cfg = get_plot_config(config)
+    display_labels = list(matrices_by_label.keys())
+    if not display_labels:
+        raise ValueError("Cross-frequency power correlation requires at least 1 matrix to plot.")
+
+    n_panels = len(display_labels) + (1 if len(display_labels) == 2 else 0)
+    fig_width = max(4.2 * n_panels, 4.8)
+    fig, axes = plt.subplots(1, n_panels, figsize=(fig_width, 4.2), squeeze=False)
+    fig.patch.set_facecolor("white")
+
+    difference_matrix: Optional[pd.DataFrame] = None
+    difference_label = ""
+    if len(display_labels) == 2:
+        difference_matrix = _compute_cross_frequency_difference_matrix(
+            matrices_by_label[display_labels[0]],
+            matrices_by_label[display_labels[1]],
+        )
+        difference_label = (
+            f"{_format_condition_display_label(display_labels[1], config)} - "
+            f"{_format_condition_display_label(display_labels[0], config)}"
+        )
+
+    for axis_index, label in enumerate(display_labels):
+        ax = axes[0, axis_index]
+        matrix = matrices_by_label[label]
+        band_labels = [str(band).upper() for band in matrix.index]
+        sns.heatmap(
+            matrix,
+            ax=ax,
+            cmap="RdBu_r",
+            center=0.0,
+            vmin=-1.0,
+            vmax=1.0,
+            square=True,
+            linewidths=0.6,
+            linecolor="white",
+            cbar=True,
+            mask=matrix.isna(),
+            annot=(matrix.shape[0] * matrix.shape[1]) <= 25,
+            fmt=".2f",
+            annot_kws={"fontsize": plot_cfg.font.small},
+            cbar_kws={"label": "Correlation (r)"},
+        )
+        ax.set_title(
+            _format_condition_display_label(label, config),
+            fontsize=plot_cfg.font.title,
+            fontweight="bold",
+            pad=10,
+        )
+        ax.set_xticklabels(band_labels, rotation=45, ha="right", fontsize=plot_cfg.font.small)
+        ax.set_yticklabels(band_labels, rotation=0, fontsize=plot_cfg.font.small)
+
+    if difference_matrix is not None:
+        diff_ax = axes[0, -1]
+        finite_difference = difference_matrix.to_numpy(dtype=float)
+        finite_difference = finite_difference[np.isfinite(finite_difference)]
+        diff_vmax = float(np.nanmax(np.abs(finite_difference))) if finite_difference.size else 1.0
+        if not np.isfinite(diff_vmax) or diff_vmax <= 0:
+            diff_vmax = 1.0
+
+        band_labels = [str(band).upper() for band in difference_matrix.index]
+        sns.heatmap(
+            difference_matrix,
+            ax=diff_ax,
+            cmap="RdBu_r",
+            center=0.0,
+            vmin=-diff_vmax,
+            vmax=diff_vmax,
+            square=True,
+            linewidths=0.6,
+            linecolor="white",
+            cbar=True,
+            mask=difference_matrix.isna(),
+            annot=(difference_matrix.shape[0] * difference_matrix.shape[1]) <= 25,
+            fmt=".2f",
+            annot_kws={"fontsize": plot_cfg.font.small},
+            cbar_kws={"label": "Δ correlation (r)"},
+        )
+        diff_ax.set_title(difference_label, fontsize=plot_cfg.font.title, fontweight="bold", pad=10)
+        diff_ax.set_xticklabels(band_labels, rotation=45, ha="right", fontsize=plot_cfg.font.small)
+        diff_ax.set_yticklabels(band_labels, rotation=0, fontsize=plot_cfg.font.small)
+
+    fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.99)
+    save_fig(
+        fig,
+        save_path,
+        footer=footer,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        tight_layout_rect=(0, 0.04, 1, 0.96),
+        config=config,
+    )
+    logger.debug("Saved cross-frequency power correlation figure: %s", save_path.name)
+
+
+def plot_cross_frequency_power_correlation(
+    power_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+) -> Dict[str, Path]:
+    """Plot cross-frequency power-correlation matrices for configured ROI(s) and conditions."""
+    if power_df is None or power_df.empty:
+        return {}
+    if events_df is None or events_df.empty:
+        raise ValueError("plot_cross_frequency_power_correlation requires events_df. No fallback will be used.")
+
+    segment = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
+    if segment == "":
+        raise ValueError("plot_cross_frequency_power_correlation requires plotting.comparisons.comparison_segment.")
+
+    conditions = _resolve_power_plot_conditions(
+        events_df,
+        config,
+        context="plot_cross_frequency_power_correlation",
+    )
+    bands = list(get_frequency_bands(config).keys())
+    if len(bands) < 2:
+        raise ValueError("plot_cross_frequency_power_correlation requires at least 2 configured frequency bands.")
+
+    rois = get_roi_definitions(config)
+    all_channels = extract_channels_from_columns(list(power_df.columns))
+    roi_names = _get_comparison_rois(config, rois)
+
+    from eeg_pipeline.utils.formatting import sanitize_label
+
+    saved_files: Dict[str, Path] = {}
+    plot_cfg = get_plot_config(config)
+    for roi_name in roi_names:
+        roi_channels = all_channels if roi_name == "all" else get_roi_channels(rois[roi_name], all_channels)
+        if not roi_channels:
+            continue
+
+        matrices_by_label: Dict[str, pd.DataFrame] = {}
+        sample_counts: Dict[str, int] = {}
+        for label, mask in conditions:
+            band_values = _extract_cross_frequency_band_values(
+                power_df,
+                bands=bands,
+                segment=segment,
+                roi_channels=roi_channels,
+                sample_mask=mask,
+            )
+            if len(band_values) < 2:
+                continue
+            matrix = _compute_cross_frequency_power_matrix(band_values, band_order=bands)
+            if not _cross_frequency_matrix_has_finite_values(matrix):
+                continue
+            matrices_by_label[label] = matrix
+            sample_counts[label] = len(next(iter(band_values.values())))
+
+        if not matrices_by_label:
+            continue
+
+        roi_display = "All Channels" if roi_name == "all" else roi_name.replace("_", " ").title()
+        roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else "all"
+        save_path = save_dir / f"sub-{subject}_cross_frequency_power_correlation_roi-{roi_safe}"
+        footer_parts = [
+            f"Subject: {subject}",
+            f"ROI: {roi_display}",
+            f"Segment: {segment}",
+            _format_sample_count_summary(sample_counts, sample_unit="trials"),
+            "Descriptive Pearson correlation across trials",
+        ]
+        _save_cross_frequency_power_correlation_figure(
+            matrices_by_label=matrices_by_label,
+            save_path=save_path,
+            logger=logger,
+            config=config,
+            title=f"Cross-frequency power correlation | {roi_display}",
+            footer=" | ".join(part for part in footer_parts if part),
+        )
+        saved_files[f"cross_frequency_power_correlation_roi-{roi_safe}"] = save_path.with_suffix(
+            f".{plot_cfg.formats[0]}"
+        )
+
+    if not saved_files:
+        raise ValueError(
+            "plot_cross_frequency_power_correlation generated no plots. "
+            "Check available ROI channels, segment selection, and comparison configuration."
+        )
+    return saved_files
 
 
 def _setup_subplot_grid(n_items: int, n_cols: int = 2, config: Any = None) -> Tuple[plt.Figure, List[plt.Axes]]:
@@ -2189,6 +2565,72 @@ def _get_band_frequency_mask(tfr: Any, band: str, config: Any, logger: logging.L
     return mask
 
 
+def _summarize_trial_spectral_profiles(
+    tfr_epochs: Any,
+    *,
+    active_window: Tuple[float, float],
+    baseline_window: Tuple[float, float],
+    logger: logging.Logger,
+) -> Optional[Dict[str, np.ndarray]]:
+    """Summarize baseline-normalized trial spectral profiles for one subset."""
+    extracted = extract_trial_spectral_profiles(
+        tfr_epochs,
+        baseline=baseline_window,
+        active_window=active_window,
+        logger=logger,
+    )
+    if extracted is None:
+        return None
+
+    freqs, trial_profiles = extracted
+    if trial_profiles.size == 0:
+        return None
+
+    mean_profile = np.nanmean(trial_profiles, axis=0)
+    if trial_profiles.shape[0] >= MIN_EPOCHS_FOR_SEM:
+        sem_profile = np.nanstd(trial_profiles, axis=0, ddof=1) / np.sqrt(trial_profiles.shape[0])
+        ci_lower = mean_profile - 1.96 * sem_profile
+        ci_upper = mean_profile + 1.96 * sem_profile
+    else:
+        sem_profile = np.zeros_like(mean_profile)
+        ci_lower = mean_profile
+        ci_upper = mean_profile
+
+    return {
+        "freqs": freqs,
+        "mean": mean_profile,
+        "sem": sem_profile,
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
+    }
+
+
+def _compute_frequency_width_weighted_samples(
+    sample_matrix: np.ndarray,
+    freqs: np.ndarray,
+    band_mask: np.ndarray,
+) -> np.ndarray:
+    """Collapse one frequency band using Hz-width weighting."""
+    selected = np.asarray(sample_matrix[:, band_mask], dtype=float)
+    band_freqs = np.asarray(freqs[band_mask], dtype=float)
+    if selected.ndim != 2:
+        raise ValueError("Frequency-weighted band samples require a 2D sample matrix.")
+    if selected.shape[1] != band_freqs.size:
+        raise ValueError("Frequency-weighted band samples must align with the selected freqs.")
+    if band_freqs.size == 0:
+        return np.full((selected.shape[0],), np.nan, dtype=float)
+    if band_freqs.size == 1:
+        return selected[:, 0]
+
+    weights = np.gradient(band_freqs).astype(float)
+    weights = np.where(np.isfinite(weights) & (weights > 0), weights, np.nan)
+    weighted = np.broadcast_to(weights, selected.shape)
+    valid_mask = np.isfinite(selected) & np.isfinite(weighted)
+    numerator = np.nansum(np.where(valid_mask, selected * weighted, 0.0), axis=1)
+    denominator = np.nansum(np.where(valid_mask, weighted, 0.0), axis=1)
+    return np.where(denominator > 0, numerator / denominator, np.nan)
+
+
 ###################################################################
 # Power Spectral Density Plotting
 ###################################################################
@@ -2206,9 +2648,10 @@ def _plot_psd_by_conditions(
 ) -> bool:
     """Plot PSD by condition with uncertainty visualization and frequency band annotations.
     
-    Computes PSD per trial, then averages across channels and time windows.
-    Shows mean ± SEM with shaded confidence intervals for scientific rigor.
-    Includes frequency band annotations and optional statistical comparison.
+    Applies baseline normalization at the trial level, then averages
+    channel/time-collapsed spectral profiles across trials.
+    Shows descriptive mean ± SEM with shaded confidence intervals.
+    Includes frequency band annotations.
     
     Args:
         tfr_epochs: EpochsTFR object
@@ -2253,59 +2696,24 @@ def _plot_psd_by_conditions(
         tfr_cond = tfr_epochs[mask]
         if len(tfr_cond) == 0:
             continue
-        
-        tfr_cond_avg = tfr_cond.average()
-        apply_baseline_and_crop(tfr_cond_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-        tfr_cond_win = _crop_tfr_to_active(tfr_cond_avg, active_window, logger)
-        
-        if tfr_cond_win is None:
+        spectral_summary = _summarize_trial_spectral_profiles(
+            tfr_cond,
+            active_window=(float(active_window[0]), float(active_window[1])),
+            baseline_window=tfr_baseline,
+            logger=logger,
+        )
+        if spectral_summary is None:
             continue
-        
-        psd_mean = tfr_cond_win.data.mean(axis=(0, 2))
-        
-        if len(psd_mean) != len(tfr_cond_win.freqs):
-            logger.warning(f"Frequency dimension mismatch: {len(psd_mean)} vs {len(tfr_cond_win.freqs)}")
-            continue
-        
-        freqs = tfr_cond_win.freqs
-        
-        if len(tfr_cond) >= MIN_EPOCHS_FOR_SEM:
-            psd_per_trial = []
-            for trial_idx in range(len(tfr_cond)):
-                tfr_trial = tfr_cond[[trial_idx]]
-                tfr_trial_avg = tfr_trial.average()
-                apply_baseline_and_crop(tfr_trial_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-                tfr_trial_win = _crop_tfr_to_active(tfr_trial_avg, active_window, logger)
-                if tfr_trial_win is not None:
-                    psd_trial = tfr_trial_win.data.mean(axis=(0, 2))
-                    if len(psd_trial) == len(freqs):
-                        psd_per_trial.append(psd_trial)
-            
-            if len(psd_per_trial) >= MIN_EPOCHS_FOR_SEM:
-                psd_per_trial = np.array(psd_per_trial)
-                psd_sem = psd_per_trial.std(axis=0, ddof=1) / np.sqrt(len(psd_per_trial))
-                ci_multiplier = 1.96
-                psd_ci_lower = psd_mean - ci_multiplier * psd_sem
-                psd_ci_upper = psd_mean + ci_multiplier * psd_sem
-            else:
-                psd_sem = np.zeros_like(psd_mean)
-                psd_ci_lower = psd_mean
-                psd_ci_upper = psd_mean
-        else:
-            psd_sem = np.zeros_like(psd_mean)
-            psd_ci_lower = psd_mean
-            psd_ci_upper = psd_mean
         
         psd_data_by_condition.append({
             'label': label,
-            'freqs': freqs,
-            'mean': psd_mean,
-            'sem': psd_sem,
-            'ci_lower': psd_ci_lower,
-            'ci_upper': psd_ci_upper,
+            'freqs': spectral_summary["freqs"],
+            'mean': spectral_summary["mean"],
+            'sem': spectral_summary["sem"],
+            'ci_lower': spectral_summary["ci_lower"],
+            'ci_upper': spectral_summary["ci_upper"],
             'n_trials': n_trials_cond,
             'color': condition_color_map[label],
-            'stacked': psd_per_trial if len(tfr_cond) >= MIN_EPOCHS_FOR_SEM and len(psd_per_trial) >= MIN_EPOCHS_FOR_SEM else None,
         })
     
     if not psd_data_by_condition:
@@ -2348,28 +2756,6 @@ def _plot_psd_by_conditions(
         config,
     )
 
-    n_significant_bands = 0
-    if len(psd_data_by_condition) == 2:
-        first_stacked = psd_data_by_condition[0]["stacked"]
-        second_stacked = psd_data_by_condition[1]["stacked"]
-        if first_stacked is not None and second_stacked is not None:
-            first_stacked = np.asarray(first_stacked, dtype=float)
-            second_stacked = np.asarray(second_stacked, dtype=float)
-            if first_stacked.shape == second_stacked.shape and first_stacked.ndim == 2:
-                significant_mask = _compute_group_curve_significance_mask(first_stacked, second_stacked, config)
-                _draw_curve_significance_strip(ax, psd_data_by_condition[0]["freqs"], significant_mask, label="PSD FDR q<0.05")
-                band_stats = _compute_group_band_summary_stats(
-                    first_stacked,
-                    second_stacked,
-                    psd_data_by_condition[0]["freqs"],
-                    features_freq_bands,
-                    config,
-                )
-                _draw_psd_band_summary_strip(ax, band_stats)
-                n_significant_bands = sum(
-                    1 for stats in band_stats.values() if bool(stats.get("significant", False))
-                )
-    
     ax.axhline(0, color="0.4", linewidth=1.0, alpha=0.5, linestyle='--', zorder=2)
     ax.set_xscale('log')
     import matplotlib.ticker as ticker
@@ -2390,8 +2776,7 @@ def _plot_psd_by_conditions(
     footer_text = (
         f"Subject: {subject} | Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}] s | "
         f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}] s | "
-        f"Band sig={n_significant_bands}/{len(features_freq_bands)} | "
-        "Within-subject mean ± 95% CI"
+        "Descriptive within-subject mean ± 95% CI across trials"
     )
     output_path = save_dir / f'sub-{subject}_power_spectral_density_by_condition{roi_suffix}'
     save_fig(
@@ -2422,8 +2807,9 @@ def _plot_psd_by_predictor(
 ) -> bool:
     """Plot PSD by predictor condition with uncertainty visualization and frequency band annotations.
     
-    Computes PSD per trial, then averages across channels and time windows.
-    Shows mean ± SEM with shaded confidence intervals for scientific rigor.
+    Applies baseline normalization at the trial level, then averages
+    channel/time-collapsed spectral profiles across trials.
+    Shows descriptive mean ± SEM with shaded confidence intervals.
     Includes frequency band annotations.
     
     Args:
@@ -2466,56 +2852,22 @@ def _plot_psd_by_predictor(
         tfr_temp = tfr_epochs[temp_mask]
         if len(tfr_temp) == 0:
             continue
-        
-        tfr_temp_avg = tfr_temp.average()
-        apply_baseline_and_crop(tfr_temp_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-        tfr_temp_win = _crop_tfr_to_active(tfr_temp_avg, active_window, logger)
-        
-        if tfr_temp_win is None:
+        spectral_summary = _summarize_trial_spectral_profiles(
+            tfr_temp,
+            active_window=(float(active_window[0]), float(active_window[1])),
+            baseline_window=tfr_baseline,
+            logger=logger,
+        )
+        if spectral_summary is None:
             continue
-        
-        psd_mean = tfr_temp_win.data.mean(axis=(0, 2))
-        
-        if len(psd_mean) != len(tfr_temp_win.freqs):
-            logger.warning(f"Frequency dimension mismatch: {len(psd_mean)} vs {len(tfr_temp_win.freqs)}")
-            continue
-        
-        freqs = tfr_temp_win.freqs
-        
-        if len(tfr_temp) >= MIN_EPOCHS_FOR_SEM:
-            psd_per_trial = []
-            for trial_idx in range(len(tfr_temp)):
-                tfr_trial = tfr_temp[[trial_idx]]
-                tfr_trial_avg = tfr_trial.average()
-                apply_baseline_and_crop(tfr_trial_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-                tfr_trial_win = _crop_tfr_to_active(tfr_trial_avg, active_window, logger)
-                if tfr_trial_win is not None:
-                    psd_trial = tfr_trial_win.data.mean(axis=(0, 2))
-                    if len(psd_trial) == len(freqs):
-                        psd_per_trial.append(psd_trial)
-            
-            if len(psd_per_trial) >= MIN_EPOCHS_FOR_SEM:
-                psd_per_trial = np.array(psd_per_trial)
-                psd_sem = psd_per_trial.std(axis=0, ddof=1) / np.sqrt(len(psd_per_trial))
-                ci_multiplier = 1.96
-                psd_ci_lower = psd_mean - ci_multiplier * psd_sem
-                psd_ci_upper = psd_mean + ci_multiplier * psd_sem
-            else:
-                psd_sem = np.zeros_like(psd_mean)
-                psd_ci_lower = psd_mean
-                psd_ci_upper = psd_mean
-        else:
-            psd_sem = np.zeros_like(psd_mean)
-            psd_ci_lower = psd_mean
-            psd_ci_upper = psd_mean
         
         psd_data_by_temp.append({
             'label': f'{temp:.0f}°C',
-            'freqs': freqs,
-            'mean': psd_mean,
-            'sem': psd_sem,
-            'ci_lower': psd_ci_lower,
-            'ci_upper': psd_ci_upper,
+            'freqs': spectral_summary["freqs"],
+            'mean': spectral_summary["mean"],
+            'sem': spectral_summary["sem"],
+            'ci_lower': spectral_summary["ci_lower"],
+            'ci_upper': spectral_summary["ci_upper"],
             'n_trials': n_trials_temp,
             'color': temp_palette[idx],
         })
@@ -2568,7 +2920,7 @@ def _plot_psd_by_predictor(
     footer_text = (
         f"Subject: {subject} | Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}] s | "
         f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}] s | "
-        "Within-subject mean ± 95% CI"
+        "Descriptive within-subject mean ± 95% CI across trials"
     )
     output_path = save_dir / f'sub-{subject}_power_spectral_density_by_predictor'
     save_fig(
@@ -2683,8 +3035,6 @@ def plot_power_spectral_density(
             f"({len(events_df)} rows) length mismatch for subject {subject}"
         )
     
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
-    from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
     from eeg_pipeline.utils.formatting import sanitize_label
     
     rois = get_roi_definitions(config)
@@ -2694,55 +3044,11 @@ def plot_power_spectral_density(
     if logger:
         logger.debug("PSD plotting: ROIs=%s", roi_names)
     
-    column = require_config_value(config, "plotting.comparisons.comparison_column")
-    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
-    labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
-    
-    if not isinstance(values_spec, (list, tuple)) or len(values_spec) < 1:
-        raise ValueError(
-            "power_spectral_density requires plotting.comparisons.comparison_values with at least 1 value. "
-            "Configure via TUI plot-specific settings or CLI."
-        )
-    
-    if len(values_spec) == 1:
-        val = values_spec[0]
-        if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 1:
-            label = str(labels_spec[0]).strip()
-        else:
-            label = str(val)
-        
-        column_values = events_df[column]
-        try:
-            numeric_val = float(val)
-            mask = (pd.to_numeric(column_values, errors="coerce") == numeric_val).values
-        except (ValueError, TypeError):
-            val_str = str(val).strip().lower()
-            mask = (column_values.astype(str).str.strip().str.lower() == val_str).values
-        
-        if int(mask.sum()) == 0:
-            raise ValueError(
-                f"power_spectral_density: no trials found for value {val!r} in column {column!r}"
-            )
-        
-        conditions = [(label, mask)]
-    elif len(values_spec) == 2:
-        comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
-        if not comp_mask_info:
-            raise ValueError(
-                "power_spectral_density plot requested but could not resolve comparison masks. "
-                "Configure plotting.comparisons.comparison_column and comparison_values."
-            )
-        mask1, mask2, label1, label2 = comp_mask_info
-        conditions = [(label1, mask1), (label2, mask2)]
-    else:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError(
-                "power_spectral_density plot requested but could not resolve multi-group masks. "
-                "Configure plotting.comparisons.comparison_column and comparison_values."
-            )
-        masks_dict, group_labels = multi_group_info
-        conditions = [(label, masks_dict[label]) for label in group_labels]
+    conditions = _resolve_power_plot_conditions(
+        events_df=events_df,
+        config=config,
+        context="power_spectral_density",
+    )
     
     for roi_name in roi_names:
         if roi_name == "all":
@@ -2788,60 +3094,27 @@ def plot_power_timecourse_by_condition(
             "plot_power_timecourse_by_condition requires config. "
             "No fallback will be used."
         )
+    if is_resting_state_feature_mode(config):
+        raise ValueError(
+            "plot_power_timecourse_by_condition is not scientifically valid for resting-state plotting."
+        )
     if len(tfr) != len(events_df):
         raise ValueError(
             f"TFR window ({len(tfr)} epochs) and events "
             f"({len(events_df)} rows) length mismatch for subject {subject}"
         )
 
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
     from eeg_pipeline.utils.formatting import sanitize_label
 
     rois = get_roi_definitions(config)
     all_channels = tfr.ch_names
     roi_names = _get_comparison_rois(config, rois)
 
-    column = require_config_value(config, "plotting.comparisons.comparison_column")
-    values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
-    labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
-
-    if not isinstance(values_spec, (list, tuple)) or len(values_spec) < 1:
-        raise ValueError(
-            "plot_power_timecourse_by_condition requires plotting.comparisons.comparison_values "
-            "with at least 1 value."
-        )
-
-    if len(values_spec) == 1:
-        value = values_spec[0]
-        label = str(labels_spec[0]).strip() if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 1 else str(value)
-        column_values = events_df[column]
-        try:
-            numeric_value = float(value)
-            mask = (pd.to_numeric(column_values, errors="coerce") == numeric_value).values
-        except (TypeError, ValueError):
-            value_string = str(value).strip().lower()
-            mask = (column_values.astype(str).str.strip().str.lower() == value_string).values
-        if int(mask.sum()) == 0:
-            raise ValueError(
-                f"plot_power_timecourse_by_condition: no trials found for value {value!r} in column {column!r}"
-            )
-        conditions = [(label, mask)]
-    elif len(values_spec) == 2:
-        comp_mask_info = extract_comparison_mask(events_df, config, require_enabled=True)
-        if not comp_mask_info:
-            raise ValueError(
-                "plot_power_timecourse_by_condition could not resolve configured comparison masks."
-            )
-        mask1, mask2, label1, label2 = comp_mask_info
-        conditions = [(label1, mask1), (label2, mask2)]
-    else:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError(
-                "plot_power_timecourse_by_condition could not resolve configured multi-group masks."
-            )
-        masks_dict, group_labels = multi_group_info
-        conditions = [(label, masks_dict[label]) for label in group_labels]
+    conditions = _resolve_power_plot_conditions(
+        events_df=events_df,
+        config=config,
+        context="plot_power_timecourse_by_condition",
+    )
 
     for roi_name in roi_names:
         if roi_name == "all":
@@ -2914,7 +3187,9 @@ def plot_band_power_topomaps(
     comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
     comparison_values = get_config_value(config, "plotting.comparisons.comparison_values", [])
     has_column_spec = (
-        comparison_column != ""
+        compare_columns
+        and events_df is not None
+        and comparison_column != ""
         and isinstance(comparison_values, (list, tuple))
         and len(comparison_values) >= 2
     )
@@ -3897,6 +4172,144 @@ def plot_band_power_topomaps_group_condition_contrast(
         )
 
 
+def _compute_unpaired_curve_significance_mask(
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+    config: Any,
+) -> np.ndarray:
+    """Return an FDR-corrected significance mask across curve samples for unpaired data."""
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_fdr_alpha
+
+    first = np.asarray(condition1_values, dtype=float)
+    second = np.asarray(condition2_values, dtype=float)
+    if first.ndim != 2 or second.ndim != 2:
+        raise ValueError("Unpaired curve significance expects 2D sample x feature arrays.")
+    if first.shape[1] != second.shape[1]:
+        raise ValueError("Unpaired curve significance arrays must share the same sample axis length.")
+
+    _, n_samples = first.shape
+    significant_mask = np.zeros(n_samples, dtype=bool)
+    if first.shape[0] < MIN_TRIALS_FOR_STATISTICS or second.shape[0] < MIN_TRIALS_FOR_STATISTICS:
+        return significant_mask
+
+    pvalues: List[float] = []
+    valid_sample_indices: List[int] = []
+
+    for sample_index in range(n_samples):
+        values1 = first[:, sample_index]
+        values2 = second[:, sample_index]
+        values1 = values1[np.isfinite(values1)]
+        values2 = values2[np.isfinite(values2)]
+        if len(values1) < MIN_TRIALS_FOR_STATISTICS or len(values2) < MIN_TRIALS_FOR_STATISTICS:
+            continue
+
+        if np.allclose(values1, values1[0]) and np.allclose(values2, values2[0]) and np.isclose(
+            values1[0],
+            values2[0],
+        ):
+            p_value = 1.0
+        else:
+            p_value = float(mannwhitneyu(values1, values2, alternative="two-sided").pvalue)
+
+        pvalues.append(p_value)
+        valid_sample_indices.append(sample_index)
+
+    if not pvalues:
+        return significant_mask
+
+    rejected, qvalues, _ = apply_fdr_correction(pvalues, config=config)
+    alpha = float(get_fdr_alpha(config))
+    for sample_index, rejected_flag, q_value in zip(valid_sample_indices, rejected, qvalues):
+        significant_mask[sample_index] = bool(rejected_flag) and float(q_value) < alpha
+
+    return significant_mask
+
+
+def _compute_unpaired_band_summary_stats(
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+    freqs: np.ndarray,
+    frequency_bands: Dict[str, Tuple[float, float]],
+    config: Any,
+) -> Dict[str, Dict[str, float]]:
+    """Return unpaired band-summary statistics for PSD curves."""
+    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, compute_cohens_d, get_fdr_alpha
+
+    first = np.asarray(condition1_values, dtype=float)
+    second = np.asarray(condition2_values, dtype=float)
+    frequency_axis = np.asarray(freqs, dtype=float)
+    if frequency_axis.ndim != 1:
+        raise ValueError("Unpaired band summary requires a 1D frequency axis.")
+    if first.ndim != 2 or second.ndim != 2:
+        raise ValueError("Unpaired band summary requires 2D sample x frequency arrays.")
+    if first.shape[1] != len(frequency_axis) or second.shape[1] != len(frequency_axis):
+        raise ValueError("Unpaired band summary arrays must match the frequency axis length.")
+
+    band_stats: Dict[str, Dict[str, float]] = {}
+    pvalues: List[float] = []
+    tested_bands: List[str] = []
+
+    for band_name, bounds in frequency_bands.items():
+        if not isinstance(bounds, (list, tuple)) or len(bounds) < 2:
+            continue
+
+        band_min = float(bounds[0])
+        band_max = float(bounds[1])
+        band_mask = (frequency_axis >= band_min) & (frequency_axis <= band_max)
+        if not np.any(band_mask):
+            continue
+
+        values1 = _compute_frequency_width_weighted_samples(first, frequency_axis, band_mask)
+        values2 = _compute_frequency_width_weighted_samples(second, frequency_axis, band_mask)
+        values1 = values1[np.isfinite(values1)]
+        values2 = values2[np.isfinite(values2)]
+        if len(values1) < MIN_TRIALS_FOR_STATISTICS or len(values2) < MIN_TRIALS_FOR_STATISTICS:
+            continue
+
+        effect_size = float(compute_cohens_d(values1, values2))
+        if (
+            np.isclose(effect_size, 0.0)
+            and np.allclose(values1, values1[0])
+            and np.allclose(values2, values2[0])
+        ):
+            mean_difference = float(np.nanmean(values2) - np.nanmean(values1))
+            if not np.isclose(mean_difference, 0.0):
+                effect_size = float(np.sign(mean_difference) * np.inf)
+
+        if np.allclose(values1, values1[0]) and np.allclose(values2, values2[0]) and np.isclose(
+            values1[0],
+            values2[0],
+        ):
+            p_value = 1.0
+            include_in_fdr = False
+        else:
+            p_value = float(mannwhitneyu(values1, values2, alternative="two-sided").pvalue)
+            include_in_fdr = True
+
+        band_stats[str(band_name)] = {
+            "fmin": band_min,
+            "fmax": band_max,
+            "effect_size": effect_size,
+            "p_value": p_value,
+            "q_value": 1.0 if not include_in_fdr else np.nan,
+            "significant": False,
+        }
+        if include_in_fdr:
+            pvalues.append(p_value)
+            tested_bands.append(str(band_name))
+
+    if not pvalues:
+        return band_stats
+
+    rejected, qvalues, _ = apply_fdr_correction(pvalues, config=config)
+    alpha = float(get_fdr_alpha(config))
+    for band_name, rejected_flag, q_value in zip(tested_bands, rejected, qvalues):
+        band_stats[band_name]["q_value"] = float(q_value)
+        band_stats[band_name]["significant"] = bool(rejected_flag) and float(q_value) < alpha
+
+    return band_stats
+
+
 def _compute_group_curve_significance_mask(
     condition1_values: np.ndarray,
     condition2_values: np.ndarray,
@@ -3987,8 +4400,8 @@ def _compute_group_band_summary_stats(
         if not np.any(band_mask):
             continue
 
-        values1 = np.nanmean(condition1_values[:, band_mask], axis=1)
-        values2 = np.nanmean(condition2_values[:, band_mask], axis=1)
+        values1 = _compute_frequency_width_weighted_samples(condition1_values, freqs, band_mask)
+        values2 = _compute_frequency_width_weighted_samples(condition2_values, freqs, band_mask)
         finite_mask = np.isfinite(values1) & np.isfinite(values2)
         if int(finite_mask.sum()) < MIN_TRIALS_FOR_STATISTICS:
             continue

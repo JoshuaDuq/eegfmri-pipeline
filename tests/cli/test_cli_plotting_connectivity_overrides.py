@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import unittest
 
 
@@ -11,6 +12,7 @@ PLOTTING_PARSER_PATH = (
 PLOTTING_OVERRIDES_PATH = (
     ROOT / "eeg_pipeline" / "cli" / "commands" / "plotting_config_overrides.py"
 )
+PLOT_CATALOG_PATH = ROOT / "eeg_pipeline" / "plotting" / "plot_catalog.json"
 
 
 class TestCliPlottingConnectivityOverrides(unittest.TestCase):
@@ -43,6 +45,24 @@ class TestCliPlottingConnectivityOverrides(unittest.TestCase):
             '"plotting.plots.tfr.topomap.label_x_position"',
             source,
         )
+
+    def test_plot_catalog_marks_rest_compatible_connectivity_plots(self) -> None:
+        payload = json.loads(PLOT_CATALOG_PATH.read_text(encoding="utf-8"))
+        plots = {entry["id"]: entry for entry in payload["plots"]}
+
+        self.assertEqual(plots["connectivity_circle"]["rest_compatibility"], "compatible")
+        self.assertEqual(plots["connectivity_by_condition"]["rest_compatibility"], "task_only")
+        self.assertEqual(
+            plots["connectivity_circle_condition"]["rest_compatibility"], "task_only"
+        )
+        self.assertEqual(plots["connectivity_heatmap"]["rest_compatibility"], "compatible")
+        self.assertEqual(plots["connectivity_network"]["rest_compatibility"], "compatible")
+
+    def test_plot_catalog_requires_events_for_power_spectral_density(self) -> None:
+        payload = json.loads(PLOT_CATALOG_PATH.read_text(encoding="utf-8"))
+        plots = {entry["id"]: entry for entry in payload["plots"]}
+
+        self.assertIn("events.tsv", plots["power_spectral_density"]["required_files"])
 
 
 if __name__ == "__main__":

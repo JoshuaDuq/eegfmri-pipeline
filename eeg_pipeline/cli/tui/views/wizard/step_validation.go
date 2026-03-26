@@ -88,6 +88,14 @@ func (m *Model) validatePlotSelectionStep() []string {
 	if m.countSelectedVisiblePlots() == 0 {
 		return []string{"Select at least one plot to generate"}
 	}
+	if taskOnlyPlots := m.selectedRestTaskOnlyPlots(); len(taskOnlyPlots) > 0 {
+		return []string{
+			fmt.Sprintf(
+				"Resting-state plotting does not support task-only plot(s): %s",
+				strings.Join(taskOnlyPlots, ", "),
+			),
+		}
+	}
 	return nil
 }
 

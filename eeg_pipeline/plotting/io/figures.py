@@ -688,6 +688,17 @@ def save_fig(
 
     plt.close(fig)
 
+    if len(saved_paths) != len(save_formats):
+        missing_formats = [
+            str(extension)
+            for extension in save_formats
+            if base_path.with_suffix(f".{extension}") not in saved_paths
+        ]
+        raise RuntimeError(
+            "Failed to save figure in all requested formats. "
+            f"Missing formats for {base_path.name}: {', '.join(missing_formats)}"
+        )
+
     if logger is not None:
         filenames = ", ".join(saved_path.name for saved_path in saved_paths)
         logger.info(f"  Saved: {filenames}")

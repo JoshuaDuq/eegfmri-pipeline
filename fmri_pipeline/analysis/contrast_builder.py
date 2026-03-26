@@ -726,6 +726,8 @@ def discover_bold_runs(
             require_fmriprep=bool(getattr(cfg, "require_fmriprep", False)),
         )
 
+    missing_run_inputs: List[Tuple[int, Tuple[str, ...]]] = []
+
     # Resolve events + BOLD for each run.
     for run_num in run_nums:
         events_patterns = [
@@ -743,9 +745,6 @@ def discover_bold_runs(
             if candidate.exists():
                 events_file = candidate
                 break
-        if events_file is None:
-            logger.warning("No events file found for run %d, skipping", run_num)
-            continue
 
         bold_path = None
         if selected_input_source == "fmriprep":
@@ -761,11 +760,35 @@ def discover_bold_runs(
                     bold_path = candidate
                     break
 
+        missing_inputs: List[str] = []
+        if events_file is None:
+            missing_inputs.append("events")
         if bold_path is None:
-            logger.warning("No BOLD file found for run %d, skipping", run_num)
+            missing_inputs.append("bold")
+        if missing_inputs:
+            missing_run_inputs.append((int(run_num), tuple(missing_inputs)))
             continue
 
         discovered.append((bold_path, events_file, int(run_num)))
+
+    if missing_run_inputs:
+        if runs is not None:
+            requested_runs = {int(run_num) for run_num in runs}
+            discovered_runs = {int(run_num) for _bold_path, _events_path, run_num in discovered}
+            missing_runs = sorted(requested_runs - discovered_runs)
+            if missing_runs:
+                raise FileNotFoundError(
+                    "Some requested runs could not be resolved to matching BOLD + events inputs: "
+                    f"{missing_runs}."
+                )
+        details = ", ".join(
+            f"run {run_num} missing {' + '.join(parts)}"
+            for run_num, parts in missing_run_inputs
+        )
+        raise FileNotFoundError(
+            "Some discovered runs could not be resolved to matching BOLD + events inputs: "
+            f"{details}."
+        )
 
     if runs is not None:
         requested_runs = {int(run_num) for run_num in runs}
@@ -816,6 +839,7 @@ def discover_confounds(
         f"{sub_label}_task-{task}_run-{run_num}_desc-confounds_timeseries.tsv",
         f"{sub_label}_task-{task}_run-{run_num:02d}_desc-confounds_timeseries.tsv",
         f"{sub_label}_task-{task}_run-{run_num}_desc-confounds_regressors.tsv",
+        f"{sub_label}_task-{task}_run-{run_num:02d}_desc-confounds_regressors.tsv",
     ]
 
     for search_dir in search_dirs:

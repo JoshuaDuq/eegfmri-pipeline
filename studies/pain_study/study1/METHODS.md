@@ -134,6 +134,17 @@ strict alignment to the clean event table. Deep regression additionally requires
 non-empty intersection of valid EEG channels across all included subjects. Channels are
 restricted to true EEG channels and exclude marked bad channels.
 
+Under the frozen shared EEG defaults, the clean task epochs span:
+
+```text
+epochs.tmin = -7.0 s
+epochs.tmax = 15.0 s
+epochs.baseline = [-0.2, 0.0] s
+```
+
+The Study 1 feature families that use explicit time-frequency baselines apply their own
+family-level baseline handling on top of this epoch definition.
+
 ### 2.5 fMRI target contract
 
 The production Study 1 target specification is:
@@ -333,6 +344,14 @@ These use `time_frequency_analysis.baseline_window` and
 `time_frequency_analysis.active_window`, both of which must be finite two-element ranges
 with `start < end`.
 
+In the frozen shared EEG configuration these windows are:
+
+```text
+time_frequency_analysis.baseline_mode = "logratio"
+time_frequency_analysis.baseline_window = [-5.0, -0.01] s
+time_frequency_analysis.active_window = [3.0, 10.5] s
+```
+
 Study 1 itself fixes which feature families are admissible, but the exact mathematical
 definitions of each family are inherited unchanged from the shared feature pipeline
 documented in `eeg_pipeline/analysis/features/README.md`.
@@ -404,6 +423,15 @@ The fixed presets are:
 | `beta` | `["beta"]` |
 | `gamma` | `["gamma"]` |
 | `alpha_beta_gamma` | `["alpha", "beta", "gamma"]` |
+
+The corresponding frozen numeric band definitions inherited from the shared EEG
+configuration are:
+
+| Band | Range (Hz) |
+| --- | --- |
+| `alpha` | `[8.0, 12.9]` |
+| `beta` | `[13.0, 30.0]` |
+| `gamma` | `[30.1, 80.0]` |
 
 The primary partition therefore evaluates two targets under four prespecified band
 presets using the same confirmatory feature family (`power`). The exploratory partition
@@ -621,6 +649,9 @@ For each target and preset, the stage:
    `frequency_bands` mapping,
 5. stacks the result into a band tensor.
 
+These tensors are built from the same clean task epochs described above, namely epochs
+spanning `-7.0` to `15.0` seconds relative to the locking event.
+
 If `n_trials`, `n_bands`, `n_channels`, and `n_times` denote the pooled dimensions, the
 input tensor is:
 
@@ -639,6 +670,14 @@ The frozen preset mapping is:
 | `beta` | `["beta"]` |
 | `gamma` | `["gamma"]` |
 | `alpha_beta_gamma` | `["alpha", "beta", "gamma"]` |
+
+The corresponding numeric filter ranges are:
+
+| Band | Range (Hz) |
+| --- | --- |
+| `alpha` | `[8.0, 12.9]` |
+| `beta` | `[13.0, 30.0]` |
+| `gamma` | `[30.1, 80.0]` |
 
 ### 6.2 Target alignment in the tensor lane
 

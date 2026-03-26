@@ -433,6 +433,67 @@ class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
                 out = b.run_group_level(["0001", "0002"], run_multilevel_correlations=True)
             self.assertIs(out, fake_result)
 
+        def test_behavior_summary_and_group_level_warning_reject_branches(self):
+            from eeg_pipeline.pipelines.behavior import (
+                BehaviorPipeline,
+                BehaviorPipelineConfig,
+                BehaviorPipelineResults,
+            )
+
+            summary = BehaviorPipelineResults(
+                subject="0001",
+                regression=pd.DataFrame(
+                    {
+                        "p_feature": ["0.01", "0.20"],
+                        "p_primary": ["0.03", None],
+                        "p_fdr": ["0.04", "0.20"],
+                    }
+                ),
+            ).to_summary()
+            self.assertEqual(summary["n_regression_features"], 2)
+            self.assertEqual(summary["n_sig_raw"], 1)
+            self.assertEqual(summary["n_sig_controlled"], 1)
+            self.assertEqual(summary["n_sig_fdr"], 1)
+
+            cfg = DotConfig({})
+            pcfg = BehaviorPipelineConfig()
+            with patch(
+                "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
+                lambda self, name, config=None: (
+                    setattr(self, "config", config or cfg),
+                    setattr(self, "logger", Mock()),
+                    setattr(self, "deriv_root", Path(tempfile.mkdtemp())),
+                ),
+            ):
+                b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, feature_files=["power"])
+
+            fake_result = SimpleNamespace(
+                multilevel_correlations=pd.DataFrame({"reject_within_family": [True, False, None]})
+            )
+            with patch(
+                "eeg_pipeline.infra.paths.deriv_stats_path",
+                side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+            ), patch(
+                "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
+                side_effect=[Path("/tmp/0001.parquet"), None, Path("/tmp/0003.parquet")],
+            ), patch(
+                "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
+                return_value=fake_result,
+            ):
+                out = b.run_group_level(["0001", "0002", "0003"], run_multilevel_correlations=True)
+
+            self.assertIs(out, fake_result)
+            b.logger.warning.assert_called_once_with(
+                "Group-level multilevel_correlations: excluding subjects without trial tables: %s",
+                "0002",
+            )
+            self.assertTrue(
+                any(
+                    call.args == ("Multilevel correlations: %d significant", 1)
+                    for call in b.logger.info.call_args_list
+                )
+            )
+
         def test_behavior_group_level_skips_by_default_when_not_selected(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
 

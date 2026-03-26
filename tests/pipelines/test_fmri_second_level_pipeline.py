@@ -79,6 +79,22 @@ class TestFmriSecondLevelPipeline(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             pipeline.process_subject("0001", task="pain")
 
+    def test_init_sets_pipeline_name(self) -> None:
+        module, _ = self._import_module()
+
+        with patch.object(
+            module.PipelineBase,
+            "__init__",
+            lambda self, name, config=None: (
+                setattr(self, "name", name),
+                setattr(self, "config", config),
+                setattr(self, "logger", Mock()),
+            ),
+        ):
+            pipeline = module.FmriSecondLevelPipeline(config=DotConfig({"project": {"task": "pain"}}))
+
+        self.assertEqual(pipeline.name, "fmri_second_level")
+
     def test_run_batch_rejects_single_subject(self) -> None:
         pipeline, module = self._build_pipeline()
         cfg = module.SecondLevelConfig(model="one-sample", contrast_names=("pain",))
@@ -141,3 +157,32 @@ class TestFmriSecondLevelPipeline(unittest.TestCase):
         progress.complete.assert_called_once_with(success=True)
         mock_run_group.assert_called_once()
         mock_write_metadata.assert_called_once()
+
+    def test_run_batch_failure_marks_progress_and_writes_failed_metadata(self) -> None:
+        pipeline, module = self._build_pipeline()
+        cfg = module.SecondLevelConfig(model="one-sample", contrast_names=("pain",))
+        progress = Mock()
+
+        with patch.object(
+            pipeline,
+            "run_group_level",
+            side_effect=RuntimeError("group-fail"),
+        ), patch.object(
+            pipeline,
+            "_write_run_metadata",
+            return_value=Path("/tmp/run.json"),
+        ) as mock_write_metadata:
+            with self.assertRaisesRegex(RuntimeError, "group-fail"):
+                pipeline.run_batch(
+                    ["0001", "0002"],
+                    task="pain",
+                    second_level_cfg=cfg,
+                    dry_run=False,
+                    progress=progress,
+                )
+
+        progress.start.assert_called_once_with("fmri_second_level", ["0001", "0002"])
+        progress.complete.assert_called_once_with(success=False)
+        mock_write_metadata.assert_called_once()
+        self.assertEqual(mock_write_metadata.call_args.kwargs["status"], "failed")
+        self.assertEqual(mock_write_metadata.call_args.kwargs["error"], "group-fail")

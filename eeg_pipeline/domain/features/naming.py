@@ -66,6 +66,7 @@ class NamingSchema:
     KNOWN_STATS = frozenset({
         # Single-token stats
         "lzc", "pe", "mean", "std", "percent", "db", "slope", "auc", "ptp",
+        "index", "logdiff",
         "logratio", "bandwidth", "entropy", "geff", "clust", "smallworld",
         # Compound stats (checked by joining from the end)
         "peak_latency", "peak_freq", "peak_power", "peak_ratio", "peak_residual",
@@ -74,7 +75,7 @@ class NamingSchema:
         "erd_magnitude", "erd_duration", "ers_magnitude", "ers_duration",
         "rebound_magnitude", "rebound_latency",
         "percent_mean", "percent_std", "db_mean", "db_std",
-        "logratio_mean", "logratio_std", "latency_diff",
+        "logratio_mean", "logratio_std", "latency_diff", "logdiff_activation",
         "power_ratio", "log_ratio",
     })
 

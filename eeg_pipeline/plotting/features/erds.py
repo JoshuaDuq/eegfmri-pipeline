@@ -300,42 +300,53 @@ def _get_erds_columns_for_roi(
     all_channels: List[str],
     rois: Dict[str, Any],
 ) -> List[str]:
-    """Get ERDS columns filtered by segment, band, and ROI."""
+    """Get ERDS columns for one spatial scope without mixing units."""
     from eeg_pipeline.plotting.features.roi import get_roi_channels
 
+    def _matching_columns(*, scope: str, stat: str, identifier: Optional[str] = None) -> List[str]:
+        columns: List[str] = []
+        for col in features_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "erds":
+                continue
+            if str(parsed.get("segment") or "") != segment:
+                continue
+            if str(parsed.get("band") or "") != band:
+                continue
+            if str(parsed.get("scope") or "") != scope:
+                continue
+            if str(parsed.get("stat") or "") != stat:
+                continue
+            if identifier is not None and str(parsed.get("identifier") or "") != identifier:
+                continue
+            columns.append(str(col))
+        return columns
+
     if roi_name == "all":
-        roi_channels = all_channels
-    else:
-        roi_channels = get_roi_channels(
-            rois.get(roi_name, []), all_channels
-        )
+        return _matching_columns(scope="global", stat="percent_mean")
+
+    roi_percent_columns = _matching_columns(
+        scope="roi",
+        stat="percent_mean",
+        identifier=roi_name,
+    )
+    if roi_percent_columns:
+        return roi_percent_columns
+
+    roi_channels = get_roi_channels(rois.get(roi_name, []), all_channels)
     roi_channel_set = set(roi_channels) if roi_channels else set()
+    if not roi_channel_set:
+        return []
 
-    matching_columns = []
-    for col in features_df.columns:
+    channel_percent_columns: List[str] = []
+    for col in _matching_columns(scope="ch", stat="percent"):
         parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if parsed.get("group") != "erds":
-            continue
-        if str(parsed.get("segment") or "") != segment:
-            continue
-        if str(parsed.get("band") or "") != band:
-            continue
-
-        scope = parsed.get("scope") or ""
-        stat = str(parsed.get("stat") or "")
-        if stat not in ("percent_mean", "db_mean", "percent", "db"):
-            continue
-
-        if scope in ("global", "roi"):
-            matching_columns.append(col)
-        elif scope == "ch":
-            channel_id = str(parsed.get("identifier") or "")
-            if channel_id in roi_channel_set:
-                matching_columns.append(col)
-
-    return matching_columns
+        channel_id = str(parsed.get("identifier") or "")
+        if channel_id in roi_channel_set:
+            channel_percent_columns.append(str(col))
+    return channel_percent_columns
 
 
 def _create_window_comparison_plots(
@@ -408,6 +419,7 @@ def _create_window_comparison_plots(
                     logger=logger,
                     roi_name=roi_name,
                     stats_dir=stats_dir,
+                    require_precomputed_stats=True,
                 )
         else:
             segment1, segment2 = segments[0], segments[1]
@@ -446,6 +458,7 @@ def _create_window_comparison_plots(
                     label2=segment2.capitalize(),
                     roi_name=roi_name,
                     stats_dir=stats_dir,
+                    require_precomputed_stats=True,
                 )
 
     plot_type = "multi-window" if use_multi_window else "paired"
@@ -583,6 +596,8 @@ def _create_column_comparison_plots(
             cell_data=cell_data,
             config=config,
             logger=logger,
+            roi_name=roi_name,
+            require_precomputed_stats=True,
         )
 
         fig, axes = plt.subplots(

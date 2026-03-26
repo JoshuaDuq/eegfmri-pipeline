@@ -20,6 +20,7 @@ from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.style import use_style, get_color
 from eeg_pipeline.utils.analysis.channels import build_roi_map, pick_eeg_channels
 from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
 
@@ -137,7 +138,121 @@ def _get_baseline_window(config: Any) -> Tuple[float, float]:
             "feature_engineering.erp.baseline_window must be a list/tuple of length 2 "
             f"(got {baseline_window!r})"
         )
-    return (float(baseline_window[0]), float(baseline_window[1]))
+    baseline_start = float(baseline_window[0])
+    baseline_end = float(baseline_window[1])
+    if not (np.isfinite(baseline_start) and np.isfinite(baseline_end)):
+        raise ValueError(
+            "feature_engineering.erp.baseline_window must contain finite numeric values."
+        )
+    if baseline_start >= baseline_end:
+        raise ValueError(
+            "feature_engineering.erp.baseline_window must satisfy start < end "
+            f"(got [{baseline_start}, {baseline_end}])."
+        )
+    return validate_baseline_window_pre_stimulus(
+        (baseline_start, baseline_end),
+        strict=True,
+    )
+
+
+def _baseline_requested(config: Any) -> bool:
+    """Return whether ERP plotting should baseline-correct epochs."""
+    return bool(get_config_value(config, "feature_engineering.erp.baseline_correction", True))
+
+
+def _allow_missing_baseline(config: Any) -> bool:
+    """Return whether ERP plotting may proceed without a usable baseline."""
+    return bool(get_config_value(config, "feature_engineering.erp.allow_no_baseline", False))
+
+
+def _compute_baseline_mask(
+    times: np.ndarray,
+    baseline_window: Tuple[float, float],
+) -> np.ndarray:
+    """Return the half-open baseline mask [start, end)."""
+    baseline_start, baseline_end = baseline_window
+    return (times >= baseline_start) & (times < baseline_end)
+
+
+def _baseline_windows_match(
+    actual_baseline: Any,
+    requested_baseline: Tuple[float, float],
+) -> bool:
+    """Return True when an existing epochs baseline matches the requested window."""
+    if not isinstance(actual_baseline, (list, tuple)) or len(actual_baseline) < 2:
+        return False
+    actual_start, actual_end = actual_baseline[0], actual_baseline[1]
+    if actual_start is None or actual_end is None:
+        return False
+    return bool(
+        np.isclose(float(actual_start), requested_baseline[0])
+        and np.isclose(float(actual_end), requested_baseline[1])
+    )
+
+
+def _resolve_plot_epochs(
+    epochs: mne.Epochs,
+    config: Any,
+) -> Tuple[mne.Epochs, Optional[Tuple[float, float]]]:
+    """Return epochs prepared for scientifically valid ERP plotting."""
+    requested_baseline = _get_baseline_window(config)
+    existing_baseline = getattr(epochs, "baseline", None)
+
+    if existing_baseline not in (None, (None, None)):
+        if _baseline_requested(config) and not _baseline_windows_match(
+            existing_baseline,
+            requested_baseline,
+        ):
+            raise ValueError(
+                "ERP plotting baseline_window does not match the baseline already applied to epochs. "
+                f"Configured={requested_baseline}, epochs.baseline={existing_baseline}."
+            )
+        return epochs, requested_baseline if _baseline_windows_match(existing_baseline, requested_baseline) else None
+
+    if not _baseline_requested(config):
+        return epochs, None
+
+    plot_epochs = epochs.copy()
+    if not plot_epochs.preload:
+        plot_epochs.load_data()
+
+    baseline_mask = _compute_baseline_mask(plot_epochs.times, requested_baseline)
+    if not np.any(baseline_mask):
+        if _allow_missing_baseline(config):
+            return plot_epochs, None
+        raise ValueError(
+            "ERP plotting requested baseline correction but the configured baseline window "
+            "is missing or empty in the loaded epochs."
+        )
+
+    baseline_mean = np.nanmean(plot_epochs._data[:, :, baseline_mask], axis=2, keepdims=True)
+    plot_epochs._data = plot_epochs._data - baseline_mean
+    plot_epochs.baseline = requested_baseline
+    return plot_epochs, requested_baseline
+
+
+def _project_roi_indices_to_epoch_picks(
+    roi_map: Dict[str, List[int]],
+    eeg_picks: np.ndarray,
+) -> Dict[str, List[int]]:
+    """Convert ROI indices from EEG-subset space back to epochs-space picks."""
+    return {
+        roi_name: [int(eeg_picks[idx]) for idx in channel_indices]
+        for roi_name, channel_indices in roi_map.items()
+    }
+
+
+def _get_baseline_span_ms(
+    baseline_window: Optional[Tuple[float, float]],
+) -> Optional[Tuple[float, float]]:
+    """Return baseline window in milliseconds when fully specified."""
+    if baseline_window is None:
+        return None
+    baseline_start, baseline_end = baseline_window
+    return (
+        float(baseline_start) * _MILLISECONDS_PER_SECOND,
+        float(baseline_end) * _MILLISECONDS_PER_SECOND,
+    )
 
 
 def _plot_roi_waveform_with_error(
@@ -205,10 +320,11 @@ def plot_butterfly_erp(
     save_dir.mkdir(parents=True, exist_ok=True)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
+    plot_epochs, _baseline_window = _resolve_plot_epochs(epochs, config)
     
     with use_style(context="paper"):
         # 1. Overall butterfly (all trials)
-        evoked = epochs.average()
+        evoked = plot_epochs.average()
         fig = evoked.plot(
             picks="eeg",
             spatial_colors=True,
@@ -235,7 +351,7 @@ def plot_butterfly_erp(
         if conditions:
             for cond_name, query in conditions.items():
                 try:
-                    cond_epochs = epochs[query]
+                    cond_epochs = plot_epochs[query]
                     if len(cond_epochs) == 0:
                         continue
                         
@@ -311,7 +427,9 @@ def plot_roi_erp(
 
     time_vector_ms = epochs.times * _MILLISECONDS_PER_SECOND
     roi_map = _filter_roi_map_by_config(roi_map, config)
-    baseline_window = _get_baseline_window(config)
+    roi_map = _project_roi_indices_to_epoch_picks(roi_map, picks)
+    plot_epochs, baseline_window = _resolve_plot_epochs(epochs, config)
+    baseline_span_ms = _get_baseline_span_ms(baseline_window)
 
     with use_style(context="paper"):
         for roi_name, channel_indices in roi_map.items():
@@ -323,7 +441,7 @@ def plot_roi_erp(
             if conditions:
                 for condition_name, query in conditions.items():
                     try:
-                        condition_data = epochs[query].get_data(picks=channel_indices)
+                        condition_data = plot_epochs[query].get_data(picks=channel_indices)
                         if condition_data.size == 0:
                             continue
                             
@@ -344,7 +462,7 @@ def plot_roi_erp(
                             f"Failed to plot ROI {roi_name} for condition {condition_name}: {e}"
                         )
             else:
-                all_trials_data = epochs.get_data(picks=channel_indices)
+                all_trials_data = plot_epochs.get_data(picks=channel_indices)
                 mean_waveform, sem_waveform = _compute_roi_waveform_statistics(
                     all_trials_data
                 )
@@ -364,15 +482,15 @@ def plot_roi_erp(
             ax.set_title(f"sub-{subject}: {roi_name} ERP")
             ax.legend()
             
-            baseline_start_ms = baseline_window[0] * _MILLISECONDS_PER_SECOND
-            baseline_end_ms = baseline_window[1] * _MILLISECONDS_PER_SECOND
-            ax.axvspan(
-                baseline_start_ms,
-                baseline_end_ms,
-                color="gray",
-                alpha=0.1,
-                label="Baseline",
-            )
+            if baseline_span_ms is not None:
+                baseline_start_ms, baseline_end_ms = baseline_span_ms
+                ax.axvspan(
+                    baseline_start_ms,
+                    baseline_end_ms,
+                    color="gray",
+                    alpha=0.1,
+                    label="Baseline",
+                )
             
             path = save_dir / f"sub-{subject}_erp_roi_{roi_name.lower()}.{primary_ext}"
             save_fig(
@@ -429,9 +547,10 @@ def plot_erp_contrast(
     save_dir.mkdir(parents=True, exist_ok=True)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
+    plot_epochs, _baseline_window = _resolve_plot_epochs(epochs, config)
 
     if cond_a is None or cond_b is None or label_a is None or label_b is None:
-        metadata = getattr(epochs, "metadata", None)
+        metadata = getattr(plot_epochs, "metadata", None)
         if metadata is None:
             logger.warning(
                 "No metadata available; skipping ERP contrast."
@@ -454,8 +573,8 @@ def plot_erp_contrast(
         label_b = auto_label_b
     
     try:
-        evoked_a = epochs[cond_a].average()
-        evoked_b = epochs[cond_b].average()
+        evoked_a = plot_epochs[cond_a].average()
+        evoked_b = plot_epochs[cond_b].average()
         
         contrast_evoked = mne.combine_evoked([evoked_a, evoked_b], weights=[1, -1])
         

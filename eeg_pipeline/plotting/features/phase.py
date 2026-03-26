@@ -168,6 +168,34 @@ def _ensure_long_format(itpc_df: pd.DataFrame,
     return _convert_itpc_wide_to_long(itpc_df, logger)
 
 
+def _get_itpc_feature_granularity(itpc_df: pd.DataFrame) -> str:
+    """Resolve ITPC granularity metadata required for scientifically valid plots."""
+    attrs = dict(getattr(itpc_df, "attrs", {}) or {})
+    granularity = str(attrs.get("feature_granularity", "")).strip().lower()
+    if granularity not in {"trial", "condition", "subject"}:
+        raise ValueError(
+            "ITPC plotting requires feature_granularity metadata. "
+            "Reload features with metadata sidecars or recompute them."
+        )
+    return granularity
+
+
+def _require_itpc_precomputed_stats(
+    itpc_df: pd.DataFrame,
+    *,
+    stats_dir: Optional[Path],
+    plot_label: str,
+) -> str:
+    """Fail fast when a comparison plot would rely on invalid row-wise ITPC tests."""
+    granularity = _get_itpc_feature_granularity(itpc_df)
+    if stats_dir is None:
+        raise ValueError(
+            f"{plot_label} requires pre-computed statistics from the behavior pipeline. "
+            "On-the-fly row-wise tests are not scientifically valid for ITPC."
+        )
+    return granularity
+
+
 def _plot_topomap_grid(axes: np.ndarray, bands: List[str], time_bins: List[str],
                        topomap_data: Dict[Tuple[str, str], Tuple[List[float], mne.Info]],
                        shared_colorbar: bool, all_values: List[float],
@@ -249,6 +277,14 @@ def plot_itpc_topomaps(
     if itpc_df is None or len(itpc_df) == 0:
         log_if_present(logger, "warning", "ITPC dataframe empty; skipping topomaps")
         return
+
+    granularity = _get_itpc_feature_granularity(itpc_df)
+    if granularity == "condition":
+        raise ValueError(
+            "Condition-level ITPC topomaps are ambiguous here because the feature table "
+            "contains condition-level values broadcast across rows. Build explicit "
+            "per-condition topomaps instead of averaging broadcast condition rows."
+        )
 
     df_long = _ensure_long_format(itpc_df, logger)
     if df_long is None:
@@ -471,6 +507,12 @@ def plot_itpc_by_condition(
 
     compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
     compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
+    if compare_wins or compare_cols:
+        _require_itpc_precomputed_stats(
+            itpc_df,
+            stats_dir=stats_dir,
+            plot_label="ITPC condition comparison plotting",
+        )
     
     segments = require_config_value(config, "plotting.comparisons.comparison_windows")
     if not isinstance(segments, (list, tuple)) or len(segments) < 2:
@@ -553,6 +595,8 @@ def plot_itpc_by_condition(
                         logger=logger,
                         roi_name=roi_name,
                         stats_dir=stats_dir,
+                        sample_unit="rows",
+                        require_precomputed_stats=True,
                     )
             else:
                 seg1, seg2 = segments[0], segments[1]
@@ -586,6 +630,8 @@ def plot_itpc_by_condition(
                         label2=seg2.capitalize(),
                         roi_name=roi_name,
                         stats_dir=stats_dir,
+                        sample_unit="rows",
+                        require_precomputed_stats=True,
                     )
         
         plot_type = "multi-window" if use_multi_window else "paired"
@@ -678,7 +724,7 @@ def plot_itpc_by_condition(
             segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
             band_colors = {band: get_band_color(band, config) for band in bands}
             n_bands = len(bands)
-            n_trials = len(itpc_df)
+            n_rows = len(itpc_df)
 
             for roi_name in roi_names:
                 cell_data = {}
@@ -727,6 +773,8 @@ def plot_itpc_by_condition(
                     cell_data=cell_data,
                     config=config,
                     logger=logger,
+                    roi_name=roi_name,
+                    require_precomputed_stats=True,
                 )
 
                 fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
@@ -806,7 +854,7 @@ def plot_itpc_by_condition(
                 stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
                 title = (
                     f"ITPC: {label1} vs {label2} (Column Comparison)\n"
-                    f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | "
+                    f"Subject: {subject} | ROI: {roi_display} | N: {n_rows} rows | "
                     f"{stats_source} | FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
                 )
                 fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
@@ -850,7 +898,9 @@ def _get_pac_columns_for_roi(pac_df: pd.DataFrame, segment: str, pair: str,
     from eeg_pipeline.domain.features.naming import NamingSchema
     from eeg_pipeline.plotting.features.roi import get_roi_channels
     
-    cols = []
+    global_cols: List[str] = []
+    roi_cols: List[str] = []
+    channel_cols: List[str] = []
     roi_channels = (all_channels if roi_name == "all" 
                    else get_roi_channels(rois.get(roi_name, []), all_channels))
     roi_set = set(roi_channels) if roi_channels else set(all_channels)
@@ -865,16 +915,29 @@ def _get_pac_columns_for_roi(pac_df: pd.DataFrame, segment: str, pair: str,
             continue
         if str(parsed.get("band") or "") != pair:
             continue
+        if str(parsed.get("stat") or "") != "val":
+            continue
         
         scope = parsed.get("scope") or ""
-        if scope in ("global", "roi"):
-            cols.append(col)
+        if scope == "global":
+            global_cols.append(col)
+        elif scope == "roi":
+            identifier = str(parsed.get("identifier") or "")
+            if roi_name != "all" and identifier == roi_name:
+                roi_cols.append(col)
         elif scope == "ch":
             ch_id = str(parsed.get("identifier") or "")
             if ch_id in roi_set:
-                cols.append(col)
-    
-    return cols
+                channel_cols.append(col)
+
+    if roi_name == "all":
+        if global_cols:
+            return global_cols
+        return channel_cols
+
+    if roi_cols:
+        return roi_cols
+    return channel_cols
 
 
 def _extract_pac_pairs_from_dataframe(pac_df: pd.DataFrame, config: Any) -> List[str]:
@@ -1046,6 +1109,7 @@ def plot_pac_by_condition(
                         logger=logger,
                         roi_name=roi_name,
                         stats_dir=stats_dir,
+                        require_precomputed_stats=True,
                     )
             else:
                 seg1, seg2 = segments[0], segments[1]
@@ -1079,6 +1143,7 @@ def plot_pac_by_condition(
                         label2=seg2.capitalize(),
                         roi_name=roi_name,
                         stats_dir=stats_dir,
+                        require_precomputed_stats=True,
                     )
                 else:
                     log_if_present(
@@ -1198,6 +1263,8 @@ def plot_pac_by_condition(
                         cell_data=cell_data,
                         config=config,
                         logger=logger,
+                        roi_name=roi_name,
+                        require_precomputed_stats=True,
                     )
                     
                     fig, axes = plt.subplots(1, n_pairs, figsize=(4 * n_pairs, 5), squeeze=False)

@@ -34,6 +34,7 @@ from eeg_pipeline.plotting.features.aperiodic import (
 )
 from eeg_pipeline.plotting.features.connectivity import (
     plot_connectivity_by_condition,
+    plot_connectivity_circle_summary,
     plot_connectivity_circle_by_condition,
     plot_connectivity_heatmap,
     plot_connectivity_network,
@@ -65,6 +66,7 @@ from eeg_pipeline.plotting.features.power import (
     plot_power_by_condition,
     plot_band_power_topomaps,
     plot_band_power_topomaps_window_contrast,
+    plot_cross_frequency_power_correlation,
     plot_power_spectral_density,
     plot_power_timecourse_by_condition,
     plot_band_power_evolution,
@@ -168,6 +170,23 @@ def plot_connectivity_mne_suite(ctx: FeaturePlotContext, saved_files):
     for measure in conn_measures:
         for band in power_bands:
             conn_dir = ctx.subdir("connectivity")
+
+            safe_plot(
+                ctx,
+                saved_files,
+                f"{measure}_{band}_circle",
+                "connectivity",
+                None,
+                plot_connectivity_circle_summary,
+                ctx.connectivity_df,
+                ctx.epochs.info,
+                ctx.subject,
+                conn_dir,
+                ctx.logger,
+                ctx.config,
+                measure=measure,
+                band=band,
+            )
 
             if ctx.aligned_events is not None:
                 safe_plot(
@@ -651,6 +670,27 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
         logger=ctx.logger,
         config=ctx.config,
         stats_dir=ctx.stats_dir,
+    )
+
+
+@VisualizationRegistry.register("power")
+def plot_power_cross_frequency_correlation(ctx: FeaturePlotContext, saved_files):
+    if ctx.power_df is None or ctx.aligned_events is None:
+        return
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "cross_frequency_power_correlation",
+        "power",
+        None,
+        plot_cross_frequency_power_correlation,
+        power_df=ctx.power_df,
+        events_df=ctx.aligned_events,
+        subject=ctx.subject,
+        save_dir=ctx.subdir("power"),
+        logger=ctx.logger,
+        config=ctx.config,
     )
 
 

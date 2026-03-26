@@ -19,6 +19,8 @@ from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
 from eeg_pipeline.plotting.features.utils import (
+    load_multigroup_stats,
+    load_precomputed_paired_stats,
     get_band_names,
     plot_paired_comparison,
     compute_or_load_column_stats,
@@ -58,6 +60,22 @@ def _sanitize_roi_name_for_path(roi_name: str) -> str:
     return sanitize_label(roi_name).lower()
 
 
+def _pair_belongs_to_roi(
+    pair_id: str,
+    roi_name: str,
+    rois: Dict[str, List[str]],
+) -> bool:
+    """Return whether both channels in a left-right pair belong to the ROI."""
+    if roi_name.lower() == "all":
+        return True
+    if "-" not in pair_id:
+        return False
+
+    left_channel, right_channel = pair_id.split("-", 1)
+    roi_channels = set(get_roi_channels(rois.get(roi_name, []), [left_channel, right_channel]))
+    return left_channel in roi_channels and right_channel in roi_channels
+
+
 def _roi_has_asymmetry_data(
     features_df: pd.DataFrame,
     roi_name: str,
@@ -79,18 +97,12 @@ def _roi_has_asymmetry_data(
         parsed = NamingSchema.parse(str(col))
         if not parsed.get("valid") or parsed.get("group") != "asymmetry":
             continue
-        
-        scope = parsed.get("scope") or ""
-        if scope != "chpair":
+
+        if str(parsed.get("scope") or "") != "chpair":
             continue
-        
+
         identifier = str(parsed.get("identifier") or "")
-        if "-" not in identifier:
-            continue
-        
-        channel1, channel2 = identifier.split("-", 1)
-        roi_channels = get_roi_channels(roi_patterns, [channel1, channel2])
-        if channel1 in roi_channels or channel2 in roi_channels:
+        if _pair_belongs_to_roi(identifier, roi_name, rois):
             return True
     
     return False
@@ -103,6 +115,7 @@ def _get_asymmetry_columns(
     metric: str,
     roi_name: str,
     rois: Dict[str, List[str]],
+    pair_id: Optional[str] = None,
 ) -> List[str]:
     """Get asymmetry columns filtered by segment, band, metric, and ROI."""
     columns = []
@@ -119,24 +132,134 @@ def _get_asymmetry_columns(
         if str(parsed.get("stat") or "") != metric:
             continue
         
-        scope = parsed.get("scope") or ""
-        if roi_name_lower == "all":
+        scope = str(parsed.get("scope") or "")
+        identifier = str(parsed.get("identifier") or "")
+        if pair_id is not None and identifier != pair_id:
+            continue
+        if scope == "roi":
+            identifier_normalized = identifier.lower().replace("_", "")
+            roi_normalized = roi_name_lower.replace("_", "")
+            if roi_name_lower == "all" or identifier_normalized == roi_normalized:
+                columns.append(col)
+            continue
+        if scope == "chpair" and _pair_belongs_to_roi(identifier, roi_name, rois):
             columns.append(col)
-        else:
-            identifier = str(parsed.get("identifier") or "")
-            if scope == "roi":
-                identifier_normalized = identifier.lower().replace("_", "")
-                roi_normalized = roi_name_lower.replace("_", "")
-                if identifier_normalized == roi_normalized:
-                    columns.append(col)
-            elif scope == "chpair":
-                if "-" in identifier:
-                    channel1, channel2 = identifier.split("-", 1)
-                    roi_channels = get_roi_channels(rois.get(roi_name, []), [channel1, channel2])
-                    if channel1 in roi_channels or channel2 in roi_channels:
-                        columns.append(col)
     
     return columns
+
+
+def _get_asymmetry_identifiers(
+    features_df: pd.DataFrame,
+    metric: str,
+    roi_name: str,
+    rois: Dict[str, List[str]],
+) -> List[str]:
+    """Return unique asymmetry pair identifiers for a metric and ROI."""
+    identifiers: List[str] = []
+    seen: set[str] = set()
+
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid") or parsed.get("group") != "asymmetry":
+            continue
+        if str(parsed.get("scope") or "") != "chpair":
+            continue
+        if str(parsed.get("stat") or "") != metric:
+            continue
+
+        identifier = str(parsed.get("identifier") or "")
+        if identifier in seen:
+            continue
+        if not _pair_belongs_to_roi(identifier, roi_name, rois):
+            continue
+
+        seen.add(identifier)
+        identifiers.append(identifier)
+
+    return identifiers
+
+
+def _get_single_asymmetry_series(
+    features_df: pd.DataFrame,
+    segment: str,
+    band: str,
+    metric: str,
+    roi_name: str,
+    rois: Dict[str, List[str]],
+    pair_id: str,
+) -> Optional[pd.Series]:
+    """Return the single asymmetry series for one pair/band/segment/metric selection."""
+    columns = _get_asymmetry_columns(
+        features_df=features_df,
+        segment=segment,
+        band=band,
+        metric=metric,
+        roi_name=roi_name,
+        rois=rois,
+        pair_id=pair_id,
+    )
+    if not columns:
+        return None
+    if len(columns) != 1:
+        raise ValueError(
+            "Expected exactly one asymmetry column for "
+            f"segment={segment!r}, band={band!r}, metric={metric!r}, pair={pair_id!r}; "
+            f"found {columns!r}"
+        )
+    return pd.to_numeric(features_df[columns[0]], errors="coerce")
+
+
+def _filter_asymmetry_stats(
+    stats_df: Optional[pd.DataFrame],
+    pair_id: str,
+    metric: str,
+) -> Optional[pd.DataFrame]:
+    """Filter pre-computed asymmetry statistics to one pair and metric."""
+    if stats_df is None or stats_df.empty:
+        return None
+
+    empty = pd.Series("", index=stats_df.index, dtype=str)
+    feature_series = stats_df.get("feature", empty).astype(str).str.lower()
+    identifier_series = stats_df.get("identifier", empty).astype(str).str.lower()
+    pair_lower = pair_id.lower()
+    metric_lower = metric.lower()
+
+    pair_mask = feature_series.str.contains(pair_lower, na=False) | identifier_series.str.contains(
+        pair_lower,
+        na=False,
+    )
+    metric_mask = (
+        feature_series.str.endswith(metric_lower)
+        | feature_series.str.contains(f"_{metric_lower}", na=False)
+        | identifier_series.str.endswith(metric_lower)
+        | identifier_series.str.contains(f"_{metric_lower}", na=False)
+    )
+    filtered = stats_df[pair_mask & metric_mask]
+    return filtered if not filtered.empty else None
+
+
+def _load_pair_stats(
+    stats_dir: Optional[Path],
+    comparison_type: str,
+    pair_id: str,
+    metric: str,
+    *,
+    condition1: Optional[str] = None,
+    condition2: Optional[str] = None,
+) -> Optional[pd.DataFrame]:
+    """Load and filter pre-computed statistics for one asymmetry pair."""
+    if stats_dir is None:
+        return None
+
+    stats_df = load_precomputed_paired_stats(
+        stats_dir=stats_dir,
+        feature_type="asymmetry",
+        comparison_type=comparison_type,
+        condition1=condition1,
+        condition2=condition2,
+        roi_name=pair_id,
+    )
+    return _filter_asymmetry_stats(stats_df, pair_id, metric)
 
 
 def plot_asymmetry_by_condition(
@@ -338,46 +461,80 @@ def _plot_window_comparison(
     
     for roi_name in roi_names:
         roi_suffix = _sanitize_roi_name_for_path(roi_name)
-        suffix = f"_roi-{roi_suffix}" if roi_suffix else ""
-        
-        if use_multi_window:
-            data_by_band_multi = _collect_multi_window_comparison_data(
-                features_df, segments, bands, metric, roi_name, rois
-            )
-            
-            if data_by_band_multi:
+        roi_path_suffix = f"_roi-{roi_suffix}" if roi_suffix else ""
+        pair_ids = _get_asymmetry_identifiers(features_df, metric, roi_name, rois)
+
+        for pair_id in pair_ids:
+            pair_suffix = _sanitize_roi_name_for_path(pair_id)
+            suffix = f"{roi_path_suffix}_pair-{pair_suffix}"
+            feature_label = f"Asymmetry ({metric_label}; {pair_id})"
+            roi_title = None if roi_name.lower() == "all" else roi_name
+
+            if use_multi_window:
+                data_by_band_multi = _collect_multi_window_comparison_data(
+                    features_df=features_df,
+                    segments=segments,
+                    bands=bands,
+                    metric=metric,
+                    roi_name=roi_name,
+                    rois=rois,
+                    pair_id=pair_id,
+                )
+                if not data_by_band_multi:
+                    continue
+
+                pair_stats = _load_pair_stats(stats_dir, "window", pair_id, metric)
                 save_path = save_dir / f"sub-{subject}_asymmetry_{metric}_by_condition{suffix}_multiwindow"
                 plot_multi_window_comparison(
                     data_by_band=data_by_band_multi,
                     subject=subject,
                     save_path=save_path,
-                    feature_label=f"Asymmetry ({metric_label})",
+                    feature_label=feature_label,
                     segments=segments,
                     config=config,
                     logger=logger,
-                    roi_name=roi_name,
-                    stats_dir=stats_dir,
+                    roi_name=roi_title,
+                    stats_dir=None,
+                    precomputed_stats=pair_stats,
                 )
-        else:
+                continue
+
             segment1, segment2 = segments[0], segments[1]
             data_by_band = _collect_window_comparison_data(
-                features_df, segment1, segment2, bands, metric, roi_name, rois
+                features_df=features_df,
+                segment1=segment1,
+                segment2=segment2,
+                bands=bands,
+                metric=metric,
+                roi_name=roi_name,
+                rois=rois,
+                pair_id=pair_id,
             )
-            
-            if data_by_band:
-                save_path = save_dir / f"sub-{subject}_asymmetry_{metric}_by_condition{suffix}_window"
-                plot_paired_comparison(
-                    data_by_band=data_by_band,
-                    subject=subject,
-                    save_path=save_path,
-                    feature_label=f"Asymmetry ({metric_label})",
-                    config=config,
-                    logger=logger,
-                    label1=segment1.capitalize(),
-                    label2=segment2.capitalize(),
-                    roi_name=roi_name,
-                    stats_dir=stats_dir,
-                )
+            if not data_by_band:
+                continue
+
+            pair_stats = _load_pair_stats(
+                stats_dir,
+                "window",
+                pair_id,
+                metric,
+                condition1=segment1.lower(),
+                condition2=segment2.lower(),
+            )
+            save_path = save_dir / f"sub-{subject}_asymmetry_{metric}_by_condition{suffix}_window"
+            plot_paired_comparison(
+                data_by_band=data_by_band,
+                subject=subject,
+                save_path=save_path,
+                feature_label=feature_label,
+                config=config,
+                logger=logger,
+                label1=segment1.capitalize(),
+                label2=segment2.capitalize(),
+                roi_name=roi_title,
+                precomputed_stats=pair_stats,
+                stats_dir=None,
+            )
 
 
 def _collect_window_comparison_data(
@@ -388,28 +545,33 @@ def _collect_window_comparison_data(
     metric: str,
     roi_name: str,
     rois: Dict[str, List[str]],
+    pair_id: str,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
-    """Collect data for window comparison across bands (2 segments)."""
-    data_by_band = {}
+    """Collect pair-specific data for window comparison across bands."""
+    data_by_band: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
     
     for band in bands:
-        cols1 = _get_asymmetry_columns(
-            features_df, segment1, band, metric, roi_name, rois
+        series1 = _get_single_asymmetry_series(
+            features_df,
+            segment1,
+            band,
+            metric,
+            roi_name,
+            rois,
+            pair_id,
         )
-        cols2 = _get_asymmetry_columns(
-            features_df, segment2, band, metric, roi_name, rois
+        series2 = _get_single_asymmetry_series(
+            features_df,
+            segment2,
+            band,
+            metric,
+            roi_name,
+            rois,
+            pair_id,
         )
-        
-        if not cols1 or not cols2:
+        if series1 is None or series2 is None:
             continue
-        
-        series1 = features_df[cols1].apply(
-            pd.to_numeric, errors="coerce"
-        ).mean(axis=1)
-        series2 = features_df[cols2].apply(
-            pd.to_numeric, errors="coerce"
-        ).mean(axis=1)
-        
+
         valid_mask = series1.notna() & series2.notna()
         values1 = series1[valid_mask].values
         values2 = series2[valid_mask].values
@@ -427,17 +589,26 @@ def _collect_multi_window_comparison_data(
     metric: str,
     roi_name: str,
     rois: Dict[str, List[str]],
+    pair_id: str,
 ) -> Dict[str, Dict[str, np.ndarray]]:
-    """Collect data for multi-window comparison across bands (3+ segments)."""
+    """Collect pair-specific data for multi-window comparison across bands."""
     data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
     
     for band in bands:
-        segment_series = {}
+        segment_series: Dict[str, pd.Series] = {}
         for seg in segments:
-            cols = _get_asymmetry_columns(features_df, seg, band, metric, roi_name, rois)
-            if cols:
-                segment_series[seg] = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-        
+            series = _get_single_asymmetry_series(
+                features_df,
+                seg,
+                band,
+                metric,
+                roi_name,
+                rois,
+                pair_id,
+            )
+            if series is not None:
+                segment_series[seg] = series
+
         if len(segment_series) < 2:
             continue
         
@@ -489,44 +660,57 @@ def _plot_column_comparison(
         
         masks_dict, group_labels = multi_group_info
         segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
-        
-        from eeg_pipeline.plotting.features.utils import load_multigroup_stats
-        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
-        
+
+        multigroup_stats = load_multigroup_stats(stats_dir, feature_type="asymmetry") if stats_dir else None
+
         for roi_name in roi_names:
-            data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
-            for band in bands:
-                cols = _get_asymmetry_columns(features_df, segment_name, band, metric, roi_name, rois)
-                if not cols:
+            roi_suffix = _sanitize_roi_name_for_path(roi_name)
+            roi_path_suffix = f"_roi-{roi_suffix}" if roi_suffix else ""
+            roi_title = None if roi_name.lower() == "all" else roi_name
+
+            for pair_id in _get_asymmetry_identifiers(features_df, metric, roi_name, rois):
+                data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+                for band in bands:
+                    value_series = _get_single_asymmetry_series(
+                        features_df,
+                        segment_name,
+                        band,
+                        metric,
+                        roi_name,
+                        rois,
+                        pair_id,
+                    )
+                    if value_series is None:
+                        continue
+
+                    group_values = {}
+                    for label, mask in masks_dict.items():
+                        vals = value_series[mask].dropna().values
+                        if len(vals) > 0:
+                            group_values[label] = vals
+
+                    if len(group_values) >= 2:
+                        data_by_band[band] = group_values
+
+                if not data_by_band:
                     continue
-                
-                val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                
-                group_values = {}
-                for label, mask in masks_dict.items():
-                    vals = val_series[mask].dropna().values
-                    if len(vals) > 0:
-                        group_values[label] = vals
-                
-                if len(group_values) >= 2:
-                    data_by_band[band] = group_values
-            
-            if data_by_band:
-                roi_suffix = _sanitize_roi_name_for_path(roi_name)
-                suffix = f"_roi-{roi_suffix}" if roi_suffix else ""
+
+                pair_suffix = _sanitize_roi_name_for_path(pair_id)
+                suffix = f"{roi_path_suffix}_pair-{pair_suffix}"
                 save_path = save_dir / f"sub-{subject}_asymmetry_{metric}_by_condition{suffix}_multigroup"
-                
+                pair_stats = _filter_asymmetry_stats(multigroup_stats, pair_id, metric)
+
                 plot_multi_group_column_comparison(
                     data_by_band=data_by_band,
                     subject=subject,
                     save_path=save_path,
-                    feature_label=f"Asymmetry ({metric_label})",
+                    feature_label=f"Asymmetry ({metric_label}; {pair_id})",
                     groups=group_labels,
                     config=config,
                     logger=logger,
-                    roi_name=roi_name,
-                    stats_dir=stats_dir,
-                    multigroup_stats=multigroup_stats,
+                    roi_name=roi_title,
+                    stats_dir=None,
+                    multigroup_stats=pair_stats,
                 )
         
         log_if_present(logger, "info", f"Saved asymmetry multi-group column comparison for {len(roi_names)} ROIs")
@@ -543,44 +727,73 @@ def _plot_column_comparison(
     n_trials = len(features_df)
     
     for roi_name in roi_names:
-        cell_data = _collect_column_comparison_data(
-            features_df, segment_name, bands, metric, roi_name,
-            rois, mask1, mask2
-        )
-        
-        qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
-            stats_dir=stats_dir,
-            feature_type="asymmetry",
-            feature_keys=bands,
-            cell_data=cell_data,
-            config=config,
-            logger=logger,
-        )
-        
-        fig = _create_column_comparison_figure(
-            bands, cell_data, qvalues, label1, label2, plot_cfg
-        )
-        
-        _add_column_comparison_title(
-            fig, metric_label, label1, label2, subject, roi_name,
-            n_trials, n_significant, len(qvalues), use_precomputed, plot_cfg
-        )
-        
-        plt.tight_layout()
-        
         roi_suffix = _sanitize_roi_name_for_path(roi_name)
-        suffix = f"_roi-{roi_suffix}" if roi_suffix else ""
-        filename = f"sub-{subject}_asymmetry_{metric}_by_condition{suffix}_column"
-        
-        save_fig(
-            fig, save_dir / filename,
-            formats=plot_cfg.formats,
-            dpi=plot_cfg.dpi,
-            bbox_inches=plot_cfg.bbox_inches,
-            pad_inches=plot_cfg.pad_inches,
-            config=config,
-        )
-        plt.close(fig)
+        roi_path_suffix = f"_roi-{roi_suffix}" if roi_suffix else ""
+
+        for pair_id in _get_asymmetry_identifiers(features_df, metric, roi_name, rois):
+            cell_data = _collect_column_comparison_data(
+                features_df=features_df,
+                segment_name=segment_name,
+                bands=bands,
+                metric=metric,
+                roi_name=roi_name,
+                rois=rois,
+                mask1=mask1,
+                mask2=mask2,
+                pair_id=pair_id,
+            )
+            pair_stats = _load_pair_stats(
+                stats_dir,
+                "column",
+                pair_id,
+                metric,
+                condition1=label1.lower(),
+                condition2=label2.lower(),
+            )
+            qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
+                stats_dir=None,
+                feature_type="asymmetry",
+                feature_keys=bands,
+                cell_data=cell_data,
+                config=config,
+                logger=logger,
+                precomputed_df=pair_stats,
+            )
+
+            fig = _create_column_comparison_figure(
+                bands, cell_data, qvalues, label1, label2, plot_cfg
+            )
+            _add_column_comparison_title(
+                fig=fig,
+                metric_label=metric_label,
+                label1=label1,
+                label2=label2,
+                subject=subject,
+                roi_name=roi_name,
+                pair_id=pair_id,
+                n_trials=n_trials,
+                n_significant=n_significant,
+                n_tests=len(qvalues),
+                use_precomputed=use_precomputed,
+                plot_cfg=plot_cfg,
+            )
+
+            plt.tight_layout()
+
+            pair_suffix = _sanitize_roi_name_for_path(pair_id)
+            suffix = f"{roi_path_suffix}_pair-{pair_suffix}"
+            filename = f"sub-{subject}_asymmetry_{metric}_by_condition{suffix}_column"
+
+            save_fig(
+                fig,
+                save_dir / filename,
+                formats=plot_cfg.formats,
+                dpi=plot_cfg.dpi,
+                bbox_inches=plot_cfg.bbox_inches,
+                pad_inches=plot_cfg.pad_inches,
+                config=config,
+            )
+            plt.close(fig)
 
 
 def _collect_column_comparison_data(
@@ -592,23 +805,25 @@ def _collect_column_comparison_data(
     rois: Dict[str, List[str]],
     mask1: pd.Series,
     mask2: pd.Series,
+    pair_id: str,
 ) -> Dict[int, Optional[Dict[str, np.ndarray]]]:
-    """Collect data for column comparison across bands."""
-    cell_data = {}
+    """Collect pair-specific data for column comparison across bands."""
+    cell_data: Dict[int, Optional[Dict[str, np.ndarray]]] = {}
     
     for col_idx, band in enumerate(bands):
-        cols = _get_asymmetry_columns(
-            features_df, segment_name, band, metric, roi_name, rois
+        value_series = _get_single_asymmetry_series(
+            features_df,
+            segment_name,
+            band,
+            metric,
+            roi_name,
+            rois,
+            pair_id,
         )
-        
-        if not cols:
+        if value_series is None:
             cell_data[col_idx] = None
             continue
-        
-        value_series = features_df[cols].apply(
-            pd.to_numeric, errors="coerce"
-        ).mean(axis=1)
-        
+
         values1 = value_series[mask1].dropna().values
         values2 = value_series[mask2].dropna().values
         
@@ -732,6 +947,7 @@ def _add_column_comparison_title(
     label2: str,
     subject: str,
     roi_name: str,
+    pair_id: str,
     n_trials: int,
     n_significant: int,
     n_tests: int,
@@ -739,20 +955,17 @@ def _add_column_comparison_title(
     plot_cfg: Any,
 ) -> None:
     """Add title to column comparison figure."""
-    roi_display = (
-        roi_name.replace("_", " ").title()
-        if roi_name.lower() != "all"
-        else "All Pairs"
-    )
-    
+    details = [f"Subject: {subject}", f"Pair: {pair_id}"]
+    if roi_name.lower() != "all":
+        details.append(f"ROI: {roi_name.replace('_', ' ').title()}")
+
     stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
-    
     title = (
         f"Asymmetry ({metric_label}): {label1} vs {label2} (Column Comparison)\n"
-        f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | "
+        f"{' | '.join(details)} | N: {n_trials} trials | "
         f"{stats_source} | FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
     )
-    
+
     fig.suptitle(
         title,
         fontsize=plot_cfg.font.suptitle,

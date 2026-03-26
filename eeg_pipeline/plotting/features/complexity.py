@@ -147,23 +147,18 @@ def _get_complexity_columns(
                 if _match_roi_name(roi_id, roi_name):
                     columns.append(col)
     
-    if roi_name == "all" and not columns:
-        for col in features_df.columns:
-            parsed = NamingSchema.parse(str(col))
-            if not parsed.get("valid"):
-                continue
-            if parsed.get("group") != COMPLEXITY_GROUP:
-                continue
-            if str(parsed.get("segment") or "") != segment:
-                continue
-            if str(parsed.get("band") or "") != band:
-                continue
-            if str(parsed.get("stat") or "") != metric:
-                continue
-            if parsed.get("scope") == "roi":
-                columns.append(col)
-    
     return columns
+
+
+def _get_complexity_feature_key(
+    segment: str,
+    band: str,
+    metric: str,
+    roi_name: str,
+) -> str:
+    if roi_name == "all":
+        return NamingSchema.build("comp", segment, band, "global", metric)
+    return NamingSchema.build("comp", segment, band, "roi", metric, channel=roi_name)
 
 
 def _determine_segments(config: Any, features_df: pd.DataFrame, logger: Any) -> List[str]:
@@ -543,10 +538,14 @@ def _plot_column_comparison(
             qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
                 stats_dir=stats_dir,
                 feature_type="complexity",
-                feature_keys=bands,
+                feature_keys=[
+                    _get_complexity_feature_key(segment_name, band, metric, roi_name)
+                    for band in bands
+                ],
                 cell_data=cell_data,
                 config=config,
                 logger=logger,
+                roi_name=roi_name,
             )
             
             fig, axes = plt.subplots(1, n_bands, figsize=(FIG_WIDTH_PER_BAND * n_bands, FIG_HEIGHT), squeeze=False)

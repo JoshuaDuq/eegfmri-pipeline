@@ -15,6 +15,38 @@ const (
 	plotSelectionDetailBaseLines = 4
 )
 
+func (m Model) restCompatibilityStatus(plot PlotItem) string {
+	if !m.prepTaskIsRest {
+		return ""
+	}
+	switch plot.RestCompatibility {
+	case plotRestCompatible:
+		return "rest-compatible"
+	case plotRestTaskOnly:
+		return "task-only"
+	default:
+		return ""
+	}
+}
+
+func (m Model) renderRestCompatibilityBadge(plot PlotItem) string {
+	status := m.restCompatibilityStatus(plot)
+	if status == "" {
+		return ""
+	}
+
+	badgeStyle := lipgloss.NewStyle().
+		Foreground(styles.TextDim).
+		Italic(true)
+	if status == "rest-compatible" {
+		badgeStyle = badgeStyle.Foreground(styles.Success)
+	}
+	if status == "task-only" {
+		badgeStyle = badgeStyle.Foreground(styles.Warning)
+	}
+	return " " + badgeStyle.Render("["+status+"]")
+}
+
 func (m Model) plotSelectionLines() (lines []string, cursorLine int, visibleCount int, selectedCount int) {
 	cursorLine = -1
 	currentGroup := ""
@@ -54,7 +86,8 @@ func (m Model) plotSelectionLines() (lines []string, cursorLine int, visibleCoun
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		}
 
-		line := cursor + checkbox + " " + idStyle.Render(plot.ID) + nameStyle.Render(" — "+plot.Name)
+		line := cursor + checkbox + " " + idStyle.Render(plot.ID) + nameStyle.Render(" — "+plot.Name) +
+			m.renderRestCompatibilityBadge(plot)
 		lines = append(lines, styles.TruncateLine(line, m.contentWidth))
 	}
 
@@ -132,6 +165,9 @@ func (m Model) renderPlotSelection() string {
 			b.WriteString("  " + reqStyle.Render(strings.Join(reqs, ", ")) + "\n")
 		} else {
 			b.WriteString("  " + reqStyle.Render("base epochs only") + "\n")
+		}
+		if status := m.restCompatibilityStatus(plot); status != "" {
+			b.WriteString("  " + reqStyle.Render("Rest mode: "+status) + "\n")
 		}
 
 		readyCount, totalCount, _ := m.plotAvailabilitySummary(plot)

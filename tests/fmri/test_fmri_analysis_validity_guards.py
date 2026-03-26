@@ -25,6 +25,7 @@ from fmri_pipeline.analysis.contrast_builder import (
     build_contrast_from_runs_detailed,
     compute_contrast_map,
     discover_bold_runs,
+    discover_confounds,
     load_contrast_config,
     load_contrast_config_section,
     _remap_events_by_condition_columns,
@@ -768,6 +769,74 @@ def test_discover_bold_runs_rejects_missing_requested_runs(tmp_path) -> None:
             runs=[1, 2],
             cfg=cfg,
         )
+
+
+def test_discover_bold_runs_rejects_auto_discovered_runs_with_missing_inputs(tmp_path) -> None:
+    bids_root = tmp_path / "bids"
+    func_dir = bids_root / "sub-0001" / "func"
+    func_dir.mkdir(parents=True, exist_ok=True)
+
+    (func_dir / "sub-0001_task-task_run-01_events.tsv").write_text(
+        "onset\tduration\ttrial_type\n0\t1\tpain\n",
+        encoding="utf-8",
+    )
+    (func_dir / "sub-0001_task-task_run-01_bold.nii.gz").write_bytes(b"")
+    (func_dir / "sub-0001_task-task_run-02_events.tsv").write_text(
+        "onset\tduration\ttrial_type\n0\t1\trest\n",
+        encoding="utf-8",
+    )
+
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="bids_raw",
+        fmriprep_space="T1w",
+        require_fmriprep=False,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        formula=None,
+        name="pain",
+        runs=None,
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+    )
+
+    with pytest.raises(FileNotFoundError, match="matching BOLD \\+ events inputs"):
+        discover_bold_runs(
+            bids_fmri_root=bids_root,
+            bids_derivatives=None,
+            subject="0001",
+            task="task",
+            runs=None,
+            cfg=cfg,
+        )
+
+
+def test_discover_confounds_accepts_zero_padded_legacy_regressors_path(tmp_path) -> None:
+    deriv_root = tmp_path / "derivatives"
+    func_dir = deriv_root / "fmriprep" / "sub-0001" / "func"
+    func_dir.mkdir(parents=True, exist_ok=True)
+    confounds_path = (
+        func_dir / "sub-0001_task-task_run-01_desc-confounds_regressors.tsv"
+    )
+    confounds_path.write_text("trans_x\n0.0\n", encoding="utf-8")
+
+    discovered = discover_confounds(
+        bids_derivatives=deriv_root,
+        subject="0001",
+        task="task",
+        run_num=1,
+    )
+
+    assert discovered == confounds_path
 
 
 def test_validate_consistent_trs_rejects_mixed_values(tmp_path) -> None:
