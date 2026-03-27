@@ -234,9 +234,44 @@ func (m *Model) saveOverridesBatch() tea.Cmd {
 			return overridesSavedMsg{err: err}
 		}
 		os.MkdirAll(filepath.Dir(m.overridesPath), 0755)
-		err = os.WriteFile(m.overridesPath, data, 0644)
+		err = writeFileAtomically(m.overridesPath, data, 0644)
 		return overridesSavedMsg{err: err}
 	}
+}
+
+func writeFileAtomically(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+
+	tempFile, err := os.CreateTemp(dir, base+".tmp*")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+
+	cleanup := func() {
+		_ = os.Remove(tempPath)
+	}
+
+	if _, err := tempFile.Write(data); err != nil {
+		_ = tempFile.Close()
+		cleanup()
+		return err
+	}
+	if err := tempFile.Chmod(perm); err != nil {
+		_ = tempFile.Close()
+		cleanup()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 func (m *Model) resetOverrides() (tea.Model, tea.Cmd) {

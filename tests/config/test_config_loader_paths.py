@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,8 @@ def _reset_loader_cache() -> None:
     loader._CONFIG = None
     loader._CONFIG_PATH = None
     loader._CONFIG_MTIME = None
+    loader._CONFIG_OVERRIDES_PATH = None
+    loader._CONFIG_OVERRIDES_MTIME = None
 
 
 def test_default_config_paths_resolve_to_repo_data(monkeypatch) -> None:
@@ -48,6 +51,24 @@ def test_overrides_path_ignores_legacy_location(monkeypatch, tmp_path) -> None:
     assert overrides_path == tmp_path / "data" / "derivatives" / ".tui_overrides.json"
 
 
+def test_apply_config_overrides_raises_for_invalid_json(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(loader, "_get_overrides_path", lambda _config_path: tmp_path / ".tui_overrides.json")
+    overrides_path = tmp_path / ".tui_overrides.json"
+    overrides_path.write_text("{bad", encoding="utf-8")
+
+    with pytest.raises(loader.ConfigError, match="Failed to parse TUI overrides"):
+        loader._apply_config_overrides({"project": {"task": "x"}}, tmp_path / "config.yaml")
+
+
+def test_apply_config_overrides_raises_for_non_mapping_json(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(loader, "_get_overrides_path", lambda _config_path: tmp_path / ".tui_overrides.json")
+    overrides_path = tmp_path / ".tui_overrides.json"
+    overrides_path.write_text('["not", "a", "mapping"]', encoding="utf-8")
+
+    with pytest.raises(loader.ConfigError, match="must contain a JSON object"):
+        loader._apply_config_overrides({"project": {"task": "x"}}, tmp_path / "config.yaml")
+
+
 def test_load_config_returns_isolated_nested_data(monkeypatch) -> None:
     _reset_loader_cache()
     missing_overrides = Path("/tmp/__no_such_tui_overrides__.json")
@@ -74,6 +95,43 @@ def test_runtime_overrides_do_not_leak_into_cached_config(monkeypatch) -> None:
     fresh_cfg = loader.load_config(apply_thread_limits=False)
 
     assert fresh_cfg.get("project.task") == original_task
+
+
+def test_load_config_reloads_when_tui_overrides_change(tmp_path, monkeypatch) -> None:
+    _reset_loader_cache()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("project:\n  task: base\n", encoding="utf-8")
+    overrides_path = tmp_path / ".tui_overrides.json"
+    overrides_path.write_text('{"project": {"task": "first"}}', encoding="utf-8")
+    monkeypatch.setenv("EEG_PIPELINE_TUI_OVERRIDES", str(overrides_path))
+
+    first_cfg = loader.load_config(config_path=config_path, apply_thread_limits=False)
+    assert first_cfg.get("project.task") == "first"
+
+    overrides_path.write_text('{"project": {"task": "second"}}', encoding="utf-8")
+    first_mtime = overrides_path.stat().st_mtime
+    os.utime(overrides_path, (first_mtime + 1, first_mtime + 1))
+
+    reloaded_cfg = loader.load_config(config_path=config_path, apply_thread_limits=False)
+    assert reloaded_cfg.get("project.task") == "second"
+
+
+def test_load_config_surfaces_invalid_tui_overrides_after_cache_warm(tmp_path, monkeypatch) -> None:
+    _reset_loader_cache()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("project:\n  task: base\n", encoding="utf-8")
+    overrides_path = tmp_path / ".tui_overrides.json"
+    overrides_path.write_text('{"project": {"task": "first"}}', encoding="utf-8")
+    monkeypatch.setenv("EEG_PIPELINE_TUI_OVERRIDES", str(overrides_path))
+
+    loader.load_config(config_path=config_path, apply_thread_limits=False)
+
+    overrides_path.write_text("{bad", encoding="utf-8")
+    first_mtime = overrides_path.stat().st_mtime
+    os.utime(overrides_path, (first_mtime + 1, first_mtime + 1))
+
+    with pytest.raises(loader.ConfigError, match="Failed to parse TUI overrides"):
+        loader.load_config(config_path=config_path, apply_thread_limits=False)
 
 
 def test_resolve_single_path_keeps_docker_image_like_values() -> None:

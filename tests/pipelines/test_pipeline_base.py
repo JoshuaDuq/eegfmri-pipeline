@@ -214,6 +214,31 @@ class TestBaseCompletion(unittest.TestCase):
         notes = getattr(exc_info.exception, "__notes__", [])
         self.assertTrue(any("meta-fail" in note for note in notes))
 
+    def test_run_batch_excludes_failed_subjects_from_group_level(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def __init__(self):
+                self.name = "dummy_partial_group_level"
+                self.config = DotConfig({"project": {"task": "x"}})
+                self.logger = Mock()
+                self.deriv_root = Path(tempfile.mkdtemp())
+
+            def process_subject(self, subject: str, task: str, **kwargs):
+                if subject == "0001":
+                    raise RuntimeError("boom")
+                return None
+
+        d = Dummy()
+        d.run_group_level = Mock()
+        progress = _NoopProgress()
+
+        with patch("eeg_pipeline.pipelines.base.BatchProgress", _NoopBatchProgress):
+            ledger = d.run_batch(["0001", "0002", "0003"], task="x", progress=progress)
+
+        self.assertEqual([item["status"] for item in ledger], ["failed", "success", "success"])
+        d.run_group_level.assert_called_once_with(["0002", "0003"], task="x", progress=progress)
+
     def test_sanitize_metadata_value_falls_back_to_repr_when_dataclass_serialization_fails(self):
         import eeg_pipeline.pipelines.base as base_module
         from eeg_pipeline.pipelines.base import PipelineBase

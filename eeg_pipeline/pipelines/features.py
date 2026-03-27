@@ -109,6 +109,13 @@ def _calculate_total_steps(n_ranges: int) -> int:
     return 1 + (n_ranges * 3)
 
 
+def _fail_subject(progress: Any, subject: str, code: str, message: str) -> None:
+    """Report a subject-level failure and raise immediately."""
+    progress.error(code, message)
+    progress.subject_done(f"sub-{subject}", success=False)
+    raise RuntimeError(message)
+
+
 def _infer_retained_trial_count(
     retention_stats: Optional[Dict[str, Any]],
     *,
@@ -547,6 +554,7 @@ def _save_merged_features(
     config: Any,
     logger: Any,
     aligned_events: Optional[pd.DataFrame] = None,
+    task: Optional[str] = None,
 ) -> None:
     """Merge and save accumulated features from multiple time ranges."""
     from eeg_pipeline.utils.config.loader import get_config_value
@@ -612,7 +620,7 @@ def _save_merged_features(
                 feature_columns=filter_feature_payload_columns(merged_df.columns),
                 config=config,
                 subject=subject_str,
-                task=config.get("project.task") if config is not None else None,
+                task=task if task is not None else config.get("project.task") if config is not None else None,
                 qc=None,
                 df_attrs=dict(df_attrs),
             )
@@ -931,14 +939,14 @@ class FeaturePipeline(PipelineBase):
         )
 
         if epochs is None:
-            self.logger.error("No cleaned epochs for sub-%s; skipping", subject)
-            progress.error("no_epochs", f"No cleaned epochs for sub-{subject}")
-            return
+            message = f"No cleaned epochs for sub-{subject}"
+            self.logger.error("%s", message)
+            _fail_subject(progress, subject, "no_epochs", message)
 
         if aligned_events is None:
-            self.logger.warning("No events available; skipping")
-            progress.error("no_events", "No aligned events")
-            return
+            message = f"No aligned events for sub-{subject}"
+            self.logger.error("%s", message)
+            _fail_subject(progress, subject, "no_events", message)
 
         input_bids_root = resolve_eeg_bids_root(self.config, task_is_rest=task_is_rest)
 
@@ -1022,6 +1030,7 @@ class FeaturePipeline(PipelineBase):
 
         accumulated_features = _create_feature_accumulator()
         accumulated_y = None
+        saved_range_count = 0
 
         for tr_spec in time_ranges:
             name = tr_spec.get("name")
@@ -1029,11 +1038,9 @@ class FeaturePipeline(PipelineBase):
             tmax = tr_spec.get("tmax")
 
             if tmin is not None and tmax is not None and tmin > tmax:
-                self.logger.warning(
-                    "Time range '%s' has tmin (%s) > tmax (%s). Swapping values.",
-                    name, tmin, tmax,
+                raise ValueError(
+                    f"Time range '{name or 'default'}' has tmin ({tmin}) greater than tmax ({tmax})."
                 )
-                tmin, tmax = tmax, tmin
 
             suffix = name
             range_info = f"range '{name}'" if name else "default range"
@@ -1183,6 +1190,7 @@ class FeaturePipeline(PipelineBase):
                 features_dir=features_dir,
                 logger=self.logger,
                 config=self.config,
+                task=task,
                 comp_df=unpacked.get("comp_df"),
                 comp_cols=unpacked.get("comp_cols"),
                 bursts_df=unpacked.get("bursts_df"),
@@ -1276,6 +1284,7 @@ class FeaturePipeline(PipelineBase):
             }
             extraction_config.update(_feature_provenance_config(self.config))
             _save_extraction_config(extraction_config, features_dir, suffix, self.logger, feature_categories, pipeline_config=self.config)
+            saved_range_count += 1
 
             self.logger.info(
                 "Saved %s: %d total columns \u00d7 %d trials",
@@ -1285,6 +1294,14 @@ class FeaturePipeline(PipelineBase):
             del ctx, features, unpacked, extra_blocks, combined_df
             del pow_df_aligned, baseline_df_aligned, conn_df_aligned, aper_df_aligned
             gc.collect()
+
+        if saved_range_count == 0:
+            message = (
+                f"No feature outputs were saved for sub-{subject}, task-{task}. "
+                "Feature extraction failed for all requested time ranges."
+            )
+            self.logger.error("%s", message)
+            _fail_subject(progress, subject, "no_saved_features", message)
 
         if len(time_ranges) > 1:
             self.logger.info(
@@ -1296,6 +1313,7 @@ class FeaturePipeline(PipelineBase):
                 self.config,
                 self.logger,
                 aligned_events=aligned_events,
+                task=task,
             )
 
             merged_extraction_config = {

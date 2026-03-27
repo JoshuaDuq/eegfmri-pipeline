@@ -89,7 +89,7 @@ class PreprocessingPipeline(PipelineBase):
         self,
         task: Optional[str],
         kwargs: Dict[str, Any],
-    ) -> tuple[str, str, bool, bool, bool, int, Any]:
+    ) -> tuple[Optional[str], str, bool, bool, bool, int, Any]:
         """Extract and normalize preprocessing parameters from kwargs.
         
         Returns:
@@ -103,11 +103,11 @@ class PreprocessingPipeline(PipelineBase):
                 progress,
             )
         """
-        resolved_task = task or self.config.get("project.task", "task")
+        task_is_rest = self._resolve_task_is_rest(kwargs.get("task_is_rest"))
+        resolved_task = self._resolve_requested_task(task, task_is_rest)
         mode = kwargs.get("mode", "full")
         use_pyprep = kwargs.get("use_pyprep", True)
         use_icalabel = kwargs.get("use_icalabel", True)
-        task_is_rest = self._resolve_task_is_rest(kwargs.get("task_is_rest"))
         n_jobs = kwargs.get("n_jobs", 1)
         progress = ensure_progress_reporter(kwargs.get("progress"))
 
@@ -120,6 +120,22 @@ class PreprocessingPipeline(PipelineBase):
             n_jobs,
             progress,
         )
+
+    def _resolve_requested_task(
+        self,
+        task: Optional[str],
+        task_is_rest: bool,
+    ) -> Optional[str]:
+        """Resolve the task selector for the active preprocessing mode."""
+        if task is not None:
+            return task
+        if task_is_rest:
+            return None
+
+        resolved_task = self.config.get("project.task")
+        if resolved_task is None:
+            raise ValueError("Missing required config value: project.task")
+        return resolved_task
 
     def _resolve_task_is_rest(self, override: Optional[bool] = None) -> bool:
         """Resolve resting-state mode from explicit override or config."""
@@ -195,6 +211,8 @@ class PreprocessingPipeline(PipelineBase):
         )
         run_status = "failed"
         run_error: Optional[str] = None
+        caught_error: Optional[Exception] = None
+        result: Optional[List[Dict[str, Any]]] = None
 
         try:
             progress.start("preprocessing", subjects)
@@ -214,26 +232,42 @@ class PreprocessingPipeline(PipelineBase):
 
             progress.complete(success=True)
             run_status = "success"
-
-            return [{
+            result = [{
                 "subjects": subjects,
                 "mode": mode,
                 "status": "success",
             }]
         except Exception as exc:
             run_error = str(exc)
-            raise
+            caught_error = exc
         finally:
-            self._write_run_metadata(
-                run_context,
-                status=run_status,
-                error=run_error,
-                outputs={},
-                summary={
-                    "n_subjects": len(subjects),
-                    "mode": mode,
-                },
-            )
+            metadata_error: Optional[Exception] = None
+            try:
+                self._write_run_metadata(
+                    run_context,
+                    status=run_status,
+                    error=run_error,
+                    outputs={},
+                    summary={
+                        "n_subjects": len(subjects),
+                        "mode": mode,
+                    },
+                )
+            except Exception as exc:
+                metadata_error = exc
+
+            if caught_error is not None:
+                if metadata_error is not None:
+                    caught_error.add_note(
+                        f"Run metadata writing also failed: {metadata_error}"
+                    )
+                raise caught_error
+            if metadata_error is not None:
+                raise metadata_error
+
+        if result is None:
+            raise RuntimeError("Preprocessing batch completed without producing a result.")
+        return result
     
     def _normalize_subjects(self, subjects: List[str]) -> Union[str, List[str]]:
         """Normalize subjects list to 'all' string if needed."""
@@ -259,7 +293,7 @@ class PreprocessingPipeline(PipelineBase):
         self,
         steps: List[str],
         subjects: List[str],
-        task: str,
+        task: Optional[str],
         use_pyprep: bool,
         use_icalabel: bool,
         task_is_rest: bool,
@@ -307,7 +341,7 @@ class PreprocessingPipeline(PipelineBase):
     def _run_bad_channel_detection(
         self,
         subjects: List[str],
-        task: str,
+        task: Optional[str],
         n_jobs: int = 1,
     ) -> None:
         """Detect bad channels using PyPREP."""
@@ -371,7 +405,7 @@ class PreprocessingPipeline(PipelineBase):
     def _run_ica_fitting(
         self,
         subjects: List[str],
-        task: str,
+        task: Optional[str],
         use_icalabel: bool = True,
         task_is_rest: Optional[bool] = None,
     ) -> None:
@@ -381,6 +415,7 @@ class PreprocessingPipeline(PipelineBase):
         self._run_mne_bids_pipeline(
             steps,
             subjects=subjects,
+            task=task,
             task_is_rest=task_is_rest,
         )
         
@@ -389,7 +424,7 @@ class PreprocessingPipeline(PipelineBase):
     def _run_ica_labeling(
         self,
         subjects: List[str],
-        task: str,
+        task: Optional[str],
     ) -> None:
         """Run ICA component labeling using mne-icalabel."""
         from eeg_pipeline.preprocessing.pipeline.ica import run_ica_label
@@ -413,7 +448,7 @@ class PreprocessingPipeline(PipelineBase):
     def _run_epoch_creation(
         self,
         subjects: List[str],
-        task: str,
+        task: Optional[str],
         task_is_rest: bool,
     ) -> None:
         """Create epochs and apply ICA via MNE-BIDS pipeline."""
@@ -422,6 +457,7 @@ class PreprocessingPipeline(PipelineBase):
         self._run_mne_bids_pipeline(
             steps,
             subjects=subjects,
+            task=task,
             task_is_rest=task_is_rest,
         )
 
@@ -432,18 +468,18 @@ class PreprocessingPipeline(PipelineBase):
         
         self.logger.info("Epoch creation complete")
 
-    def _resolve_epoch_conditions(self) -> list[str] | None:
+    def _resolve_epoch_conditions(self, task: Optional[str] = None) -> list[str] | None:
         conditions = self.config.get("epochs.conditions")
         if conditions:
             return list(conditions)
-        detected = self._detect_conditions_from_bids()
+        detected = self._detect_conditions_from_bids(task)
         return list(detected) if detected else None
 
     def _write_clean_events_tsv(self, *, subjects: List[str], task: str) -> None:
         from eeg_pipeline.infra.paths import find_clean_epochs_path
         from eeg_pipeline.utils.data.preprocessing import write_clean_events_tsv_for_epochs
 
-        conditions = self._resolve_epoch_conditions()
+        conditions = self._resolve_epoch_conditions(task)
         raw_condition_columns = self.config.get("event_columns.condition", []) or []
         if isinstance(raw_condition_columns, (list, tuple)):
             condition_columns = [str(v).strip() for v in raw_condition_columns if str(v).strip()]
@@ -485,7 +521,7 @@ class PreprocessingPipeline(PipelineBase):
                     raise RuntimeError(msg) from exc
                 self.logger.warning(msg)
     
-    def _collect_stats(self, task: str) -> None:
+    def _collect_stats(self, task: Optional[str]) -> None:
         """Collect preprocessing statistics."""
         from eeg_pipeline.preprocessing.pipeline.stats import collect_preprocessing_stats
         
@@ -503,6 +539,7 @@ class PreprocessingPipeline(PipelineBase):
         self,
         steps: str,
         subjects: List[str] = None,
+        task: Optional[str] = None,
         task_is_rest: Optional[bool] = None,
     ) -> None:
         """Run MNE-BIDS pipeline with a generated config file.
@@ -514,6 +551,7 @@ class PreprocessingPipeline(PipelineBase):
         Args:
             steps: MNE-BIDS pipeline steps to run
             subjects: List of subject IDs to process (without 'sub-' prefix)
+            task: Task name to constrain MNE-BIDS-Pipeline subject selection
             task_is_rest: Override config to enable/disable resting-state preprocessing
         """
         import tempfile
@@ -521,6 +559,7 @@ class PreprocessingPipeline(PipelineBase):
         config_content = self._generate_mne_bids_config(
             steps,
             subjects=subjects,
+            task=task,
             task_is_rest=task_is_rest,
         )
         
@@ -611,11 +650,15 @@ class PreprocessingPipeline(PipelineBase):
         lines.append(f"rest_epochs_duration = {duration}")
         lines.append(f"rest_epochs_overlap = {overlap}")
 
-    def _append_task_epoch_config(self, lines: list[str]) -> None:
+    def _append_task_epoch_config(
+        self,
+        lines: list[str],
+        task: Optional[str],
+    ) -> None:
         """Append event-locked epoch configuration for MNE-BIDS-Pipeline."""
         conditions = self.config.get("epochs.conditions")
         if not conditions:
-            conditions = self._detect_conditions_from_bids()
+            conditions = self._detect_conditions_from_bids(task)
         if not conditions:
             raise ValueError(
                 "Non-resting-state preprocessing requires epochs.conditions or "
@@ -672,6 +715,7 @@ class PreprocessingPipeline(PipelineBase):
         self,
         steps: str,
         subjects: List[str] = None,
+        task: Optional[str] = None,
         task_is_rest: Optional[bool] = None,
     ) -> str:
         """Generate Python config file content for mne_bids_pipeline.
@@ -681,6 +725,9 @@ class PreprocessingPipeline(PipelineBase):
             subjects: List of subject IDs to process (without 'sub-' prefix)
         """
         resolved_task_is_rest = self._resolve_task_is_rest(task_is_rest)
+        resolved_task = task
+        if resolved_task is None and not resolved_task_is_rest:
+            resolved_task = self.config.get("project.task")
         lines = [
             '"""Auto-generated MNE-BIDS pipeline config."""',
             "",
@@ -692,6 +739,10 @@ class PreprocessingPipeline(PipelineBase):
         # Subject filter (critical to avoid processing all subjects)
         if subjects:
             lines.append(f'subjects = {subjects}')
+            lines.append("")
+
+        if resolved_task:
+            lines.append(f'task = "{resolved_task}"')
             lines.append("")
         
         # Channel types
@@ -787,7 +838,7 @@ class PreprocessingPipeline(PipelineBase):
         if resolved_task_is_rest:
             self._append_rest_epoch_config(lines)
         else:
-            self._append_task_epoch_config(lines)
+            self._append_task_epoch_config(lines, resolved_task)
 
         self._append_rejection_config(lines)
         
@@ -795,7 +846,7 @@ class PreprocessingPipeline(PipelineBase):
         
         return "\n".join(lines)
     
-    def _detect_conditions_from_bids(self) -> list | None:
+    def _detect_conditions_from_bids(self, task: Optional[str] = None) -> list | None:
         """Detect unique condition names from BIDS events files.
         
         Reads a configured condition column from first available events TSV and returns
@@ -804,24 +855,51 @@ class PreprocessingPipeline(PipelineBase):
         Returns:
             List of unique condition values, or None if detection fails.
         """
-        events_files = sorted(self.bids_root.glob("sub-*/eeg/*_events.tsv"))
+        if task is None:
+            events_files = sorted(
+                path
+                for path in self.bids_root.rglob("*_events.tsv")
+                if path.is_file() and "eeg" in path.parts
+            )
+        else:
+            candidate_paths = sorted(
+                path
+                for path in self.bids_root.rglob(f"*_task-{task}*_events.tsv")
+                if path.is_file() and "eeg" in path.parts
+            )
+            events_files = [
+                path
+                for path in candidate_paths
+                if f"_task-{task}_" in path.name
+                or path.name.endswith(f"_task-{task}_events.tsv")
+            ]
         config_obj = getattr(self, "config", None)
         
         if not events_files:
-            self.logger.debug("No events files found in %s", self.bids_root)
+            if task is None:
+                self.logger.debug("No EEG events files found in %s", self.bids_root)
+            else:
+                self.logger.debug(
+                    "No EEG events files found in %s for task '%s'",
+                    self.bids_root,
+                    task,
+                )
             return None
         
-        try:
-            with open(events_files[0], "r", encoding="utf-8") as f:
+        candidates = list(get_condition_column_candidates(config_obj))
+        if not candidates:
+            candidates = ["condition", "trial_type"]
+
+        conditions = set()
+        detected_columns = set()
+        for events_file in events_files:
+            with open(events_file, "r", encoding="utf-8") as f:
                 header = f.readline().strip().split("\t")
                 header_lookup = {
                     str(name).strip().lower(): idx for idx, name in enumerate(header)
                 }
                 condition_column = None
                 condition_idx = None
-                candidates = list(get_condition_column_candidates(config_obj))
-                if not candidates:
-                    candidates = ["condition", "trial_type"]
                 for candidate in candidates:
                     idx = header_lookup.get(candidate.lower())
                     if idx is not None:
@@ -830,86 +908,81 @@ class PreprocessingPipeline(PipelineBase):
                         break
 
                 if condition_idx is None:
-                    self.logger.debug(
-                        "No configured condition column found in events file header (candidates=%s)",
-                        candidates,
-                    )
-                    return None
+                    continue
 
-                conditions = set()
-                
+                detected_columns.add(str(condition_column))
                 for line in f:
                     parts = line.strip().split("\t")
-                    if len(parts) > condition_idx:
-                        condition_value = parts[condition_idx].strip()
-                        if condition_value and condition_value != "n/a":
-                            conditions.add(condition_value)
+                    if len(parts) <= condition_idx:
+                        continue
+                    condition_value = parts[condition_idx].strip()
+                    if condition_value and condition_value != "n/a":
+                        conditions.add(condition_value)
 
-                if not conditions:
-                    return None
+        if not detected_columns:
+            self.logger.debug(
+                "No configured condition column found in any events file header (candidates=%s)",
+                candidates,
+            )
+            return None
 
-                # Heuristic filtering:
-                # - Prefer task-like triggers using configurable prefixes.
-                # - Avoid scanner/housekeeping markers (Volume, Pulse Artifact, SyncStatus, etc.)
-                configured_prefixes = None
-                if config_obj is not None and hasattr(config_obj, "get"):
-                    configured_prefixes = config_obj.get("preprocessing.condition_preferred_prefixes")
-                if isinstance(configured_prefixes, (list, tuple)):
-                    preferred_prefixes = tuple(
-                        str(p).strip()
-                        for p in configured_prefixes
-                        if str(p).strip()
-                    )
-                elif isinstance(configured_prefixes, str) and configured_prefixes.strip():
-                    preferred_prefixes = tuple(
-                        part.strip()
-                        for part in configured_prefixes.split(",")
-                        if part.strip()
-                    )
-                else:
-                    preferred_prefixes = ()
-                excluded_prefixes = (
-                    "Volume",
-                    "Pulse",
-                    "SyncStatus",
-                    "New Segment",
-                    "Bad",
-                    "EDGE",
-                    "Response",
-                )
+        if not conditions:
+            return None
 
-                preferred = sorted(
-                    t for t in conditions if any(t.startswith(p) for p in preferred_prefixes)
-                )
-                if preferred:
-                    self.logger.info(
-                        "Auto-detected task conditions from BIDS column '%s': %s",
-                        condition_column,
-                        preferred,
-                    )
-                    return preferred
+        configured_prefixes = None
+        if config_obj is not None and hasattr(config_obj, "get"):
+            configured_prefixes = config_obj.get("preprocessing.condition_preferred_prefixes")
+        if isinstance(configured_prefixes, (list, tuple)):
+            preferred_prefixes = tuple(
+                str(p).strip()
+                for p in configured_prefixes
+                if str(p).strip()
+            )
+        elif isinstance(configured_prefixes, str) and configured_prefixes.strip():
+            preferred_prefixes = tuple(
+                part.strip()
+                for part in configured_prefixes.split(",")
+                if part.strip()
+            )
+        else:
+            preferred_prefixes = ()
+        excluded_prefixes = (
+            "Volume",
+            "Pulse",
+            "SyncStatus",
+            "New Segment",
+            "Bad",
+            "EDGE",
+            "Response",
+        )
 
-                filtered = sorted(
-                    t for t in conditions if not any(t.startswith(p) for p in excluded_prefixes)
-                )
-                if not filtered:
-                    return None
+        preferred = sorted(
+            t for t in conditions if any(t.startswith(p) for p in preferred_prefixes)
+        )
+        if preferred:
+            self.logger.info(
+                "Auto-detected task conditions from BIDS columns %s: %s",
+                sorted(detected_columns),
+                preferred,
+            )
+            return preferred
 
-                if len(filtered) > 50:
-                    self.logger.warning(
-                        "Auto-detected %d conditions from BIDS (too many). "
-                        "Set epochs.conditions explicitly in config to avoid ambiguity.",
-                        len(filtered),
-                    )
-                    return None
+        filtered = sorted(
+            t for t in conditions if not any(t.startswith(p) for p in excluded_prefixes)
+        )
+        if not filtered:
+            return None
 
-                self.logger.info("Auto-detected filtered conditions from BIDS: %s", filtered)
-                return filtered
-                    
-        except Exception as e:
-            self.logger.debug("Failed to detect conditions: %s", e)
-        
-        return None
+        if len(filtered) > 50:
+            self.logger.warning(
+                "Auto-detected %d conditions from BIDS (too many). "
+                "Set epochs.conditions explicitly in config to avoid ambiguity.",
+                len(filtered),
+            )
+            return None
+
+        self.logger.info("Auto-detected filtered conditions from BIDS: %s", filtered)
+        return filtered
 
 
 __all__ = ["PreprocessingPipeline"]

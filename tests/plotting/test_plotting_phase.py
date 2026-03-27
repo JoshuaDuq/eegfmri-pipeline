@@ -290,3 +290,24 @@ def test_apply_stats_filters_matches_window_alias_columns() -> None:
 
     assert filtered is not None
     assert len(filtered) == 1
+
+
+def test_apply_stats_filters_restricts_identifier_only_tables_by_feature_type() -> None:
+    stats_df = pd.DataFrame(
+        {
+            "identifier": [
+                "power_alpha_roi-frontal",
+                "asymmetry_alpha_pair-f3-f4",
+            ],
+            "comparison_type": ["multigroup", "multigroup"],
+        }
+    )
+
+    filtered = plotting_utils._apply_stats_filters(
+        stats_df,
+        feature_type="asymmetry",
+        comparison_type="multigroup",
+    )
+
+    assert filtered is not None
+    assert filtered["identifier"].tolist() == ["asymmetry_alpha_pair-f3-f4"]

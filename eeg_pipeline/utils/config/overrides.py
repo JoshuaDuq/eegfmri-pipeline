@@ -62,21 +62,30 @@ def apply_set_overrides(
 def _apply_set_override(config: dict[str, Any], raw_override: str) -> None:
     override = raw_override.strip()
     if not override:
-        return
+        raise ValueError("Empty override is invalid; expected KEY=VALUE.")
     if "=" not in override:
-        return
+        raise ValueError(
+            f"Invalid override {raw_override!r}; expected KEY=VALUE."
+        )
 
     key, raw_value = override.split("=", 1)
     path_parts = [part.strip() for part in key.split(".") if part.strip()]
     if not path_parts:
-        return
+        raise ValueError(
+            f"Invalid override key {key!r}; expected a non-empty dotted path."
+        )
 
     cursor: dict[str, Any] = config
     for part in path_parts[:-1]:
         next_value = cursor.get(part)
-        if not isinstance(next_value, dict):
+        if next_value is None:
             next_value = {}
             cursor[part] = next_value
+        elif not isinstance(next_value, dict):
+            raise ValueError(
+                f"Cannot apply override {raw_override!r}: parent path "
+                f"{part!r} resolves to a non-mapping value."
+            )
         cursor = next_value
 
     cursor[path_parts[-1]] = _coerce_set_value(raw_value.strip())
@@ -107,6 +116,8 @@ def _coerce_set_value(raw_value: str) -> Any:
         try:
             return json.loads(raw_value)
         except json.JSONDecodeError:
-            return raw_value
+            raise ValueError(
+                f"Invalid JSON override value: {raw_value!r}"
+            ) from None
 
     return raw_value

@@ -189,6 +189,30 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertIn("baseline = (None, 0)", cfg)
         self.assertNotIn("reject =", cfg)
 
+    def test_generate_mne_bids_config_includes_requested_task(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.bids_root = Path("/tmp/bids")
+        p.deriv_root = Path("/tmp/deriv")
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "preprocessing": {"task_is_rest": False},
+                "epochs": {},
+            }
+        )
+
+        with patch.object(PreprocessingPipeline, "_detect_conditions_from_bids", return_value=["stim"]) as mock_detect:
+            cfg = p._generate_mne_bids_config(
+                "preprocessing/_07_make_epochs",
+                subjects=["0001"],
+                task="pain",
+            )
+
+        self.assertIn('task = "pain"', cfg)
+        mock_detect.assert_called_once_with("pain")
+
     def test_generate_mne_bids_config_for_resting_state(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -218,6 +242,32 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertIn("rest_epochs_duration = 12.0", cfg)
         self.assertIn("rest_epochs_overlap = 0.0", cfg)
         self.assertNotIn("epochs_tmax =", cfg)
+
+    def test_generate_mne_bids_config_omits_project_task_for_resting_state_without_override(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.bids_root = Path("/tmp/bids-rest")
+        p.deriv_root = Path("/tmp/deriv-rest")
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "project": {"task": "pain"},
+                "preprocessing": {
+                    "task_is_rest": True,
+                    "rest_epochs_duration": 12.0,
+                    "rest_epochs_overlap": 0.0,
+                },
+            }
+        )
+
+        cfg = p._generate_mne_bids_config(
+            "preprocessing/_07_make_epochs",
+            subjects=["0001"],
+            task=None,
+        )
+
+        self.assertNotIn('task = "pain"', cfg)
 
     def test_preprocessing_helper_failure_validation_and_config_branches(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -280,6 +330,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
 
         p.config = DotConfig(
             {
+                "project": {"task": "task"},
                 "eeg": {"ch_types": "eeg"},
                 "preprocessing": {"task_is_rest": False, "random_state": 7},
                 "epochs": {"conditions": ["stim"]},
@@ -334,6 +385,18 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         p.config = DotConfig({"preprocessing": {"condition_preferred_prefixes": "Cue"}})
         self.assertEqual(p._detect_conditions_from_bids(), ["CueA", "CueB"])
 
+    def test_resolve_epoch_conditions_uses_requested_task(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig({"epochs": {}})
+
+        with patch.object(PreprocessingPipeline, "_detect_conditions_from_bids", return_value=["stim"]) as mock_detect:
+            self.assertEqual(p._resolve_epoch_conditions(task="pain"), ["stim"])
+
+        mock_detect.assert_called_once_with("pain")
+
     def test_generate_mne_bids_config_rejects_overlapping_rest_epochs(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -376,18 +439,19 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         p.bids_root = Path("/tmp/bids")
         p.deriv_root = Path("/tmp/deriv")
 
-        with patch.object(PreprocessingPipeline, "_generate_mne_bids_config", return_value="x=1"), patch(
+        with patch.object(PreprocessingPipeline, "_generate_mne_bids_config", return_value="x=1") as mock_generate, patch(
             "eeg_pipeline.pipelines.preprocessing.subprocess.run",
             return_value=SimpleNamespace(returncode=0, stdout="ok", stderr=""),
         ):
-            p._run_mne_bids_pipeline("init", subjects=["0001"])
+            p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain")
+        self.assertEqual(mock_generate.call_args.kwargs["task"], "pain")
 
         with patch.object(PreprocessingPipeline, "_generate_mne_bids_config", return_value="x=1"), patch(
             "eeg_pipeline.pipelines.preprocessing.subprocess.run",
             return_value=SimpleNamespace(returncode=1, stdout="", stderr="boom"),
         ):
             with self.assertRaises(RuntimeError):
-                p._run_mne_bids_pipeline("init", subjects=["0001"])
+                p._run_mne_bids_pipeline("init", subjects=["0001"], task="pain")
 
     def test_run_bad_channel_and_ica_labeling(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -518,6 +582,35 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["specifications"]["mode"], "epochs")
 
+    def test_run_batch_preserves_primary_failure_when_metadata_write_also_fails(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.name = "preprocessing"
+        p.config = DotConfig({"project": {"task": "task"}})
+        p.logger = Mock()
+        p.bids_root = Path(tempfile.mkdtemp()) / "bids"
+        p.deriv_root = Path(tempfile.mkdtemp())
+
+        with patch.object(
+            PreprocessingPipeline,
+            "_execute_steps",
+            side_effect=RuntimeError("boom"),
+        ), patch.object(
+            p,
+            "_write_run_metadata",
+            side_effect=RuntimeError("meta-fail"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom") as exc_info:
+                p.run_batch(
+                    subjects=["0001"],
+                    task="task",
+                    mode="epochs",
+                    progress=_NoopProgress(),
+                )
+
+        self.assertIn("meta-fail", "".join(getattr(exc_info.exception, "__notes__", [])))
+
     def test_extract_params_and_process_subject(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -533,6 +626,23 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         self.assertTrue(use_pyprep)
         self.assertTrue(use_icalabel)
         self.assertFalse(task_is_rest)
+        self.assertEqual(n_jobs, 1)
+        self.assertIsNotNone(progress)
+
+        p.config = DotConfig({})
+        with self.assertRaisesRegex(ValueError, "Missing required config value: project.task"):
+            p._extract_preprocessing_params(None, {})
+
+        p.config = DotConfig({"preprocessing": {"task_is_rest": True}})
+        with patch.dict(sys.modules, {"eeg_pipeline.cli.common": fake_cli}):
+            task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = (
+                p._extract_preprocessing_params(None, {})
+            )
+        self.assertIsNone(task)
+        self.assertEqual(mode, "full")
+        self.assertTrue(use_pyprep)
+        self.assertTrue(use_icalabel)
+        self.assertTrue(task_is_rest)
         self.assertEqual(n_jobs, 1)
         self.assertIsNotNone(progress)
 
@@ -648,9 +758,53 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         ev.write_text(f"trial_type\tonset\n{many}\n", encoding="utf-8")
         self.assertIsNone(p._detect_conditions_from_bids())
 
-        # exception while reading -> debug branch
+        # read/parsing errors should surface
         with patch("builtins.open", side_effect=RuntimeError("bad-open")):
-            self.assertIsNone(p._detect_conditions_from_bids())
+            with self.assertRaisesRegex(RuntimeError, "bad-open"):
+                p._detect_conditions_from_bids()
+
+    def test_detect_conditions_from_bids_uses_requested_task_in_session_layout(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.bids_root = Path(tempfile.mkdtemp())
+        p.logger = Mock()
+
+        session_eeg_dir = p.bids_root / "sub-0001" / "ses-01" / "eeg"
+        session_eeg_dir.mkdir(parents=True, exist_ok=True)
+        (session_eeg_dir / "sub-0001_ses-01_task-audio_run-01_events.tsv").write_text(
+            "trial_type\tonset\nAudioOnly\t0\n",
+            encoding="utf-8",
+        )
+        (session_eeg_dir / "sub-0001_ses-01_task-pain_run-01_events.tsv").write_text(
+            "trial_type\tonset\nCueA\t0\nCueB\t1\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(p._detect_conditions_from_bids(task="pain"), ["CueA", "CueB"])
+
+    def test_detect_conditions_from_bids_aggregates_across_matching_files(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.bids_root = Path(tempfile.mkdtemp())
+        p.logger = Mock()
+
+        subject_a_dir = p.bids_root / "sub-0001" / "eeg"
+        subject_b_dir = p.bids_root / "sub-0002" / "eeg"
+        subject_a_dir.mkdir(parents=True, exist_ok=True)
+        subject_b_dir.mkdir(parents=True, exist_ok=True)
+
+        (subject_a_dir / "sub-0001_task-pain_run-01_events.tsv").write_text(
+            "trial_type\tonset\nVolume\t0\n",
+            encoding="utf-8",
+        )
+        (subject_b_dir / "sub-0002_task-pain_run-01_events.tsv").write_text(
+            "trial_type\tonset\nCueA\t0\nCueB\t1\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(p._detect_conditions_from_bids(task="pain"), ["CueA", "CueB"])
 
     def test_generate_config_additional_branches_and_clean_events_error_paths(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline

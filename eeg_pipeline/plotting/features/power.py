@@ -1418,7 +1418,7 @@ def _plot_column_comparison(
     Supports both 2-group comparison (simple unpaired) and multi-group comparison
     (3+ groups with all pairwise brackets and significance asterisks).
     """
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.utils.config.loader import get_config_value
     from .utils import load_precomputed_paired_stats, get_precomputed_qvalues, plot_multi_group_column_comparison, get_named_segments
     
@@ -1426,17 +1426,24 @@ def _plot_column_comparison(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
-        
-        masks_dict, group_labels = multi_group_info
+        conditions = _resolve_power_plot_conditions(
+            events_df=events_df,
+            config=config,
+            context="plot_power_by_condition multi-group column comparison",
+        )
+        if len(conditions) < 3:
+            raise ValueError(
+                "Multi-group column comparison requires at least 3 configured groups with matching trials."
+            )
+
+        group_labels = [label for label, _ in conditions]
+        masks_dict = {label: mask for label, mask in conditions}
         seg_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         if seg_name == "":
             raise ValueError("plotting.comparisons.comparison_segment must be a non-empty string")
         
         from .utils import load_multigroup_stats
-        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+        multigroup_stats = load_multigroup_stats(stats_dir, feature_type="power") if stats_dir else None
         
         for roi_name in roi_names:
             if roi_name == "all":
@@ -1737,6 +1744,8 @@ def plot_power_by_condition(
 
     compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
     compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
+    comparison_values = get_config_value(config, "plotting.comparisons.comparison_values", [])
+    use_multi_group = isinstance(comparison_values, (list, tuple)) and len(comparison_values) > 2
     
     bands = list(get_frequency_band_names(config) or ["delta", "theta", "alpha", "beta", "gamma"])
     
@@ -1791,30 +1800,33 @@ def plot_power_by_condition(
             power_df, events_df, subject, save_dir, logger, config,
             bands, roi_names, rois, all_channels, stats_dir
         )
-        comparison_segment = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
-        effect_df, qvalue_df, label1, label2 = _compute_column_effect_summary(
-            power_df=power_df,
-            events_df=events_df,
-            bands=bands,
-            seg_name=comparison_segment,
-            roi_names=roi_names,
-            rois=rois,
-            all_channels=all_channels,
-            config=config,
-        )
-        _plot_power_effect_summary_heatmap(
-            effect_df=effect_df,
-            qvalue_df=qvalue_df,
-            subject=subject,
-            save_path=save_dir / f"sub-{subject}_power_roi_band_summary_column",
-            logger=logger,
-            config=config,
-            title=f"Power condition effects: {label2} - {label1}",
-            footer=(
-                f"Subject: {subject} | Segment: {comparison_segment} | "
-                f"Unpaired effect size (d) | FDR across ROI x band cells | open circles: q<0.05"
-            ),
-        )
+        if not use_multi_group:
+            comparison_segment = str(
+                require_config_value(config, "plotting.comparisons.comparison_segment")
+            ).strip()
+            effect_df, qvalue_df, label1, label2 = _compute_column_effect_summary(
+                power_df=power_df,
+                events_df=events_df,
+                bands=bands,
+                seg_name=comparison_segment,
+                roi_names=roi_names,
+                rois=rois,
+                all_channels=all_channels,
+                config=config,
+            )
+            _plot_power_effect_summary_heatmap(
+                effect_df=effect_df,
+                qvalue_df=qvalue_df,
+                subject=subject,
+                save_path=save_dir / f"sub-{subject}_power_roi_band_summary_column",
+                logger=logger,
+                config=config,
+                title=f"Power condition effects: {label2} - {label1}",
+                footer=(
+                    f"Subject: {subject} | Segment: {comparison_segment} | "
+                    f"Unpaired effect size (d) | FDR across ROI x band cells | open circles: q<0.05"
+                ),
+            )
 
 
 
@@ -1827,7 +1839,17 @@ def _resolve_power_plot_conditions(
     context: str,
 ) -> List[Tuple[str, np.ndarray]]:
     """Resolve configured power-plot comparison masks into label/mask pairs."""
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    from eeg_pipeline.plotting.features.utils import resolve_complete_multigroup_plot_groups
+
+    def _require_non_empty_mask(label: str, mask: np.ndarray) -> np.ndarray:
+        mask_bool = np.asarray(mask, dtype=bool)
+        if int(mask_bool.sum()) == 0:
+            raise ValueError(
+                f"{context}: no trials found for configured group {label!r} "
+                f"in column {comparison_column!r}"
+            )
+        return mask_bool
 
     comparison_column = str(get_config_value(config, "plotting.comparisons.comparison_column", "") or "").strip()
     values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
@@ -1875,13 +1897,17 @@ def _resolve_power_plot_conditions(
         if not comp_mask_info:
             raise ValueError(f"{context} could not resolve configured comparison masks.")
         mask1, mask2, label1, label2 = comp_mask_info
-        return [(str(label1), np.asarray(mask1, dtype=bool)), (str(label2), np.asarray(mask2, dtype=bool))]
+        mask1_bool = _require_non_empty_mask(str(label1), mask1)
+        mask2_bool = _require_non_empty_mask(str(label2), mask2)
+        return [(str(label1), mask1_bool), (str(label2), mask2_bool)]
 
-    multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-    if not multi_group_info:
-        raise ValueError(f"{context} could not resolve configured multi-group masks.")
-    masks_dict, group_labels = multi_group_info
-    return [(str(label), np.asarray(masks_dict[label], dtype=bool)) for label in group_labels]
+    masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+        events_df,
+        config,
+        context=context,
+        minimum_groups=3,
+    )
+    return [(label, masks_dict[label]) for label in group_labels]
 
 
 def _extract_cross_frequency_band_values(

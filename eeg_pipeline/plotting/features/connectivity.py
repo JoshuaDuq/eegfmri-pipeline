@@ -658,13 +658,14 @@ def plot_connectivity_circle_by_condition(
         log_if_present(logger, "warning", "No feature data for connectivity plot")
         return
 
-    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
-    
-    multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-    if not multi_group_info:
-        raise ValueError("Connectivity circle plot requested but could not resolve group masks.")
-    masks_dict, group_labels = multi_group_info
-    conditions = [(label, mask) for label, mask in masks_dict.items()]
+    from eeg_pipeline.plotting.features.utils import resolve_complete_multigroup_plot_groups
+
+    masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+        events_df,
+        config,
+        context="Connectivity circle plot",
+    )
+    conditions = [(label, masks_dict[label]) for label in group_labels]
     
     plot_cfg = get_plot_config(config)
     group_colors = plt.cm.Set2(np.linspace(0, 1, max(len(conditions), 3)))
@@ -870,8 +871,13 @@ def _plot_column_comparison_connectivity(
     """
     from scipy.stats import mannwhitneyu
 
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
-    from eeg_pipeline.plotting.features.utils import apply_fdr_correction, get_band_color, plot_multi_group_column_comparison
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    from eeg_pipeline.plotting.features.utils import (
+        apply_fdr_correction,
+        get_band_color,
+        plot_multi_group_column_comparison,
+        resolve_complete_multigroup_plot_groups,
+    )
     from eeg_pipeline.utils.formatting import sanitize_label
 
     def compute_plot_limits(values: np.ndarray, measure_name: str) -> Tuple[float, float]:
@@ -1010,11 +1016,11 @@ def _plot_column_comparison_connectivity(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
-        
-        masks_dict, group_labels = multi_group_info
+        masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+            events_df,
+            config,
+            context="Connectivity multi-group column comparison",
+        )
         segment = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         for roi_name in roi_names:
@@ -1528,13 +1534,14 @@ def plot_connectivity_network_by_condition(
         log_if_present(logger, "warning", "No feature data for connectivity network plot")
         return
 
-    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
-    
-    multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-    if not multi_group_info:
-        raise ValueError("Connectivity network plot requested but could not resolve group masks.")
-    masks_dict, group_labels = multi_group_info
-    conditions = [(label, mask) for label, mask in masks_dict.items()]
+    from eeg_pipeline.plotting.features.utils import resolve_complete_multigroup_plot_groups
+
+    masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+        events_df,
+        config,
+        context="Connectivity network plot",
+    )
+    conditions = [(label, masks_dict[label]) for label in group_labels]
     
     plot_cfg = get_plot_config(config)
     group_colors = plt.cm.Set2(np.linspace(0, 1, max(len(conditions), 3)))

@@ -12,6 +12,7 @@ This module consolidates common functionality used across multiple plotting modu
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Tuple, List, Dict, Any, Optional, Union
 from itertools import combinations
@@ -869,10 +870,16 @@ def _apply_stats_filters(
     # Filter by feature_type
     if feature_type:
         ft_lower = feature_type.lower()
+        feature_mask: Optional[pd.Series] = None
         if "feature_type" in df.columns:
-            mask &= df["feature_type"].str.lower().str.contains(ft_lower, na=False)
+            feature_mask = df["feature_type"].astype(str).str.lower().str.contains(ft_lower, na=False)
         if "identifier" in df.columns:
-            mask |= df["identifier"].str.lower().str.contains(ft_lower, na=False)
+            identifier_lower = df["identifier"].astype(str).str.lower()
+            if _identifier_has_feature_family(identifier_lower, ft_lower):
+                identifier_mask = identifier_lower.str.contains(ft_lower, na=False)
+                feature_mask = identifier_mask if feature_mask is None else (feature_mask | identifier_mask)
+        if feature_mask is not None:
+            mask &= feature_mask
     
     # Filter by comparison_type
     if comparison_type and "comparison_type" in df.columns:
@@ -911,6 +918,29 @@ def _apply_stats_filters(
     
     filtered = df[mask]
     return filtered if not filtered.empty else None
+
+
+def _identifier_has_feature_family(
+    identifier_lower: pd.Series,
+    requested_feature_type: str,
+) -> bool:
+    """Return whether identifiers encode feature-family names for strict filtering."""
+    known_prefixes = (
+        "power_",
+        "aperiodic_",
+        "complexity_",
+        "bursts_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "itpc_",
+        "pac_",
+        "connectivity_",
+    )
+    if identifier_lower.str.startswith(known_prefixes).any():
+        return True
+    return identifier_lower.str.contains(requested_feature_type, na=False).any()
 
 
 def get_precomputed_qvalues(
@@ -1646,6 +1676,51 @@ def load_multigroup_stats(
     return stats
 
 
+def resolve_complete_multigroup_plot_groups(
+    events_df: pd.DataFrame,
+    config: Any,
+    *,
+    context: str,
+    minimum_groups: int = 2,
+) -> Tuple[Dict[str, np.ndarray], List[str]]:
+    """Resolve configured multi-group labels and require every group to have trials."""
+    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
+
+    multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
+    if not multi_group_info:
+        raise ValueError(f"{context} could not resolve configured multi-group masks.")
+
+    masks_dict, group_labels = multi_group_info
+    resolved_masks: Dict[str, np.ndarray] = {}
+    missing_labels: List[str] = []
+
+    for label in group_labels:
+        mask = masks_dict.get(label)
+        if mask is None:
+            missing_labels.append(str(label))
+            continue
+
+        mask_bool = np.asarray(mask, dtype=bool)
+        if int(mask_bool.sum()) == 0:
+            missing_labels.append(str(label))
+            continue
+
+        resolved_masks[str(label)] = mask_bool
+
+    if missing_labels:
+        raise ValueError(
+            f"{context}: missing configured group(s) with matching trials: {missing_labels}"
+        )
+
+    ordered_labels = [str(label) for label in group_labels]
+    if len(ordered_labels) < minimum_groups:
+        raise ValueError(
+            f"{context} requires at least {minimum_groups} configured groups with matching trials."
+        )
+
+    return resolved_masks, ordered_labels
+
+
 def plot_multi_group_column_comparison(
     data_by_band: Dict[str, Dict[str, np.ndarray]],
     subject: str,
@@ -1658,6 +1733,7 @@ def plot_multi_group_column_comparison(
     roi_name: Optional[str] = None,
     stats_dir: Optional[Union[Path, str]] = None,
     multigroup_stats: Optional[pd.DataFrame] = None,
+    stats_match_terms: Optional[Dict[str, Tuple[str, ...]]] = None,
 ) -> None:
     """Multi-group unpaired comparison plot with significance brackets.
     
@@ -1678,6 +1754,7 @@ def plot_multi_group_column_comparison(
         roi_name: ROI name for title
         stats_dir: Directory containing pre-computed statistics (required if multigroup_stats not provided)
         multigroup_stats: Pre-loaded multigroup stats DataFrame (optional, avoids reloading)
+        stats_match_terms: Optional mapping from plotted feature key to identifier match terms
     """
     import matplotlib.pyplot as plt
     
@@ -1688,22 +1765,18 @@ def plot_multi_group_column_comparison(
 
     if multigroup_stats is None:
         if stats_dir is None:
-            if logger:
-                logger.warning(
-                    f"Multi-group comparison for {feature_label} requires pre-computed stats. "
-                    "Run behavior pipeline with 3+ comparison values first."
-                )
-            return
+            raise ValueError(
+                f"Multi-group comparison for {feature_label} requires pre-computed stats. "
+                "Run behavior pipeline with 3+ comparison values first."
+            )
         
         multigroup_stats = load_multigroup_stats(stats_dir)
 
         if multigroup_stats is None or multigroup_stats.empty:
-            if logger:
-                logger.warning(
-                    f"No pre-computed multi-group stats found for {feature_label}. "
-                    "Run behavior pipeline with 3+ comparison values first."
-                )
-            return
+            raise ValueError(
+                f"No pre-computed multi-group stats found for {feature_label}. "
+                "Run behavior pipeline with 3+ comparison values first."
+            )
     else:
         multigroup_stats = multigroup_stats.copy()
 
@@ -1715,12 +1788,10 @@ def plot_multi_group_column_comparison(
         )
 
     if multigroup_stats.empty and stats_dir is not None:
-        if logger:
-            logger.warning(
-                f"No pre-computed multi-group stats found for {feature_label}. "
-                "Run behavior pipeline with 3+ comparison values first."
-            )
-        return
+        raise ValueError(
+            f"No pre-computed multi-group stats found for {feature_label}. "
+            "Run behavior pipeline with 3+ comparison values first."
+        )
     
     plot_cfg = get_plot_config(config)
     bands_in_order = list(data_by_band.keys())
@@ -1732,25 +1803,14 @@ def plot_multi_group_column_comparison(
     n_groups = len(groups)
     group_colors = plt.cm.Set2(np.linspace(0, 1, max(n_groups, 3)))
     
-    # Build qvalues map for all bands
-    qvalues_map: Dict[Tuple[int, str, str], Tuple[float, bool]] = {}
-    total_significant = 0
-    total_tests = 0
-    
-    for _, row in multigroup_stats.iterrows():
-        feature = str(row.get("feature", ""))
-        g1 = str(row.get("group1", ""))
-        g2 = str(row.get("group2", ""))
-        q_value = float(row.get("q_value", 1.0))
-        is_sig = bool(row.get("significant_fdr", False))
-        
-        for band_idx, band in enumerate(bands_in_order):
-            if band.lower() in feature.lower():
-                qvalues_map[(band_idx, g1, g2)] = (q_value, is_sig)
-                total_tests += 1
-                if is_sig:
-                    total_significant += 1
-                break
+    qvalues_map, total_significant, total_tests = _resolve_multigroup_qvalues_map(
+        data_by_band=data_by_band,
+        groups=groups,
+        multigroup_stats=multigroup_stats,
+        feature_keys=bands_in_order,
+        roi_name=roi_name,
+        stats_match_terms=stats_match_terms,
+    )
     
     # Decide layout: separate plots per band if more than 3 groups
     separate_plots_per_band = n_groups > 3
@@ -2051,3 +2111,132 @@ def _plot_multi_group_combined(
     if logger:
         logger.info(f"Saved {feature_label} multi-group column comparison "
                    f"({total_significant}/{total_tests} FDR significant, pre-computed)")
+
+
+def _build_multigroup_qvalues_map(
+    multigroup_stats: pd.DataFrame,
+    feature_keys: List[str],
+    groups: List[str],
+    roi_name: Optional[str],
+    stats_match_terms: Optional[Dict[str, Tuple[str, ...]]] = None,
+) -> Tuple[Dict[Tuple[int, str, str], Tuple[float, bool]], int, int]:
+    """Map precomputed multi-group stats to the requested feature keys."""
+    stats = multigroup_stats.copy()
+    if "identifier" not in stats.columns:
+        stats["identifier"] = stats["feature"].astype(str)
+
+    identifier_normalized = stats["identifier"].astype(str).map(_normalize_stats_match_text)
+    if roi_name and roi_name.lower() != "all":
+        roi_term = _normalize_stats_match_text(roi_name)
+        roi_mask = identifier_normalized.str.contains(roi_term, na=False)
+        stats = stats[roi_mask].copy()
+        identifier_normalized = stats["identifier"].astype(str).map(_normalize_stats_match_text)
+
+    qvalues_map: Dict[Tuple[int, str, str], Tuple[float, bool]] = {}
+    total_significant = 0
+    total_tests = 0
+    expected_pairs = {tuple(sorted((g1, g2))) for g1, g2 in combinations(groups, 2)}
+
+    for feature_idx, feature_key in enumerate(feature_keys):
+        match_terms = _resolve_stats_match_terms(feature_key, stats_match_terms)
+        feature_mask = _build_stats_match_mask(identifier_normalized, match_terms)
+        feature_rows = stats[feature_mask]
+        if feature_rows.empty:
+            raise ValueError(
+                "No multigroup stats matched plotted feature "
+                f"{feature_key!r} for roi {roi_name!r} using match terms {match_terms!r}."
+            )
+
+        seen_pairs = set()
+        for _, row in feature_rows.iterrows():
+            g1 = str(row.get("group1", ""))
+            g2 = str(row.get("group2", ""))
+            if g1 not in groups or g2 not in groups:
+                continue
+
+            pair_key = tuple(sorted((g1, g2)))
+            if pair_key not in expected_pairs:
+                continue
+            if pair_key in seen_pairs:
+                raise ValueError(
+                    "Ambiguous multigroup stats for "
+                    f"feature {feature_key!r}, groups {g1!r}/{g2!r}, roi {roi_name!r}."
+                )
+            seen_pairs.add(pair_key)
+
+            row_key = (feature_idx, g1, g2)
+            if row_key in qvalues_map:
+                raise ValueError(
+                    "Ambiguous multigroup stats for "
+                    f"feature {feature_key!r}, groups {g1!r}/{g2!r}, roi {roi_name!r}."
+                )
+
+            q_value = float(row.get("q_value", 1.0))
+            is_sig = bool(row.get("significant_fdr", False))
+            qvalues_map[row_key] = (q_value, is_sig)
+            total_tests += 1
+            if is_sig:
+                total_significant += 1
+
+        missing_pairs = sorted(expected_pairs.difference(seen_pairs))
+        if missing_pairs:
+            raise ValueError(
+                "Missing multigroup stats for "
+                f"feature {feature_key!r}, roi {roi_name!r}: {missing_pairs!r}."
+            )
+
+    return qvalues_map, total_significant, total_tests
+
+
+def _resolve_multigroup_qvalues_map(
+    *,
+    data_by_band: Dict[str, Dict[str, np.ndarray]],
+    groups: List[str],
+    multigroup_stats: pd.DataFrame,
+    feature_keys: List[str],
+    roi_name: Optional[str],
+    stats_match_terms: Optional[Dict[str, Tuple[str, ...]]] = None,
+) -> Tuple[Dict[Tuple[int, str, str], Tuple[float, bool]], int, int]:
+    """Resolve multigroup q-values from precomputed stats."""
+    return _build_multigroup_qvalues_map(
+        multigroup_stats=multigroup_stats,
+        feature_keys=feature_keys,
+        groups=groups,
+        roi_name=roi_name,
+        stats_match_terms=stats_match_terms,
+    )
+
+
+def _resolve_stats_match_terms(
+    feature_key: str,
+    stats_match_terms: Optional[Dict[str, Tuple[str, ...]]],
+) -> Tuple[str, ...]:
+    """Return the identifier terms that must match for one plotted feature key."""
+    if stats_match_terms and feature_key in stats_match_terms:
+        terms = tuple(str(term) for term in stats_match_terms[feature_key] if str(term).strip())
+    else:
+        terms = (str(feature_key),)
+
+    if not terms:
+        raise ValueError(f"No stats match terms were provided for feature {feature_key!r}.")
+    return terms
+
+
+def _normalize_stats_match_text(value: str) -> str:
+    """Normalize stats identifiers and match terms to comparable lowercase tokens."""
+    normalized = re.sub(r"[^0-9a-z]+", " ", str(value).lower())
+    return " ".join(normalized.split())
+
+
+def _build_stats_match_mask(
+    identifier_normalized: pd.Series,
+    match_terms: Tuple[str, ...],
+) -> pd.Series:
+    """Return rows whose normalized identifier contains every requested term."""
+    mask = pd.Series(True, index=identifier_normalized.index)
+    for term in match_terms:
+        normalized_term = _normalize_stats_match_text(term)
+        if normalized_term == "":
+            raise ValueError(f"Invalid empty stats match term in {match_terms!r}.")
+        mask &= identifier_normalized.str.contains(normalized_term, na=False)
+    return mask

@@ -456,29 +456,32 @@ def _plot_column_comparison(
     Supports both 2-group comparison (simple unpaired) and multi-group comparison
     (3+ groups with all pairwise brackets and significance asterisks).
     """
-    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
-    from eeg_pipeline.plotting.features.utils import plot_multi_group_column_comparison
+    from eeg_pipeline.plotting.features.utils import (
+        plot_multi_group_column_comparison,
+        resolve_complete_multigroup_plot_groups,
+    )
     from eeg_pipeline.utils.formatting import sanitize_label
     
     values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
-        
-        masks_dict, group_labels = multi_group_info
+        masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+            events_df,
+            config,
+            context="Complexity multi-group column comparison",
+        )
         segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
-        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+        multigroup_stats = load_multigroup_stats(stats_dir, feature_type="complexity") if stats_dir else None
         
         for metric in metrics:
             metric_label = _metric_label(metric)
             
             for roi_name in roi_names:
                 data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+                stats_match_terms: Dict[str, Tuple[str, ...]] = {}
                 for band in bands:
                     cols = _get_complexity_columns(features_df, segment_name, band, metric, roi_name)
                     if not cols:
@@ -494,6 +497,7 @@ def _plot_column_comparison(
                     
                     if len(group_values) >= 2:
                         data_by_band[band] = group_values
+                        stats_match_terms[band] = (band, metric)
                 
                 if data_by_band:
                     roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
@@ -511,6 +515,7 @@ def _plot_column_comparison(
                         roi_name=roi_name,
                         stats_dir=stats_dir,
                         multigroup_stats=multigroup_stats,
+                        stats_match_terms=stats_match_terms,
                     )
         
         log_if_present(logger, "info", f"Saved complexity multi-group column comparison for {len(roi_names)} ROIs")

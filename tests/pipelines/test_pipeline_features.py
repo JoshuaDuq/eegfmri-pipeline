@@ -655,7 +655,8 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis",
             return_value=(None, None),
         ) as mock_load:
-            pipeline.process_subject("0001", task="rest", progress=progress)
+            with self.assertRaisesRegex(RuntimeError, "No cleaned epochs"):
+                pipeline.process_subject("0001", task="rest", progress=progress)
 
         self.assertTrue(mock_load.called)
         self.assertTrue(mock_load.call_args.kwargs["task_is_rest"])
@@ -695,6 +696,61 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "rest_epochs_overlap > 0"):
                 pipeline.process_subject("0001", task="rest", progress=progress)
+
+    def test_feature_pipeline_rejects_inverted_time_ranges(self):
+        from eeg_pipeline.pipelines.features import FeaturePipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        pipeline = object.__new__(FeaturePipeline)
+        pipeline.config = DotConfig({"project": {"task": "task"}})
+        pipeline.logger = Mock()
+        pipeline.deriv_root = tmp / "deriv"
+        pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
+        progress = SimpleNamespace(
+            subject_start=lambda *a, **k: None,
+            step=lambda *a, **k: None,
+            subject_done=lambda *a, **k: None,
+            error=lambda *a, **k: None,
+        )
+        epochs = SimpleNamespace(times=np.array([0.0, 0.1]), info={"sfreq": 100.0}, ch_names=["Cz"])
+        aligned_events = pd.DataFrame({"trial_id": [1]})
+
+        with patch(
+            "eeg_pipeline.pipelines.features.resolve_feature_categories",
+            return_value=["power"],
+        ), patch(
+            "eeg_pipeline.pipelines.features.deriv_features_path",
+            return_value=tmp / "features",
+        ), patch(
+            "eeg_pipeline.pipelines.features.ensure_dir"
+        ), patch(
+            "eeg_pipeline.pipelines.features.setup_matplotlib"
+        ), patch(
+            "eeg_pipeline.pipelines.features.load_epochs_for_analysis",
+            return_value=(epochs, aligned_events),
+        ), patch(
+            "eeg_pipeline.pipelines.features._load_events_df",
+            return_value=None,
+        ), patch(
+            "eeg_pipeline.pipelines.features._load_fixed_templates",
+            return_value=(None, None, None),
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_tfr_if_needed",
+            return_value=None,
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_complex_tfr_if_needed",
+            return_value=None,
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_intermediates_if_needed",
+            return_value=None,
+        ):
+            with self.assertRaisesRegex(ValueError, "tmin .* greater than tmax"):
+                pipeline.process_subject(
+                    "0001",
+                    task="task",
+                    progress=progress,
+                    time_ranges=[{"name": "bad", "tmin": 1.0, "tmax": 0.0}],
+                )
 
     def test_feature_pipeline_uses_rest_bids_root_for_original_events(self):
         from eeg_pipeline.pipelines.features import FeaturePipeline
@@ -902,7 +958,8 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(None, None)
         ):
-            p.process_subject("0001", task="task", progress=progress)
+            with self.assertRaisesRegex(RuntimeError, "No cleaned epochs"):
+                p.process_subject("0001", task="task", progress=progress)
 
         with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
             "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "f"
@@ -911,7 +968,8 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
         ), patch(
             "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(SimpleNamespace(times=np.array([0.0]), info={"sfreq": 100.0}), None)
         ):
-            p.process_subject("0001", task="task", progress=progress)
+            with self.assertRaisesRegex(RuntimeError, "No aligned events"):
+                p.process_subject("0001", task="task", progress=progress)
 
     def test_feature_pipeline_allows_missing_target(self):
         from eeg_pipeline.pipelines.features import FeaturePipeline
@@ -1093,14 +1151,22 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
                 task="task",
                 progress=progress,
                 feature_categories=["power"],
-                time_ranges=[{"name": "late", "tmin": 1.0, "tmax": 0.0}, {"name": "full", "tmin": 0.0, "tmax": 1.0}],
+                time_ranges=[
+                    {"name": "late", "tmin": 0.5, "tmax": 1.0},
+                    {"name": "full", "tmin": 0.0, "tmax": 1.0},
+                ],
             )
         self.assertTrue(save_merged.called)
         self.assertGreaterEqual(save_cfg.call_count, 2)
 
-        with patch.dict(fmod.__dict__, {"FeaturePipeline": FeaturePipeline}):
+        with patch.dict(fmod.__dict__, {"FeaturePipeline": FeaturePipeline}), patch.object(
+            FeaturePipeline, "process_subject"
+        ) as mock_process_subject, patch.object(
+            FeaturePipeline, "run_batch", return_value=[{"subject": "0001", "status": "success"}]
+        ):
             wrap_ps("0001", task="t")
             out = extract_features_for_subjects(["0001"], task="t")
+        mock_process_subject.assert_called_once()
         self.assertEqual(out, [{"subject": "0001", "status": "success"}])
 
     def test_pipeline_constants_and_exports(self):
@@ -1631,7 +1697,8 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
         ) as mock_save_all_features, patch(
             "eeg_pipeline.pipelines.features._save_extraction_config"
         ) as mock_save_extraction_config:
-            pipeline.process_subject("0001", task="task", progress=progress, feature_categories=["power"])
+            with self.assertRaisesRegex(RuntimeError, "No feature outputs were saved"):
+                pipeline.process_subject("0001", task="task", progress=progress, feature_categories=["power"])
 
         self.assertEqual(precomputed.metadata, "sentinel")
         self.assertEqual(precomputed.condition_labels, "sentinel")
@@ -1639,7 +1706,7 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
         mock_save_all_features.assert_not_called()
         mock_save_extraction_config.assert_not_called()
         pipeline.logger.warning.assert_called()
-        pipeline.logger.error.assert_called_with(
+        pipeline.logger.error.assert_any_call(
             "Feature alignment failed for %s; skipping save",
             "default range",
         )
@@ -2027,7 +2094,13 @@ class TestFeatureGapfill(_FeatureImportMixin, unittest.TestCase):
         }
 
         fake_feature_io = types.SimpleNamespace(_get_folder_for_feature=lambda name, config=None: name)
-        fake_naming = types.SimpleNamespace(generate_manifest=lambda **kwargs: {"feature_columns": kwargs["feature_columns"]})
+        manifest_calls = []
+
+        def _generate_manifest(**kwargs):
+            manifest_calls.append(kwargs)
+            return {"feature_columns": kwargs["feature_columns"], "task": kwargs["task"]}
+
+        fake_naming = types.SimpleNamespace(generate_manifest=_generate_manifest)
 
         with patch.dict(
             sys.modules,
@@ -2039,8 +2112,15 @@ class TestFeatureGapfill(_FeatureImportMixin, unittest.TestCase):
         ), patch("eeg_pipeline.pipelines.features.write_parquet") as write_parquet, patch(
             "eeg_pipeline.utils.config.loader.get_config_value", return_value=True
         ):
-            _save_merged_features(acc, features_dir, DotConfig({"project": {"task": "task"}}), Mock())
+            _save_merged_features(
+                acc,
+                features_dir,
+                DotConfig({"project": {"task": "config-task"}}),
+                Mock(),
+                task="runtime-task",
+            )
         self.assertTrue(write_parquet.called)
+        self.assertEqual(manifest_calls[-1]["task"], "runtime-task")
 
         p = object.__new__(FeaturePipeline)
         p.config = DotConfig({"project": {"task": "task"}, "event_columns": {"rating": ["rating"]}, "bids_root": str(tmp / "bids")})
@@ -2116,3 +2196,83 @@ class TestFeatureGapfill(_FeatureImportMixin, unittest.TestCase):
             p.process_subject("0001", task="task", progress=progress, feature_categories=["power"])
 
         self.assertIsNotNone(precomputed.condition_labels)
+
+    def test_feature_pipeline_raises_when_all_time_ranges_fail_alignment(self):
+        from eeg_pipeline.pipelines.features import FeaturePipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        pipeline = object.__new__(FeaturePipeline)
+        pipeline.config = DotConfig({"project": {"task": "task"}, "bids_root": str(tmp / "bids")})
+        pipeline.logger = Mock()
+        pipeline.deriv_root = tmp / "deriv"
+        pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
+        progress = SimpleNamespace(
+            subject_start=lambda *a, **k: None,
+            step=lambda *a, **k: None,
+            subject_done=lambda *a, **k: None,
+            error=lambda *a, **k: None,
+        )
+        epochs = SimpleNamespace(times=np.array([0.0, 0.1]), info={"sfreq": 100.0}, ch_names=["Cz"])
+        aligned_events = pd.DataFrame({"condition": ["a"]})
+        fake_features = SimpleNamespace(
+            aper_qc=None,
+            ratios_df=pd.DataFrame(), ratios_cols=[],
+            asymmetry_df=pd.DataFrame(), asymmetry_cols=[],
+            quality_df=pd.DataFrame(), quality_cols=[],
+        )
+        unpacked = {
+            "pow_df": pd.DataFrame({"p": [1]}), "pow_cols": ["p"],
+            "baseline_df": pd.DataFrame({"b": [1]}), "baseline_cols": ["b"],
+            "conn_df": pd.DataFrame(), "conn_cols": [],
+            "aper_df": pd.DataFrame(), "aper_cols": [],
+            "dconn_df": pd.DataFrame(), "dconn_cols": [],
+            "source_df": pd.DataFrame(), "source_cols": [],
+            "source_contrast_df": pd.DataFrame(), "source_contrast_cols": [],
+            "erp_df": pd.DataFrame(), "erp_cols": [],
+            "itpc_df": pd.DataFrame(), "itpc_cols": [],
+            "itpc_trial_df": pd.DataFrame(), "itpc_trial_cols": [],
+            "pac_df": pd.DataFrame(), "pac_trials_df": pd.DataFrame(), "pac_time_df": pd.DataFrame(),
+            "comp_df": pd.DataFrame(), "comp_cols": [],
+            "bursts_df": pd.DataFrame(), "bursts_cols": [],
+            "spectral_df": pd.DataFrame(), "spectral_cols": [],
+            "erds_df": pd.DataFrame(), "erds_cols": [],
+        }
+
+        with patch("eeg_pipeline.pipelines.features.resolve_feature_categories", return_value=["power"]), patch(
+            "eeg_pipeline.pipelines.features.deriv_features_path", return_value=tmp / "features"
+        ), patch("eeg_pipeline.pipelines.features.ensure_dir", side_effect=_mkdir_path), patch(
+            "eeg_pipeline.pipelines.features.setup_matplotlib"
+        ), patch(
+            "eeg_pipeline.pipelines.features.load_epochs_for_analysis", return_value=(epochs, aligned_events)
+        ), patch(
+            "eeg_pipeline.pipelines.features._load_events_df", return_value=None
+        ), patch(
+            "eeg_pipeline.pipelines.features._load_fixed_templates", return_value=(None, None, None)
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_tfr_if_needed", return_value=None
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_complex_tfr_if_needed", return_value=None
+        ), patch(
+            "eeg_pipeline.pipelines.features._precompute_intermediates_if_needed", return_value=None
+        ), patch(
+            "eeg_pipeline.pipelines.features.extract_all_features", return_value=fake_features
+        ), patch(
+            "eeg_pipeline.pipelines.features._unpack_feature_results", return_value=unpacked
+        ), patch(
+            "eeg_pipeline.pipelines.features.align_feature_dataframes",
+            return_value=(None, None, None, None, None, None),
+        ), patch(
+            "eeg_pipeline.pipelines.features.save_all_features"
+        ) as mock_save:
+            with self.assertRaisesRegex(RuntimeError, "No feature outputs were saved"):
+                pipeline.process_subject(
+                    "0001",
+                    task="task",
+                    progress=progress,
+                    time_ranges=[
+                        {"name": "first", "tmin": 0.0, "tmax": 0.1},
+                        {"name": "second", "tmin": 0.1, "tmax": 0.2},
+                    ],
+                )
+
+        mock_save.assert_not_called()

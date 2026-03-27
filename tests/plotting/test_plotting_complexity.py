@@ -103,6 +103,111 @@ class TestPlottingComplexity(unittest.TestCase):
             ],
         )
 
+    def test_plot_column_comparison_rejects_missing_multigroup_value(self):
+        features_df = pd.DataFrame(
+            {
+                NamingSchema.build("comp", "active", "alpha", "roi", "lzc", channel="Frontal"): [0.1, 0.2, 0.3, 0.4],
+            }
+        )
+        events_df = pd.DataFrame({"condition": [0, 0, 1, 1]})
+        config = {
+            "plotting": {
+                "comparisons": {
+                    "compare_columns": True,
+                    "comparison_column": "condition",
+                    "comparison_values": [0, 1, 2],
+                    "comparison_labels": ["Cool", "Warm", "Hot"],
+                    "comparison_segment": "active",
+                }
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "missing configured group"):
+                _plot_column_comparison(
+                    features_df=features_df,
+                    events_df=events_df,
+                    bands=["alpha"],
+                    metrics=["lzc"],
+                    roi_names=["Frontal"],
+                    subject="01",
+                    save_dir=Path(temp_dir),
+                    config=config,
+                    logger=None,
+                    stats_dir=None,
+                )
+
+    def test_plot_column_comparison_passes_metric_specific_multigroup_match_terms(self):
+        features_df = pd.DataFrame(
+            {
+                NamingSchema.build("comp", "active", "alpha", "roi", "lzc", channel="Frontal"): [
+                    0.1,
+                    0.2,
+                    0.3,
+                    0.4,
+                    0.5,
+                    0.6,
+                ],
+            }
+        )
+        events_df = pd.DataFrame({"condition": [0, 0, 1, 1, 2, 2]})
+        config = {
+            "plotting": {
+                "comparisons": {
+                    "compare_columns": True,
+                    "comparison_column": "condition",
+                    "comparison_values": [0, 1, 2],
+                    "comparison_labels": ["Cool", "Warm", "Hot"],
+                    "comparison_segment": "active",
+                }
+            }
+        }
+        captured: dict[str, object] = {}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "eeg_pipeline.plotting.features.utils.resolve_complete_multigroup_plot_groups",
+                return_value=(
+                    {
+                        "Cool": pd.Series([True, True, False, False, False, False]).to_numpy(),
+                        "Warm": pd.Series([False, False, True, True, False, False]).to_numpy(),
+                        "Hot": pd.Series([False, False, False, False, True, True]).to_numpy(),
+                    },
+                    ["Cool", "Warm", "Hot"],
+                ),
+            ), patch(
+                "eeg_pipeline.plotting.features.utils.load_multigroup_stats",
+                return_value=pd.DataFrame(
+                    {
+                        "feature": ["complexity_alpha_roi-frontal_lzc"],
+                        "identifier": ["complexity_alpha_roi-frontal_lzc"],
+                        "group1": ["Cool"],
+                        "group2": ["Warm"],
+                        "q_value": [0.2],
+                        "significant_fdr": [False],
+                    }
+                ),
+            ), patch(
+                "eeg_pipeline.plotting.features.utils.plot_multi_group_column_comparison",
+                side_effect=lambda **kwargs: captured.update(
+                    stats_match_terms=kwargs["stats_match_terms"]
+                ),
+            ):
+                _plot_column_comparison(
+                    features_df=features_df,
+                    events_df=events_df,
+                    bands=["alpha"],
+                    metrics=["lzc"],
+                    roi_names=["Frontal"],
+                    subject="01",
+                    save_dir=Path(temp_dir),
+                    config=config,
+                    logger=None,
+                    stats_dir=Path(temp_dir),
+                )
+
+        self.assertEqual(captured["stats_match_terms"], {"alpha": ("alpha", "lzc")})
+
 
 if __name__ == "__main__":
     unittest.main()

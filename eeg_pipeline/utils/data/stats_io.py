@@ -126,35 +126,29 @@ def load_subject_scatter_data(
     -------
     Tuple of 9 optional values:
         temporal_df, active_df, y, info, pred_series, Z_df_full, Z_df_predictor, roi_map, conn_df
-        Returns tuple of None values if loading fails
     """
-    try:
-        epochs = _load_epochs_for_subject(subject, task, deriv_root, config, logger)
-        
-        temporal_df, active_df, conn_df, y, info = _load_features_for_subject(
-            subject, task, deriv_root, config, epochs
-        )
-        
-        _, pred_series, Z_df_full, Z_df_predictor = _load_aligned_events_and_covariates(
-            epochs, subject, task, config, logger, partial_covars
-        )
-        
-        from ..analysis.tfr import build_rois_from_info
+    epochs = _load_epochs_for_subject(subject, task, deriv_root, config, logger)
+    
+    temporal_df, active_df, conn_df, y, info = _load_features_for_subject(
+        subject, task, deriv_root, config, epochs
+    )
+    
+    _, pred_series, Z_df_full, Z_df_predictor = _load_aligned_events_and_covariates(
+        epochs, subject, task, config, logger, partial_covars
+    )
+    
+    from ..analysis.tfr import build_rois_from_info
 
-        roi_map = build_rois_from_info(info, config)
-        
-        return (
-            temporal_df,
-            active_df,
-            y,
-            info,
-            pred_series,
-            Z_df_full,
-            Z_df_predictor,
-            roi_map,
-            conn_df,
-        )
-        
-    except Exception as e:
-        logger.error(f"Failed to load scatter data for sub-{subject}: {e}")
-        return None, None, None, None, None, None, None, None, None
+    roi_map = build_rois_from_info(info, config)
+    
+    return (
+        temporal_df,
+        active_df,
+        y,
+        info,
+        pred_series,
+        Z_df_full,
+        Z_df_predictor,
+        roi_map,
+        conn_df,
+    )
