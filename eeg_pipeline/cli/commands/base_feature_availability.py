@@ -100,6 +100,14 @@ def _empty_feature_availability() -> dict:
     }
 
 
+def detect_feature_inventory(features_dir: Union[str, Path]) -> dict:
+    """Detect feature availability and available bands for a subject."""
+    return {
+        "feature_availability": detect_feature_availability(features_dir),
+        "available_bands": detect_available_bands(features_dir),
+    }
+
+
 def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     """Detect available feature categories, bands, and computations with modification timestamps."""
     from datetime import datetime
