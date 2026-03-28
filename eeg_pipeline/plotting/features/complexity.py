@@ -147,23 +147,18 @@ def _get_complexity_columns(
                 if _match_roi_name(roi_id, roi_name):
                     columns.append(col)
     
-    if roi_name == "all" and not columns:
-        for col in features_df.columns:
-            parsed = NamingSchema.parse(str(col))
-            if not parsed.get("valid"):
-                continue
-            if parsed.get("group") != COMPLEXITY_GROUP:
-                continue
-            if str(parsed.get("segment") or "") != segment:
-                continue
-            if str(parsed.get("band") or "") != band:
-                continue
-            if str(parsed.get("stat") or "") != metric:
-                continue
-            if parsed.get("scope") == "roi":
-                columns.append(col)
-    
     return columns
+
+
+def _get_complexity_feature_key(
+    segment: str,
+    band: str,
+    metric: str,
+    roi_name: str,
+) -> str:
+    if roi_name == "all":
+        return NamingSchema.build("comp", segment, band, "global", metric)
+    return NamingSchema.build("comp", segment, band, "roi", metric, channel=roi_name)
 
 
 def _determine_segments(config: Any, features_df: pd.DataFrame, logger: Any) -> List[str]:
@@ -461,29 +456,32 @@ def _plot_column_comparison(
     Supports both 2-group comparison (simple unpaired) and multi-group comparison
     (3+ groups with all pairwise brackets and significance asterisks).
     """
-    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
-    from eeg_pipeline.plotting.features.utils import plot_multi_group_column_comparison
+    from eeg_pipeline.plotting.features.utils import (
+        plot_multi_group_column_comparison,
+        resolve_complete_multigroup_plot_groups,
+    )
     from eeg_pipeline.utils.formatting import sanitize_label
     
     values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
-        
-        masks_dict, group_labels = multi_group_info
+        masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+            events_df,
+            config,
+            context="Complexity multi-group column comparison",
+        )
         segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
-        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+        multigroup_stats = load_multigroup_stats(stats_dir, feature_type="complexity") if stats_dir else None
         
         for metric in metrics:
             metric_label = _metric_label(metric)
             
             for roi_name in roi_names:
                 data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+                stats_match_terms: Dict[str, Tuple[str, ...]] = {}
                 for band in bands:
                     cols = _get_complexity_columns(features_df, segment_name, band, metric, roi_name)
                     if not cols:
@@ -499,6 +497,7 @@ def _plot_column_comparison(
                     
                     if len(group_values) >= 2:
                         data_by_band[band] = group_values
+                        stats_match_terms[band] = (band, metric)
                 
                 if data_by_band:
                     roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
@@ -516,6 +515,7 @@ def _plot_column_comparison(
                         roi_name=roi_name,
                         stats_dir=stats_dir,
                         multigroup_stats=multigroup_stats,
+                        stats_match_terms=stats_match_terms,
                     )
         
         log_if_present(logger, "info", f"Saved complexity multi-group column comparison for {len(roi_names)} ROIs")
@@ -543,10 +543,14 @@ def _plot_column_comparison(
             qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
                 stats_dir=stats_dir,
                 feature_type="complexity",
-                feature_keys=bands,
+                feature_keys=[
+                    _get_complexity_feature_key(segment_name, band, metric, roi_name)
+                    for band in bands
+                ],
                 cell_data=cell_data,
                 config=config,
                 logger=logger,
+                roi_name=roi_name,
             )
             
             fig, axes = plt.subplots(1, n_bands, figsize=(FIG_WIDTH_PER_BAND * n_bands, FIG_HEIGHT), squeeze=False)

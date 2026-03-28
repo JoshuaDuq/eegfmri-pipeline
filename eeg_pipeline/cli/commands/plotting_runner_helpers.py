@@ -227,6 +227,7 @@ def run_group_plotting(
 
     from eeg_pipeline.plotting.orchestration.features import (
         visualize_band_power_topomaps_for_group,
+        visualize_power_cross_frequency_correlation_for_group,
         visualize_power_by_condition_for_group,
         visualize_power_timecourse_for_group,
         visualize_power_spectral_density_for_group,
@@ -235,6 +236,7 @@ def run_group_plotting(
     logger = logging.getLogger(__name__)
     group_plotters = {
         "band_power_topomaps": visualize_band_power_topomaps_for_group,
+        "cross_frequency_power_correlation": visualize_power_cross_frequency_correlation_for_group,
         "power_by_condition": visualize_power_by_condition_for_group,
         "power_timecourse": visualize_power_timecourse_for_group,
         "power_spectral_density": visualize_power_spectral_density_for_group,

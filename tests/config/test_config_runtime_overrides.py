@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from eeg_pipeline.utils.config.overrides import apply_runtime_overrides, apply_set_overrides
 
 
@@ -69,10 +71,27 @@ def test_apply_runtime_overrides_applies_set_overrides() -> None:
     assert cfg["analysis"]["optional"] is None
 
 
-def test_apply_runtime_overrides_ignores_invalid_set_overrides() -> None:
+def test_apply_runtime_overrides_rejects_invalid_set_overrides() -> None:
     cfg: dict[str, object] = {"project": {"task": "keep"}}
-    apply_runtime_overrides(cfg, set_overrides=["", "invalid", ".=x", "project.task=updated"])
-    assert cfg["project"]["task"] == "updated"
+    with pytest.raises(ValueError, match="KEY=VALUE|Empty override|path"):
+        apply_runtime_overrides(cfg, set_overrides=["", "invalid", ".=x"])
+
+
+def test_apply_runtime_overrides_rejects_malformed_json_set_value() -> None:
+    cfg: dict[str, object] = {"analysis": {}}
+
+    with pytest.raises(ValueError, match="Invalid JSON"):
+        apply_runtime_overrides(
+            cfg,
+            set_overrides=['analysis.metadata={"mode":'],
+        )
+
+
+def test_apply_set_overrides_rejects_non_mapping_parent_path() -> None:
+    cfg: dict[str, object] = {"project": {"task": "keep"}}
+
+    with pytest.raises(ValueError, match="non-mapping"):
+        apply_set_overrides(cfg, ["project.task.name=bad"])
 
 
 def test_apply_set_overrides_can_take_precedence_after_other_mutations() -> None:

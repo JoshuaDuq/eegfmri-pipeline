@@ -77,11 +77,18 @@ namespaces = true
 eeg_pipeline = ["plotting/plot_catalog.json", "utils/config/*.yaml"]
 fmri_pipeline = ["utils/config/*.yaml"]
 "studies.pain_study" = [
+    "scripts/config/*.yaml",
+]
+"studies.pain_study.study1" = [
+    "config/*.yaml",
+    "README.md",
+]
+"studies.pain_study.study2" = [
     "analysis/*.R",
     "config/*.yaml",
     "config/**/*.json",
     "config/**/*.label",
-    "scripts/config/*.yaml",
+    "README.md",
 ]
 
 [tool.black]

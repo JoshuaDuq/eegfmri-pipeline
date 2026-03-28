@@ -48,14 +48,10 @@ def _safe_read_table(
     path: Path,
     logger: logging.Logger,
 ) -> Optional[pd.DataFrame]:
-    """Safely read a table file, returning None if missing or invalid."""
+    """Read a table file, returning None only when the file is absent."""
     if not path.exists():
         return None
-    try:
-        return read_table(path)
-    except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-        logger.warning("Failed to read %s: %s", path, exc)
-        return None
+    return read_table(path)
 
 
 def _extract_target_series(target_df: pd.DataFrame, target_path: Path) -> pd.Series:
@@ -267,11 +263,7 @@ def _safe_read_feature_table_with_path(
     for candidate in candidates:
         if not candidate.exists():
             continue
-        try:
-            return read_table(candidate), candidate
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read %s: %s", candidate, exc)
-            return None, candidate
+        return read_table(candidate), candidate
 
     return None, None
 
@@ -480,6 +472,7 @@ def _save_feature_metadata(
     config: Any,
     logger: logging.Logger,
     suffix: Optional[str] = None,
+    task: Optional[str] = None,
 ) -> None:
     """Save feature-specific metadata to its metadata subfolder."""
     if df is None or df.empty:
@@ -505,7 +498,7 @@ def _save_feature_metadata(
             feature_columns=filter_feature_payload_columns(df.columns),
             config=config,
             subject=subject_str,
-            task=config.get("project.task") if config is not None else None,
+            task=task if task is not None else config.get("project.task") if config is not None else None,
             qc=None,
             df_attrs=dict(getattr(df, "attrs", {}) or {}),
         )
@@ -726,6 +719,7 @@ def save_all_features(
     features_dir: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
     config: Any = None,
+    task: Optional[str] = None,
     comp_df: Optional[pd.DataFrame] = None,
     comp_cols: Optional[List[str]] = None,
     bursts_df: Optional[pd.DataFrame] = None,
@@ -824,7 +818,7 @@ def save_all_features(
                 aligned_events=aligned_events,
             )
             _save_feature_metadata(
-                df, base_name, features_dir, config, logger, suffix
+                df, base_name, features_dir, config, logger, suffix, task=task
             )
 
     if aper_qc:
@@ -853,7 +847,7 @@ def save_all_features(
             aligned_events=aligned_events,
         )
         _save_feature_metadata(
-            direct_df, "features_power", features_dir, config, logger, suffix
+            direct_df, "features_power", features_dir, config, logger, suffix, task=task
         )
 
     if active_df is not None and not active_df.empty:
@@ -868,7 +862,7 @@ def save_all_features(
             aligned_events=aligned_events,
         )
         _save_feature_metadata(
-            active_df, "features_power_active", features_dir, config, logger, suffix
+            active_df, "features_power_active", features_dir, config, logger, suffix, task=task
         )
 
     if conn_df is not None and not conn_df.empty:
@@ -892,7 +886,7 @@ def save_all_features(
             write_csv(conn_df_to_save, csv_path, index=False)
             logger.info("Also saved connectivity features as CSV: %s", csv_path)
         _save_feature_metadata(
-            conn_df, "features_connectivity", features_dir, config, logger, suffix
+            conn_df, "features_connectivity", features_dir, config, logger, suffix, task=task
         )
 
 

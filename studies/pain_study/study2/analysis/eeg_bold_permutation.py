@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Sequence
 import numpy as np
 import pandas as pd
 
-from studies.pain_study.analysis.eeg_bold_sensitivity import (
+from studies.pain_study.study2.analysis.eeg_bold_sensitivity import (
     PrimaryPermutationSensitivityConfig,
 )
 

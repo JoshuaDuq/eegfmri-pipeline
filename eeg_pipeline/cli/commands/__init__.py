@@ -35,7 +35,11 @@ from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
 from fmri_pipeline.cli.commands.fmri import setup_fmri, run_fmri
 from fmri_pipeline.cli.commands.fmri_analysis import setup_fmri_analysis, run_fmri_analysis
-from studies.pain_study.cli.coupling import setup_coupling, run_coupling
+from studies.pain_study.study2.cli.coupling import setup_coupling, run_coupling
+from studies.pain_study.cli.signature_prediction import (
+    setup_signature_prediction,
+    run_signature_prediction,
+)
 
 
 COMMANDS: List[Command] = [
@@ -48,6 +52,11 @@ COMMANDS: List[Command] = [
         name="coupling",
         setup=setup_coupling,
         run=run_coupling,
+    ),
+    Command(
+        name="signature-prediction",
+        setup=setup_signature_prediction,
+        run=run_signature_prediction,
     ),
     Command(
         name="features",

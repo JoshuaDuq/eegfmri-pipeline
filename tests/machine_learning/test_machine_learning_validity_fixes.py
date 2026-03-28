@@ -2269,6 +2269,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                         deriv_root=deriv_root,
                         config=cfg,
                         feature_families=["power"],
+                        feature_input_root=None,
                         logger=Mock(),
                     )
 
@@ -2304,6 +2305,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     deriv_root=deriv_root,
                     config=cfg,
                     feature_families=["power"],
+                    feature_input_root=None,
                     logger=Mock(),
                 )
 
@@ -2338,6 +2340,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                         deriv_root=deriv_root,
                         config=cfg,
                         feature_families=["connectivity"],
+                        feature_input_root=None,
                         logger=Mock(),
                     )
 

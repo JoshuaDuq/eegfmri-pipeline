@@ -103,7 +103,6 @@ Runs the Python subprocess and streams output in real time:
 
 - **Progress bar** with subject-level and step-level tracking
 - **Per-subject status** (pending / running / done / failed)
-- **ETA estimation** based on completed subject durations
 - **Resource monitor** — CPU and memory usage, per-core breakdown
 - **Scrollable log viewport** with mouse wheel support
 - **Copy mode** (`M`) disables mouse capture for native text selection

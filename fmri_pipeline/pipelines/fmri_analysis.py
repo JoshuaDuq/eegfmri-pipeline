@@ -285,8 +285,30 @@ class FmriAnalysisPipeline(PipelineBase):
                     f"{sub_label}_task-{task}_contrast-{contrast_name}"
                     f"_space-MNI152NLin2009cAsym_stat-{output_type_actual}_{cfg_hash}.nii.gz"
                 )
-                if mni_nifti_path.exists():
+                mni_effect_path = out_dir / (
+                    f"{sub_label}_task-{task}_contrast-{contrast_name}"
+                    f"_space-MNI152NLin2009cAsym_stat-effect_size_{cfg_hash}.nii.gz"
+                )
+                mni_variance_path = out_dir / (
+                    f"{sub_label}_task-{task}_contrast-{contrast_name}"
+                    f"_space-MNI152NLin2009cAsym_stat-effect_variance_{cfg_hash}.nii.gz"
+                )
+                need_mni_effect = bool(getattr(cfg_obj, "include_effect_size", True)) or bool(
+                    getattr(cfg_obj, "include_signatures", True)
+                )
+                need_mni_variance = bool(getattr(cfg_obj, "include_standard_error", True))
+                have_complete_mni_cache = mni_nifti_path.exists()
+                if need_mni_effect:
+                    have_complete_mni_cache = have_complete_mni_cache and mni_effect_path.exists()
+                if need_mni_variance:
+                    have_complete_mni_cache = have_complete_mni_cache and mni_variance_path.exists()
+
+                if have_complete_mni_cache:
                     mni_img = nib.load(str(mni_nifti_path))
+                    if need_mni_effect:
+                        mni_effect = nib.load(str(mni_effect_path))
+                    if need_mni_variance:
+                        mni_variance = nib.load(str(mni_variance_path))
                 else:
                     mni_img, _mni_meta, mni_glm, mni_contrast_def, _mni_out_type = build_contrast_from_runs_detailed(
                         bids_fmri_root=Path(str(bids_fmri_root)).expanduser().resolve(),
@@ -298,12 +320,20 @@ class FmriAnalysisPipeline(PipelineBase):
                     )
                     nib.save(mni_img, str(mni_nifti_path))
 
-                    mni_contrast_arg = _contrast_arg_for_model_runs(mni_glm.flm, mni_contrast_def)
-                    mni_effect = mni_glm.flm.compute_contrast(mni_contrast_arg, output_type="effect_size")
-                    mni_variance = mni_glm.flm.compute_contrast(
-                        mni_contrast_arg,
-                        output_type="effect_variance",
-                    )
+                    if need_mni_effect or need_mni_variance:
+                        mni_contrast_arg = _contrast_arg_for_model_runs(mni_glm.flm, mni_contrast_def)
+                        if need_mni_effect:
+                            mni_effect = mni_glm.flm.compute_contrast(
+                                mni_contrast_arg,
+                                output_type="effect_size",
+                            )
+                            nib.save(mni_effect, str(mni_effect_path))
+                        if need_mni_variance:
+                            mni_variance = mni_glm.flm.compute_contrast(
+                                mni_contrast_arg,
+                                output_type="effect_variance",
+                            )
+                            nib.save(mni_variance, str(mni_variance_path))
 
             native_bg, native_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="native")
             mni_bg, mni_mask = self._discover_plot_assets(sub_label=sub_label, task=task, space="mni")

@@ -1160,14 +1160,15 @@ func TestSelectedPlotIDs_PlottingGroupScopeFiltersUnsupportedPlots(t *testing.T)
 	m.plottingScope = PlottingScopeGroup
 	m.plotItems = []PlotItem{
 		{ID: "band_power_topomaps", Group: "power"},
+		{ID: "cross_frequency_power_correlation", Group: "power"},
 		{ID: "power_by_condition", Group: "power"},
 		{ID: "power_spectral_density", Group: "power"},
 		{ID: "power_timecourse", Group: "power"},
 	}
-	m.plotSelected = map[int]bool{0: true, 1: true, 2: true, 3: true}
+	m.plotSelected = map[int]bool{0: true, 1: true, 2: true, 3: true, 4: true}
 
 	got := m.SelectedPlotIDs()
-	want := []string{"band_power_topomaps", "power_by_condition", "power_spectral_density", "power_timecourse"}
+	want := []string{"band_power_topomaps", "cross_frequency_power_correlation", "power_by_condition", "power_spectral_density", "power_timecourse"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected group plotting IDs %v, got %v", want, got)
 	}
@@ -1954,6 +1955,44 @@ func TestBuildCommand_PlottingNeverEmitsRoisOrBands(t *testing.T) {
 	}
 	if strings.Contains(cmd, "--frequency-bands") {
 		t.Fatalf("did not expect --frequency-bands in plotting command, got: %s", cmd)
+	}
+}
+
+func TestValidate_PlottingRejectsTaskOnlyPowerPlotsInRestMode(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.prepTaskIsRest = true
+	m.plotItems = []PlotItem{
+		{ID: "power_by_condition", Group: "power", Name: "Condition Comparison", RestCompatibility: plotRestTaskOnly},
+	}
+	m.plotSelected = map[int]bool{0: true}
+
+	errors := m.validatePlotSelectionStep()
+
+	if !containsString(errors, "Resting-state plotting does not support task-only plot(s): power_by_condition") {
+		t.Fatalf("expected resting-state task-only plot validation error, got: %#v", errors)
+	}
+}
+
+func TestValidate_PlottingRejectsTaskOnlyConnectivityPlotsInRestMode(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.prepTaskIsRest = true
+	m.plotItems = []PlotItem{
+		{
+			ID:                "connectivity_circle_condition",
+			Group:             "connectivity",
+			Name:              "Circle by Condition",
+			RestCompatibility: plotRestTaskOnly,
+		},
+	}
+	m.plotSelected = map[int]bool{0: true}
+
+	errors := m.validatePlotSelectionStep()
+
+	if !containsString(
+		errors,
+		"Resting-state plotting does not support task-only plot(s): connectivity_circle_condition",
+	) {
+		t.Fatalf("expected resting-state connectivity validation error, got: %#v", errors)
 	}
 }
 

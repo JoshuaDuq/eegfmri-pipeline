@@ -453,16 +453,25 @@ var computationApplicableFeatures = map[string][]string{
 }
 
 type PlotItem struct {
-	ID               string
-	Group            string
-	Name             string
-	Description      string
-	RequiredFiles    []string
-	RequiresEpochs   bool
-	RequiresFeatures bool
-	RequiresStats    bool
-	Dependencies     []string // Other plots this plot depends on
+	ID                string
+	Group             string
+	Name              string
+	Description       string
+	RequiredFiles     []string
+	RequiresEpochs    bool
+	RequiresFeatures  bool
+	RequiresStats     bool
+	RestCompatibility PlotRestCompatibility
+	Dependencies      []string // Other plots this plot depends on
 }
+
+type PlotRestCompatibility string
+
+const (
+	plotRestNeutral    PlotRestCompatibility = ""
+	plotRestCompatible PlotRestCompatibility = "compatible"
+	plotRestTaskOnly   PlotRestCompatibility = "task_only"
+)
 
 type PlotterInfo struct {
 	ID       string
@@ -856,16 +865,17 @@ const (
 
 var defaultPlotItems = []PlotItem{
 	// Power
-	{ID: "power_by_condition", Group: "power", Name: "Condition Comparison", Description: "Power differences between conditions", RequiredFiles: []string{"features_power*.tsv", "events.tsv"}, RequiresFeatures: true},
-	{ID: "band_power_topomaps", Group: "power", Name: "Topomaps", Description: "Band power topographic maps for selected time window", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true},
-	{ID: "cross_frequency_power_correlation", Group: "power", Name: "Cross-Frequency Correlation", Description: "Correlation matrix between frequency bands", RequiredFiles: []string{"features_power*.tsv"}, RequiresFeatures: true},
-	{ID: "power_spectral_density", Group: "power", Name: "PSD Summary", Description: "Power spectral density curves", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "power_timecourse", Group: "power", Name: "Timecourse", Description: "Time-resolved band power trajectories by condition", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "power_by_condition", Group: "power", Name: "Condition Comparison", Description: "Power differences between conditions", RequiredFiles: []string{"features_power*.tsv", "events.tsv"}, RequiresFeatures: true, RestCompatibility: plotRestTaskOnly},
+	{ID: "band_power_topomaps", Group: "power", Name: "Topomaps", Description: "Band power topographic maps for selected time window", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true, RestCompatibility: plotRestCompatible},
+	{ID: "cross_frequency_power_correlation", Group: "power", Name: "Cross-Frequency Correlation", Description: "Correlation matrix between frequency bands", RequiredFiles: []string{"features_power*.tsv", "events.tsv"}, RequiresFeatures: true, RestCompatibility: plotRestCompatible},
+	{ID: "power_spectral_density", Group: "power", Name: "PSD Summary", Description: "Power spectral density curves", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true, RestCompatibility: plotRestCompatible},
+	{ID: "power_timecourse", Group: "power", Name: "Timecourse", Description: "Time-resolved band power trajectories by condition", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true, RestCompatibility: plotRestTaskOnly},
 	// Connectivity
-	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.tsv", "events.tsv"}, RequiresFeatures: true},
-	{ID: "connectivity_circle_condition", Group: "connectivity", Name: "Circle by Condition", Description: "Connectivity circles per measure and band by condition", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true},
-	{ID: "connectivity_heatmap", Group: "connectivity", Name: "Heatmaps", Description: "Connectivity heatmaps per measure and band", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
-	{ID: "connectivity_network", Group: "connectivity", Name: "Networks", Description: "Connectivity network visualizations per measure and band", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
+	{ID: "connectivity_circle", Group: "connectivity", Name: "Circle", Description: "Connectivity circle summary per measure and band", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true, RestCompatibility: plotRestCompatible},
+	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.tsv", "events.tsv"}, RequiresFeatures: true, RestCompatibility: plotRestTaskOnly},
+	{ID: "connectivity_circle_condition", Group: "connectivity", Name: "Circle by Condition", Description: "Connectivity circles per measure and band by condition", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif", "events.tsv"}, RequiresFeatures: true, RequiresEpochs: true, RestCompatibility: plotRestTaskOnly},
+	{ID: "connectivity_heatmap", Group: "connectivity", Name: "Heatmaps", Description: "Connectivity heatmaps per measure and band", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true, RestCompatibility: plotRestCompatible},
+	{ID: "connectivity_network", Group: "connectivity", Name: "Networks", Description: "Connectivity network visualizations per measure and band", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true, RestCompatibility: plotRestCompatible},
 	// Aperiodic
 	{ID: "aperiodic_topomaps", Group: "aperiodic", Name: "Topomaps", Description: "Topographic maps of aperiodic and periodic-peak metrics", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "aperiodic_by_condition", Group: "aperiodic", Name: "Condition Comparison", Description: "Aperiodic and oscillatory peak differences between conditions", RequiredFiles: []string{"features_aperiodic*.tsv", "events.tsv"}, RequiresFeatures: true},
@@ -938,14 +948,15 @@ type plotGroupPayload struct {
 }
 
 type plotItemPayload struct {
-	ID               string   `json:"id"`
-	Group            string   `json:"group"`
-	Label            string   `json:"label"`
-	Description      string   `json:"description"`
-	RequiredFiles    []string `json:"required_files"`
-	RequiresEpochs   bool     `json:"requires_epochs"`
-	RequiresFeatures bool     `json:"requires_features"`
-	RequiresStats    bool     `json:"requires_stats"`
+	ID                string   `json:"id"`
+	Group             string   `json:"group"`
+	Label             string   `json:"label"`
+	Description       string   `json:"description"`
+	RequiredFiles     []string `json:"required_files"`
+	RequiresEpochs    bool     `json:"requires_epochs"`
+	RequiresFeatures  bool     `json:"requires_features"`
+	RequiresStats     bool     `json:"requires_stats"`
+	RestCompatibility string   `json:"rest_compatibility"`
 }
 
 func loadPlotCatalog(repoRoot string) ([]PlotItem, []FeatureCategory, error) {
@@ -963,14 +974,15 @@ func loadPlotCatalog(repoRoot string) ([]PlotItem, []FeatureCategory, error) {
 	items := make([]PlotItem, 0, len(payload.Plots))
 	for _, plot := range payload.Plots {
 		items = append(items, PlotItem{
-			ID:               plot.ID,
-			Group:            plot.Group,
-			Name:             plot.Label,
-			Description:      plot.Description,
-			RequiredFiles:    plot.RequiredFiles,
-			RequiresEpochs:   plot.RequiresEpochs,
-			RequiresFeatures: plot.RequiresFeatures,
-			RequiresStats:    plot.RequiresStats,
+			ID:                plot.ID,
+			Group:             plot.Group,
+			Name:              plot.Label,
+			Description:       plot.Description,
+			RequiredFiles:     plot.RequiredFiles,
+			RequiresEpochs:    plot.RequiresEpochs,
+			RequiresFeatures:  plot.RequiresFeatures,
+			RequiresStats:     plot.RequiresStats,
+			RestCompatibility: PlotRestCompatibility(strings.TrimSpace(plot.RestCompatibility)),
 		})
 	}
 

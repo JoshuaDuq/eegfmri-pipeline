@@ -298,33 +298,6 @@ func (m Model) renderHeader() string {
 	return headerLine + "\n" + styles.RenderDivider(lineWidth)
 }
 
-func (m *Model) calculateETA() {
-	if len(m.SubjectDurations) == 0 || m.SubjectTotal == 0 {
-		m.EstimatedRemaining = 0
-		return
-	}
-
-	avgDuration := m.averageSubjectDuration()
-	remainingSubjects := m.SubjectTotal - m.SubjectCurrent
-	if remainingSubjects < 0 {
-		remainingSubjects = 0
-	}
-
-	m.EstimatedRemaining = time.Duration(remainingSubjects) * avgDuration
-}
-
-func (m Model) averageSubjectDuration() time.Duration {
-	if len(m.SubjectDurations) == 0 {
-		return 0
-	}
-
-	var total time.Duration
-	for _, d := range m.SubjectDurations {
-		total += d
-	}
-	return total / time.Duration(len(m.SubjectDurations))
-}
-
 // renderProgressSection renders the main progress overview including
 // overall completion, current subject/step, timing, and metrics.
 func (m Model) renderProgressSection() string {
@@ -336,9 +309,6 @@ func (m Model) renderProgressSection() string {
 	if m.StartTime.Unix() > 0 {
 		dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		headerLine += dimStyle.Render("  " + formatDuration(m.getDuration()))
-		if m.Status == StatusRunning && m.EstimatedRemaining > 0 {
-			headerLine += dimStyle.Render("  ETA ") + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(formatDuration(m.EstimatedRemaining))
-		}
 	}
 	b.WriteString(styles.TruncateLine(headerLine, iw) + "\n")
 

@@ -12,8 +12,10 @@ This module consolidates common functionality used across multiple plotting modu
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Tuple, List, Dict, Any, Optional, Union
+from itertools import combinations
 from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
@@ -357,6 +359,23 @@ def get_significance_color(significant: bool, config: Any = None) -> str:
         return sig_color if significant else nonsig_color
     
     return default_sig_color if significant else default_nonsig_color
+
+
+def _resolve_feature_type_name(feature_label: str) -> str:
+    """Map plot labels to canonical feature family names."""
+    feature_type_map = {
+        "Band Power": "power",
+        "Aperiodic": "aperiodic",
+        "Connectivity": "connectivity",
+        "Spectral": "spectral",
+        "ERDS": "erds",
+        "Band Ratios": "ratios",
+        "Asymmetry": "asymmetry",
+        "ITPC": "itpc",
+        "PAC": "pac",
+        "Complexity": "complexity",
+    }
+    return feature_type_map.get(feature_label, feature_label.lower())
 
 
 ###################################################################
@@ -851,29 +870,77 @@ def _apply_stats_filters(
     # Filter by feature_type
     if feature_type:
         ft_lower = feature_type.lower()
+        feature_mask: Optional[pd.Series] = None
         if "feature_type" in df.columns:
-            mask &= df["feature_type"].str.lower().str.contains(ft_lower, na=False)
+            feature_mask = df["feature_type"].astype(str).str.lower().str.contains(ft_lower, na=False)
         if "identifier" in df.columns:
-            mask |= df["identifier"].str.lower().str.contains(ft_lower, na=False)
+            identifier_lower = df["identifier"].astype(str).str.lower()
+            if _identifier_has_feature_family(identifier_lower, ft_lower):
+                identifier_mask = identifier_lower.str.contains(ft_lower, na=False)
+                feature_mask = identifier_mask if feature_mask is None else (feature_mask | identifier_mask)
+        if feature_mask is not None:
+            mask &= feature_mask
     
     # Filter by comparison_type
     if comparison_type and "comparison_type" in df.columns:
         mask &= df["comparison_type"].str.lower() == comparison_type.lower()
     
     # Filter by conditions (flexible matching)
-    if condition1 and "condition1" in df.columns:
+    if condition1:
         c1_lower = condition1.lower()
-        mask &= df["condition1"].str.lower() == c1_lower
-    if condition2 and "condition2" in df.columns:
+        condition1_columns = [
+            col for col in ("condition1", "window1", "condition_value1") if col in df.columns
+        ]
+        if condition1_columns:
+            condition1_mask = pd.Series(False, index=df.index)
+            for col in condition1_columns:
+                condition1_mask |= df[col].astype(str).str.lower() == c1_lower
+            mask &= condition1_mask
+        else:
+            mask &= False
+
+    if condition2:
         c2_lower = condition2.lower()
-        mask &= df["condition2"].str.lower() == c2_lower
-    
+        condition2_columns = [
+            col for col in ("condition2", "window2", "condition_value2") if col in df.columns
+        ]
+        if condition2_columns:
+            condition2_mask = pd.Series(False, index=df.index)
+            for col in condition2_columns:
+                condition2_mask |= df[col].astype(str).str.lower() == c2_lower
+            mask &= condition2_mask
+        else:
+            mask &= False
+
     # Filter by ROI
     if roi_name and roi_name.lower() != "all" and "identifier" in df.columns:
         mask &= df["identifier"].str.lower().str.contains(roi_name.lower(), na=False)
     
     filtered = df[mask]
     return filtered if not filtered.empty else None
+
+
+def _identifier_has_feature_family(
+    identifier_lower: pd.Series,
+    requested_feature_type: str,
+) -> bool:
+    """Return whether identifiers encode feature-family names for strict filtering."""
+    known_prefixes = (
+        "power_",
+        "aperiodic_",
+        "complexity_",
+        "bursts_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "itpc_",
+        "pac_",
+        "connectivity_",
+    )
+    if identifier_lower.str.startswith(known_prefixes).any():
+        return True
+    return identifier_lower.str.contains(requested_feature_type, na=False).any()
 
 
 def get_precomputed_qvalues(
@@ -896,13 +963,21 @@ def get_precomputed_qvalues(
     for key in feature_keys:
         key_lower = key.lower()
         match = pd.DataFrame()
-        
-        if roi_name and roi_name.lower() != "all":
+        roi_lower = roi_name.lower() if roi_name else "all"
+
+        if roi_lower != "all":
             pattern = f"{key_lower}_{roi_name.lower()}"
             match = precomputed_df[identifier_lower == pattern]
-        
         if match.empty:
-            match = precomputed_df[identifier_lower.str.contains(key_lower, na=False)]
+            exact_match = precomputed_df[identifier_lower == key_lower]
+            if not exact_match.empty:
+                match = exact_match
+
+        if match.empty:
+            key_mask = identifier_lower.str.contains(key_lower, na=False)
+            if roi_lower != "all":
+                key_mask &= identifier_lower.str.contains(roi_lower, na=False)
+            match = precomputed_df[key_mask]
         
         if not match.empty:
             row = match.iloc[0]
@@ -915,6 +990,59 @@ def get_precomputed_qvalues(
     return qvalues
 
 
+def get_precomputed_window_qvalues(
+    precomputed_df: Optional[pd.DataFrame],
+    bands: List[str],
+    segments: List[str],
+    *,
+    roi_name: str = "all",
+) -> Dict[Tuple[str, str, str], Tuple[float, float, float, bool]]:
+    """Extract pairwise window q-values keyed by `(band, segment1, segment2)`."""
+    qvalues: Dict[Tuple[str, str, str], Tuple[float, float, float, bool]] = {}
+    if not _is_valid_dataframe(precomputed_df) or "identifier" not in precomputed_df.columns:
+        return qvalues
+
+    identifier_lower = precomputed_df["identifier"].astype(str).str.lower()
+    window1_cols = [col for col in ("window1", "condition1", "condition_value1") if col in precomputed_df.columns]
+    window2_cols = [col for col in ("window2", "condition2", "condition_value2") if col in precomputed_df.columns]
+    if not window1_cols or not window2_cols:
+        return qvalues
+
+    roi_lower = str(roi_name or "all").lower()
+    for band in bands:
+        band_lower = str(band).lower()
+        band_mask = identifier_lower.str.contains(band_lower, na=False)
+        if roi_lower != "all":
+            band_mask &= identifier_lower.str.contains(roi_lower, na=False)
+        band_rows = precomputed_df[band_mask]
+        if band_rows.empty:
+            continue
+
+        for seg1, seg2 in combinations(segments, 2):
+            seg1_lower = str(seg1).lower()
+            seg2_lower = str(seg2).lower()
+            pair_mask = pd.Series(False, index=band_rows.index)
+            for left_col in window1_cols:
+                left_values = band_rows[left_col].astype(str).str.lower()
+                for right_col in window2_cols:
+                    right_values = band_rows[right_col].astype(str).str.lower()
+                    pair_mask |= (left_values == seg1_lower) & (right_values == seg2_lower)
+                    pair_mask |= (left_values == seg2_lower) & (right_values == seg1_lower)
+
+            match = band_rows[pair_mask]
+            if match.empty:
+                continue
+
+            row = match.iloc[0]
+            p = float(row.get("p_value", 1.0))
+            q = float(row.get("q_value", p))
+            d = float(row.get("effect_size_d", 0.0))
+            sig = bool(row.get("significant_fdr", q < 0.05)) if "significant_fdr" in row else (q < 0.05)
+            qvalues[(band, seg1, seg2)] = (p, q, d, sig)
+
+    return qvalues
+
+
 def compute_or_load_column_stats(
     stats_dir: Optional[Union[Path, str]],
     feature_type: str,
@@ -922,6 +1050,10 @@ def compute_or_load_column_stats(
     cell_data: Dict[int, Optional[Dict[str, np.ndarray]]],
     config: Any = None,
     logger: Any = None,
+    *,
+    roi_name: str = "all",
+    require_precomputed_stats: bool = False,
+    precomputed_df: Optional[pd.DataFrame] = None,
 ) -> Tuple[Dict[int, Tuple[float, float, float, bool]], int, bool]:
     """Compute or load column comparison statistics.
     
@@ -935,20 +1067,22 @@ def compute_or_load_column_stats(
     use_precomputed = False
     
     # Try to load pre-computed stats
-    if stats_dir is not None:
+    precomputed = precomputed_df
+    if precomputed is None and stats_dir is not None:
         precomputed = load_precomputed_paired_stats(
             stats_dir=stats_dir,
             feature_type=feature_type,
             comparison_type="column",
+            roi_name=roi_name,
         )
-        
-        if precomputed is not None and not precomputed.empty:
+
+    if precomputed is not None and not precomputed.empty:
             use_precomputed = True
             if logger and hasattr(logger, "info"):
                 logger.info(f"Using pre-computed column stats for {feature_type} ({len(precomputed)} entries)")
             
             # Map pre-computed stats to feature_keys
-            precomputed_qvals = get_precomputed_qvalues(precomputed, feature_keys, roi_name="all")
+            precomputed_qvals = get_precomputed_qvalues(precomputed, feature_keys, roi_name=roi_name)
             
             for col_idx, key in enumerate(feature_keys):
                 if key in precomputed_qvals:
@@ -956,6 +1090,12 @@ def compute_or_load_column_stats(
             
             n_significant = sum(1 for v in qvalues.values() if v[3])
             return qvalues, n_significant, use_precomputed
+
+    if require_precomputed_stats:
+        raise ValueError(
+            f"{feature_type} column comparison requires pre-computed statistics; "
+            "on-the-fly row-wise tests are disabled for this plot."
+        )
     
     # Fall back to computing on-the-fly
     all_pvals = []
@@ -1049,6 +1189,40 @@ def _summarize_multi_window_sample_counts(
     return f"N per window: {_format_count_range(counts)} {sample_unit}"
 
 
+def _get_displayed_multi_window_pairs(
+    available_segments: List[str],
+) -> List[Tuple[str, str]]:
+    """Return the window pairs actually drawn on the figure."""
+    if len(available_segments) < 2:
+        return []
+    return list(combinations(available_segments, 2))
+
+
+def _filter_displayed_multi_window_qvalues(
+    qvalues: Dict[Tuple[str, str, str], Tuple[float, float, float, bool]],
+    bands_in_order: List[str],
+    segments: List[str],
+) -> Dict[Tuple[str, str, str], Tuple[float, float, float, bool]]:
+    """Keep only the comparisons that are rendered on the figure."""
+    displayed_pairs = set(_get_displayed_multi_window_pairs(segments))
+    filtered: Dict[Tuple[str, str, str], Tuple[float, float, float, bool]] = {}
+    for band in bands_in_order:
+        for seg1, seg2 in displayed_pairs:
+            key = (band, seg1, seg2)
+            reverse_key = (band, seg2, seg1)
+            if key in qvalues:
+                filtered[key] = qvalues[key]
+            elif reverse_key in qvalues:
+                filtered[key] = qvalues[reverse_key]
+    return filtered
+
+
+def _format_displayed_multi_window_pairs(segments: List[str]) -> str:
+    """Format the displayed comparison pairs for figure metadata."""
+    displayed_pairs = _get_displayed_multi_window_pairs(segments)
+    return ", ".join(f"{seg1} vs {seg2}" for seg1, seg2 in displayed_pairs)
+
+
 def plot_multi_window_comparison(
     data_by_band: Dict[str, Dict[str, np.ndarray]],
     subject: str,
@@ -1060,8 +1234,10 @@ def plot_multi_window_comparison(
     *,
     roi_name: Optional[str] = None,
     stats_dir: Optional[Union[Path, str]] = None,
+    precomputed_stats: Optional[pd.DataFrame] = None,
     sample_unit: str = "trials",
     comparison_dimension_name: str = "windows",
+    require_precomputed_stats: bool = False,
 ) -> None:
     """Multi-window paired comparison plot with significance brackets.
     
@@ -1080,7 +1256,6 @@ def plot_multi_window_comparison(
         stats_dir: Directory containing pre-computed statistics
     """
     import matplotlib.pyplot as plt
-    from itertools import combinations
     from scipy.stats import wilcoxon
     from eeg_pipeline.plotting.io.figures import save_fig
     
@@ -1106,32 +1281,66 @@ def plot_multi_window_comparison(
     segment_colors = plt.cm.Set2(np.linspace(0, 1, max(n_segments, 3)))
     segment_color_map = {seg: segment_colors[i] for i, seg in enumerate(segments)}
     
-    all_pvalues = []
-    pvalue_keys = []
-    min_samples = int(get_config_value(config, "behavior_analysis.min_samples.default", 5))
-    
-    for band in bands_in_order:
-        segment_data = data_by_band[band]
-        for seg1, seg2 in combinations(segments, 2):
-            if seg1 not in segment_data or seg2 not in segment_data:
-                continue
-            v1, v2 = segment_data[seg1], segment_data[seg2]
-            if len(v1) >= min_samples and len(v2) >= min_samples and len(v1) == len(v2):
-                try:
-                    _, p_value = wilcoxon(v2, v1)
-                    effect_size = compute_paired_cohens_d(v1, v2)
-                    all_pvalues.append(p_value)
-                    pvalue_keys.append((band, seg1, seg2, p_value, effect_size))
-                except (ValueError, RuntimeError):
-                    pass
-    
+    feature_type = _resolve_feature_type_name(feature_label)
+    if precomputed_stats is None and stats_dir is not None:
+        precomputed_stats = load_precomputed_paired_stats(
+            stats_dir=stats_dir,
+            feature_type=feature_type,
+            comparison_type="window",
+            roi_name=roi_name,
+        )
+
+    use_precomputed = precomputed_stats is not None and not precomputed_stats.empty
+    if require_precomputed_stats and not use_precomputed:
+        raise ValueError(
+            f"{feature_label} multi-window comparison requires pre-computed statistics; "
+            "on-the-fly row-wise tests are disabled for this plot."
+        )
+
     qvalues: Dict[Tuple[str, str, str], Tuple[float, float, float, bool]] = {}
     n_significant = 0
-    if all_pvalues:
-        rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
-        for i, (band, seg1, seg2, p_value, effect_size) in enumerate(pvalue_keys):
-            qvalues[(band, seg1, seg2)] = (p_value, qvals[i], effect_size, rejected[i])
-        n_significant = int(np.sum(rejected))
+    if use_precomputed:
+        qvalues = get_precomputed_window_qvalues(
+            precomputed_stats,
+            bands_in_order,
+            segments,
+            roi_name=roi_name or "all",
+        )
+        if require_precomputed_stats and not qvalues:
+            raise ValueError(
+                f"{feature_label} multi-window comparison could not match the requested "
+                "bands/windows in the pre-computed statistics table."
+            )
+        qvalues = _filter_displayed_multi_window_qvalues(qvalues, bands_in_order, segments)
+        n_significant = sum(1 for stats_tuple in qvalues.values() if stats_tuple[3])
+    else:
+        all_pvalues = []
+        pvalue_keys = []
+        min_samples = int(get_config_value(config, "behavior_analysis.min_samples.default", 5))
+        displayed_pairs = set(_get_displayed_multi_window_pairs(segments))
+
+        for band in bands_in_order:
+            segment_data = data_by_band[band]
+            for seg1, seg2 in combinations(segments, 2):
+                if (seg1, seg2) not in displayed_pairs:
+                    continue
+                if seg1 not in segment_data or seg2 not in segment_data:
+                    continue
+                v1, v2 = segment_data[seg1], segment_data[seg2]
+                if len(v1) >= min_samples and len(v2) >= min_samples and len(v1) == len(v2):
+                    try:
+                        _, p_value = wilcoxon(v2, v1)
+                        effect_size = compute_paired_cohens_d(v1, v2)
+                        all_pvalues.append(p_value)
+                        pvalue_keys.append((band, seg1, seg2, p_value, effect_size))
+                    except (ValueError, RuntimeError):
+                        pass
+
+        if all_pvalues:
+            rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
+            for i, (band, seg1, seg2, p_value, effect_size) in enumerate(pvalue_keys):
+                qvalues[(band, seg1, seg2)] = (p_value, qvals[i], effect_size, rejected[i])
+            n_significant = int(np.sum(rejected))
     
     fig_width_per_band = 2.5 + 0.5 * n_segments
     fig_height = 5 + 0.4 * n_pairs
@@ -1182,9 +1391,8 @@ def plot_multi_window_comparison(
         
         bracket_y = y_max + 0.08 * y_range
         bracket_spacing = 0.12 * y_range
-        
-        # Only plot brackets compared to the first element (Control) to avoid ladder density
-        pair_list = [(0, j) for j in range(1, len(available_segments))]
+
+        pair_list = list(combinations(range(len(available_segments)), 2))
         drawn_brackets = 0
         for pair_idx, (i, j) in enumerate(pair_list):
             seg1, seg2 = available_segments[i], available_segments[j]
@@ -1212,21 +1420,23 @@ def plot_multi_window_comparison(
         ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, "gray"))
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-    
+
     n_tests = len(qvalues)
     
     roi_display = roi_name.replace("_", " ").title() if roi_name and roi_name != "all" else "All Channels"
     
     dimension_name = str(comparison_dimension_name).strip() or "windows"
+    displayed_pair_text = _format_displayed_multi_window_pairs(segments)
     title_parts = [
         f"{feature_label}: Multi-{dimension_name.capitalize()} Comparison "
-        f"({n_segments} {dimension_name}, {n_pairs} pairs)"
+        f"({n_segments} {dimension_name}, {len(_get_displayed_multi_window_pairs(segments))} displayed pairs)"
     ]
     info_parts = [
         f"Subject: {subject}",
         f"ROI: {roi_display}",
         _summarize_multi_window_sample_counts(data_by_band, sample_unit),
         "Wilcoxon signed-rank",
+        f"Displayed comparisons: {displayed_pair_text}",
         f"FDR: {n_significant}/{n_tests} significant (*p<.05, **p<.01, ***p<.001)"
     ]
     title_parts.append(" | ".join(info_parts))
@@ -1270,6 +1480,7 @@ def plot_paired_comparison(
     precomputed_stats: Optional[pd.DataFrame] = None,
     stats_dir: Optional[Union[Path, str]] = None,
     sample_unit: str = "trials",
+    require_precomputed_stats: bool = False,
 ) -> None:
     """Unified paired comparison plot.
     
@@ -1298,19 +1509,7 @@ def plot_paired_comparison(
     condition1_color = condition_colors.get("condition_1", "#5a7d9a")
     condition2_color = condition_colors.get("condition_2", "#c44e52")
     
-    feature_type_map = {
-        "Band Power": "power",
-        "Aperiodic": "aperiodic",
-        "Connectivity": "connectivity",
-        "Spectral": "spectral",
-        "ERDS": "erds",
-        "Band Ratios": "ratios",
-        "Asymmetry": "asymmetry",
-        "ITPC": "itpc",
-        "PAC": "pac",
-        "Complexity": "complexity",
-    }
-    feature_type = feature_type_map.get(feature_label, feature_label.lower())
+    feature_type = _resolve_feature_type_name(feature_label)
     
     if precomputed_stats is None and stats_dir is not None:
         precomputed_stats = load_precomputed_paired_stats(
@@ -1325,9 +1524,19 @@ def plot_paired_comparison(
     qvalues = {}
     n_significant = 0
     use_precomputed = precomputed_stats is not None and not precomputed_stats.empty
+    if require_precomputed_stats and not use_precomputed:
+        raise ValueError(
+            f"{feature_label} paired comparison requires pre-computed statistics; "
+            "on-the-fly row-wise tests are disabled for this plot."
+        )
     
     if use_precomputed:
         qvalues = get_precomputed_qvalues(precomputed_stats, bands_in_order, roi_name or "all")
+        if require_precomputed_stats and not qvalues:
+            raise ValueError(
+                f"{feature_label} paired comparison could not match the requested bands "
+                "in the pre-computed statistics table."
+            )
         n_significant = sum(1 for stats_tuple in qvalues.values() if stats_tuple[3])
         if logger:
             logger.debug(f"Using pre-computed statistics for {feature_label} ({len(qvalues)} bands)")
@@ -1467,6 +1676,51 @@ def load_multigroup_stats(
     return stats
 
 
+def resolve_complete_multigroup_plot_groups(
+    events_df: pd.DataFrame,
+    config: Any,
+    *,
+    context: str,
+    minimum_groups: int = 2,
+) -> Tuple[Dict[str, np.ndarray], List[str]]:
+    """Resolve configured multi-group labels and require every group to have trials."""
+    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
+
+    multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
+    if not multi_group_info:
+        raise ValueError(f"{context} could not resolve configured multi-group masks.")
+
+    masks_dict, group_labels = multi_group_info
+    resolved_masks: Dict[str, np.ndarray] = {}
+    missing_labels: List[str] = []
+
+    for label in group_labels:
+        mask = masks_dict.get(label)
+        if mask is None:
+            missing_labels.append(str(label))
+            continue
+
+        mask_bool = np.asarray(mask, dtype=bool)
+        if int(mask_bool.sum()) == 0:
+            missing_labels.append(str(label))
+            continue
+
+        resolved_masks[str(label)] = mask_bool
+
+    if missing_labels:
+        raise ValueError(
+            f"{context}: missing configured group(s) with matching trials: {missing_labels}"
+        )
+
+    ordered_labels = [str(label) for label in group_labels]
+    if len(ordered_labels) < minimum_groups:
+        raise ValueError(
+            f"{context} requires at least {minimum_groups} configured groups with matching trials."
+        )
+
+    return resolved_masks, ordered_labels
+
+
 def plot_multi_group_column_comparison(
     data_by_band: Dict[str, Dict[str, np.ndarray]],
     subject: str,
@@ -1479,6 +1733,7 @@ def plot_multi_group_column_comparison(
     roi_name: Optional[str] = None,
     stats_dir: Optional[Union[Path, str]] = None,
     multigroup_stats: Optional[pd.DataFrame] = None,
+    stats_match_terms: Optional[Dict[str, Tuple[str, ...]]] = None,
 ) -> None:
     """Multi-group unpaired comparison plot with significance brackets.
     
@@ -1499,30 +1754,44 @@ def plot_multi_group_column_comparison(
         roi_name: ROI name for title
         stats_dir: Directory containing pre-computed statistics (required if multigroup_stats not provided)
         multigroup_stats: Pre-loaded multigroup stats DataFrame (optional, avoids reloading)
+        stats_match_terms: Optional mapping from plotted feature key to identifier match terms
     """
     import matplotlib.pyplot as plt
     
     if not data_by_band:
         return
     
+    required_stat_columns = {"feature", "group1", "group2", "q_value", "significant_fdr"}
+
     if multigroup_stats is None:
         if stats_dir is None:
-            if logger:
-                logger.warning(
-                    f"Multi-group comparison for {feature_label} requires pre-computed stats. "
-                    "Run behavior pipeline with 3+ comparison values first."
-                )
-            return
+            raise ValueError(
+                f"Multi-group comparison for {feature_label} requires pre-computed stats. "
+                "Run behavior pipeline with 3+ comparison values first."
+            )
         
         multigroup_stats = load_multigroup_stats(stats_dir)
-    
-    if multigroup_stats is None or multigroup_stats.empty:
-        if logger:
-            logger.warning(
+
+        if multigroup_stats is None or multigroup_stats.empty:
+            raise ValueError(
                 f"No pre-computed multi-group stats found for {feature_label}. "
                 "Run behavior pipeline with 3+ comparison values first."
             )
-        return
+    else:
+        multigroup_stats = multigroup_stats.copy()
+
+    missing_columns = required_stat_columns.difference(set(multigroup_stats.columns))
+    if missing_columns:
+        raise ValueError(
+            "Invalid multigroup stats table: missing required columns "
+            f"{sorted(missing_columns)}."
+        )
+
+    if multigroup_stats.empty and stats_dir is not None:
+        raise ValueError(
+            f"No pre-computed multi-group stats found for {feature_label}. "
+            "Run behavior pipeline with 3+ comparison values first."
+        )
     
     plot_cfg = get_plot_config(config)
     bands_in_order = list(data_by_band.keys())
@@ -1534,25 +1803,14 @@ def plot_multi_group_column_comparison(
     n_groups = len(groups)
     group_colors = plt.cm.Set2(np.linspace(0, 1, max(n_groups, 3)))
     
-    # Build qvalues map for all bands
-    qvalues_map: Dict[Tuple[int, str, str], Tuple[float, bool]] = {}
-    total_significant = 0
-    total_tests = 0
-    
-    for _, row in multigroup_stats.iterrows():
-        feature = str(row.get("feature", ""))
-        g1 = str(row.get("group1", ""))
-        g2 = str(row.get("group2", ""))
-        q_value = float(row.get("q_value", 1.0))
-        is_sig = bool(row.get("significant_fdr", False))
-        
-        for band_idx, band in enumerate(bands_in_order):
-            if band.lower() in feature.lower():
-                qvalues_map[(band_idx, g1, g2)] = (q_value, is_sig)
-                total_tests += 1
-                if is_sig:
-                    total_significant += 1
-                break
+    qvalues_map, total_significant, total_tests = _resolve_multigroup_qvalues_map(
+        data_by_band=data_by_band,
+        groups=groups,
+        multigroup_stats=multigroup_stats,
+        feature_keys=bands_in_order,
+        roi_name=roi_name,
+        stats_match_terms=stats_match_terms,
+    )
     
     # Decide layout: separate plots per band if more than 3 groups
     separate_plots_per_band = n_groups > 3
@@ -1853,3 +2111,132 @@ def _plot_multi_group_combined(
     if logger:
         logger.info(f"Saved {feature_label} multi-group column comparison "
                    f"({total_significant}/{total_tests} FDR significant, pre-computed)")
+
+
+def _build_multigroup_qvalues_map(
+    multigroup_stats: pd.DataFrame,
+    feature_keys: List[str],
+    groups: List[str],
+    roi_name: Optional[str],
+    stats_match_terms: Optional[Dict[str, Tuple[str, ...]]] = None,
+) -> Tuple[Dict[Tuple[int, str, str], Tuple[float, bool]], int, int]:
+    """Map precomputed multi-group stats to the requested feature keys."""
+    stats = multigroup_stats.copy()
+    if "identifier" not in stats.columns:
+        stats["identifier"] = stats["feature"].astype(str)
+
+    identifier_normalized = stats["identifier"].astype(str).map(_normalize_stats_match_text)
+    if roi_name and roi_name.lower() != "all":
+        roi_term = _normalize_stats_match_text(roi_name)
+        roi_mask = identifier_normalized.str.contains(roi_term, na=False)
+        stats = stats[roi_mask].copy()
+        identifier_normalized = stats["identifier"].astype(str).map(_normalize_stats_match_text)
+
+    qvalues_map: Dict[Tuple[int, str, str], Tuple[float, bool]] = {}
+    total_significant = 0
+    total_tests = 0
+    expected_pairs = {tuple(sorted((g1, g2))) for g1, g2 in combinations(groups, 2)}
+
+    for feature_idx, feature_key in enumerate(feature_keys):
+        match_terms = _resolve_stats_match_terms(feature_key, stats_match_terms)
+        feature_mask = _build_stats_match_mask(identifier_normalized, match_terms)
+        feature_rows = stats[feature_mask]
+        if feature_rows.empty:
+            raise ValueError(
+                "No multigroup stats matched plotted feature "
+                f"{feature_key!r} for roi {roi_name!r} using match terms {match_terms!r}."
+            )
+
+        seen_pairs = set()
+        for _, row in feature_rows.iterrows():
+            g1 = str(row.get("group1", ""))
+            g2 = str(row.get("group2", ""))
+            if g1 not in groups or g2 not in groups:
+                continue
+
+            pair_key = tuple(sorted((g1, g2)))
+            if pair_key not in expected_pairs:
+                continue
+            if pair_key in seen_pairs:
+                raise ValueError(
+                    "Ambiguous multigroup stats for "
+                    f"feature {feature_key!r}, groups {g1!r}/{g2!r}, roi {roi_name!r}."
+                )
+            seen_pairs.add(pair_key)
+
+            row_key = (feature_idx, g1, g2)
+            if row_key in qvalues_map:
+                raise ValueError(
+                    "Ambiguous multigroup stats for "
+                    f"feature {feature_key!r}, groups {g1!r}/{g2!r}, roi {roi_name!r}."
+                )
+
+            q_value = float(row.get("q_value", 1.0))
+            is_sig = bool(row.get("significant_fdr", False))
+            qvalues_map[row_key] = (q_value, is_sig)
+            total_tests += 1
+            if is_sig:
+                total_significant += 1
+
+        missing_pairs = sorted(expected_pairs.difference(seen_pairs))
+        if missing_pairs:
+            raise ValueError(
+                "Missing multigroup stats for "
+                f"feature {feature_key!r}, roi {roi_name!r}: {missing_pairs!r}."
+            )
+
+    return qvalues_map, total_significant, total_tests
+
+
+def _resolve_multigroup_qvalues_map(
+    *,
+    data_by_band: Dict[str, Dict[str, np.ndarray]],
+    groups: List[str],
+    multigroup_stats: pd.DataFrame,
+    feature_keys: List[str],
+    roi_name: Optional[str],
+    stats_match_terms: Optional[Dict[str, Tuple[str, ...]]] = None,
+) -> Tuple[Dict[Tuple[int, str, str], Tuple[float, bool]], int, int]:
+    """Resolve multigroup q-values from precomputed stats."""
+    return _build_multigroup_qvalues_map(
+        multigroup_stats=multigroup_stats,
+        feature_keys=feature_keys,
+        groups=groups,
+        roi_name=roi_name,
+        stats_match_terms=stats_match_terms,
+    )
+
+
+def _resolve_stats_match_terms(
+    feature_key: str,
+    stats_match_terms: Optional[Dict[str, Tuple[str, ...]]],
+) -> Tuple[str, ...]:
+    """Return the identifier terms that must match for one plotted feature key."""
+    if stats_match_terms and feature_key in stats_match_terms:
+        terms = tuple(str(term) for term in stats_match_terms[feature_key] if str(term).strip())
+    else:
+        terms = (str(feature_key),)
+
+    if not terms:
+        raise ValueError(f"No stats match terms were provided for feature {feature_key!r}.")
+    return terms
+
+
+def _normalize_stats_match_text(value: str) -> str:
+    """Normalize stats identifiers and match terms to comparable lowercase tokens."""
+    normalized = re.sub(r"[^0-9a-z]+", " ", str(value).lower())
+    return " ".join(normalized.split())
+
+
+def _build_stats_match_mask(
+    identifier_normalized: pd.Series,
+    match_terms: Tuple[str, ...],
+) -> pd.Series:
+    """Return rows whose normalized identifier contains every requested term."""
+    mask = pd.Series(True, index=identifier_normalized.index)
+    for term in match_terms:
+        normalized_term = _normalize_stats_match_text(term)
+        if normalized_term == "":
+            raise ValueError(f"Invalid empty stats match term in {match_terms!r}.")
+        mask &= identifier_normalized.str.contains(normalized_term, na=False)
+    return mask

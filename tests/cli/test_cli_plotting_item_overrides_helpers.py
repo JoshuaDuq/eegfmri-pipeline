@@ -84,3 +84,23 @@ def test_collect_shared_group_overrides_rejects_conflicting_group_settings() -> 
 
     with pytest.raises(ValueError, match="Conflicting --plot-item-config values"):
         _collect_shared_group_overrides(plot_ids, plot_item_configs)
+
+
+def test_collect_shared_group_overrides_propagates_cross_frequency_power_settings() -> None:
+    plot_ids = ["cross_frequency_power_correlation", "power_timecourse"]
+    plot_item_configs = {
+        "cross_frequency_power_correlation": {
+            "comparison_segment": ["active"],
+            "comparison_column": ["condition"],
+            "comparison_values": ["0", "1"],
+            "comparison_labels": ["Cool", "Hot"],
+        }
+    }
+
+    shared = _collect_shared_group_overrides(plot_ids, plot_item_configs)
+    resolved = _resolve_plot_overrides("power_timecourse", plot_item_configs, shared)
+
+    assert resolved["comparison_segment"] == ["active"]
+    assert resolved["comparison_column"] == ["condition"]
+    assert resolved["comparison_values"] == ["0", "1"]
+    assert resolved["comparison_labels"] == ["Cool", "Hot"]

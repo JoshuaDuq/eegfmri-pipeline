@@ -89,7 +89,8 @@
       "feature_categories": [
         "power"
       ],
-      "requires_features": true
+      "requires_features": true,
+      "rest_compatibility": "task_only"
     },
     {
       "id": "band_power_topomaps",
@@ -108,7 +109,23 @@
         "band_power_topomaps*"
       ],
       "requires_features": true,
-      "requires_epochs": true
+      "requires_epochs": true,
+      "rest_compatibility": "compatible"
+    },
+    {
+      "id": "cross_frequency_power_correlation",
+      "group": "power",
+      "label": "Cross-Frequency Correlation",
+      "description": "Correlation matrix between frequency bands",
+      "required_files": [
+        "features_power*.parquet",
+        "events.tsv"
+      ],
+      "feature_categories": [
+        "power"
+      ],
+      "requires_features": true,
+      "rest_compatibility": "compatible"
     },
     {
       "id": "power_spectral_density",
@@ -116,12 +133,14 @@
       "label": "PSD Summary",
       "description": "Power spectral density curves",
       "required_files": [
-        "epochs/*.fif"
+        "epochs/*.fif",
+        "events.tsv"
       ],
       "feature_categories": [
         "power"
       ],
-      "requires_epochs": true
+      "requires_epochs": true,
+      "rest_compatibility": "compatible"
     },
     {
       "id": "power_timecourse",
@@ -135,7 +154,27 @@
       "feature_categories": [
         "power"
       ],
-      "requires_epochs": true
+      "requires_epochs": true,
+      "rest_compatibility": "task_only"
+    },
+    {
+      "id": "connectivity_circle",
+      "group": "connectivity",
+      "label": "Circle",
+      "description": "Connectivity circle summary per measure and band",
+      "required_files": [
+        "features_connectivity*.parquet",
+        "epochs/*.fif"
+      ],
+      "feature_categories": [
+        "connectivity"
+      ],
+      "feature_plot_patterns": [
+        "*_circle"
+      ],
+      "requires_features": true,
+      "requires_epochs": true,
+      "rest_compatibility": "compatible"
     },
     {
       "id": "connectivity_by_condition",
@@ -149,7 +188,8 @@
       "feature_categories": [
         "connectivity"
       ],
-      "requires_features": true
+      "requires_features": true,
+      "rest_compatibility": "task_only"
     },
     {
       "id": "connectivity_circle_condition",
@@ -168,7 +208,8 @@
         "*_circle_condition"
       ],
       "requires_features": true,
-      "requires_epochs": true
+      "requires_epochs": true,
+      "rest_compatibility": "task_only"
     },
     {
       "id": "connectivity_heatmap",
@@ -186,7 +227,8 @@
         "*_heatmap"
       ],
       "requires_features": true,
-      "requires_epochs": true
+      "requires_epochs": true,
+      "rest_compatibility": "compatible"
     },
     {
       "id": "connectivity_network",
@@ -204,7 +246,8 @@
         "*_network"
       ],
       "requires_features": true,
-      "requires_epochs": true
+      "requires_epochs": true,
+      "rest_compatibility": "compatible"
     },
     {
       "id": "aperiodic_topomaps",

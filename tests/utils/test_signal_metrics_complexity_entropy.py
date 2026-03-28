@@ -5,12 +5,28 @@ import unittest
 import numpy as np
 
 from eeg_pipeline.utils.analysis.signal_metrics import (
+    compute_lempel_ziv_complexity,
     compute_multiscale_entropy,
     compute_sample_entropy,
 )
 
 
 class TestSignalMetricsComplexityEntropy(unittest.TestCase):
+    def test_lempel_ziv_complexity_matches_reference_for_simple_binary_sequences(self):
+        constant = np.zeros(8, dtype=float)
+        alternating = np.array([0, 1, 0, 1, 0, 1, 0, 1], dtype=float)
+
+        self.assertAlmostEqual(
+            compute_lempel_ziv_complexity(constant, threshold=0.5),
+            0.75,
+            places=12,
+        )
+        self.assertAlmostEqual(
+            compute_lempel_ziv_complexity(alternating, threshold=0.5),
+            1.125,
+            places=12,
+        )
+
     def test_sample_entropy_returns_finite_for_variable_signal(self):
         rng = np.random.default_rng(7)
         x = rng.standard_normal(500)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
@@ -34,8 +35,130 @@ from eeg_pipeline.plotting.features.utils import (
     _summarize_multi_window_sample_counts,
     _summarize_paired_sample_counts,
     _plot_single_band_comparison,
+    plot_multi_group_column_comparison,
 )
 from eeg_pipeline.utils.analysis.stats.paired_comparisons import compute_paired_cohens_d
+
+
+class _FakePlotTFR:
+    def __init__(self, ch_names: list[str], n_epochs: int) -> None:
+        self.ch_names = list(ch_names)
+        self._n_epochs = int(n_epochs)
+
+    def __len__(self) -> int:
+        return self._n_epochs
+
+    def copy(self) -> "_FakePlotTFR":
+        return _FakePlotTFR(self.ch_names, self._n_epochs)
+
+    def pick(self, channels: list[str]) -> "_FakePlotTFR":
+        channel_set = set(channels)
+        self.ch_names = [ch for ch in self.ch_names if ch in channel_set]
+        return self
+
+
+class _FakeAverageSpectralTFR:
+    def __init__(
+        self,
+        data: np.ndarray,
+        *,
+        times: np.ndarray,
+        freqs: np.ndarray,
+        ch_names: list[str],
+    ) -> None:
+        self.data = np.array(data, dtype=float, copy=True)
+        self.times = np.array(times, dtype=float, copy=True)
+        self.freqs = np.array(freqs, dtype=float, copy=True)
+        self.ch_names = list(ch_names)
+
+    def copy(self) -> "_FakeAverageSpectralTFR":
+        return _FakeAverageSpectralTFR(
+            self.data,
+            times=self.times,
+            freqs=self.freqs,
+            ch_names=self.ch_names,
+        )
+
+    def crop(self, tmin: float, tmax: float) -> "_FakeAverageSpectralTFR":
+        time_mask = (self.times >= float(tmin)) & (self.times <= float(tmax))
+        self.times = self.times[time_mask]
+        self.data = self.data[:, :, time_mask]
+        return self
+
+
+class _FakeEpochsSpectralTFR:
+    def __init__(
+        self,
+        data: np.ndarray,
+        *,
+        times: np.ndarray,
+        freqs: np.ndarray,
+        ch_names: list[str],
+    ) -> None:
+        self.data = np.array(data, dtype=float, copy=True)
+        self.times = np.array(times, dtype=float, copy=True)
+        self.freqs = np.array(freqs, dtype=float, copy=True)
+        self.ch_names = list(ch_names)
+
+    def __len__(self) -> int:
+        return int(self.data.shape[0])
+
+    def __getitem__(self, item) -> "_FakeEpochsSpectralTFR":
+        selected = np.array(self.data[item], dtype=float, copy=True)
+        if selected.ndim == 3:
+            selected = selected[np.newaxis, ...]
+        return _FakeEpochsSpectralTFR(
+            selected,
+            times=self.times,
+            freqs=self.freqs,
+            ch_names=self.ch_names,
+        )
+
+    def copy(self) -> "_FakeEpochsSpectralTFR":
+        return _FakeEpochsSpectralTFR(
+            self.data,
+            times=self.times,
+            freqs=self.freqs,
+            ch_names=self.ch_names,
+        )
+
+    def average(self) -> _FakeAverageSpectralTFR:
+        return _FakeAverageSpectralTFR(
+            np.nanmean(self.data, axis=0),
+            times=self.times,
+            freqs=self.freqs,
+            ch_names=self.ch_names,
+        )
+
+    def crop(self, tmin: float, tmax: float) -> "_FakeEpochsSpectralTFR":
+        time_mask = (self.times >= float(tmin)) & (self.times <= float(tmax))
+        self.times = self.times[time_mask]
+        self.data = self.data[:, :, :, time_mask]
+        return self
+
+
+def _fake_apply_baseline_and_crop(
+    tfr_obj,
+    baseline,
+    crop_window=None,
+    mode=None,
+    logger=None,
+    **kwargs,
+):
+    del mode, logger, kwargs
+
+    baseline_start, baseline_end = float(baseline[0]), float(baseline[1])
+    baseline_mask = (tfr_obj.times >= baseline_start) & (tfr_obj.times <= baseline_end)
+    if not baseline_mask.any():
+        raise ValueError("Baseline window does not overlap fake TFR times.")
+
+    baseline_power = np.nanmean(tfr_obj.data[..., baseline_mask], axis=-1, keepdims=True)
+    tfr_obj.data = np.log10(tfr_obj.data / baseline_power)
+
+    if crop_window is not None:
+        tfr_obj.crop(float(crop_window[0]), float(crop_window[1]))
+
+    return baseline
 
 
 def test_compute_window_effect_summary_returns_roi_band_matrices() -> None:
@@ -70,6 +193,69 @@ def test_compute_window_effect_summary_returns_roi_band_matrices() -> None:
     assert effect_df.loc["all", "alpha"] > 0
     assert effect_df.loc["Frontal", "alpha"] > 0
     assert np.isfinite(qvalue_df.loc["all", "alpha"])
+
+
+def test_resolve_power_plot_conditions_returns_rest_mask_without_comparison_config() -> None:
+    from eeg_pipeline.plotting.features.power import _resolve_power_plot_conditions
+
+    events_df = pd.DataFrame({"trial_id": [1, 2, 3, 4]})
+    config = {"feature_engineering": {"task_is_rest": True}}
+
+    conditions = _resolve_power_plot_conditions(
+        events_df=events_df,
+        config=config,
+        context="test_rest_plot",
+    )
+
+    assert len(conditions) == 1
+    assert conditions[0][0] == "Rest"
+    assert np.array_equal(conditions[0][1], np.array([True, True, True, True]))
+
+
+def test_resolve_power_plot_conditions_rejects_missing_two_group_value() -> None:
+    from eeg_pipeline.plotting.features.power import _resolve_power_plot_conditions
+
+    events_df = pd.DataFrame({"condition": [0, 0, 0]})
+    config = {
+        "plotting": {
+            "comparisons": {
+                "compare_columns": True,
+                "comparison_column": "condition",
+                "comparison_values": [0, 1],
+                "comparison_labels": ["Cool", "Hot"],
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="no trials found"):
+        _resolve_power_plot_conditions(
+            events_df=events_df,
+            config=config,
+            context="test_two_group_missing_value",
+        )
+
+
+def test_resolve_power_plot_conditions_rejects_missing_multigroup_value() -> None:
+    from eeg_pipeline.plotting.features.power import _resolve_power_plot_conditions
+
+    events_df = pd.DataFrame({"condition": [0, 0, 1, 1]})
+    config = {
+        "plotting": {
+            "comparisons": {
+                "compare_columns": True,
+                "comparison_column": "condition",
+                "comparison_values": [0, 1, 2],
+                "comparison_labels": ["Cool", "Warm", "Hot"],
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="missing configured group"):
+        _resolve_power_plot_conditions(
+            events_df=events_df,
+            config=config,
+            context="test_multigroup_missing_value",
+        )
 
 
 def test_compute_column_effect_summary_uses_configured_masks() -> None:
@@ -258,6 +444,704 @@ def test_format_topomap_condition_title_label_expands_raw_value() -> None:
     assert _format_topomap_condition_title_label("1.0", config) == "pain_binary_coded=1.0"
 
 
+def test_plot_power_by_condition_allows_column_only_config_without_comparison_windows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    called: dict[str, object] = {}
+
+    def fake_plot_column_comparison(*args, **kwargs) -> None:
+        called["column"] = True
+
+    def fake_compute_column_effect_summary(**kwargs):
+        effect_df = pd.DataFrame([[0.5]], index=["all"], columns=["alpha"], dtype=float)
+        qvalue_df = pd.DataFrame([[0.01]], index=["all"], columns=["alpha"], dtype=float)
+        return effect_df, qvalue_df, "Cool", "Hot"
+
+    def fake_plot_power_effect_summary_heatmap(**kwargs) -> None:
+        called["heatmap"] = kwargs["title"]
+
+    monkeypatch.setattr(power_module, "_plot_column_comparison", fake_plot_column_comparison)
+    monkeypatch.setattr(power_module, "_compute_column_effect_summary", fake_compute_column_effect_summary)
+    monkeypatch.setattr(power_module, "_plot_power_effect_summary_heatmap", fake_plot_power_effect_summary_heatmap)
+
+    power_df = pd.DataFrame(
+        {
+            "power_active_alpha_ch_Fz_logratio": [0.1, 0.2, 0.3, 0.4],
+            "power_active_alpha_ch_Cz_logratio": [0.2, 0.3, 0.4, 0.5],
+        }
+    )
+    events_df = pd.DataFrame({"condition": [0, 0, 1, 1]})
+    config = {
+        "plotting": {
+            "overwrite": True,
+            "comparisons": {
+                "compare_windows": False,
+                "compare_columns": True,
+                "comparison_segment": "active",
+                "comparison_column": "condition",
+                "comparison_values": [0, 1],
+                "comparison_labels": ["Cool", "Hot"],
+                "comparison_rois": ["all"],
+            },
+        },
+        "feature_engineering": {"frequency_bands": {"alpha": [8.0, 12.0]}},
+    }
+
+    power_module.plot_power_by_condition(
+        power_df=power_df,
+        events_df=events_df,
+        subject="01",
+        save_dir=tmp_path,
+        logger=power_module.logger,
+        config=config,
+        stats_dir=None,
+    )
+
+    assert called["column"] is True
+    assert called["heatmap"] == "Power condition effects: Hot - Cool"
+
+
+def test_plot_power_by_condition_skips_two_group_summary_for_multigroup_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    monkeypatch.setattr(power_module, "_plot_column_comparison", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        power_module,
+        "_compute_column_effect_summary",
+        lambda **kwargs: pytest.fail("two-group summary should not run for multigroup config"),
+    )
+    monkeypatch.setattr(
+        power_module,
+        "_plot_power_effect_summary_heatmap",
+        lambda **kwargs: pytest.fail("two-group heatmap should not run for multigroup config"),
+    )
+
+    power_df = pd.DataFrame(
+        {
+            "power_active_alpha_ch_Fz_logratio": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            "power_active_alpha_ch_Cz_logratio": [0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        }
+    )
+    events_df = pd.DataFrame({"condition": [0, 0, 1, 1, 2, 2]})
+    config = {
+        "plotting": {
+            "overwrite": True,
+            "comparisons": {
+                "compare_windows": False,
+                "compare_columns": True,
+                "comparison_segment": "active",
+                "comparison_column": "condition",
+                "comparison_values": [0, 1, 2],
+                "comparison_labels": ["Cool", "Warm", "Hot"],
+                "comparison_rois": ["all"],
+            },
+        },
+        "feature_engineering": {"frequency_bands": {"alpha": [8.0, 12.0]}},
+    }
+
+    power_module.plot_power_by_condition(
+        power_df=power_df,
+        events_df=events_df,
+        subject="01",
+        save_dir=tmp_path,
+        logger=power_module.logger,
+        config=config,
+        stats_dir=None,
+    )
+
+
+def test_plot_power_by_condition_rejects_multigroup_config_with_missing_group_trials(
+    tmp_path: Path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    power_df = pd.DataFrame(
+        {
+            "power_active_alpha_ch_Fz_logratio": [0.1, 0.2, 0.3, 0.4],
+            "power_active_alpha_ch_Cz_logratio": [0.2, 0.3, 0.4, 0.5],
+        }
+    )
+    events_df = pd.DataFrame({"condition": [0, 0, 1, 1]})
+    config = {
+        "plotting": {
+            "overwrite": True,
+            "comparisons": {
+                "compare_windows": False,
+                "compare_columns": True,
+                "comparison_segment": "active",
+                "comparison_column": "condition",
+                "comparison_values": [0, 1, 2],
+                "comparison_labels": ["Cool", "Warm", "Hot"],
+                "comparison_rois": ["all"],
+            },
+        },
+        "feature_engineering": {"frequency_bands": {"alpha": [8.0, 12.0]}},
+    }
+
+    with pytest.raises(ValueError, match="missing configured group"):
+        power_module.plot_power_by_condition(
+            power_df=power_df,
+            events_df=events_df,
+            subject="01",
+            save_dir=tmp_path,
+            logger=power_module.logger,
+            config=config,
+            stats_dir=None,
+        )
+
+
+def test_plot_multi_group_column_comparison_requires_precomputed_stats(
+    tmp_path: Path,
+) -> None:
+    data_by_band = {
+        "alpha": {
+            "Cool": np.array([1.0, 2.0, 3.0], dtype=float),
+            "Warm": np.array([2.0, 3.0, 4.0], dtype=float),
+            "Hot": np.array([3.0, 4.0, 5.0], dtype=float),
+        }
+    }
+
+    with pytest.raises(ValueError, match="requires pre-computed stats"):
+        plot_multi_group_column_comparison(
+            data_by_band=data_by_band,
+            subject="01",
+            save_path=tmp_path / "multigroup",
+            feature_label="Band Power",
+            groups=["Cool", "Warm", "Hot"],
+            config={},
+            logger=None,
+            roi_name="all",
+            stats_dir=None,
+        )
+
+
+def test_plot_multi_group_column_comparison_filters_stats_to_requested_roi(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_plot_multi_group_combined(**kwargs) -> None:
+        captured["qvalues_map"] = kwargs["qvalues_map"]
+        captured["total_tests"] = kwargs["total_tests"]
+
+    monkeypatch.setattr(
+        "eeg_pipeline.plotting.features.utils._plot_multi_group_combined",
+        fake_plot_multi_group_combined,
+    )
+
+    data_by_band = {
+        "alpha": {
+            "Cool": np.array([1.0, 2.0, 3.0], dtype=float),
+            "Hot": np.array([3.0, 4.0, 5.0], dtype=float),
+        }
+    }
+    multigroup_stats = pd.DataFrame(
+        {
+            "feature": [
+                "power_alpha_roi-frontal",
+                "power_alpha_roi-parietal",
+            ],
+            "identifier": [
+                "power_alpha_roi-frontal",
+                "power_alpha_roi-parietal",
+            ],
+            "group1": ["Cool", "Cool"],
+            "group2": ["Hot", "Hot"],
+            "q_value": [0.01, 0.30],
+            "significant_fdr": [True, False],
+        }
+    )
+
+    plot_multi_group_column_comparison(
+        data_by_band=data_by_band,
+        subject="01",
+        save_path=tmp_path / "multigroup",
+        feature_label="Band Power",
+        groups=["Cool", "Hot"],
+        config={},
+        logger=None,
+        roi_name="frontal",
+        stats_dir=None,
+        multigroup_stats=multigroup_stats,
+    )
+
+    assert captured["qvalues_map"] == {(0, "Cool", "Hot"): (0.01, True)}
+    assert captured["total_tests"] == 1
+
+
+def test_plot_multi_group_column_comparison_rejects_ambiguous_precomputed_stats(
+    tmp_path: Path,
+) -> None:
+    data_by_band = {
+        "alpha": {
+            "Cool": np.linspace(0.0, 1.0, 8, dtype=float),
+            "Hot": np.linspace(2.0, 3.0, 8, dtype=float),
+        }
+    }
+    multigroup_stats = pd.DataFrame(
+        {
+            "feature": [
+                "power_alpha_ch-fz",
+                "power_alpha_ch-cz",
+            ],
+            "identifier": [
+                "power_alpha_ch-fz",
+                "power_alpha_ch-cz",
+            ],
+            "group1": ["Cool", "Cool"],
+            "group2": ["Hot", "Hot"],
+            "q_value": [0.01, 0.03],
+            "significant_fdr": [True, True],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Ambiguous multigroup stats"):
+        plot_multi_group_column_comparison(
+            data_by_band=data_by_band,
+            subject="01",
+            save_path=tmp_path / "multigroup",
+            feature_label="Band Power",
+            groups=["Cool", "Hot"],
+            config={},
+            logger=None,
+            roi_name="all",
+            stats_dir=None,
+            multigroup_stats=multigroup_stats,
+        )
+
+
+def test_resolve_multigroup_qvalues_map_rejects_incomplete_pairwise_stats() -> None:
+    from eeg_pipeline.plotting.features.utils import _resolve_multigroup_qvalues_map
+
+    multigroup_stats = pd.DataFrame(
+        {
+            "feature": ["power_alpha_roi-frontal"],
+            "identifier": ["power_alpha_roi-frontal"],
+            "group1": ["Cool"],
+            "group2": ["Warm"],
+            "q_value": [0.01],
+            "significant_fdr": [True],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Missing multigroup stats"):
+        _resolve_multigroup_qvalues_map(
+            data_by_band={
+                "alpha": {
+                    "Cool": np.array([1.0, 2.0, 3.0], dtype=float),
+                    "Warm": np.array([2.0, 3.0, 4.0], dtype=float),
+                    "Hot": np.array([3.0, 4.0, 5.0], dtype=float),
+                }
+            },
+            groups=["Cool", "Warm", "Hot"],
+            multigroup_stats=multigroup_stats,
+            feature_keys=["alpha"],
+            roi_name="frontal",
+        )
+
+
+def test_plot_multi_group_column_comparison_matches_normalized_stats_terms(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_plot_multi_group_combined(**kwargs) -> None:
+        captured["qvalues_map"] = kwargs["qvalues_map"]
+        captured["total_tests"] = kwargs["total_tests"]
+
+    monkeypatch.setattr(
+        "eeg_pipeline.plotting.features.utils._plot_multi_group_combined",
+        fake_plot_multi_group_combined,
+    )
+
+    data_by_band = {
+        "alpha peak height": {
+            "Cool": np.array([1.0, 2.0, 3.0], dtype=float),
+            "Hot": np.array([3.0, 4.0, 5.0], dtype=float),
+        }
+    }
+    multigroup_stats = pd.DataFrame(
+        {
+            "feature": ["aperiodic_alpha_peak_height_roi-frontal"],
+            "identifier": ["aperiodic_alpha_peak_height_roi-frontal"],
+            "group1": ["Cool"],
+            "group2": ["Hot"],
+            "q_value": [0.01],
+            "significant_fdr": [True],
+        }
+    )
+
+    plot_multi_group_column_comparison(
+        data_by_band=data_by_band,
+        subject="01",
+        save_path=tmp_path / "multigroup",
+        feature_label="Aperiodic",
+        groups=["Cool", "Hot"],
+        config={},
+        logger=None,
+        roi_name="frontal",
+        stats_dir=None,
+        multigroup_stats=multigroup_stats,
+        stats_match_terms={"alpha peak height": ("alpha", "peak_height")},
+    )
+
+    assert captured["qvalues_map"] == {(0, "Cool", "Hot"): (0.01, True)}
+    assert captured["total_tests"] == 1
+
+
+def test_plot_power_by_condition_loads_power_multigroup_stats_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    captured: dict[str, object] = {}
+
+    def fake_load_multigroup_stats(stats_dir: Path, feature_type: str | None = None) -> pd.DataFrame:
+        captured["stats_dir"] = stats_dir
+        captured["feature_type"] = feature_type
+        return pd.DataFrame(
+            {
+                "feature": ["power_alpha_roi-all"],
+                "identifier": ["power_alpha_roi-all"],
+                "group1": ["Cool"],
+                "group2": ["Warm"],
+                "q_value": [0.2],
+                "significant_fdr": [False],
+            }
+        )
+
+    monkeypatch.setattr(
+        "eeg_pipeline.plotting.features.utils.load_multigroup_stats",
+        fake_load_multigroup_stats,
+    )
+    monkeypatch.setattr(
+        "eeg_pipeline.plotting.features.utils.plot_multi_group_column_comparison",
+        lambda **kwargs: None,
+    )
+
+    power_df = pd.DataFrame(
+        {
+            "power_active_alpha_ch_Fz_logratio": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            "power_active_alpha_ch_Cz_logratio": [0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        }
+    )
+    events_df = pd.DataFrame({"condition": [0, 0, 1, 1, 2, 2]})
+    config = {
+        "plotting": {
+            "overwrite": True,
+            "comparisons": {
+                "compare_windows": False,
+                "compare_columns": True,
+                "comparison_segment": "active",
+                "comparison_column": "condition",
+                "comparison_values": [0, 1, 2],
+                "comparison_labels": ["Cool", "Warm", "Hot"],
+                "comparison_rois": ["all"],
+            },
+        },
+        "feature_engineering": {"frequency_bands": {"alpha": [8.0, 12.0]}},
+    }
+
+    power_module.plot_power_by_condition(
+        power_df=power_df,
+        events_df=events_df,
+        subject="01",
+        save_dir=tmp_path,
+        logger=power_module.logger,
+        config=config,
+        stats_dir=tmp_path,
+    )
+
+    assert captured["stats_dir"] == tmp_path
+    assert captured["feature_type"] == "power"
+
+
+def test_plot_power_by_condition_rejects_rest_mode() -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    power_df = pd.DataFrame({"power_active_alpha_ch_Fz_logratio": [0.1, 0.2, 0.3]})
+    events_df = pd.DataFrame({"trial_id": [1, 2, 3]})
+    config = {"feature_engineering": {"task_is_rest": True}}
+
+    with pytest.raises(ValueError, match="resting-state"):
+        power_module.plot_power_by_condition(
+            power_df=power_df,
+            events_df=events_df,
+            subject="01",
+            save_dir=Path("."),
+            logger=power_module.logger,
+            config=config,
+            stats_dir=None,
+        )
+
+
+def test_plot_band_power_topomaps_ignores_column_spec_when_compare_columns_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    captured: dict[str, object] = {}
+
+    def fake_single_segment(*args, **kwargs) -> None:
+        captured["conditions"] = args[8]
+        captured["compare_columns"] = args[9]
+
+    monkeypatch.setattr(power_module, "_plot_band_power_topomaps_single_segment", fake_single_segment)
+
+    pow_df = pd.DataFrame(
+        {
+            "power_active_alpha_ch_Fz_logratio": [0.1, 0.2, 0.3],
+            "power_active_beta_ch_Fz_logratio": [0.4, 0.5, 0.6],
+            "power_active_alpha_ch_Cz_logratio": [0.2, 0.3, 0.4],
+            "power_active_beta_ch_Cz_logratio": [0.5, 0.6, 0.7],
+        }
+    )
+    info = mne.create_info(["Fz", "Cz", "Pz", "Oz"], sfreq=250.0, ch_types="eeg")
+    events_df = pd.DataFrame({"condition": [0, 1, 2]})
+    config = {
+        "plotting": {
+            "overwrite": True,
+            "comparisons": {
+                "compare_columns": False,
+                "comparison_column": "condition",
+                "comparison_values": [0, 1, 2],
+                "comparison_labels": ["Low", "Mid", "High"],
+            },
+        }
+    }
+
+    power_module.plot_band_power_topomaps(
+        pow_df=pow_df,
+        epochs_info=info,
+        bands=["alpha", "beta"],
+        subject="01",
+        save_dir=tmp_path,
+        logger=power_module.logger,
+        config=config,
+        segment="active",
+        events_df=events_df,
+    )
+
+    assert captured["compare_columns"] is False
+    assert captured["conditions"] is None
+
+
+def test_plot_power_spectral_density_allows_rest_mode_without_comparison_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(power_module, "_validate_epochs_tfr", lambda *args, **kwargs: None)
+
+    def fake_plot_psd_by_conditions(tfr_roi, conditions, subject, save_dir, logger, config, **kwargs) -> None:
+        captured["labels"] = [label for label, _ in conditions]
+        captured["channels"] = list(tfr_roi.ch_names)
+        captured["subject"] = subject
+
+    monkeypatch.setattr(power_module, "_plot_psd_by_conditions", fake_plot_psd_by_conditions)
+
+    tfr = _FakePlotTFR(["Fz", "Cz"], n_epochs=4)
+    events_df = pd.DataFrame({"trial_id": [1, 2, 3, 4]})
+    config = {
+        "feature_engineering": {"task_is_rest": True},
+        "plotting": {"comparisons": {"comparison_rois": ["all"]}},
+    }
+
+    power_module.plot_power_spectral_density(
+        tfr=tfr,
+        subject="01",
+        save_dir=tmp_path,
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+        events_df=events_df,
+        config=config,
+    )
+
+    assert captured["labels"] == ["Rest"]
+    assert captured["channels"] == ["Fz", "Cz"]
+    assert captured["subject"] == "01"
+
+
+def test_plot_cross_frequency_power_correlation_allows_rest_mode_without_comparison_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    captured: dict[str, object] = {}
+
+    def fake_save_cross_frequency(*, matrices_by_label, save_path, logger, config, title, footer) -> None:
+        captured["labels"] = list(matrices_by_label.keys())
+        captured["title"] = title
+        captured["save_path"] = save_path
+
+    monkeypatch.setattr(
+        power_module,
+        "_save_cross_frequency_power_correlation_figure",
+        fake_save_cross_frequency,
+    )
+
+    power_df = pd.DataFrame(
+        {
+            "power_active_alpha_ch_Fz_mean": [1.0, 1.2, 1.4, 1.6],
+            "power_active_beta_ch_Fz_mean": [0.5, 0.7, 0.9, 1.1],
+        }
+    )
+    events_df = pd.DataFrame({"trial_id": [1, 2, 3, 4]})
+    config = {
+        "feature_engineering": {"task_is_rest": True},
+        "plotting": {"comparisons": {"comparison_segment": "active", "comparison_rois": ["all"]}},
+    }
+
+    saved_files = power_module.plot_cross_frequency_power_correlation(
+        power_df=power_df,
+        events_df=events_df,
+        subject="01",
+        save_dir=tmp_path,
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        config=config,
+    )
+
+    assert captured["labels"] == ["Rest"]
+    assert "cross_frequency_power_correlation_roi-all" in saved_files
+
+
+def test_plot_cross_frequency_power_correlation_rejects_underpowered_condition(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    monkeypatch.setattr(
+        power_module,
+        "_save_cross_frequency_power_correlation_figure",
+        lambda **kwargs: pytest.fail("figure should not be saved for all-NaN matrices"),
+    )
+
+    power_df = pd.DataFrame(
+        {
+            "power_active_alpha_ch_Fz_mean": [1.0, 1.2],
+            "power_active_beta_ch_Fz_mean": [0.5, 0.7],
+        }
+    )
+    events_df = pd.DataFrame({"condition": [0, 0]})
+    config = {
+        "plotting": {
+            "comparisons": {
+                "comparison_segment": "active",
+                "comparison_column": "condition",
+                "comparison_values": [0],
+                "comparison_rois": ["all"],
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="generated no plots"):
+        power_module.plot_cross_frequency_power_correlation(
+            power_df=power_df,
+            events_df=events_df,
+            subject="01",
+            save_dir=tmp_path,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+            config=config,
+        )
+
+
+def test_group_cross_frequency_power_correlation_rejects_underpowered_subject_count(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    import eeg_pipeline.plotting.orchestration.features as orchestration_module
+
+    power_df = pd.DataFrame(
+        {
+            "power_active_alpha_ch_Fz_mean": [1.0, 1.2],
+            "power_active_beta_ch_Fz_mean": [0.5, 0.7],
+        }
+    )
+    events_df = pd.DataFrame({"condition": [0, 0]})
+    config = {
+        "plotting": {
+            "comparisons": {
+                "comparison_segment": "active",
+                "comparison_column": "condition",
+                "comparison_values": [0],
+                "comparison_rois": ["all"],
+            }
+        }
+    }
+
+    monkeypatch.setattr(orchestration_module, "_load_config_if_needed", lambda cfg: cfg)
+    monkeypatch.setattr(orchestration_module, "setup_matplotlib", lambda cfg: None)
+    monkeypatch.setattr(orchestration_module, "_resolve_task", lambda task, cfg: "task")
+    monkeypatch.setattr(orchestration_module, "resolve_deriv_root", lambda deriv_root, config: tmp_path)
+    monkeypatch.setattr(orchestration_module, "deriv_features_path", lambda deriv_root, subject: tmp_path / subject)
+    monkeypatch.setattr(orchestration_module, "_load_features_power_df", lambda **kwargs: power_df.copy())
+    monkeypatch.setattr(
+        orchestration_module,
+        "load_epochs_for_analysis",
+        lambda **kwargs: (None, events_df.copy()),
+    )
+    monkeypatch.setattr(orchestration_module, "deriv_plots_path", lambda *args, **kwargs: tmp_path / "plots")
+    monkeypatch.setattr(orchestration_module, "ensure_dir", lambda path: path.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(orchestration_module, "_resolve_power_roi_names", lambda **kwargs: ["all"])
+    monkeypatch.setattr(orchestration_module, "_save_plot_manifest", lambda **kwargs: None)
+
+    monkeypatch.setattr(
+        "eeg_pipeline.plotting.features.roi.get_roi_definitions",
+        lambda config: {},
+    )
+    monkeypatch.setattr(
+        "eeg_pipeline.plotting.features.power._save_cross_frequency_power_correlation_figure",
+        lambda **kwargs: pytest.fail("group figure should not be saved for all-NaN matrices"),
+    )
+
+    with pytest.raises(ValueError, match="generated no plots"):
+        orchestration_module.visualize_power_cross_frequency_correlation_for_group(
+            subjects=["01", "02"],
+            task="pain",
+            deriv_root=tmp_path,
+            config=config,
+            logger=SimpleNamespace(
+                warning=lambda *args, **kwargs: None,
+                debug=lambda *args, **kwargs: None,
+            ),
+        )
+
+
+def test_plot_power_timecourse_by_condition_rejects_rest_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+
+    monkeypatch.setattr(power_module, "_validate_epochs_tfr", lambda *args, **kwargs: None)
+    tfr = _FakePlotTFR(["Fz"], n_epochs=3)
+    events_df = pd.DataFrame({"trial_id": [1, 2, 3]})
+    config = {"feature_engineering": {"task_is_rest": True}}
+
+    with pytest.raises(ValueError, match="resting-state"):
+        power_module.plot_power_timecourse_by_condition(
+            tfr=tfr,
+            subject="01",
+            save_dir=Path("."),
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+            events_df=events_df,
+            config=config,
+        )
+
+
 def test_format_condition_display_label_preserves_configured_label() -> None:
     config = {
         "plotting": {
@@ -291,6 +1175,20 @@ def test_compute_group_timecourse_significance_mask_flags_consistent_effect() ->
     condition2[:, 2:] += 0.5
 
     significant_mask = _compute_group_timecourse_significance_mask(condition1, condition2, config={})
+
+    assert significant_mask.shape == (5,)
+    assert not bool(significant_mask[0])
+    assert bool(significant_mask[-1])
+
+
+def test_compute_unpaired_curve_significance_mask_flags_consistent_effect() -> None:
+    from eeg_pipeline.plotting.features.power import _compute_unpaired_curve_significance_mask
+
+    condition1 = np.ones((7, 5), dtype=float)
+    condition2 = np.ones((6, 5), dtype=float)
+    condition2[:, 2:] += 0.6
+
+    significant_mask = _compute_unpaired_curve_significance_mask(condition1, condition2, config={})
 
     assert significant_mask.shape == (5,)
     assert not bool(significant_mask[0])
@@ -332,6 +1230,182 @@ def test_compute_group_band_summary_stats_flags_band_level_effect() -> None:
     assert not bool(band_stats["delta"]["significant"])
     assert bool(band_stats["alpha"]["significant"])
     assert band_stats["alpha"]["effect_size"] > 0
+
+
+def test_compute_group_band_summary_stats_uses_frequency_width_weighting() -> None:
+    freqs = np.array([1.0, 2.0, 10.0], dtype=float)
+    frequency_bands = {"full": (1.0, 10.0)}
+    condition1 = np.zeros((6, 3), dtype=float)
+    condition2 = np.tile(np.array([1.0, 1.0, -0.6875], dtype=float), (6, 1))
+
+    band_stats = _compute_group_band_summary_stats(
+        condition1,
+        condition2,
+        freqs,
+        frequency_bands,
+        config={},
+    )
+
+    assert band_stats["full"]["effect_size"] == pytest.approx(0.0)
+    assert band_stats["full"]["p_value"] == pytest.approx(1.0)
+    assert not bool(band_stats["full"]["significant"])
+
+
+def test_compute_unpaired_band_summary_stats_flags_band_level_effect() -> None:
+    from eeg_pipeline.plotting.features.power import _compute_unpaired_band_summary_stats
+
+    freqs = np.array([2.0, 4.0, 8.0, 16.0], dtype=float)
+    frequency_bands = {
+        "delta": (1.0, 4.0),
+        "alpha": (8.0, 12.0),
+        "beta": (13.0, 30.0),
+    }
+    condition1 = np.ones((8, 4), dtype=float)
+    condition2 = np.ones((7, 4), dtype=float)
+    condition2[:, 2] += 0.7
+
+    band_stats = _compute_unpaired_band_summary_stats(
+        condition1,
+        condition2,
+        freqs,
+        frequency_bands,
+        config={},
+    )
+
+    assert set(band_stats) == {"delta", "alpha", "beta"}
+    assert not bool(band_stats["delta"]["significant"])
+    assert bool(band_stats["alpha"]["significant"])
+    assert band_stats["alpha"]["effect_size"] > 0
+
+
+def test_compute_subject_condition_psd_averages_epochwise_logratios(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from eeg_pipeline.plotting.orchestration.features import _compute_subject_condition_psd
+    import eeg_pipeline.utils.analysis.tfr as tfr_module
+
+    monkeypatch.setattr(tfr_module, "apply_baseline_and_crop", _fake_apply_baseline_and_crop)
+
+    tfr = _FakeEpochsSpectralTFR(
+        np.array(
+            [
+                [[[1.0, 1.0, 4.0, 4.0], [1.0, 1.0, 4.0, 4.0]]],
+                [[[4.0, 4.0, 8.0, 8.0], [4.0, 4.0, 8.0, 8.0]]],
+            ],
+            dtype=float,
+        ),
+        times=np.array([-1.0, -0.5, 0.5, 1.0], dtype=float),
+        freqs=np.array([8.0, 12.0], dtype=float),
+        ch_names=["Fz"],
+    )
+
+    freqs, psd_vector = _compute_subject_condition_psd(
+        tfr_epochs=tfr,
+        mask=np.array([True, True], dtype=bool),
+        active_window=(0.5, 1.0),
+        baseline_window=(-1.0, -0.5),
+        logger=SimpleNamespace(),
+    )
+
+    expected_value = (np.log10(4.0) + np.log10(2.0)) / 2.0
+    np.testing.assert_allclose(freqs, np.array([8.0, 12.0], dtype=float))
+    np.testing.assert_allclose(psd_vector, np.full(2, expected_value, dtype=float))
+
+
+def test_plot_psd_by_conditions_skips_trial_level_significance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from eeg_pipeline.plotting.features import power as power_module
+    import eeg_pipeline.utils.analysis.tfr as tfr_module
+
+    monkeypatch.setattr(tfr_module, "apply_baseline_and_crop", _fake_apply_baseline_and_crop)
+    monkeypatch.setattr(power_module, "apply_baseline_and_crop", _fake_apply_baseline_and_crop)
+
+    calls = {"curve_strip": 0, "band_strip": 0}
+
+    def _count_curve_strip(*args, **kwargs) -> None:
+        del args, kwargs
+        calls["curve_strip"] += 1
+
+    def _count_band_strip(*args, **kwargs) -> None:
+        del args, kwargs
+        calls["band_strip"] += 1
+
+    monkeypatch.setattr(power_module, "_draw_curve_significance_strip", _count_curve_strip)
+    monkeypatch.setattr(power_module, "_draw_psd_band_summary_strip", _count_band_strip)
+    monkeypatch.setattr(power_module, "save_fig", lambda *args, **kwargs: None)
+
+    tfr = _FakeEpochsSpectralTFR(
+        np.array(
+            [
+                [[[1.0, 1.0, 4.0, 4.0], [1.0, 1.0, 4.0, 4.0]]],
+                [[[1.0, 1.0, 4.0, 4.0], [1.0, 1.0, 4.0, 4.0]]],
+                [[[1.0, 1.0, 4.0, 4.0], [1.0, 1.0, 4.0, 4.0]]],
+                [[[1.0, 1.0, 2.0, 2.0], [1.0, 1.0, 2.0, 2.0]]],
+                [[[1.0, 1.0, 2.0, 2.0], [1.0, 1.0, 2.0, 2.0]]],
+                [[[1.0, 1.0, 2.0, 2.0], [1.0, 1.0, 2.0, 2.0]]],
+            ],
+            dtype=float,
+        ),
+        times=np.array([-1.0, -0.5, 0.5, 1.0], dtype=float),
+        freqs=np.array([8.0, 12.0], dtype=float),
+        ch_names=["Fz"],
+    )
+
+    config = {
+        "time_frequency_analysis": {
+            "baseline_window": [-1.0, -0.5],
+            "active_window": [0.5, 1.0],
+        },
+        "feature_engineering": {
+            "frequency_bands": {
+                "alpha": [8.0, 12.0],
+            }
+        },
+    }
+    logger = SimpleNamespace(
+        debug=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+    )
+    conditions = [
+        ("Low", np.array([True, True, True, False, False, False], dtype=bool)),
+        ("High", np.array([False, False, False, True, True, True], dtype=bool)),
+    ]
+
+    try:
+        power_module._plot_psd_by_conditions(
+            tfr,
+            conditions,
+            "01",
+            tmp_path,
+            logger,
+            config,
+            roi_name="all",
+        )
+    finally:
+        plt.close("all")
+
+    assert calls["curve_strip"] == 0
+    assert calls["band_strip"] == 0
+
+
+def test_compute_cross_frequency_power_matrix_returns_square_band_matrix() -> None:
+    from eeg_pipeline.plotting.features.power import _compute_cross_frequency_power_matrix
+
+    band_values = {
+        "alpha": np.array([1.0, 2.0, 3.0, 4.0], dtype=float),
+        "beta": np.array([2.0, 4.0, 6.0, 8.0], dtype=float),
+        "theta": np.array([4.0, 3.0, 2.0, 1.0], dtype=float),
+    }
+
+    correlation_df = _compute_cross_frequency_power_matrix(band_values, band_order=["theta", "alpha", "beta"])
+
+    assert list(correlation_df.index) == ["theta", "alpha", "beta"]
+    assert list(correlation_df.columns) == ["theta", "alpha", "beta"]
+    assert correlation_df.loc["alpha", "alpha"] == pytest.approx(1.0)
+    assert correlation_df.loc["alpha", "beta"] == pytest.approx(1.0)
+    assert correlation_df.loc["theta", "alpha"] < 0
 
 
 def test_build_topomap_panel_requires_more_than_minimum_channels() -> None:

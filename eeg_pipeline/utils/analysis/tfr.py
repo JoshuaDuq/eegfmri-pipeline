@@ -1253,6 +1253,46 @@ def clip_time_range(times: np.ndarray, tmin_req: float, tmax_req: float) -> Opti
 # TFR Object Extraction Utilities
 ###################################################################
 
+def extract_trial_spectral_profiles(
+    tfr_epochs,
+    baseline: Tuple[Optional[float], Optional[float]],
+    active_window: Tuple[float, float],
+    logger: Optional[logging.Logger] = None,
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """Return trial-level spectral profiles after epoch-level baseline correction."""
+    if not hasattr(tfr_epochs, "data"):
+        return None
+
+    tfr_copy = tfr_epochs.copy()
+    apply_baseline_and_crop(
+        tfr_copy,
+        baseline=baseline,
+        mode="logratio",
+        logger=logger,
+    )
+
+    times = np.asarray(tfr_copy.times, dtype=float)
+    clipped_window = clip_time_range(times, float(active_window[0]), float(active_window[1]))
+    if clipped_window is None:
+        return None
+
+    tmin, tmax = clipped_window
+    tfr_window = tfr_copy.copy().crop(tmin=tmin, tmax=tmax)
+    data = np.asarray(tfr_window.data, dtype=float)
+    freqs = np.asarray(tfr_window.freqs, dtype=float)
+
+    if data.ndim != 4:
+        raise ValueError("Trial spectral profiles require 4D TFR data.")
+    if freqs.ndim != 1:
+        raise ValueError("Trial spectral profiles require a 1D frequency axis.")
+
+    profiles = np.nanmean(data, axis=(1, 3))
+    if profiles.ndim != 2 or profiles.shape[1] != len(freqs):
+        raise ValueError("Trial spectral profile matrix must match the frequency axis.")
+
+    return freqs, profiles
+
+
 def extract_trial_band_power(tfr_epochs, fmin: float, fmax: float, tmin: float, tmax: float) -> Optional[np.ndarray]:
     if not isinstance(tfr_epochs, mne.time_frequency.EpochsTFR):
         return None
@@ -1379,6 +1419,7 @@ __all__ = [
     "time_mask",
     "clip_time_range",
     # TFR data extraction utilities
+    "extract_trial_spectral_profiles",
     "extract_trial_band_power",
     # ROI processing utilities
     "build_roi_channel_mask",

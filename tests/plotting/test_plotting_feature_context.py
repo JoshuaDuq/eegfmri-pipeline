@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -153,3 +154,65 @@ def test_load_feature_set_wide_prefers_aligned_events_length_over_first_file(tmp
     assert loaded is not None
     assert loaded.shape[0] == 4
     assert list(loaded.columns) == ["power_plateau_alpha_Fz"]
+
+
+def test_load_feature_set_wide_ignores_window_specific_attr_conflicts(tmp_path: Path) -> None:
+    features_dir = tmp_path / "features"
+    plots_dir = tmp_path / "plots"
+    source_dir = features_dir / "sourcelocalization"
+    metadata_dir = source_dir / "metadata"
+    metadata_dir.mkdir(parents=True)
+    plots_dir.mkdir(parents=True)
+
+    baseline_path = source_dir / "features_sourcelocalization_baseline.parquet"
+    active_path = source_dir / "features_sourcelocalization_active.parquet"
+    baseline_path.touch()
+    active_path.touch()
+
+    (metadata_dir / "features_sourcelocalization_baseline.json").write_text(
+        json.dumps(
+            {
+                "provenance": {
+                    "file_attrs": {
+                        "segment_label": "baseline",
+                        "feature_granularity": "subject",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (metadata_dir / "features_sourcelocalization_active.json").write_text(
+        json.dumps(
+            {
+                "provenance": {
+                    "file_attrs": {
+                        "segment_label": "active",
+                        "feature_granularity": "subject",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    context = _build_context(features_dir, plots_dir)
+    frames = {
+        baseline_path: pd.DataFrame({"src_baseline_lcmv_alpha_global_power": [0.1, 0.2]}),
+        active_path: pd.DataFrame({"src_active_lcmv_alpha_global_power": [0.3, 0.4]}),
+    }
+    context._safe_read_table = lambda path: frames.get(path)  # type: ignore[method-assign]
+
+    loaded = context._load_feature_set(
+        [baseline_path, active_path],
+        mode="wide",
+        stem="features_sourcelocalization",
+    )
+
+    assert loaded is not None
+    assert list(loaded.columns) == [
+        "src_baseline_lcmv_alpha_global_power",
+        "src_active_lcmv_alpha_global_power",
+    ]
+    assert loaded.attrs["feature_granularity"] == "subject"
+    assert "segment_label" not in loaded.attrs

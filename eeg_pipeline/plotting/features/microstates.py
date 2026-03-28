@@ -33,11 +33,19 @@ def _select_segment(features_df: pd.DataFrame, config: Any) -> Optional[str]:
         return None
 
     preferred = str(get_config_value(config, "plotting.comparisons.comparison_segment", "")).strip()
-    if preferred and preferred in segments:
+    if preferred:
+        if preferred not in segments:
+            raise ValueError(
+                "Microstates plotting comparison segment "
+                f"{preferred!r} is not available. Found: {', '.join(segments)}."
+            )
         return preferred
-    non_baseline = [segment for segment in segments if str(segment).strip().lower() != "baseline"]
-    if non_baseline:
-        return non_baseline[0]
+
+    if len(segments) > 1:
+        raise ValueError(
+            "Microstates plotting requires an explicit comparison segment when multiple "
+            "microstate segments are available. Set plotting.comparisons.comparison_segment."
+        )
     return segments[0]
 
 
@@ -69,22 +77,22 @@ def _collect_metric_columns(
     return {metric: by_label for metric, by_label in collected.items() if by_label}
 
 
-def _comparison_masks(events_df: pd.DataFrame, config: Any) -> Optional[Tuple[np.ndarray, np.ndarray, str, str]]:
+def _require_comparison_masks(
+    events_df: pd.DataFrame,
+    config: Any,
+) -> Tuple[np.ndarray, np.ndarray, str, str]:
     comparison = extract_comparison_mask(events_df, config, require_enabled=False)
     if comparison is not None:
         return comparison
+    raise ValueError(
+        "Microstates plotting requires an explicit comparison configuration. "
+        "Set plotting.comparisons.comparison_column, comparison_values, and comparison_labels."
+    )
 
-    # Fallback to binary_outcome if explicit comparison config is missing.
-    candidate_columns = ("binary_outcome", "binary_outcome_coded")
-    for column in candidate_columns:
-        if column not in events_df.columns:
-            continue
-        values = pd.to_numeric(events_df[column], errors="coerce")
-        mask1 = (values == 0).to_numpy()
-        mask2 = (values == 1).to_numpy()
-        if np.any(mask1) and np.any(mask2):
-            return mask1, mask2, "condition_1", "condition_2"
-    return None
+
+def _supports_trial_level_inference(features_df: pd.DataFrame) -> bool:
+    source = str(features_df.attrs.get("microstate_template_source") or "").strip().lower()
+    return source == "fixed"
 
 
 def _plot_metric(
@@ -99,6 +107,8 @@ def _plot_metric(
     save_dir: Path,
     logger: Any,
     config: Any,
+    *,
+    show_inference: bool,
 ) -> None:
     plot_cfg = get_plot_config(config)
     ordered_labels = sorted(by_label.keys())
@@ -150,22 +160,23 @@ def _plot_metric(
         return
     y_span = max(1e-9, y_max - y_min)
 
-    for idx, (v1, v2) in enumerate(zip(vals_1, vals_2)):
-        if len(v1) < 3 or len(v2) < 3:
-            continue
-        try:
-            _, p_value = mannwhitneyu(v1, v2, alternative="two-sided")
-        except ValueError:
-            continue
-        p_text = f"p={p_value:.3f}" if p_value >= 0.001 else "p<0.001"
-        ax.text(
-            x_positions[idx],
-            y_max + (0.06 + 0.05 * idx) * y_span,
-            p_text,
-            ha="center",
-            va="bottom",
-            fontsize=8,
-        )
+    if show_inference:
+        for idx, (v1, v2) in enumerate(zip(vals_1, vals_2)):
+            if len(v1) < 3 or len(v2) < 3:
+                continue
+            try:
+                _, p_value = mannwhitneyu(v1, v2, alternative="two-sided")
+            except ValueError:
+                continue
+            p_text = f"p={p_value:.3f}" if p_value >= 0.001 else "p<0.001"
+            ax.text(
+                x_positions[idx],
+                y_max + (0.06 + 0.05 * idx) * y_span,
+                p_text,
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
 
     ax.set_xticks(x_positions)
     ax.set_xticklabels([label.upper() for label in ordered_labels])
@@ -177,7 +188,7 @@ def _plot_metric(
     fig.tight_layout()
 
     save_path = save_dir / f"sub-{subject}_microstates_{metric}_by_condition"
-    save_fig(fig, save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi)
+    save_fig(fig, save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi, overwrite=True)
     plt.close(fig)
 
     if logger is not None:
@@ -209,18 +220,20 @@ def plot_microstates_by_condition(
     if not metric_columns:
         return
 
-    comparison = _comparison_masks(events_df, config)
-    if comparison is None:
-        if logger is not None:
-            logger.warning("Microstates plotting: no valid condition comparison found; skipping.")
-        return
-    mask1, mask2, label1, label2 = comparison
+    mask1, mask2, label1, label2 = _require_comparison_masks(events_df, config)
 
     if len(mask1) != len(features_df) or len(mask2) != len(features_df):
-        n = min(len(features_df), len(mask1), len(mask2))
-        mask1 = mask1[:n]
-        mask2 = mask2[:n]
-        features_df = features_df.iloc[:n].reset_index(drop=True)
+        raise ValueError(
+            "Microstates plotting row count mismatch between features and aligned events "
+            f"(features={len(features_df)}, mask1={len(mask1)}, mask2={len(mask2)})."
+        )
+
+    show_inference = _supports_trial_level_inference(features_df)
+    if not show_inference and logger is not None:
+        logger.warning(
+            "Microstates plotting: skipping trial-level inference because template provenance "
+            "is not trialwise valid."
+        )
 
     for metric, by_label in metric_columns.items():
         _plot_metric(
@@ -235,6 +248,7 @@ def plot_microstates_by_condition(
             save_dir=save_dir,
             logger=logger,
             config=config,
+            show_inference=show_inference,
         )
 
 

@@ -149,6 +149,31 @@ class TestComplexityEntropyFeatures(unittest.TestCase):
         )
         self.assertTrue(np.isfinite(np.asarray(df[expected_col], dtype=float)).any())
 
+    def test_invalid_complexity_config_raises(self):
+        precomputed = self._build_precomputed()
+        precomputed.config = DotConfig(
+            {
+                "feature_engineering": {
+                    "complexity": {
+                        "signal_basis": "bad-basis",
+                        "pe_order": 1,
+                        "pe_delay": 0,
+                        "sampen_order": 0,
+                        "sampen_r": 0.0,
+                        "mse_scale_min": 3,
+                        "mse_scale_max": 2,
+                        "zscore": True,
+                        "min_segment_sec": 0.5,
+                        "min_samples": 80,
+                    },
+                    "parallel": {"n_jobs_complexity": 1},
+                }
+            }
+        )
+
+        with self.assertRaises(ValueError):
+            extract_complexity_from_precomputed(precomputed, n_jobs=1)
+
 
 if __name__ == "__main__":
     unittest.main()

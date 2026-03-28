@@ -233,29 +233,40 @@ def compute_lempel_ziv_complexity(x: np.ndarray, threshold: Optional[float] = No
     if threshold is None:
         threshold = np.median(x)
     
-    binary = (x > threshold).astype(np.uint8)
+    binary = "".join("1" if value else "0" for value in (x > threshold))
     n = len(binary)
-    
-    vocabulary = set()
-    complexity_count = 0
-    position = 0
-    
-    while position < n:
-        phrase_length = 1
-        current_phrase = tuple(binary[position:position + phrase_length])
-        
-        while position + phrase_length <= n and current_phrase in vocabulary:
-            phrase_length += 1
-            current_phrase = tuple(binary[position:position + phrase_length])
-        
-        if position + phrase_length <= n:
-            vocabulary.add(current_phrase)
-        
-        complexity_count += 1
-        position += phrase_length
-    
-    if n > 1:
-        theoretical_max = n / np.log2(n)
-        return float(complexity_count / theoretical_max)
-    
-    return np.nan
+    if n < 2:
+        return np.nan
+
+    prefix_cursor = 0
+    match_length = 1
+    phrase_start = 1
+    max_match_length = 1
+    complexity_count = 1
+
+    while True:
+        if binary[prefix_cursor + match_length - 1] == binary[phrase_start + match_length - 1]:
+            match_length += 1
+            if phrase_start + match_length > n:
+                complexity_count += 1
+                break
+        else:
+            if match_length > max_match_length:
+                max_match_length = match_length
+            prefix_cursor += 1
+            if prefix_cursor == phrase_start:
+                complexity_count += 1
+                phrase_start += max_match_length
+                if phrase_start > n:
+                    break
+                prefix_cursor = 0
+                match_length = 1
+                max_match_length = 1
+            else:
+                match_length = 1
+        if phrase_start + match_length > n:
+            complexity_count += 1
+            break
+
+    theoretical_max = n / np.log2(n)
+    return float(complexity_count / theoretical_max)

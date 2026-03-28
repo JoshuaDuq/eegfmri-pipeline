@@ -306,6 +306,15 @@ class PipelineBase(ABC):
 
         return failed_subjects
 
+    def _resolve_group_level_subjects(
+        self,
+        subjects: List[str],
+        failed_subjects: List[str],
+    ) -> List[str]:
+        """Return subjects with successful subject-level outputs."""
+        failed_subject_set = set(failed_subjects)
+        return [subject for subject in subjects if subject not in failed_subject_set]
+
     def run_batch(
         self,
         subjects: List[str],
@@ -369,8 +378,12 @@ class PipelineBase(ABC):
                 ledger, subjects, resolved_ledger_path, progress
             )
 
-            if len(subjects) >= _MIN_SUBJECTS_FOR_GROUP_ANALYSIS:
-                self.run_group_level(subjects, task=resolved_task, **kwargs)
+            group_level_subjects = self._resolve_group_level_subjects(
+                subjects,
+                failed_subjects,
+            )
+            if len(group_level_subjects) >= _MIN_SUBJECTS_FOR_GROUP_ANALYSIS:
+                self.run_group_level(group_level_subjects, task=resolved_task, **kwargs)
 
             all_succeeded = len(failed_subjects) == 0
             run_status = "success" if all_succeeded else "partial_success"

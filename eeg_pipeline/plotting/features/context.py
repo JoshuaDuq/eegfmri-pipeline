@@ -60,6 +60,8 @@ _FEATURE_TABLE_SPECS: List[Tuple[str, str, List[str], str]] = [
     ("sourcelocalization_df", "features_sourcelocalization", [".parquet", ".tsv"], "wide"),
 ]
 
+_WINDOW_SPECIFIC_FEATURE_ATTRS = {"segment_label"}
+
 
 @dataclass
 class FeaturePlotContext:
@@ -381,6 +383,11 @@ class FeaturePlotContext:
                 continue
 
             df = df.reset_index(drop=True)
+            file_attrs = self._load_feature_attrs(path)
+            if file_attrs:
+                df = df.copy()
+                df.attrs.update(file_attrs)
+
             if mode == "wide":
                 if expected_len is not None and len(df) != expected_len:
                     self.logger.warning(
@@ -422,7 +429,52 @@ class FeaturePlotContext:
         if combined.columns.duplicated().any():
             combined = combined.loc[:, ~combined.columns.duplicated()]
 
+        merged_attrs = self._merge_feature_attrs(data_frames, stem=stem)
+        if merged_attrs:
+            combined.attrs.update(merged_attrs)
+
         return combined
+
+    def _load_feature_attrs(self, path: Path) -> Dict[str, Any]:
+        """Load persisted DataFrame attrs from the feature metadata sidecar."""
+        metadata_path = path.parent / "metadata" / f"{path.stem}.json"
+        if not metadata_path.exists():
+            return {}
+
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.warning("Failed to read feature metadata %s: %s", metadata_path, exc)
+            return {}
+
+        provenance = payload.get("provenance")
+        if not isinstance(provenance, dict):
+            return {}
+        file_attrs = provenance.get("file_attrs")
+        if not isinstance(file_attrs, dict):
+            return {}
+        return dict(file_attrs)
+
+    def _merge_feature_attrs(
+        self,
+        data_frames: Sequence[pd.DataFrame],
+        *,
+        stem: str,
+    ) -> Dict[str, Any]:
+        """Merge persisted attrs across related feature files."""
+        merged: Dict[str, Any] = {}
+        for df in data_frames:
+            attrs = dict(getattr(df, "attrs", {}) or {})
+            for key, value in attrs.items():
+                if key in _WINDOW_SPECIFIC_FEATURE_ATTRS:
+                    continue
+                if key in merged and merged[key] != value:
+                    raise ValueError(
+                        f"Conflicting feature metadata for {stem}: attribute '{key}' has "
+                        f"incompatible values {merged[key]!r} and {value!r}."
+                    )
+                merged[key] = value
+        return merged
 
     def _safe_read_table(self, path: Path) -> Optional[pd.DataFrame]:
         """Safely read table file, returning None on failure."""

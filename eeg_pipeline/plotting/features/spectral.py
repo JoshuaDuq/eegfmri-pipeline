@@ -461,11 +461,12 @@ def _plot_column_comparison(
     Supports both 2-group comparison (simple unpaired) and multi-group comparison
     (3+ groups with all pairwise brackets and significance asterisks).
     """
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import (
         compute_or_load_column_stats,
         get_band_color,
         plot_multi_group_column_comparison,
+        resolve_complete_multigroup_plot_groups,
     )
     from eeg_pipeline.plotting.io.figures import log_if_present
     from eeg_pipeline.utils.formatting import sanitize_label
@@ -474,15 +475,15 @@ def _plot_column_comparison(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
-        
-        masks_dict, group_labels = multi_group_info
+        masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+            events_df,
+            config,
+            context="Spectral multi-group column comparison",
+        )
         segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
-        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+        multigroup_stats = load_multigroup_stats(stats_dir, feature_type="spectral") if stats_dir else None
         
         for roi_name in roi_names:
             data_by_band: dict[str, dict[str, np.ndarray]] = {}

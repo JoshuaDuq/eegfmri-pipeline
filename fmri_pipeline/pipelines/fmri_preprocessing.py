@@ -158,7 +158,10 @@ class FmriPreprocessingPipeline(PipelineBase):
         dry_run: bool = False,
         **_kwargs: Any,
     ) -> None:
-        subj_label = f"sub-{subject}"
+        subject_id = str(subject)
+        if subject_id.startswith("sub-"):
+            subject_id = subject_id[4:]
+        subj_label = f"sub-{subject_id}"
         if progress is not None and hasattr(progress, "subject_start"):
             progress.subject_start(subj_label)
         success = False
@@ -257,7 +260,7 @@ class FmriPreprocessingPipeline(PipelineBase):
                 "/out",
                 "participant",
                 "--participant-label",
-                subject,
+                subject_id,
                 "--work-dir",
                 "/work",
                 "--fs-license-file",
@@ -390,7 +393,7 @@ class FmriPreprocessingPipeline(PipelineBase):
             if progress is not None and hasattr(progress, "step"):
                 progress.step("Run fMRIPrep")
 
-            subject_logger = self.get_subject_logger(subject)
+            subject_logger = self.get_subject_logger(subject_id)
             _stream_subprocess(cmd, subject_logger)
             success = True
         finally:

@@ -300,42 +300,53 @@ def _get_erds_columns_for_roi(
     all_channels: List[str],
     rois: Dict[str, Any],
 ) -> List[str]:
-    """Get ERDS columns filtered by segment, band, and ROI."""
+    """Get ERDS columns for one spatial scope without mixing units."""
     from eeg_pipeline.plotting.features.roi import get_roi_channels
 
+    def _matching_columns(*, scope: str, stat: str, identifier: Optional[str] = None) -> List[str]:
+        columns: List[str] = []
+        for col in features_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "erds":
+                continue
+            if str(parsed.get("segment") or "") != segment:
+                continue
+            if str(parsed.get("band") or "") != band:
+                continue
+            if str(parsed.get("scope") or "") != scope:
+                continue
+            if str(parsed.get("stat") or "") != stat:
+                continue
+            if identifier is not None and str(parsed.get("identifier") or "") != identifier:
+                continue
+            columns.append(str(col))
+        return columns
+
     if roi_name == "all":
-        roi_channels = all_channels
-    else:
-        roi_channels = get_roi_channels(
-            rois.get(roi_name, []), all_channels
-        )
+        return _matching_columns(scope="global", stat="percent_mean")
+
+    roi_percent_columns = _matching_columns(
+        scope="roi",
+        stat="percent_mean",
+        identifier=roi_name,
+    )
+    if roi_percent_columns:
+        return roi_percent_columns
+
+    roi_channels = get_roi_channels(rois.get(roi_name, []), all_channels)
     roi_channel_set = set(roi_channels) if roi_channels else set()
+    if not roi_channel_set:
+        return []
 
-    matching_columns = []
-    for col in features_df.columns:
+    channel_percent_columns: List[str] = []
+    for col in _matching_columns(scope="ch", stat="percent"):
         parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if parsed.get("group") != "erds":
-            continue
-        if str(parsed.get("segment") or "") != segment:
-            continue
-        if str(parsed.get("band") or "") != band:
-            continue
-
-        scope = parsed.get("scope") or ""
-        stat = str(parsed.get("stat") or "")
-        if stat not in ("percent_mean", "db_mean", "percent", "db"):
-            continue
-
-        if scope in ("global", "roi"):
-            matching_columns.append(col)
-        elif scope == "ch":
-            channel_id = str(parsed.get("identifier") or "")
-            if channel_id in roi_channel_set:
-                matching_columns.append(col)
-
-    return matching_columns
+        channel_id = str(parsed.get("identifier") or "")
+        if channel_id in roi_channel_set:
+            channel_percent_columns.append(str(col))
+    return channel_percent_columns
 
 
 def _create_window_comparison_plots(
@@ -408,6 +419,7 @@ def _create_window_comparison_plots(
                     logger=logger,
                     roi_name=roi_name,
                     stats_dir=stats_dir,
+                    require_precomputed_stats=True,
                 )
         else:
             segment1, segment2 = segments[0], segments[1]
@@ -446,6 +458,7 @@ def _create_window_comparison_plots(
                     label2=segment2.capitalize(),
                     roi_name=roi_name,
                     stats_dir=stats_dir,
+                    require_precomputed_stats=True,
                 )
 
     plot_type = "multi-window" if use_multi_window else "paired"
@@ -474,11 +487,12 @@ def _create_column_comparison_plots(
     Supports both 2-group comparison (simple unpaired) and multi-group comparison
     (3+ groups with all pairwise brackets and significance asterisks).
     """
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask, extract_multi_group_masks
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import (
         compute_or_load_column_stats,
         get_band_color,
         plot_multi_group_column_comparison,
+        resolve_complete_multigroup_plot_groups,
     )
     from eeg_pipeline.plotting.io.figures import log_if_present
     from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
@@ -488,15 +502,15 @@ def _create_column_comparison_plots(
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
-        
-        masks_dict, group_labels = multi_group_info
+        masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+            events_df,
+            config,
+            context="ERDS multi-group column comparison",
+        )
         segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
-        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+        multigroup_stats = load_multigroup_stats(stats_dir, feature_type="erds") if stats_dir else None
         
         for roi_name in roi_names:
             data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
@@ -583,6 +597,8 @@ def _create_column_comparison_plots(
             cell_data=cell_data,
             config=config,
             logger=logger,
+            roi_name=roi_name,
+            require_precomputed_stats=True,
         )
 
         fig, axes = plt.subplots(

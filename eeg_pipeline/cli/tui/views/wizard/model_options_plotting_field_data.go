@@ -58,6 +58,11 @@ var preComparisonFieldsByPlotID = map[string][]plotItemConfigField{
 		plotItemConfigFieldComparisonValues,
 		plotItemConfigFieldComparisonLabels,
 	},
+	"connectivity_circle": {
+		plotItemConfigFieldConnectivityCircleTopFraction,
+		plotItemConfigFieldConnectivityCircleMinLines,
+		plotItemConfigFieldComparisonSegment,
+	},
 }
 
 var comparisonFieldProfilesByPlotID = map[string][]plotItemConfigField{
@@ -109,6 +114,13 @@ var comparisonFieldProfilesByPlotID = map[string][]plotItemConfigField{
 		plotItemConfigFieldComparisonLabels,
 	},
 	"power_timecourse": {
+		plotItemConfigFieldComparisonColumn,
+		plotItemConfigFieldComparisonValues,
+		plotItemConfigFieldComparisonLabels,
+		plotItemConfigFieldComparisonROIs,
+	},
+	"cross_frequency_power_correlation": {
+		plotItemConfigFieldComparisonSegment,
 		plotItemConfigFieldComparisonColumn,
 		plotItemConfigFieldComparisonValues,
 		plotItemConfigFieldComparisonLabels,

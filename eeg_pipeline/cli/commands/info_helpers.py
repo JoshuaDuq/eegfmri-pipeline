@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from eeg_pipeline.cli.commands.base import (
-    detect_available_bands,
-    detect_feature_availability,
+    detect_feature_inventory,
     _empty_feature_availability,
 )
 from eeg_pipeline.cli.common import get_deriv_root, resolve_task
@@ -426,6 +425,57 @@ def _handle_plotters_mode(output_json: bool) -> None:
             for plotter in plotters:
                 print(f"  - {plotter['name']}")
 
+def _read_feature_header_columns(feature_path: Path) -> List[str]:
+    import pandas as pd
+    import pyarrow.parquet as pq
+
+    if feature_path.suffix.lower() == ".parquet":
+        parquet_file = pq.ParquetFile(feature_path)
+        return list(parquet_file.schema_arrow.names)
+
+    df = pd.read_csv(feature_path, sep="\t", nrows=0)
+    return df.columns.tolist()
+
+
+def _collect_available_time_windows(
+    features_dir: Path,
+    config: Any,
+    feature_groups: Optional[List[str]],
+) -> tuple[List[str], Dict[str, List[str]]]:
+    from eeg_pipeline.domain.features.naming import NamingSchema
+
+    if not features_dir.exists():
+        return [], {}
+    allowed_groups = set(feature_groups or [])
+    windows: set[str] = set()
+    windows_by_group: Dict[str, set[str]] = {}
+    for feature_path in features_dir.rglob("features_*"):
+        if not feature_path.is_file() or feature_path.suffix.lower() not in {".tsv", ".parquet"}:
+            continue
+        category = feature_path.parent.name
+        prefix = f"features_{category}_"
+        stem = feature_path.stem
+        if stem.startswith(prefix) and stem[len(prefix):]:
+            window = stem[len(prefix):]
+            windows.add(window)
+            if not allowed_groups or category in allowed_groups:
+                windows_by_group.setdefault(category, set()).add(window)
+        for column in _read_feature_header_columns(feature_path):
+            parsed = NamingSchema.parse(str(column))
+            segment = parsed.get("segment") if parsed.get("valid") else None
+            if not segment:
+                continue
+            segment_name = str(segment)
+            windows.add(segment_name)
+            group = str(parsed.get("group") or "")
+            if group and (not allowed_groups or group in allowed_groups):
+                windows_by_group.setdefault(group, set()).add(segment_name)
+    return sorted(windows), {
+        group: sorted(group_windows)
+        for group, group_windows in sorted(windows_by_group.items())
+        if group_windows
+    }
+
 
 def _get_available_time_windows(features_dir: Path, config: Any, feature_group: Optional[str] = None) -> List[str]:
     """Extract available time windows by scanning window-specific feature files and column names.
@@ -576,9 +626,9 @@ def _process_single_subject(
 
     if has_features or has_epochs:
         features_dir = deriv_features_path(deriv_root, subj_id)
-        feature_availability = detect_feature_availability(features_dir)
-        if features_dir.exists():
-            available_bands = detect_available_bands(features_dir)
+        feature_inventory = detect_feature_inventory(features_dir)
+        feature_availability = feature_inventory["feature_availability"]
+        available_bands = feature_inventory["available_bands"]
     else:
         feature_availability = _empty_feature_availability()
 
@@ -653,15 +703,7 @@ def _build_subject_status_json(
         if not features_dir.exists():
             continue
             
-        windows = _get_available_time_windows(features_dir, config)
-        if windows:
-            available_windows = windows
-        
-        for feature_group in feature_groups:
-            feature_windows = _get_available_time_windows(features_dir, config, feature_group=feature_group)
-            if feature_windows:
-                available_windows_by_feature[feature_group] = feature_windows
-        
+        available_windows, available_windows_by_feature = _collect_available_time_windows(features_dir, config, feature_groups)
         if available_windows:
             break
 

@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -212,3 +213,121 @@ class TestBaseCompletion(unittest.TestCase):
 
         notes = getattr(exc_info.exception, "__notes__", [])
         self.assertTrue(any("meta-fail" in note for note in notes))
+
+    def test_run_batch_excludes_failed_subjects_from_group_level(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def __init__(self):
+                self.name = "dummy_partial_group_level"
+                self.config = DotConfig({"project": {"task": "x"}})
+                self.logger = Mock()
+                self.deriv_root = Path(tempfile.mkdtemp())
+
+            def process_subject(self, subject: str, task: str, **kwargs):
+                if subject == "0001":
+                    raise RuntimeError("boom")
+                return None
+
+        d = Dummy()
+        d.run_group_level = Mock()
+        progress = _NoopProgress()
+
+        with patch("eeg_pipeline.pipelines.base.BatchProgress", _NoopBatchProgress):
+            ledger = d.run_batch(["0001", "0002", "0003"], task="x", progress=progress)
+
+        self.assertEqual([item["status"] for item in ledger], ["failed", "success", "success"])
+        d.run_group_level.assert_called_once_with(["0002", "0003"], task="x", progress=progress)
+
+    def test_sanitize_metadata_value_falls_back_to_repr_when_dataclass_serialization_fails(self):
+        import eeg_pipeline.pipelines.base as base_module
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        @dataclass
+        class Payload:
+            value: object
+
+        class Dummy(PipelineBase):
+            def process_subject(self, subject: str, task: str, **kwargs):
+                return None
+
+        payload = Payload(value=object())
+        dummy = object.__new__(Dummy)
+
+        with patch.object(base_module, "asdict", side_effect=RuntimeError("bad-asdict")):
+            result = dummy._sanitize_metadata_value(payload)
+
+        self.assertEqual(result, repr(payload))
+
+    def test_sanitize_metadata_value_falls_back_to_repr_when_object_vars_fail(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def process_subject(self, subject: str, task: str, **kwargs):
+                return None
+
+        class BrokenObject:
+            pass
+
+        dummy = object.__new__(Dummy)
+        broken = BrokenObject()
+        with patch("builtins.vars", side_effect=RuntimeError("bad-vars")):
+            result = dummy._sanitize_metadata_value(broken)
+
+        self.assertEqual(result, repr(broken))
+
+    def test_sanitize_metadata_value_returns_repr_for_objects_without_supported_structure(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def process_subject(self, subject: str, task: str, **kwargs):
+                return None
+
+        class SlotOnly:
+            __slots__ = ()
+
+        dummy = object.__new__(Dummy)
+        value = SlotOnly()
+
+        self.assertEqual(dummy._sanitize_metadata_value(value), repr(value))
+
+    def test_write_run_metadata_requires_deriv_root(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def process_subject(self, subject: str, task: str, **kwargs):
+                return None
+
+        d = object.__new__(Dummy)
+        d.name = "dummy_missing_deriv"
+        d.config = DotConfig({"project": {"task": "x"}})
+        d.logger = Mock()
+        run_context = {
+            "run_id": "test-run",
+            "started_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            "task": "x",
+            "subjects": ["0001"],
+            "specifications": {},
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "deriv_root is not set"):
+            d._write_run_metadata(run_context, status="success")
+
+    def test_run_batch_surfaces_metadata_error_when_processing_succeeds(self):
+        from eeg_pipeline.pipelines.base import PipelineBase
+
+        class Dummy(PipelineBase):
+            def __init__(self):
+                self.name = "dummy_meta_only_fail"
+                self.config = DotConfig({"project": {"task": "x"}})
+                self.logger = Mock()
+                self.deriv_root = Path(tempfile.mkdtemp())
+
+            def process_subject(self, subject: str, task: str, **kwargs):
+                return None
+
+        d = Dummy()
+        with patch("eeg_pipeline.pipelines.base.BatchProgress", _NoopBatchProgress):
+            with patch.object(d, "_write_run_metadata", side_effect=RuntimeError("meta-only-fail")):
+                with self.assertRaisesRegex(RuntimeError, "meta-only-fail"):
+                    d.run_batch(["0001"], task="x", progress=_NoopProgress())

@@ -103,6 +103,36 @@ def _resolve_line_noise_freqs(
     return line_freqs
 
 
+def _resolve_power_segment_name(ctx: Any) -> Optional[str]:
+    segment_name = getattr(ctx, "name", None)
+    if segment_name:
+        return str(segment_name)
+
+    windows = getattr(ctx, "windows", None)
+    ranges = getattr(windows, "ranges", None)
+    if not isinstance(ranges, dict):
+        return None
+
+    candidate_names = [str(name) for name in ranges.keys() if str(name).strip().lower() != "baseline"]
+    if not candidate_names:
+        return None
+    if len(candidate_names) == 1:
+        return candidate_names[0]
+
+    for candidate_name in candidate_names:
+        get_mask = getattr(windows, "get_mask", None)
+        if callable(get_mask):
+            mask = get_mask(candidate_name)
+            if mask is not None and np.any(mask):
+                return candidate_name
+        masks = getattr(windows, "masks", None)
+        if isinstance(masks, dict):
+            mask = masks.get(candidate_name)
+            if mask is not None and np.any(mask):
+                return candidate_name
+    return candidate_names[0]
+
+
 def _extract_tfr_components(tfr: Any) -> Tuple[Any, Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[List[str]]]:
     """Extract TFR object and its core components.
     
@@ -516,7 +546,7 @@ def extract_power_features(
 
     n_epochs = len(tfr_data)
     
-    segment_name = getattr(ctx, "name", None)
+    segment_name = _resolve_power_segment_name(ctx)
     ctx.logger.info(f"Computing power features for segment: {segment_name or 'unnamed'}")
     
     time_mask = make_mask_for_times(ctx.windows, segment_name, times)

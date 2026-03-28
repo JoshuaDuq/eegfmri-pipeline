@@ -140,11 +140,19 @@ def _apply_config_overrides(config: Dict[str, Any], config_path: Path) -> Dict[s
     try:
         with open(overrides_path, "r", encoding="utf-8") as handle:
             overrides = json.load(handle) or {}
-    except (OSError, json.JSONDecodeError):
-        return config
+    except OSError as exc:
+        raise ConfigError(
+            f"Failed to read TUI overrides at {overrides_path}: {exc}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ConfigError(
+            f"Failed to parse TUI overrides at {overrides_path}: {exc}"
+        ) from exc
 
     if not isinstance(overrides, dict):
-        return config
+        raise ConfigError(
+            f"TUI overrides at {overrides_path} must contain a JSON object."
+        )
 
     _merge_overrides(config, overrides)
     return resolve_config_paths(config, config_path)
@@ -168,6 +176,8 @@ class ConfigValidationError(ConfigError):
 _CONFIG: Optional[Dict[str, Any]] = None
 _CONFIG_PATH: Optional[Path] = None
 _CONFIG_MTIME: Optional[float] = None
+_CONFIG_OVERRIDES_PATH: Optional[Path] = None
+_CONFIG_OVERRIDES_MTIME: Optional[float] = None
 _CONFIG_LOCK = threading.Lock()
 
 
@@ -226,11 +236,18 @@ class ConfigDict(dict):
 
 def _should_reload_config(config_path: Path) -> bool:
     global _CONFIG, _CONFIG_PATH, _CONFIG_MTIME
+    global _CONFIG_OVERRIDES_PATH, _CONFIG_OVERRIDES_MTIME
     
     if _CONFIG is None:
         return True
     
     if _CONFIG_PATH != config_path:
+        return True
+
+    overrides_path, overrides_mtime = _get_overrides_cache_state(config_path)
+    if _CONFIG_OVERRIDES_PATH != overrides_path:
+        return True
+    if _CONFIG_OVERRIDES_MTIME != overrides_mtime:
         return True
     
     current_mtime = config_path.stat().st_mtime
@@ -238,6 +255,13 @@ def _should_reload_config(config_path: Path) -> bool:
         return True
     
     return False
+
+
+def _get_overrides_cache_state(config_path: Path) -> tuple[Path, Optional[float]]:
+    """Return the resolved overrides path and its current mtime, if it exists."""
+    overrides_path = _get_overrides_path(config_path)
+    overrides_mtime = overrides_path.stat().st_mtime if overrides_path.exists() else None
+    return overrides_path, overrides_mtime
 
 
 def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
@@ -337,6 +361,7 @@ def _validate_config_path(config_path: Path) -> None:
 
 def _load_and_cache_config(config_path: Path, apply_thread_limits: bool) -> Dict[str, Any]:
     global _CONFIG, _CONFIG_PATH, _CONFIG_MTIME
+    global _CONFIG_OVERRIDES_PATH, _CONFIG_OVERRIDES_MTIME
     
     config = _load_config_from_file(config_path)
     
@@ -346,6 +371,7 @@ def _load_and_cache_config(config_path: Path, apply_thread_limits: bool) -> Dict
     _CONFIG = config
     _CONFIG_PATH = config_path
     _CONFIG_MTIME = config_path.stat().st_mtime
+    _CONFIG_OVERRIDES_PATH, _CONFIG_OVERRIDES_MTIME = _get_overrides_cache_state(config_path)
     
     return config
 

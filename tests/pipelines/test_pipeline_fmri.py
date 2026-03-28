@@ -17,6 +17,28 @@ _NoopProgress = NoopProgress
 
 
 class TestFmriAnalysisGapfill(unittest.TestCase):
+    def test_discover_plot_assets_mni_branches(self):
+        from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        p = object.__new__(FmriAnalysisPipeline)
+        p.deriv_root = tmp / "deriv"
+        p.deriv_root.mkdir(parents=True, exist_ok=True)
+
+        empty_anat = p.deriv_root / "preprocessed" / "fmri" / "sub-0001" / "anat"
+        empty_anat.mkdir(parents=True, exist_ok=True)
+        fallback_anat = p.deriv_root / "fmriprep" / "sub-0001" / "anat"
+        fallback_anat.mkdir(parents=True, exist_ok=True)
+        expected_anat = (
+            fallback_anat / "sub-0001_space-MNI152NLin6Asym_desc-preproc_T1w.nii.gz"
+        )
+        expected_anat.write_text("x", encoding="utf-8")
+
+        bg_img, mask_img = p._discover_plot_assets(sub_label="sub-0001", task="task", space="mni")
+
+        self.assertEqual(bg_img, expected_anat)
+        self.assertIsNone(mask_img)
+
     def test_resample_success_and_mni_cached_without_mutating_cfg(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
 
@@ -57,26 +79,48 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
             resample_to_freesurfer: bool = False
             fmriprep_space: str = "T1w"
 
+        report_calls = []
         out_mni_loads = {"count": 0}
 
         def fake_load(path):
             if "space-MNI152NLin2009cAsym" in str(path):
                 out_mni_loads["count"] += 1
-            return "img"
+            return f"loaded:{Path(path).name}"
 
-        fake_builder = types.SimpleNamespace(
-            build_contrast_from_runs_detailed=lambda **kwargs: (
-                "img",
+        def compute_contrast(_contrast_arg, output_type):
+            if output_type == "effect_size":
+                return "effect"
+            if output_type == "effect_variance":
+                return "variance"
+            return "contrast"
+
+        build_calls = {"count": 0}
+
+        def build_contrast_from_runs_detailed(**kwargs):
+            build_calls["count"] += 1
+            if build_calls["count"] == 1:
+                image = "native_img"
+            else:
+                image = "mni_img"
+            return (
+                image,
                 {"output_type": "z_score"},
-                SimpleNamespace(flm=SimpleNamespace(compute_contrast=lambda *a, **k: "x")),
+                SimpleNamespace(flm=SimpleNamespace(compute_contrast=compute_contrast)),
                 "def",
                 None,
-            ),
+            )
+
+        fake_builder = types.SimpleNamespace(
+            build_contrast_from_runs_detailed=build_contrast_from_runs_detailed,
             resample_to_freesurfer=Mock(side_effect=lambda img, fs_dir: img),
             ContrastBuilderConfig=CBuilderCfg,
         )
         fake_plot = types.SimpleNamespace(FmriPlottingConfig=PlotCfg)
-        fake_report = types.SimpleNamespace(run_fmri_plotting_and_report=lambda **kwargs: {"ok": True})
+        fake_report = types.SimpleNamespace(
+            run_fmri_plotting_and_report=lambda **kwargs: (
+                report_calls.append(kwargs) or {"ok": True}
+            )
+        )
         fake_nib = types.SimpleNamespace(save=lambda img, path: Path(path).write_text("x", encoding="utf-8"), load=fake_load)
 
         with patch.dict(
@@ -95,6 +139,11 @@ class TestFmriAnalysisGapfill(unittest.TestCase):
         self.assertEqual(cfg.fmriprep_space, "T1w")
         self.assertTrue(fake_builder.resample_to_freesurfer.called)
         self.assertGreaterEqual(out_mni_loads["count"], 1)
+        self.assertEqual(len(report_calls), 2)
+        self.assertIsNotNone(report_calls[0]["mni_effect_img"])
+        self.assertIsNotNone(report_calls[0]["mni_variance_img"])
+        self.assertIsNotNone(report_calls[1]["mni_effect_img"])
+        self.assertIsNotNone(report_calls[1]["mni_variance_img"])
 
     def test_mni_save_and_contrast_compute_exceptions_surface(self):
         from fmri_pipeline.pipelines.fmri_analysis import FmriAnalysisPipeline
@@ -238,11 +287,116 @@ class TestFmriPreprocessingGapfill(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             p.process_subject("0001", task="", dry_run=True)
 
+    def test_process_subject_normalizes_sub_prefixed_subject_ids(self):
+        from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        bids = tmp / "bids"
+        (bids / "sub-0001").mkdir(parents=True, exist_ok=True)
+        fs_license = tmp / "license.txt"
+        fs_license.write_text("license", encoding="utf-8")
+
+        p = object.__new__(FmriPreprocessingPipeline)
+        p.config = DotConfig(
+            {
+                "paths": {"bids_fmri_root": str(bids)},
+                "fmri_preprocessing": {
+                    "engine": "docker",
+                    "fmriprep": {
+                        "fs_license_file": str(fs_license),
+                        "output_spaces": ["T1w"],
+                    },
+                },
+            }
+        )
+        p.deriv_root = tmp / "deriv"
+        p.deriv_root.mkdir(parents=True, exist_ok=True)
+        p.logger = Mock()
+        p.get_subject_logger = lambda subject: Mock()
+
+        progress = SimpleNamespace(
+            subject_start=Mock(),
+            subject_done=Mock(),
+            step=lambda *args, **kwargs: None,
+        )
+
+        with patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"), patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing._stream_subprocess"
+        ) as mock_stream:
+            p.process_subject("sub-0001", task="", progress=progress, dry_run=False)
+
+        cmd = mock_stream.call_args.args[0]
+        self.assertIn("--participant-label", cmd)
+        self.assertIn("0001", cmd)
+        self.assertNotIn("sub-0001", cmd[cmd.index("--participant-label") + 1 : cmd.index("--participant-label") + 2])
+        progress.subject_start.assert_called_once_with("sub-0001")
+        progress.subject_done.assert_called_once_with("sub-0001", success=True)
+
         bids = Path(tempfile.mkdtemp())
         bids.mkdir(parents=True, exist_ok=True)
         p.config = DotConfig({"paths": {"bids_fmri_root": str(bids)}, "fmri_preprocessing": {"engine": "docker", "fmriprep": {"fs_license_file": str(bids / "missing_license.txt")}}})
         with self.assertRaises(FileNotFoundError):
             p.process_subject("0001", task="", dry_run=True)
+
+    def test_preprocessing_deriv_root_and_apptainer_sanitized_mount_branch(self):
+        from fmri_pipeline.pipelines.fmri_preprocessing import (
+            BIDS_SANITIZED_SOURCE_MOUNT,
+            FmriPreprocessingPipeline,
+        )
+
+        p = object.__new__(FmriPreprocessingPipeline)
+        p.config = DotConfig(
+            {
+                "paths": {"deriv_fmri_root": "/tmp/fmri-deriv"},
+                "fmri_preprocessing": {"task_is_rest": False},
+            }
+        )
+        with patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing.resolve_fmri_deriv_root",
+            return_value=Path("/tmp/fmri-deriv"),
+        ) as mock_resolve_deriv_root:
+            self.assertEqual(p._resolve_pipeline_deriv_root(), Path("/tmp/fmri-deriv"))
+        mock_resolve_deriv_root.assert_called_once_with(p.config, task_is_rest=False)
+
+        tmp = Path(tempfile.mkdtemp())
+        bids = tmp / "bids"
+        bids.mkdir(parents=True, exist_ok=True)
+        (bids / "sub-0001").mkdir(parents=True, exist_ok=True)
+        lic = tmp / "lic.txt"
+        lic.write_text("x", encoding="utf-8")
+
+        p = object.__new__(FmriPreprocessingPipeline)
+        p.config = DotConfig(
+            {
+                "paths": {"bids_fmri_root": str(bids)},
+                "fmri_preprocessing": {
+                    "engine": "apptainer",
+                    "fmriprep": {"fs_license_file": str(lic)},
+                },
+            }
+        )
+        p.deriv_root = tmp / "deriv"
+        p.deriv_root.mkdir(parents=True, exist_ok=True)
+        p.logger = Mock()
+
+        class _Tmp:
+            def cleanup(self):
+                return None
+
+        with patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing._resolve_bids_mount_root",
+            return_value=(Path("/sanitized"), _Tmp()),
+        ), patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing._require_executable"
+        ):
+            p.process_subject("0001", task="", progress=_NoopProgress(), dry_run=True)
+
+        logged_commands = [
+            call.args[1]
+            for call in p.logger.info.call_args_list
+            if call.args and call.args[0] == "fMRIPrep command: %s"
+        ]
+        self.assertTrue(any(BIDS_SANITIZED_SOURCE_MOUNT in cmd for cmd in logged_commands))
 
     def test_docker_and_apptainer_mount_flags(self):
         from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline

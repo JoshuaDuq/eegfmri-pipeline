@@ -10,6 +10,7 @@ from eeg_pipeline.cli.commands.base_feature_availability import (
     FREQUENCY_BANDS,
     _empty_feature_availability,
     detect_available_bands,
+    detect_feature_inventory,
     detect_feature_availability,
 )
 from eeg_pipeline.pipelines.constants import (
@@ -19,6 +20,7 @@ from eeg_pipeline.pipelines.constants import (
 
 __all__ = [
     "detect_available_bands",
+    "detect_feature_inventory",
     "detect_feature_availability",
     "_empty_feature_availability",
     "discover_event_columns",

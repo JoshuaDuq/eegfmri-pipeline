@@ -1023,23 +1023,28 @@ def plot_aperiodic_by_condition(
 
     # Column comparison (unpaired)
     if compare_cols:
-        from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
-        from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats, plot_multi_group_column_comparison
+        from eeg_pipeline.plotting.features.utils import (
+            compute_or_load_column_stats,
+            plot_multi_group_column_comparison,
+            resolve_complete_multigroup_plot_groups,
+        )
         
         values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
         use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
         
         if use_multi_group:
-            multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-            if not multi_group_info:
-                raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
-            masks_dict, group_labels = multi_group_info
+            masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+                events_df,
+                config,
+                context="Aperiodic multi-group column comparison",
+            )
             seg_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
             from eeg_pipeline.plotting.features.utils import load_multigroup_stats
-            multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+            multigroup_stats = load_multigroup_stats(stats_dir, feature_type="aperiodic") if stats_dir else None
 
             for roi_name in roi_names:
                 data_by_band: Dict[str, Dict[str, np.ndarray]] = {}
+                stats_match_terms: Dict[str, Tuple[str, ...]] = {}
                 for spec in metric_specs:
                     metric_label = spec["label"]
                     stat = spec["stat"]
@@ -1058,6 +1063,7 @@ def plot_aperiodic_by_condition(
 
                     if len(group_values) >= 2:
                         data_by_band[metric_label] = group_values
+                        stats_match_terms[metric_label] = (band, stat)
 
                 if data_by_band:
                     roi_safe = sanitize_label(roi_name).lower() if roi_name != "all" else ""
@@ -1075,6 +1081,7 @@ def plot_aperiodic_by_condition(
                         roi_name=roi_name,
                         stats_dir=stats_dir,
                         multigroup_stats=multigroup_stats,
+                        stats_match_terms=stats_match_terms,
                     )
                 
                 log_if_present(logger, "info", f"Saved aperiodic multi-group column comparison for {len(roi_names)} ROIs")

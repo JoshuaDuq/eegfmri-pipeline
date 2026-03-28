@@ -27,6 +27,9 @@ from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 
 
+_PLOT_RATIO_STATISTIC = "power_ratio"
+
+
 def _order_ratio_pairs_by_config(pairs: List[str], config: Any) -> List[str]:
     """Order ratio pairs according to config, preserving config order."""
     config_pairs = get_config_value(config, "feature_engineering.spectral.ratio_pairs", [])
@@ -71,7 +74,7 @@ def _get_ratio_columns_for_segment_pair_roi(
     pair: str,
     roi_name: str,
 ) -> List[str]:
-    """Get ratio columns matching segment, pair, and ROI criteria."""
+    """Get ratio columns matching segment, pair, ROI, and plotting statistic."""
     matching_columns = []
     
     for column in features_df.columns:
@@ -82,6 +85,9 @@ def _get_ratio_columns_for_segment_pair_roi(
         parsed_segment = str(parsed.get("segment") or "")
         parsed_band = str(parsed.get("band") or "")
         if parsed_segment != segment or parsed_band != pair:
+            continue
+
+        if str(parsed.get("stat") or "") != _PLOT_RATIO_STATISTIC:
             continue
         
         scope = parsed.get("scope") or ""
@@ -257,22 +263,24 @@ def _plot_column_comparison_ratios(
     Supports both 2-group comparison (simple unpaired) and multi-group comparison
     (3+ groups with all pairwise brackets and significance asterisks).
     """
-    from eeg_pipeline.utils.analysis.events import extract_multi_group_masks
-    from eeg_pipeline.plotting.features.utils import plot_multi_group_column_comparison
+    from eeg_pipeline.plotting.features.utils import (
+        plot_multi_group_column_comparison,
+        resolve_complete_multigroup_plot_groups,
+    )
     
     values_spec = get_config_value(config, "plotting.comparisons.comparison_values", [])
     use_multi_group = isinstance(values_spec, (list, tuple)) and len(values_spec) > 2
     
     if use_multi_group:
-        multi_group_info = extract_multi_group_masks(events_df, config, require_enabled=True)
-        if not multi_group_info:
-            raise ValueError("Multi-group column comparison requested but could not resolve group masks.")
-        
-        masks_dict, group_labels = multi_group_info
+        masks_dict, group_labels = resolve_complete_multigroup_plot_groups(
+            events_df,
+            config,
+            context="Ratios multi-group column comparison",
+        )
         segment_name = str(require_config_value(config, "plotting.comparisons.comparison_segment")).strip()
         
         from eeg_pipeline.plotting.features.utils import load_multigroup_stats
-        multigroup_stats = load_multigroup_stats(stats_dir) if stats_dir else None
+        multigroup_stats = load_multigroup_stats(stats_dir, feature_type="ratios") if stats_dir else None
         
         for roi_name in roi_names:
             data_by_band: Dict[str, Dict[str, np.ndarray]] = {}

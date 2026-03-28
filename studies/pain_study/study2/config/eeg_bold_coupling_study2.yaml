@@ -38,7 +38,7 @@ eeg_bold_coupling:
           - "roi_library/study2/fsaverage/label/lh.study2_cingulo_pre_sma.label"
           - "roi_library/study2/fsaverage/label/rh.study2_cingulo_pre_sma.label"
     # Frozen ROI provenance:
-    # /Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/config/roi_library/study2/fsaverage/study2_roi_manifest.json
+    # /Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/study2/config/roi_library/study2/fsaverage/study2_roi_manifest.json
 
   eeg:
     bands: ["alpha", "beta"]

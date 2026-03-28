@@ -2904,6 +2904,7 @@ def run_model_comparison_ml(
     *,
     target: Optional[str] = None,
     feature_families: Optional[List[str]] = None,
+    feature_input_root: Optional[Path] = None,
     feature_harmonization: Optional[str] = None,
     covariates: Optional[List[str]] = None,
     feature_bands: Optional[List[str]] = None,
@@ -2933,6 +2934,7 @@ def run_model_comparison_ml(
         config,
         logger,
         feature_families=feature_families,
+        feature_input_root=feature_input_root,
         feature_harmonization=feature_harmonization,  # type: ignore[arg-type]
         target=target,
         target_kind="continuous",

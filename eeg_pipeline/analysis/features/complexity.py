@@ -60,9 +60,13 @@ class ComplexityParams:
 
 
 def _extract_params(config: Any) -> ComplexityParams:
-    signal_basis = str(get_config_value(config, "feature_engineering.complexity.signal_basis", "filtered")).strip().lower()
+    signal_basis = str(
+        get_config_value(config, "feature_engineering.complexity.signal_basis", "filtered")
+    ).strip().lower()
     if signal_basis not in {"filtered", "envelope"}:
-        signal_basis = "filtered"
+        raise ValueError(
+            "feature_engineering.complexity.signal_basis must be 'filtered' or 'envelope'"
+        )
 
     pe_order = int(get_config_value(config, "feature_engineering.complexity.pe_order", 3))
     pe_delay = int(get_config_value(config, "feature_engineering.complexity.pe_delay", 1))
@@ -74,19 +78,35 @@ def _extract_params(config: Any) -> ComplexityParams:
     min_segment_sec = float(get_config_value(config, "feature_engineering.complexity.min_segment_sec", 2.0))
     min_samples = int(get_config_value(config, "feature_engineering.complexity.min_samples", 200))
 
-    pe_order = max(2, pe_order)
-    pe_delay = max(1, pe_delay)
-    sampen_order = max(1, sampen_order)
+    if pe_order < 2:
+        raise ValueError("feature_engineering.complexity.pe_order must be >= 2")
+    if pe_delay < 1:
+        raise ValueError("feature_engineering.complexity.pe_delay must be >= 1")
+    if sampen_order < 1:
+        raise ValueError("feature_engineering.complexity.sampen_order must be >= 1")
     if not np.isfinite(sampen_r) or sampen_r <= 0:
-        sampen_r = 0.2
-    mse_scale_min = max(1, mse_scale_min)
-    mse_scale_max = max(mse_scale_min, mse_scale_max)
+        raise ValueError("feature_engineering.complexity.sampen_r must be a finite value > 0")
+    if mse_scale_min < 1:
+        raise ValueError("feature_engineering.complexity.mse_scale_min must be >= 1")
+    if mse_scale_max < mse_scale_min:
+        raise ValueError(
+            "feature_engineering.complexity.mse_scale_max must be >= mse_scale_min"
+        )
+    if min_segment_sec <= 0:
+        raise ValueError("feature_engineering.complexity.min_segment_sec must be > 0")
+    if min_samples < 1:
+        raise ValueError("feature_engineering.complexity.min_samples must be >= 1")
 
     # PE needs enough samples for ordinal patterns
     min_needed_for_pe = max(1, (pe_order - 1) * pe_delay + 2)
     # MSE at max scale needs enough points for SampEn templates.
     min_needed_for_mse = max(1, mse_scale_max * (sampen_order + 2))
-    min_samples = max(min_samples, min_needed_for_pe, min_needed_for_mse)
+    required_min_samples = max(min_needed_for_pe, min_needed_for_mse)
+    if min_samples < required_min_samples:
+        raise ValueError(
+            "feature_engineering.complexity.min_samples must be >= "
+            f"{required_min_samples} for the configured PE/MSE parameters"
+        )
 
     return ComplexityParams(
         signal_basis=signal_basis,
