@@ -244,9 +244,9 @@ and voxel `v`. Let `M_k(v)` denote the signature-map weight for target `k`, wher
 `k in {NPS, SIIPS1}`. Because Study 1 uses the `dot` metric with
 `normalization = none`, the trial-wise target is:
 
-$$
+```math
 y_{s,i}^{(k)} = \sum_{v \in V} \beta_{s,i}(v) \, M_k(v).
-$$
+```
 
 No within-run or within-subject normalization is applied in the frozen production
 configuration.
@@ -262,20 +262,20 @@ through the shared fMRI-signature target loader. Two keying strategies are consi
 If `r_i` is the run index, `q_i` the trial index, `o_i` the onset, and `d_i` the
 duration, the candidate keys are:
 
-$$
+```math
 \kappa_i^{trial} = (r_i, q_i)
-$$
+```
 
 and
 
-$$
+```math
 \kappa_i^{time} =
 \left(
 r_i,
 \mathrm{round}(o_i, 3),
 \mathrm{round}(d_i, 3)
 \right).
-$$
+```
 
 The implementation constructs both key families for the clean EEG events table and for
 the subject-level fMRI signature table, counts successful matches under each mode, and
@@ -308,13 +308,13 @@ Downstream Study 1 stages resolve their working cohort from `primary_targets.par
 For a requested subject set `S_req`, task `tau`, and available subject set `S_tau`
 present in the primary table for that task, the resolved cohort is:
 
-$$
+```math
 S_{study1} =
 \begin{cases}
 S_{req}, & \text{if } S_{req} \neq \varnothing \\
 S_{\tau}, & \text{otherwise.}
 \end{cases}
-$$
+```
 
 The stage fails if:
 
@@ -453,9 +453,9 @@ targets are dropped before matrix assembly.
 
 Let
 
-$$
+```math
 X \in \mathbb{R}^{N \times P}
-$$
+```
 
 denote the combined trial-by-feature matrix after concatenating subject-specific feature
 tables over all included subjects. Study 1 requests
@@ -475,21 +475,21 @@ columns rather than aborting.
 For each model family, preprocessing is fit on the outer training data only. If
 `X_{train}` denotes the fold-specific training matrix, the shared preprocessing stack is:
 
-$$
+```math
 X^{(1)} = \mathrm{ReplaceInfWithNaN}(X_{train})
-$$
+```
 
-$$
+```math
 X^{(2)} = \mathrm{DropAllNaNColumns}(X^{(1)})
-$$
+```
 
-$$
+```math
 X^{(3)} = \mathrm{Impute}_{median}(X^{(2)})
-$$
+```
 
-$$
+```math
 X^{(4)} = \mathrm{VarianceThreshold}_{\tau}(X^{(3)}),
-$$
+```
 
 where `tau` is tuned by inner cross-validation. For `elasticnet` and `ridge`, an
 additional `StandardScaler` is fitted after the variance-threshold stage. PCA and
@@ -500,9 +500,9 @@ exist in the shared backend, but they are inactive under the frozen Study 1 defa
 The regression target is wrapped in a `TransformedTargetRegressor` using a Yeo-Johnson
 power transform with standardization:
 
-$$
+```math
 \tilde{y} = \mathrm{YJ}(y).
-$$
+```
 
 This target transform is learned on the training data of each estimator fit and inverted
 after prediction.
@@ -527,7 +527,7 @@ For the linear models, the optimized objectives are:
 
 ElasticNet:
 
-$$
+```math
 \min_{\beta_0,\beta}
 \frac{1}{2n}
 \left\|
@@ -537,11 +537,11 @@ $$
 \alpha \rho \|\beta\|_1
 +
 \frac{\alpha(1-\rho)}{2}\|\beta\|_2^2
-$$
+```
 
 Ridge:
 
-$$
+```math
 \min_{\beta_0,\beta}
 \frac{1}{2n}
 \left\|
@@ -549,7 +549,7 @@ $$
 \right\|_2^2
 +
 \frac{\alpha}{2}\|\beta\|_2^2.
-$$
+```
 
 `rf` is implemented as a bootstrap random-forest regressor under the parameter grid
 above.
@@ -558,16 +558,16 @@ above.
 
 All compared models share the same outer subject-level folds:
 
-$$
+```math
 \mathcal{F}_{outer} = \mathrm{LeaveOneGroupOut}(subject).
-$$
+```
 
 When the outer training split contains at least two unique subjects, inner
 hyperparameter tuning uses:
 
-$$
+```math
 \mathcal{F}_{inner} = \mathrm{GroupKFold}(n_{splits} = \min(5, n_{train\_subjects})).
-$$
+```
 
 The inner grid search uses a scoring dictionary containing Pearson correlation and
 negative mean squared error, and refits the best estimator by maximizing inner-CV
@@ -576,17 +576,17 @@ grid search is run and the estimator is fit at its default parameterization.
 
 For each held-out fold `f`, the recorded metrics are:
 
-$$
+```math
 R_f^2 =
 1 - \frac{\sum_{i \in f}(y_i - \hat{y}_i)^2}
 {\sum_{i \in f}(y_i - \bar{y}_f)^2}
-$$
+```
 
 and
 
-$$
+```math
 \mathrm{MAE}_f = \frac{1}{|f|}\sum_{i \in f}|y_i - \hat{y}_i|.
-$$
+```
 
 The summary JSON reports the arithmetic mean and standard deviation of these foldwise
 subject-level metrics, plus bootstrap confidence intervals over held-out-subject folds.
@@ -655,9 +655,9 @@ spanning `-7.0` to `15.0` seconds relative to the locking event.
 If `n_trials`, `n_bands`, `n_channels`, and `n_times` denote the pooled dimensions, the
 input tensor is:
 
-$$
+```math
 X \in \mathbb{R}^{n_{trials} \times n_{bands} \times n_{channels} \times n_{times}}.
-$$
+```
 
 Unknown band names raise immediately. No deep-regression run is attempted when the
 common channel intersection is empty.
@@ -706,19 +706,19 @@ For each outer fold:
 
 If `X_{n,b,c,t}` denotes the outer-fold tensor, the input normalization is:
 
-$$
+```math
 \tilde{X}_{n,b,c,t} =
 \frac{X_{n,b,c,t} - \mu_{b,c}}
 {\sigma_{b,c}^{*}},
-$$
+```
 
 with
 
-$$
+```math
 \mu_{b,c} = \mathrm{mean}_{n,t}(X_{train,n,b,c,t}),
 \qquad
 \sigma_{b,c}^{*} = \max\left(\mathrm{sd}_{n,t}(X_{train,n,b,c,t}), 10^{-6}\right).
-$$
+```
 
 The validation split is group-based. If the outer training split contains at least two
 unique subjects, the training subjects are shuffled with a fold-specific seed and a
@@ -736,18 +736,18 @@ In that case, the model simply runs for the full epoch budget and keeps the fina
 Let `y_fit` denote the target values in the fitting subset after the validation holdout.
 The target normalization used for optimization is:
 
-$$
+```math
 \tilde{y}_n =
 \frac{y_n - \mu_y}{\sigma_y^{*}},
-$$
+```
 
 where
 
-$$
+```math
 \mu_y = \mathrm{mean}(y_{fit}),
 \qquad
 \sigma_y^{*} = \max(\mathrm{sd}(y_{fit}), 10^{-6}).
-$$
+```
 
 Predictions are inverted back to the original target scale after inference.
 
@@ -755,9 +755,9 @@ Predictions are inverted back to the original target scale after inference.
 
 The implemented model is a compact PyTorch regressor. For a per-trial input tensor
 
-$$
+```math
 \tilde{X} \in \mathbb{R}^{B \times C \times T},
-$$
+```
 
 the network applies:
 
@@ -772,7 +772,7 @@ the network applies:
 With `F = study1.deep_regression.temporal_filters = 8` and `k` the odd temporal kernel
 length constrained by the available trial duration, the feature extractor is:
 
-$$
+```math
 H^{(1)}_{n,f,c,t}
 =
 \mathrm{ELU}
@@ -783,9 +783,9 @@ H^{(1)}_{n,f,c,t}
 W^{temp}_{f,b,u}\tilde{X}_{n,b,c,t+u}
 \right)
 \right)
-$$
+```
 
-$$
+```math
 H^{(2)}_{n,f,t}
 =
 \mathrm{ELU}
@@ -796,15 +796,15 @@ H^{(2)}_{n,f,t}
 W^{spat}_{f,c} H^{(1)}_{n,f,c,t}
 \right)
 \right)
-$$
+```
 
-$$
+```math
 z_n = \mathrm{Pool}_{8}\left(\mathrm{Dropout}(H^{(2)}_n)\right)
-$$
+```
 
 and the regression head is:
 
-$$
+```math
 \hat{y}_n =
 W_2
 \,
@@ -817,7 +817,7 @@ W_1 \, \mathrm{vec}(z_n) + b_1
 \right)
 +
 b_2.
-$$
+```
 
 The frozen architectural defaults are:
 
@@ -832,7 +832,7 @@ The frozen architectural defaults are:
 
 The training objective is mean squared error on standardized targets:
 
-$$
+```math
 \mathcal{L}(\theta)
 =
 \frac{1}{m}
@@ -840,7 +840,7 @@ $$
 \left(
 \hat{\tilde{y}}_n - \tilde{y}_n
 \right)^2.
-$$
+```
 
 The frozen optimization defaults are:
 
@@ -860,21 +860,21 @@ CUDA is available.
 
 For each held-out subject fold, the stage records:
 
-$$
+```math
 r_f = \mathrm{corr}(y_f, \hat{y}_f),
-$$
+```
 
-$$
+```math
 R_f^2 =
 1 - \frac{\sum_{i \in f}(y_i - \hat{y}_i)^2}
 {\sum_{i \in f}(y_i - \bar{y}_f)^2},
-$$
+```
 
 and
 
-$$
+```math
 \mathrm{MAE}_f = \frac{1}{|f|}\sum_{i \in f}|y_i - \hat{y}_i|.
-$$
+```
 
 The output summary reports the arithmetic mean of `r_f`, `R_f^2`, and `MAE_f` across
 held-out-subject folds. Deep regression requires PyTorch; if PyTorch is unavailable, the
