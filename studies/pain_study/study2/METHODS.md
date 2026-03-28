@@ -284,7 +284,7 @@ Let `T_active` and `T_base` denote the active and baseline sample sets.
 
 The area-weighted ROI power summaries are:
 
-$$
+```math
 \bar{P}^{active}_{sriqb}
 =
 \frac{\sum_{j \in q} w_{qj}
@@ -293,9 +293,9 @@ $$
 \sum_{t \in T_{active}} P_{sriqjb}(t)
 \right)}
 {\sum_{j \in q} w_{qj}}
-$$
+```
 
-$$
+```math
 \bar{P}^{base}_{sriqb}
 =
 \frac{\sum_{j \in q} w_{qj}
@@ -304,14 +304,14 @@ $$
 \sum_{t \in T_{base}} P_{sriqjb}(t)
 \right)}
 {\sum_{j \in q} w_{qj}}
-$$
+```
 
 where `w_{qj}` is the cortical-area weight assigned to source row `j` after ROI
 morphing and source-space intersection.
 
 The final EEG predictor is the active-to-baseline power ratio expressed in decibels:
 
-$$
+```math
 X_{sriqb}
 =
 10 \log_{10}
@@ -319,7 +319,7 @@ X_{sriqb}
 \frac{\bar{P}^{active}_{sriqb}}
 {\bar{P}^{base}_{sriqb}}
 \right)
-$$
+```
 
 The production EEG predictor columns are:
 
@@ -392,17 +392,17 @@ Let `beta_{sriqv}` denote the trial-wise LSS effect estimate at cortical vertex 
 let `a_{qv}` denote the positive cortical area weight for that vertex. The ROI mean BOLD
 response is:
 
-$$
+```math
 Y_{sriq}
 =
 \frac{\sum_{v \in q} a_{qv} \beta_{sriqv}}
 {\sum_{v \in q} a_{qv}}
-$$
+```
 
 When trial-wise effect variances are available, Study 2 also computes the variance of
 the area-weighted mean:
 
-$$
+```math
 Var(Y_{sriq})
 =
 \sum_{v \in q}
@@ -410,7 +410,7 @@ Var(Y_{sriq})
 \frac{a_{qv}}{\sum_{u \in q} a_{qu}}
 \right)^2
 \sigma^2_{sriqv}
-$$
+```
 
 The production BOLD columns are:
 
@@ -513,12 +513,12 @@ canonical trial regressor with the confound vector and taking the weighted mean 
 times. For a confound series `m(t)` and trial-specific HRF regressor `h_i(t)`, the
 trial-level summary is:
 
-$$
+```math
 M_i
 =
 \frac{\sum_t h_i(t) m(t)}
 {\sum_t h_i(t)}
-$$
+```
 
 The production nuisance thresholds are:
 
@@ -540,23 +540,23 @@ from the clean EEG events table:
 
 Each component is robust-z-scored within run:
 
-$$
+```math
 z_{ik}
 =
 \frac{x_{ik} - median_r(x_{\cdot k})}
 {1.4826 \; MAD_r(x_{\cdot k})}
-$$
+```
 
 If the within-run MAD is zero or non-finite, the implemented robust z-score defaults to
 `0.0` for that run. The production composite then keeps only positive burden and averages
 across required components:
 
-$$
+```math
 A_i
 =
 \frac{1}{K}
 \sum_{k=1}^{K} \max(z_{ik}, 0)
-$$
+```
 
 This yields the trial-wise `eeg_artifact` predictor used both for censoring and as a
 covariate in the confirmatory model.
@@ -615,7 +615,7 @@ A group fit is only attempted when at least two eligible subjects remain for tha
 
 The fixed-effect model for cell `(q, b)` can be written as:
 
-$$
+```math
 Y^{(q)}_{sri}
 =
 \beta_0
@@ -625,7 +625,7 @@ Y^{(q)}_{sri}
 + u_{0s}
 + u_{1s} X^{(q,b)}_{sri}
 + \varepsilon_{sri}
-$$
+```
 
 where `C_{sri,m}` denotes the prespecified covariates
 `{temperature, temperature_sq, fd, eeg_artifact, exp_site, exp_global, block_start}`.
@@ -642,11 +642,11 @@ is rescaled into the same standardized units and passed into `nlme::lme` through
 
 The continuous-time dependence structure is indexed by trial onset in seconds:
 
-$$
+```math
 Cor(\varepsilon_{sri}, \varepsilon_{sr'i'})
 =
 \rho^{|\tau_{sri} - \tau_{sr'i'}|}
-$$
+```
 
 for observations in the same subject/run series, where `tau` is trial onset.
 

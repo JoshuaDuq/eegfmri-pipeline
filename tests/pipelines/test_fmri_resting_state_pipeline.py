@@ -6,7 +6,6 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from tests.pipelines_test_utils import DotConfig
