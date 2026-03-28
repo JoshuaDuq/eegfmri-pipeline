@@ -838,10 +838,6 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		}
 	case optTfrWorkers:
 		m.tfrWorkers = int(val)
-	case optFeatureTmin:
-		m.featureTmin = val
-	case optFeatureTmax:
-		m.featureTmax = val
 	case optItpcNJobs:
 		m.itpcNJobs = int(val)
 	// Asymmetry options

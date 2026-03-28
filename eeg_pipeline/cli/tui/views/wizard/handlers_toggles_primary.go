@@ -965,9 +965,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optAggregationMethod:
 		m.aggregationMethod = (m.aggregationMethod + 1) % 2
 		m.useDefaultAdvanced = false
-	case optFeatureTmin, optFeatureTmax:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
 	case optBandEnvelopePadSec, optBandEnvelopePadCycles, optIAFAlphaWidthHz, optIAFSearchRangeMin, optIAFSearchRangeMax, optIAFMinProminence, optIAFMinCyclesAtFmin, optIAFMinBaselineSec:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false

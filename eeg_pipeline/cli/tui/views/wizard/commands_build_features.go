@@ -1069,8 +1069,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 	aggregationMethods := []string{"mean", "median"}
 	args = append(args, "--aggregation-method", aggregationMethods[m.aggregationMethod%len(aggregationMethods)])
-	args = append(args, "--tmin", fmt.Sprintf("%.3f", m.featureTmin))
-	args = append(args, "--tmax", fmt.Sprintf("%.3f", m.featureTmax))
 
 	// Execution options
 	if m.featComputeChangeScores {

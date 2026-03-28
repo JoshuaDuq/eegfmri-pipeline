@@ -1653,8 +1653,6 @@ type Model struct {
 
 	// Aggregation
 	aggregationMethod int // 0: mean, 1: median
-	featureTmin       float64
-	featureTmax       float64
 
 	// Generic
 	minEpochsForFeatures int
@@ -2807,8 +2805,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		minEpochsForFeatures:    10,
 		featAnalysisMode:        0,
 		aggregationMethod:       0,
-		featureTmin:             -7.0,
-		featureTmax:             15.0,
 		featComputeChangeScores: true,
 		featSaveTfrWithSidecar:  false,
 		featNJobsBands:          -1,

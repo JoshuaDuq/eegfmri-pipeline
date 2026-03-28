@@ -2417,20 +2417,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			methods := []string{"mean", "median"}
 			value = methods[m.aggregationMethod%len(methods)]
 			hint = "ROI/channels aggregation"
-		case optFeatureTmin:
-			label = "Window Tmin"
-			value = fmt.Sprintf("%.3f", m.featureTmin)
-			if m.editingNumber && m.isCurrentlyEditing(optFeatureTmin) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "global feature window start (s)"
-		case optFeatureTmax:
-			label = "Window Tmax"
-			value = fmt.Sprintf("%.3f", m.featureTmax)
-			if m.editingNumber && m.isCurrentlyEditing(optFeatureTmax) {
-				value = m.numberBuffer + "█"
-			}
-			hint = "global feature window end (s)"
 		case optFeatComputeChangeScores:
 			label = "Change scores"
 			value = m.boolToOnOff(m.featComputeChangeScores)

@@ -285,6 +285,24 @@ func TestGetFeaturesOptions_RestingStateHidesTrialSpecificAdvancedControls(t *te
 	}
 }
 
+func TestGetFeaturesOptions_FeatureExecutionUsesTimeRangeStepAsWindowSource(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.featGroupExecutionExpanded = true
+
+	opts := m.getFeaturesOptions()
+
+	for _, option := range []optionType{
+		optMinEpochs,
+		optAggregationMethod,
+		optFeatComputeChangeScores,
+		optFeatSaveTfrWithSidecar,
+	} {
+		if !hasOption(opts, option) {
+			t.Fatalf("expected execution option %v in advanced execution settings", option)
+		}
+	}
+}
+
 func TestApplyFeatureRestConstraints_RemovesRestIncompatibleSelectionsAndForcesRestSafeState(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, category := range m.categories {

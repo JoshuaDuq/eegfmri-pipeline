@@ -236,8 +236,6 @@ const (
 	optFeatNJobsAperiodic
 	optFeatNJobsComplexity
 	optAggregationMethod
-	optFeatureTmin
-	optFeatureTmax
 	// Source localization options (LCMV, eLORETA)
 	optSourceLocMode
 	optSourceLocMethod

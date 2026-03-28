@@ -307,6 +307,18 @@ func TestBuildFeaturesAdvancedArgs_RestingStateSuppressesAperiodicEvokedSubtract
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_DoesNotEmitGlobalWindowFallbackArgs(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	for _, flag := range []string{"--tmin", "--tmax"} {
+		if containsString(args, flag) {
+			t.Fatalf("did not expect feature advanced args to include %s: %#v", flag, args)
+		}
+	}
+}
+
 func TestBuildFeaturesAdvancedArgs_RestingStateOmitsTrialSpecificFeatureArgs(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i, category := range m.categories {

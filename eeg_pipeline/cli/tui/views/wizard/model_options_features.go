@@ -466,8 +466,6 @@ func (m Model) getFeaturesOptions() []optionType {
 			options,
 			optMinEpochs,
 			optAggregationMethod,
-			optFeatureTmin,
-			optFeatureTmax,
 			optFeatComputeChangeScores,
 			optFeatSaveTfrWithSidecar,
 		)
