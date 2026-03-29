@@ -6,7 +6,7 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://joshuaduq.github.io/eegfmri-pipeline/)
 
 Modular neuroimaging analysis suite — EEG preprocessing, 16 feature families,
-behavioural statistics, machine learning, fMRI GLM, and source localisation,
+behavioral statistics, machine learning, fMRI GLM, and source localization,
 all from a single CLI or interactive TUI.
 
 <p align="center">
@@ -22,7 +22,7 @@ all from a single CLI or interactive TUI.
 | | |
 |:--|:--|
 | [Installation](https://joshuaduq.github.io/eegfmri-pipeline/install.html) | Python setup, TUI build, Docker image |
-| [Quick Start](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html) | End-to-end walkthrough |
+| [Quick Start](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html) | Clean walkthrough from install to outputs |
 | [User Guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/index.html) | Data layout, configuration, CLI, TUI |
 | [Methods](https://joshuaduq.github.io/eegfmri-pipeline/methods/index.html) | Notation, formulas, output schemas |
 | [API](https://joshuaduq.github.io/eegfmri-pipeline/api/index.html) | Public Python API reference |
@@ -31,21 +31,46 @@ all from a single CLI or interactive TUI.
 
 ## Quick Start
 
+Install the package:
+
 ```bash
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git && cd eegfmri-pipeline
 python3.11 -m venv .venv311 && source .venv311/bin/activate
 pip install -e ".[dev,ml]"
 ```
 
-Place BIDS data under `data/bids_output/eeg/`, then:
+Place BIDS EEG data under `data/bids_output/eeg/`, then validate the dataset and
+run the first pipeline stage:
 
 ```bash
+eeg-pipeline validate quick
+eeg-pipeline info subjects
 eeg-pipeline preprocessing full --subject 0001
 eeg-pipeline features compute --subject 0001
 eeg-pipeline ml regression --all-subjects
 ```
 
-**Optional TUI** (requires Go 1.21+):
+Available command families and modes:
+
+| Command | Modes |
+|:--|:--|
+| `validate` | `quick`, `all`, `epochs`, `features`, `behavior`, `bids` |
+| `info` | `subjects`, `features`, `config`, `version`, `plotters`, `discover`, `rois`, `fmri-conditions`, `fmri-columns`, `multigroup-stats`, `ml-feature-space` |
+| `preprocessing` | `full`, `bad-channels`, `ica`, `epochs` |
+| `features` | `compute`, `visualize` |
+| `behavior` | `compute`, `visualize` |
+| `ml` | `regression`, `classify`, `timegen`, `model_comparison`, `incremental_validity`, `uncertainty`, `shap`, `permutation` |
+| `fmri` | `preprocess` |
+| `fmri-analysis` | `first-level`, `second-level`, `beta-series`, `lss`, `rest` |
+| `plotting` | `visualize`, `tfr` |
+| `stats` | `summary`, `subjects`, `features`, `storage`, `timeline` |
+
+The full, command-by-command walkthrough lives in
+[Quick Start](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html),
+and the complete CLI reference is in
+[User Guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/index.html).
+
+**Optional TUI** requires Go 1.21+:
 
 ```bash
 cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
@@ -55,15 +80,21 @@ cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 
 ## Pipeline
 
-| Command | Description |
-|:--------|:------------|
-| `preprocessing` | Bad channel detection · ICA · epoch creation |
-| `features` | 16 trial-level EEG feature families |
-| `behavior` | Correlations · regression · ICC · condition comparisons |
-| `ml` | LOSO regression · classification · SHAP · permutation tests |
-| `fmri` | fMRIPrep preprocessing (Docker / Apptainer) |
-| `fmri-analysis` | First-level GLM · group inference · beta-series · resting-state |
-| `plotting` | 40+ plot types across all domains |
+The pipeline is organized as a single CLI with one command family per analysis
+stage. Use `--help` on any command to inspect its options:
+
+```bash
+eeg-pipeline preprocessing --help
+eeg-pipeline features --help
+eeg-pipeline behavior --help
+eeg-pipeline ml --help
+eeg-pipeline fmri --help
+eeg-pipeline fmri-analysis --help
+eeg-pipeline plotting --help
+eeg-pipeline validate --help
+eeg-pipeline info --help
+eeg-pipeline stats --help
+```
 
 ---
 

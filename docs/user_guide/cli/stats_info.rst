@@ -3,53 +3,59 @@ Stats and Info
 
 Inspect pipeline state, subject availability, and current configuration.
 
-Info Command
-------------
+.. tab-set::
 
-Read-only inspection — never modifies state.
+   .. tab-item:: info
 
-.. code-block:: bash
+      Read-only discovery (never modifies state).
 
-   eeg-pipeline info [mode] [options]
+      .. code-block:: bash
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
+         eeg-pipeline info [mode] [options]
 
-   * - Mode
-     - Reports
-   * - ``subjects``
-     - Discovered subjects across BIDS, epochs, and feature derivatives
-   * - ``features``
-     - Feature availability per subject (which families/tables exist)
-   * - ``config``
-     - Current effective configuration (including runtime overrides)
-   * - ``version``
-     - Installed pipeline version and dependency snapshot
-   * - ``plotters``
-     - Available plot definitions and groups
-   * - ``discover``
-     - Discover available columns and values from events, trial tables, and condition-effects data
-   * - ``rois``
-     - Configured ROI definitions (channel groupings)
-   * - ``fmri-conditions``
-     - fMRI event conditions available for GLM specification
-   * - ``fmri-columns``
-     - Columns present in ``events.tsv`` files for fMRI analyses
-   * - ``multigroup-stats``
-     - Cross-subject summary statistics for selected features
-   * - ``ml-feature-space``
-     - Dimensions and structure of the ML feature matrix
+      Modes:
 
-Stats Command
--------------
+      .. dropdown:: Available info modes
+         :icon: info
 
-Pipeline-wide dashboard. Modes: ``summary``, ``subjects``, ``features``,
-``storage``, ``timeline``.
+         .. list-table::
+            :header-rows: 1
+            :widths: 30 70
 
-.. code-block:: bash
+            * - Mode
+              - Reports
+            * - ``subjects``
+              - Subjects discovered across BIDS, epochs, and feature derivatives
+            * - ``features``
+              - Feature availability per subject (which tables exist)
+            * - ``config``
+              - Effective configuration (including runtime overrides)
+            * - ``version``
+              - Installed pipeline version and dependency snapshot
+            * - ``plotters``
+              - Available plot definitions and groups
+            * - ``discover``
+              - Column/value discovery from events, trial tables, and condition-effects
+            * - ``rois``
+              - ROI definitions (channel groupings)
+            * - ``fmri-conditions``
+              - fMRI event conditions available for GLM specification
+            * - ``fmri-columns``
+              - Columns present in fMRI ``events.tsv``
+            * - ``multigroup-stats``
+              - Cross-subject summary statistics for selected features
+            * - ``ml-feature-space``
+              - ML feature-space dimensions and structure
 
-   eeg-pipeline stats [mode]
+   .. tab-item:: stats
+
+      Pipeline-wide dashboard (read-only).
+
+      .. code-block:: bash
+
+         eeg-pipeline stats [mode]
+
+      Modes: ``summary`` (default), ``subjects``, ``features``, ``storage``, ``timeline``.
 
 Examples
 --------
@@ -62,3 +68,7 @@ Examples
    eeg-pipeline info ml-feature-space
    eeg-pipeline stats
    eeg-pipeline stats storage
+
+See also:
+:doc:`../subject_selection` (shared runtime flags) and
+:doc:`../../methods/index` (methods reference for outputs and contracts).

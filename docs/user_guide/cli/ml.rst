@@ -1,8 +1,8 @@
 Machine Learning
 ================
 
-Trial-level predictive modeling with leave-one-subject-out (LOSO)
-cross-validation.
+Trial-level predictive modeling with leave-one-subject-out (LOSO) or
+within-subject cross-validation, plus model comparison and feature attribution.
 
 .. code-block:: bash
 
@@ -18,7 +18,7 @@ Modes
    * - Mode
      - Description
    * - ``regression``
-     - LOSO or within-subject regression for continuous outcomes (e.g. pain ratings)
+     - Continuous outcomes with LOSO or within-subject CV (e.g., pain ratings)
    * - ``classify``
      - Binary classification (SVM, logistic regression, random forest, CNN)
    * - ``timegen``
@@ -34,65 +34,100 @@ Modes
    * - ``permutation``
      - Permutation-based feature importance
 
-For the full architecture, CV schemes, evaluation metrics, and configuration
-details, see :doc:`../../methods/eeg/machine_learning`.
+For CV schemes, metrics, and the full configuration surface, see
+:doc:`../../methods/eeg/machine_learning`.
 
 Examples
 --------
 
-.. code-block:: bash
+.. tab-set::
 
-   # LOSO regression (requires ≥2 subjects)
-   eeg-pipeline ml regression --subject 0001 --subject 0002 --subject 0003
+   .. tab-item:: Regression
 
-   # Model family selection: elasticnet (default), ridge, or rf
-   eeg-pipeline ml regression --subject 0001 --subject 0002 --model ridge
+      .. code-block:: bash
 
-   # SVM classification with explicit binary threshold
-   eeg-pipeline ml classify --subject 0001 --subject 0002 \
-     --classification-model svm --binary-threshold 30
+         # LOSO regression (requires >= 2 subjects)
+         eeg-pipeline ml regression --subject 0001 --subject 0002 --subject 0003
 
-   # SHAP importance
-   eeg-pipeline ml shap --subject 0001 --subject 0002
+         # Within-subject CV (single-subject)
+         eeg-pipeline ml regression --subject 0001 --cv-scope subject
 
-   # Within-subject CV
-   eeg-pipeline ml regression --subject 0001 --cv-scope subject
+         # Predict trial-wise fMRI signature expression from EEG
+         eeg-pipeline ml regression --subject 0001 --subject 0002 \
+           --target fmri_signature --fmri-signature-name SIGNATURE_A
 
-   # Predict fMRI signature expression from EEG
-   eeg-pipeline ml regression --subject 0001 --subject 0002 \
-     --target fmri_signature --fmri-signature-name SIGNATURE_A
+   .. tab-item:: Classification
 
-   # Model comparison with custom hyperparameters
-   eeg-pipeline ml model_comparison --subject 0001 --subject 0002 \
-     --elasticnet-alpha-grid 0.01 0.1 1 10 \
-     --rf-n-estimators 500
+      .. code-block:: bash
 
-   # Restrict to specific feature families and bands
-   eeg-pipeline ml regression --subject 0001 --subject 0002 \
-     --feature-families power connectivity --feature-bands alpha beta
+         # SVM classification with an explicit threshold to binarize the target
+         eeg-pipeline ml classify --subject 0001 --subject 0002 \
+           --classification-model svm --binary-threshold 30
 
-   # Fine-grained feature filtering: scope, segment, stat
-   eeg-pipeline ml regression --subject 0001 --subject 0002 \
-     --feature-scopes roi global --feature-segments active \
-     --feature-stats wpli aec
+   .. tab-item:: Feature Space
 
-   # Feature harmonization across subjects (default: intersection)
-   eeg-pipeline ml regression --all-subjects \
-     --feature-harmonization union_impute
+      .. code-block:: bash
 
-   # Append meta covariates to the feature matrix
-   eeg-pipeline ml regression --subject 0001 --subject 0002 \
-     --covariates predictor trial_index
+         # Restrict to specific feature families and bands
+         eeg-pipeline ml regression --subject 0001 --subject 0002 \
+           --feature-families power connectivity --feature-bands alpha beta
 
-   # Incremental validity: EEG over temperature baseline
-   eeg-pipeline ml incremental_validity --subject 0001 --subject 0002 \
-     --baseline-predictors predictor
+         # Fine-grained feature filtering: scope, segment, stat
+         eeg-pipeline ml regression --subject 0001 --subject 0002 \
+           --feature-scopes roi global --feature-segments active \
+           --feature-stats wpli aec
 
-   # Enforce ML-safe mode (prevents CV leakage from cross-trial features)
-   eeg-pipeline ml regression --subject 0001 --subject 0002 \
-     --require-trial-ml-safe
+         # Feature harmonization across subjects
+         eeg-pipeline ml regression --all-subjects \
+           --feature-harmonization union_impute
 
-   # Pipeline preprocessing overrides
-   eeg-pipeline ml regression --subject 0001 --subject 0002 \
-     --imputer mean --pca-enabled --pca-n-components 0.95 \
-     --feature-selection-percentile 50
+         # Append covariates to the feature matrix
+         eeg-pipeline ml regression --subject 0001 --subject 0002 \
+           --covariates predictor trial_index
+
+         # Enforce ML-safe mode (prevents CV leakage from cross-trial features)
+         eeg-pipeline ml regression --subject 0001 --subject 0002 \
+           --require-trial-ml-safe
+
+   .. tab-item:: Time Generalization
+
+      .. code-block:: bash
+
+         eeg-pipeline ml timegen --subject 0001 --subject 0002
+
+   .. tab-item:: Model Comparison
+
+      .. code-block:: bash
+
+         # Compare model families under a shared CV scheme
+         eeg-pipeline ml model_comparison --subject 0001 --subject 0002
+
+         # Custom grids / hyperparameters
+         eeg-pipeline ml model_comparison --subject 0001 --subject 0002 \
+           --elasticnet-alpha-grid 0.01 0.1 1 10 \
+           --rf-n-estimators 500
+
+   .. tab-item:: Incremental Validity
+
+      .. code-block:: bash
+
+         eeg-pipeline ml incremental_validity --subject 0001 --subject 0002 \
+           --baseline-predictors predictor
+
+   .. tab-item:: Uncertainty
+
+      .. code-block:: bash
+
+         eeg-pipeline ml uncertainty --subject 0001 --subject 0002
+
+   .. tab-item:: SHAP
+
+      .. code-block:: bash
+
+         eeg-pipeline ml shap --subject 0001 --subject 0002
+
+   .. tab-item:: Permutation
+
+      .. code-block:: bash
+
+         eeg-pipeline ml permutation --subject 0001 --subject 0002

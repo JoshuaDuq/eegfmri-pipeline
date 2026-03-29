@@ -1,26 +1,59 @@
 fMRI Preprocessing
 ==================
 
-Containerized fMRIPrep preprocessing via Docker or Apptainer.
+Containerized fMRIPrep-style preprocessing via Docker or Apptainer.
 
 .. code-block:: bash
 
    eeg-pipeline fmri preprocess [options]
 
+Mode
+----
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Mode
+     - Purpose
+   * - ``preprocess``
+     - Run fMRIPrep and write outputs under the derivatives directory.
+
 Examples
 --------
 
-.. code-block:: bash
+.. tab-set::
 
-   # Docker (default)
-   eeg-pipeline fmri preprocess --subject 0001 --engine docker
+   .. tab-item:: Docker
 
-   # Apptainer (HPC)
-   eeg-pipeline fmri preprocess --subject 0001 --engine apptainer
+      .. code-block:: bash
 
-   # Custom output spaces
-   eeg-pipeline fmri preprocess --subject 0001 \
-     --output-spaces T1w MNI152NLin2009cAsym
+         eeg-pipeline fmri preprocess --subject 0001 --engine docker
+
+   .. tab-item:: Apptainer (HPC)
+
+      .. code-block:: bash
+
+         eeg-pipeline fmri preprocess --subject 0001 --engine apptainer
+
+   .. tab-item:: Output Spaces
+
+      .. code-block:: bash
+
+         eeg-pipeline fmri preprocess --subject 0001 \
+           --output-spaces T1w MNI152NLin2009cAsym
+
+   .. tab-item:: Resources / Advanced
+
+      .. code-block:: bash
+
+         # Threads and memory constraints
+         eeg-pipeline fmri preprocess --subject 0001 \
+           --nthreads 8 --omp-nthreads 4 --mem-mb 24000
+
+         # Pass through raw fMRIPrep args (parsed with shlex)
+         eeg-pipeline fmri preprocess --subject 0001 \
+           --fmriprep-extra-args '--verbose'
 
 Key Options
 -----------

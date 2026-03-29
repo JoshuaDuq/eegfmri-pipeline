@@ -1,10 +1,9 @@
 Behavioral Analysis
 ===================
 
-Statistical analyses linking EEG features to behavior (e.g. pain ratings,
-temperature, conditions). All stages operate on a trial table with explicit
-column semantics. The trialwise join contract is canonical ``trial_id``, not
-inferred paradigm columns.
+Statistical analyses linking EEG features to behavior (e.g., ratings,
+temperature, and condition effects). Joins are always performed via the
+canonical ``trial_id``.
 
 .. code-block:: bash
 
@@ -20,22 +19,22 @@ Modes
    * - Mode
      - Description
    * - ``compute``
-     - Run behavioral analysis stages and save numerical outputs
+     - Run behavioral analysis stages and write numerical outputs
    * - ``visualize``
-     - Generate standardized plots from previously computed results
+     - Plot from previously computed results
 
-For all 17 stage definitions, the pipeline DAG, statistical safeguards, and
-configuration details, see :doc:`../../methods/eeg/behavior`.
+For stage definitions, statistical safeguards, and configuration, see
+:doc:`../../methods/eeg/behavior`.
 
 Examples
 --------
 
 .. code-block:: bash
 
-   # All behavioral analyses
+   # Default analysis suite
    eeg-pipeline behavior compute --subject 0001
 
-   # Specific stages
+   # Selected stages only
    eeg-pipeline behavior compute --subject 0001 \
      --computations correlations condition temporal
 
@@ -47,8 +46,12 @@ Examples
    eeg-pipeline behavior compute --subject 0001 \
      --robust-correlation percentage_bend --compute-bayes-factors
 
-   # Visualize
+   # Visualize from existing results
    eeg-pipeline behavior visualize --subject 0001
 
    # List available stages
    eeg-pipeline behavior compute --list-stages
+
+See also:
+:doc:`../subject_selection` (shared subject/task flags) and
+:doc:`../../methods/eeg/behavior` (methods + configuration).

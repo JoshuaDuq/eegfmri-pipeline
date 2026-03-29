@@ -1,34 +1,19 @@
 Quick Start
 ===========
 
-A complete EEG/fMRI analysis run from ``git clone`` to plotted results.
+This page gives a clean start path from install to outputs, then groups the
+full CLI surface by analysis family. Use the tabs when you need the exact
+command for a specific stage.
 
 .. note::
 
-   Prefer a guided interface? :doc:`tui` wraps every step below in an
-   interactive wizard — no command memorisation needed.
+   Prefer a guided interface? :doc:`tui` wraps the same CLI in an interactive
+   wizard.
 
-.. grid:: 3
-   :gutter: 2
+1. Install
+----------
 
-   .. grid-item-card:: Steps 1–3 · Setup
-
-      Install · Place data · Validate
-
-   .. grid-item-card:: Steps 4–7 · EEG Analysis
-
-      Preprocess · Extract features ·
-      Behaviour · Machine learning
-
-   .. grid-item-card:: Steps 8–9 · Optional
-
-      fMRI pipeline · Plot results
-
-Every CLI step follows the same pattern:
-``eeg-pipeline <command> <mode> [--subject XXXX | --all-subjects]``
-
-1 — Install
------------
+Create an isolated Python environment and install the package:
 
 .. code-block:: bash
 
@@ -37,15 +22,12 @@ Every CLI step follows the same pattern:
    python3.11 -m venv .venv311
    source .venv311/bin/activate
    pip install -e ".[dev,ml]"
-   eeg-pipeline --help
 
-See :doc:`../install` for TUI and Docker setup.
+2. Prepare Data
+---------------
 
-2 — Place Your Data
---------------------
-
-Put BIDS-formatted EEG under ``data/bids_output/eeg/``
-(see :doc:`data_layout` for the full layout):
+Place BIDS-formatted EEG data under ``data/bids_output/eeg/``. The expected
+layout is documented in :doc:`data_layout`.
 
 .. code-block:: text
 
@@ -56,81 +38,271 @@ Put BIDS-formatted EEG under ``data/bids_output/eeg/``
        ├── sub-0001_task-task_run-01_events.tsv
        └── sub-0001_task-task_run-01_channels.tsv
 
-3 — Validate
--------------
+3. Validate and Inspect
+-----------------------
+
+Start with read-only checks:
 
 .. code-block:: bash
 
-   eeg-pipeline validate bids
+   eeg-pipeline validate quick
    eeg-pipeline info subjects
+   eeg-pipeline info config
+   eeg-pipeline info ml-feature-space
 
-4 — Preprocess
---------------
-
-.. code-block:: bash
-
-   # Single subject: bad channels → ICA → epochs
-   eeg-pipeline preprocessing full --subject 0001
-
-   # All subjects
-   eeg-pipeline preprocessing full --all-subjects
-
-Outputs: ``data/derivatives/sub-0001/eeg/*_proc-clean_epo.fif``
-
-5 — Extract Features
----------------------
+If you need a broader sweep, use the same family with explicit modes:
 
 .. code-block:: bash
 
-   # All default feature categories
-   eeg-pipeline features compute --all-subjects
+   eeg-pipeline validate all
+   eeg-pipeline info features 0001
+   eeg-pipeline info discover
+   eeg-pipeline stats summary
 
-   # Specific categories
-   eeg-pipeline features compute --all-subjects \
-       --categories power connectivity aperiodic
+4. Run the Pipeline
+-------------------
 
-Outputs: ``data/derivatives/sub-0001/eeg/features/<category>/*.parquet``
+Use the tabs below for the full command matrix and focused examples.
 
-6 — Behavioral Analysis
-------------------------
+.. tab-set::
+
+   .. tab-item:: EEG Preprocessing
+
+      Modes:
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 22 78
+
+         * - Mode
+           - Purpose
+         * - ``full``
+           - Run bad-channel detection, ICA, and epoch creation in sequence.
+         * - ``bad-channels``
+           - Detect and interpolate bad channels only.
+         * - ``ica``
+           - Fit and apply ICA only.
+         * - ``epochs``
+           - Create epochs only.
+
+      Examples:
+
+      .. code-block:: bash
+
+         eeg-pipeline preprocessing full --subject 0001
+         eeg-pipeline preprocessing full --all-subjects
+         eeg-pipeline preprocessing bad-channels --subject 0001 --ransac
+         eeg-pipeline preprocessing ica --subject 0001
+         eeg-pipeline preprocessing epochs --subject 0001 --tmin -7.0 --tmax 15.0
+
+      See :doc:`../methods/eeg/preprocessing` for the full preprocessing
+      contract.
+
+   .. tab-item:: Feature Extraction
+
+      Modes:
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 18 82
+
+         * - Mode
+           - Purpose
+         * - ``compute``
+           - Extract features and write derivatives.
+         * - ``visualize``
+           - Inspect already-computed feature tables.
+
+      Feature categories:
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 24 76
+
+         * - Category
+           - Scope
+         * - ``power``
+           - Band-limited oscillatory power.
+         * - ``spectral``
+           - Spectral summary measures.
+         * - ``ratios``
+           - Band-power ratios.
+         * - ``aperiodic``
+           - 1/f background structure.
+         * - ``connectivity``
+           - Functional connectivity.
+         * - ``directedconnectivity``
+           - Directed connectivity.
+         * - ``microstates``
+           - Microstate sequence statistics.
+         * - ``pac``
+           - Phase-amplitude coupling.
+         * - ``itpc``
+           - Inter-trial phase coherence.
+         * - ``erp``
+           - ERP amplitudes.
+         * - ``bursts``
+           - Transient oscillatory bursts.
+         * - ``complexity``
+           - Signal complexity measures.
+         * - ``asymmetry``
+           - Hemispheric asymmetry indices.
+         * - ``erds``
+           - Event-related desynchronization/synchronization.
+         * - ``quality``
+           - Data quality indicators.
+         * - ``sourcelocalization``
+           - Source-space features.
+
+      Examples:
+
+      .. code-block:: bash
+
+         eeg-pipeline features compute --subject 0001
+         eeg-pipeline features compute --all-subjects
+         eeg-pipeline features compute --all-subjects --categories power connectivity aperiodic
+         eeg-pipeline features visualize --subject 0001
+
+      See :doc:`../methods/eeg/features` for formulas, spatial modes, and
+      configuration details.
+
+   .. tab-item:: Behavioral Analysis
+
+      Modes:
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 18 82
+
+         * - Mode
+           - Purpose
+         * - ``compute``
+           - Run behavioral analyses and write numerical outputs.
+         * - ``visualize``
+           - Render standardized plots from computed results.
+
+      Examples:
+
+      .. code-block:: bash
+
+         eeg-pipeline behavior compute --subject 0001
+         eeg-pipeline behavior compute --all-subjects
+         eeg-pipeline behavior compute --subject 0001 --computations correlations condition temporal
+         eeg-pipeline behavior visualize --subject 0001
+
+      Behavioral analyses always operate on the trial table and use explicit
+      trial-wise joins.
+
+   .. tab-item:: Machine Learning
+
+      Modes:
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 24 76
+
+         * - Mode
+           - Purpose
+         * - ``regression``
+           - Continuous outcome prediction with LOSO or within-subject CV.
+         * - ``classify``
+           - Binary classification.
+         * - ``timegen``
+           - Temporal generalization across windows.
+         * - ``model_comparison``
+           - Compare model families under the same CV scheme.
+         * - ``incremental_validity``
+           - Quantify the added value of EEG features over a baseline.
+         * - ``uncertainty``
+           - Conformal prediction intervals.
+         * - ``shap``
+           - SHAP-based feature importance.
+         * - ``permutation``
+           - Permutation-based feature importance.
+
+      Examples:
+
+      .. code-block:: bash
+
+         eeg-pipeline ml regression --subject 0001 --subject 0002 --subject 0003
+         eeg-pipeline ml classify --subject 0001 --subject 0002 --classification-model svm
+         eeg-pipeline ml timegen --subject 0001 --subject 0002
+         eeg-pipeline ml model_comparison --subject 0001 --subject 0002
+         eeg-pipeline ml incremental_validity --subject 0001 --subject 0002
+         eeg-pipeline ml uncertainty --subject 0001 --subject 0002
+         eeg-pipeline ml shap --subject 0001 --subject 0002
+         eeg-pipeline ml permutation --subject 0001 --subject 0002
+
+   .. tab-item:: fMRI
+
+      Commands:
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 22 78
+
+         * - Command
+           - Modes
+         * - ``fmri``
+           - ``preprocess``
+         * - ``fmri-analysis``
+           - ``first-level`` · ``second-level`` · ``beta-series`` · ``lss`` · ``rest``
+
+      Examples:
+
+      .. code-block:: bash
+
+         eeg-pipeline fmri preprocess --subject 0001
+         eeg-pipeline fmri preprocess --subject 0001 --engine apptainer
+         eeg-pipeline fmri-analysis first-level --subject 0001 --cond-a-value stimulation --cond-b-value fixation_rest
+         eeg-pipeline fmri-analysis second-level --subject 0001 --subject 0002
+         eeg-pipeline fmri-analysis beta-series --subject 0001 --cond-a-value stimulation --cond-b-value fixation_rest
+         eeg-pipeline fmri-analysis lss --subject 0001 --cond-a-value stimulation --cond-b-value fixation_rest
+         eeg-pipeline fmri-analysis rest --subject 0001 --atlas-labels-img /path/to/atlas.nii.gz --atlas-labels-tsv /path/to/atlas.tsv
+
+      See :doc:`../methods/fmri/pipeline` for the fMRI methods reference.
+
+   .. tab-item:: Plotting
+
+      Modes:
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 18 82
+
+         * - Mode
+           - Purpose
+         * - ``visualize``
+           - Render selected plot suites.
+         * - ``tfr``
+           - Time-frequency plots.
+
+      Examples:
+
+      .. code-block:: bash
+
+         eeg-pipeline plotting visualize --subject 0001 --all-plots
+         eeg-pipeline plotting visualize --all-subjects --analysis-scope group
+         eeg-pipeline plotting tfr --subject 0001
+
+5. Optional TUI
+---------------
+
+The Go TUI wraps the same CLI from the repository root.
 
 .. code-block:: bash
 
-   eeg-pipeline behavior compute --all-subjects
+   cd eeg_pipeline/cli/tui
+   go build -o eeg-tui .
+   ./eeg-tui
 
-7 — Machine Learning
---------------------
+6. Documentation Build
+----------------------
 
-.. code-block:: bash
-
-   # LOSO regression
-   eeg-pipeline ml regression --all-subjects \
-       --feature-categories power aperiodic
-
-   # Classification
-   eeg-pipeline ml classify --all-subjects --classification-model svm
-
-8 — fMRI Analysis
-------------------
+Build and validate the docs locally:
 
 .. code-block:: bash
 
-   # fMRIPrep preprocessing
-   eeg-pipeline fmri preprocess --subject 0001
-
-   # First-level GLM
-   eeg-pipeline fmri-analysis first-level --subject 0001 \
-       --condition-a stimulation --condition-b rest
-
-   # Group inference
-   eeg-pipeline fmri-analysis second-level
-
-See :doc:`../methods/fmri/pipeline` for the full fMRI methods reference.
-
-9 — Plot
---------
-
-.. code-block:: bash
-
-   eeg-pipeline plotting visualize --subject 0001 --all-plots
-   eeg-pipeline plotting visualize --all-subjects --mode group
+   python -m pip install -e ".[docs]"
+   make docs
+   make docs-check

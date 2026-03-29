@@ -1,7 +1,8 @@
 Validation
 ==========
 
-Data integrity and schema checks across the pipeline.
+Data integrity and schema checks across the pipeline. The default mode is
+``quick``.
 
 .. code-block:: bash
 
@@ -37,8 +38,12 @@ Examples
    # Quick validation (default)
    eeg-pipeline validate
 
-   # Full validation for specific subjects
+   # Full validation for specific subjects (note: --subjects, not --subject)
    eeg-pipeline validate all --subjects 0001 0002
 
    # JSON output (for CI/scripting)
    eeg-pipeline validate all --json
+
+See also:
+:doc:`../subject_selection` (shared runtime flags) and
+:doc:`../../methods/index` (methods reference for expected inputs/outputs).

@@ -24,26 +24,65 @@ Modes
 Available Plot Groups
 ---------------------
 
-``power``, ``connectivity``, ``aperiodic``, ``phase``, ``erds``,
-``complexity``, ``spectral``, ``ratios``, ``asymmetry``, ``microstates``,
-``bursts``, ``erp``, ``tfr``, ``behavior``
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - Group
+     - Typical content
+   * - ``power``
+     - Band power summaries and topographies
+   * - ``connectivity``
+     - Connectivity matrices and derived summaries
+   * - ``aperiodic``
+     - 1/f slope/offset distributions and QC
+   * - ``phase``
+     - Phase-based measures (ITPC/PAC summaries)
+   * - ``erds``
+     - ERDS time-course and summary figures
+   * - ``complexity``
+     - Complexity feature summaries
+   * - ``spectral``
+     - Spectral edge and peak summaries
+   * - ``ratios``
+     - Band ratio summaries
+   * - ``asymmetry``
+     - Asymmetry indices and comparisons
+   * - ``microstates``
+     - Microstate statistics and transitions
+   * - ``bursts``
+     - Burst rate/duration summaries
+   * - ``erp``
+     - ERP component summaries
+   * - ``tfr``
+     - Time-frequency plots
+   * - ``behavior``
+     - Behavioral and model-summary plots
 
 Examples
 --------
 
-.. code-block:: bash
+.. tab-set::
 
-   # All available plots
-   eeg-pipeline plotting visualize --subject 0001 --all-plots
+   .. tab-item:: Visualize
 
-   # Specific plot groups
-   eeg-pipeline plotting visualize --subject 0001 --groups power behavior
+      .. code-block:: bash
 
-   # TFR
-   eeg-pipeline plotting tfr --subject 0001
+         # All available plots for one subject
+         eeg-pipeline plotting visualize --subject 0001 --all-plots
 
-   # Export as SVG and PDF
-   eeg-pipeline plotting visualize --subject 0001 --all-plots --formats svg pdf
+         # Specific plot groups
+         eeg-pipeline plotting visualize --subject 0001 --groups power behavior
 
-   # Group-level aggregate plots
-   eeg-pipeline plotting visualize --subject 0001 --subject 0002 --analysis-scope group
+         # Export as SVG and PDF
+         eeg-pipeline plotting visualize --subject 0001 --all-plots --formats svg pdf
+
+         # Group-level aggregate plots
+         eeg-pipeline plotting visualize --subject 0001 --subject 0002 \
+           --analysis-scope group
+
+   .. tab-item:: TFR
+
+      .. code-block:: bash
+
+         eeg-pipeline plotting tfr --subject 0001

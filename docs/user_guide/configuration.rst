@@ -1,9 +1,14 @@
 Configuration
 =============
 
-All pipeline defaults are declared in three YAML files. CLI flags override
-YAML values at runtime; use ``--set KEY=VALUE`` for any parameter not exposed
-as a dedicated flag.
+This page is the canonical reference for the public YAML configuration
+entrypoints and their keys.
+
+Precedence (highest wins):
+
+1. ``--set KEY=VALUE`` runtime overrides
+2. Command flags (e.g., ``--tmin``, ``--categories``, ``--engine``)
+3. YAML defaults
 
 .. grid:: 3
    :gutter: 2
@@ -29,8 +34,48 @@ as a dedicated flag.
    ``eeg_pipeline/utils/config/`` directory. Use absolute paths or the
    ``../../../`` prefix to reach ``data/`` from the default config location.
 
-Project and Paths
------------------
+.. _configuration-quick-nav:
+
+Quick Navigation
+----------------
+
+Jump to the section you need:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Section
+     - Covers
+   * - :ref:`Project & Paths <configuration-project-paths>`
+     - Task naming and all filesystem roots.
+   * - :ref:`EEG & Preprocessing <configuration-eeg-preprocessing>`
+     - Montage/reference defaults and preprocessing stage settings.
+   * - :ref:`Bad Channels (PyPREP) <configuration-pyprep>`
+     - PyPREP and RANSAC-related bad-channel detection controls.
+   * - :ref:`ICA <configuration-ica>`
+     - ICA algorithm, labeling, and ICLabel thresholds.
+   * - :ref:`Epochs <configuration-epochs>`
+     - Epoch windows, baselines, and rejection settings.
+   * - :ref:`Frequency Bands & Time Windows <configuration-bands-windows>`
+     - Default band edges and named time windows.
+   * - :ref:`Feature Engineering <configuration-feature-engineering>`
+     - Feature-family selection, transforms, and per-family controls.
+   * - :ref:`fMRI Preprocessing (fMRIPrep) <configuration-fmri-preprocessing>`
+     - Container engine and fMRIPrep defaults.
+   * - :ref:`First-Level GLM <configuration-first-level-glm>`
+     - GLM specification and condition selection.
+   * - :ref:`Second-Level (Group) Inference <configuration-second-level>`
+     - Group model and permutation inference.
+   * - :ref:`Behavioral Statistics <configuration-behavior>`
+     - Predictor type, correlation/regression, and permutation/FDR controls.
+   * - :ref:`Runtime Overrides (``--set``) <configuration-runtime-overrides>`
+     - Final-precedence overrides for long-tail keys.
+
+.. _configuration-project-paths:
+
+Project & Paths
+---------------
 
 .. list-table::
    :header-rows: 1
@@ -79,8 +124,10 @@ Project and Paths
      - ``[]``
      - List of ``{name, path}`` entries relative to ``signature_dir``
 
-EEG and Preprocessing
----------------------
+.. _configuration-eeg-preprocessing:
+
+EEG & Preprocessing
+-------------------
 
 .. list-table::
    :header-rows: 1
@@ -129,8 +176,10 @@ EEG and Preprocessing
      - ``true``
      - Write post-rejection ``*_proc-clean_events.tsv`` to derivatives
 
-Bad Channel Detection (PyPREP)
-------------------------------
+.. _configuration-pyprep:
+
+Bad Channels (PyPREP)
+---------------------
 
 .. list-table::
    :header-rows: 1
@@ -158,6 +207,8 @@ Bad Channel Detection (PyPREP)
      - ``false``
      - Remove break annotations before bad-channel detection
 
+.. _configuration-ica:
+
 ICA
 ---
 
@@ -183,6 +234,8 @@ ICA
    * - ``ica.labels_to_keep``
      - ``["brain", "other"]``
      - ICLabel classes to retain as clean components
+
+.. _configuration-epochs:
 
 Epochs
 ------
@@ -210,8 +263,10 @@ Epochs
      - ``[4, 8, 16]``
      - Bad channel interpolation counts tried by Autoreject
 
-Frequency Bands and Time Windows
----------------------------------
+.. _configuration-bands-windows:
+
+Frequency Bands & Time Windows
+------------------------------
 
 Default frequency bands:
 
@@ -256,6 +311,8 @@ Default time windows:
    * - ``time_windows.baseline_erp``
      - ``[-0.2, 0.0]``
      - ERP baseline window
+
+.. _configuration-feature-engineering:
 
 Feature Engineering
 -------------------
@@ -316,6 +373,8 @@ Feature Engineering
      - ``false``
      - Also export feature tables as CSV alongside Parquet
 
+.. _configuration-fmri-preprocessing:
+
 fMRI Preprocessing (fMRIPrep)
 -----------------------------
 
@@ -356,6 +415,8 @@ fMRI Preprocessing (fMRIPrep)
    * - ``fmri_preprocessing.fmriprep.extra_args``
      - ``""``
      - Additional CLI arguments appended verbatim to fMRIPrep
+
+.. _configuration-first-level-glm:
 
 First-Level GLM
 ---------------
@@ -401,6 +462,8 @@ First-Level GLM
      - ``null``
      - Value in that column identifying condition A trials
 
+.. _configuration-second-level:
+
 Second-Level (Group) Inference
 ------------------------------
 
@@ -424,8 +487,10 @@ Second-Level (Group) Inference
      - ``5000``
      - Number of permutations
 
-Behavioral Statistics Config
-----------------------------
+.. _configuration-behavior:
+
+Behavioral Statistics
+---------------------
 
 .. list-table::
    :header-rows: 1
@@ -454,15 +519,18 @@ Behavioral Statistics Config
    * - ``behavior_analysis.predictor_residual.method``
      - Residualization method: ``"spline"``, ``"polynomial"``
 
+.. _configuration-runtime-overrides:
+
 Runtime Overrides (``--set``)
 -----------------------------
 
-For long-tail or rarely used parameters, use universal config overrides instead
-of adding dedicated flags. This keeps the CLI and TUI maintainable while
-preserving full configurability.
+Use ``--set`` for long-tail parameters that do not justify dedicated CLI flags.
+This keeps the CLI and TUI maintainable while preserving configurability.
 
-- **CLI:** repeat ``--set KEY=VALUE``
-- **TUI:** use ``Config Overrides`` in Advanced settings (``key=value;key2=value2``)
+Where to use it:
+
+- CLI: repeat ``--set KEY=VALUE``
+- TUI: Advanced settings, ``Config Overrides`` (``key=value;key2=value2``)
 
 .. code-block:: bash
 
@@ -483,6 +551,5 @@ preserving full configurability.
 
 Notes:
 
-- ``--set`` values are type-coerced (``true/false``, ``null``, ints, floats, JSON arrays/objects).
-- ``--set`` is applied after command-specific overrides, so it has final precedence.
-- Use dedicated flags/widgets for common workflows; use ``--set`` for uncommon keys.
+- Values are type-coerced (``true/false``, ``null``, ints, floats, JSON arrays/objects).
+- ``--set`` is applied after command flags and has final precedence.

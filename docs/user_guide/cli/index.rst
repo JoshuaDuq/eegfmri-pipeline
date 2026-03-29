@@ -25,6 +25,47 @@ Shared subject-selection flags (``--subject``, ``--all-subjects``, ``--task``,
    validation
    stats_info
 
+Command Matrix
+--------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 28 50
+
+   * - Command family
+     - Modes
+     - Purpose
+   * - ``preprocessing``
+     - ``full`` · ``bad-channels`` · ``ica`` · ``epochs``
+     - EEG preprocessing stages from bad-channel detection to epoch creation.
+   * - ``features``
+     - ``compute`` · ``visualize``
+     - Extract 16 EEG feature families or visualize existing tables.
+   * - ``behavior``
+     - ``compute`` · ``visualize``
+     - Behavioral statistics and plots derived from trial tables.
+   * - ``ml``
+     - ``regression`` · ``classify`` · ``timegen`` · ``model_comparison`` · ``incremental_validity`` · ``uncertainty`` · ``shap`` · ``permutation``
+     - Trial-level predictive modeling and feature attribution.
+   * - ``fmri``
+     - ``preprocess``
+     - Containerized fMRIPrep-style preprocessing.
+   * - ``fmri-analysis``
+     - ``first-level`` · ``second-level`` · ``beta-series`` · ``lss`` · ``rest``
+     - Event-related GLM, group inference, trial-wise betas, and resting-state connectivity.
+   * - ``plotting``
+     - ``visualize`` · ``tfr``
+     - Render the curated plot catalog and TFR outputs.
+   * - ``validate``
+     - ``quick`` · ``all`` · ``epochs`` · ``features`` · ``behavior`` · ``bids``
+     - Validate data integrity and schema consistency.
+   * - ``info``
+     - ``subjects`` · ``features`` · ``config`` · ``version`` · ``plotters`` · ``discover`` · ``rois`` · ``fmri-conditions`` · ``fmri-columns`` · ``multigroup-stats`` · ``ml-feature-space``
+     - Read-only discovery for data availability, configuration, and feature-space structure.
+   * - ``stats``
+     - ``summary`` · ``subjects`` · ``features`` · ``storage`` · ``timeline``
+     - Project-wide summaries and storage/timeline inspection.
+
 .. grid:: 2
    :gutter: 3
 
@@ -44,7 +85,7 @@ Shared subject-selection flags (``--subject``, ``--all-subjects``, ``--task``,
 
       Category selection, spatial transforms, IAF mode, analysis mode.
 
-   .. grid-item-card:: :octicon:`table` Behavioural Statistics
+   .. grid-item-card:: :octicon:`table` Behavioral Statistics
       :link: behavior
       :link-type: doc
 
@@ -88,7 +129,7 @@ Shared subject-selection flags (``--subject``, ``--all-subjects``, ``--task``,
       :link: validation
       :link-type: doc
 
-      ``bids`` · ``derivatives`` · ``events`` · ``features``
+      ``bids`` · ``epochs`` · ``features`` · ``behavior`` · ``quick`` · ``all``
 
       Data integrity checks at every pipeline stage.
 
@@ -96,6 +137,4 @@ Shared subject-selection flags (``--subject``, ``--all-subjects``, ``--task``,
       :link: stats_info
       :link-type: doc
 
-      ``stats`` · ``info``
-
-      Pipeline-wide coverage summaries and read-only state inspection.
+      ``stats`` and ``info`` modes for coverage summaries and read-only state inspection.

@@ -2,7 +2,7 @@ EEG–fMRI Analysis Pipeline
 ===========================
 
 A modular, reproducible analysis suite for multimodal neuroimaging research.
-From raw :term:`BIDS` data to EEG features, behavioural statistics, machine
+From raw :term:`BIDS` data to EEG features, behavioral statistics, machine
 learning models, and full fMRI :term:`GLM` — driven by a single CLI or
 interactive TUI.
 
@@ -27,8 +27,8 @@ interactive TUI.
       :link: user_guide/quickstart
       :link-type: doc
 
-      9-step walkthrough from ``git clone`` to plotted results.
-      Covers every pipeline stage end-to-end.
+      Clean walkthrough from ``git clone`` to plotted results.
+      Covers validation, preprocessing, features, behavior, ML, fMRI, and plotting.
 
    .. grid-item-card:: :octicon:`book` User Guide
       :link: user_guide/index
@@ -65,7 +65,7 @@ interactive TUI.
       16 trial-level feature families: power, connectivity, aperiodic,
       ITPC, PAC, ERP, ERDS, complexity, microstates, and source ROI.
 
-   .. grid-item-card:: 3 · Behavioural Statistics
+   .. grid-item-card:: 3 · Behavioral Statistics
       :link: methods/eeg/behavior
       :link-type: doc
 
@@ -77,7 +77,7 @@ interactive TUI.
       :link-type: doc
 
       LOSO regression and classification, permutation tests,
-      SHAP feature importance, and temporal generalisation.
+      SHAP feature importance, and temporal generalization.
 
    .. grid-item-card:: 5 · fMRI Pipeline
       :link: methods/fmri/pipeline
@@ -86,7 +86,7 @@ interactive TUI.
       fMRIPrep preprocessing, first-level GLM, group inference,
       trial-wise beta estimation, and resting-state connectivity.
 
-   .. grid-item-card:: 6 · Source Localisation
+   .. grid-item-card:: 6 · Source Localization
       :link: methods/eeg/source_localization
       :link-type: doc
 

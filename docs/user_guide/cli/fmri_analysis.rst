@@ -33,45 +33,62 @@ For full methods, see :doc:`../../methods/fmri/pipeline`.
 Examples
 --------
 
-.. code-block:: bash
+.. tab-set::
 
-   # First-level GLM
-   eeg-pipeline fmri-analysis first-level --subject 0001 \
-     --contrast-name contrast \
-     --cond-a-value stimulation --cond-b-value fixation_rest
+   .. tab-item:: First-level
 
-   # With fMRIPrep preprocessed BOLD in MNI space
-   eeg-pipeline fmri-analysis first-level --subject 0001 \
-     --input-source fmriprep --fmriprep-space MNI152NLin2009cAsym \
-     --cond-a-value stimulation --cond-b-value fixation_rest
+      .. code-block:: bash
 
-   # Group mean from existing first-level MNI cope/effect-size maps
-   eeg-pipeline fmri-analysis second-level --subject 0001 --subject 0002 \
-     --group-model one-sample \
-     --group-contrast-names stimulation_vs_rest
+         eeg-pipeline fmri-analysis first-level --subject 0001 \
+           --contrast-name contrast \
+           --cond-a-value stimulation --cond-b-value fixation_rest
 
-   # Beta-series for EEG–fMRI fusion
-   eeg-pipeline fmri-analysis beta-series --subject 0001 \
-     --cond-a-value stimulation --cond-b-value fixation_rest
+         # With fMRIPrep BOLD in MNI space
+         eeg-pipeline fmri-analysis first-level --subject 0001 \
+           --input-source fmriprep --fmriprep-space MNI152NLin2009cAsym \
+           --cond-a-value stimulation --cond-b-value fixation_rest
 
-   # LSS betas
-   eeg-pipeline fmri-analysis lss --subject 0001 \
-     --cond-a-value stimulation --cond-b-value fixation_rest
+         # With plots and a self-contained HTML report
+         eeg-pipeline fmri-analysis first-level --subject 0001 \
+           --cond-a-value stimulation --cond-b-value fixation_rest \
+           --plots --plot-html-report
 
-   # Resting-state ROI connectivity (atlas required)
-   eeg-pipeline fmri-analysis rest --subject 0001 \
-     --atlas-labels-img /path/to/atlas_parc.nii.gz \
-     --atlas-labels-tsv /path/to/atlas_labels.tsv
+   .. tab-item:: Second-level
 
-   # Resting-state with custom bandpass and smoothing
-   eeg-pipeline fmri-analysis rest --subject 0001 \
-     --atlas-labels-img /path/to/atlas_parc.nii.gz \
-     --high-pass-hz 0.01 --low-pass-hz 0.08 --smoothing-fwhm 6.0
+      .. code-block:: bash
 
-   # With HTML report
-   eeg-pipeline fmri-analysis first-level --subject 0001 \
-     --cond-a-value stimulation --cond-b-value fixation_rest \
-     --plots --plot-html-report
+         # Group mean from existing first-level MNI effect-size maps
+         eeg-pipeline fmri-analysis second-level --subject 0001 --subject 0002 \
+           --group-model one-sample \
+           --group-contrast-names stimulation_vs_rest
+
+   .. tab-item:: Beta-series
+
+      .. code-block:: bash
+
+         eeg-pipeline fmri-analysis beta-series --subject 0001 \
+           --cond-a-value stimulation --cond-b-value fixation_rest
+
+   .. tab-item:: LSS
+
+      .. code-block:: bash
+
+         eeg-pipeline fmri-analysis lss --subject 0001 \
+           --cond-a-value stimulation --cond-b-value fixation_rest
+
+   .. tab-item:: Rest
+
+      .. code-block:: bash
+
+         # Resting-state ROI connectivity (atlas required)
+         eeg-pipeline fmri-analysis rest --subject 0001 \
+           --atlas-labels-img /path/to/atlas_parc.nii.gz \
+           --atlas-labels-tsv /path/to/atlas_labels.tsv
+
+         # Custom bandpass and smoothing
+         eeg-pipeline fmri-analysis rest --subject 0001 \
+           --atlas-labels-img /path/to/atlas_parc.nii.gz \
+           --high-pass-hz 0.01 --low-pass-hz 0.08 --smoothing-fwhm 6.0
 
 Key Options
 -----------

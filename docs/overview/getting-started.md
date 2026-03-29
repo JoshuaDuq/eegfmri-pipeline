@@ -1,6 +1,8 @@
 # Getting Started
 
-This page is the shortest path from a fresh clone to a working public pipeline install.
+This page is the shortest path from a fresh clone to a working install.
+For the complete, copy-paste workflow and the full command matrix, use
+[Quick Start](../user_guide/quickstart).
 
 ## Installation
 
@@ -16,33 +18,23 @@ source .venv/bin/activate
 python -m pip install -e ".[dev,ml]"
 ```
 
-For tooling that expects a requirements file:
+## Smoke Test
+
+Validate inputs and confirm subject discovery:
 
 ```bash
-python -m pip install -r requirements.txt
+eeg-pipeline validate quick
+eeg-pipeline info subjects
+eeg-pipeline info config
+eeg-pipeline info ml-feature-space
 ```
 
-## First Commands
+## Next
 
-```bash
-eeg-pipeline --help
-eeg-pipeline preprocessing --help
-eeg-pipeline features --help
-eeg-pipeline behavior --help
-eeg-pipeline ml --help
-eeg-pipeline fmri --help
-eeg-pipeline fmri-analysis --help
-```
-
-## CLI-Only Workflow
-
-If you do not need the terminal UI, the Python environment is enough.
-Typical first-run sequence:
-
-1. Validate the dataset layout with `eeg-pipeline validate`.
-2. Run EEG preprocessing for a small subject set.
-3. Extract features from cleaned epochs.
-4. Run behavior, machine learning, plotting, or fMRI analysis against the derivatives.
+- Canonical walkthrough: [Quick Start](../user_guide/quickstart)
+- Command matrix and flags: [CLI Reference](../user_guide/cli/index)
+- Optional guided interface: [TUI](../user_guide/tui)
+- Install and environment details: [Install](../install)
 
 ## Optional TUI
 
