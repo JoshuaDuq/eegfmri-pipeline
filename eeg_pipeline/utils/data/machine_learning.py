@@ -26,7 +26,7 @@ from eeg_pipeline.utils.data.fmri_signature_targets import (
 from eeg_pipeline.utils.data.source_localization_paths import (
     source_localization_candidate_paths,
 )
-from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
+from eeg_pipeline.utils.data import epochs as epochs_data
 from ..config.loader import ConfigDict
 
 EEGConfig = ConfigDict
@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 MLTargetKind = Literal["continuous", "binary"]
 MLFeatureHarmonization = Literal["intersection", "union_impute"]
+
+
+def load_epochs_for_analysis(*args: Any, **kwargs: Any) -> Any:
+    """Delegate to the epochs loader through the source module namespace."""
+    return epochs_data.load_epochs_for_analysis(*args, **kwargs)
 
 
 def _filter_finite_targets(
