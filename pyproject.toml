@@ -57,10 +57,14 @@ Repository = "https://github.com/JoshuaDuq/eegfmri-pipeline"
 [project.optional-dependencies]
 dev = [
     "black>=24.10.0",
+    "furo>=2024.1.29",
+    "myst-parser>=3.0",
     "pre-commit>=4.0.1",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.8.0",
+    "sphinx>=7.0",
+    "sphinx-design>=0.6",
 ]
 ml = [
     "torch>=2.7.1",

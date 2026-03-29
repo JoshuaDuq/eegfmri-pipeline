@@ -67,18 +67,12 @@ agents.md
 .copilot/
 docs/superpowers/
 
-# Ignore documentation by default, but keep the approved public docs folders
-docs/*
-!docs/index.md
-!docs/screenshots/
-!docs/screenshots/**
-!docs/eeg/
-!docs/eeg/**
-!docs/fmri/
-!docs/fmri/**
-
-### Development planning docs ###
+# Track all Sphinx documentation source files; ignore build output only
+docs/_build/
 docs/plans/
+
+### Studies (study-specific, not part of public pipeline) ###
+studies/
 
 ### IDEs & OS ###
 .vscode/

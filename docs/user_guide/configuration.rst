@@ -1,0 +1,488 @@
+Configuration
+=============
+
+All pipeline defaults are declared in three YAML files. CLI flags override
+YAML values at runtime; use ``--set KEY=VALUE`` for any parameter not exposed
+as a dedicated flag.
+
+.. grid:: 3
+   :gutter: 2
+
+   .. grid-item-card:: :octicon:`file-code` ``eeg_config.yaml``
+
+      EEG preprocessing, feature extraction, machine learning,
+      and fMRI integration defaults.
+
+   .. grid-item-card:: :octicon:`file-code` ``behavior_config.yaml``
+
+      Behavioral statistics pipeline: predictor type, analysis
+      stages, permutation settings, and FDR parameters.
+
+   .. grid-item-card:: :octicon:`file-code` ``fmri_config.yaml``
+
+      fMRI pipeline defaults: fMRIPrep options, GLM specification,
+      confound strategy, and group-level inference.
+
+.. note::
+
+   All relative ``paths`` in the YAML are resolved relative to the
+   ``eeg_pipeline/utils/config/`` directory. Use absolute paths or the
+   ``../../../`` prefix to reach ``data/`` from the default config location.
+
+Project and Paths
+-----------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 45
+
+   * - Key
+     - Default
+     - Description
+   * - ``project.task``
+     - ``"task"``
+     - Task name used in BIDS paths and file naming
+   * - ``project.random_state``
+     - ``42``
+     - Primary random seed for reproducible analyses
+   * - ``project.subject_list``
+     - ``null``
+     - Optional list of subjects to process; ``null`` = all found
+   * - ``paths.bids_root``
+     - ``"../../../data/bids_output/eeg"``
+     - BIDS-formatted EEG data directory
+   * - ``paths.bids_rest_root``
+     - ``null``
+     - Optional resting-state EEG BIDS directory (``task_is_rest`` mode)
+   * - ``paths.bids_fmri_root``
+     - ``"../../../data/bids_output/fmri"``
+     - BIDS-formatted fMRI data directory
+   * - ``paths.deriv_root``
+     - ``"../../../data/derivatives"``
+     - Processed derivatives output directory
+   * - ``paths.deriv_rest_root``
+     - ``null``
+     - Resting-state EEG derivatives directory
+   * - ``paths.source_data``
+     - ``"../../../data/source_data"``
+     - Raw source data directory
+   * - ``paths.freesurfer_dir``
+     - ``"../../../data/derivatives/freesurfer"``
+     - FreeSurfer ``SUBJECTS_DIR``
+   * - ``paths.freesurfer_license``
+     - ``null``
+     - Path to FreeSurfer ``license.txt``; falls back to ``EEG_PIPELINE_FREESURFER_LICENSE`` env var, then ``~/license.txt``
+   * - ``paths.signature_dir``
+     - ``null``
+     - Root directory for multivariate signature weight maps
+   * - ``paths.signature_maps``
+     - ``[]``
+     - List of ``{name, path}`` entries relative to ``signature_dir``
+
+EEG and Preprocessing
+---------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 45
+
+   * - Key
+     - Default
+     - Description
+   * - ``eeg.montage``
+     - ``"easycap-M1"``
+     - EEG cap montage name (MNE-Python format)
+   * - ``eeg.reference``
+     - ``"average"``
+     - Re-reference target: ``"average"``, ``"REST"``, or channel name
+   * - ``eeg.eog_channels``
+     - ``null``
+     - EOG channel names; ``null`` = auto-detect
+   * - ``eeg.ecg_channels``
+     - ``["ECG"]``
+     - ECG channel names for ICA cardiac labeling
+   * - ``preprocessing.resample_freq``
+     - ``500``
+     - Target sampling rate (Hz)
+   * - ``preprocessing.l_freq``
+     - ``0.1``
+     - High-pass filter cutoff (Hz)
+   * - ``preprocessing.h_freq``
+     - ``100``
+     - Low-pass filter cutoff (Hz)
+   * - ``preprocessing.notch_freq``
+     - ``60``
+     - Notch filter frequency (Hz)
+   * - ``preprocessing.task_is_rest``
+     - ``false``
+     - ``true`` = fixed-length resting-state epochs, no event conditions
+   * - ``preprocessing.rest_epochs_duration``
+     - ``10.0``
+     - Resting-state epoch duration (s)
+   * - ``preprocessing.rest_epochs_overlap``
+     - ``0.0``
+     - Overlap between resting-state epochs (s)
+   * - ``preprocessing.find_breaks``
+     - ``true``
+     - Detect and annotate recording breaks
+   * - ``preprocessing.write_clean_events``
+     - ``true``
+     - Write post-rejection ``*_proc-clean_events.tsv`` to derivatives
+
+Bad Channel Detection (PyPREP)
+------------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 45
+
+   * - Key
+     - Default
+     - Description
+   * - ``pyprep.ransac``
+     - ``true``
+     - Use RANSAC for bad channel detection
+   * - ``pyprep.repeats``
+     - ``3``
+     - Number of PREP iterations
+   * - ``pyprep.average_reref``
+     - ``false``
+     - Apply average re-reference inside PyPREP
+   * - ``pyprep.consider_previous_bads``
+     - ``true``
+     - Carry forward bads from previous runs
+   * - ``pyprep.overwrite_chans_tsv``
+     - ``true``
+     - Overwrite BIDS ``*_channels.tsv`` with updated bad-channel status
+   * - ``pyprep.delete_breaks``
+     - ``false``
+     - Remove break annotations before bad-channel detection
+
+ICA
+---
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 45
+
+   * - Key
+     - Default
+     - Description
+   * - ``ica.algorithm``
+     - ``"extended_infomax"``
+     - ICA decomposition algorithm (``"extended_infomax"``, ``"fastica"``, ``"picard"``)
+   * - ``ica.n_components``
+     - ``0.99``
+     - Number of components; float < 1 = explained-variance fraction
+   * - ``ica.l_freq``
+     - ``1.0``
+     - High-pass before ICA fitting (Hz); suppresses slow drift
+   * - ``ica.probability_threshold``
+     - ``0.8``
+     - ICLabel probability threshold for artifact exclusion
+   * - ``ica.labels_to_keep``
+     - ``["brain", "other"]``
+     - ICLabel classes to retain as clean components
+
+Epochs
+------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 45
+
+   * - Key
+     - Default
+     - Description
+   * - ``epochs.tmin``
+     - ``-7.0``
+     - Epoch start relative to event onset (s); leave generous padding for TFR baselines
+   * - ``epochs.tmax``
+     - ``15.0``
+     - Epoch end relative to event onset (s)
+   * - ``epochs.baseline``
+     - ``[-0.2, 0.0]``
+     - ERP baseline window (s); ``null`` = no baseline
+   * - ``epochs.reject``
+     - ``"autoreject_local"``
+     - Artifact rejection: ``"autoreject_local"``, ``"autoreject_global"``, ``null``
+   * - ``epochs.autoreject_n_interpolate``
+     - ``[4, 8, 16]``
+     - Bad channel interpolation counts tried by Autoreject
+
+Frequency Bands and Time Windows
+---------------------------------
+
+Default frequency bands:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Band
+     - Range (Hz)
+     - Key
+   * - Delta
+     - 1.0 – 3.9
+     - ``frequency_bands.delta``
+   * - Theta
+     - 4.0 – 7.9
+     - ``frequency_bands.theta``
+   * - Alpha
+     - 8.0 – 12.9
+     - ``frequency_bands.alpha``
+   * - Beta
+     - 13.0 – 30.0
+     - ``frequency_bands.beta``
+   * - Gamma
+     - 30.1 – 80.0
+     - ``frequency_bands.gamma``
+
+Default time windows:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 25 45
+
+   * - Key
+     - Default (s)
+     - Description
+   * - ``time_windows.active``
+     - ``[3.0, 10.5]``
+     - Task/active period for power and connectivity
+   * - ``time_windows.baseline_tfr``
+     - ``[-5.0, -0.01]``
+     - TFR baseline window for logratio normalization
+   * - ``time_windows.baseline_erp``
+     - ``[-0.2, 0.0]``
+     - ERP baseline window
+
+Feature Engineering
+-------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 25 35
+
+   * - Key
+     - Default
+     - Description
+   * - ``feature_engineering.feature_categories``
+     - *(all 14 families)*
+     - Active feature families; see :doc:`../methods/eeg/features`
+   * - ``feature_engineering.analysis_mode``
+     - ``"group_stats"``
+     - ``"group_stats"`` or ``"trial_ml_safe"`` — controls cross-trial leakage guards
+   * - ``feature_engineering.spatial_transform``
+     - ``"none"``
+     - Global override; prefer per-family settings below
+   * - ``feature_engineering.spatial_transform_per_family.connectivity``
+     - ``"csd"``
+     - CSD applied to phase-based connectivity (recommended)
+   * - ``feature_engineering.spatial_transform_per_family.power``
+     - ``"none"``
+     - No CSD for amplitude features (changes units)
+   * - ``feature_engineering.parallel.n_jobs_bands``
+     - ``-1``
+     - Workers for band-parallel computation (``-1`` = all cores)
+   * - ``feature_engineering.power.subtract_evoked``
+     - ``true``
+     - Subtract ERP before power → induced oscillations
+   * - ``feature_engineering.power.emit_db``
+     - ``true``
+     - Emit dB-scaled (``10·log10``) power alongside log-ratio
+   * - ``feature_engineering.connectivity.measures``
+     - ``["wpli", "aec"]``
+     - Active connectivity measures
+   * - ``feature_engineering.connectivity.aec_output``
+     - ``["r"]``
+     - AEC output format: ``"r"`` (raw), ``"z"`` (Fisher-z), or both
+   * - ``feature_engineering.aperiodic.model``
+     - ``"fixed"``
+     - Spectral parameterization model: ``"fixed"`` or ``"knee"``
+   * - ``feature_engineering.aperiodic.min_r2``
+     - ``0.6``
+     - Minimum :math:`R^2` to accept an aperiodic fit
+   * - ``feature_engineering.pac.method``
+     - ``"mvl"``
+     - PAC method: ``"mvl"`` (mean vector length)
+   * - ``feature_engineering.pac.pairs``
+     - ``[["theta","gamma"],["alpha","gamma"]]``
+     - Phase–amplitude coupling frequency pairs
+   * - ``feature_engineering.bands.use_iaf``
+     - ``false``
+     - Use individualized alpha frequency (IAF) to shift alpha band
+   * - ``feature_engineering.output.also_save_csv``
+     - ``false``
+     - Also export feature tables as CSV alongside Parquet
+
+fMRI Preprocessing (fMRIPrep)
+-----------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 40
+
+   * - Key
+     - Default
+     - Description
+   * - ``fmri_preprocessing.engine``
+     - ``"docker"``
+     - Container engine: ``"docker"`` or ``"apptainer"``
+   * - ``fmri_preprocessing.fmriprep.image``
+     - ``"nipreps/fmriprep:25.2.4"``
+     - Docker image tag or Apptainer URI
+   * - ``fmri_preprocessing.fmriprep.output_spaces``
+     - ``["MNI152NLin2009cAsym","T1w"]``
+     - Output template spaces
+   * - ``fmri_preprocessing.fmriprep.level``
+     - ``"full"``
+     - fMRIPrep processing level: ``"full"``, ``"resampling"``, ``"minimal"``
+   * - ``fmri_preprocessing.fmriprep.fd_spike_threshold``
+     - ``0.5``
+     - FD spike threshold (mm) for motion scrubbing
+   * - ``fmri_preprocessing.fmriprep.dvars_spike_threshold``
+     - ``1.5``
+     - DVARS spike threshold
+   * - ``fmri_preprocessing.fmriprep.bold2t1w_dof``
+     - ``6``
+     - Degrees of freedom for BOLD→T1w registration
+   * - ``fmri_preprocessing.fmriprep.skull_strip_template``
+     - ``"OASIS30ANTs"``
+     - Template for skull stripping
+   * - ``fmri_preprocessing.fmriprep.nthreads``
+     - ``0``
+     - CPU threads (0 = auto)
+   * - ``fmri_preprocessing.fmriprep.extra_args``
+     - ``""``
+     - Additional CLI arguments appended verbatim to fMRIPrep
+
+First-Level GLM
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 40
+
+   * - Key
+     - Default
+     - Description
+   * - ``fmri_contrast.enabled``
+     - ``false``
+     - Must be set ``true`` to run first-level analysis
+   * - ``fmri_contrast.input_source``
+     - ``"fmriprep"``
+     - BOLD source: ``"fmriprep"`` or ``"bids_raw"``
+   * - ``fmri_contrast.fmriprep_space``
+     - ``"T1w"``
+     - fMRIPrep output space to use
+   * - ``fmri_contrast.hrf_model``
+     - ``"spm"``
+     - HRF model: ``"spm"``, ``"flobs"``, ``"fir"``
+   * - ``fmri_contrast.drift_model``
+     - ``"cosine"``
+     - Drift removal: ``"cosine"``, ``"polynomial"``, ``"none"``
+   * - ``fmri_contrast.high_pass_hz``
+     - ``0.008``
+     - High-pass filter (128 s period)
+   * - ``fmri_contrast.confounds_strategy``
+     - ``"auto"``
+     - Nuisance regressor strategy; see :doc:`../methods/fmri/pipeline`
+   * - ``fmri_contrast.output_type``
+     - ``"z-score"``
+     - Output statistic: ``"z-score"``, ``"t-stat"``, ``"effect_size"``
+   * - ``fmri_contrast.resample_to_freesurfer``
+     - ``true``
+     - Resample contrast maps into FreeSurfer subject space
+   * - ``fmri_contrast.condition_a.column``
+     - ``"trial_type"``
+     - ``events.tsv`` column for condition A selection
+   * - ``fmri_contrast.condition_a.value``
+     - ``null``
+     - Value in that column identifying condition A trials
+
+Second-Level (Group) Inference
+------------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 22 40
+
+   * - Key
+     - Default
+     - Description
+   * - ``fmri_group_level.enabled``
+     - ``false``
+     - Must be set ``true`` to run second-level analysis
+   * - ``fmri_group_level.model``
+     - ``"one-sample"``
+     - Design: ``"one-sample"``, ``"two-sample"``, ``"paired"``, ``"repeated-measures"``
+   * - ``fmri_group_level.permutation.enabled``
+     - ``false``
+     - Enable max-T permutation inference
+   * - ``fmri_group_level.permutation.n_permutations``
+     - ``5000``
+     - Number of permutations
+
+Behavioral Statistics Config
+----------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Key
+     - Description
+   * - ``behavior_analysis.predictor_type``
+     - Column alias group used as the primary predictor (``"predictor"`` or ``"outcome"``)
+   * - ``behavior_analysis.correlations.method``
+     - Correlation method: ``"spearman"`` (default), ``"pearson"``, ``"kendall"``
+   * - ``behavior_analysis.correlations.partial_targets``
+     - List of covariate column names for partial correlation
+   * - ``behavior_analysis.correlations.loso_stability``
+     - ``true`` — compute LOSO stability of feature–behavior correlations
+   * - ``behavior_analysis.statistics.fdr_alpha``
+     - FDR :math:`q`-value for multiple comparison correction (default ``0.05``)
+   * - ``behavior_analysis.statistics.n_permutations``
+     - Permutation count for non-parametric tests (default ``1000``)
+   * - ``behavior_analysis.regression.model``
+     - Linear model variant: ``"ols"``, ``"robust"``
+   * - ``behavior_analysis.icc.model``
+     - ICC model type: ``"ICC1"``, ``"ICC2"``, ``"ICC3"`` etc. (default ``"ICC2"``)
+   * - ``behavior_analysis.temporal.n_time_bins``
+     - Number of temporal bins for time-resolved correlations
+   * - ``behavior_analysis.predictor_residual.method``
+     - Residualization method: ``"spline"``, ``"polynomial"``
+
+Runtime Overrides (``--set``)
+-----------------------------
+
+For long-tail or rarely used parameters, use universal config overrides instead
+of adding dedicated flags. This keeps the CLI and TUI maintainable while
+preserving full configurability.
+
+- **CLI:** repeat ``--set KEY=VALUE``
+- **TUI:** use ``Config Overrides`` in Advanced settings (``key=value;key2=value2``)
+
+.. code-block:: bash
+
+   # Override behavior statistics at runtime
+   eeg-pipeline behavior compute --subject 0001 \
+     --set behavior_analysis.statistics.fdr_alpha=0.01 \
+     --set behavior_analysis.cluster.n_permutations=5000
+
+   # Override plotting style defaults
+   eeg-pipeline plotting visualize --subject 0001 --all-plots \
+     --set plotting.defaults.dpi=400 \
+     --set plotting.styling.colors.significant=\"#D62728\"
+
+   # Override ML data/feature filters
+   eeg-pipeline ml regression --all-subjects \
+     --set machine_learning.data.feature_harmonization=union_impute \
+     --set machine_learning.data.feature_bands='[\"alpha\",\"beta\"]'
+
+Notes:
+
+- ``--set`` values are type-coerced (``true/false``, ``null``, ints, floats, JSON arrays/objects).
+- ``--set`` is applied after command-specific overrides, so it has final precedence.
+- Use dedicated flags/widgets for common workflows; use ``--set`` for uncommon keys.
