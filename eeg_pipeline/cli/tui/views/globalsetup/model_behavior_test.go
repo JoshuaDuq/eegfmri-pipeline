@@ -11,6 +11,7 @@ import (
 	"github.com/eeg-pipeline/tui/styles"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestBuildOverridesNormalizesProjectValues(t *testing.T) {
@@ -67,6 +68,8 @@ func TestViewShowsPathStatusAndStatusMessage(t *testing.T) {
 
 	m := New(repoRoot)
 	m.isLoading = false
+	m.width = 100
+	m.height = 24
 	m.sectionIndex = int(sectionPaths)
 	m.fieldCursor = 0
 	m.bidsRoot = existingPath
@@ -84,7 +87,7 @@ func TestViewShowsPathStatusAndStatusMessage(t *testing.T) {
 	if !strings.Contains(rendered, styles.WarningMark+" not found") {
 		t.Fatalf("expected warning for missing path, got %q", rendered)
 	}
-	if !strings.Contains(rendered, "[B] browse") {
+	if !strings.Contains(rendered, "browse") {
 		t.Fatalf("expected browse hint on focused path, got %q", rendered)
 	}
 	if !strings.Contains(rendered, "Discovery failed") {
@@ -105,6 +108,31 @@ func TestRenderFooterUsesEditingHints(t *testing.T) {
 	}
 }
 
+func TestViewTruncatesLongFieldValuesToViewportWidth(t *testing.T) {
+	repoRoot := t.TempDir()
+	existingPath := filepath.Join(repoRoot, strings.Repeat("nested-directory-", 8))
+	if err := os.MkdirAll(existingPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	m := New(repoRoot)
+	m.width = 72
+	m.height = 24
+	m.sectionIndex = int(sectionPaths)
+	m.fieldCursor = 0
+	m.bidsRoot = existingPath
+
+	rendered := m.View()
+	for _, line := range strings.Split(rendered, "\n") {
+		if lipgloss.Width(line) > m.width {
+			t.Fatalf("expected line to fit width %d, got %d\nline: %q\nview:\n%s", m.width, lipgloss.Width(line), line, rendered)
+		}
+	}
+	if !strings.Contains(rendered, "...") {
+		t.Fatalf("expected long field value to be truncated, got:\n%s", rendered)
+	}
+}
+
 func TestUpdateHandlesMessageAndKeyBranches(t *testing.T) {
 	repoRoot := t.TempDir()
 
@@ -112,7 +140,7 @@ func TestUpdateHandlesMessageAndKeyBranches(t *testing.T) {
 		m := New(repoRoot)
 		updated, cmd := m.Update(messages.ConfigKeysLoadedMsg{
 			Values: map[string]interface{}{
-				"project.task":       "rest",
+				"project.task":         "rest",
 				"project.subject_list": []interface{}{"sub-01", "sub-02"},
 			},
 			Error: errors.New("boom"),

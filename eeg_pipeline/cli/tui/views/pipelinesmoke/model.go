@@ -181,17 +181,36 @@ func (m *Model) Reset() {
 	m.statusLine = ""
 }
 
+func smokeItemColor(id string) lipgloss.Color {
+	switch {
+	case strings.HasPrefix(id, "fmri"):
+		return styles.Success
+	case id == "validate", id == "info", id == "stats", id == "runtime_version":
+		return styles.TextDim
+	default:
+		return styles.Primary
+	}
+}
+
 func (m Model) View() string {
 	var b strings.Builder
 
-	b.WriteString(styles.RenderSectionLabel("Pipeline Smoke Test") + "\n")
-	b.WriteString(styles.RenderDivider(70) + "\n\n")
+	selected := len(m.selectedIDs())
+	total := len(smokeItems)
+	selText := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(fmt.Sprintf("%d/%d", selected, total))
+	selLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render(" selected")
+
+	headerLeft := styles.RenderSectionLabel("Pipeline Smoke Test")
+	b.WriteString(headerLeft + "  " + selText + selLabel + "\n")
+	b.WriteString(styles.RenderHeaderSeparator(70) + "\n\n")
+
 	task := m.task
 	if task == "" {
-		task = "(default)"
+		task = "default"
 	}
-	b.WriteString("Task: " + lipgloss.NewStyle().Foreground(styles.Accent).Render(task) + "\n")
-	b.WriteString(fmt.Sprintf("Selected: %d/%d\n\n", len(m.selectedIDs()), len(smokeItems)))
+	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("task  ")
+	taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(task)
+	b.WriteString(taskLabel + taskValue + "\n\n")
 
 	for i, item := range smokeItems {
 		focused := i == m.cursor
@@ -201,11 +220,14 @@ func (m Model) View() string {
 			cursor = styles.RenderCursorOptional(m.animQueue.CursorVisible())
 		}
 
+		itemColor := smokeItemColor(item.ID)
 		nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 		if focused {
-			nameStyle = nameStyle.Foreground(styles.Text).Bold(true)
-			descStyle = descStyle.Foreground(styles.TextDim)
+			nameStyle = lipgloss.NewStyle().Foreground(itemColor).Bold(true)
+			descStyle = lipgloss.NewStyle().Foreground(styles.TextDim)
+		} else if checked {
+			nameStyle = lipgloss.NewStyle().Foreground(itemColor)
 		}
 
 		line := fmt.Sprintf(
@@ -238,5 +260,5 @@ func (m Model) View() string {
 	if cardWidth < 72 {
 		cardWidth = 72
 	}
-	return styles.CardStyle.Width(cardWidth).Render(b.String())
+	return styles.RenderNoWrapBlock(styles.CardStyle, b.String(), cardWidth)
 }

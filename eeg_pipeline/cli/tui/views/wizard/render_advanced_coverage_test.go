@@ -211,7 +211,7 @@ func TestPlotSelectionScrollsLongLists(t *testing.T) {
 	}
 
 	rendered := m.renderPlotSelection()
-	if !strings.Contains(rendered, "more above") {
+	if !strings.Contains(rendered, "more") {
 		t.Fatalf("expected scroll-up indicator in plot selection render, got:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "behavior_binary_outcome_probability") {

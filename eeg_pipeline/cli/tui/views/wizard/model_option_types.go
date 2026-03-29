@@ -129,7 +129,6 @@ const (
 	optPowerLineNoiseHarmonics
 	optPowerEmitDb
 	optSpectralRatioPairs
-	optSpectralSegments
 	optSpectralIncludeLogRatios
 	optSpectralExcludeLineNoise
 	optSpectralLineNoiseFreq

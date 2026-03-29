@@ -81,7 +81,7 @@ func (m Model) renderMLAdvancedConfig() string {
 	}
 
 	labelWidth := defaultLabelWidthWide
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
 	textFieldForOpt := func(opt optionType) (textField, bool) {
 		switch opt {
@@ -161,7 +161,7 @@ func (m Model) renderMLAdvancedConfig() string {
 	startLine, endLine, showScrollIndicators := calculateExactScrollWindow(
 		totalLines, m.advancedOffset, scrollableVisibleLines(totalLines, m.availableAdvancedContentHeight()))
 	if showScrollIndicators && startLine > 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startLine)) + "\n")
+		b.WriteString(styles.RenderScrollUpIndicator(startLine) + "\n")
 	}
 
 	lineIdx := 0
@@ -443,7 +443,7 @@ func (m Model) renderMLAdvancedConfig() string {
 				if isFocused {
 					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 				}
-				headerStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 				if isFocused {
 					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 				}
@@ -461,7 +461,7 @@ func (m Model) renderMLAdvancedConfig() string {
 				if isFocused {
 					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 				}
-				headerStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 				if isFocused {
 					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 				}
@@ -479,7 +479,7 @@ func (m Model) renderMLAdvancedConfig() string {
 				if isFocused {
 					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 				}
-				headerStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 				if isFocused {
 					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 				}
@@ -497,7 +497,7 @@ func (m Model) renderMLAdvancedConfig() string {
 				if isFocused {
 					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 				}
-				headerStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 				if isFocused {
 					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 				}
@@ -559,7 +559,7 @@ func (m Model) renderMLAdvancedConfig() string {
 
 	if showScrollIndicators && endLine < totalLines {
 		remaining := totalLines - endLine
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", remaining)) + "\n")
+		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
 	}
 
 	return b.String()

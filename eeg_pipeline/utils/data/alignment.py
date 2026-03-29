@@ -8,9 +8,11 @@ Functions for loading clean events.tsv (already aligned to epochs).
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 import mne
+import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.data.feature_alignment import require_trial_id_column
@@ -21,6 +23,7 @@ def get_aligned_events(
     subject: str,
     task: str,
     *,
+    deriv_root=None,
     strict: bool = True,
     logger: Optional[logging.Logger] = None,
     config=None,
@@ -58,29 +61,32 @@ def get_aligned_events(
         raise ValueError("config is required for get_aligned_events")
 
     from eeg_pipeline.infra.paths import _find_clean_events_path, _resolve_deriv_root
-    
-    try:
-        deriv_root = _resolve_deriv_root(None, config, constants)
-    except Exception:
-        deriv_root = None
-    
-    if deriv_root is None:
-        if strict:
-            raise ValueError(
-                f"Could not resolve deriv_root for sub-{subject}, task-{task}"
-            )
-        logger.warning(f"Could not resolve deriv_root for sub-{subject}, task-{task}")
-        return None
-    
+
+    resolved_deriv_root = (
+        Path(deriv_root)
+        if deriv_root is not None
+        else _resolve_deriv_root(None, config, constants)
+    )
+
     clean_events_path = _find_clean_events_path(
         subject=subject,
         task=task,
-        deriv_root=deriv_root,
+        deriv_root=resolved_deriv_root,
         config=config,
         constants=constants,
     )
     
     if clean_events_path is None or not clean_events_path.exists():
+        task_is_rest = bool(config.get("preprocessing.task_is_rest", False))
+        if task_is_rest:
+            logger.info(
+                "Clean events.tsv not found for sub-%s, task-%s; synthesizing resting-state trial alignment.",
+                subject,
+                task,
+            )
+            return pd.DataFrame(
+                {"trial_id": np.arange(1, len(epochs) + 1, dtype=int)}
+            )
         message = (
             f"Clean events.tsv not found for sub-{subject}, task-{task}. "
             "Required when strict=True"

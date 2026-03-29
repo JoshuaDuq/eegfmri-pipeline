@@ -102,10 +102,10 @@ func TestViewAndReset(t *testing.T) {
 	if !strings.Contains(view, "Pipeline Smoke Test") {
 		t.Fatalf("expected title in view, got %q", view)
 	}
-	if !strings.Contains(view, "Task:") {
+	if !strings.Contains(view, "task") {
 		t.Fatalf("expected task line in view, got %q", view)
 	}
-	if !strings.Contains(view, "Selected: 11/11") {
+	if !strings.Contains(view, "11/11 selected") {
 		t.Fatalf("expected selected count in view, got %q", view)
 	}
 

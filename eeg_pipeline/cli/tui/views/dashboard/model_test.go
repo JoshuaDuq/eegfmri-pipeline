@@ -86,3 +86,21 @@ func TestView_NarrowLayoutFitsWindowWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestView_NarrowLayoutTruncatesLongTaskText(t *testing.T) {
+	m := newTestModel()
+	m.width = 72
+	m.height = 24
+	m.stats.Task = strings.Repeat("very-long-task-name-", 6)
+
+	view := stripANSI(m.View())
+
+	for _, line := range strings.Split(view, "\n") {
+		if lipgloss.Width(line) > m.width {
+			t.Fatalf("expected line to fit width %d, got %d\nline: %q\nview:\n%s", m.width, lipgloss.Width(line), line, view)
+		}
+	}
+	if !strings.Contains(view, "...") {
+		t.Fatalf("expected long task text to be truncated, got:\n%s", view)
+	}
+}

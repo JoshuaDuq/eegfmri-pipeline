@@ -119,7 +119,7 @@ func TestRenderSubjectSummary_ClampsToTotal(t *testing.T) {
 	}
 
 	got := stripExecutionANSI(m.renderSubjectSummary(80))
-	if !strings.Contains(got, "Subjects 3/3 100%") {
+	if !strings.Contains(got, "Subjects 3/3") || !strings.Contains(got, "100%") {
 		t.Fatalf("unexpected subject summary: %q", got)
 	}
 }

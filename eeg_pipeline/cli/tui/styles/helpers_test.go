@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 var stylesANSIPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -46,10 +48,10 @@ func TestIndicatorAndLayoutRenderers(t *testing.T) {
 	if got := stripStylesANSI(RenderScrollUpIndicator(0)); got != "" {
 		t.Fatalf("RenderScrollUpIndicator(0) = %q", got)
 	}
-	if got := stripStylesANSI(RenderScrollUpIndicator(2)); got != "  ↑ 2 more above" {
+	if got := stripStylesANSI(RenderScrollUpIndicator(2)); got != "  ▲ 2 more" {
 		t.Fatalf("RenderScrollUpIndicator(2) = %q", got)
 	}
-	if got := stripStylesANSI(RenderScrollDownIndicator(3)); got != "  ↓ 3 more below" {
+	if got := stripStylesANSI(RenderScrollDownIndicator(3)); got != "  ▼ 3 more" {
 		t.Fatalf("RenderScrollDownIndicator(3) = %q", got)
 	}
 
@@ -131,6 +133,12 @@ func TestFormattingRenderers(t *testing.T) {
 	if got := PadRight("abc", 5); got != "abc  " {
 		t.Fatalf("PadRight() = %q", got)
 	}
+	if got := FitLine("abcdef", 4); got != "a..." {
+		t.Fatalf("FitLine() = %q", got)
+	}
+	if got := FitLine("abc", 5); got != "abc  " {
+		t.Fatalf("FitLine() = %q", got)
+	}
 
 	line := stripStylesANSI(RenderConfigLine("▸ ", "Label:", "Value", "Hint", 8, 80))
 	if !strings.Contains(line, "Label:") || !strings.Contains(line, "Value") || !strings.Contains(line, "Hint") {
@@ -146,6 +154,29 @@ func TestFormattingRenderers(t *testing.T) {
 	}
 	if got := stripStylesANSI(RenderStatusCount(2, 3, "subjects")); !strings.Contains(got, "2/3") {
 		t.Fatalf("RenderStatusCount(2, 3) = %q", got)
+	}
+}
+
+func TestClampBlockAndRenderNoWrapBlock(t *testing.T) {
+	block := ClampBlock("123456\nabc", 4)
+	lines := strings.Split(block, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %q", len(lines), block)
+	}
+	if lines[0] != "1..." {
+		t.Fatalf("expected first line to truncate, got %q", lines[0])
+	}
+	if lines[1] != "abc" {
+		t.Fatalf("expected second line unchanged, got %q", lines[1])
+	}
+
+	rendered := stripStylesANSI(RenderNoWrapBlock(lipgloss.NewStyle().Padding(0, 1), "123456", 6))
+	renderedLines := strings.Split(rendered, "\n")
+	if len(renderedLines) != 1 {
+		t.Fatalf("expected single rendered line, got %d: %q", len(renderedLines), rendered)
+	}
+	if got := lipgloss.Width(renderedLines[0]); got != 6 {
+		t.Fatalf("expected rendered width 6, got %d: %q", got, renderedLines[0])
 	}
 }
 

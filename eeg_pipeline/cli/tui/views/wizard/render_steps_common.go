@@ -76,7 +76,7 @@ func (m Model) renderDefaultConfigView(configType string) string {
 	b.WriteString(infoStyle.Render(fmt.Sprintf("Using defaults for %s. Space to customize.", configType)) + "\n\n")
 
 	labelWidth := defaultLabelWidth
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	isFocused := m.advancedCursor == 0
 	cursor := "  "
 	if isFocused {

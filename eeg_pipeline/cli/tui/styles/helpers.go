@@ -93,8 +93,8 @@ func RenderScrollUpIndicator(count int) string {
 	if count <= 0 {
 		return ""
 	}
-	arrow := lipgloss.NewStyle().Foreground(Primary).Render("  ↑")
-	text := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf(" %d more above", count))
+	arrow := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  ▲")
+	text := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf(" %d more", count))
 	return arrow + text
 }
 
@@ -102,9 +102,44 @@ func RenderScrollDownIndicator(count int) string {
 	if count <= 0 {
 		return ""
 	}
-	arrow := lipgloss.NewStyle().Foreground(Primary).Render("  ↓")
-	text := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf(" %d more below", count))
+	arrow := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  ▼")
+	text := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf(" %d more", count))
 	return arrow + text
+}
+
+// RenderScrollTrack renders a compact vertical scrollbar track showing thumb position.
+// current is the top visible item index, visible is the viewport height in items,
+// total is the total item count. Track is trackHeight chars tall.
+func RenderScrollTrack(current, visible, total, trackHeight int) string {
+	if total <= visible || trackHeight < 2 {
+		return ""
+	}
+
+	thumbSize := max(1, trackHeight*visible/total)
+	maxOffset := total - visible
+	thumbPos := 0
+	if maxOffset > 0 {
+		thumbPos = current * (trackHeight - thumbSize) / maxOffset
+	}
+	if thumbPos+thumbSize > trackHeight {
+		thumbPos = trackHeight - thumbSize
+	}
+
+	trackStyle := lipgloss.NewStyle().Foreground(Border)
+	thumbStyle := lipgloss.NewStyle().Foreground(Primary)
+
+	var sb strings.Builder
+	for i := 0; i < trackHeight; i++ {
+		if i >= thumbPos && i < thumbPos+thumbSize {
+			sb.WriteString(thumbStyle.Render("┃"))
+		} else {
+			sb.WriteString(trackStyle.Render("│"))
+		}
+		if i < trackHeight-1 {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
 }
 
 func IsTerminalTooSmall(width, height int) bool {
@@ -207,28 +242,26 @@ func RenderDimSectionLabel(title string) string {
 	return bar + label
 }
 
-// RenderPreviewSubHeader renders a lightweight sub-section label for preview panes.
+// RenderPreviewSubHeader renders a bold dim section label with a trailing rule.
 func RenderPreviewSubHeader(title string) string {
-	bar := lipgloss.NewStyle().Foreground(Secondary).Render(SectionIcon)
-	label := lipgloss.NewStyle().Foreground(TextDim).Render(" " + title)
-	return bar + label
+	label := lipgloss.NewStyle().Foreground(TextDim).Bold(true).Render(title)
+	rule := lipgloss.NewStyle().Foreground(Border).Render(" " + strings.Repeat(SectionDividerChar, 6))
+	return label + rule
 }
 
-// RenderPreviewSubHeaderWithRule renders a single-line titled rule: "─── TITLE ──────".
+// RenderPreviewSubHeaderWithRule renders a titled rule spanning the given width.
 func RenderPreviewSubHeaderWithRule(title string, width int) string {
 	if width <= 0 {
 		return RenderPreviewSubHeader(title)
 	}
 	label := lipgloss.NewStyle().Foreground(TextDim).Bold(true).Render(title)
 	ruleStyle := lipgloss.NewStyle().Foreground(Border)
-	prefix := ruleStyle.Render(strings.Repeat(SectionDividerChar, 2) + " ")
-	visibleLabel := lipgloss.Width(prefix) + lipgloss.Width(label)
-	trailing := width - visibleLabel - 1
+	trailing := width - lipgloss.Width(label) - 1
 	if trailing < 1 {
 		trailing = 1
 	}
 	suffix := ruleStyle.Render(" " + strings.Repeat(SectionDividerChar, trailing))
-	return prefix + label + suffix
+	return label + suffix
 }
 
 // RenderSectionBlock renders a section label followed by a thin separator line.
@@ -288,6 +321,39 @@ func PadRight(s string, targetWidth int) string {
 	return s + strings.Repeat(" ", targetWidth-w)
 }
 
+// FitLine truncates a line to width and pads it back to that width.
+func FitLine(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return PadRight(TruncateLine(s, width), width)
+}
+
+// ClampBlock truncates each line in a multi-line block without wrapping.
+func ClampBlock(content string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	for i := range lines {
+		lines[i] = TruncateLine(lines[i], maxWidth)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// RenderNoWrapBlock renders a fixed-width styled block after truncating each
+// content line to the style's inner width, preventing lipgloss from wrapping.
+func RenderNoWrapBlock(style lipgloss.Style, content string, outerWidth int) string {
+	if outerWidth <= 0 {
+		return style.Render(content)
+	}
+	innerWidth := outerWidth - style.GetHorizontalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	return style.Width(outerWidth).Render(ClampBlock(content, innerWidth))
+}
+
 // RenderConfigLine builds a single config option line: cursor + label + value + hint,
 // using manual padding instead of lipgloss .Width() to avoid internal wrapping.
 // The result is truncated to maxWidth.
@@ -311,6 +377,8 @@ func RenderStepHeader(title string, width int) string {
 }
 
 // RenderProgressBar renders a static filled/empty progress bar with a percentage label.
+// Color shifts warning→primary→success as fill progresses; a sub-block partial cell
+// gives a smoother leading edge.
 // progress is clamped to [0.0, 1.0]; width is clamped to [MinProgressBarWidth, MaxProgressBarWidth].
 func RenderProgressBar(progress float64, width int) string {
 	if width < MinProgressBarWidth {
@@ -325,27 +393,62 @@ func RenderProgressBar(progress float64, width int) string {
 	if progress > 1 {
 		progress = 1
 	}
-	filled := int(progress * float64(width))
-	bar := ProgressFilledStyle.Render(strings.Repeat("█", filled)) +
-		ProgressEmptyStyle.Render(strings.Repeat("░", width-filled))
-	pct := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(fmt.Sprintf(" %3.0f%%", progress*100))
-	return bar + pct
+
+	var fillColor lipgloss.Color
+	switch {
+	case progress >= 1.0:
+		fillColor = Success
+	case progress >= 0.6:
+		fillColor = Primary
+	case progress >= 0.25:
+		fillColor = Accent
+	default:
+		fillColor = Warning
+	}
+
+	subBlocks := []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
+	exact := progress * float64(width)
+	filled := int(exact)
+	subIdx := int((exact - float64(filled)) * float64(len(subBlocks)))
+	if subIdx >= len(subBlocks) {
+		subIdx = len(subBlocks) - 1
+	}
+	hasPartial := subIdx > 0 && filled < width
+	emptyWidth := width - filled
+	if hasPartial {
+		emptyWidth--
+	}
+
+	fillStyle := lipgloss.NewStyle().Foreground(fillColor)
+	emptyStyle := lipgloss.NewStyle().Foreground(Muted)
+
+	var sb strings.Builder
+	if filled > 0 {
+		sb.WriteString(fillStyle.Render(strings.Repeat("█", filled)))
+	}
+	if hasPartial {
+		sb.WriteString(fillStyle.Render(subBlocks[subIdx]))
+	}
+	if emptyWidth > 0 {
+		sb.WriteString(emptyStyle.Render(strings.Repeat("░", emptyWidth)))
+	}
+
+	pct := lipgloss.NewStyle().Foreground(fillColor).Bold(true).Render(fmt.Sprintf(" %3.0f%%", progress*100))
+	return sb.String() + pct
 }
 
-// RenderStatusCount renders a count badge + summary line.
+// RenderStatusCount renders a count + noun summary line.
 func RenderStatusCount(count, total int, noun string) string {
-	var pillFg, pillBg lipgloss.Color
-	if count >= 1 {
-		pillFg, pillBg = BgDark, Success
-	} else {
-		pillFg, pillBg = BgDark, Warning
-	}
-	pill := lipgloss.NewStyle().Foreground(pillFg).Background(pillBg).Bold(true).Padding(0, 1).
-		Render(fmt.Sprintf("%d/%d", count, total))
-	nounStyle := lipgloss.NewStyle().Foreground(TextDim)
-	result := pill + " " + nounStyle.Render(noun)
+	color := Success
 	if count == 0 {
-		result += "  " + lipgloss.NewStyle().Foreground(Warning).Render("select at least 1")
+		color = Warning
+	}
+	countText := lipgloss.NewStyle().Foreground(color).Bold(true).
+		Render(fmt.Sprintf("%d/%d", count, total))
+	nounText := lipgloss.NewStyle().Foreground(TextDim).Render(" " + noun)
+	result := countText + nounText
+	if count == 0 {
+		result += "  " + lipgloss.NewStyle().Foreground(Warning).Italic(true).Render("select at least 1")
 	}
 	return result
 }

@@ -354,6 +354,7 @@ def _load_events_df(
     subject: str,
     task: str,
     bids_root: Optional[Path] = None,
+    deriv_root: Optional[Path] = None,
     constants: Optional[Dict[str, Any]] = None,
     config: Optional[EEGConfig] = None,
     *,
@@ -361,15 +362,17 @@ def _load_events_df(
 ) -> Optional[pd.DataFrame]:
     """Load events DataFrame (prefer cleaned derivative events when available)."""
     if prefer_clean:
+        resolved_deriv_root: Optional[Path]
         try:
-            deriv_root = _resolve_deriv_root(None, config, constants)
-        except Exception:
-            deriv_root = None
-        if deriv_root is not None:
+            resolved_deriv_root = _resolve_deriv_root(deriv_root, config, constants)
+        except ValueError:
+            resolved_deriv_root = None
+
+        if resolved_deriv_root is not None:
             clean_path = _find_clean_events_path(
                 subject=subject,
                 task=task,
-                deriv_root=deriv_root,
+                deriv_root=resolved_deriv_root,
                 constants=constants,
                 config=config,
             )
@@ -390,6 +393,7 @@ def load_events_df(
     subject: str,
     task: str,
     bids_root: Optional[Path] = None,
+    deriv_root: Optional[Path] = None,
     *,
     constants: Optional[Dict[str, Any]] = None,
     config: Optional[EEGConfig] = None,
@@ -400,6 +404,7 @@ def load_events_df(
         subject=subject,
         task=task,
         bids_root=bids_root,
+        deriv_root=deriv_root,
         constants=constants,
         config=config,
         prefer_clean=prefer_clean,

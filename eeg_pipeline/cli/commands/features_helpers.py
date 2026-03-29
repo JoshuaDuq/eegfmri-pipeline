@@ -533,8 +533,6 @@ def _apply_spectral_overrides(args: argparse.Namespace, config: Any) -> None:
         spectral_cfg["line_noise_width_hz"] = args.spectral_line_noise_width_hz
     if getattr(args, "spectral_line_noise_harmonics", None) is not None:
         spectral_cfg["line_noise_harmonics"] = args.spectral_line_noise_harmonics
-    if getattr(args, "spectral_segments", None) is not None:
-        spectral_cfg["segments"] = args.spectral_segments
     if getattr(args, "spectral_min_segment_sec", None) is not None:
         spectral_cfg["min_segment_sec"] = args.spectral_min_segment_sec
     if getattr(args, "spectral_min_cycles_at_fmin", None) is not None:
@@ -780,10 +778,6 @@ def _apply_rest_mode_overrides(args: argparse.Namespace, config: Any) -> None:
         power_cfg["require_baseline"] = False
     if getattr(args, "power_subtract_evoked", None) is None:
         power_cfg["subtract_evoked"] = False
-
-    spectral_cfg = config.setdefault("feature_engineering", {}).setdefault("spectral", {})
-    if getattr(args, "spectral_segments", None) is None:
-        spectral_cfg["segments"] = []
 
     bands_cfg = config.setdefault("feature_engineering", {}).setdefault("bands", {})
     if getattr(args, "iaf_allow_full_fallback", None) is None:

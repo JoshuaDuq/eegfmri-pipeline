@@ -171,7 +171,6 @@ func (m Model) getFeaturesOptions() []optionType {
 				optSpectralMultitaperAdaptive,
 				optSpectralFmin,
 				optSpectralFmax,
-				optSpectralSegments,
 				optSpectralMinSegmentSec,
 				optSpectralMinCyclesAtFmin,
 				optSpectralExcludeLineNoise,

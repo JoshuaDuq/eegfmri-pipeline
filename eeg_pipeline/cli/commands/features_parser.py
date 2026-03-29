@@ -325,7 +325,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--spectral-line-noise-freq", type=float, default=None, help="Line noise frequency (50 or 60 Hz)")
     parser.add_argument("--spectral-line-noise-width-hz", type=float, default=None, help="Line noise frequency band width to exclude")
     parser.add_argument("--spectral-line-noise-harmonics", type=int, default=None, help="Number of line noise harmonics to exclude")
-    parser.add_argument("--spectral-segments", nargs="+", default=None, help="Segments for spectral features (e.g., baseline active)")
     parser.add_argument("--spectral-min-segment-sec", type=float, default=None, help="Minimum segment duration for spectral")
     parser.add_argument("--spectral-min-cycles-at-fmin", type=float, default=None, help="Minimum cycles at lowest frequency")
 

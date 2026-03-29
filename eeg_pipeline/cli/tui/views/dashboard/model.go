@@ -239,7 +239,7 @@ func (m Model) View() string {
 	b.WriteString(m.renderContent(contentWidth))
 	b.WriteString(m.renderFooter(contentWidth))
 
-	return styles.BoxStyle.Width(m.boxWidth()).Render(b.String())
+	return styles.RenderNoWrapBlock(styles.BoxStyle, b.String(), m.boxWidth())
 }
 
 func (m Model) renderContent(width int) string {
@@ -253,10 +253,10 @@ func (m Model) renderContent(width int) string {
 }
 
 func (m Model) renderHeader(width int) string {
-	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("◈")
+	glyph := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("◈")
 	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("Project Dashboard")
 	headerLine := "  " + glyph + "  " + title
-	sep := lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat(styles.HeaderSeparatorChar, width))
+	sep := styles.RenderHeaderSeparator(width)
 	return headerLine + "\n" + sep + "\n"
 }
 
@@ -288,17 +288,14 @@ func (m Model) renderStats(width int) string {
 }
 
 func (m Model) renderSummaryStrip(width int) string {
-	taskPill := lipgloss.NewStyle().
-		Foreground(styles.BgDark).Background(styles.Accent).Bold(true).Padding(0, 1).
-		Render(m.stats.Task)
-	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("Task")
+	taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.stats.Task)
+	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("task  ")
 
-	countPill := lipgloss.NewStyle().
-		Foreground(styles.BgDark).Background(styles.Primary).Bold(true).Padding(0, 1).
+	countValue := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).
 		Render(fmt.Sprintf("%d", m.stats.TotalSubjects))
-	subjectsLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("Subjects")
+	subjectsLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("  subjects  ")
 
-	left := "  " + taskLabel + " " + taskPill + "    " + subjectsLabel + " " + countPill
+	left := "  " + taskLabel + taskValue + subjectsLabel + countValue
 
 	updatedAt := ""
 	if !m.lastUpdate.IsZero() {
@@ -397,28 +394,34 @@ func (m Model) layoutForSection(width int) sectionLayout {
 	}
 }
 
+func (m Model) pipelineSectionColor(title string) lipgloss.Color {
+	if strings.HasPrefix(strings.ToLower(title), "fmri") {
+		return styles.Success
+	}
+	return styles.Primary
+}
+
 func (m Model) renderPipelineSectionHeader(title string, width int) string {
-	icon := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(styles.SectionIconActive)
-	label := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(" " + title)
-	subjectsBadge := lipgloss.NewStyle().
-		Foreground(styles.BgDark).Background(styles.Muted).Bold(true).Padding(0, 1).
+	color := m.pipelineSectionColor(title)
+	icon := lipgloss.NewStyle().Foreground(color).Bold(true).Render(styles.SectionIconActive)
+	label := lipgloss.NewStyle().Bold(true).Foreground(color).Render(" " + title)
+	countText := lipgloss.NewStyle().Foreground(styles.TextDim).
 		Render(fmt.Sprintf("%d subjects", m.stats.TotalSubjects))
 	left := "  " + icon + label
-	spacer := lipgloss.NewStyle().Width(max(width-lipgloss.Width(left)-lipgloss.Width(subjectsBadge)-1, 0)).Render("")
-	return left + spacer + subjectsBadge + "\n" + "\n"
+	spacer := lipgloss.NewStyle().Width(max(width-lipgloss.Width(left)-lipgloss.Width(countText)-1, 0)).Render("")
+	return left + spacer + countText + "\n" + "\n"
 }
 
 func (m Model) renderSubSectionHeader(title string, width int) string {
 	label := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render(title)
 	ruleStyle := lipgloss.NewStyle().Foreground(styles.Border)
-	prefix := ruleStyle.Render(strings.Repeat(styles.SectionDividerChar, 2) + " ")
-	visibleW := lipgloss.Width(prefix) + lipgloss.Width(label) + 4
+	visibleW := lipgloss.Width(label) + 5
 	trailing := width - visibleW
 	if trailing < 1 {
 		trailing = 1
 	}
 	suffix := ruleStyle.Render(" " + strings.Repeat(styles.SectionDividerChar, trailing))
-	return "  " + prefix + label + suffix + "\n" + "\n"
+	return "  " + label + suffix + "\n" + "\n"
 }
 
 func (m Model) renderEegSection(width int) string {
@@ -669,6 +672,6 @@ func (m Model) renderFooter(width int) string {
 		styles.RenderKeyHintSecondary("Esc", "Back"),
 	}, "")
 	divider := styles.RenderDivider(width)
-	bar := styles.FooterStyle.Width(width).Render(hints)
+	bar := styles.RenderNoWrapBlock(styles.FooterStyle, hints, width)
 	return divider + "\n" + bar
 }

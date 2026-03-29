@@ -122,6 +122,19 @@ func TestBuildCommand_FeaturesRestModeIncludesRestSafePowerFlags(t *testing.T) {
 	}
 }
 
+func TestBuildFeaturesAdvancedArgs_OmitsRemovedSpectralSegmentsFlag(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	for i := range m.selected {
+		m.selected[i] = i < len(m.categories) && m.categories[i] == "spectral"
+	}
+
+	args := m.buildFeaturesAdvancedArgs()
+
+	if containsString(args, "--spectral-segments") {
+		t.Fatalf("did not expect removed spectral segment flag in args: %#v", args)
+	}
+}
+
 func TestBuildCommand_IncludesBidsRestRootForFeatures(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	m.bidsRestRoot = "/data/bids/rest"

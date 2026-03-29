@@ -48,16 +48,16 @@ func (t *Toast) Tick() {
 	}
 }
 
-func (t Toast) toastColors() (icon string, bgColor, fgColor lipgloss.Color) {
+func (t Toast) toastStyle() (icon string, color lipgloss.Color) {
 	switch t.Type {
 	case ToastSuccess:
-		return styles.CheckMark, styles.Success, styles.BgDark
+		return styles.CheckMark, styles.Success
 	case ToastWarning:
-		return styles.WarningMark, styles.Warning, styles.BgDark
+		return styles.WarningMark, styles.Warning
 	case ToastError:
-		return styles.CrossMark, styles.Error, styles.BgDark
+		return styles.CrossMark, styles.Error
 	default:
-		return styles.ActiveMark, styles.Accent, styles.BgDark
+		return styles.ActiveMark, styles.Accent
 	}
 }
 
@@ -65,14 +65,10 @@ func (t Toast) View() string {
 	if !t.Visible {
 		return ""
 	}
-
-	icon, bgColor, fgColor := t.toastColors()
+	icon, color := t.toastStyle()
 	return lipgloss.NewStyle().
-		Foreground(fgColor).
-		Background(bgColor).
-		Padding(0, 2).
-		Bold(true).
-		Render(icon + " " + t.Message)
+		Foreground(color).Bold(true).
+		Render(icon + "  " + t.Message)
 }
 
 const helpKeyWidth = 12
@@ -112,18 +108,24 @@ func (h HelpOverlay) View() string {
 	}
 
 	var content strings.Builder
+	innerWidth := h.Width - styles.PanelStyle.GetHorizontalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Text)
 	content.WriteString(titleStyle.Render(h.Title) + "\n")
-	content.WriteString(styles.RenderDivider(h.Width-8) + "\n\n")
+	content.WriteString(styles.RenderHeaderSeparator(innerWidth) + "\n\n")
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(styles.Text).
-		Background(styles.Border).
+		Background(styles.Surface).
 		Bold(true).
 		Padding(0, 1)
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	sectionStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Bold(true)
 
 	sectionOrder := []string{"Navigation", "Selection", "Actions", "General"}
 	rendered := make(map[string]bool)
@@ -134,8 +136,9 @@ func (h HelpOverlay) View() string {
 		}
 		content.WriteString(sectionStyle.Render(sectionName) + "\n")
 		for _, item := range items {
-			keyText := lipgloss.NewStyle().Width(helpKeyWidth).Render(keyStyle.Render(item.Key))
-			content.WriteString(keyText + " " + descStyle.Render(item.Description) + "\n")
+			keyText := styles.FitLine(keyStyle.Render(item.Key), helpKeyWidth)
+			line := keyText + " " + descStyle.Render(item.Description)
+			content.WriteString(styles.TruncateLine(line, innerWidth) + "\n")
 		}
 		content.WriteString("\n")
 		rendered[sectionName] = true
@@ -151,15 +154,18 @@ func (h HelpOverlay) View() string {
 	for _, sectionName := range extra {
 		content.WriteString(sectionStyle.Render(sectionName) + "\n")
 		for _, item := range h.Sections[sectionName] {
-			keyText := lipgloss.NewStyle().Width(helpKeyWidth).Render(keyStyle.Render(item.Key))
-			content.WriteString(keyText + " " + descStyle.Render(item.Description) + "\n")
+			keyText := styles.FitLine(keyStyle.Render(item.Key), helpKeyWidth)
+			line := keyText + " " + descStyle.Render(item.Description)
+			content.WriteString(styles.TruncateLine(line, innerWidth) + "\n")
 		}
 		content.WriteString("\n")
 	}
 
-	content.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("? or Esc to close"))
+	closeHint := lipgloss.NewStyle().Foreground(styles.Muted).
+		Render("? or Esc to close")
+	content.WriteString(closeHint)
 
-	return styles.PanelStyle.Width(h.Width).Render(content.String())
+	return styles.RenderNoWrapBlock(styles.PanelStyle, content.String(), h.Width)
 }
 
 type Spinner struct {
@@ -170,7 +176,7 @@ type Spinner struct {
 
 func NewSpinner(label string) Spinner {
 	return Spinner{
-		Frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		Frames: []string{"◐", "◓", "◑", "◒"},
 		Index:  0,
 		Label:  label,
 	}
@@ -181,7 +187,7 @@ func (s *Spinner) Tick() {
 }
 
 func (s Spinner) View() string {
-	frameStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	frameStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	return frameStyle.Render(s.Frames[s.Index]) + " " + labelStyle.Render(s.Label)
 }
@@ -201,8 +207,8 @@ func (s ScrollIndicator) CanScrollDown() bool {
 }
 
 func (s ScrollIndicator) View() string {
-	baseStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	activeStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	baseStyle := lipgloss.NewStyle().Foreground(styles.Border)
+	activeStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 
 	upArrow := baseStyle.Render("▲")
 	if s.CanScrollUp() {

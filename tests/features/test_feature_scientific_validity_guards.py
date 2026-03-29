@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import mne
 import numpy as np
 import pandas as pd
 
@@ -425,10 +426,10 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertEqual(columns, ["power_active_alpha_global_log10raw_mean"])
         self.assertTrue(np.allclose(features_df.iloc[:, 0].to_numpy(dtype=float), 1.0))
 
-    def test_spectral_resting_state_rejects_baseline_only_configured_segments(self):
+    def test_spectral_resting_state_uses_available_analysis_segments(self):
         class _EpochsStub:
             def __init__(self):
-                self.info = {"sfreq": 100.0}
+                self.info = mne.create_info(ch_names=["Cz"], sfreq=100.0, ch_types="eeg")
                 self.times = np.linspace(0.0, 3.98, 400)
 
             def get_data(self, picks=None):
@@ -440,7 +441,6 @@ class TestScientificValidityGuards(unittest.TestCase):
                 "feature_engineering": {
                     "task_is_rest": True,
                     "spectral": {
-                        "segments": ["baseline"],
                         "psd_method": "welch",
                         "min_segment_sec": 1.0,
                         "min_cycles_at_fmin": 0.0,
@@ -465,8 +465,11 @@ class TestScientificValidityGuards(unittest.TestCase):
             name=None,
         )
 
-        with self.assertRaisesRegex(ValueError, "requires explicitly configured segments"):
-            extract_spectral_features(ctx, ["alpha"])
+        features_df, columns, qc = extract_spectral_features(ctx, ["alpha"])
+
+        self.assertFalse(features_df.empty)
+        self.assertTrue(columns)
+        self.assertIn("analysis", qc["segment_durations"])
 
     def test_power_uses_analysis_window_when_segment_name_is_missing(self):
         config = DotConfig(

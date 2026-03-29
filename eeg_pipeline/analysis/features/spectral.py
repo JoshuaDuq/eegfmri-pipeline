@@ -1134,28 +1134,6 @@ def remove_aperiodic_component(
     return 10 ** residual
 
 
-def _resolve_spectral_segments(
-    segment_masks: Dict[str, np.ndarray],
-    configured_segments: Any,
-    task_is_rest: bool,
-    logger: Any,
-) -> List[str]:
-    """Resolve spectral segments on the current window set."""
-    if configured_segments:
-        if isinstance(configured_segments, str):
-            configured_segments = [configured_segments]
-        segments = [str(name) for name in configured_segments if name in segment_masks]
-        if segments:
-            return segments
-        if task_is_rest:
-            configured = ", ".join(str(name) for name in configured_segments)
-            raise ValueError(
-                "Spectral: resting-state mode requires explicitly configured segments to match "
-                f"the available non-baseline analysis segments. Requested: {configured}."
-            )
-    return list(segment_masks.keys())
-
-
 def _rebuild_spectral_segment_masks(
     windows: Any,
     current_times: np.ndarray,
@@ -1572,7 +1550,6 @@ def extract_spectral_features(
     # CRITICAL: Use epochs.times (cropped) for mask building, not ctx.windows (original)
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
-    configured_segments = spec_cfg.get("segments")
     task_is_rest = is_resting_state_feature_mode(config)
     current_times = epochs.times
 
@@ -1590,12 +1567,7 @@ def extract_spectral_features(
         )
         return pd.DataFrame(), [], {"error": mask_error}
     if not segments:
-        segments = _resolve_spectral_segments(
-            segment_masks,
-            configured_segments,
-            task_is_rest,
-            logger,
-        )
+        segments = list(segment_masks.keys())
     if not segments:
         logger.warning("Spectral: No valid segments found; returning empty DataFrame.")
         return pd.DataFrame(), [], {}

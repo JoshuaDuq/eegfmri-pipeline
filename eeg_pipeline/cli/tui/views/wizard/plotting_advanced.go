@@ -399,14 +399,15 @@ func (m Model) renderMinimalView(builder *strings.Builder) string {
 	builder.WriteString(infoStyle.Render("Using defaults. Space to customize.") + "\n\n")
 
 	const labelWidth = 22
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
 	isFocused := m.advancedCursor == 0
 	cursor := m.renderCursor(isFocused)
 	labelStyle := m.buildLabelStyle(isFocused)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
-	builder.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+	builder.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("defaults") + sep + hintStyle.Render("Space to customize") + "\n")
 	return builder.String()
 }
 
@@ -541,9 +542,10 @@ func (m Model) renderGroupLine(opt optionType, label string, expanded bool, hint
 	cursor := m.renderCursor(focused)
 	arrow := m.getExpansionArrow(expanded)
 	labelStyle := m.buildGroupLabelStyle(focused, m.isOptionDisabled(opt))
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
-	text := cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, label)) + "  " + hintStyle.Render(hint)
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+	text := cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, label)) + sep + hintStyle.Render(hint)
 	return renderLine{text: styles.TruncateLine(text, m.contentWidth)}
 }
 
@@ -557,7 +559,7 @@ func (m Model) renderValueLine(opt optionType, label string, value string, hint 
 		displayValue = "(default)"
 	}
 
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	text := styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(displayValue), hintStyle.Render(hint), labelWidth, m.contentWidth)
 	return renderLine{text: text}
 }
@@ -582,7 +584,7 @@ func (m Model) buildGroupLabelStyle(focused bool, disabled bool) lipgloss.Style 
 
 func (m Model) buildValueStyle(opt optionType) lipgloss.Style {
 	if m.isOptionDisabled(opt) {
-		return lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+		return lipgloss.NewStyle().Foreground(styles.Muted)
 	}
 	return lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 }
@@ -600,8 +602,9 @@ func (m Model) renderPlotHeaderLine(plot PlotItem, expanded bool, focused bool) 
 	if focused {
 		labelStyle = labelStyle.Foreground(styles.Primary)
 	}
-	metaStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-	text := cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, plot.Name)) + "  " + metaStyle.Render(plot.ID)
+	metaStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+	text := cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, plot.Name)) + sep + metaStyle.Render(plot.ID)
 	return renderLine{text: text}
 }
 
@@ -609,7 +612,7 @@ func (m Model) renderPlotValueLine(label string, value string, hint string, focu
 	cursor := m.renderCursor(focused)
 	labelStyle := m.buildLabelStyle(focused)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
 	displayValue := value
 	if strings.TrimSpace(displayValue) == "" {
@@ -617,7 +620,8 @@ func (m Model) renderPlotValueLine(label string, value string, hint string, focu
 	}
 
 	const indent = "   "
-	text := cursor + indent + labelStyle.Render(label+":") + " " + valueStyle.Render(displayValue) + "  " + hintStyle.Render(hint)
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+	text := cursor + indent + labelStyle.Render(label+":") + " " + valueStyle.Render(displayValue) + sep + hintStyle.Render(hint)
 	return renderLine{text: text}
 }
 
@@ -727,7 +731,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 				lines = append(lines, expandedLines...)
 			} else if col != "" {
 				// Show empty state message when column selected but values not discovered
-				hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+				hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 				hintText := hintStyle.Render(fmt.Sprintf("  No values discovered for %s yet. Enter values manually (space-separated).", col))
 				lines = append(lines, renderLine{text: hintText})
 			}
@@ -1739,8 +1743,7 @@ func (m Model) renderLinesWithScrolling(builder *strings.Builder, lines []render
 	start, end, showScroll := calculateExactScrollWindow(len(lines), m.advancedOffset, maxLines)
 
 	if showScroll && start > 0 {
-		scrollStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-		builder.WriteString(scrollStyle.Render(fmt.Sprintf("  ↑ %d more items above", start)) + "\n")
+		builder.WriteString(styles.RenderScrollUpIndicator(start) + "\n")
 	}
 
 	for i := start; i < end; i++ {
@@ -1748,8 +1751,7 @@ func (m Model) renderLinesWithScrolling(builder *strings.Builder, lines []render
 	}
 
 	if showScroll && end < len(lines) {
-		scrollStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-		builder.WriteString(scrollStyle.Render(fmt.Sprintf("  ↓ %d more items below", len(lines)-end)) + "\n")
+		builder.WriteString(styles.RenderScrollDownIndicator(len(lines)-end) + "\n")
 	}
 }
 

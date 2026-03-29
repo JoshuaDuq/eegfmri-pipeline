@@ -838,6 +838,15 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         self.assertIn("reject_tmax = 0.5", cfg)
         self.assertIn("autoreject_n_interpolate = [1, 2]", cfg)
 
+        p.config = DotConfig(
+            {
+                "eeg": {"ch_types": ["eeg", "eog"]},
+                "epochs": {"conditions": ["stim"]},
+            }
+        )
+        cfg = p._generate_mne_bids_config("x", subjects=["0001"])
+        self.assertIn("ch_types = ['eeg', 'eog']", cfg)
+
         # _write_clean_events_tsv exception branches
         p.config = DotConfig({"preprocessing": {"clean_events_strict": False}})
         p.bids_root = Path(tempfile.mkdtemp())

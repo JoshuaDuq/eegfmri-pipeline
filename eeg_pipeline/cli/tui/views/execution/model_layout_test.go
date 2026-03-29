@@ -47,7 +47,7 @@ func TestView_StackedCompletionKeepsLogsVisible(t *testing.T) {
 	m.EndTime = time.Now()
 
 	view := stripExecutionANSI(m.View())
-	if !strings.Contains(view, "Log [3 lines") {
+	if !strings.Contains(view, "3 lines") {
 		t.Fatalf("expected completed stacked layout to keep log header visible\nview:\n%s", view)
 	}
 	if !strings.Contains(view, "[12:00:01] processing") {
@@ -105,7 +105,7 @@ func TestView_WideLayoutStillShowsLogsFirst(t *testing.T) {
 	m.SetStatus(StatusRunning)
 
 	view := stripExecutionANSI(m.View())
-	if !strings.Contains(view, "Log [2 lines") {
+	if !strings.Contains(view, "2 lines") {
 		t.Fatalf("expected wide execution layout to show log header\nview:\n%s", view)
 	}
 	if !strings.Contains(view, "[12:00:01] processing") {

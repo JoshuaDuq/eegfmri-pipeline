@@ -191,58 +191,44 @@ func (m Model) renderPlotConfig() string {
 	options := m.getPlotConfigOptions()
 	labelWidth := 16
 
-	for i, opt := range options {
-		isFocused := i == m.plotConfigCursor
-		cursor := "  "
-		if isFocused {
-			cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
-		}
-		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-		if isFocused {
-			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
-		}
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
-		if isFocused {
-			valueStyle = valueStyle.Foreground(styles.Accent).Bold(true)
-		}
-
-		var label, value string
+	type plotConfigRow struct {
+		label, value string
+	}
+	rowFor := func(opt optionType) plotConfigRow {
 		switch opt {
 		case optPlotPNG:
-			label = "PNG"
-			value = m.boolToOnOff(m.plotFormatSelected["png"])
+			return plotConfigRow{"PNG", m.boolToOnOff(m.plotFormatSelected["png"])}
 		case optPlotSVG:
-			label = "SVG"
-			value = m.boolToOnOff(m.plotFormatSelected["svg"])
+			return plotConfigRow{"SVG", m.boolToOnOff(m.plotFormatSelected["svg"])}
 		case optPlotPDF:
-			label = "PDF"
-			value = m.boolToOnOff(m.plotFormatSelected["pdf"])
+			return plotConfigRow{"PDF", m.boolToOnOff(m.plotFormatSelected["pdf"])}
 		case optPlotDPI:
-			label = "Figure DPI"
+			val := "default"
 			if m.plotDpiIndex >= 0 && m.plotDpiIndex < len(m.plotDpiOptions) {
-				value = fmt.Sprintf("%d", m.plotDpiOptions[m.plotDpiIndex])
-			} else {
-				value = "default"
+				val = fmt.Sprintf("%d", m.plotDpiOptions[m.plotDpiIndex])
 			}
+			return plotConfigRow{"Figure DPI", val}
 		case optPlotSaveDPI:
-			label = "Savefig DPI"
+			val := "default"
 			if m.plotSavefigDpiIndex >= 0 && m.plotSavefigDpiIndex < len(m.plotDpiOptions) {
-				value = fmt.Sprintf("%d", m.plotDpiOptions[m.plotSavefigDpiIndex])
-			} else {
-				value = "default"
+				val = fmt.Sprintf("%d", m.plotDpiOptions[m.plotSavefigDpiIndex])
 			}
+			return plotConfigRow{"Savefig DPI", val}
 		case optPlotSharedColorbar:
-			label = "Shared Colorbar"
-			value = m.boolToOnOff(m.plotSharedColorbar)
+			return plotConfigRow{"Shared Colorbar", m.boolToOnOff(m.plotSharedColorbar)}
 		case optPlotOverwrite:
-			label = "Overwrite"
 			val := "OFF"
 			if m.plotOverwrite != nil && *m.plotOverwrite {
 				val = "ON"
 			}
-			value = val
+			return plotConfigRow{"Overwrite", val}
+		default:
+			return plotConfigRow{}
 		}
-		b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), "", labelWidth, m.contentWidth) + "\n")
+	}
+	for i, opt := range options {
+		row := rowFor(opt)
+		b.WriteString(m.renderConfigRow(row.label, row.value, "", i == m.plotConfigCursor, labelWidth) + "\n")
 	}
 
 	return b.String()
@@ -255,26 +241,11 @@ func (m Model) renderTimeRange() string {
 
 	if m.timeRangeShowsRestToggle() {
 		isFocused := m.timeRangeCursorOnRestToggle() && m.editingRangeIdx == noRangeEditing
-		cursor := "  "
-		if isFocused {
-			cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
-		}
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text)
-		if isFocused {
-			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
-		}
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-		b.WriteString(
-			styles.RenderConfigLine(
-				cursor,
-				labelStyle.Render("Resting State:"),
-				valueStyle.Render(m.boolToOnOff(m.prepTaskIsRest)),
-				hintStyle.Render("ON = no task events; power uses raw/log power"),
-				defaultLabelWidth,
-				m.contentWidth,
-			) + "\n\n",
-		)
+		b.WriteString(m.renderConfigRow(
+			"Resting State", m.boolToOnOff(m.prepTaskIsRest),
+			"ON = no task events; power uses raw/log power",
+			isFocused, defaultLabelWidth,
+		) + "\n\n")
 		if m.prepTaskIsRest {
 			infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
 			b.WriteString(infoStyle.Render(

@@ -2,6 +2,7 @@ import argparse
 import unittest
 
 from eeg_pipeline.cli.commands.features import setup_features
+from eeg_pipeline.utils.config.loader import load_config
 
 
 class TestCliFeaturesHelp(unittest.TestCase):
@@ -144,6 +145,29 @@ class TestCliFeaturesHelp(unittest.TestCase):
         )
 
         self.assertEqual(args.erds_condition_marker_bands, ["alpha"])
+
+    def test_default_feature_analysis_mode_is_group_stats(self):
+        config = load_config()
+        self.assertEqual(config.get("feature_engineering.analysis_mode"), "group_stats")
+
+    def test_features_rejects_removed_spectral_segments_flag(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_features(subparsers)
+
+        with self.assertRaises(SystemExit) as exc:
+            parser.parse_args(
+                [
+                    "features",
+                    "compute",
+                    "--subject",
+                    "0001",
+                    "--spectral-segments",
+                    "baseline",
+                ]
+            )
+
+        self.assertEqual(exc.exception.code, 2)
 
 
 if __name__ == "__main__":

@@ -196,8 +196,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.microstatesFixedTemplatesPath
 	case textFieldSpectralRatioPairs:
 		return m.spectralRatioPairsSpec
-	case textFieldSpectralSegments:
-		return m.spectralSegmentsSpec
 	case textFieldAsymmetryChannelPairs:
 		return m.asymmetryChannelPairsSpec
 	case textFieldAsymmetryActivationBands:
@@ -665,8 +663,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.microstatesFixedTemplatesPath = strings.TrimSpace(value)
 	case textFieldSpectralRatioPairs:
 		m.spectralRatioPairsSpec = strings.Join(strings.Fields(value), "")
-	case textFieldSpectralSegments:
-		m.spectralSegmentsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldAsymmetryChannelPairs:
 		m.asymmetryChannelPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldAsymmetryActivationBands:

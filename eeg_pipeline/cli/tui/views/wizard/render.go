@@ -69,16 +69,15 @@ func (m Model) View() string {
 	mainContent := m.renderMainContent(h < shortHeightThreshold)
 	mainContent = normalizeContentFrame(mainContent, innerW, mainH)
 
-	mainStyled := lipgloss.NewStyle().Width(innerW).Render(mainContent)
+	mainStyled := styles.RenderNoWrapBlock(lipgloss.NewStyle(), mainContent, innerW)
 	innerView := header + "\n\n" + mainStyled + "\n" + footer
 
-	container := lipgloss.NewStyle().
-		Width(containerW).
+	containerStyle := lipgloss.NewStyle().
 		Height(containerH).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Border).
-		Padding(containerPadV, containerPadH).
-		Render(innerView)
+		Padding(containerPadV, containerPadH)
+	container := styles.RenderNoWrapBlock(containerStyle, innerView, containerW)
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, container)
 }
@@ -232,9 +231,7 @@ func (m Model) buildStepPill() string {
 	if stepNumber > len(m.steps) {
 		stepNumber = len(m.steps)
 	}
-	return lipgloss.NewStyle().
-		Foreground(styles.BgDark).Background(styles.Primary).
-		Bold(true).Padding(0, 1).
+	return lipgloss.NewStyle().Foreground(styles.TextDim).
 		Render(fmt.Sprintf("%d/%d", stepNumber, len(m.steps)))
 }
 
@@ -254,10 +251,23 @@ func (m Model) buildProgressBar(width int) string {
 		width = 4
 	}
 
+	progress := float64(filled) / float64(total)
+	var fillColor lipgloss.Color
+	switch {
+	case progress >= 1.0:
+		fillColor = styles.Success
+	case progress >= 0.6:
+		fillColor = styles.Primary
+	case progress >= 0.25:
+		fillColor = styles.Accent
+	default:
+		fillColor = styles.Warning
+	}
+
 	filledW := width * filled / total
 	emptyW := width - filledW
 
-	filledStr := lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("━", filledW))
+	filledStr := lipgloss.NewStyle().Foreground(fillColor).Render(strings.Repeat("━", filledW))
 	emptyStr := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("─", emptyW))
 	return filledStr + emptyStr
 }
@@ -265,7 +275,8 @@ func (m Model) buildProgressBar(width int) string {
 func (m Model) buildSubjectBadge() string {
 	count := countSelectedStringItems(m.subjectSelected)
 	if count > 0 {
-		return m.badge(fmt.Sprintf("%d subjects", count), styles.Accent)
+		return lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).
+			Render(fmt.Sprintf("%d subjects", count))
 	}
 	if len(m.subjects) > 0 {
 		return lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " no subjects")
@@ -277,22 +288,14 @@ func (m Model) buildPresetBadge() string {
 	if m.activePreset == "" {
 		return ""
 	}
-	return m.badge(styles.CheckMark+" "+m.activePreset, styles.Success)
-}
-
-func (m Model) badge(text string, bg lipgloss.Color) string {
-	return lipgloss.NewStyle().
-		Foreground(styles.BgDark).
-		Background(bg).
-		Bold(true).
-		Padding(0, 1).
-		Render(text)
+	return lipgloss.NewStyle().Foreground(styles.Success).Bold(true).
+		Render(styles.CheckMark + " " + m.activePreset)
 }
 
 func (m Model) buildBreadcrumbRow(width int) string {
 	var parts []string
 	isCompact := styles.IsNarrowLayout(width)
-	connector := lipgloss.NewStyle().Foreground(styles.Border).Render(" › ")
+	connector := lipgloss.NewStyle().Foreground(styles.Border).Render("  ·  ")
 
 	for i, step := range m.steps {
 		name := stepDisplayNames[step]
@@ -303,17 +306,17 @@ func (m Model) buildBreadcrumbRow(width int) string {
 		var segment string
 		switch {
 		case i < m.stepIndex:
-			check := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
 			if isCompact {
-				segment = check
+				segment = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
 			} else {
-				segment = check + lipgloss.NewStyle().Foreground(styles.TextDim).Render(" "+name)
+				check := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
+				segment = check + lipgloss.NewStyle().Foreground(styles.Muted).Render(" "+name)
 			}
 		case i == m.stepIndex:
 			segment = lipgloss.NewStyle().
-				Foreground(styles.BgDark).Background(styles.Primary).
-				Bold(true).
-				Render(" " + name + " ")
+				Foreground(styles.Primary).
+				Bold(true).Underline(true).
+				Render(name)
 		default:
 			segment = lipgloss.NewStyle().Foreground(styles.Border).Render(name)
 		}
@@ -349,8 +352,8 @@ func (m Model) renderFooter(width int) string {
 	divider := styles.RenderDivider(width)
 	status := m.renderFooterStatus(width)
 	barContent := m.renderFooterHints(width, hints)
-	bar := styles.FooterStyle.Width(width).Align(lipgloss.Center).
-		Render(barContent)
+	footerStyle := styles.FooterStyle.Align(lipgloss.Center)
+	bar := styles.RenderNoWrapBlock(footerStyle, barContent, width)
 	if status == "" {
 		return "\n" + divider + "\n" + bar
 	}
@@ -424,18 +427,25 @@ func (m Model) renderValidationSummary(width int) string {
 }
 
 func (m Model) renderToast(width int) string {
-	toastStyle := lipgloss.NewStyle().Bold(true)
-	switch m.toastType {
-	case "success":
-		toastStyle = toastStyle.Foreground(styles.Success)
-	case "error":
-		toastStyle = toastStyle.Foreground(styles.Error)
-	case "warning":
-		toastStyle = toastStyle.Foreground(styles.Warning)
-	default:
-		toastStyle = toastStyle.Foreground(styles.Accent)
+	type toastDef struct {
+		icon string
+		fg   lipgloss.Color
 	}
-	return styles.TruncateLine(toastStyle.Render(styles.CheckMark+" "+m.toastMessage), width)
+	defs := map[string]toastDef{
+		"success": {styles.CheckMark, styles.Success},
+		"error":   {styles.CrossMark, styles.Error},
+		"warning": {styles.WarningMark, styles.Warning},
+	}
+	d, ok := defs[m.toastType]
+	if !ok {
+		d = toastDef{styles.ActiveMark, styles.Accent}
+	}
+
+	text := lipgloss.NewStyle().
+		Foreground(d.fg).Bold(true).
+		Render(d.icon + "  " + m.toastMessage)
+
+	return styles.TruncateLine(text, width)
 }
 
 func (m Model) getStepHints() []footerHint {

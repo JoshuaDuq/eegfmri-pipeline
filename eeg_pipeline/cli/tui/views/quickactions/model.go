@@ -32,12 +32,12 @@ type Action struct {
 
 var (
 	quickActions = []Action{
-		{Type: ActionStats, Name: "Project Stats", Description: "View subject & feature analytics", Icon: styles.SelectedMark, Shortcut: "S"},
-		{Type: ActionHistory, Name: "History", Description: "View recent pipeline executions", Icon: styles.SelectedMark, Shortcut: "H"},
-		{Type: ActionValidate, Name: "Validate", Description: "Check data integrity", Icon: styles.SelectedMark, Shortcut: "V"},
-		{Type: ActionExport, Name: "Export", Description: "Export features to CSV", Icon: styles.SelectedMark, Shortcut: "X"},
-		{Type: ActionConfig, Name: "Config", Description: "View configuration", Icon: styles.SelectedMark, Shortcut: "C"},
-		{Type: ActionRefresh, Name: "Refresh", Description: "Reload subject data", Icon: styles.SelectedMark, Shortcut: "R"},
+		{Type: ActionStats, Name: "Project Stats", Description: "Subject & feature analytics", Icon: "◈", Shortcut: "S"},
+		{Type: ActionHistory, Name: "History", Description: "Recent pipeline executions", Icon: "○", Shortcut: "H"},
+		{Type: ActionValidate, Name: "Validate", Description: "Check data integrity", Icon: "✦", Shortcut: "V"},
+		{Type: ActionExport, Name: "Export", Description: "Export features to CSV", Icon: "⇥", Shortcut: "X"},
+		{Type: ActionConfig, Name: "Config", Description: "View configuration", Icon: "⚙", Shortcut: "C"},
+		{Type: ActionRefresh, Name: "Refresh", Description: "Reload subject data", Icon: "↺", Shortcut: "R"},
 	}
 	shortcutMap = map[string]ActionType{
 		"s": ActionStats,
@@ -147,7 +147,7 @@ func (m Model) View() string {
 	if overlayw < 30 {
 		overlayw = 30
 	}
-	return styles.CardStyle.Width(overlayw).Render(b.String())
+	return styles.RenderNoWrapBlock(styles.CardStyle, b.String(), overlayw)
 }
 
 func (m Model) renderAction(action Action, isCursor bool) string {
@@ -156,29 +156,25 @@ func (m Model) renderAction(action Action, isCursor bool) string {
 		cursor = styles.RenderCursorOptional(m.animQueue.CursorVisible())
 	}
 
-	shortcutStyle := lipgloss.NewStyle().
-		Foreground(styles.Text).
-		Background(styles.Border).
-		Bold(true).
-		Padding(0, 1)
+	shortcutStyle := styles.FooterKeySecondaryStyle
 	if isCursor {
-		shortcutStyle = lipgloss.NewStyle().
-			Foreground(styles.BgDark).
-			Background(styles.Primary).
-			Bold(true).
-			Padding(0, 1)
+		shortcutStyle = styles.FooterKeyPrimaryStyle
 	}
 
+	iconStyle := lipgloss.NewStyle().Foreground(styles.Border)
 	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	if isCursor {
+		iconStyle = iconStyle.Foreground(styles.Accent)
 		nameStyle = nameStyle.Foreground(styles.Text).Bold(true)
 		descStyle = descStyle.Foreground(styles.TextDim)
 	}
 
-	line := cursor + shortcutStyle.Render(action.Shortcut) + " " + nameStyle.Render(action.Name)
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+	line := cursor + shortcutStyle.Render(action.Shortcut) + " " +
+		iconStyle.Render(action.Icon) + " " + nameStyle.Render(action.Name)
 	if isCursor {
-		line += "  " + descStyle.Render(action.Description)
+		line += sep + descStyle.Render(action.Description)
 	}
 	return line
 }

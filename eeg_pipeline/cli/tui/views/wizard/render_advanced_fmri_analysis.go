@@ -32,7 +32,7 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	}
 
 	labelWidth := defaultLabelWidthWide
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	mode := ""
 	if m.modeIndex >= 0 && m.modeIndex < len(m.modeOptions) {
 		mode = m.modeOptions[m.modeIndex]

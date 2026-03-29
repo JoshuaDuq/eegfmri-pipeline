@@ -12,12 +12,12 @@ import (
 
 func (m Model) View() string {
 	title := styles.RenderSectionLabel("Global Setup")
-	section := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("  " + m.sections[m.sectionIndex].label)
 	lineWidth := m.width - 8
 	if lineWidth < 20 {
 		lineWidth = 20
 	}
-	header := title + section + "\n" + styles.RenderDivider(lineWidth)
+	tabs := m.renderSectionTabs()
+	header := title + "\n" + tabs + "\n" + styles.RenderHeaderSeparator(lineWidth)
 	headerHeight := strings.Count(header, "\n") + 2
 
 	footer := m.renderFooter()
@@ -29,10 +29,10 @@ func (m Model) View() string {
 	}
 
 	var mainContent strings.Builder
-	mainContent.WriteString(m.renderFields())
+	mainContent.WriteString(m.renderFields(lineWidth))
 
 	if m.isLoading {
-		mainContent.WriteString("\n  " + m.searchSpinner.View())
+		mainContent.WriteString("\n" + styles.TruncateLine("  "+m.searchSpinner.View(), lineWidth))
 	}
 
 	if m.statusMessage != "" {
@@ -40,16 +40,17 @@ func (m Model) View() string {
 		if m.statusIsError {
 			color = styles.Error
 		}
-		mainContent.WriteString("\n" + lipgloss.NewStyle().Foreground(color).Render(m.statusMessage))
+		statusLine := lipgloss.NewStyle().Foreground(color).Render(m.statusMessage)
+		mainContent.WriteString("\n" + styles.TruncateLine(statusLine, lineWidth))
 	}
 
 	if m.isSaving {
-		mainContent.WriteString("\n  " + m.saveSpinner.View())
+		mainContent.WriteString("\n" + styles.TruncateLine("  "+m.saveSpinner.View(), lineWidth))
 	}
 
 	mainContentStyled := lipgloss.NewStyle().
 		Height(mainHeight).
-		Render(mainContent.String())
+		Render(styles.ClampBlock(mainContent.String(), lineWidth))
 
 	return header + "\n" + mainContentStyled + "\n" + footer
 }
@@ -77,26 +78,44 @@ func (m Model) renderFooter() string {
 		width = 20
 	}
 	divider := styles.RenderDivider(width)
-	bar := styles.FooterStyle.Width(width).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	bar := styles.RenderNoWrapBlock(styles.FooterStyle, strings.Join(hints, styles.RenderFooterSeparator()), width)
 	return divider + "\n" + bar
 }
 
-func (m Model) renderFields() string {
+func (m Model) renderSectionTabs() string {
+	var parts []string
+	for i, sec := range m.sections {
+		if i == m.sectionIndex {
+			parts = append(parts, lipgloss.NewStyle().
+				Foreground(styles.Primary).
+				Bold(true).Underline(true).
+				Render(sec.label))
+		} else {
+			parts = append(parts, lipgloss.NewStyle().
+				Foreground(styles.TextDim).
+				Render(sec.label))
+		}
+	}
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render("  ·  ")
+	return "  " + strings.Join(parts, sep)
+}
+
+func (m Model) renderFields(maxWidth int) string {
 	var b strings.Builder
 	section := m.sections[m.sectionIndex]
 
-	b.WriteString(styles.SectionTitleStyle.Render(section.label) + "\n")
 	if section.description != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(section.description) + "\n")
+		description := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render("  " + section.description)
+		b.WriteString(styles.TruncateLine(description, maxWidth) + "\n")
 	}
 	b.WriteString("\n")
 
 	fields := m.sectionFields(section.key)
 	for i, field := range fields {
 		isFocused := i == m.fieldCursor
-		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(20)
+		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Bold(true).Width(20)
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
 		}
 
 		cursor := "  "
@@ -108,34 +127,52 @@ func (m Model) renderFields() string {
 		if m.editingText && m.editingField == field.key {
 			value = m.textBuffer + "█"
 		}
-		if value == "" {
-			value = "(not set)"
+		isUnset := value == ""
+		if isUnset {
+			value = "not set"
 		}
 
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-		if value == "(not set)" {
-			valueStyle = lipgloss.NewStyle().Foreground(styles.Muted)
+		var valueRendered string
+		if isUnset {
+			valueRendered = lipgloss.NewStyle().
+				Foreground(styles.Muted).Italic(true).
+				Render("not set")
+		} else {
+			valueRendered = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(value)
 		}
-		line := cursor + labelStyle.Render(field.label) + " " + valueStyle.Render(value)
+		label := styles.FitLine(labelStyle.Render(field.label), 20)
+		prefix := cursor + label + " "
 
-		if field.isPath && value != "(not set)" {
+		sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+		var suffix strings.Builder
+		if field.isPath && !isUnset {
 			path := m.fieldValue(field.key)
 			if pathExists(path) {
-				line += lipgloss.NewStyle().Foreground(styles.Success).Render("  " + styles.CheckMark)
+				suffix.WriteString(sep)
+				suffix.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark))
 			} else {
-				line += lipgloss.NewStyle().Foreground(styles.Warning).Render("  " + styles.WarningMark + " not found")
+				suffix.WriteString(sep)
+				suffix.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " not found"))
 			}
 		}
 
 		if field.description != "" {
-			line += lipgloss.NewStyle().Foreground(styles.Muted).Render("  " + field.description)
+			suffix.WriteString(sep)
+			suffix.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(field.description))
 		}
 
 		if field.isPath && isFocused {
-			line += lipgloss.NewStyle().Foreground(styles.Border).Render("  [B] browse")
+			suffix.WriteString(sep)
+			suffix.WriteString(styles.FooterKeySecondaryStyle.Render("B"))
+			suffix.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(" browse"))
 		}
 
-		b.WriteString(line + "\n")
+		valueWidth := maxWidth - lipgloss.Width(prefix) - lipgloss.Width(suffix.String())
+		if valueWidth < 1 {
+			valueWidth = 1
+		}
+		line := prefix + styles.TruncateLine(valueRendered, valueWidth) + suffix.String()
+		b.WriteString(styles.TruncateLine(line, maxWidth) + "\n")
 	}
 
 	return b.String()

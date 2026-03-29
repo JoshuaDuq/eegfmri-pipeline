@@ -24,7 +24,7 @@ func (m Model) renderPreprocessingStageSelection() string {
 	b.WriteString("  " + styles.RenderStatusCount(selectedCount, len(m.prepStages), "stages"))
 	b.WriteString("\n")
 
-	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	for i, stage := range m.prepStages {
 		isSelected := m.prepStageSelected[i]
 		isFocused := i == m.prepStageCursor
@@ -37,9 +37,10 @@ func (m Model) renderPreprocessingStageSelection() string {
 		if isFocused {
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		}
+		sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
 		line := cursor + checkbox + " " + nameStyle.Render(stage.Name)
 		if len(stage.Description) > 0 {
-			line += "  " + descStyle.Render(stage.Description)
+			line += sep + descStyle.Render(stage.Description)
 		}
 		b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
 	}
@@ -54,7 +55,6 @@ func (m Model) renderPreprocessingFiltering() string {
 	b.WriteString(styles.RenderStepHeader("Filtering", m.contentWidth) + "\n\n")
 
 	labelWidth := defaultLabelWidth
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	resampleVal := fmt.Sprintf("%d Hz", m.prepResample)
 	if m.editingNumber && m.advancedCursor == 0 {
@@ -90,19 +90,7 @@ func (m Model) renderPreprocessingFiltering() string {
 	}
 
 	for i, opt := range options {
-		isFocused := i == m.advancedCursor
-		var labelStyle lipgloss.Style
-		if isFocused {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-		} else {
-			labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
-		}
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-		cursor := "  "
-		if isFocused {
-			cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
-		}
-		b.WriteString(styles.RenderConfigLine(cursor, labelStyle.Render(opt.label+":"), valueStyle.Render(opt.value), hintStyle.Render(opt.hint), labelWidth, m.contentWidth) + "\n")
+		b.WriteString(m.renderConfigRow(opt.label, opt.value, opt.hint, i == m.advancedCursor, labelWidth) + "\n")
 	}
 
 	return b.String()
@@ -188,19 +176,23 @@ func (m Model) renderPreprocessingICA() string {
 }
 
 func (m Model) renderConfigRow(label, value, hint string, isFocused bool, labelWidth int) string {
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 	var labelStyle lipgloss.Style
+	var valueStyle lipgloss.Style
+	var hintRendered string
 	if isFocused {
 		labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Underline(true)
+		hintRendered = lipgloss.NewStyle().Foreground(styles.Muted).Render(hint)
 	} else {
-		labelStyle = lipgloss.NewStyle().Foreground(styles.Text)
+		labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim)
+		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		hintRendered = lipgloss.NewStyle().Foreground(styles.Border).Render(hint)
 	}
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	cursor := "  "
 	if isFocused {
 		cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
 	}
-	return styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), hintStyle.Render(hint), labelWidth, m.contentWidth)
+	return styles.RenderConfigLine(cursor, labelStyle.Render(label+":"), valueStyle.Render(value), hintRendered, labelWidth, m.contentWidth)
 }
 
 func (m Model) renderPreprocessingEpochs() string {

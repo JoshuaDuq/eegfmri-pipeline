@@ -74,7 +74,7 @@ func TestBuildBreadcrumbRowCompactAndWide(t *testing.T) {
 	m.stepIndex = 1
 
 	compact := stripWizardHeaderANSI(m.buildBreadcrumbRow(80))
-	if strings.Contains(compact, "›") {
+	if strings.Contains(compact, "·") {
 		t.Fatalf("expected compact breadcrumb to omit connector, got %q", compact)
 	}
 	if strings.Contains(compact, "Mode") {
@@ -85,7 +85,7 @@ func TestBuildBreadcrumbRowCompactAndWide(t *testing.T) {
 	}
 
 	wide := stripWizardHeaderANSI(m.buildBreadcrumbRow(120))
-	if !strings.Contains(wide, "›") {
+	if !strings.Contains(wide, "·") {
 		t.Fatalf("expected wide breadcrumb to include connector, got %q", wide)
 	}
 	if !strings.Contains(wide, "Mode") {
@@ -143,4 +143,3 @@ func TestBuildSubjectBadgeStates(t *testing.T) {
 		t.Fatalf("expected empty badge when no subjects present, got %q", badge)
 	}
 }
-

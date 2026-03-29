@@ -120,7 +120,7 @@ class TestFeaturesTUIWiring(unittest.TestCase):
         self.assertTrue(config.get("feature_engineering.task_is_rest"))
         self.assertFalse(config.get("feature_engineering.power.require_baseline"))
         self.assertFalse(config.get("feature_engineering.power.subtract_evoked"))
-        self.assertEqual(config.get("feature_engineering.spectral.segments"), [])
+        self.assertNotIn("segments", config["feature_engineering"]["spectral"])
         self.assertTrue(config.get("feature_engineering.bands.allow_full_fallback"))
         self.assertFalse(config.get("feature_engineering.aperiodic.subtract_evoked"))
 

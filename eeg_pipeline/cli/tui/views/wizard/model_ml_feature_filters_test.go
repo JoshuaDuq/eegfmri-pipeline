@@ -100,7 +100,7 @@ func TestRenderMLAdvancedConfig_ShowsScrollIndicatorWithOffset(t *testing.T) {
 	m.advancedOffset = 3
 
 	out := m.renderMLAdvancedConfig()
-	if !strings.Contains(out, "more items above") {
+	if !strings.Contains(out, "more") {
 		t.Fatalf("expected scroll indicator in ML advanced render, got:\n%s", out)
 	}
 }

@@ -158,9 +158,16 @@ const (
 
 const (
 	mainMenuWideThreshold     = 118
+	mainMenuTallNarrowWidth   = 92
+	mainMenuTallNarrowHeight  = 28
+	mainMenuSplitMinWidth     = 76
+	mainMenuSplitMinHeight    = 26
 	mainMenuColumnGap         = 2
 	mainMenuPreviewMinWidth   = 42
 	mainMenuPreviewLabelWidth = 10
+	mainMenuCompactDetailMin  = 15
+	mainMenuCompactMenuMin    = 6
+	mainMenuCompactDetailRows = 6
 )
 
 type HomeConfigSummary struct {
@@ -430,14 +437,29 @@ func (m Model) renderHeader() string {
 		lineWidth = 0
 	}
 
-	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Render("◆")
+	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("◆")
 	logo := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("eegfmri-pipeline")
+
 	v := m.version
 	if v == "" {
 		v = "dev"
 	}
-	version := lipgloss.NewStyle().Foreground(styles.Muted).Render(v)
-	titleRow := "  " + glyph + " " + logo + "   " + version
+	versionText := lipgloss.NewStyle().Foreground(styles.TextDim).Render(v)
+
+	left := "  " + glyph + " " + logo + "  " + versionText
+
+	right := ""
+	if task := strings.TrimSpace(m.Task); task != "" {
+		taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(task)
+		taskLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render("task  ")
+		right = taskLabel + taskValue + "  "
+	}
+
+	spacer := ""
+	if lineWidth > lipgloss.Width(left)+lipgloss.Width(right) {
+		spacer = strings.Repeat(" ", lineWidth-lipgloss.Width(left)-lipgloss.Width(right))
+	}
+	titleRow := left + spacer + right
 
 	return titleRow + "\n" + styles.RenderHeaderSeparator(lineWidth)
 }
@@ -468,23 +490,22 @@ func (m Model) renderItem(name, description string, selected bool, config sectio
 		if !m.animQueue.CursorVisible() {
 			cursorChar = "  "
 		}
-		cursor := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(styles.Highlight).Render(cursorChar)
-		nameStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(styles.Highlight)
-		sepStyle := lipgloss.NewStyle().Foreground(styles.Muted).Background(styles.Highlight)
-		descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Background(styles.Highlight)
+		cursor := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(cursorChar)
+		nameStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+		descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		var inner string
 		if config.showDescriptions {
-			inner = cursor + nameStyle.Render(name) + sepStyle.Render(" "+styles.BulletMark+" ") + descStyle.Render(description)
+			sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+			inner = cursor + nameStyle.Render(name) + sep + descStyle.Render(description)
 		} else {
 			inner = cursor + nameStyle.Render(name)
 		}
-		inner = styles.TruncateLine(inner, config.width)
-		return lipgloss.NewStyle().Width(config.width).Background(styles.Highlight).Render(inner)
+		return styles.TruncateLine(inner, config.width)
 	}
 
-	sep := lipgloss.NewStyle().Foreground(styles.Muted).Render(" " + styles.BulletMark + " ")
-	nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
+	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
 	var rawLine string
 	if config.showDescriptions {
 		rawLine = "  " + nameStyle.Render(name) + sep + descStyle.Render(description)
@@ -509,7 +530,7 @@ func (m Model) renderFooter() string {
 		width = 20
 	}
 	divider := styles.RenderDivider(width)
-	bar := styles.FooterStyle.Width(width).Render(m.renderFooterHints(width, hints))
+	bar := styles.RenderNoWrapBlock(styles.FooterStyle, m.renderFooterHints(width, hints), width)
 	return divider + "\n" + bar
 }
 
@@ -536,18 +557,99 @@ type footerHint struct {
 }
 
 func (m Model) renderContent(width, height int) string {
-	if width >= mainMenuWideThreshold {
+	if m.useWideLayout(width, height) {
 		return m.renderWideContent(width, height)
 	}
 	return m.renderCompactContent(width, height)
 }
 
+func (m Model) useWideLayout(width, height int) bool {
+	if width >= mainMenuWideThreshold {
+		return true
+	}
+	return width >= mainMenuTallNarrowWidth && height >= mainMenuTallNarrowHeight
+}
+
 func (m Model) renderCompactContent(width, height int) string {
 	compactWidth := max(width, 1)
 	compactHeight := max(height, 1)
-	return styles.BoxStyle.Width(compactWidth).Height(compactHeight).Render(
-		m.renderCompactMenuPane(compactWidth-4, compactHeight-2),
+	if m.useSplitCompactLayout(compactWidth, compactHeight) {
+		return m.renderSplitCompactContent(compactWidth, compactHeight)
+	}
+
+	innerWidth := max(compactWidth-4, 1)
+	innerHeight := max(compactHeight-2, 1)
+	style := styles.BoxStyle.Height(compactHeight)
+	return styles.RenderNoWrapBlock(style, m.renderCompactBody(innerWidth, innerHeight), compactWidth)
+}
+
+func (m Model) useSplitCompactLayout(width, height int) bool {
+	return width >= mainMenuSplitMinWidth && height >= mainMenuSplitMinHeight
+}
+
+func (m Model) renderSplitCompactContent(width, height int) string {
+	menuPaneHeight, detailPaneHeight := m.compactPanelHeights(height)
+	menuPaneStyle := styles.CardStyleFocused.Height(menuPaneHeight)
+	menuPane := styles.RenderNoWrapBlock(menuPaneStyle, m.renderCompactMenuPane(width-6, menuPaneHeight-4), width)
+	detailPaneStyle := styles.PanelStyle.Height(detailPaneHeight)
+	detailPane := styles.RenderNoWrapBlock(detailPaneStyle, m.renderCompactDetailPane(width-6, detailPaneHeight-4), width)
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		menuPane,
+		"",
+		detailPane,
 	)
+}
+
+func (m Model) compactPanelHeights(totalHeight int) (int, int) {
+	detailPaneHeight := min(16, totalHeight*40/100)
+	if detailPaneHeight < 12 {
+		detailPaneHeight = 12
+	}
+
+	menuPaneHeight := totalHeight - detailPaneHeight - 1
+	if menuPaneHeight < 13 {
+		menuPaneHeight = 13
+		detailPaneHeight = totalHeight - menuPaneHeight - 1
+	}
+
+	return menuPaneHeight, detailPaneHeight
+}
+
+func (m Model) renderCompactBody(innerWidth, innerHeight int) string {
+	if innerHeight < mainMenuCompactDetailMin {
+		return m.renderCompactMenuPane(innerWidth, innerHeight)
+	}
+
+	detailHeight := m.compactDetailHeight(innerHeight)
+	if detailHeight < 4 {
+		return m.renderCompactMenuPane(innerWidth, innerHeight)
+	}
+
+	menuHeight := innerHeight - detailHeight - 1
+	if menuHeight < mainMenuCompactMenuMin {
+		return m.renderCompactMenuPane(innerWidth, innerHeight)
+	}
+
+	menu := m.renderCompactMenuPane(innerWidth, menuHeight)
+	detail := m.renderCompactDetailPane(innerWidth, detailHeight)
+	return menu + "\n" + styles.RenderDivider(innerWidth) + "\n" + detail
+}
+
+func (m Model) compactDetailHeight(innerHeight int) int {
+	extraRows := max(innerHeight-mainMenuCompactDetailMin, 0)
+	detailHeight := mainMenuCompactDetailRows + extraRows/2
+	return min(detailHeight, innerHeight-mainMenuCompactMenuMin-1)
+}
+
+func compactFocusContentRows(availableRows, focusAreaCount int) int {
+	if focusAreaCount == 0 || availableRows <= 1 {
+		return 0
+	}
+
+	focusRows := min(focusAreaCount, availableRows-1)
+	return 1 + focusRows
 }
 
 func (m Model) renderWideContent(width, height int) string {
@@ -561,8 +663,10 @@ func (m Model) renderWideContent(width, height int) string {
 		leftWidth = width - rightWidth - mainMenuColumnGap
 	}
 
-	menuPane := styles.CardStyleFocused.Width(leftWidth).Height(height).Render(m.renderMenuPane(leftWidth-6, height-4))
-	previewPane := styles.PanelStyle.Width(rightWidth).Height(height).Render(m.renderPreviewPane(rightWidth - 6))
+	menuPaneStyle := styles.CardStyleFocused.Height(height)
+	menuPane := styles.RenderNoWrapBlock(menuPaneStyle, m.renderMenuPane(leftWidth-6, height-4), leftWidth)
+	previewPaneStyle := styles.PanelStyle.Height(height)
+	previewPane := styles.RenderNoWrapBlock(previewPaneStyle, m.renderPreviewPane(rightWidth-6), rightWidth)
 
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -749,8 +853,8 @@ func (m Model) renderPreviewPane(innerWidth int) string {
 
 	kindLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render(detail.kind)
 	if detail.lastUsed {
-		lastUsedMark := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " last used")
-		kindLabel += styles.RenderFooterSeparator() + lastUsedMark
+		lastUsed := lipgloss.NewStyle().Foreground(styles.Success).Render("  " + styles.CheckMark + " last used")
+		kindLabel += lastUsed
 	}
 
 	var b strings.Builder
@@ -773,6 +877,63 @@ func (m Model) renderPreviewPane(innerWidth int) string {
 	}
 
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m Model) renderCompactDetailPane(width, maxLines int) string {
+	detail := m.selectedDetail()
+	titleStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+	descriptionStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	focusStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	bulletStyle := lipgloss.NewStyle().Foreground(styles.Accent)
+
+	lines := []string{
+		styles.RenderPreviewSubHeaderWithRule("DETAILS", width),
+		styles.TruncateLine(titleStyle.Render(detail.title), width),
+		styles.TruncateLine(descriptionStyle.Render(detail.description), width),
+	}
+
+	remainingRows := maxLines - len(lines)
+	minimumRows := len(detail.rows) +
+		compactFocusContentRows(max(remainingRows-len(detail.rows), 0), len(detail.focusAreas))
+	if remainingRows > minimumRows+1 {
+		lines = append(lines, "")
+		remainingRows--
+	}
+
+	for _, row := range detail.rows {
+		if remainingRows <= 0 {
+			break
+		}
+
+		line := styles.RenderKeyValue(row.label, row.value, mainMenuPreviewLabelWidth)
+		if row.accent {
+			line = styles.RenderKeyValueAccent(row.label, row.value, mainMenuPreviewLabelWidth)
+		}
+
+		lines = append(lines, styles.TruncateLine(line, width))
+		remainingRows--
+	}
+
+	focusRows := min(len(detail.focusAreas), max(remainingRows-1, 0))
+	if focusRows > 0 && remainingRows > focusRows+1 {
+		lines = append(lines, "")
+		remainingRows--
+	}
+	if focusRows > 0 {
+		lines = append(lines, styles.RenderPreviewSubHeaderWithRule("FOCUS", width))
+		remainingRows--
+	}
+	for _, focus := range detail.focusAreas {
+		if remainingRows <= 0 {
+			break
+		}
+
+		line := bulletStyle.Render(styles.BulletMark) + " " + focusStyle.Render(focus)
+		lines = append(lines, styles.TruncateLine(line, width))
+		remainingRows--
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) selectedDetail() selectionDetail {
@@ -921,7 +1082,7 @@ func (m Model) renderPreviewFocusBlock(detail selectionDetail, width int) string
 		return ""
 	}
 
-	bodyStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(width)
+	bodyStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	bulletStyle := lipgloss.NewStyle().Foreground(styles.Accent)
 
 	var b strings.Builder
@@ -929,22 +1090,24 @@ func (m Model) renderPreviewFocusBlock(detail selectionDetail, width int) string
 	b.WriteString("\n")
 	for _, focus := range detail.focusAreas {
 		b.WriteString("\n")
-		b.WriteString(bulletStyle.Render(styles.BulletMark))
-		b.WriteString(" ")
-		b.WriteString(bodyStyle.Render(focus))
+		bullet := bulletStyle.Render(styles.BulletMark) + " "
+		b.WriteString(styles.TruncateLine(bullet+bodyStyle.Render(focus), width))
 	}
 	return b.String()
 }
 
 func (m Model) renderRecentRunLine(run RecentRunSummary) string {
-	statusIcon := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
-	if !run.Success {
-		statusIcon = lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark)
+	var statusIcon string
+	if run.Success {
+		statusIcon = lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(styles.CheckMark)
+	} else {
+		statusIcon = lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render(styles.CrossMark)
 	}
 
+	pipelineStyle := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
 	parts := []string{
 		statusIcon,
-		lipgloss.NewStyle().Foreground(styles.Text).Render(run.Pipeline),
+		pipelineStyle.Render(run.Pipeline),
 	}
 	if run.Mode != "" {
 		parts = append(parts, lipgloss.NewStyle().Foreground(styles.TextDim).Render(run.Mode))
@@ -956,7 +1119,8 @@ func (m Model) renderRecentRunLine(run RecentRunSummary) string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Duration))
 	}
 
-	return strings.Join(parts, "  ")
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+	return strings.Join(parts, sep)
 }
 
 func (m Model) shortPath(path string) string {

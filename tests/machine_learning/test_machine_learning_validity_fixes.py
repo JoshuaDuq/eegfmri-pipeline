@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import types
@@ -16,6 +17,70 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class TestMachineLearningValidityFixes(unittest.TestCase):
+    def _import_ml_data(self):
+        mne_home = Path(tempfile.mkdtemp())
+        with patch.dict(
+            os.environ,
+            {"HOME": str(mne_home), "MNE_DONTWRITE_HOME": "true"},
+            clear=False,
+        ), patch.dict(
+            sys.modules,
+            {
+                "eeg_pipeline.utils.config": types.SimpleNamespace(__path__=[]),
+                "eeg_pipeline.utils.config.loader": types.SimpleNamespace(
+                    ConfigDict=dict,
+                    get_config_value=lambda config, key, default=None: config.get(key, default)
+                    if hasattr(config, "get")
+                    else default,
+                    load_config=lambda *args, **kwargs: DotConfig({}),
+                ),
+                "mne": types.SimpleNamespace(
+                    pick_types=lambda *_args, **_kwargs: np.array([], dtype=int),
+                    Epochs=object,
+                ),
+                "eeg_pipeline.domain.features": types.ModuleType("eeg_pipeline.domain.features"),
+                "eeg_pipeline.domain.features.naming": types.SimpleNamespace(
+                    NamingSchema=type(
+                        "NamingSchema",
+                        (),
+                        {"parse": staticmethod(lambda *_args, **_kwargs: {"valid": False})},
+                    )
+                ),
+                "eeg_pipeline.infra": types.SimpleNamespace(__path__=[]),
+                "eeg_pipeline.infra.tsv": types.SimpleNamespace(
+                    read_table=lambda *_args, **_kwargs: pd.DataFrame(),
+                    read_tsv=lambda *_args, **_kwargs: pd.DataFrame(),
+                ),
+                "eeg_pipeline.infra.paths": types.SimpleNamespace(
+                    _find_clean_events_path=lambda *_args, **_kwargs: None,
+                    deriv_features_path=lambda deriv_root, subject: Path(deriv_root)
+                    / f"sub-{subject}"
+                    / "eeg"
+                    / "features",
+                    load_events_df=lambda *_args, **_kwargs: pd.DataFrame(),
+                ),
+                "eeg_pipeline.utils.data.epochs": types.SimpleNamespace(
+                    load_epochs_for_analysis=lambda *_args, **_kwargs: (None, None),
+                ),
+                "eeg_pipeline.utils.data.fmri_signature_targets": types.SimpleNamespace(
+                    find_block_column=lambda *_args, **_kwargs: None,
+                    load_fmri_signature_target_for_subject=lambda **_kwargs: (_ for _ in ()).throw(
+                        AssertionError("fMRI signature target helper should not be used in this test")
+                    ),
+                ),
+                "mne_bids": types.SimpleNamespace(
+                    BIDSPath=type(
+                        "BIDSPath",
+                        (),
+                        {"__init__": lambda self, *args, **kwargs: setattr(self, "fpath", None)},
+                    )
+                )
+            },
+        ):
+            from eeg_pipeline.utils.data import machine_learning as ml_data
+
+        return ml_data
+
     def test_spatial_feature_selector_requires_feature_names_when_regions_are_requested(self):
         from eeg_pipeline.analysis.machine_learning.preprocessing import SpatialFeatureSelector
 
@@ -367,6 +432,90 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     covariates=["rating"],
                 )
 
+    def test_load_active_matrix_preserves_canonical_trial_ids(self):
+        ml_data = self._import_ml_data()
+
+        config = DotConfig(
+            {
+                "feature_engineering": {"analysis_mode": "trial_ml_safe"},
+            }
+        )
+
+        subject_payloads = {
+            "0001": (
+                pd.DataFrame({"power_feature": [1.0, 2.0]}),
+                np.array([10.0, 20.0], dtype=float),
+                "rating",
+                pd.DataFrame(
+                    {
+                        "subject_id": ["sub-0001", "sub-0001"],
+                        "trial_id": [10, 11],
+                        "trial_index": [0, 1],
+                    }
+                ),
+            ),
+            "0002": (
+                pd.DataFrame({"power_feature": [3.0]}),
+                np.array([30.0], dtype=float),
+                "rating",
+                pd.DataFrame(
+                    {
+                        "subject_id": ["sub-0002"],
+                        "trial_id": [21],
+                        "trial_index": [0],
+                    }
+                ),
+            ),
+        }
+
+        def _fake_load_subject(subject, *_args, **_kwargs):
+            return subject_payloads[str(subject)]
+
+        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+            _X, _y, groups, _feature_names, meta = ml_data.load_active_matrix(
+                subjects=["0001", "0002"],
+                task="task",
+                deriv_root=Path("."),
+                config=config,
+                feature_families=["power"],
+            )
+
+        self.assertEqual(groups.tolist(), ["sub-0001", "sub-0001", "sub-0002"])
+        self.assertEqual(meta["trial_id"].tolist(), [10, 11, 21])
+
+    def test_load_subject_ml_from_features_passes_deriv_root_to_clean_event_lookup(self):
+        ml_data = self._import_ml_data()
+        deriv_root = Path(tempfile.mkdtemp())
+        captured: dict[str, object] = {}
+
+        def _load_events_df(subject, task, *, deriv_root=None, config=None, prefer_clean=True):
+            _ = (subject, task, config, prefer_clean)
+            captured["deriv_root"] = deriv_root
+            return pd.DataFrame({"trial_id": [7], "rating": [10.0]})
+
+        with patch.object(ml_data, "load_events_df", side_effect=_load_events_df), patch.object(
+            ml_data,
+            "_load_subject_feature_table",
+            return_value=(pd.DataFrame({"power_feature": [1.0]}), ["power_feature"]),
+        ):
+            _X_df, y, y_col, meta = ml_data._load_subject_ml_from_features(
+                subject="0001",
+                task="task",
+                deriv_root=deriv_root,
+                config=DotConfig({"event_columns": {"outcome": ["rating"]}}),
+                feature_families=["power"],
+                feature_input_root=None,
+                target=None,
+                target_kind="continuous",
+                binary_threshold=None,
+                logger=Mock(),
+            )
+
+        self.assertEqual(captured["deriv_root"], deriv_root)
+        self.assertEqual(y.tolist(), [10.0])
+        self.assertEqual(y_col, "rating")
+        self.assertEqual(meta["trial_id"].tolist(), [7])
+
     def test_load_channels_mean_matrix_rejects_empty_active_window(self):
         from eeg_pipeline.utils.data import machine_learning as ml_data
 
@@ -440,6 +589,50 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     config=config,
                     target="rating",
                 )
+
+    def test_load_channels_mean_matrix_preserves_canonical_trial_ids(self):
+        ml_data = self._import_ml_data()
+
+        class _EpochsStub:
+            def __init__(self):
+                self.info = {"bads": []}
+                self.times = np.array([-0.2, 0.0, 0.2], dtype=float)
+                self.ch_names = ["C3", "C4"]
+                self.baseline = None
+
+            def get_data(self, picks=None):
+                _ = picks
+                return np.ones((2, 2, 3), dtype=float)
+
+        aligned_events = pd.DataFrame(
+            {
+                "trial_id": [7, 9],
+                "rating": [10.0, 20.0],
+            }
+        )
+        config = DotConfig(
+            {
+                "time_frequency_analysis": {
+                    "baseline_window": [-0.2, 0.0],
+                    "active_window": [0.0, 0.2],
+                }
+            }
+        )
+
+        with patch.object(
+            ml_data,
+            "load_epochs_for_analysis",
+            return_value=(_EpochsStub(), aligned_events),
+        ), patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)):
+            _X, _y, _groups, _feature_names, meta = ml_data.load_channels_mean_matrix(
+                subjects=["0001"],
+                task="task",
+                deriv_root=Path("."),
+                config=config,
+                target="rating",
+            )
+
+        self.assertEqual(meta["trial_id"].tolist(), [7, 9])
 
     def test_load_active_matrix_blocks_target_covariate_leakage_for_explicit_target_column(self):
         from eeg_pipeline.utils.data import machine_learning as ml_data
@@ -2473,6 +2666,114 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             self.assertIsInstance(rec["scoring"], dict)
             self.assertIn("r", rec["scoring"])
             self.assertEqual(rec["refit"], "r")
+
+    def test_load_epoch_tensor_matrix_preserves_canonical_trial_ids(self):
+        ml_data = self._import_ml_data()
+
+        class _EpochsStub:
+            def __init__(self):
+                self.info = {"bads": []}
+                self.ch_names = ["C3", "C4"]
+
+            def __getitem__(self, item):
+                if isinstance(item, slice):
+                    return self
+                raise TypeError("Unexpected index type")
+
+            def copy(self):
+                return self
+
+            def pick(self, channels):
+                _ = channels
+                return self
+
+            def get_data(self, picks=None):
+                _ = picks
+                return np.ones((2, 2, 4), dtype=float)
+
+            def __len__(self):
+                return 2
+
+        aligned_events = pd.DataFrame(
+            {
+                "trial_id": [14, 18],
+                "rating": [1.0, 2.0],
+            }
+        )
+
+        with patch.object(
+            ml_data,
+            "load_epochs_for_analysis",
+            return_value=(_EpochsStub(), aligned_events),
+        ), patch.object(ml_data.mne, "pick_types", return_value=np.array([0, 1], dtype=int)):
+            _X, _y, _groups, _channels, meta = ml_data.load_epoch_tensor_matrix(
+                subjects=["0001"],
+                task="task",
+                deriv_root=Path("."),
+                config=DotConfig({}),
+                target="rating",
+            )
+
+        self.assertEqual(meta["trial_id"].tolist(), [14, 18])
+
+    def test_load_epochs_with_targets_supports_resting_state_without_clean_events_file(self):
+        ml_data = self._import_ml_data()
+
+        class _EpochsStub:
+            def __init__(self):
+                self.info = {"bads": [], "ch_names": ["C3", "C4"]}
+                self.metadata = None
+                self.montage = None
+                self.interpolated = False
+
+            def set_montage(self, montage):
+                self.montage = montage
+
+            def interpolate_bads(self, reset_bads=True):
+                _ = reset_bads
+                self.interpolated = True
+
+            def get_channel_types(self, picks=None):
+                _ = picks
+                return ["eeg"]
+
+            def __len__(self):
+                return 2
+
+        epochs = _EpochsStub()
+        aligned = pd.DataFrame({"trial_id": [1, 2], "rating": [10.0, 20.0]})
+        fake_mne = types.SimpleNamespace(
+            channels=types.SimpleNamespace(make_standard_montage=lambda name: f"montage:{name}")
+        )
+
+        with patch.object(
+            ml_data,
+            "load_epochs_for_analysis",
+            return_value=(epochs, aligned),
+        ), patch.object(
+            ml_data,
+            "mne",
+            fake_mne,
+        ):
+            tuples, common_channels = ml_data.load_epochs_with_targets(
+                deriv_root=Path("."),
+                config=DotConfig(
+                    {
+                        "event_columns": {"outcome": ["rating"]},
+                    }
+                ),
+                subjects=["0001"],
+                task="rest",
+                target="rating",
+                logger=Mock(),
+            )
+
+        self.assertEqual(len(tuples), 1)
+        self.assertEqual(tuples[0][0], "sub-0001")
+        self.assertEqual(tuples[0][2].tolist(), [10.0, 20.0])
+        self.assertEqual(common_channels, ["C3", "C4"])
+        self.assertEqual(epochs.metadata["trial_id"].tolist(), [1, 2])
+        self.assertEqual(epochs.montage, "montage:standard_1005")
 
     def test_incremental_validity_uses_correlation_refit_objective(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch

@@ -352,7 +352,7 @@ feature_engineering:
   # Controls cross-trial feature computation and leakage constraints:
   # - "group_stats": allow cross-trial estimates (one row per subject/condition as appropriate)
   # - "trial_ml_safe": forbid cross-trial features unless train_mask is provided (ML/CV-safe)
-  analysis_mode: "trial_ml_safe"
+  analysis_mode: "group_stats"
 
   # Per-family spatial transforms: CSD is excellent for phase connectivity but changes
   # the meaning/units/topography of amplitude-derived features. Configure separately.

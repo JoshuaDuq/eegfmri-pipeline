@@ -707,7 +707,6 @@ const (
 	textFieldPACPairs
 	textFieldBurstBands
 	textFieldSpectralRatioPairs
-	textFieldSpectralSegments
 	textFieldAsymmetryChannelPairs
 	textFieldAsymmetryActivationBands
 	textFieldIAFRois
@@ -1647,7 +1646,6 @@ type Model struct {
 
 	// Spectral configuration
 	spectralRatioPairsSpec     string // e.g. theta:beta,alpha:beta
-	spectralSegmentsSpec       string // e.g. baseline,active
 	spectralPsdAdaptive        bool
 	spectralMultitaperAdaptive bool
 
@@ -2563,7 +2561,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		powerEmitDb:                true,
 		// Spectral defaults
 		spectralRatioPairsSpec:     "theta:beta,theta:alpha,alpha:beta,delta:alpha,delta:theta",
-		spectralSegmentsSpec:       "baseline",
 		spectralPsdAdaptive:        false,
 		spectralMultitaperAdaptive: false,
 		// Connectivity defaults

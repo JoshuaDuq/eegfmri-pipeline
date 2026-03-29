@@ -748,7 +748,10 @@ class PreprocessingPipeline(PipelineBase):
         # Channel types
         ch_types = self.config.get("eeg.ch_types", "eeg")
         if ch_types:
-            lines.append(f'ch_types = ["{ch_types}"]')
+            if isinstance(ch_types, (list, tuple)):
+                lines.append(f"ch_types = {list(ch_types)}")
+            else:
+                lines.append(f'ch_types = ["{ch_types}"]')
         
         # EEG reference
         eeg_reference = self.config.get("eeg.reference", "average")

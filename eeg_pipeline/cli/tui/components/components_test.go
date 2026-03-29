@@ -50,6 +50,24 @@ func TestHelpOverlayView(t *testing.T) {
 	}
 }
 
+func TestHelpOverlayViewDoesNotWrapLongDescriptions(t *testing.T) {
+	help := NewHelpOverlay("Wizard Shortcuts", 40)
+	help.AddSection("Navigation", []HelpItem{{
+		Key:         "Ctrl+Shift+Alt+N",
+		Description: "Move cursor through an intentionally long description that should truncate instead of wrapping",
+	}})
+	help.Toggle()
+
+	view := stripComponentsANSI(help.View())
+	lines := strings.Split(strings.TrimSuffix(view, "\n"), "\n")
+	if len(lines) != 11 {
+		t.Fatalf("expected 11 overlay lines without wrapped continuations, got %d\nview:\n%s", len(lines), view)
+	}
+	if !strings.Contains(view, "...") {
+		t.Fatalf("expected truncated long help text, got:\n%s", view)
+	}
+}
+
 func TestSpinnerAndScrollIndicator(t *testing.T) {
 	spinner := NewSpinner("Loading")
 	first := stripComponentsANSI(spinner.View())

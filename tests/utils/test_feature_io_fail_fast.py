@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pandas as pd
 
 
@@ -33,6 +34,10 @@ def _feature_io_import_stubs() -> dict[str, types.ModuleType]:
             "eeg_pipeline.utils.data.feature_alignment",
             attach_feature_alignment_columns=lambda df, *_args, **_kwargs: df,
             filter_feature_payload_columns=lambda df, *_args, **_kwargs: df,
+        ),
+        "eeg_pipeline.utils.config.loader": _make_module(
+            "eeg_pipeline.utils.config.loader",
+            get_config_value=lambda config, key, default=None: default,
         ),
         "eeg_pipeline.utils.data.epochs": _make_module(
             "eeg_pipeline.utils.data.epochs",
@@ -133,6 +138,95 @@ class TestFeatureIoFailFast(unittest.TestCase):
                 config={"project": {"task": "config-task"}},
                 logger=logger,
                 task="runtime-task",
+                qc={"range_qc": {"status": "ok"}},
             )
 
         self.assertEqual(manifest_calls[-1]["task"], "runtime-task")
+        self.assertEqual(manifest_calls[-1]["qc"], {"range_qc": {"status": "ok"}})
+
+    def test_save_all_features_propagates_feature_qc_to_metadata(self):
+        features_dir = Path(tempfile.mkdtemp())
+        pow_df = pd.DataFrame({"power_alpha": [1.0]})
+        qc_payload = {"range_qc": {"status": "ok"}}
+
+        with patch.object(self.feature_io, "_save_feature_metadata") as mock_save_metadata:
+            self.feature_io.save_all_features(
+                pow_df=pow_df,
+                pow_cols=list(pow_df.columns),
+                baseline_df=pd.DataFrame(),
+                baseline_cols=[],
+                conn_df=None,
+                conn_cols=[],
+                aper_df=None,
+                aper_cols=[],
+                features_dir=features_dir,
+                config={},
+                feature_qc=qc_payload,
+            )
+
+        self.assertTrue(mock_save_metadata.called)
+        self.assertEqual(mock_save_metadata.call_args.kwargs["qc"], qc_payload)
+
+    def test_save_aperiodic_qc_writes_tsv_not_parquet(self):
+        features_dir = Path(tempfile.mkdtemp())
+        logger = Mock()
+        qc_payload = {
+            "slopes": np.array([[1.0]]),
+            "offsets": np.array([[2.0]]),
+            "r2": np.array([[0.95]]),
+            "rms": np.array([[0.1]]),
+            "fit_ok": np.array([[True]]),
+            "valid_bins": np.array([[10]]),
+            "kept_bins": np.array([[8]]),
+            "peak_rejected": np.array([[False]]),
+            "channel_names": ["Cz"],
+        }
+
+        with patch.object(self.feature_io, "write_tsv") as mock_write_tsv, patch.object(
+            self.feature_io, "write_parquet"
+        ) as mock_write_parquet:
+            self.feature_io._save_aperiodic_qc(qc_payload, features_dir, logger)
+
+        mock_write_tsv.assert_called_once()
+        mock_write_parquet.assert_not_called()
+
+    def test_load_features_and_targets_passes_deriv_root_to_aligned_events_lookup(self):
+        deriv_root = Path(tempfile.mkdtemp())
+        features_dir = deriv_root / "sub-0001" / "eeg" / "features" / "power"
+        features_dir.mkdir(parents=True, exist_ok=True)
+        (features_dir / "features_power.parquet").write_text("x", encoding="utf-8")
+        captured: dict[str, object] = {}
+
+        def _get_aligned_events(*_args, **kwargs):
+            captured["deriv_root"] = kwargs["deriv_root"]
+            return pd.DataFrame({"rating": [1.0]})
+
+        with patch.object(
+            self.feature_io,
+            "read_table",
+            side_effect=[
+                pd.DataFrame({"power_alpha": [1.0]}),
+                pd.DataFrame({"power_alpha": [1.0]}),
+            ],
+        ), patch.object(
+            self.feature_io,
+            "pick_target_column",
+            return_value="rating",
+        ), patch.dict(
+            sys.modules,
+            {
+                "eeg_pipeline.utils.data.alignment": _make_module(
+                    "eeg_pipeline.utils.data.alignment",
+                    get_aligned_events=_get_aligned_events,
+                )
+            },
+        ):
+            self.feature_io._load_features_and_targets(
+                subject="0001",
+                task="task",
+                deriv_root=deriv_root,
+                config={},
+                epochs=object(),
+            )
+
+        self.assertEqual(captured["deriv_root"], deriv_root)

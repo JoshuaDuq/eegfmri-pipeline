@@ -13,6 +13,7 @@ import (
 // Layout sizing, lifecycle helpers, and clipboard export.
 
 const executionMinVisibleLogLines = 4
+const executionSectionSpacingLines = 2
 
 func (m Model) compactLogPriorityMode() bool {
 	return m.width < styles.MinTerminalWidth || m.height < styles.MinTerminalHeight
@@ -102,13 +103,15 @@ func clampViewportDimension(available, preferredMin, hardMax int) int {
 }
 
 func (m Model) stackedReservedHeight() int {
-	reserved := renderedLineCount(m.renderHeader()) + renderedLineCount(m.renderFooter())
+	reserved := renderedLineCount(m.renderHeader()) +
+		renderedLineCount(m.renderFooter()) +
+		executionSectionSpacingLines
 	reserved += styles.ExecLogTitleLines + styles.ExecViewportBorderLines
 	if m.copyMode {
 		reserved += styles.ExecCopyModeBannerLines
 	}
 	for _, section := range m.stackedSupplementarySections() {
-		reserved += renderedLineCount(section)
+		reserved += renderedLineCount(section) + 1
 	}
 	return reserved
 }
@@ -123,7 +126,8 @@ func (m Model) stackedSupplementarySections() []string {
 		renderedLineCount(m.renderFooter()) -
 		styles.ExecLogTitleLines -
 		styles.ExecViewportBorderLines -
-		executionMinVisibleLogLines - 1
+		executionMinVisibleLogLines -
+		executionSectionSpacingLines
 	if m.copyMode {
 		available -= styles.ExecCopyModeBannerLines
 	}
@@ -133,7 +137,7 @@ func (m Model) stackedSupplementarySections() []string {
 
 	if m.IsDone() {
 		summary := m.renderCompletionSummary()
-		if renderedLineCount(summary) <= available {
+		if renderedLineCount(summary)+1 <= available {
 			return []string{summary}
 		}
 		return nil
@@ -142,7 +146,7 @@ func (m Model) stackedSupplementarySections() []string {
 	progress := m.renderSidebarCard(m.renderProgressSection())
 	progressLines := renderedLineCount(progress)
 
-	if progressLines <= available {
+	if progressLines+1 <= available {
 		return []string{progress}
 	}
 	return nil
@@ -157,7 +161,7 @@ func (m Model) sidebarInnerWidth() int {
 }
 
 func (m Model) renderSidebarCard(content string) string {
-	return styles.PanelStyle.Width(m.panelWidth()).Render(content)
+	return styles.RenderNoWrapBlock(styles.PanelStyle, content, m.panelWidth())
 }
 
 func (m Model) copyLogToClipboard() tea.Cmd {

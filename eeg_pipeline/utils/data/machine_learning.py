@@ -10,8 +10,8 @@ import mne
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.infra.tsv import read_table, read_tsv
-from eeg_pipeline.infra.paths import _find_clean_events_path, deriv_features_path, load_events_df
+from eeg_pipeline.infra.tsv import read_table
+from eeg_pipeline.infra.paths import deriv_features_path, load_events_df
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.columns import (
     find_binary_outcome_column_in_events,
@@ -52,6 +52,29 @@ def _filter_finite_targets(
     groups_filtered = groups[finite_mask]
     meta_filtered = meta.loc[finite_mask].reset_index(drop=True)
     return X_filtered, y_filtered, groups_filtered, meta_filtered
+
+
+def _coerce_trial_id_series(trial_ids: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(trial_ids, errors="raise")
+    if not np.all(np.isfinite(numeric.to_numpy(dtype=float))):
+        raise ValueError("trial_id values must be finite.")
+
+    integer_values = numeric.to_numpy(dtype=float)
+    rounded = np.rint(integer_values)
+    if not np.allclose(integer_values, rounded):
+        raise ValueError("trial_id values must be integers.")
+
+    return pd.Series(rounded.astype(int), index=trial_ids.index, name="trial_id")
+
+
+def _finalize_meta_trial_ids(meta: pd.DataFrame) -> pd.DataFrame:
+    finalized = meta.reset_index(drop=True).copy()
+    if "trial_id" in finalized.columns:
+        finalized["trial_id"] = _coerce_trial_id_series(finalized["trial_id"])
+        return finalized
+
+    finalized["trial_id"] = np.arange(1, len(finalized) + 1, dtype=int)
+    return finalized
 
 
 def _normalize_subject(subject: str) -> Tuple[str, str]:
@@ -501,6 +524,9 @@ def _standardize_meta_columns(
     """Extract commonly used covariates into standardized meta column names."""
     meta_cols: Dict[str, pd.Series] = {}
 
+    if "trial_id" in events_df.columns:
+        meta_cols["trial_id"] = _coerce_trial_id_series(events_df["trial_id"])
+
     block_col = _find_block_column(events_df)
     if block_col is not None:
         meta_cols["block"] = block_col
@@ -550,7 +576,13 @@ def _load_subject_ml_from_features(
     """Load (X_df, y, y_col, meta_df) for one subject from feature tables + clean events."""
     subject_raw, subject_bids = _normalize_subject(subject)
 
-    events_df = load_events_df(subject_raw, task, config=config, prefer_clean=True)
+    events_df = load_events_df(
+        subject_raw,
+        task,
+        deriv_root=deriv_root,
+        config=config,
+        prefer_clean=True,
+    )
     if events_df is None or events_df.empty:
         raise FileNotFoundError(f"Events.tsv not found (or empty) for {subject_bids}, task-{task}.")
     events_df = events_df.reset_index(drop=True)
@@ -638,21 +670,21 @@ def load_epochs_with_targets(
     bids_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[List[Tuple[str, mne.Epochs, pd.Series]], List[str]]:
-    from eeg_pipeline.utils.config.loader import load_config
-    
     if config is None:
+        from eeg_pipeline.utils.config.loader import load_config
+
         config = load_config()
     if logger is None:
         logger = logging.getLogger(__name__)
 
     if task == "":
         task = config.get("project.task")
-    if bids_root is None:
-        bids_root = config.bids_root
 
     if subjects is None or subjects == ["all"]:
         from .subjects import get_available_subjects
 
+        if bids_root is None:
+            bids_root = config.bids_root
         subjects = get_available_subjects(
             config=config,
             deriv_root=deriv_root,
@@ -666,40 +698,25 @@ def load_epochs_with_targets(
 
     out: List[Tuple[str, mne.Epochs, pd.Series]] = []
     ch_sets: List[set] = []
-
     for s in subjects:
         sub = f"sub-{s}" if not str(s).startswith("sub-") else str(s)
-
-        try:
-            from eeg_pipeline.infra.paths import find_clean_epochs_path
-
-            epochs_path = find_clean_epochs_path(s, task, deriv_root=deriv_root, config=config)
-        except (FileNotFoundError, ValueError, KeyError):
-            epochs_path = None
-
-        if epochs_path is None or not Path(epochs_path).exists():
-            logger.warning(f"Clean epochs not found for {sub}; skipping.")
+        epochs, aligned = load_epochs_for_analysis(
+            s,
+            task,
+            align="strict",
+            preload=True,
+            deriv_root=deriv_root,
+            logger=logger,
+            config=config,
+        )
+        if epochs is None or aligned is None:
+            logger.warning("No aligned epochs/events for %s; skipping.", sub)
             continue
 
-        epochs = mne.read_epochs(epochs_path, preload=True, verbose=False)
         epochs.set_montage(mne.channels.make_standard_montage("standard_1005"))
         bad_channels = epochs.info.get("bads", [])
         if bad_channels:
             epochs.interpolate_bads(reset_bads=True)
-
-        clean_events_path = _find_clean_events_path(
-            subject=str(s),
-            task=task,
-            deriv_root=deriv_root,
-            config=config,
-            constants=None,
-        )
-        
-        if clean_events_path is None or not clean_events_path.exists():
-            logger.warning(f"Clean events.tsv not found for {sub}; skipping.")
-            continue
-        
-        aligned = read_tsv(clean_events_path)
         
         if len(epochs) != len(aligned):
             raise ValueError(
@@ -903,8 +920,6 @@ def load_active_matrix(
 
     # Optional filters by parsed feature metadata (band/segment/scope).
     # These filters are applied after harmonization so "intersection" behaves predictably.
-    from eeg_pipeline.domain.features.naming import NamingSchema
-
     def _sanitize_list(values: Optional[List[str]]) -> Optional[List[str]]:
         if values is None:
             return None
@@ -925,6 +940,8 @@ def load_active_matrix(
     )
 
     if bands or segments or scopes or stats:
+        from eeg_pipeline.domain.features.naming import NamingSchema
+
         keep: List[str] = []
         for col in feature_names:
             parsed = NamingSchema.parse(str(col))
@@ -954,8 +971,7 @@ def load_active_matrix(
     groups_arr = np.asarray(groups_list)
     meta = pd.concat(meta_list, axis=0, ignore_index=True)
 
-    meta = meta.reset_index(drop=True)
-    meta["trial_id"] = np.arange(len(meta), dtype=int)
+    meta = _finalize_meta_trial_ids(meta)
 
     X = X_all_df.to_numpy(dtype=float)
 
@@ -1065,8 +1081,6 @@ def load_channels_mean_matrix(
     meta_blocks: List[pd.DataFrame] = []
     feature_cols: Optional[List[str]] = None
 
-    from .epochs import load_epochs_for_analysis
-
     for sub in subjects:
         epochs, aligned_events = load_epochs_for_analysis(
             sub,
@@ -1164,8 +1178,7 @@ def load_channels_mean_matrix(
     meta = pd.concat(meta_blocks, axis=0, ignore_index=True)
 
     X, y_all, groups_arr, meta = _filter_finite_targets(X, y_all, groups_arr, meta)
-    meta = meta.reset_index(drop=True)
-    meta["trial_id"] = np.arange(len(meta), dtype=int)
+    meta = _finalize_meta_trial_ids(meta)
 
     if target_kind == "binary":
         unique = set(np.unique(y_all).tolist())
@@ -1275,8 +1288,7 @@ def load_epoch_tensor_matrix(
     meta = pd.concat(meta_blocks, axis=0, ignore_index=True)
 
     X, y_all, groups_arr, meta = _filter_finite_targets(X, y_all, groups_arr, meta)
-    meta = meta.reset_index(drop=True)
-    meta["trial_id"] = np.arange(len(meta), dtype=int)
+    meta = _finalize_meta_trial_ids(meta)
 
     if target_kind == "binary":
         unique = set(np.unique(y_all).tolist())

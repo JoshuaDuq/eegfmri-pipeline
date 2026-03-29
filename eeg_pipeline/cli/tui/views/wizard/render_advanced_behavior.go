@@ -33,7 +33,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	}
 
 	labelWidth := defaultLabelWidthWide
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
 	options := m.getBehaviorOptions()
 	availableColumns := m.GetAvailableColumns()
@@ -141,47 +141,47 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return label, "", "QC gates · cluster correction · input ranges"
 		// Behavior sub-section headers (non-collapsible visual separators)
 		case optBehaviorSubDataMapping:
-			return "  ── Data Mapping", "", ""
+			return "  · Data Mapping", "", ""
 		case optBehaviorSubCorrelationSettings:
-			return "  ── Correlation Settings", "", ""
+			return "  · Correlation Settings", "", ""
 		case optBehaviorSubStatisticalInference:
-			return "  ── Statistical Inference", "", ""
+			return "  · Statistical Inference", "", ""
 		case optBehaviorSubPermutations:
-			return "  ── Permutations", "", ""
+			return "  · Permutations", "", ""
 		case optBehaviorSubCovariates:
-			return "  ── Covariates", "", ""
+			return "  · Covariates", "", ""
 		case optBehaviorSubRunAdjustment:
-			return "  ── Run Adjustment", "", ""
+			return "  · Run Adjustment", "", ""
 		case optBehaviorSubCorrelationsExtra:
-			return "  ── Correlations Extra", "", ""
+			return "  · Correlations Extra", "", ""
 		case optBehaviorSubOutcome:
-			return "  ── Outcome", "", ""
+			return "  · Outcome", "", ""
 		case optBehaviorSubOutcomes:
-			return "  ── Outcomes", "", ""
+			return "  · Outcomes", "", ""
 		case optBehaviorSubModelFamilies:
-			return "  ── Model Families", "", ""
+			return "  · Model Families", "", ""
 		case optBehaviorSubInference:
-			return "  ── Inference", "", ""
+			return "  · Inference", "", ""
 		case optBehaviorSubDiagnostics:
-			return "  ── Diagnostics", "", ""
+			return "  · Diagnostics", "", ""
 		case optBehaviorSubFitting:
-			return "  ── Fitting", "", ""
+			return "  · Fitting", "", ""
 		case optBehaviorSubCrossfit:
-			return "  ── Crossfit", "", ""
+			return "  · Crossfit", "", ""
 		case optBehaviorSubTimeWindow:
-			return "  ── Time Window", "", ""
+			return "  · Time Window", "", ""
 		case optBehaviorSubFeatures:
-			return "  ── Features & Output", "", ""
+			return "  · Features & Output", "", ""
 		case optBehaviorSubITPC:
-			return "  ── ITPC", "", ""
+			return "  · ITPC", "", ""
 		case optBehaviorSubERDS:
-			return "  ── ERDS", "", ""
+			return "  · ERDS", "", ""
 		case optBehaviorSubClusterCorrection:
-			return "  ── Cluster Correction", "", ""
+			return "  · Cluster Correction", "", ""
 		case optBehaviorSubMultilevel:
-			return "  ── Group-Level", "", ""
+			return "  · Group-Level", "", ""
 		case optBehaviorSubFeatureRegistry:
-			return "  ── Feature Filtering & Registry", "", ""
+			return "  · Feature Filtering & Registry", "", ""
 		case optPredictorType:
 			types := []string{"continuous", "binary", "categorical"}
 			v := "continuous"
@@ -1039,7 +1039,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		totalLines, m.advancedOffset, scrollableVisibleLines(totalLines, m.availableAdvancedContentHeight()))
 
 	if showScrollIndicators && startLine > 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startLine)) + "\n")
+		b.WriteString(styles.RenderScrollUpIndicator(startLine) + "\n")
 	}
 
 	lineIdx := 0
@@ -1062,7 +1062,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 			valueStyle = lipgloss.NewStyle()
 		} else if isSubHeader {
@@ -1078,9 +1078,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		if m.useDefaultAdvanced && i > 0 {
 			labelStyle = labelStyle.Faint(true)
-			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Muted)
 		} else if m.editingNumber && isFocused {
-			// Highlight the editing field
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		}
 
@@ -1091,7 +1090,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		if inRange {
 			if isSectionHeader {
-				line := cursor + labelStyle.Render(label) + "  " + hintStyle.Render(hint)
+				sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+				line := cursor + labelStyle.Render(label) + sep + hintStyle.Render(hint)
 				b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
 			} else {
 				styledLabel := labelStyle.Render(label + ":")
@@ -1131,7 +1131,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 	if showScrollIndicators && endLine < totalLines {
 		remaining := totalLines - endLine
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", remaining)) + "\n")
+		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
 	}
 
 	return b.String()

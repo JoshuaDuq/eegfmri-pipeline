@@ -838,7 +838,7 @@ def write_clean_events_tsv_for_epochs(
             f"epochs={n_epochs}, target_events={len(target)} and epochs.selection unavailable."
         )
 
-    kept.insert(0, "trial_id", range(len(kept)))
+    kept.insert(0, "trial_id", range(1, len(kept) + 1))
     kept.insert(0, "epoch_index", range(len(kept)))
     qc_table = _compute_clean_events_qc_table(epochs=epochs, qc_cfg=qc_cfg)
     if len(qc_table) != len(kept):

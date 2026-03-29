@@ -269,7 +269,20 @@ func (m Model) innerWidth() int {
 func (m Model) renderHeader() string {
 	title := styles.RenderSectionLabel("Execution History")
 	count := lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("  %d records", len(m.records)))
-	return title + count + "\n" + styles.RenderDivider(m.innerWidth())
+	header := title + count + "\n" + styles.RenderDivider(m.innerWidth())
+	if len(m.records) > 0 {
+		header += "\n" + m.renderColumnHeaders()
+	}
+	return header
+}
+
+func (m Model) renderColumnHeaders() string {
+	colStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
+	return "    " +
+		colStyle.Width(16).Render("Pipeline") +
+		colStyle.Width(11).Render("Mode") +
+		colStyle.Width(11).Render("Duration") +
+		colStyle.Render("When")
 }
 
 func (m Model) renderLoading() string {
@@ -284,6 +297,27 @@ func (m Model) renderEmpty() string {
 	return "\n  " + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("No execution history yet. Run a pipeline to see it here.") + "\n"
 }
 
+type timeGroup int
+
+const (
+	groupToday timeGroup = iota
+	groupThisWeek
+	groupOlder
+)
+
+func recordTimeGroup(t time.Time) timeGroup {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	weekAgo := today.AddDate(0, 0, -7)
+	if t.After(today) {
+		return groupToday
+	}
+	if t.After(weekAgo) {
+		return groupThisWeek
+	}
+	return groupOlder
+}
+
 func (m Model) renderHistory() string {
 	var b strings.Builder
 
@@ -292,11 +326,29 @@ func (m Model) renderHistory() string {
 		maxShow = len(m.records)
 	}
 
+	groupLabelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
+	groupDivStyle := lipgloss.NewStyle().Foreground(styles.Border)
+	groupNames := map[timeGroup]string{
+		groupToday:    "Today",
+		groupThisWeek: "This Week",
+		groupOlder:    "Older",
+	}
+
+	renderedGroups := map[timeGroup]bool{}
 	for i := 0; i < maxShow; i++ {
 		record := m.records[i]
-		isCursor := i == m.cursor
-
-		b.WriteString(m.renderRecord(record, isCursor))
+		grp := recordTimeGroup(record.StartTime)
+		if !renderedGroups[grp] {
+			renderedGroups[grp] = true
+			label := groupLabelStyle.Render(groupNames[grp])
+			ruleWidth := m.innerWidth() - lipgloss.Width(label) - 3
+			if ruleWidth < 1 {
+				ruleWidth = 1
+			}
+			rule := groupDivStyle.Render(" " + strings.Repeat("─", ruleWidth))
+			b.WriteString("\n" + label + rule + "\n")
+		}
+		b.WriteString(m.renderRecord(record, i == m.cursor))
 		b.WriteString("\n")
 	}
 
@@ -316,25 +368,30 @@ func (m Model) renderRecord(record ExecutionRecord, isCursor bool) string {
 
 	var statusIcon string
 	if record.Success {
-		statusIcon = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
+		statusIcon = lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(styles.CheckMark)
 	} else {
-		statusIcon = lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark)
+		statusIcon = lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render(styles.CrossMark)
 	}
 
-	pipelineStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(14)
+	var pipelineText string
 	if isCursor {
-		pipelineStyle = pipelineStyle.Foreground(styles.Primary).Bold(true)
+		pipelineText = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(record.Pipeline)
+	} else {
+		pipelineText = lipgloss.NewStyle().Foreground(styles.Text).Render(record.Pipeline)
 	}
 
-	modeStyle := lipgloss.NewStyle().Foreground(styles.Muted).Width(10)
-	durationStyle := lipgloss.NewStyle().Foreground(styles.Muted).Width(10)
-	timeStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render("  ·  ")
+	modeText := lipgloss.NewStyle().Foreground(styles.TextDim).Render(record.Mode)
+	durText := lipgloss.NewStyle().Foreground(styles.Muted).Render(FormatDurationSeconds(record.Duration))
+	timeText := lipgloss.NewStyle().Foreground(styles.Muted).Render(FormatTimeAgo(record.StartTime))
 
-	return cursor + statusIcon + " " +
-		pipelineStyle.Render(record.Pipeline) +
-		modeStyle.Render(record.Mode) +
-		durationStyle.Render(FormatDurationSeconds(record.Duration)) +
-		timeStyle.Render(FormatTimeAgo(record.StartTime))
+	parts := []string{pipelineText}
+	if record.Mode != "" {
+		parts = append(parts, modeText)
+	}
+	parts = append(parts, durText, timeText)
+
+	return cursor + statusIcon + " " + strings.Join(parts, sep)
 }
 
 func FormatDurationSeconds(secs float64) string {
@@ -376,6 +433,6 @@ func (m Model) renderFooter() string {
 
 	w := m.innerWidth()
 	divider := styles.RenderDivider(w)
-	bar := styles.FooterStyle.Width(w).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	bar := styles.RenderNoWrapBlock(styles.FooterStyle, strings.Join(hints, styles.RenderFooterSeparator()), w)
 	return divider + "\n" + bar
 }

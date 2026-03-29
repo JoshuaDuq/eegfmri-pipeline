@@ -212,40 +212,47 @@ func (m Model) renderMetricTiles(tiles []metricTile, maxWidth int) string {
 
 // renderCompletionActions renders the action button bar for the completion card.
 func (m Model) renderCompletionActions() string {
-	btnStyle := func(bg lipgloss.Color) lipgloss.Style {
+	key := func(k string) string {
 		return lipgloss.NewStyle().
-			Foreground(styles.BgDark).
-			Background(bg).
-			Bold(true).
-			Padding(0, 1)
+			Foreground(styles.TextDim).Background(styles.Surface).
+			Bold(true).Padding(0, 1).Render(k)
 	}
-	dimBtn := lipgloss.NewStyle().
-		Foreground(styles.Text).
-		Background(styles.Border).
-		Padding(0, 1)
+	action := func(label string, color lipgloss.Color) string {
+		return lipgloss.NewStyle().Foreground(color).Bold(true).Render(label)
+	}
+	dim := func(label string) string {
+		return lipgloss.NewStyle().Foreground(styles.TextDim).Render(label)
+	}
+	hint := func(k, label string, color lipgloss.Color) string {
+		return key(k) + " " + action(label, color)
+	}
+	dimHint := func(k, label string) string {
+		return key(k) + " " + dim(label)
+	}
 
-	var buttons []string
+	var parts []string
 	switch m.Status {
 	case StatusSuccess:
-		buttons = append(buttons,
-			btnStyle(styles.Success).Render("[Enter] Menu"),
-			btnStyle(styles.Accent).Render("[O] Open Results"),
-			dimBtn.Render("[C] Copy Log"),
+		parts = append(parts,
+			hint("Enter", "Menu", styles.Success),
+			hint("O", "Open Results", styles.Accent),
+			dimHint("C", "Copy Log"),
 		)
 	case StatusFailed:
-		buttons = append(buttons,
-			btnStyle(styles.Warning).Render("[R] Retry"),
-			btnStyle(styles.Error).Render("[C] Copy Log"),
-			dimBtn.Render("[Enter] Menu"),
+		parts = append(parts,
+			hint("R", "Retry", styles.Warning),
+			hint("C", "Copy Log", styles.Error),
+			dimHint("Enter", "Menu"),
 		)
 	case StatusCancelled:
-		buttons = append(buttons,
-			btnStyle(styles.Accent).Render("[R] Retry"),
-			dimBtn.Render("[Enter] Menu"),
+		parts = append(parts,
+			hint("R", "Retry", styles.Accent),
+			dimHint("Enter", "Menu"),
 		)
 	}
 
-	return "  " + strings.Join(buttons, "  ")
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render("  │  ")
+	return "  " + strings.Join(parts, sep)
 }
 
 func formatDuration(d time.Duration) string {
@@ -305,10 +312,10 @@ func (m Model) renderProgressSection() string {
 
 	iw := m.sidebarInnerWidth()
 
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
 	headerLine := m.renderStatus() + "  " + styles.RenderSectionLabel("Progress")
 	if m.StartTime.Unix() > 0 {
-		dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-		headerLine += dimStyle.Render("  " + formatDuration(m.getDuration()))
+		headerLine += sep + lipgloss.NewStyle().Foreground(styles.TextDim).Render(formatDuration(m.getDuration()))
 	}
 	b.WriteString(styles.TruncateLine(headerLine, iw) + "\n")
 
@@ -348,6 +355,7 @@ func (m Model) renderProgressSection() string {
 func (m Model) renderCurrentStep(maxWidth int) string {
 	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	arrow := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
 
 	var parts []string
 
@@ -356,22 +364,21 @@ func (m Model) renderCurrentStep(maxWidth int) string {
 	}
 
 	if m.CurrentOperation != "" {
-		opText := m.CurrentOperation
 		if m.OperationTotal > 0 {
 			stepProgress := float64(m.OperationCurrent) / float64(m.OperationTotal)
-			opText += fmt.Sprintf(" %d/%d", m.OperationCurrent, m.OperationTotal)
-			// Inline mini bar (8 chars)
 			barWidth := 8
 			filled := int(stepProgress * float64(barWidth))
-			bar := lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("━", filled))
+			fillColor := progressFillColor(stepProgress)
+			bar := lipgloss.NewStyle().Foreground(fillColor).Render(strings.Repeat("━", filled))
 			empty := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("─", barWidth-filled))
-			parts = append(parts, dimStyle.Render("→ ")+dimStyle.Render(opText)+" "+bar+empty)
+			counter := dimStyle.Render(fmt.Sprintf("%d/%d", m.OperationCurrent, m.OperationTotal))
+			parts = append(parts, dimStyle.Render(m.CurrentOperation)+" "+counter+" "+bar+empty)
 		} else {
-			parts = append(parts, dimStyle.Render("→ "+opText))
+			parts = append(parts, dimStyle.Render(m.CurrentOperation))
 		}
 	}
 
-	return strings.Join(parts, " ")
+	return strings.Join(parts, arrow)
 }
 
 // renderMetricsDashboard renders a compact resource dashboard with
@@ -515,8 +522,9 @@ func (m Model) renderLogSection() string {
 	}
 
 	logHeader := styles.RenderSectionLabel("Log")
+	right := ""
 	if len(m.OutputLines) > 0 {
-		scrollPct := 0
+		scrollPct := 100
 		if m.logViewport.TotalLineCount() > 0 {
 			scrollPct = int(float64(m.logViewport.YOffset+m.logViewport.Height) / float64(m.logViewport.TotalLineCount()) * 100)
 			if scrollPct > 100 {
@@ -524,19 +532,45 @@ func (m Model) renderLogSection() string {
 			}
 		}
 
-		indicator := lipgloss.NewStyle().Foreground(styles.Muted).Render(
-			fmt.Sprintf(" [%d lines | %d%%]", len(m.OutputLines), scrollPct))
-		logHeader += indicator
+		lineText := lipgloss.NewStyle().Foreground(styles.TextDim).
+			Render(fmt.Sprintf("%d lines", len(m.OutputLines)))
+		sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+		scrollText := lipgloss.NewStyle().Foreground(styles.Muted).
+			Render(fmt.Sprintf("%d%%", scrollPct))
+		right = lineText + sep + scrollText
 	}
 
-	b.WriteString(lipgloss.NewStyle().Width(contentWidth).Render(logHeader) + "\n")
+	if right != "" {
+		gap := contentWidth - lipgloss.Width(logHeader) - lipgloss.Width(right)
+		if gap < 1 {
+			gap = 1
+		}
+		logHeader += strings.Repeat(" ", gap) + right
+	}
+
+	b.WriteString(styles.TruncateLine(logHeader, contentWidth) + "\n")
 	b.WriteString(styles.RenderDivider(contentWidth) + "\n")
 	b.WriteString(m.logViewport.View())
 
 	return b.String()
 }
 
-// renderAnimatedProgressBar renders the main progress bar (single accent color; name kept for API).
+// progressFillColor returns a fill color that shifts warning→accent→primary→success
+// as progress increases, giving an intuitive at-a-glance completion sense.
+func progressFillColor(p float64) lipgloss.Color {
+	switch {
+	case p >= 1.0:
+		return styles.Success
+	case p >= 0.6:
+		return styles.Primary
+	case p >= 0.25:
+		return styles.Accent
+	default:
+		return styles.Warning
+	}
+}
+
+// renderAnimatedProgressBar renders the main progress bar with gradient fill color.
 // When running, the leading edge pulses via the animation queue.
 func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 	if width < styles.MinProgressBarWidth {
@@ -554,7 +588,8 @@ func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 		filled = width
 	}
 
-	fillStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	fillColor := progressFillColor(p)
+	fillStyle := lipgloss.NewStyle().Foreground(fillColor)
 	emptyStyle := lipgloss.NewStyle().Foreground(styles.Border)
 
 	var fillBlock string
@@ -574,25 +609,26 @@ func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 	}
 
 	bar := fillBlock + emptyStyle.Render(strings.Repeat("░", width-filled))
-	pct := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(fmt.Sprintf(" %3.0f%%", p*100))
+	pct := lipgloss.NewStyle().Bold(true).Foreground(fillColor).Render(fmt.Sprintf(" %3.0f%%", p*100))
 	return bar + pct
 }
 
-// renderStatus renders a small status badge summarizing the current
-// execution state with an appropriate color and icon.
+// renderStatus renders the current execution state with glyph + colored text.
 func (m Model) renderStatus() string {
-	style := lipgloss.NewStyle().Bold(true).Padding(0, 1)
+	s := func(icon string, color lipgloss.Color, label string) string {
+		return lipgloss.NewStyle().Foreground(color).Bold(true).Render(icon + " " + label)
+	}
 	switch m.Status {
 	case StatusRunning:
-		return style.Background(styles.Primary).Foreground(styles.BgDark).Render(styles.ActiveMark + " Running")
+		return s(styles.ActiveMark, styles.Primary, "Running")
 	case StatusSuccess:
-		return style.Background(styles.Success).Foreground(styles.BgDark).Render(styles.CheckMark + " Success")
+		return s(styles.CheckMark, styles.Success, "Success")
 	case StatusFailed:
-		return style.Background(styles.Error).Foreground(styles.BgDark).Render(styles.CrossMark + " Failed")
+		return s(styles.CrossMark, styles.Error, "Failed")
 	case StatusCancelled:
-		return style.Background(styles.Warning).Foreground(styles.BgDark).Render(styles.CrossMark + " Cancelled")
+		return s(styles.CrossMark, styles.Warning, "Cancelled")
 	default:
-		return style.Background(styles.Surface).Foreground(styles.Muted).Render(" Pending ")
+		return lipgloss.NewStyle().Foreground(styles.Muted).Render("Pending")
 	}
 }
 
@@ -655,7 +691,7 @@ func (m Model) renderFooter() string {
 		width = 20
 	}
 	divider := styles.RenderDivider(width)
-	bar := styles.FooterStyle.Width(width).Render(strings.Join(hints, styles.RenderFooterSeparator()))
+	bar := styles.RenderNoWrapBlock(styles.FooterStyle, strings.Join(hints, styles.RenderFooterSeparator()), width)
 	return divider + "\n" + bar
 }
 

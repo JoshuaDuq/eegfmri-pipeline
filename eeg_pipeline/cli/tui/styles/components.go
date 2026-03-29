@@ -37,10 +37,6 @@ var (
 			BorderForeground(Secondary).
 			Padding(1, 2)
 
-	SelectedRowStyle = lipgloss.NewStyle().
-				Background(Highlight).
-				Foreground(Primary)
-
 	HeaderLineStyle = lipgloss.NewStyle().Foreground(Secondary)
 
 	SectionDividerStyle = lipgloss.NewStyle().Foreground(Border)
@@ -50,25 +46,11 @@ var (
 )
 
 var (
-	badgeDarkForeground  = lipgloss.Color("#000000")
-	badgeLightForeground = lipgloss.Color("#FFFFFF")
-)
-
-func newBadgeStyle(foreground, background lipgloss.Color) lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(foreground).
-		Background(background).
-		Bold(true).
-		Padding(0, 1)
-}
-
-var (
-	BadgeSuccessStyle = newBadgeStyle(badgeDarkForeground, Success)
-	BadgeErrorStyle   = newBadgeStyle(badgeLightForeground, Error)
-	BadgeWarningStyle = newBadgeStyle(badgeDarkForeground, Warning)
-	BadgeAccentStyle  = newBadgeStyle(badgeLightForeground, Accent)
-	BadgeMutedStyle   = newBadgeStyle(badgeLightForeground, Secondary)
-	BadgeTaskStyle    = lipgloss.NewStyle().Foreground(Accent).Bold(true)
+	BadgeSuccessStyle = lipgloss.NewStyle().Foreground(Success).Bold(true)
+	BadgeErrorStyle   = lipgloss.NewStyle().Foreground(Error).Bold(true)
+	BadgeWarningStyle = lipgloss.NewStyle().Foreground(Warning).Bold(true)
+	BadgeAccentStyle  = lipgloss.NewStyle().Foreground(Accent).Bold(true)
+	BadgeMutedStyle   = lipgloss.NewStyle().Foreground(Muted)
 	InlineKindStyle   = lipgloss.NewStyle().Foreground(Muted)
 	PreviewBlockLabel = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 	PreviewSepStyle   = lipgloss.NewStyle().Foreground(Border)
@@ -77,6 +59,15 @@ var (
 var (
 	ValidIndicatorStyle   = lipgloss.NewStyle().Foreground(Success)
 	InvalidIndicatorStyle = lipgloss.NewStyle().Foreground(Warning)
+)
+
+var (
+	FocusedInputStyle     = lipgloss.NewStyle().Foreground(Primary).Bold(true).Underline(true)
+	InputPlaceholderStyle = lipgloss.NewStyle().Foreground(Muted).Italic(true)
+	PanelFocusedStyle     = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(Primary).
+				Padding(1, 2)
 )
 
 var (

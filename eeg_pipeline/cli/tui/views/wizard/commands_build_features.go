@@ -673,10 +673,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.spectralFmax != 80.0 {
 			args = append(args, "--spectral-fmax", fmt.Sprintf("%.1f", m.spectralFmax))
 		}
-		if strings.TrimSpace(m.spectralSegmentsSpec) != "" && m.spectralSegmentsSpec != "baseline" {
-			args = append(args, "--spectral-segments")
-			args = append(args, splitSpaceList(m.spectralSegmentsSpec)...)
-		}
 		if m.spectralExcludeLineNoise {
 			args = append(args, "--spectral-exclude-line-noise")
 		} else {

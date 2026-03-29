@@ -30,7 +30,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 	}
 
 	labelWidth := defaultLabelWidth
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
 	// Build values for display
 	engineVal := []string{"docker", "apptainer"}[m.fmriEngineIndex%2]
@@ -210,7 +210,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupOutput:
@@ -223,7 +223,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupPerformance:
@@ -236,7 +236,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupAnatomical:
@@ -249,7 +249,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupBold:
@@ -262,7 +262,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupQc:
@@ -275,7 +275,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupDenoising:
@@ -288,7 +288,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupSurface:
@@ -301,7 +301,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupMultiecho:
@@ -314,7 +314,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupRepro:
@@ -327,7 +327,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupValidation:
@@ -340,7 +340,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optFmriGroupAdvanced:
@@ -353,7 +353,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		// Runtime options (indented)

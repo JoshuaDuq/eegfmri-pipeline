@@ -16,6 +16,5 @@ var (
 	TextDim   = lipgloss.Color("#8A9BB0") // Cool-gray-400 — secondary text
 	BgDark    = lipgloss.Color("#0D1117") // Near-black — app background
 	Surface   = lipgloss.Color("#161C26") // Dark-navy — card/panel background
-	Highlight = lipgloss.Color("#1A2D42") // Dark-steel — selected row background
 	Border    = lipgloss.Color("#2D3748") // Cool-gray-700 — subtle borders
 )

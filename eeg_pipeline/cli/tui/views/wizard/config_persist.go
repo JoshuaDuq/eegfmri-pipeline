@@ -161,7 +161,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["powerLineNoiseHarmonics"] = m.powerLineNoiseHarmonics
 	cfg["powerEmitDb"] = m.powerEmitDb
 	cfg["spectralRatioPairsSpec"] = m.spectralRatioPairsSpec
-	cfg["spectralSegmentsSpec"] = m.spectralSegmentsSpec
 	cfg["spectralPsdAdaptive"] = m.spectralPsdAdaptive
 	cfg["spectralMultitaperAdaptive"] = m.spectralMultitaperAdaptive
 	cfg["spectralPsdMethod"] = m.spectralPsdMethod
@@ -1343,7 +1342,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.powerLineNoiseHarmonics = getInt("powerLineNoiseHarmonics", m.powerLineNoiseHarmonics)
 	m.powerEmitDb = getBool("powerEmitDb", m.powerEmitDb)
 	m.spectralRatioPairsSpec = getString("spectralRatioPairsSpec", m.spectralRatioPairsSpec)
-	m.spectralSegmentsSpec = getString("spectralSegmentsSpec", m.spectralSegmentsSpec)
 	m.spectralPsdAdaptive = getBool("spectralPsdAdaptive", m.spectralPsdAdaptive)
 	m.spectralMultitaperAdaptive = getBool("spectralMultitaperAdaptive", m.spectralMultitaperAdaptive)
 	m.spectralPsdMethod = getInt("spectralPsdMethod", m.spectralPsdMethod)

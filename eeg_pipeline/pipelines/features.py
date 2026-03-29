@@ -69,6 +69,7 @@ from eeg_pipeline.utils.data.feature_io import (
     save_dropped_trials_log,
 )
 from eeg_pipeline.utils.data.feature_alignment import (
+    TRIAL_ID_COLUMN,
     attach_feature_alignment_columns,
     filter_feature_payload_columns,
 )
@@ -142,6 +143,31 @@ def _infer_retained_trial_count(
         except Exception:
             continue
     return candidates[0] if candidates else 0
+
+
+def _retained_aligned_events(
+    aligned_events: Optional[pd.DataFrame],
+    retention_stats: Optional[Dict[str, Any]],
+) -> Optional[pd.DataFrame]:
+    """Return aligned events after applying the retention mask from feature alignment."""
+    if aligned_events is None:
+        return None
+
+    retained_events = aligned_events.reset_index(drop=True)
+    if not isinstance(retention_stats, dict):
+        return retained_events
+
+    mask = retention_stats.get("mask")
+    if mask is None:
+        return retained_events
+
+    keep_mask = np.asarray(mask, dtype=bool)
+    if len(keep_mask) != len(retained_events):
+        raise ValueError(
+            "Feature alignment retention mask length does not match aligned events length."
+        )
+
+    return retained_events.loc[keep_mask].reset_index(drop=True)
 
 
 def _resolve_condition_labels_for_events(
@@ -448,6 +474,7 @@ def _accumulate_features(
     unpacked: Dict[str, Any],
     features: FeatureExtractionResult,
     aligned: Dict[str, pd.DataFrame],
+    aligned_events: Optional[pd.DataFrame] = None,
 ) -> None:
     """Accumulate aligned features for later merging."""
     feature_mapping = {
@@ -478,7 +505,9 @@ def _accumulate_features(
         if key not in accumulated:
             accumulated[key] = []
         if df is not None and not df.empty:
-            accumulated[key].append(df)
+            accumulated[key].append(
+                attach_feature_alignment_columns(df, aligned_events)
+            )
 
 
 def _get_df_cols(df: Optional[pd.DataFrame]) -> int:
@@ -541,7 +570,20 @@ def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
             if attrs.get(key) != common_attrs[key]:
                 common_attrs.pop(key, None)
 
-    merged = pd.concat(valid_dfs, axis=1)
+    if all(TRIAL_ID_COLUMN in df.columns for df in valid_dfs):
+        indexed_dfs: List[pd.DataFrame] = []
+        for df in valid_dfs:
+            if df[TRIAL_ID_COLUMN].duplicated().any():
+                raise ValueError(
+                    "Cannot merge feature tables with duplicate trial_id values."
+                )
+            indexed_dfs.append(df.set_index(TRIAL_ID_COLUMN, drop=True))
+
+        merged = pd.concat(indexed_dfs, axis=1, sort=False)
+        merged = merged.sort_index(kind="stable").reset_index()
+    else:
+        merged = pd.concat(valid_dfs, axis=1)
+
     merged = merged.loc[:, ~merged.columns.duplicated(keep="first")]
     if common_attrs:
         merged.attrs.update(common_attrs)
@@ -555,6 +597,7 @@ def _save_merged_features(
     logger: Any,
     aligned_events: Optional[pd.DataFrame] = None,
     task: Optional[str] = None,
+    qc: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Merge and save accumulated features from multiple time ranges."""
     from eeg_pipeline.utils.config.loader import get_config_value
@@ -621,7 +664,7 @@ def _save_merged_features(
                 config=config,
                 subject=subject_str,
                 task=task if task is not None else config.get("project.task") if config is not None else None,
-                qc=None,
+                qc=qc,
                 df_attrs=dict(df_attrs),
             )
             meta_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -1030,6 +1073,7 @@ class FeaturePipeline(PipelineBase):
 
         accumulated_features = _create_feature_accumulator()
         accumulated_y = None
+        accumulated_qc: Dict[str, Dict[str, Any]] = {}
         saved_range_count = 0
 
         for tr_spec in time_ranges:
@@ -1159,8 +1203,14 @@ class FeaturePipeline(PipelineBase):
 
             extra_blocks = retention_stats.get("extra_blocks", {})
             _update_from_aligned_extra(unpacked, features, extra_blocks)
+            aligned_events_retained = _retained_aligned_events(
+                aligned_events,
+                retention_stats,
+            )
 
             feature_qc = _build_feature_qc(features, ctx)
+            if len(time_ranges) > 1 and feature_qc:
+                accumulated_qc[name or "default"] = feature_qc
 
             current_step += 1
             progress.step(
@@ -1215,7 +1265,7 @@ class FeaturePipeline(PipelineBase):
                 source_contrast_cols=unpacked.get("source_contrast_cols"),
                 feature_qc=feature_qc or None,
                 suffix=suffix,
-                aligned_events=aligned_events,
+                aligned_events=aligned_events_retained,
             )
 
             if kwargs.get("save_canonical_trial_table", True):
@@ -1231,7 +1281,7 @@ class FeaturePipeline(PipelineBase):
                     deriv_root=self.deriv_root,
                     subject=subject,
                     task=task,
-                    aligned_events=aligned_events,
+                    aligned_events=aligned_events_retained,
                     feature_tables=trial_feature_tables,
                     config=self.config,
                     logger=self.logger,
@@ -1245,7 +1295,13 @@ class FeaturePipeline(PipelineBase):
                     "conn_df_aligned": conn_df_aligned,
                     "aper_df_aligned": aper_df_aligned,
                 }
-                _accumulate_features(accumulated_features, unpacked, features, aligned_dict)
+                _accumulate_features(
+                    accumulated_features,
+                    unpacked,
+                    features,
+                    aligned_dict,
+                    aligned_events=aligned_events_retained,
+                )
                 if accumulated_y is None and y_aligned is not None and len(y_aligned) > 0:
                     accumulated_y = y_aligned
 
@@ -1314,6 +1370,7 @@ class FeaturePipeline(PipelineBase):
                 self.logger,
                 aligned_events=aligned_events,
                 task=task,
+                qc=accumulated_qc or None,
             )
 
             merged_extraction_config = {

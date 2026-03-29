@@ -160,7 +160,13 @@ def _load_features_and_targets(
     
     # Load targets from aligned_events using explicit outcome config first.
     aligned_events = get_aligned_events(
-        epochs, subject, task, strict=True, logger=logger, config=config
+        epochs,
+        subject,
+        task,
+        deriv_root=deriv_root,
+        strict=True,
+        logger=logger,
+        config=config,
     )
     if aligned_events is None:
         raise ValueError(f"Failed to load aligned events for sub-{subject}, task-{task}")
@@ -473,6 +479,7 @@ def _save_feature_metadata(
     logger: logging.Logger,
     suffix: Optional[str] = None,
     task: Optional[str] = None,
+    qc: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Save feature-specific metadata to its metadata subfolder."""
     if df is None or df.empty:
@@ -499,7 +506,7 @@ def _save_feature_metadata(
             config=config,
             subject=subject_str,
             task=task if task is not None else config.get("project.task") if config is not None else None,
-            qc=None,
+            qc=qc,
             df_attrs=dict(getattr(df, "attrs", {}) or {}),
         )
 
@@ -681,7 +688,7 @@ def _save_aperiodic_qc(
             "band_coverage": {k: float(v) for k, v in band_coverage.items()} if band_coverage else {},
         }
         
-        write_parquet(df, save_path)
+        write_tsv(df, save_path, index=False)
         
         # Save metadata sidecar
         metadata_path = save_path.with_suffix(".json")
@@ -818,7 +825,7 @@ def save_all_features(
                 aligned_events=aligned_events,
             )
             _save_feature_metadata(
-                df, base_name, features_dir, config, logger, suffix, task=task
+                df, base_name, features_dir, config, logger, suffix, task=task, qc=feature_qc
             )
 
     if aper_qc:
@@ -847,7 +854,7 @@ def save_all_features(
             aligned_events=aligned_events,
         )
         _save_feature_metadata(
-            direct_df, "features_power", features_dir, config, logger, suffix, task=task
+            direct_df, "features_power", features_dir, config, logger, suffix, task=task, qc=feature_qc
         )
 
     if active_df is not None and not active_df.empty:
@@ -862,7 +869,7 @@ def save_all_features(
             aligned_events=aligned_events,
         )
         _save_feature_metadata(
-            active_df, "features_power_active", features_dir, config, logger, suffix, task=task
+            active_df, "features_power_active", features_dir, config, logger, suffix, task=task, qc=feature_qc
         )
 
     if conn_df is not None and not conn_df.empty:
@@ -886,7 +893,7 @@ def save_all_features(
             write_csv(conn_df_to_save, csv_path, index=False)
             logger.info("Also saved connectivity features as CSV: %s", csv_path)
         _save_feature_metadata(
-            conn_df, "features_connectivity", features_dir, config, logger, suffix, task=task
+            conn_df, "features_connectivity", features_dir, config, logger, suffix, task=task, qc=feature_qc
         )
 
 

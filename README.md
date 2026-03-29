@@ -28,6 +28,8 @@ Please send any suggestions my way :)
 1. [Documentation](#1-documentation)
 2. [Quick Start](#2-quick-start)
 3. [Installation](#3-installation)
+   - 3.1 [CLI-Only Setup (No TUI)](#31-cli-only-setup-no-tui)
+   - 3.2 [TUI Setup (Optional)](#32-tui-setup-optional)
 4. [Data Requirements](#4-data-requirements)
 5. [Project Structure](#5-project-structure)
 6. [CLI Reference](#6-cli-reference)
@@ -80,14 +82,18 @@ relevant to your workflow:
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git && cd eegfmri-pipeline
 python -m venv .venv311
 source .venv311/bin/activate
-pip install -e ".[dev,ml]"
+python -m pip install -e ".[dev,ml]"
 
 # 2. Place your data (see §4 Data Requirements)
 
 # 3. Inspect the CLI
 eeg-pipeline --help
 
-# 4. Launch the interactive TUI
+# 4. Run a pipeline directly from the CLI
+eeg-pipeline preprocessing --help
+eeg-pipeline features --help
+
+# 5. Launch the interactive TUI (optional)
 cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 ```
 
@@ -100,17 +106,48 @@ cd eeg_pipeline/cli/tui && go build -o eeg-tui . && ./eeg-tui
 ```bash
 python -m venv .venv311
 source .venv311/bin/activate
-pip install -e ".[dev,ml]"
+python -m pip install -e ".[dev,ml]"
 ```
 
 The repository also ships a `requirements.txt` shim for tooling that expects one:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 After installation, the `eeg-pipeline` console script and `python -m eeg_pipeline`
 entry point are both available in the active environment.
+
+### 3.1 CLI-Only Setup (No TUI)
+
+If you do not plan to use the interactive TUI, the Python environment above is
+all you need. No Go toolchain is required.
+
+```bash
+python -m venv .venv311
+source .venv311/bin/activate
+python -m pip install -e ".[dev,ml]"
+eeg-pipeline --help
+```
+
+From there, run the pipeline directly from the command line:
+
+```bash
+eeg-pipeline preprocessing --subject 0001
+eeg-pipeline features compute --subject 0001
+eeg-pipeline info subjects
+```
+
+### 3.2 TUI Setup (Optional)
+
+The Go-based TUI is optional. Install and build it only if you want the menu-driven
+interface on top of the same Python CLI:
+
+```bash
+cd eeg_pipeline/cli/tui
+go build -o eeg-tui .
+./eeg-tui
+```
 
 ---
 

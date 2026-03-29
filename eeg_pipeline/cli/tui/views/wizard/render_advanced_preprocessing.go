@@ -30,7 +30,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	}
 
 	labelWidth := defaultLabelWidth
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
 	// Build values for display
 	nJobsVal := fmt.Sprintf("%d", m.prepNJobs)
@@ -252,7 +252,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optPrepGroupGeneral:
@@ -265,7 +265,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optPrepGroupFiltering:
@@ -278,7 +278,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optPrepGroupPyprep:
@@ -291,7 +291,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optPrepGroupICA:
@@ -304,7 +304,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		case optPrepGroupEpoching:
@@ -317,7 +317,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 			} else {
-				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 
 		// Stage toggles (indented under Stages group)

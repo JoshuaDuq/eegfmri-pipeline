@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/eeg-pipeline/tui/types"
@@ -193,6 +194,20 @@ func TestGetFeaturesOptions_ExecutionOptionsAreCategoryScoped(t *testing.T) {
 	}
 	if hasOption(opts, optFeatNJobsBands) || hasOption(opts, optFeatNJobsConnectivity) || hasOption(opts, optFeatNJobsAperiodic) || hasOption(opts, optFeatNJobsComplexity) {
 		t.Fatalf("did not expect unrelated execution n_jobs options for itpc selection")
+	}
+}
+
+func TestGetFeaturesOptions_SpectralGroupOmitsRemovedSegmentSelector(t *testing.T) {
+	m := Model{
+		categories:                []string{"spectral"},
+		selected:                  map[int]bool{0: true},
+		featGroupSpectralExpanded: true,
+	}
+
+	rendered := m.renderFeaturesAdvancedConfig()
+
+	if strings.Contains(rendered, "Spectral segments") {
+		t.Fatalf("did not expect removed spectral segment selector option:\n%s", rendered)
 	}
 }
 

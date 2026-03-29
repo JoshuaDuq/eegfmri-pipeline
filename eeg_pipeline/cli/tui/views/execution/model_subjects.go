@@ -126,17 +126,19 @@ func (m Model) renderSubjectSummary(maxWidth int) string {
 		return ""
 	}
 
-	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	subjectCount := m.SubjectCurrent
 	if subjectCount > m.SubjectTotal {
 		subjectCount = m.SubjectTotal
 	}
 	pct := float64(subjectCount) / float64(m.SubjectTotal)
 
-	line := dimStyle.Render("Subjects ") +
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	sepStyle := lipgloss.NewStyle().Foreground(styles.Border)
+
+	line := labelStyle.Render("Subjects ") +
 		valueStyle.Render(fmt.Sprintf("%d/%d", subjectCount, m.SubjectTotal)) +
-		dimStyle.Render(" ") +
+		sepStyle.Render(" · ") +
 		valueStyle.Render(fmt.Sprintf("%.0f%%", pct*100))
 
 	return styles.TruncateLine(line, maxWidth)
@@ -197,20 +199,21 @@ func (m Model) subjectAnchorIndex() int {
 }
 
 func (m Model) renderSubjectWindow(start, end int) string {
-	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	dimStyle := lipgloss.NewStyle().Foreground(styles.Border)
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
 	parts := make([]string, 0, end-start+2)
 
 	if start > 0 {
-		parts = append(parts, dimStyle.Render(fmt.Sprintf("+%d", start)))
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("···+%d", start)))
 	}
 	for _, subject := range m.SubjectOrder[start:end] {
 		parts = append(parts, m.renderSubjectChip(subject))
 	}
 	if end < len(m.SubjectOrder) {
-		parts = append(parts, dimStyle.Render(fmt.Sprintf("+%d", len(m.SubjectOrder)-end)))
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("+%d···", len(m.SubjectOrder)-end)))
 	}
 
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, sep)
 }
 
 func (m Model) renderSubjectChip(subject string) string {
@@ -243,7 +246,8 @@ func (m Model) renderFailureLane(maxWidth int) string {
 		return ""
 	}
 
-	label := lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render("Failed")
-	value := lipgloss.NewStyle().Foreground(styles.Error).Render(strings.Join(m.FailedSubjects, ", "))
-	return styles.TruncateLine(label+": "+value, maxWidth)
+	icon := lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark)
+	label := lipgloss.NewStyle().Foreground(styles.TextDim).Render(" failed  ")
+	value := lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render(strings.Join(m.FailedSubjects, "  "))
+	return styles.TruncateLine(icon+label+value, maxWidth)
 }

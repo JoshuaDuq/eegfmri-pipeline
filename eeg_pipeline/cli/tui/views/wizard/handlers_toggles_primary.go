@@ -837,9 +837,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSpectralRatioPairs:
 		m.startTextEdit(textFieldSpectralRatioPairs)
 		m.useDefaultAdvanced = false
-	case optSpectralSegments:
-		m.startTextEdit(textFieldSpectralSegments)
-		m.useDefaultAdvanced = false
 	case optAperiodicSubtractEvoked:
 		m.aperiodicSubtractEvoked = !m.aperiodicSubtractEvoked
 		m.useDefaultAdvanced = false
