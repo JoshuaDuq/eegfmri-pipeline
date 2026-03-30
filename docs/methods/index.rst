@@ -32,7 +32,7 @@ EEG
       derivations — power, connectivity, aperiodic, ITPC, PAC,
       ERP, ERDS, complexity, microstates, and source ROI.
 
-   .. grid-item-card:: :octicon:`table` Behavioural Statistics
+   .. grid-item-card:: :octicon:`table` Behavioral Statistics
       :link: eeg/behavior
       :link-type: doc
 
@@ -44,9 +44,9 @@ EEG
       :link-type: doc
 
       LOSO cross-validation, permutation inference, SHAP feature
-      importance, and temporal generalisation.
+      importance, and temporal generalization.
 
-   .. grid-item-card:: :octicon:`location` Source Localisation
+   .. grid-item-card:: :octicon:`location` Source Localization
       :link: eeg/source_localization
       :link-type: doc
 

@@ -80,4 +80,12 @@ Documentation
    make docs                          # build (warnings treated as errors)
    open docs/_build/html/index.html   # preview
 
-All pages are ``.rst`` under ``docs/``. CI deploys to GitHub Pages on push to ``main``.
+The Sphinx build uses ``.rst`` as the primary source format. CI deploys to GitHub Pages
+on push to ``main``.
+
+Architecture Decisions
+----------------------
+
+Module boundary rules are recorded in ``docs/architecture/adr-0001-module-boundaries.md``
+and enforced by ``make verify-architecture``. Update the ADR and the enforcement tests in
+the same commit whenever boundaries change.

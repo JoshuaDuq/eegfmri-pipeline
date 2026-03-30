@@ -2,7 +2,7 @@ API Reference
 =============
 
 Public symbols for both packages listed by module. Docstrings are rendered
-when the package is installed (``pip install -e ".[dev]")``; the tables below
+when the package is installed (``pip install -e ".[dev]"``); the tables below
 are available without a full environment.
 
 .. note::

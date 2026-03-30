@@ -32,7 +32,7 @@ methods, configuration keys, and output schemas.
       power, connectivity, aperiodic, ITPC, PAC, complexity, ERP, ERDS,
       microstates, spectral, and source ROI.
 
-   .. grid-item-card:: :octicon:`table` Behavioural Statistics
+   .. grid-item-card:: :octicon:`table` Behavioral Statistics
       :link: behavior
       :link-type: doc
 
@@ -45,9 +45,9 @@ methods, configuration keys, and output schemas.
 
       LOSO cross-validation for regression and classification. Feature
       selection, permutation testing, SHAP importance, and temporal
-      generalisation.
+      generalization.
 
-   .. grid-item-card:: :octicon:`location` Source Localisation
+   .. grid-item-card:: :octicon:`location` Source Localization
       :link: source_localization
       :link-type: doc
 
