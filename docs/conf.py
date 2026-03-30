@@ -47,6 +47,7 @@ exclude_patterns = [
     "workflows/**",
     "eeg/**",
     "fmri/**",
+    "index.md",
     "index_old.md",
 ]
 

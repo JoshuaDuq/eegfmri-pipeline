@@ -69,7 +69,7 @@ Jump to the section you need:
      - Group model and permutation inference.
    * - :ref:`Behavioral Statistics <configuration-behavior>`
      - Predictor type, correlation/regression, and permutation/FDR controls.
-   * - :ref:`Runtime Overrides (``--set``) <configuration-runtime-overrides>`
+   * - :ref:`Runtime Overrides <configuration-runtime-overrides>`
      - Final-precedence overrides for long-tail keys.
 
 .. _configuration-project-paths:

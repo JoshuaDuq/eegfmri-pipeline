@@ -28,8 +28,7 @@ map, then jump to the methods reference for the scientific details.
 
    .. tab-item:: Artifacts
 
-      Feature Tables
-      --------------
+      .. rubric:: Feature Tables
 
       Feature tables are saved as **Parquet** by default. TSV/CSV export remains
       available when you need a plain-text copy:
@@ -63,8 +62,7 @@ map, then jump to the methods reference for the scientific details.
       subdirectory is ``eeg_only/`` or ``fmri_informed/`` depending on
       ``feature_engineering.sourcelocalization.mode``.
 
-      Plot Exports
-      ------------
+      .. rubric:: Plot Exports
 
       Plots are saved as PNG by default. Use ``--formats`` to add more:
 
@@ -72,8 +70,7 @@ map, then jump to the methods reference for the scientific details.
 
          eeg-pipeline plotting visualize --subject 0001 --formats png svg pdf
 
-      Source Localization
-      -------------------
+      .. rubric:: Source Localization
 
       Supports a template-based path (fsaverage, no MRI needed) and a
       subject-specific fMRI-constrained path (requires FreeSurfer + Docker).
@@ -83,16 +80,14 @@ map, then jump to the methods reference for the scientific details.
 
    .. tab-item:: Workflows
 
-      fMRI Raw-to-BIDS
-      ----------------
+      .. rubric:: fMRI Raw-to-BIDS
 
       DICOM-to-BIDS conversion with optional event generation from behavioral logs.
       Requires ``dcm2niix`` on ``PATH``.
 
       See :doc:`../methods/fmri/raw_to_bids` for the BIDS contract and validation steps.
 
-      EEG–fMRI Fusion
-      ---------------
+      .. rubric:: EEG–fMRI Fusion
 
       Predict trial-wise fMRI signature expression from EEG features:
 
@@ -107,8 +102,7 @@ map, then jump to the methods reference for the scientific details.
       Methods: ``beta-series``, ``lss``. Metrics: ``dot``, ``cosine``, ``pearson_r``.
       Signature names come from ``paths.signature_maps`` in the config.
 
-      Spatial Transforms
-      ------------------
+      .. rubric:: Spatial Transforms
 
       Phase-based families (connectivity, ITPC, PAC) have CSD applied by default to
       reduce volume conduction. Override globally or per-family:
@@ -117,8 +111,7 @@ map, then jump to the methods reference for the scientific details.
 
          eeg-pipeline features compute --subject 0001 --spatial-transform csd
 
-      Individual Alpha Frequency (IAF)
-      --------------------------------
+      .. rubric:: Individual Alpha Frequency (IAF)
 
       Adaptive frequency bands derived from each subject's baseline PSD:
 
@@ -126,8 +119,7 @@ map, then jump to the methods reference for the scientific details.
 
          eeg-pipeline features compute --subject 0001 --iaf-enabled
 
-      Analysis Modes
-      --------------
+      .. rubric:: Analysis Modes
 
       .. list-table::
          :header-rows: 1
@@ -144,8 +136,7 @@ map, then jump to the methods reference for the scientific details.
 
          eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
 
-      Resting-State Workflows
-      -----------------------
+      .. rubric:: Resting-State Workflows
 
       Enable resting-state mode in ``eeg_config.yaml``:
 
