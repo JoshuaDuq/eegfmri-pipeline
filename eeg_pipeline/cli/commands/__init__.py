@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from importlib import metadata
 from typing import Any, Callable, List
+
+
+CLI_COMMAND_GROUP = "eeg_pipeline.cli_commands"
 
 
 @dataclass
@@ -35,80 +39,96 @@ from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
 from fmri_pipeline.cli.commands.fmri import setup_fmri, run_fmri
 from fmri_pipeline.cli.commands.fmri_analysis import setup_fmri_analysis, run_fmri_analysis
-from studies.pain_study.study2.cli.coupling import setup_coupling, run_coupling
-from studies.pain_study.cli.signature_prediction import (
-    setup_signature_prediction,
-    run_signature_prediction,
-)
 
 
-COMMANDS: List[Command] = [
-    Command(
-        name="behavior",
-        setup=setup_behavior,
-        run=run_behavior,
-    ),
-    Command(
-        name="coupling",
-        setup=setup_coupling,
-        run=run_coupling,
-    ),
-    Command(
-        name="signature-prediction",
-        setup=setup_signature_prediction,
-        run=run_signature_prediction,
-    ),
-    Command(
-        name="features",
-        setup=setup_features,
-        run=run_features,
-    ),
-    Command(
-        name="fmri",
-        setup=setup_fmri,
-        run=run_fmri,
-        requires_subjects=False,
-    ),
-    Command(
-        name="fmri-analysis",
-        setup=setup_fmri_analysis,
-        run=run_fmri_analysis,
-        requires_subjects=False,
-    ),
-    Command(
-        name="info",
-        setup=setup_info,
-        run=run_info,
-        requires_subjects=False,
-    ),
-    Command(
-        name="ml",
-        setup=setup_ml,
-        run=run_ml,
-    ),
-    Command(
-        name="plotting",
-        setup=setup_plotting,
-        run=run_plotting,
-    ),
-    Command(
-        name="preprocessing",
-        setup=setup_preprocessing,
-        run=run_preprocessing,
-    ),
-    Command(
-        name="stats",
-        setup=setup_stats,
-        run=run_stats,
-        requires_subjects=False,
-    ),
-    Command(
-        name="validate",
-        setup=setup_validate,
-        run=run_validate,
-        requires_subjects=False,
-    ),
-]
+def _builtin_commands() -> list[Command]:
+    return [
+        Command(
+            name="behavior",
+            setup=setup_behavior,
+            run=run_behavior,
+        ),
+        Command(
+            name="features",
+            setup=setup_features,
+            run=run_features,
+        ),
+        Command(
+            name="fmri",
+            setup=setup_fmri,
+            run=run_fmri,
+            requires_subjects=False,
+        ),
+        Command(
+            name="fmri-analysis",
+            setup=setup_fmri_analysis,
+            run=run_fmri_analysis,
+            requires_subjects=False,
+        ),
+        Command(
+            name="info",
+            setup=setup_info,
+            run=run_info,
+            requires_subjects=False,
+        ),
+        Command(
+            name="ml",
+            setup=setup_ml,
+            run=run_ml,
+        ),
+        Command(
+            name="plotting",
+            setup=setup_plotting,
+            run=run_plotting,
+        ),
+        Command(
+            name="preprocessing",
+            setup=setup_preprocessing,
+            run=run_preprocessing,
+        ),
+        Command(
+            name="stats",
+            setup=setup_stats,
+            run=run_stats,
+            requires_subjects=False,
+        ),
+        Command(
+            name="validate",
+            setup=setup_validate,
+            run=run_validate,
+            requires_subjects=False,
+        ),
+    ]
+
+
+def _external_commands() -> list[Command]:
+    commands: list[Command] = []
+    for entry_point in metadata.entry_points(group=CLI_COMMAND_GROUP):
+        command = entry_point.load()()
+        if not isinstance(command, Command):
+            raise TypeError(
+                f"CLI entry point {entry_point.value!r} must return "
+                f"{Command.__module__}.{Command.__qualname__}"
+            )
+        commands.append(command)
+    return commands
+
+
+def _validate_unique_names(commands: list[Command]) -> None:
+    command_names = [command.name for command in commands]
+    duplicates = {name for name in command_names if command_names.count(name) > 1}
+    if duplicates:
+        duplicate_list = ", ".join(sorted(duplicates))
+        raise ValueError(f"Duplicate CLI command names are not allowed: {duplicate_list}")
+
+
+def get_commands() -> list[Command]:
+    commands = _builtin_commands() + _external_commands()
+    _validate_unique_names(commands)
+    return commands
+
+
+COMMANDS: List[Command] = get_commands()
 
 
 def get_command(name: str):
@@ -119,4 +139,4 @@ def get_command(name: str):
     return None
 
 
-__all__ = ["Command", "COMMANDS", "get_command"]
+__all__ = ["CLI_COMMAND_GROUP", "Command", "COMMANDS", "get_command", "get_commands"]

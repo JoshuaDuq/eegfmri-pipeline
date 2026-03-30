@@ -25,7 +25,7 @@ from eeg_pipeline.utils.config.loader import load_config
 from eeg_pipeline.utils.config.overrides import apply_runtime_overrides
 from eeg_pipeline.utils.data.subjects import parse_subject_args
 from eeg_pipeline.cli.common import get_deriv_root
-from eeg_pipeline.cli.commands import COMMANDS, get_command, Command
+from eeg_pipeline.cli.commands import get_commands, get_command, Command
 
 
 os.environ["NUMPY_SKIP_MACOS_CHECK"] = "1"
@@ -78,7 +78,7 @@ For detailed help on each subcommand:
     
     subparsers = parser.add_subparsers(dest="command", help="Analysis type")
     
-    for command in COMMANDS:
+    for command in get_commands():
         command.setup(subparsers)
     
     return parser

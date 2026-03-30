@@ -35,16 +35,6 @@ RULES: tuple[Rule, ...] = (
         forbidden_prefix="eeg_pipeline.cli",
         description="pipelines must not depend on cli",
     ),
-    Rule(
-        source_prefix="studies.pain_study.study1",
-        forbidden_prefix="eeg_pipeline.cli",
-        description="Study 1 modules must not depend on eeg_pipeline cli",
-    ),
-    Rule(
-        source_prefix="studies.pain_study.study1",
-        forbidden_prefix="studies.pain_study.cli",
-        description="Study 1 core modules must not depend on study cli modules",
-    ),
 )
 
 
@@ -57,7 +47,6 @@ def _iter_python_sources() -> list[Path]:
     roots = [
         REPO_ROOT / "eeg_pipeline",
         REPO_ROOT / "fmri_pipeline",
-        REPO_ROOT / "studies",
         REPO_ROOT / "scripts",
     ]
     paths: list[Path] = []

@@ -19,15 +19,20 @@ Available commands:
 - validate: BIDS validation
 """
 
-__all__ = ["COMMANDS", "Command", "get_command", "main"]
+__all__ = ["COMMANDS", "Command", "get_command", "get_commands", "main"]
 
 
 def __getattr__(name: str):
     # Lazy import to avoid circular imports when submodules import eeg_pipeline.cli.common.
-    if name in {"COMMANDS", "Command", "get_command"}:
-        from eeg_pipeline.cli.commands import COMMANDS, Command, get_command
+    if name in {"COMMANDS", "Command", "get_command", "get_commands"}:
+        from eeg_pipeline.cli.commands import COMMANDS, Command, get_command, get_commands
 
-        return {"COMMANDS": COMMANDS, "Command": Command, "get_command": get_command}[name]
+        return {
+            "COMMANDS": COMMANDS,
+            "Command": Command,
+            "get_command": get_command,
+            "get_commands": get_commands,
+        }[name]
     if name == "main":
         from eeg_pipeline.cli.main import main
 

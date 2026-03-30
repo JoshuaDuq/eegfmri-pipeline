@@ -85,7 +85,7 @@ def test_removed_legacy_scripts_do_not_reappear() -> None:
     ]
     assert not reintroduced, (
         "Deprecated standalone utility scripts must not be reintroduced. "
-        "Use `python studies/pain_study/scripts/run_paradigm_specific.py ...` instead.\n"
+        "Keep study-specific entrypoints in the private studies package instead.\n"
         f"Found: {reintroduced}"
     )
 
@@ -94,7 +94,7 @@ def test_removed_legacy_worktree_paths_do_not_exist() -> None:
     present = [path for path in REMOVED_WORKTREE_PATHS if (REPO_ROOT / path).exists()]
     assert not present, (
         "Legacy pain-study worktree paths must not exist. "
-        "Use `studies/pain_study/` instead.\n"
+        "Do not keep study-specific worktrees in the public repository.\n"
         f"Found: {present}"
     )
 

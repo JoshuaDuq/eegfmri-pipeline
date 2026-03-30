@@ -71,7 +71,7 @@ docs/superpowers/
 docs/_build/
 docs/plans/
 
-### Studies (study-specific, not part of public pipeline) ###
+### Studies (private package workspace) ###
 studies/
 
 ### IDEs & OS ###
@@ -142,6 +142,3 @@ eeg_pipeline/data/derivatives/**
 
 ### Secrets ###
 eeg_pipeline/licenses/license_*.txt
-
-### Studies (local only) ###
-studies/
