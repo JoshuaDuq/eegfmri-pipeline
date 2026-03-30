@@ -34,16 +34,41 @@ Events Data
 
 Behavior and ML workflows read trial-level predictors from ``*_events.tsv``.
 
-**Required BIDS columns:** ``onset``, ``duration``, ``trial_type``.
+**Required BIDS columns:**
 
-Add any study-specific predictor or target columns alongside these.
-Column name aliases are resolved via ``event_columns`` in ``eeg_config.yaml``
-(see :doc:`configuration`).
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Column
+     - Purpose
+   * - ``onset``
+     - Event onset in seconds from the start of the recording
+   * - ``duration``
+     - Event duration in seconds
+   * - ``trial_type``
+     - Condition label; used by the GLM and behavioral condition contrasts
+
+Add any study-specific predictor or outcome columns alongside these.
+Column name aliases (e.g. ``intensity``, ``rating``) are resolved via
+``event_columns`` in ``eeg_config.yaml`` (see :doc:`configuration`).
+
+**The** ``trial_id`` **alignment contract**
 
 After preprocessing, the pipeline writes ``*_proc-clean_events.tsv`` to
-derivatives — only rows for kept epochs, with a canonical ``trial_id`` column.
-This is the **only** alignment contract between EEG features, fMRI betas, and
-behavioral targets.
+``derivatives/preprocessed/eeg/``. This file contains only the rows
+corresponding to kept epochs, with a canonical integer ``trial_id`` column
+added by the pipeline.
+
+``trial_id`` is the **only** accepted join key between:
+
+- EEG feature tables (``features_<family>.parquet``)
+- fMRI trial-wise beta volumes (``beta-series`` / ``lss``)
+- Behavioral predictor and outcome columns
+
+Row-order alignment across files is not a valid join strategy and will cause
+silent misalignment. Any code that builds the feature–target matrix must join
+on ``trial_id`` explicitly.
 
 fMRI Data (Optional)
 ----------------------
