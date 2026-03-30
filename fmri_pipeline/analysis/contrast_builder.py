@@ -818,11 +818,11 @@ def discover_confounds(
     """
     Discover confounds file from fMRIPrep derivatives if available.
 
-    Searches (aligned with _discover_fmriprep_preproc_bold):
-      - derivatives/preprocessed/fmri/sub-*/func/
-      - derivatives/preprocessed/fmri/fmriprep/sub-*/func/
-      - derivatives/fmriprep/sub-*/func/
-      - derivatives/sub-*/func/
+    Searches (aligned with ``_discover_fmriprep_preproc_bold``):
+    - `derivatives/preprocessed/fmri/sub-*/func/`
+    - `derivatives/preprocessed/fmri/fmriprep/sub-*/func/`
+    - `derivatives/fmriprep/sub-*/func/`
+    - `derivatives/sub-*/func/`
 
     Returns path to confounds TSV or None if not found.
     """

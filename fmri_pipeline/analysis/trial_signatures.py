@@ -748,15 +748,15 @@ def run_trial_signature_extraction_for_subject(
     """
     Compute trial-wise beta maps (beta-series or LSS) and multivariate signature expression.
 
-        Outputs (per subject) under:
-          <deriv_root>/sub-XX/fmri/<beta_series|lss>/task-<task>/contrast-<name>/
-            - trials.tsv
-            - signatures/trial_signature_expression.tsv
-            - condition_betas/*.nii.gz (optional)
-            - signatures/condition_signature_expression.tsv
-            - provenance.json
-            - trial_betas/**/*.nii.gz (optional)
-        """
+    Outputs (per subject) under:
+    `<deriv_root>/sub-XX/fmri/<beta_series|lss>/task-<task>/contrast-<name>/`
+    - `trials.tsv`
+    - `signatures/trial_signature_expression.tsv`
+    - `condition_betas/*.nii.gz` (optional)
+    - `signatures/condition_signature_expression.tsv`
+    - `provenance.json`
+    - `trial_betas/**/*.nii.gz` (optional)
+    """
     cfg = cfg.normalized()
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
     if signature_root is not None and signature_specs:

@@ -197,12 +197,14 @@ def compute_signature_expression(
     Compute multivariate signature expression (dot product and Pearson correlation).
 
     Scientific notes:
+
     - Images must be in the same space as the signature weight maps (typically MNI).
     - Both dot-product (pattern expression) and Pearson correlation (scale-invariant) are returned.
     - Uses intersection of finite voxels and an optional analysis mask (resampled as needed).
-    - Resampling strategy:
-        * resampling="image_to_weights" (default): resample the target image to each signature's grid.
-        * resampling="weights_to_image": resample each signature's weights to the target image grid.
+    - ``resampling="image_to_weights"`` (default): resample the target image to each
+      signature's grid.
+    - ``resampling="weights_to_image"``: resample each signature's weights to the
+      target image grid.
     """
     files = discover_signature_files(signature_root, signature_specs)
     if signatures:

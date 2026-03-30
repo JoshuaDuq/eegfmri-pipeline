@@ -34,15 +34,10 @@ CROSS_TRIAL_FEATURES = {
 @dataclass
 class FeatureContext:
     """Context for feature extraction pipeline.
-    
-    Attributes
-    ----------
-    analysis_mode : str
-        Controls cross-trial feature computation:
-        - "trial_ml_safe": Forbid cross-trial features unless train_mask is provided.
-          Use this for ML/CV pipelines to prevent data leakage.
-        - "group_stats": Allow cross-trial estimates, output one row per subject/condition.
-          Use this for group-level statistical analysis.
+
+    ``analysis_mode`` controls whether cross-trial features are allowed:
+    ``trial_ml_safe`` forbids them unless ``train_mask`` is provided, while
+    ``group_stats`` allows cross-trial estimates for group-level analysis.
     """
     subject: str
     task: str
