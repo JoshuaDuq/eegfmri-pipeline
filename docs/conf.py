@@ -63,6 +63,7 @@ autodoc_mock_imports = [
     "scipy",
     "mne",
     "mne_bids",
+    "mne_bids_pipeline",
     "mne_icalabel",
     "mne_connectivity",
     "nilearn",
@@ -79,6 +80,7 @@ autodoc_mock_imports = [
     "pyprep",
     "matplotlib",
     "seaborn",
+    "pyarrow",
 ]
 
 # ---------------------------------------------------------------------------
