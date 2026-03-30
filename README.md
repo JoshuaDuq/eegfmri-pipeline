@@ -32,68 +32,18 @@ all from a single CLI or interactive TUI.
 
 ## What It Does
 
-The pipeline processes EEG and fMRI data through four consecutive stages.
-Each stage writes BIDS-derivative outputs that the next stage consumes. The
-``trial_id`` column in ``proc-clean_events.tsv`` is the join key across all
-stages: EEG features, fMRI betas, and behavioral targets align exclusively
-on this identifier.
+Four sequential stages. Each stage writes BIDS derivatives consumed by the
+next. `trial_id` in `proc-clean_events.tsv` is the join key across all stages.
 
-```text
-BIDS EEG / fMRI Data
-        │
-        ▼
-┌─────────────────────────────────────────────────────────┐
-│  1. EEG Preprocessing                                   │
-│     Bad-channel detection: PyPREP (deviation +          │
-│     correlation + optional RANSAC), 3 iterations        │
-│     ICA: extended Infomax (99% variance) via            │
-│     MNE-BIDS-Pipeline; artifact labeling with ICLabel   │
-│     (threshold p > 0.8; keeps brain and other)          │
-│     Epoching: tmin = -7 s, tmax = 15 s, autoreject     │
-│     → proc-clean_epo.fif + proc-clean_events.tsv        │
-└────────────────────────┬────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  2. Feature Extraction (16 families)                    │
-│     power · spectral · aperiodic · erp · erds           │
-│     ratios · asymmetry · microstates · connectivity      │
-│     directedconnectivity · itpc · pac                   │
-│     sourcelocalization · complexity · bursts · quality  │
-│     One row per trial; spatial modes: ROI, channel,     │
-│     global, channel-pair                                │
-│     → features/<family>/features_<family>.parquet       │
-└──────────────┬─────────────────────┬────────────────────┘
-               │                     │
-               ▼                     ▼
-┌─────────────────────┐  ┌──────────────────────────────┐
-│  3a. Behavioral     │  │  3b. Machine Learning         │
-│      Statistics     │  │                               │
-│  Partial Spearman   │  │  LOSO nested CV: ElasticNet,  │
-│  correlations,      │  │  Ridge, Random Forest         │
-│  predictor          │  │  Classification: SVM, LR,     │
-│  residualization,   │  │  RF, EEGNet CNN               │
-│  OLS regression,    │  │  Temporal generalization,     │
-│  ICC(3,1),          │  │  SHAP importance, conformal   │
-│  condition Welch t, │  │  intervals, permutation test  │
-│  cluster permutation│  │  Primary metric: subject-     │
-│  BH FDR + Simes     │  │  level Fisher-z Pearson r     │
-│  → stats/           │  │  → ml/                        │
-└─────────────────────┘  └──────────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────────────────────┐
-│  4. fMRI Pipeline (optional)                            │
-│     Preprocessing: fMRIPrep (Docker / Apptainer)        │
-│     First-level GLM: Nilearn FirstLevelModel            │
-│     HRF: spm; drift: cosine; high-pass: 0.008 Hz        │
-│     Trial-wise betas: beta-series (LSA) or LSS          │
-│     Group inference: one-sample GLM + permutation       │
-│     Resting-state: ROI timeseries + connectivity        │
-│     EEG–fMRI fusion: predict signature from EEG         │
-│     → sub-*/fmri/, group/fmri/                          │
-└─────────────────────────────────────────────────────────┘
-```
+| Stage | What it does | Key tools | Output |
+|:---:|:---|:---|:---|
+| **1 — Preprocessing** | Bad-channel detection (deviation + correlation + RANSAC, 3×); ICA fitting (extended Infomax, 99% variance) and labeling (ICLabel p > 0.8); epoch creation tmin = −7 s / tmax = 15 s, autoreject | PyPREP · MNE-BIDS-Pipeline · ICLabel | `proc-clean_epo.fif` `proc-clean_events.tsv` |
+| **2 — Feature Extraction** | 16 families: power, spectral, aperiodic, ERP, ERDS, ratios, asymmetry, microstates, connectivity, directed connectivity, ITPC, PAC, source localization, complexity, bursts, quality. One row per trial. | MNE · MNE-Connectivity · specparam · scikit-learn | `features/<family>/features_<family>.parquet` |
+| **3a — Behavioral Stats** | Partial Spearman correlations + permutation p-values; predictor residualization; OLS regression (HC3); ICC(3,1); condition Welch t-test; temporal cluster permutation; BH + Simes FDR | SciPy · statsmodels | `stats/` |
+| **3b — Machine Learning** | Nested LOSO CV; regression (ElasticNet / Ridge / RF, Yeo-Johnson target); classification (SVM / LR / RF / EEGNet); temporal generalization; SHAP; conformal intervals; permutation test | scikit-learn · SHAP · PyTorch | `ml/` |
+| **4 — fMRI** *(optional)* | fMRIPrep preprocessing; first-level Nilearn GLM (HRF spm, cosine drift, 0.008 Hz HP); trial-wise betas (beta-series / LSS); group one-sample GLM + max-T permutation; resting-state connectivity | fMRIPrep · Nilearn · NiBabel | `sub-*/fmri/` `group/fmri/` |
+
+The **fMRI pipeline** (`fmri`, `fmri-analysis`) and the **plotting pipeline** (`plotting`) are still under active development: interfaces, defaults, and outputs may change between releases; report issues if something does not match the docs.
 
 ---
 
@@ -133,8 +83,10 @@ Full walkthrough with all stages: [Quick Start](https://joshuaduq.github.io/eegf
 | `ml` | `regression`, `classify`, `timegen`, `model_comparison`, `incremental_validity`, `uncertainty`, `shap`, `permutation` |
 | `fmri` | `preprocess` |
 | `fmri-analysis` | `first-level`, `second-level`, `beta-series`, `lss`, `rest` |
-| `plotting` | `visualize`, `tfr` |
+| `plotting` | `visualize`, `tfr` *(under development)* |
 | `stats` | `summary`, `subjects`, `features`, `storage`, `timeline` |
+
+Commands `fmri`, `fmri-analysis`, and `plotting` are still evolving; see the note above.
 
 Use `--help` on any command to inspect its options:
 

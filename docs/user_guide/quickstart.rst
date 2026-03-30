@@ -16,55 +16,131 @@ surface of each analysis family.
 Pipeline Overview
 -----------------
 
-The pipeline has six sequential stages. Each stage writes derivatives that
-the next stage reads.
+Four sequential stages. Each stage writes BIDS derivatives that the next stage
+reads. The ``trial_id`` column in ``proc-clean_events.tsv`` is the join key
+that aligns EEG features, fMRI betas, and behavioral targets across all stages.
 
-.. code-block:: text
+.. grid:: 1
+   :gutter: 0
 
-   BIDS EEG / fMRI Data
-           │
-           ▼
-   ┌─────────────────────────────────────────────────────────┐
-   │  1.  Preprocessing                                      │
-   │      Bad-channel detection (PyPREP + RANSAC)            │
-   │      ICA fitting and artifact labeling (ICLabel)        │
-   │      Epoch creation and autoreject                      │
-   │      → proc-clean epochs (.fif) + proc-clean events.tsv │
-   └───────────────────────┬─────────────────────────────────┘
-                           │
-                           ▼
-   ┌─────────────────────────────────────────────────────────┐
-   │  2.  Feature Extraction                                 │
-   │      16 families: power, connectivity, aperiodic,       │
-   │      ERP, ERDS, PAC, ITPC, complexity, microstates, …   │
-   │      One row per trial per subject                      │
-   │      → features/<family>/features_<family>.parquet      │
-   └───────────────────────┬─────────────────────────────────┘
-                           │
-                     ┌─────┴──────┐
-                     ▼            ▼
-   ┌──────────────────────┐  ┌──────────────────────────────┐
-   │  3a. Behavioral Stats │  │  3b. Machine Learning        │
-   │      Correlations,   │  │      LOSO regression,        │
-   │      regression, ICC │  │      classification, SHAP,   │
-   │      temporal, FDR   │  │      permutation testing,    │
-   │      → stats/        │  │      conformal intervals     │
-   └──────────────────────┘  │      → ml/                   │
-                              └──────────────────────────────┘
-                           │
-                           ▼
-   ┌─────────────────────────────────────────────────────────┐
-   │  4.  fMRI Pipeline (optional)                           │
-   │      fMRIPrep preprocessing                             │
-   │      First-level GLM (Nilearn), contrast maps           │
-   │      Trial-wise betas (beta-series / LSS)               │
-   │      Group inference, resting-state connectivity        │
-   │      → sub-*/fmri/, group/fmri/                         │
-   └─────────────────────────────────────────────────────────┘
+   .. grid-item-card:: :octicon:`cpu;1.1em;sd-text-primary` Stage 1 — EEG Preprocessing
+      :class-card: sd-border-1
 
-The ``trial_id`` column in ``proc-clean_events.tsv`` is the join key across
-all stages: EEG features, fMRI betas, and behavioral targets are aligned
-exclusively by this identifier.
+      **Input:** BIDS EEG (``.vhdr`` · ``.edf`` · ``.fif``) + ``events.tsv``
+
+      - Bad-channel detection: PyPREP (deviation + correlation + optional RANSAC), 3 iterations; bads synchronized across runs
+      - ICA fitting: extended Infomax, 99% variance, 1 Hz high-pass; via MNE-BIDS-Pipeline
+      - ICA labeling: ICLabel probabilistic classifier, threshold ``p > 0.8``; keeps ``brain`` and ``other``
+      - Epoching: ``tmin = −7 s``, ``tmax = 15 s``, baseline ``[−0.2, 0] s``, autoreject
+
+      **Output:** ``proc-clean_epo.fif`` · ``proc-clean_events.tsv`` (with ``trial_id``) · ICA logs
+
+.. rst-class:: sd-text-center sd-fs-3 sd-text-muted
+
+   ↓
+
+.. grid:: 1
+   :gutter: 0
+
+   .. grid-item-card:: :octicon:`graph;1.1em;sd-text-success` Stage 2 — Feature Extraction (16 families)
+      :class-card: sd-border-1
+
+      **Input:** ``proc-clean_epo.fif`` · ``proc-clean_events.tsv``
+
+      .. grid:: 4
+         :gutter: 2
+         :margin: 0
+
+         .. grid-item::
+
+            | ``power``
+            | ``spectral``
+            | ``aperiodic``
+            | ``erp``
+
+         .. grid-item::
+
+            | ``erds``
+            | ``ratios``
+            | ``asymmetry``
+            | ``microstates``
+
+         .. grid-item::
+
+            | ``connectivity``
+            | ``directedconnectivity``
+            | ``itpc``
+            | ``pac``
+
+         .. grid-item::
+
+            | ``sourcelocalization``
+            | ``complexity``
+            | ``bursts``
+            | ``quality``
+
+      One row per trial · spatial scopes: ROI, channel, global, channel-pair
+
+      **Output:** ``features/<family>/features_<family>.parquet`` + ``metadata/*.json``
+
+.. rst-class:: sd-text-center sd-fs-3 sd-text-muted
+
+   ↓
+
+.. grid:: 2
+   :gutter: 2
+
+   .. grid-item-card:: :octicon:`beaker;1.1em;sd-text-warning` Stage 3a — Behavioral Statistics
+      :class-card: sd-border-1
+
+      - Partial Spearman correlations + permutation p-values
+      - Predictor residualization (spline OLS, AIC-selected)
+      - Trial-wise OLS regression with HC3 standard errors
+      - ICC(3,1) run-level reliability
+      - Condition contrasts: Welch t-test, Cohen's d, Hedges' g
+      - Temporal cluster permutation tests
+      - Benjamini–Hochberg + hierarchical Simes FDR
+
+      **Output:** ``stats/`` (TSV / Parquet per analysis stage)
+
+   .. grid-item-card:: :octicon:`dependabot;1.1em;sd-text-danger` Stage 3b — Machine Learning
+      :class-card: sd-border-1
+
+      - Nested LOSO CV: outer LeaveOneGroupOut · inner GroupKFold
+      - Regression: ElasticNet · Ridge · Random Forest (Yeo-Johnson target)
+      - Classification: SVM (RBF) · Logistic Regression · RF · EEGNet CNN
+      - Temporal generalization matrix
+      - Conformal prediction intervals
+      - SHAP feature importance (fold-aggregated)
+      - Permutation test: full nested CV on shuffled labels
+
+      **Output:** ``ml/`` (summaries, predictions, SHAP, figures)
+
+.. rst-class:: sd-text-center sd-fs-3 sd-text-muted
+
+   ↓
+
+.. grid:: 1
+   :gutter: 0
+
+   .. grid-item-card:: :octicon:`telescope;1.1em;sd-text-muted` Stage 4 — fMRI Pipeline *(optional)*
+      :class-card: sd-border-1
+
+      **Input:** BIDS fMRI + fMRIPrep derivatives
+
+      - Preprocessing: containerized fMRIPrep (Docker or Apptainer; image ``nipreps/fmriprep:25.2.4``)
+      - First-level GLM: Nilearn ``FirstLevelModel``; HRF ``spm``; drift ``cosine``; high-pass 0.008 Hz
+      - Trial-wise betas: beta-series (LSA) or least-squares-separate (LSS)
+      - Group inference: one-sample GLM + optional max-T permutation (default 5 000 iterations)
+      - Resting-state: ROI timeseries extraction and connectivity matrix
+      - EEG–fMRI fusion: predict trial-wise fMRI signature expression from EEG features
+
+      **Output:** ``sub-*/fmri/first_level/`` · ``sub-*/fmri/beta_series/`` · ``group/fmri/second_level/``
+
+      .. note::
+
+         The fMRI pipeline is **still under active development**. Command-line
+         options, defaults, and file layouts may change between releases.
 
 .. _qs-install:
 
@@ -452,6 +528,11 @@ Use the tabs below for the full command matrix and focused examples.
 
    .. tab-item:: fMRI
 
+      .. note::
+
+         The fMRI pipeline is **still under active development**. Expect
+         evolving APIs and outputs; verify behavior against your dataset.
+
       Containerized fMRI preprocessing via fMRIPrep (Docker or Apptainer),
       followed by Nilearn GLM analyses and resting-state connectivity.
 
@@ -515,6 +596,11 @@ Use the tabs below for the full command matrix and focused examples.
       confound strategy, and signature readout methods.
 
    .. tab-item:: Plotting
+
+      .. note::
+
+         The plotting pipeline is **still under active development**. Plot
+         catalog entries, CLI flags, and default figure styles may change.
 
       Renders visualization suites from computed features and statistical results.
 

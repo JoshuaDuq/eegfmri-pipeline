@@ -11,6 +11,12 @@ Append ``--help`` to any command for full option details.
 Shared subject-selection flags (``--subject``, ``--all-subjects``, ``--task``,
 ``--dry-run``, ``--set``) are documented in :doc:`../subject_selection`.
 
+.. note::
+
+   The **fMRI** commands (``fmri``, ``fmri-analysis``) and the **plotting**
+   command are **still under active development**. Expect evolving options and
+   outputs; pin a release or check the changelog when upgrading.
+
 .. toctree::
    :maxdepth: 1
    :hidden:

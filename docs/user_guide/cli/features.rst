@@ -1,7 +1,7 @@
 Feature Extraction
 ==================
 
-Extract trial-level EEG features from cleaned epochs.
+Extract trial-level EEG features from cleaned epochs and write Parquet tables.
 
 .. code-block:: bash
 
@@ -17,81 +17,178 @@ Modes
    * - Mode
      - Description
    * - ``compute``
-     - Extract features and write derivatives (Parquet; optional TSV/CSV via ``--also-save-csv``)
+     - Extract features and write derivatives. Parquet by default;
+       add ``--also-save-csv`` for a plain-text copy.
    * - ``visualize``
-     - Plot from already-computed tables
+     - Render summary plots from already-computed tables.
 
-.. dropdown:: Feature families (categories)
-   :icon: list-unordered
+Feature Families
+----------------
 
-   .. list-table::
-      :header-rows: 1
-      :widths: 25 75
+All 16 families are available. Select a subset with ``--categories``.
 
-      * - Category
-        - What is quantified
-      * - ``power``
-        - Band-limited oscillatory power (delta, theta, alpha, beta, gamma)
-      * - ``spectral``
-        - Spectral summary measures (spectral edge, peak frequency, bandwidth)
-      * - ``ratios``
-        - Band-power ratios (theta/beta, theta/alpha, alpha/beta, delta/alpha, delta/theta)
-      * - ``aperiodic``
-        - 1/f background (slope, offset) via iterative fits
-      * - ``connectivity``
-        - Functional connectivity (wPLI, imcoh, AEC, PLV, PLI)
-      * - ``directedconnectivity``
-        - Directed connectivity (PSI, DTF, PDC) from MVAR models
-      * - ``microstates``
-        - Microstate sequence statistics (coverage, duration, occurrence, transitions)
-      * - ``pac``
-        - Phase-amplitude coupling (theta-gamma, alpha-gamma) with surrogates
-      * - ``itpc``
-        - Inter-trial phase coherence
-      * - ``erp``
-        - ERP amplitudes in configurable component windows
-      * - ``bursts``
-        - Transient oscillatory bursts from envelope thresholding
-      * - ``complexity``
-        - Signal complexity (permutation entropy, sample entropy, MSE, LZC)
-      * - ``asymmetry``
-        - Hemispheric asymmetry indices for canonical electrode pairs
-      * - ``erds``
-        - Event-related desynchronization/synchronization
-      * - ``quality``
-        - Data quality indicators (SNR, muscle, line noise)
-      * - ``sourcelocalization``
-        - Source-space features from LCMV or eLORETA solutions
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
 
-For formulas and configuration details, see :doc:`../../methods/eeg/features`.
+   * - Family
+     - What it computes
+   * - ``power``
+     - Morlet TFR band power (delta · theta · alpha · beta · gamma),
+       baseline-normalized (dB / percent / log-ratio)
+   * - ``spectral``
+     - PSD descriptors: peak frequency, center frequency, bandwidth,
+       spectral entropy (multitaper or Welch)
+   * - ``aperiodic``
+     - 1/f slope and offset (fixed or knee model via specparam/FOOOF);
+       ``powcorr`` band power corrected for aperiodic background
+   * - ``erp``
+     - ERP component windows (N1 / N2 / P2): peak amplitude, latency,
+       AUC, peak-to-peak
+   * - ``erds``
+     - Event-related desynchronization / synchronization vs. baseline;
+       onset and rebound latencies
+   * - ``ratios``
+     - Band-power ratios (e.g., theta/alpha, delta/beta) from PSD
+   * - ``asymmetry``
+     - Hemispheric asymmetry indices and log-difference on configured
+       electrode pairs
+   * - ``microstates``
+     - GFP-peak K-means microstate templates: coverage, duration,
+       occurrence rate, transition probabilities
+   * - ``connectivity``
+     - wPLI, PLI, imCoh, PLV, AEC/AEC-orth; optional graph metrics
+       (global efficiency, small-world index) and dynamic connectivity states
+   * - ``directedconnectivity``
+     - Phase Slope Index (PSI), DTF, PDC from MVAR model
+   * - ``itpc``
+     - Inter-trial phase clustering; CV-safe ``fold_global`` mode by default
+   * - ``pac``
+     - Phase–amplitude coupling (mean vector length); surrogate z-score
+       from trial-shuffle or circular-shift surrogates
+   * - ``sourcelocalization``
+     - LCMV beamformer or eLORETA inverse → ROI band power and
+       AEC/wPLI/PLV in source space; optional fMRI constraint mask
+   * - ``complexity``
+     - LZC, permutation entropy, sample entropy, multiscale entropy (MSE)
+   * - ``bursts``
+     - Threshold-based transient oscillation detection on band envelopes:
+       count, rate, mean duration, mean amplitude, occupancy fraction
+   * - ``quality``
+     - Per-trial QC: variance, SNR, muscle artifact index, PTP, finite fraction
+
+Key Options
+-----------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 45 20
+
+   * - Option
+     - Description
+     - Default
+   * - ``--categories``
+     - Space-separated list of feature families to extract
+     - all enabled families from config
+   * - ``--analysis-mode``
+     - ``group_stats`` (descriptive) or ``trial_ml_safe`` (CV-safe;
+       disables cross-trial leakage paths)
+     - ``group_stats``
+   * - ``--spatial-transform``
+     - Apply ``csd`` (surface Laplacian) or ``none`` before phase-based
+       families; per-family overrides via config
+     - per-family config default
+   * - ``--spatial``
+     - Spatial aggregation scopes: ``roi``, ``global``, ``ch``, ``chpair``
+     - all scopes
+   * - ``--frequency-bands``
+     - Custom band definitions as ``name:f_min:f_max`` (space-separated);
+       appends to or replaces config bands
+     - config ``frequency_bands``
+   * - ``--rois``
+     - Custom ROI definitions as ``name:ch1,ch2,...``
+     - config ROIs
+   * - ``--iaf-enabled``
+     - Estimate each subject's Individual Alpha Frequency from baseline PSD
+       and shift the alpha band accordingly
+     - disabled
+   * - ``--also-save-csv``
+     - Write a ``.csv`` copy alongside the Parquet output
+     - disabled
+   * - ``--change-scores``
+     - Append change-score columns (``difference``, ``percent``,
+       ``log_ratio``) for baseline/active pairs
+     - disabled
+   * - ``--change-scores-window-pairs``
+     - Explicit window pairs for change scores (e.g., ``baseline:active``)
+     - ``baseline:active``
+   * - ``--n-jobs``
+     - Parallel jobs for band/connectivity/aperiodic loops
+     - config ``feature_engineering.parallel``
+
+Analysis Modes
+--------------
+
+The ``--analysis-mode`` flag is critical when features feed ML models.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 38 40
+
+   * - Mode
+     - When to use
+     - What changes
+   * - ``group_stats``
+     - Descriptive analyses, behavioral correlations, group-level plots
+     - All cross-trial computations permitted
+   * - ``trial_ml_safe``
+     - Feature inputs to cross-validated ML pipelines
+     - Any computation that uses test-trial data (evoked subtraction,
+       ITPC global average, microstate clustering, etc.) either
+       restricts to training trials or raises an error
+
+Run feature extraction twice — once in each mode — to feed both behavioral
+analyses and ML models without recomputing from scratch.
 
 Examples
 --------
 
 .. code-block:: bash
 
-   # Default categories
+   # Default feature extraction (all configured categories)
    eeg-pipeline features compute --subject 0001
 
-   # Selected categories with explicit spatial aggregation
+   # Subset of families, ML-safe
    eeg-pipeline features compute --subject 0001 \
-     --categories power connectivity aperiodic \
-     --spatial roi global
+     --categories power connectivity aperiodic erp erds itpc pac \
+     --analysis-mode trial_ml_safe
+
+   # All subjects, parallel jobs, also write CSV
+   eeg-pipeline features compute --all-subjects \
+     --categories power spectral aperiodic \
+     --n-jobs -1 --also-save-csv
 
    # Custom frequency bands and ROIs
    eeg-pipeline features compute --subject 0001 \
      --frequency-bands "mu:8.0:13.0" "high_beta:20.0:30.0" \
      --rois "Motor:C3,C4,Cz" "Occipital:O1,O2,Oz"
 
-   # ML-safe mode (avoid CV leakage from cross-trial computations)
-   eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
+   # IAF-adaptive alpha band
+   eeg-pipeline features compute --subject 0001 --iaf-enabled
 
-   # CSD spatial transform (useful for phase-based families)
+   # CSD spatial transform for phase-based families
    eeg-pipeline features compute --subject 0001 --spatial-transform csd
 
-   # Visualize from existing tables
+   # Visualize existing feature tables
    eeg-pipeline features visualize --subject 0001
 
-See also:
-:doc:`../subject_selection` (shared subject/task flags) and
-:doc:`../../methods/eeg/features` (methods + configuration).
+.. seealso::
+
+   :doc:`../../methods/eeg/features`
+      Formulas, spatial modes, CV hygiene table, and normalization schemes.
+
+   :doc:`../output_formats`
+      Parquet layout, metadata JSON, and directory structure.
+
+   :doc:`../subject_selection`
+      Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.

@@ -1,6 +1,11 @@
 fMRI Analysis
 =============
 
+.. note::
+
+   The fMRI pipeline is **still under active development**. GLM modes, contrast
+   discovery, and file naming conventions may evolve between releases.
+
 Subject-level and group-level GLM analysis plus trial-wise beta estimation
 via nilearn.
 

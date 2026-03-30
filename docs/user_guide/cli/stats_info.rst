@@ -1,74 +1,112 @@
 Stats and Info
 ==============
 
-Inspect pipeline state, subject availability, and current configuration.
+Read-only inspection commands. Neither ``info`` nor ``stats`` modifies
+pipeline state.
 
 .. tab-set::
 
    .. tab-item:: info
 
-      Read-only discovery (never modifies state).
+      Discover subjects, features, configuration, and data availability.
 
       .. code-block:: bash
 
          eeg-pipeline info [mode] [options]
 
-      Modes:
+      .. list-table::
+         :header-rows: 1
+         :widths: 30 70
 
-      .. dropdown:: Available info modes
-         :icon: info
-
-         .. list-table::
-            :header-rows: 1
-            :widths: 30 70
-
-            * - Mode
-              - Reports
-            * - ``subjects``
-              - Subjects discovered across BIDS, epochs, and feature derivatives
-            * - ``features``
-              - Feature availability per subject (which tables exist)
-            * - ``config``
-              - Effective configuration (including runtime overrides)
-            * - ``version``
-              - Installed pipeline version and dependency snapshot
-            * - ``plotters``
-              - Available plot definitions and groups
-            * - ``discover``
-              - Column/value discovery from events, trial tables, and condition-effects
-            * - ``rois``
-              - ROI definitions (channel groupings)
-            * - ``fmri-conditions``
-              - fMRI event conditions available for GLM specification
-            * - ``fmri-columns``
-              - Columns present in fMRI ``events.tsv``
-            * - ``multigroup-stats``
-              - Cross-subject summary statistics for selected features
-            * - ``ml-feature-space``
-              - ML feature-space dimensions and structure
+         * - Mode
+           - What it reports
+         * - ``subjects``
+           - Subjects discovered across BIDS, epochs, and feature derivatives;
+             run counts and availability summary
+         * - ``features``
+           - Feature table availability per subject — which families exist,
+             row counts, and any missing tables
+         * - ``config``
+           - Fully resolved active configuration, including all runtime overrides
+             and path resolutions
+         * - ``version``
+           - Installed pipeline version and key dependency versions
+         * - ``plotters``
+           - Available plot definitions, groups, and their configuration
+         * - ``discover``
+           - Auto-discover ``trial_type`` values, condition columns, and
+             event columns from ``events.tsv`` and trial tables
+         * - ``rois``
+           - Configured ROI definitions (channel groupings) with member channels
+         * - ``fmri-conditions``
+           - Available condition values from fMRI ``events.tsv`` for GLM spec
+         * - ``fmri-columns``
+           - All columns present in fMRI ``events.tsv``
+         * - ``multigroup-stats``
+           - Cross-subject summary statistics for selected feature families
+         * - ``ml-feature-space``
+           - ML feature matrix dimensions: subjects × features after harmonization
 
    .. tab-item:: stats
 
-      Pipeline-wide dashboard (read-only).
+      Project-wide dashboard and storage inspection.
 
       .. code-block:: bash
 
          eeg-pipeline stats [mode]
 
-      Modes: ``summary`` (default), ``subjects``, ``features``, ``storage``, ``timeline``.
+      .. list-table::
+         :header-rows: 1
+         :widths: 22 78
+
+         * - Mode
+           - What it reports
+         * - ``summary`` *(default)*
+           - High-level overview: subjects, preprocessing status, extracted
+             families, ML results availability
+         * - ``subjects``
+           - Per-subject processing status across all pipeline stages
+         * - ``features``
+           - Feature table coverage and row counts across subjects and families
+         * - ``storage``
+           - Derivatives directory size breakdown by subdirectory
+         * - ``timeline``
+           - Chronological log of pipeline runs (timestamps from file metadata)
 
 Examples
 --------
 
 .. code-block:: bash
 
+   # Discover all subjects and their data availability
    eeg-pipeline info subjects
+
+   # Inspect feature tables for a specific subject
    eeg-pipeline info features 0001
+
+   # Show the fully resolved configuration (useful for debugging)
    eeg-pipeline info config
+
+   # Show ML feature matrix dimensions before running ML
    eeg-pipeline info ml-feature-space
+
+   # Discover condition values in the events file
+   eeg-pipeline info discover
+
+   # Project-wide status dashboard
    eeg-pipeline stats
+
+   # Storage breakdown
    eeg-pipeline stats storage
 
-See also:
-:doc:`../subject_selection` (shared runtime flags) and
-:doc:`../../methods/index` (methods reference for outputs and contracts).
+   # JSON output for scripting
+   eeg-pipeline info subjects --json
+   eeg-pipeline validate all --json
+
+.. seealso::
+
+   :doc:`../subject_selection`
+      Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.
+
+   :doc:`validation`
+      Data integrity checks that complement these read-only inspection commands.

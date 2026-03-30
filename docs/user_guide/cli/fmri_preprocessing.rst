@@ -1,6 +1,11 @@
 fMRI Preprocessing
 ==================
 
+.. note::
+
+   The fMRI pipeline is **still under active development**. Container wiring,
+   defaults, and derivative paths may change; confirm outputs after upgrades.
+
 Containerized fMRIPrep-style preprocessing via Docker or Apptainer.
 
 .. code-block:: bash

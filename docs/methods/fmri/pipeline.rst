@@ -1,6 +1,11 @@
 fMRI Analysis Pipeline
 ======================
 
+.. note::
+
+   This fMRI pipeline is **still under active development**. APIs, defaults,
+   and on-disk layouts may change between releases; re-check outputs after upgrades.
+
 **Module:** ``fmri_pipeline``
 
 .. seealso::

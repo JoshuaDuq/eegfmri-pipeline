@@ -11,9 +11,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Project metadata
 # ---------------------------------------------------------------------------
 project = "EEG–fMRI Analysis Pipeline"
-author = "Joshua Duque"
+author = "JoshuaDuq"
 release = "1.0.0"
-copyright = "2025, Joshua Duque"
+copyright = "2026, JoshuaDuq"
 
 # ---------------------------------------------------------------------------
 # Extensions
