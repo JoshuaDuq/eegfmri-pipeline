@@ -142,3 +142,6 @@ eeg_pipeline/data/derivatives/**
 
 ### Secrets ###
 eeg_pipeline/licenses/license_*.txt
+
+### Studies (local only) ###
+studies/
