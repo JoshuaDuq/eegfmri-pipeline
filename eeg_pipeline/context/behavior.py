@@ -342,9 +342,11 @@ class BehaviorContext:
         self.source_localization_df = bundle.source_localization_df
         if bundle.pac_trials_df is not None and not bundle.pac_trials_df.empty:
             self.pac_df = bundle.pac_trials_df
-            if "pac_trials" in self.feature_manifests and "pac" not in self.feature_manifests:
+            self.feature_manifests.pop("pac", None)
+            self.feature_paths.pop("pac", None)
+            if "pac_trials" in self.feature_manifests:
                 self.feature_manifests["pac"] = self.feature_manifests["pac_trials"]
-            if "pac_trials" in self.feature_paths and "pac" not in self.feature_paths:
+            if "pac_trials" in self.feature_paths:
                 self.feature_paths["pac"] = self.feature_paths["pac_trials"]
         else:
             self.pac_df = bundle.pac_df
