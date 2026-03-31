@@ -10,7 +10,7 @@ map, then jump to the methods reference for the scientific details.
 
    .. grid-item-card:: Feature Tables
 
-      Parquet by default, optional TSV/CSV, with one table per feature family.
+      Parquet by default, optional CSV export, with one or more tables per feature family.
 
    .. grid-item-card:: Plot Exports
 
@@ -30,7 +30,7 @@ map, then jump to the methods reference for the scientific details.
 
       .. rubric:: Feature Tables
 
-      Feature tables are saved as **Parquet** by default. TSV/CSV export remains
+      Feature tables are saved as **Parquet** by default. CSV export remains
       available when you need a plain-text copy:
 
       .. code-block:: bash
@@ -149,7 +149,7 @@ map, then jump to the methods reference for the scientific details.
 
       When ``task_is_rest: true``, preprocessing creates fixed-length segments
       and no ``events.tsv`` is required. Event-locked families that depend on
-      trial onset markers are automatically skipped:
+      trial onset markers are rejected as invalid (fail fast):
 
       - **Skipped:** ``erp``, ``erds``, ``itpc``, ``pac``
       - **Compatible:** ``power``, ``spectral``, ``aperiodic``, ``connectivity``,

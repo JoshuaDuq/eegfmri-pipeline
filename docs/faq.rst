@@ -203,7 +203,9 @@ BIDS directory:
      deriv_rest_root: "../../../data/derivatives/rest"
 
 No ``events.tsv`` is required. Event-locked families (``erp``, ``erds``,
-``itpc``, ``pac``) are automatically skipped; all others run normally.
+``itpc``, ``pac``) are not valid in rest mode and raise an error if requested.
+Use only rest-compatible families (for example: ``power``, ``connectivity``,
+``aperiodic``, ``spectral``, ``complexity``).
 
 .. code-block:: bash
 
@@ -232,7 +234,10 @@ Or pass it at runtime for a specific run:
 
 .. code-block:: bash
 
-   eeg-pipeline features compute --all-subjects --n-jobs -1
+   eeg-pipeline features compute --all-subjects \
+     --n-jobs-bands -1 \
+     --n-jobs-connectivity -1 \
+     --n-jobs-aperiodic -1
 
 Limit to the families you need for the current analysis:
 
@@ -313,7 +318,7 @@ SMOTE resampling:
 .. code-block:: bash
 
    eeg-pipeline ml classify --subject 0001 --subject 0002 \
-     --set machine_learning.classification.resampling=smote
+     --set machine_learning.classification.resampler=smote
 
 ----
 
@@ -336,16 +341,16 @@ Set an absolute writable path:
 
 **First-level GLM produces empty contrast maps.**
 
-1. ``fmri_contrast.enabled`` must be ``true`` (it is ``false`` by default).
-2. ``fmri_contrast.condition_a.value`` must exactly match a ``trial_type``
+1. ``fmri_contrast.condition_a.value`` must exactly match a ``trial_type``
    value in your ``events.tsv``. Use ``eeg-pipeline info fmri-conditions``
    to list available values.
-3. Confirm fMRIPrep outputs exist under the expected derivatives path.
+2. Confirm fMRIPrep outputs exist under the expected derivatives path.
 
 .. code-block:: bash
 
    eeg-pipeline info fmri-conditions
    eeg-pipeline validate bids
+   bids-validator /path/to/bids_root
 
 ----
 

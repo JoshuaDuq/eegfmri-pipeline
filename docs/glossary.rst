@@ -139,11 +139,12 @@ documentation. Terms are linked from methods pages via ``:term:`` references.
       row-order alignment across files is not valid.
 
    task_is_rest
-      A boolean config key (``preprocessing.task_is_rest``) that switches the
-      pipeline into resting-state mode. When ``true``, preprocessing creates
-      fixed-length overlapping segments instead of event-locked epochs, no
-      ``events.tsv`` conditions are required, and event-locked feature families
-      (``erp``, ``erds``, ``itpc``, ``pac``) are automatically skipped.
+      A boolean config key (``preprocessing.task_is_rest`` and
+      ``feature_engineering.task_is_rest``) that switches the pipeline into
+      resting-state mode. When ``true``, preprocessing creates fixed-length
+      overlapping segments instead of event-locked epochs, no ``events.tsv``
+      conditions are required, and event-locked feature families (``erp``,
+      ``erds``, ``itpc``, ``pac``) are rejected as invalid.
 
    Parquet
       A columnar binary file format (Apache Parquet) used for storing feature

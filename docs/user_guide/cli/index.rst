@@ -18,7 +18,7 @@ Append ``--help`` to any command for full option details.
 Shared Options
 --------------
 
-All commands accept these subject-selection and runtime flags:
+Most analysis commands accept these subject-selection and runtime flags:
 
 .. list-table::
    :header-rows: 1
@@ -47,11 +47,11 @@ All commands accept these subject-selection and runtime flags:
    * - ``--bids-fmri-root``
      - Override ``paths.bids_fmri_root`` at runtime
    * - ``--bids-rest-root``
-     - Override ``paths.bids_rest_root`` at runtime (resting-state EEG)
+     - Override ``paths.bids_rest_root`` at runtime (resting-state dataset root; EEG and fMRI rest modes)
    * - ``--deriv-root``
      - Override ``paths.deriv_root`` at runtime
    * - ``--deriv-rest-root``
-     - Override ``paths.deriv_rest_root`` at runtime (resting-state EEG)
+     - Override ``paths.deriv_rest_root`` at runtime (resting-state derivatives root; EEG and fMRI rest modes)
 
 .. note::
 

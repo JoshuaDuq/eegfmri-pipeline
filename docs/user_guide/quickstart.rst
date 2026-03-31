@@ -81,9 +81,9 @@ that aligns EEG features, fMRI betas, and behavioral targets across all stages.
             | ``bursts``
             | ``quality``
 
-      One row per trial · spatial scopes: ROI, channel, global, channel-pair
+      Granularity depends on family/mode (trial, condition, or subject) · spatial scopes: ROI, channels, global
 
-      **Output:** ``features/<family>/features_<family>.parquet`` + ``metadata/*.json``
+      **Output:** ``features/<family>/features_*.parquet`` + ``metadata/*.json``
 
 .. rst-class:: sd-text-center sd-fs-3 sd-text-muted
 
@@ -128,7 +128,8 @@ that aligns EEG features, fMRI betas, and behavioral targets across all stages.
    .. grid-item-card:: Stage 4 — fMRI Pipeline *(optional)*
       :class-card: sd-border-1
 
-      **Input:** BIDS fMRI + fMRIPrep derivatives
+      **Input:** BIDS fMRI (fMRIPrep derivatives are the default input source for analysis;
+      raw BIDS BOLD can be used explicitly via ``--input-source bids_raw``)
 
       - Preprocessing: containerized fMRIPrep (Docker or Apptainer; image ``nipreps/fmriprep:25.2.4``)
       - First-level GLM: Nilearn ``FirstLevelModel``; HRF ``spm``; drift ``cosine``; high-pass 0.008 Hz
@@ -273,7 +274,8 @@ Override any key at runtime without editing the YAML:
 
    eeg-pipeline features compute --subject 0001 \
      --set feature_engineering.analysis_mode=trial_ml_safe \
-     --set feature_engineering.parallel=true
+     --set feature_engineering.parallel.n_jobs_bands=-1 \
+     --set feature_engineering.parallel.n_jobs_connectivity=-1
 
 See :doc:`configuration` for the complete key reference.
 
@@ -332,7 +334,7 @@ Use the tabs below for the full command matrix and focused examples.
 
    .. tab-item:: Feature Extraction
 
-      Reads ``proc-clean`` epochs and writes one Parquet table per family to
+      Reads ``proc-clean`` epochs and writes one or more Parquet tables per family to
       ``derivatives/sub-<id>/eeg/features/<family>/``.
 
       **Output:** ``features_<family>.parquet`` + ``metadata/features_<family>.json``
@@ -565,7 +567,7 @@ Use the tabs below for the full command matrix and focused examples.
              high-pass 0.008 Hz; writes z-score/t-stat/cope maps
          * - ``fmri-analysis``
            - ``second-level``
-           - Group one-sample GLM from MNI cope/beta maps; optional max-T
+           - Group one-sample GLM from MNI cope/effect-size maps; optional max-T
              permutation inference (default 5000 permutations)
          * - ``fmri-analysis``
            - ``beta-series``
@@ -586,7 +588,8 @@ Use the tabs below for the full command matrix and focused examples.
          eeg-pipeline fmri-analysis first-level --subject 0001 \
            --cond-a-value stimulation --cond-b-value fixation_rest
          eeg-pipeline fmri-analysis second-level \
-           --subject 0001 --subject 0002
+           --subject 0001 --subject 0002 \
+           --group-contrast-names stimulation_vs_rest
          eeg-pipeline fmri-analysis beta-series --subject 0001 \
            --cond-a-value stimulation --cond-b-value fixation_rest
          eeg-pipeline fmri-analysis lss --subject 0001 \
@@ -597,9 +600,9 @@ Use the tabs below for the full command matrix and focused examples.
 
       .. note::
 
-         ``fmri_contrast.enabled`` and ``fmri_group_level.enabled`` must be
-         set to ``true`` in the config (or via ``--set``) for first-level and
-         group-level analyses to run.
+         ``fmri_contrast.enabled`` and ``fmri_group_level.enabled`` default to
+         ``false`` in config, but CLI ``first-level`` / ``second-level`` modes
+         run when explicitly invoked.
 
       See :doc:`../methods/fmri/pipeline` for the GLM specification,
       confound strategy, and signature readout methods.

@@ -52,7 +52,7 @@ Key Options
      - Epoch end time in seconds
      - ``15.0``
    * - ``--reject-method``
-     - Epoch rejection strategy: ``autoreject_local`` or ``peak_to_peak``
+     - Epoch rejection strategy: ``none``, ``autoreject_local``, or ``autoreject_global``
      - ``autoreject_local``
    * - ``--no-icalabel``
      - Skip ICLabel; fall back to MNE-BIDS heuristic component labeling
@@ -85,10 +85,10 @@ Key Options
    * - ``--write-clean-events``
      - Write ``proc-clean_events.tsv`` aligned to kept epochs (required by
        feature extraction and ML)
-     - enabled by default in ``full`` mode
+     - from config (default: enabled)
    * - ``--trim-to-first-volume``
      - Trim EEG onset to the first fMRI volume timestamp (simultaneous EEG–fMRI)
-     - disabled
+     - config-dependent (enabled in the default config)
    * - ``--l-freq``
      - High-pass filter cutoff (Hz)
      - from config (default: ``0.1``)

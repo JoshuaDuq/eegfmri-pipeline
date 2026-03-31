@@ -16,7 +16,8 @@ dataset-specific step before ``eeg-pipeline fmri preprocess`` /
    * - Outputs
      - Validated BIDS structure ready for ``fmri preprocess``
    * - CLI
-     - ``eeg-pipeline validate bids``
+     - ``eeg-pipeline validate bids`` (quick internal checks) and
+       ``bids-validator /path/to/bids_root`` (full BIDS-spec validation)
    * - Requires
      - ``dcm2niix`` on ``PATH`` (for DICOM conversion); BIDS Validator (optional)
 
@@ -80,7 +81,6 @@ Before running the fMRI pipeline, validate your BIDS layout:
 .. code-block:: bash
 
    eeg-pipeline validate bids
-   # or with the BIDS Validator directly:
    bids-validator /path/to/bids_root
 
 .. seealso::

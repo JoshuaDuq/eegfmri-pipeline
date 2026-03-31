@@ -120,7 +120,7 @@ Multi-step configuration flow. Steps vary by pipeline:
    * - Select subjects
      - Auto-discovered from BIDS/derivatives with status badges
    * - Select mode
-     - Compute, visualize, or pipeline-specific modes (e.g. ``trial_ml_safe`` vs ``rest`` for feature extraction)
+     - Compute, visualize, or pipeline-specific modes (e.g. ``group_stats`` vs ``trial_ml_safe`` for feature extraction)
    * - Select computations
      - Toggle individual analyses (behavior pipeline)
    * - Select feature families

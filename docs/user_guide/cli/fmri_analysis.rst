@@ -11,9 +11,9 @@ via nilearn.
 
 .. note::
 
-   ``fmri_contrast.enabled`` and ``fmri_group_level.enabled`` are both
-   ``false`` by default. You must set them to ``true`` in config (or via
-   ``--set``) before ``first-level`` and ``second-level`` modes will run.
+   ``fmri_contrast.enabled`` and ``fmri_group_level.enabled`` default to
+   ``false``, but CLI ``first-level`` / ``second-level`` modes run when invoked.
+   You do not need to flip those toggles to use the CLI modes directly.
    Use ``eeg-pipeline info fmri-conditions`` to list available condition
    values before specifying ``--cond-a-value`` / ``--cond-b-value``.
 
@@ -33,7 +33,7 @@ Modes
    * - ``first-level``
      - First-level GLM with user-defined contrasts → contrast maps
    * - ``second-level``
-     - Explicit group GLM from existing first-level MNI cope/beta maps
+     - Explicit group GLM from existing first-level MNI cope/effect-size maps
    * - ``beta-series``
      - Trial-wise beta-series estimation (LSA method)
    * - ``lss``
@@ -70,7 +70,7 @@ Examples
 
       .. code-block:: bash
 
-         # Group mean from existing first-level MNI cope/beta maps
+         # Group mean from existing first-level MNI cope/effect-size maps
          eeg-pipeline fmri-analysis second-level --subject 0001 --subject 0002 \
            --group-model one-sample \
            --group-contrast-names stimulation_vs_rest
@@ -91,8 +91,8 @@ Examples
 
    .. tab-item:: Rest
 
-      Requires a parcellation atlas: a NIfTI label image (integer ROI indices)
-      and a matching TSV with ``index`` and ``name`` columns.
+      Requires a parcellation atlas label image (NIfTI, integer ROI indices).
+      A matching TSV with ``index`` and ``name`` columns is optional but recommended.
 
       .. code-block:: bash
 
@@ -163,7 +163,7 @@ Key Options
       Containerized fMRIPrep preprocessing (run before analysis).
 
    :doc:`../configuration`
-      ``fmri_contrast`` and ``fmri_group_level`` config sections.
+      ``fmri_contrast``, ``fmri_group_level``, and ``fmri_resting_state`` config sections.
 
    :doc:`../data_layout`
       fMRI BIDS layout and required ``*_bold.json`` sidecar fields.

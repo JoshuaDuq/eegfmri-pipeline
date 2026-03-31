@@ -101,7 +101,7 @@ Key Options
        families; per-family overrides via config
      - per-family config default
    * - ``--spatial``
-     - Spatial aggregation scopes: ``roi``, ``global``, ``ch``, ``chpair``
+     - Spatial aggregation scopes: ``roi``, ``channels``, ``global``
      - all scopes
    * - ``--frequency-bands``
      - Custom band definitions as ``name:f_min:f_max`` (space-separated);
@@ -117,14 +117,17 @@ Key Options
    * - ``--also-save-csv``
      - Write a ``.csv`` copy alongside the Parquet output
      - disabled
-   * - ``--change-scores``
+   * - ``--compute-change-scores``
      - Append change-score columns (``difference``, ``percent``,
        ``log_ratio``) for baseline/active pairs
-     - disabled
+     - config-dependent (enabled in the default config)
+   * - ``--change-scores-transform``
+     - Change-score transform for derived columns
+     - ``difference``
    * - ``--change-scores-window-pairs``
      - Explicit window pairs for change scores (e.g., ``baseline:active``)
      - ``baseline:active``
-   * - ``--n-jobs``
+   * - ``--n-jobs-bands``, ``--n-jobs-connectivity``, ``--n-jobs-aperiodic``
      - Parallel jobs for band/connectivity/aperiodic loops
      - config ``feature_engineering.parallel``
 
@@ -132,7 +135,8 @@ Resting-State Compatibility
 ---------------------------
 
 When ``task_is_rest: true``, the following event-locked families are
-automatically skipped (they require trial onset markers):
+scientifically invalid and will raise an error if requested (they require
+trial onset markers):
 
 - ``erp`` — requires event-onset-aligned epochs
 - ``erds`` — requires baseline window relative to event onset
@@ -183,7 +187,7 @@ Examples
    # All subjects, parallel jobs, also write CSV
    eeg-pipeline features compute --all-subjects \
      --categories power spectral aperiodic \
-     --n-jobs -1 --also-save-csv
+     --n-jobs-bands -1 --n-jobs-aperiodic -1 --also-save-csv
 
    # Custom frequency bands and ROIs
    eeg-pipeline features compute --subject 0001 \

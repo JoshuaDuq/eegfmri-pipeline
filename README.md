@@ -50,7 +50,8 @@ implementation details.
 - Python 3.11 or later
 - Git for cloning the repository
 - Go 1.21+ only if you want to build the optional TUI
-- Docker plus a FreeSurfer license only for source localization workflows
+- Docker or Apptainer for fMRI preprocessing workflows
+- A FreeSurfer license for fMRI preprocessing and source-localization workflows
 
 See the [installation guide](https://joshuaduq.github.io/eegfmri-pipeline/install.html)
 for environment variables, optional components, and the Docker image used by
@@ -105,7 +106,7 @@ eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
 eeg-pipeline ml regression --all-subjects
 ```
 
-CLI flags for feature extraction (`--features`, `--bands`, `--rois`, etc.) map
+CLI flags for feature extraction (`--categories`, `--bands`, `--rois`, etc.) map
 directly to the wizard steps in the TUI. See the
 [Quick start guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html)
 for the full walkthrough.
@@ -113,11 +114,14 @@ for the full walkthrough.
 ## Feature Extraction
 
 Feature extraction supports both **task-based** (event-related, trial-level)
-and **resting-state** paradigms. The `--analysis-mode` flag controls the
-output format:
+and **resting-state** paradigms. The `--analysis-mode` flag controls
+cross-trial leakage behavior:
 
+- `group_stats` — descriptive/group analysis mode
 - `trial_ml_safe` — per-trial features suitable for ML pipelines
-- `rest` — segment-averaged features for resting-state analyses
+
+For resting-state extraction, set `task_is_rest: true` (config) or pass
+`--task-is-rest` on the CLI.
 
 Feature families (power spectra, connectivity, complexity, etc.) and frequency
 bands are selected per-run via the TUI wizard or the corresponding CLI flags.

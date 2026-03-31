@@ -17,7 +17,7 @@ fMRI Analysis Pipeline
       EEG source localization uses fMRI contrast maps as spatial priors.
 
    :doc:`../../user_guide/configuration`
-      Full ``fmri_preprocessing``, ``fmri_contrast``, and ``fmri_group_level`` key reference.
+      Full ``fmri_preprocessing``, ``fmri_contrast``, ``fmri_group_level``, and ``fmri_resting_state`` key reference.
 
    :doc:`../../user_guide/cli/fmri_analysis`
       CLI flags for all fMRI analysis modes.
@@ -43,7 +43,7 @@ in the source localization stage.
    * - CLI
      - ``eeg-pipeline fmri preprocess`` / ``eeg-pipeline fmri-analysis [first-level | second-level | beta-series | lss | rest]``
    * - Config
-     - ``fmri_preprocessing``, ``fmri_contrast``, ``fmri_group_level`` sections
+     - ``fmri_preprocessing``, ``fmri_contrast``, ``fmri_group_level``, ``fmri_resting_state`` sections
 
 Notation
 --------
@@ -104,7 +104,7 @@ Pipeline Overview
      - Multi-run first-level GLM and contrast computation
    * - 3b
      - ``pipelines/fmri_second_level.py`` + ``analysis/second_level.py``
-     - Explicit group-level inference from first-level MNI cope/beta maps
+     - Explicit group-level inference from first-level MNI cope/effect-size maps
    * - 4
      - ``pipelines/fmri_trial_signatures.py`` + ``analysis/trial_signatures.py``
      - Trial-wise beta estimation and signature readout
@@ -438,7 +438,8 @@ Dockerfile: ``eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne``.
 Multivariate Signature Readouts
 ---------------------------------
 
-**Module:** ``analysis/multivariate_signatures.py``
+**Modules:** ``analysis/trial_signatures.py`` and
+``analysis/multivariate_signatures.py``
 
 No signatures are hard-coded. Supply signature maps through configuration:
 
