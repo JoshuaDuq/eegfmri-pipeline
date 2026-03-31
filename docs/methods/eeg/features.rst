@@ -17,9 +17,14 @@ EEG Feature Extraction
    :doc:`../../user_guide/cli/features`
       CLI flags for feature category selection, spatial transforms, and IAF mode.
 
-Trial-level EEG feature extraction pipeline. Each trial (epoch) produces one row
-in a feature matrix. Targets event-related paradigms with well-defined time windows
-but is applicable to any EEG study with the same structure.
+EEG feature extraction pipeline. Supports both **task-based** (event-related, trial-level)
+and **resting-state** paradigms:
+
+- **Task mode** (default): each trial (epoch) produces one row in the feature matrix;
+  time windows are relative to event onset.
+- **Rest mode** (``preprocessing.task_is_rest: true``): fixed-length segments replace
+  trials; features are averaged across segments per subject.
+
 See :doc:`../../glossary` for definitions of :term:`TFR`, :term:`wPLI`, :term:`AEC`,
 :term:`PAC`, :term:`ITPC`, :term:`ERDS`, :term:`IAF`, and :term:`CSD`.
 
@@ -104,7 +109,7 @@ Most feature columns follow:
    * - ``domain``
      - ``power``, ``erp``, ``itpc``, ``erds``, ``conn``, ``comp``, …
    * - ``segment``
-     - ``baseline``, ``active``, task-specific window names
+     - ``baseline``, ``active``, or named time windows; ``seg_N`` for rest segments
    * - ``band``
      - ``alpha``, ``theta``, ``beta``, ``broadband``, …
    * - ``scope``
@@ -428,8 +433,9 @@ Harmonic overlap guards reject invalid band combinations.
 
 **fMRI constraint system:** when enabled, source space is restricted to suprathreshold
 fMRI activation voxels. Voxels are thresholded (z-score or FDR), clustered
-(minimum ``cluster_min_voxels`` = 50), and mapped to ``aparc+aseg`` labels for
-cross-subject harmonization.
+(minimum ``cluster_min_voxels`` = 50 voxels by default; override with
+``cluster_min_volume_mm3`` for a volume-based threshold), and mapped to
+``aparc+aseg`` labels for cross-subject harmonization.
 
 **Output spaces:**
 
@@ -588,9 +594,17 @@ Cross-Validation Hygiene
 Resting-State Restrictions
 ---------------------------
 
-Incompatible with resting-state mode (``task_is_rest = true``):
-``erp``, ``erds``, ``itpc``. Analysis mode must be ``group_stats``.
-Evoked subtraction (``subtract_evoked = true``) is rejected.
+The following families require event-locked epochs and are automatically
+skipped when ``task_is_rest = true``:
+
+- ``erp`` — requires event-onset-aligned component windows
+- ``erds`` — requires a baseline window relative to event onset
+- ``itpc`` — inter-trial phase clustering requires repeated trial markers
+- ``pac`` — surrogate scheme assumes repeated trial structure
+
+All other families run normally. Analysis mode may be ``group_stats`` or
+``trial_ml_safe``; the latter treats fixed-length segments as the trial unit.
+Evoked subtraction (``subtract_evoked = true``) raises an error in rest mode.
 
 Output Files
 ------------

@@ -1,17 +1,45 @@
 EEG–fMRI Analysis Pipeline
 ===========================
 
-A modular analysis suite for multimodal neuroimaging research. The pipeline
-takes :term:`BIDS`-formatted EEG and fMRI recordings through six stages —
-automated preprocessing, 16 EEG feature families, behavioral statistics,
-machine learning, fMRI :term:`GLM`, and source localization — from a single
-CLI or interactive TUI, with reproducible outputs and explicit CV safeguards
-throughout.
+This is a personal research project I started in 2025 and have been actively
+building ever since. It grew out of a simple frustration: running EEG and fMRI
+analyses typically means juggling a dozen tools, writing long terminal commands
+from memory, and spending more time gluing scripts together than doing actual
+science.
+
+My goal is to build a pipeline that **anyone doing EEG or fMRI research can
+pick up and use**, regardless of their programming background. The pipeline
+covers the full analysis stack from raw :term:`BIDS`-formatted recordings
+through preprocessing, feature extraction, behavioral statistics, machine
+learning, fMRI :term:`GLM`, and source localization. Everything runs from a
+single CLI or through an interactive terminal UI (TUI) that guides you through
+each step with wizards, so you never have to remember a flag name again.
+
+The TUI was something I particularly wanted to get right. Typing out commands
+like ``eeg-pipeline ml regression --all-subjects --set machine_learning...``
+every time is tedious and error-prone. The TUI turns that into a few
+keystrokes and a guided menu: pick subjects, modes, feature families, and
+bands interactively, and it assembles and runs the command for you.
+
+.. admonition:: Work in progress
+
+   This project is still growing. Several parts, particularly the **plotting
+   pipeline** and the **fMRI analysis** command surface, along with a number
+   of smaller features throughout, are incomplete or actively being redesigned.
+   I have a long list of things I still want to add and improve.
+
+   **If you use this pipeline and have ideas, find bugs, or think something
+   could work better, I would genuinely love to hear from you.** Suggestions
+   for new features, better defaults, clearer docs, or anything else are very
+   welcome. Feel free to open an issue or a discussion on GitHub.
 
 .. figure:: screenshots/tui_main_menu.png
    :width: 760px
    :align: center
-   :alt: Interactive TUI — pipeline stages at a glance
+   :alt: Interactive TUI main menu
+
+   The TUI main menu: all pipeline stages accessible through guided wizards,
+   no terminal commands required.
 
 ----
 
@@ -29,21 +57,21 @@ throughout.
       :link: user_guide/quickstart
       :link-type: doc
 
-      Full walkthrough from install to results — pipeline overview, validation,
+      Full walkthrough from install to results: pipeline overview, validation,
       preprocessing, features, ML, fMRI, and a complete chained workflow.
 
    .. grid-item-card:: :octicon:`book` User Guide
       :link: user_guide/index
       :link-type: doc
 
-      Data layout, YAML configuration, subject selection, CLI command
-      reference, output formats, and the interactive TUI.
+      Data layout, YAML configuration, CLI command reference,
+      output formats, and the interactive TUI.
 
    .. grid-item-card:: :octicon:`beaker` Methods Reference
       :link: methods/index
       :link-type: doc
 
-      Full scientific documentation — notation, formulas, configuration keys,
+      Full scientific documentation: notation, formulas, configuration keys,
       and output schemas for every pipeline stage.
 
    .. grid-item-card:: :octicon:`comment-discussion` FAQ
@@ -129,9 +157,9 @@ Pipeline Stages
    :caption: Getting Started
 
    install
-   contributing
-   glossary
+   user_guide/quickstart
    faq
+   glossary
 
 .. toctree::
    :hidden:
@@ -153,3 +181,10 @@ Pipeline Stages
    :caption: API Reference
 
    api/index
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Development
+
+   contributing

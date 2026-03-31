@@ -131,6 +131,20 @@ documentation. Terms are linked from methods pages via ``:term:`` references.
       :math:`z = \text{arctanh}(r)`. Used to symmetrize and stabilize
       variance before averaging connectivity values across runs or subjects.
 
+   trial_id
+      A canonical integer column written by the preprocessing stage into
+      ``*_proc-clean_events.tsv``. Each value identifies a single kept epoch
+      after artifact rejection. All downstream tables (feature Parquet files,
+      fMRI beta volumes, behavioral targets) must be joined on ``trial_id``;
+      row-order alignment across files is not valid.
+
+   task_is_rest
+      A boolean config key (``preprocessing.task_is_rest``) that switches the
+      pipeline into resting-state mode. When ``true``, preprocessing creates
+      fixed-length overlapping segments instead of event-locked epochs, no
+      ``events.tsv`` conditions are required, and event-locked feature families
+      (``erp``, ``erds``, ``itpc``, ``pac``) are automatically skipped.
+
    Parquet
       A columnar binary file format (Apache Parquet) used for storing feature
       tables. Preserves dtype precision, supports metadata sidecar JSON,

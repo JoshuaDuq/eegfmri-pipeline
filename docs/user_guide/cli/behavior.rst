@@ -149,5 +149,5 @@ Examples
    :doc:`../data_layout`
       ``events.tsv`` column requirements for predictor and outcome aliases.
 
-   :doc:`../subject_selection`
+   :doc:`index`
       Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.

@@ -104,7 +104,7 @@ Pipeline Overview
      - Multi-run first-level GLM and contrast computation
    * - 3b
      - ``pipelines/fmri_second_level.py`` + ``analysis/second_level.py``
-     - Explicit group-level inference from first-level MNI effect-size maps
+     - Explicit group-level inference from first-level MNI cope/beta maps
    * - 4
      - ``pipelines/fmri_trial_signatures.py`` + ``analysis/trial_signatures.py``
      - Trial-wise beta estimation and signature readout
@@ -248,7 +248,7 @@ Contrast Computation
    * - Custom formula
      - User-provided string (e.g., ``"stimulation - fixation_rest"``)
 
-Output types: ``z_score`` (default), ``stat`` (t-statistic), ``effect_size`` (COPE/beta).
+Output types: ``z-score`` (default), ``t-stat`` (t-statistic), ``cope`` (contrast of parameter estimates), ``beta`` (raw parameter estimates).
 
 Caching: contrast maps are named with an MD5 hash of key configuration parameters.
 A JSON sidecar records full provenance (subject, task, contrast definition, run inputs,
@@ -258,7 +258,7 @@ Stage 3b — Second-Level Group Inference
 -----------------------------------------
 
 Explicit mode (``eeg-pipeline fmri-analysis second-level``) consuming previously
-generated first-level maps. Inputs must be first-level ``effect_size`` maps in
+generated first-level maps. Inputs must be first-level ``cope`` or ``beta`` maps in
 ``MNI152NLin2009cAsym`` space.
 
 Supported designs:
@@ -478,8 +478,8 @@ Output Layout
    ├── sub-XXXX/
    │   └── fmri/
    │       ├── first_level/<task>/<contrast_name>/
-   │       │   ├── sub-XXXX_<contrast>_z_score.nii.gz
-   │       │   ├── sub-XXXX_<contrast>_effect_size.nii.gz
+   │       │   ├── sub-XXXX_task-<task>_contrast-<name>_stat-z_score_<hash>.nii.gz
+   │       │   ├── sub-XXXX_task-<task>_contrast-<name>_stat-effect_size_<hash>.nii.gz
    │       │   ├── sub-XXXX_<contrast>_provenance.json
    │       │   ├── design_matrix_run-01.tsv
    │       │   └── report.html

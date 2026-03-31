@@ -30,12 +30,33 @@ Modes
    * - ``uncertainty``
      - Conformal prediction intervals for calibrated uncertainty estimates
    * - ``shap``
-     - SHAP-based feature importance
+     - SHAP-based feature importance (fold-aggregated TreeExplainer / LinearExplainer)
    * - ``permutation``
-     - Permutation-based feature importance
+     - Null distribution test: re-runs full nested CV on label-shuffled targets
+       to estimate chance-level performance
 
 For CV schemes, metrics, and the full configuration surface, see
 :doc:`../../methods/eeg/machine_learning`.
+
+.. note::
+
+   Features must be extracted with ``--analysis-mode trial_ml_safe`` before
+   running any ML mode. Use ``eeg-pipeline info ml-feature-space`` to inspect
+   the resulting design matrix dimensions and check for missing families.
+
+.. seealso::
+
+   :doc:`../../methods/eeg/machine_learning`
+      CV scheme, model formulas, SHAP aggregation, and conformal prediction.
+
+   :doc:`features`
+      Feature extraction; ``trial_ml_safe`` mode and ``--categories`` selection.
+
+   :doc:`index`
+      Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.
+
+   :doc:`../output_formats`
+      EEG–fMRI fusion workflow (``--target fmri_signature``).
 
 Examples
 --------

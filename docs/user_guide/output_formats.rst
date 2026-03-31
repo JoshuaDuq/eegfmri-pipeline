@@ -147,9 +147,14 @@ map, then jump to the methods reference for the scientific details.
            rest_epochs_duration: 10.0
            rest_epochs_overlap: 0.0
 
-      When ``task_is_rest: true``, preprocessing creates fixed-length epochs,
-      no ``events.tsv`` conditions are required, and event-locked feature categories
-      (``erp``, ``erds``, ``itpc``, ``phase``) are disabled.
+      When ``task_is_rest: true``, preprocessing creates fixed-length segments
+      and no ``events.tsv`` is required. Event-locked families that depend on
+      trial onset markers are automatically skipped:
+
+      - **Skipped:** ``erp``, ``erds``, ``itpc``, ``pac``
+      - **Compatible:** ``power``, ``spectral``, ``aperiodic``, ``connectivity``,
+        ``directedconnectivity``, ``asymmetry``, ``ratios``, ``microstates``,
+        ``complexity``, ``bursts``, ``quality``
 
       .. code-block:: bash
 

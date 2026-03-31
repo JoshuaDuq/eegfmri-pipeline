@@ -1,6 +1,12 @@
 CLI Reference
 =============
 
+.. tip::
+
+   For interactive use, the :doc:`../tui` assembles these commands through
+   guided wizards — no flags to memorize. Use the CLI reference when
+   scripting, running headless batch jobs, or overriding specific options.
+
 All commands follow the same pattern:
 
 .. code-block:: bash
@@ -8,8 +14,49 @@ All commands follow the same pattern:
    eeg-pipeline <command> [mode] [--subject XXXX | --all-subjects] [options]
 
 Append ``--help`` to any command for full option details.
-Shared subject-selection flags (``--subject``, ``--all-subjects``, ``--task``,
-``--dry-run``, ``--set``) are documented in :doc:`../subject_selection`.
+
+Shared Options
+--------------
+
+All commands accept these subject-selection and runtime flags:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Option
+     - Description
+   * - ``--subject XXXX`` / ``-s XXXX``
+     - Single subject; repeat the flag for multiple subjects
+   * - ``--all-subjects``
+     - Process every discovered subject
+   * - ``--group all`` or ``--group A,B,C``
+     - Select a named group or comma-separated subject list
+   * - ``--task`` / ``-t``
+     - Override the task label from config
+   * - ``--dry-run``
+     - Preview work without executing
+   * - ``--json``
+     - Emit JSON output for scripting or the TUI
+   * - ``--progress-json``
+     - Emit progress events as JSON lines
+   * - ``--set KEY=VALUE``
+     - Override config values at runtime (see :doc:`../configuration`)
+   * - ``--bids-root``
+     - Override ``paths.bids_root`` at runtime
+   * - ``--bids-fmri-root``
+     - Override ``paths.bids_fmri_root`` at runtime
+   * - ``--bids-rest-root``
+     - Override ``paths.bids_rest_root`` at runtime (resting-state EEG)
+   * - ``--deriv-root``
+     - Override ``paths.deriv_root`` at runtime
+   * - ``--deriv-rest-root``
+     - Override ``paths.deriv_rest_root`` at runtime (resting-state EEG)
+
+.. note::
+
+   ``validate`` uses ``--subjects``; ``info features`` takes a positional subject ID.
+
 
 .. note::
 

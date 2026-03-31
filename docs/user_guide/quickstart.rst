@@ -8,8 +8,10 @@ surface of each analysis family.
 
 .. note::
 
-   Prefer a guided interface? :doc:`tui` wraps every command below in an
-   interactive wizard.
+   **New to the pipeline?** Start with the :doc:`TUI <tui>` — it walks you
+   through all configuration and pipeline steps interactively, builds the
+   command, and runs it for you. The numbered steps below document the same
+   workflow for scripted or headless use.
 
 .. _qs-overview:
 
@@ -229,11 +231,18 @@ For a deeper sweep:
 
 All pipeline behavior is controlled by ``eeg_pipeline/utils/config/eeg_config.yaml``
 (and ``behavior_config.yaml`` / ``fmri_config.yaml`` for their respective domains).
-Review the active configuration before running any analysis stage:
+
+**Preferred path — TUI Global Setup:**
+Launch the TUI, navigate to *Global Setup* (or press ``C`` from the main menu),
+and set your task name and all path roots through the interactive editor.
+Settings are saved to ``data/derivatives/.tui_overrides.json`` and take effect
+immediately. No YAML editing required.
+
+**Alternative — edit YAML directly or inspect at runtime:**
 
 .. code-block:: bash
 
-   eeg-pipeline info config
+   eeg-pipeline info config   # print the resolved active configuration
 
 Key entries to verify before feature extraction:
 
@@ -255,8 +264,8 @@ Key entries to verify before feature extraction:
      - Band edges in Hz (default: delta 1–4, theta 4–8, alpha 8–13, beta 13–30, gamma 30–80)
    * - ``time_windows.active``
      - Active-epoch window in seconds (default ``[3.0, 10.5]``)
-   * - ``time_windows.baseline``
-     - Baseline window in seconds (default ``[-5.0, -0.01]``)
+   * - ``time_windows.baseline_tfr``
+     - TFR baseline window in seconds (default ``[-5.0, -0.01]``)
 
 Override any key at runtime without editing the YAML:
 
@@ -556,7 +565,7 @@ Use the tabs below for the full command matrix and focused examples.
              high-pass 0.008 Hz; writes z-score/t-stat/cope maps
          * - ``fmri-analysis``
            - ``second-level``
-           - Group one-sample GLM from MNI effect-size maps; optional max-T
+           - Group one-sample GLM from MNI cope/beta maps; optional max-T
              permutation inference (default 5000 permutations)
          * - ``fmri-analysis``
            - ``beta-series``
@@ -681,18 +690,21 @@ Then predict fMRI signature expression from EEG features:
 
 .. _qs-tui:
 
-7. Optional TUI
----------------
+7. TUI Reference
+----------------
 
-The Go TUI wraps the same CLI from the repository root.
+Build and launch the TUI from the repository root:
 
 .. code-block:: bash
 
-   cd eeg_pipeline/cli/tui
-   go build -o eeg-tui .
-   ./eeg-tui
+   cd eeg_pipeline/cli/tui && go build -o eeg-tui . && cd -
+   ./eeg_pipeline/cli/tui/eeg-tui
 
-See :doc:`tui` for the complete TUI reference, shortcuts, and wizard navigation.
+The TUI covers the full workflow above — configuration, subject selection,
+feature family and band selection, mode selection, and execution — all
+through guided wizards. It is the recommended entry point for interactive use.
+
+See :doc:`tui` for the complete reference, keyboard shortcuts, and persistence details.
 
 .. _qs-docs:
 

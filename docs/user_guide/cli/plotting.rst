@@ -8,6 +8,14 @@ Plotting
 
 Render visualization suites driven by the pipeline's curated plot catalog.
 
+.. note::
+
+   Plots are generated from already-computed derivatives. Feature-based plot
+   groups require extracted feature tables; behavioral plot groups require
+   computed stats. Run the relevant upstream stages first, then visualize.
+   Use ``eeg-pipeline info plotters`` to list all available plot definitions.
+   The TUI wizard covers plot group and format selection interactively.
+
 .. code-block:: bash
 
    eeg-pipeline plotting [mode] [options]
@@ -133,7 +141,7 @@ Examples
 
 .. seealso::
 
-   :doc:`../subject_selection`
+   :doc:`index`
       Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.
 
    :doc:`../output_formats`

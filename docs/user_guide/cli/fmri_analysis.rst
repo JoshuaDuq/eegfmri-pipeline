@@ -9,6 +9,14 @@ fMRI Analysis
 Subject-level and group-level GLM analysis plus trial-wise beta estimation
 via nilearn.
 
+.. note::
+
+   ``fmri_contrast.enabled`` and ``fmri_group_level.enabled`` are both
+   ``false`` by default. You must set them to ``true`` in config (or via
+   ``--set``) before ``first-level`` and ``second-level`` modes will run.
+   Use ``eeg-pipeline info fmri-conditions`` to list available condition
+   values before specifying ``--cond-a-value`` / ``--cond-b-value``.
+
 .. code-block:: bash
 
    eeg-pipeline fmri-analysis [mode] [options]
@@ -25,7 +33,7 @@ Modes
    * - ``first-level``
      - First-level GLM with user-defined contrasts → contrast maps
    * - ``second-level``
-     - Explicit group GLM from existing first-level MNI effect-size maps
+     - Explicit group GLM from existing first-level MNI cope/beta maps
    * - ``beta-series``
      - Trial-wise beta-series estimation (LSA method)
    * - ``lss``
@@ -62,7 +70,7 @@ Examples
 
       .. code-block:: bash
 
-         # Group mean from existing first-level MNI effect-size maps
+         # Group mean from existing first-level MNI cope/beta maps
          eeg-pipeline fmri-analysis second-level --subject 0001 --subject 0002 \
            --group-model one-sample \
            --group-contrast-names stimulation_vs_rest
@@ -82,6 +90,9 @@ Examples
            --cond-a-value stimulation --cond-b-value fixation_rest
 
    .. tab-item:: Rest
+
+      Requires a parcellation atlas: a NIfTI label image (integer ROI indices)
+      and a matching TSV with ``index`` and ``name`` columns.
 
       .. code-block:: bash
 
@@ -116,7 +127,7 @@ Key Options
      - ``auto``
    * - ``--smoothing-fwhm``
      - Spatial smoothing kernel (mm)
-     - ``5.0``
+     - ``null``
    * - ``--output-type``
      - ``z-score``, ``t-stat``, ``cope``, ``beta``
      - ``z-score``
@@ -141,3 +152,18 @@ Key Options
    * - ``--write-design-matrix``
      - Save design matrices (TSV + PNG)
      - first-level: disabled; second-level: enabled
+
+.. seealso::
+
+   :doc:`../../methods/fmri/pipeline`
+      GLM specification, confound strategy, beta estimation, and
+      multivariate signature readout methods.
+
+   :doc:`fmri_preprocessing`
+      Containerized fMRIPrep preprocessing (run before analysis).
+
+   :doc:`../configuration`
+      ``fmri_contrast`` and ``fmri_group_level`` config sections.
+
+   :doc:`../data_layout`
+      fMRI BIDS layout and required ``*_bold.json`` sidecar fields.

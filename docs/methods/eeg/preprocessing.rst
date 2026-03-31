@@ -7,6 +7,10 @@ Automated, reproducible EEG preprocessing built on :term:`MNE-Python`, MNE-BIDS-
 PyPREP, and MNE-ICAlabel. Operates on :term:`BIDS`-formatted EEG data and produces clean,
 epoched datasets ready for feature extraction and statistical analysis.
 
+Supports both **task-based** (event-locked epochs) and **resting-state** paradigms.
+Set ``preprocessing.task_is_rest: true`` to create fixed-length segments without
+requiring ``events.tsv`` condition labels.
+
 .. list-table::
    :header-rows: 1
    :widths: 20 80
@@ -144,7 +148,7 @@ The pipeline expects BIDS-formatted EEG data:
 Step 1 — Bad Channel Detection
 --------------------------------
 
-**Module:** ``pipeline/preprocess.py`` → ``run_bads_detection()``
+**Module:** ``preprocessing/pipeline/preprocess.py`` → ``run_bads_detection()``
 
 Automated detection of noisy channels using PyPREP's ``NoisyChannels`` class,
 operating on continuous raw data before ICA or epoching.
@@ -161,7 +165,7 @@ Method
 
    - ``find_bad_by_deviation()`` — channels whose robust z-scored amplitude deviates from the cross-channel median.
    - ``find_bad_by_correlation()`` — channels with low Pearson correlation to neighboring channels.
-   - ``find_bad_by_ransac()`` — channels that cannot be predicted from neighbors via RANSAC interpolation (optional; disabled by default).
+   - ``find_bad_by_ransac()`` — channels that cannot be predicted from neighbors via RANSAC interpolation (optional; enabled by default via ``pyprep.ransac: true``).
    - After each iteration, detected bads are accumulated as a union and marked in ``raw.info["bads"]``.
 
 7. Inject custom bad channels from ``custom_bad_dict`` (per-task, per-subject dict).
@@ -181,7 +185,7 @@ Configuration
      - Default
      - Description
    * - ``pyprep.ransac``
-     - ``false``
+     - ``true``
      - Enable RANSAC-based detection
    * - ``pyprep.repeats``
      - ``3``
@@ -193,7 +197,7 @@ Configuration
      - ``".vhdr"``
      - Raw data file extension
    * - ``pyprep.consider_previous_bads``
-     - ``false``
+     - ``true``
      - Retain previously marked bads from ``channels.tsv``
    * - ``pyprep.custom_bad_dict``
      - ``null``
@@ -208,7 +212,7 @@ Configuration
 Step 2 — Bad Channel Synchronization
 --------------------------------------
 
-**Module:** ``pipeline/preprocess.py`` → ``synchronize_bad_channels_across_runs()``
+**Module:** ``preprocessing/pipeline/preprocess.py`` → ``synchronize_bad_channels_across_runs()``
 
 For multi-run paradigms, bad channels detected in any run are propagated to all
 runs of the same subject. This ensures a consistent channel set before ICA fitting.
@@ -224,7 +228,7 @@ incompatible ICA decompositions.
 Step 3 — ICA Fitting
 ---------------------
 
-**Module:** ``pipelines/preprocessing.py`` → ``_run_ica_fitting()``
+**Module:** ``preprocessing/pipeline/preprocess.py`` + ``pipelines/preprocessing.py`` → ``_run_ica_fitting()``
 
 ICA fitting is delegated to MNE-BIDS-Pipeline via subprocess. A temporary Python
 config file is generated from the YAML configuration and passed to the pipeline runner.
@@ -291,7 +295,7 @@ Configuration
 Step 4 — ICA Component Labeling
 ---------------------------------
 
-**Module:** ``pipeline/ica.py`` → ``run_ica_label()``
+**Module:** ``preprocessing/pipeline/ica.py`` → ``run_ica_label()``
 
 Automated classification of :term:`ICA` components using MNE-ICAlabel, which wraps the
 :term:`ICLabel` deep learning classifier.
@@ -343,7 +347,7 @@ ICLabel Classes
 Step 5 — Epoch Creation and Artifact Rejection
 -----------------------------------------------
 
-**Module:** ``pipelines/preprocessing.py`` → ``_run_epoch_creation()``
+**Module:** ``preprocessing/pipeline/preprocess.py`` + ``pipelines/preprocessing.py`` → ``_run_epoch_creation()``
 
 MNE-BIDS-Pipeline Steps
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -432,7 +436,7 @@ is the only supported alignment contract for downstream trialwise artifacts.
 Step 7 — Preprocessing Statistics
 -----------------------------------
 
-**Module:** ``pipeline/stats.py`` → ``collect_preprocessing_stats()``
+**Module:** ``preprocessing/pipeline/stats.py`` → ``collect_preprocessing_stats()``
 
 .. list-table::
    :header-rows: 1
@@ -456,7 +460,7 @@ Step 7 — Preprocessing Statistics
 Step 8 — Time-Frequency Representation (Optional)
 --------------------------------------------------
 
-**Module:** ``pipeline/tfr.py`` → ``custom_tfr()``
+**Module:** ``preprocessing/pipeline/tfr.py`` → ``custom_tfr()``
 
 Morlet wavelet :term:`TFR` decomposition on clean epochs.
 

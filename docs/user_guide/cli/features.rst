@@ -1,7 +1,9 @@
 Feature Extraction
 ==================
 
-Extract trial-level EEG features from cleaned epochs and write Parquet tables.
+Extract EEG features from cleaned epochs and write Parquet tables.
+Supports both task-based (trial-level) and resting-state paradigms
+(set ``preprocessing.task_is_rest: true`` in config or pass ``--task-is-rest``).
 
 .. code-block:: bash
 
@@ -126,6 +128,21 @@ Key Options
      - Parallel jobs for band/connectivity/aperiodic loops
      - config ``feature_engineering.parallel``
 
+Resting-State Compatibility
+---------------------------
+
+When ``task_is_rest: true``, the following event-locked families are
+automatically skipped (they require trial onset markers):
+
+- ``erp`` — requires event-onset-aligned epochs
+- ``erds`` — requires baseline window relative to event onset
+- ``itpc`` — inter-trial phase clustering requires repeated trials
+- ``pac`` — phase–amplitude coupling in its trial-averaged form
+
+All other families (``power``, ``spectral``, ``aperiodic``, ``connectivity``,
+``directedconnectivity``, ``asymmetry``, ``ratios``, ``microstates``,
+``complexity``, ``bursts``, ``quality``) are fully compatible with rest data.
+
 Analysis Modes
 --------------
 
@@ -190,5 +207,5 @@ Examples
    :doc:`../output_formats`
       Parquet layout, metadata JSON, and directory structure.
 
-   :doc:`../subject_selection`
+   :doc:`index`
       Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.

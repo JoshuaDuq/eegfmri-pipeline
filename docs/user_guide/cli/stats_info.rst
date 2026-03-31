@@ -105,7 +105,7 @@ Examples
 
 .. seealso::
 
-   :doc:`../subject_selection`
+   :doc:`index`
       Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.
 
    :doc:`validation`

@@ -20,12 +20,12 @@ configuration, output formats, and command references.
 ## What It Does
 
 - EEG preprocessing with artifact detection, ICA, epoching, and cleaning
-- Trial-level EEG feature extraction across 16 feature families
+- Trial-level and **resting-state** EEG feature extraction across 16 feature families
 - Behavioral statistics with robust inference and multiple-comparison control
 - Nested machine-learning workflows for regression and classification
 - Source localization workflows for EEG analyses
 - fMRI preprocessing and GLM-based analysis
-- CLI and TUI interfaces for interactive use and batch execution
+- Interactive TUI and CLI interfaces for configuration and batch execution
 
 ## Documentation
 
@@ -67,7 +67,31 @@ If you do not need that model, `pip install -e ".[dev]"` is sufficient.
 
 ## Quick Start
 
-Place BIDS-formatted EEG data under `data/bids_output/eeg/`, then run:
+Before running any pipeline, configuration must be set: paths to your BIDS
+root, derivatives directory, task type, number of parallel jobs, and—for
+feature extraction—which feature families, frequency bands, and analysis mode
+to use. **The recommended way to handle all of this is the TUI.**
+
+### Using the TUI (recommended)
+
+Build and launch the TUI once after installation:
+
+```bash
+cd eeg_pipeline/cli/tui && go build -o eeg-tui . && cd -
+./eeg_pipeline/cli/tui/eeg-tui
+```
+
+The TUI walks you through every configuration step interactively—pipeline
+selection, subject selection, feature families, frequency bands, spatial
+options, time ranges, preprocessing stages, and advanced options—before
+assembling and running the underlying CLI command. No flags to memorize; the
+wizard validates your choices at each step and shows a live summary on the
+home screen.
+
+### Using the CLI directly
+
+If you prefer scripting or headless execution, configure
+`eeg_pipeline/utils/config/` first, then:
 
 ```bash
 eeg-pipeline validate quick
@@ -77,8 +101,22 @@ eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
 eeg-pipeline ml regression --all-subjects
 ```
 
-For the full walkthrough from data layout to results, see the
-[Quick start guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html).
+CLI flags for feature extraction (`--features`, `--bands`, `--rois`, etc.) map
+directly to the wizard steps in the TUI. See the
+[Quick start guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html)
+for the full walkthrough.
+
+## Feature Extraction
+
+Feature extraction supports both **task-based** (event-related, trial-level)
+and **resting-state** paradigms. The `--analysis-mode` flag controls the
+output format:
+
+- `trial_ml_safe` — per-trial features suitable for ML pipelines
+- `rest` — segment-averaged features for resting-state analyses
+
+Feature families (power spectra, connectivity, complexity, etc.) and frequency
+bands are selected per-run via the TUI wizard or the corresponding CLI flags.
 
 ## Current Scope
 

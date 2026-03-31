@@ -37,13 +37,20 @@ What Is Computed
 ----------------
 
 - Per-trial/window: source-band power and source-band envelope features.
-- Optional: subject-level source contrast tables (``sourcecontrast``) for condition A vs B.
+- Optional: subject-level source contrast tables (``sourcecontrast``) for
+  condition A vs B — only computed when ``--source-fmri-contrast-enabled``
+  is passed.
 - fMRI-informed outputs: ``cluster`` space (subject-specific fMRI clusters),
   ``atlas`` space (subject-space ``aparc+aseg`` labels), or ``dual`` (both).
 
-Scientific constraints:
+.. warning::
 
-- ``feature_engineering.sourcelocalization.fmri.time_windows`` is unsupported and raises ``ValueError`` if set.
+   ``feature_engineering.sourcelocalization.fmri.time_windows`` is
+   explicitly unsupported and raises ``ValueError`` if set. Remove this
+   key from your config before running fMRI-constrained localization.
+
+Other constraints:
+
 - fMRI-constrained eLORETA requires ``--source-loose 1.0``.
 - Use atlas-harmonized source outputs for inferential cross-subject statistics.
 
@@ -255,15 +262,30 @@ fMRI constraint flags:
    * - ``--source-fmri-threshold``
      - Threshold applied to fMRI stats map
      - ``3.1``
+   * - ``--source-fmri-threshold-mode``
+     - Thresholding mode: ``z`` (z-score) or ``fdr``
+     - ``z``
+   * - ``--source-fmri-fdr-q``
+     - FDR q-value when threshold mode is ``fdr``
+     - ``0.05``
    * - ``--source-fmri-tail``
      - Threshold tail: ``pos`` or ``abs``
      - ``pos``
+   * - ``--source-fmri-cluster-min-voxels``
+     - Minimum cluster size in voxels after thresholding
+     - ``50``
    * - ``--source-fmri-cluster-min-mm3``
-     - Minimum cluster volume (mm³)
-     - ``400``
+     - Minimum cluster volume (mm³); overrides ``--source-fmri-cluster-min-voxels`` when set
+     - (none)
+   * - ``--source-fmri-max-clusters``
+     - Maximum number of clusters kept from fMRI map
+     - ``20``
    * - ``--source-fmri-max-voxels-per-cluster``
      - Maximum voxels sampled per cluster
      - ``2000``
+   * - ``--source-fmri-max-total-voxels``
+     - Maximum total voxels across all clusters
+     - ``20000``
    * - ``--source-fmri-output-space``
      - Feature output family: ``cluster``, ``atlas``, or ``dual``
      - ``dual``

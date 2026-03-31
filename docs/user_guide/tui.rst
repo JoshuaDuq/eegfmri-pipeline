@@ -37,6 +37,20 @@ Repository root discovery:
 the TUI searches upward for the ``eeg_pipeline`` directory and runs all Python
 commands from that repository root.
 
+First-Run Setup
+~~~~~~~~~~~~~~~
+
+Before running any pipeline, open **Global Setup** (main menu → *Utilities →
+Global Setup*, or press ``C`` from the main menu) and set:
+
+- **Task name** — must match the ``task-<name>`` label in your BIDS filenames
+- **BIDS root / BIDS rest root** — paths to your EEG (and optionally resting-state) BIDS datasets
+- **Derivatives root** — where processed outputs are written
+- **fMRI BIDS root** — required only for fMRI workflows
+
+These overrides are saved to ``data/derivatives/.tui_overrides.json`` and
+persist across sessions. You do not need to edit the YAML config files directly.
+
 Pipelines
 ---------
 
@@ -106,26 +120,28 @@ Multi-step configuration flow. Steps vary by pipeline:
    * - Select subjects
      - Auto-discovered from BIDS/derivatives with status badges
    * - Select mode
-     - Compute, visualize, or pipeline-specific modes
+     - Compute, visualize, or pipeline-specific modes (e.g. ``trial_ml_safe`` vs ``rest`` for feature extraction)
    * - Select computations
      - Toggle individual analyses (behavior pipeline)
+   * - Select feature families
+     - All 16 families listed with checkboxes; select any subset
    * - Select feature files
-     - Choose which feature Parquet files to use
+     - Choose which feature Parquet files to use (behavior / ML pipelines)
    * - Select bands
-     - Frequency bands (delta through gamma), editable
+     - Frequency bands (delta through gamma), editable in-place
    * - Select ROIs
-     - Regions of interest with channel lists, editable
+     - Regions of interest with channel lists, editable in-place
    * - Select spatial
      - ROI / All Channels / Global aggregation
    * - Time range
      - Named time windows with tmin/tmax
    * - Advanced config
-     - Pipeline-specific parameters (filtering, ICA, epochs, ML models, plot styling, fMRI options)
+     - Pipeline-specific parameters (filtering, ICA, epochs, ML models, plot styling, fMRI options, ``--set`` overrides)
    * - Select plots
      - Plot catalog with per-plot advanced overrides
 
-On confirmation, the wizard builds the CLI command string and hands it to the
-execution view.
+On confirmation, the wizard assembles the full CLI command string (shown in the
+execution view header) and launches it as a subprocess.
 
 Execution View
 ~~~~~~~~~~~~~~

@@ -37,18 +37,21 @@ Setup
    (``ml classify --classification-model cnn``). Omit it for all other
    workflows: ``pip install -e ".[dev]"``.
 
-TUI (Optional)
---------------
+TUI
+---
 
-The interactive TUI requires **Go 1.21+** and compiles to a single static binary.
+Recommended for interactive use. Requires **Go 1.21+** and compiles to a
+single static binary with no runtime dependencies.
 
 .. code-block:: bash
 
-   cd eeg_pipeline/cli/tui
-   go build -o eeg-tui .
-   ./eeg-tui
+   cd eeg_pipeline/cli/tui && go build -o eeg-tui . && cd -
+   ./eeg_pipeline/cli/tui/eeg-tui
 
-See :doc:`user_guide/tui` for the full TUI reference.
+On first launch, open **Global Setup** (press ``C`` from the main menu) to
+set your task name and data paths before running any pipeline.
+
+See :doc:`user_guide/tui` for the full reference.
 
 Docker Image (FreeSurfer + MNE)
 --------------------------------

@@ -186,6 +186,36 @@ first to trigger re-synchronization.
 Feature Extraction
 ------------------
 
+**How do I run the pipeline on resting-state EEG data?**
+
+Set ``task_is_rest: true`` in ``eeg_config.yaml`` (or pass ``--task-is-rest``
+to preprocessing) and point ``paths.bids_rest_root`` at your resting-state
+BIDS directory:
+
+.. code-block:: yaml
+
+   preprocessing:
+     task_is_rest: true
+     rest_epochs_duration: 10.0   # seconds per segment
+     rest_epochs_overlap: 0.0
+   paths:
+     bids_rest_root: "../../../data/bids_output/eeg_rest"
+     deriv_rest_root: "../../../data/derivatives/rest"
+
+No ``events.tsv`` is required. Event-locked families (``erp``, ``erds``,
+``itpc``, ``pac``) are automatically skipped; all others run normally.
+
+.. code-block:: bash
+
+   eeg-pipeline preprocessing full --subject 0001 --task-is-rest
+   eeg-pipeline features compute --subject 0001 \
+     --categories power connectivity aperiodic spectral complexity
+
+See :doc:`user_guide/output_formats` for the full resting-state workflow, and
+:doc:`user_guide/configuration` for all related config keys.
+
+----
+
 **Feature extraction is slow.**
 
 Enable parallelism in the config:
@@ -331,6 +361,16 @@ Run FreeSurfer ``recon-all`` first, then point the config at the output:
 
    paths:
      freesurfer_dir: "../../../data/derivatives/freesurfer"
+
+----
+
+**Do I need to edit YAML files before running a pipeline?**
+
+Not if you use the TUI. Open **Global Setup** (press ``C`` from the main menu
+or navigate to *Utilities → Global Setup*) to set the task name and all data
+paths interactively. Settings persist across sessions. YAML editing is only
+necessary for parameters not exposed in Global Setup (ICA thresholds,
+aperiodic model, etc.).
 
 ----
 

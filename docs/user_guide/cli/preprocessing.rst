@@ -41,10 +41,10 @@ Key Options
    * - Option
      - Description
      - Default
-   * - ``--ransac``
-     - Enable RANSAC during bad-channel detection (more sensitive,
-       substantially slower)
-     - disabled
+   * - ``--ransac`` / ``--no-ransac``
+     - Force-enable or force-disable RANSAC during bad-channel detection;
+       ``--ransac`` is more sensitive but substantially slower
+     - from config (default: enabled)
    * - ``--tmin``
      - Epoch start time in seconds
      - ``-7.0``
@@ -55,8 +55,26 @@ Key Options
      - Epoch rejection strategy: ``autoreject_local`` or ``peak_to_peak``
      - ``autoreject_local``
    * - ``--no-icalabel``
-     - Skip ICLabel; fall back to heuristic component labeling
+     - Skip ICLabel; fall back to MNE-BIDS heuristic component labeling
      - disabled
+   * - ``--no-pyprep``
+     - Skip PyPREP bad-channel detection entirely
+     - disabled
+   * - ``--ica-method``
+     - ICA algorithm: ``extended_infomax``, ``fastica``, ``infomax``, ``picard``
+     - from config (default: ``extended_infomax``)
+   * - ``--ica-components``
+     - Number of ICA components (int) or explained-variance fraction (float < 1)
+     - from config (default: ``0.99``)
+   * - ``--ica-l-freq``
+     - High-pass filter applied before ICA fitting (Hz)
+     - from config (default: ``1.0``)
+   * - ``--prob-threshold``
+     - ICLabel probability threshold for artifact exclusion
+     - from config (default: ``0.8``)
+   * - ``--ica-labels-to-keep``
+     - ICLabel component classes to retain (space-separated)
+     - from config (default: ``brain other``)
    * - ``--spatial-filter``
      - Artifact removal method: ``ica`` or ``ssp``
      - ``ica``
@@ -71,9 +89,18 @@ Key Options
    * - ``--trim-to-first-volume``
      - Trim EEG onset to the first fMRI volume timestamp (simultaneous EEG–fMRI)
      - disabled
+   * - ``--l-freq``
+     - High-pass filter cutoff (Hz)
+     - from config (default: ``0.1``)
+   * - ``--h-freq``
+     - Low-pass filter cutoff (Hz)
+     - from config (default: ``100``)
+   * - ``--notch``
+     - Notch filter frequency (Hz)
+     - from config (default: ``60``)
    * - ``--n-jobs``
-     - Number of parallel jobs for autoreject (``-1`` = all cores)
-     - ``1``
+     - Number of parallel jobs for bad-channel detection and autoreject (``-1`` = all cores)
+     - from config (default: ``1``)
 
 Examples
 --------
@@ -119,7 +146,7 @@ Examples
    :doc:`../../methods/eeg/preprocessing`
       Algorithm details, default parameter values, and ICA labeling rules.
 
-   :doc:`../subject_selection`
+   :doc:`index`
       Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.
 
    :doc:`../configuration`

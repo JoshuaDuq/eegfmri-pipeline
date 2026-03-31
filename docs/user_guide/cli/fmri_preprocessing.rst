@@ -8,6 +8,14 @@ fMRI Preprocessing
 
 Containerized fMRIPrep-style preprocessing via Docker or Apptainer.
 
+**Prerequisites:**
+
+- BIDS-validated fMRI data under ``paths.bids_fmri_root``
+  (run ``eeg-pipeline validate bids`` first)
+- Docker or Apptainer installed and accessible on ``PATH``
+- A FreeSurfer ``license.txt`` at ``paths.freesurfer_license`` or
+  ``$EEG_PIPELINE_FREESURFER_LICENSE`` (required for surface reconstruction)
+
 .. code-block:: bash
 
    eeg-pipeline fmri preprocess [options]
@@ -127,4 +135,16 @@ Key Options
    For container runs, the pipeline automatically ignores macOS metadata files
    (``._*``, ``.DS_Store``) by mounting a sanitized temporary BIDS view.
 
-For full methods, see :doc:`../../methods/fmri/pipeline`.
+.. seealso::
+
+   :doc:`../../methods/fmri/pipeline`
+      GLM specification, confound strategy, and beta estimation methods.
+
+   :doc:`fmri_analysis`
+      First-level GLM, group inference, beta-series, LSS, and resting-state.
+
+   :doc:`../data_layout`
+      Required BIDS fMRI directory layout and ``*_bold.json`` sidecar fields.
+
+   :doc:`../configuration`
+      ``fmri_preprocessing`` config section (engine, image, FD threshold, etc.).

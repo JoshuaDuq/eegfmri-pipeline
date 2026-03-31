@@ -23,14 +23,16 @@ EEG
 
       Bad channel detection (PyPREP), ICA fitting and ICLabel
       classification, epoch creation and rejection.
+      Supports task-based and resting-state modes.
 
    .. grid-item-card:: :octicon:`graph` Feature Extraction
       :link: eeg/features
       :link-type: doc
 
-      16 trial-level feature families with full mathematical
-      derivations — power, connectivity, aperiodic, ITPC, PAC,
-      ERP, ERDS, complexity, microstates, and source ROI.
+      16 feature families with full mathematical derivations —
+      power, connectivity, aperiodic, complexity, microstates,
+      source ROI, and more. Supports task-based and resting-state
+      paradigms.
 
    .. grid-item-card:: :octicon:`table` Behavioral Statistics
       :link: eeg/behavior

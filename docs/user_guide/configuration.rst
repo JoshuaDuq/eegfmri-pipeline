@@ -4,6 +4,13 @@ Configuration
 This page is the canonical reference for the public YAML configuration
 entrypoints and their keys.
 
+.. tip::
+
+   The quickest way to set paths and task name before a first run is the
+   **TUI Global Setup** screen (main menu → *Utilities → Global Setup*, or
+   press ``C``). It edits the same values without touching any YAML file.
+   See :doc:`tui` for details.
+
 Precedence (highest wins):
 
 1. ``--set KEY=VALUE`` runtime overrides
@@ -162,13 +169,14 @@ EEG & Preprocessing
      - Notch filter frequency (Hz)
    * - ``preprocessing.task_is_rest``
      - ``false``
-     - ``true`` = fixed-length resting-state epochs, no event conditions
+     - ``true`` = resting-state mode: fixed-length segments, no event conditions.
+       Also set ``paths.bids_rest_root`` and ``paths.deriv_rest_root``.
    * - ``preprocessing.rest_epochs_duration``
      - ``10.0``
-     - Resting-state epoch duration (s)
+     - Resting-state segment duration (s); only used when ``task_is_rest: true``
    * - ``preprocessing.rest_epochs_overlap``
      - ``0.0``
-     - Overlap between resting-state epochs (s)
+     - Overlap between resting-state segments (s); only used when ``task_is_rest: true``
    * - ``preprocessing.find_breaks``
      - ``true``
      - Detect and annotate recording breaks
@@ -451,7 +459,7 @@ First-Level GLM
      - Nuisance regressor strategy; see :doc:`../methods/fmri/pipeline`
    * - ``fmri_contrast.output_type``
      - ``"z-score"``
-     - Output statistic: ``"z-score"``, ``"t-stat"``, ``"effect_size"``
+     - Output statistic: ``"z-score"``, ``"t-stat"``, ``"cope"``, ``"beta"``
    * - ``fmri_contrast.resample_to_freesurfer``
      - ``true``
      - Resample contrast maps into FreeSurfer subject space

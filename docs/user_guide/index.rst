@@ -1,33 +1,25 @@
 User Guide
 ==========
 
-Start here for the operational docs: install, validate inputs, run the
-pipelines, and interpret outputs.
+Operational reference for data layout, configuration, and running the
+pipeline. New users: start with :doc:`/user_guide/quickstart` in the
+*Getting Started* section of the sidebar.
 
 .. toctree::
    :maxdepth: 1
    :hidden:
 
-   quickstart
    data_layout
    configuration
-   subject_selection
    output_formats
    tui
    cli/index
 
-Start Here
-----------
+Data and Configuration
+-----------------------
 
-.. grid:: 2
+.. grid:: 3
    :gutter: 3
-
-   .. grid-item-card:: :octicon:`rocket` Quick Start
-      :link: quickstart
-      :link-type: doc
-
-      Clean walkthrough from install to plotted results.
-      Organized by pipeline family with copy-paste commands.
 
    .. grid-item-card:: :octicon:`database` Data Layout
       :link: data_layout
@@ -36,24 +28,12 @@ Start Here
       What the pipeline expects on disk:
       BIDS inputs, required TSV columns, and derivatives structure.
 
-Configure and Run
------------------
-
-.. grid:: 2
-   :gutter: 3
-
    .. grid-item-card:: :octicon:`gear` Configuration
       :link: configuration
       :link-type: doc
 
       YAML entry points and defaults.
       Includes runtime overrides via ``--set``.
-
-   .. grid-item-card:: :octicon:`person` Subject Selection
-      :link: subject_selection
-      :link-type: doc
-
-      Shared flags and runtime controls used across commands.
 
    .. grid-item-card:: :octicon:`file-directory` Outputs
       :link: output_formats
@@ -75,9 +55,10 @@ Operate the CLI and TUI
       Command families, modes, and flags.
       Use this when you need the exact option surface.
 
-   .. grid-item-card:: :octicon:`terminal` Interactive TUI
+   .. grid-item-card:: :octicon:`terminal` Interactive TUI *(recommended)*
       :link: tui
       :link-type: doc
 
-      The same pipeline via a guided terminal UI:
-      steps, shortcuts, and environment discovery.
+      **Start here for interactive use.** Guided wizards handle
+      configuration, subject selection, feature families, bands,
+      and analysis modes — no flags to memorize.

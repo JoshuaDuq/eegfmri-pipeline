@@ -29,6 +29,41 @@ Place BIDS-formatted EEG under ``paths.bids_root`` (default ``data/bids_output/e
    event-log merging externally before running this pipeline.
    See :doc:`../methods/fmri/raw_to_bids` for the fMRI BIDS contract.
 
+Resting-State EEG Layout
+------------------------
+
+For resting-state data, place the BIDS directory under ``paths.bids_rest_root``
+(default ``null``; must be set explicitly). Structure is identical to task EEG
+except ``events.tsv`` files are not required:
+
+.. code-block:: text
+
+   data/bids_output/eeg_rest/
+   ├── dataset_description.json
+   ├── participants.tsv
+   └── sub-XXXX/
+       └── eeg/
+           ├── sub-XXXX_task-rest_run-01_eeg.vhdr
+           ├── sub-XXXX_task-rest_run-01_eeg.vmrk
+           ├── sub-XXXX_task-rest_run-01_eeg.eeg
+           ├── sub-XXXX_task-rest_run-01_channels.tsv   # recommended
+           └── sub-XXXX_task-rest_run-01_electrodes.tsv # recommended
+
+Enable rest mode and set the path in ``eeg_config.yaml``:
+
+.. code-block:: yaml
+
+   preprocessing:
+     task_is_rest: true
+     rest_epochs_duration: 10.0
+     rest_epochs_overlap: 0.0
+   paths:
+     bids_rest_root:  "../../../data/bids_output/eeg_rest"
+     deriv_rest_root: "../../../data/derivatives/rest"
+
+See :doc:`configuration` for all rest-mode keys and
+:doc:`../methods/eeg/features` for which feature families are compatible.
+
 Events Data
 -----------
 
