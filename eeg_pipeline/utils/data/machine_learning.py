@@ -18,7 +18,10 @@ from eeg_pipeline.utils.data.columns import (
     find_predictor_column_in_events,
     pick_target_column,
 )
-from eeg_pipeline.utils.data.feature_alignment import drop_feature_alignment_columns
+from eeg_pipeline.utils.data.feature_alignment import (
+    drop_feature_alignment_columns,
+    require_trial_id_column,
+)
 from eeg_pipeline.utils.data.fmri_signature_targets import (
     find_block_column as _find_block_column,
     load_fmri_signature_target_for_subject as _shared_load_fmri_signature_target_for_subject,
@@ -90,6 +93,12 @@ def _normalize_subject(subject: str) -> Tuple[str, str]:
     return subject_raw, f"sub-{subject_raw}"
 
 
+def _raise_subject_loading_error(subject: str, message: str) -> None:
+    """Raise a fail-fast subject loading error with normalized subject ID."""
+    _subject_raw, subject_bids = _normalize_subject(subject)
+    raise RuntimeError(f"{message} for {subject_bids}")
+
+
 def _as_list(value: Any) -> Optional[List[str]]:
     if value is None:
         return None
@@ -118,6 +127,12 @@ def _resolve_feature_families(
     from_config = _as_list(get_config_value(config, "machine_learning.data.feature_families", None))
     if from_config:
         return from_config
+
+    configured_feature_categories = _as_list(
+        get_config_value(config, "feature_engineering.feature_categories", None)
+    )
+    if configured_feature_categories:
+        return configured_feature_categories
 
     # If feature_set is "combined" and no explicit list is provided, prefer a broad
     # default that matches the feature pipeline's standard outputs.
@@ -473,6 +488,7 @@ def _load_subject_feature_table(
     dfs: List[pd.DataFrame] = []
     feature_names: List[str] = []
     expected_n_rows: Optional[int] = None
+    expected_trial_ids: Optional[pd.Series] = None
 
     for family in feature_families:
         fam = str(family).strip()
@@ -482,31 +498,47 @@ def _load_subject_feature_table(
         filename = _resolve_feature_filename(fam, config)
         path = _resolve_feature_path(features_dir, fam, filename, config)
         if not path.exists():
-            logger.warning("Missing feature table for %s (%s): %s", subject_bids, fam, path)
-            continue
+            raise FileNotFoundError(
+                f"Missing requested feature table for {subject_bids} "
+                f"(family '{fam}'): {path}"
+            )
 
         _warn_or_raise_if_feature_tables_not_ml_safe(path, family=fam)
 
         df = read_table(path)
         if df is None or df.empty:
-            logger.warning("Empty feature table for %s (%s): %s", subject_bids, fam, path)
-            continue
+            raise ValueError(
+                f"Requested feature table is empty for {subject_bids} "
+                f"(family '{fam}'): {path}"
+            )
+        trial_ids = _coerce_trial_id_series(
+            require_trial_id_column(
+                df,
+                context=(
+                    f"Requested feature table for {subject_bids}, task-{task}, "
+                    f"family '{fam}'"
+                ),
+            )
+        ).reset_index(drop=True)
         df = drop_feature_alignment_columns(df)
         if df.empty:
-            logger.warning(
-                "Feature table contains only alignment metadata for %s (%s): %s",
-                subject_bids,
-                fam,
-                path,
+            raise ValueError(
+                f"Requested feature table contains only alignment metadata for "
+                f"{subject_bids} (family '{fam}'): {path}"
             )
-            continue
 
         if expected_n_rows is None:
             expected_n_rows = len(df)
+            expected_trial_ids = trial_ids
         elif len(df) != expected_n_rows:
             raise ValueError(
                 f"Feature length mismatch for {subject_bids}: family '{fam}' has {len(df)} rows "
                 f"but expected {expected_n_rows} (cannot safely concatenate)."
+            )
+        elif expected_trial_ids is not None and not trial_ids.equals(expected_trial_ids):
+            raise ValueError(
+                f"trial_id mismatch across requested feature tables for {subject_bids}, "
+                f"task-{task}. Family '{fam}' does not align with previously loaded families."
             )
 
         prefixed = _prefix_feature_columns(df, prefix=f"{fam}_")
@@ -519,6 +551,11 @@ def _load_subject_feature_table(
         )
 
     combined = pd.concat(dfs, axis=1).reset_index(drop=True)
+    if expected_trial_ids is None:
+        raise RuntimeError(
+            f"Feature loading produced no trial alignment metadata for {subject_bids}, task-{task}."
+        )
+    combined.attrs["trial_id"] = expected_trial_ids.to_numpy(dtype=int, copy=True)
     return combined, feature_names
 
 
@@ -601,12 +638,27 @@ def _load_subject_ml_from_features(
         feature_input_root=feature_input_root,
         logger=logger,
     )
+    feature_trial_ids = pd.Series(
+        np.asarray(X_df.attrs.get("trial_id"), dtype=int),
+        name="trial_id",
+    ).reset_index(drop=True)
+    event_trial_ids = _coerce_trial_id_series(
+        require_trial_id_column(
+            events_df,
+            context=f"Clean events for {subject_bids}, task-{task}",
+        )
+    ).reset_index(drop=True)
 
     if len(X_df) != len(events_df):
         raise ValueError(
             f"Feature/events count mismatch for {subject_bids}, task-{task}: "
             f"features={len(X_df)} rows, events={len(events_df)} rows. "
             "Re-run feature extraction and/or preprocessing to regenerate aligned clean events."
+        )
+    if not feature_trial_ids.equals(event_trial_ids):
+        raise ValueError(
+            f"trial_id alignment mismatch between feature tables and clean events for "
+            f"{subject_bids}, task-{task}."
         )
 
     extra_meta_df: Optional[pd.DataFrame] = None
@@ -695,7 +747,7 @@ def load_epochs_with_targets(
             deriv_root=deriv_root,
             bids_root=bids_root,
             task=task,
-            discovery_sources=["features"],
+            discovery_sources=["derivatives_epochs"],
             subject_discovery_policy=subject_discovery_policy,
             logger=logger,
         )
@@ -715,8 +767,7 @@ def load_epochs_with_targets(
             config=config,
         )
         if epochs is None or aligned is None:
-            logger.warning("No aligned epochs/events for %s; skipping.", sub)
-            continue
+            _raise_subject_loading_error(sub, "No aligned epochs/events")
 
         epochs.set_montage(mne.channels.make_standard_montage("standard_1005"))
         bad_channels = epochs.info.get("bads", [])
@@ -731,8 +782,7 @@ def load_epochs_with_targets(
             )
         
         if len(aligned) == 0:
-            logger.warning(f"Clean events.tsv is empty for {sub}; skipping.")
-            continue
+            _raise_subject_loading_error(sub, "Clean events.tsv is empty")
 
         try:
             y_series, _y_col = _resolve_target_series(
@@ -748,18 +798,15 @@ def load_epochs_with_targets(
                 )
             y = pd.to_numeric(y_series, errors="coerce")
         except ValueError as exc:
-            logger.warning("No suitable target column for %s; skipping (%s).", sub, exc)
-            continue
+            raise ValueError(f"No suitable target column for {sub} ({exc}).") from exc
         if len(epochs) != len(y):
-            logger.error(
+            raise ValueError(
                 f"Epochs-target length mismatch for subject {sub}, task {task}: "
-                f"epochs={len(epochs)}, y={len(y)}. Skipping subject."
+                f"epochs={len(epochs)}, y={len(y)}."
             )
-            continue
 
         if len(epochs) == 0:
-            logger.warning(f"No trials for {sub}; skipping.")
-            continue
+            _raise_subject_loading_error(sub, "No trials available")
 
         epochs.metadata = aligned
         out.append((sub, epochs, y))
@@ -817,7 +864,15 @@ def load_active_matrix(
     if log is None:
         log = logging.getLogger(__name__)
 
-    feature_set_cfg = str(get_config_value(config, "machine_learning.data.feature_set", "combined")).strip().lower()
+    feature_set_cfg = str(
+        get_config_value(config, "machine_learning.data.feature_set", "combined")
+    ).strip().lower()
+    if feature_set_cfg == "channels_mean" and feature_families is not None:
+        raise ValueError(
+            "machine_learning.data.feature_set='channels_mean' is incompatible with "
+            "explicit feature_families. Remove feature_families or choose a "
+            "feature-table-based feature_set."
+        )
     if feature_set_cfg == "channels_mean" and feature_families is None:
         return load_channels_mean_matrix(
             subjects,
@@ -841,18 +896,20 @@ def load_active_matrix(
         or str(get_config_value(config, "machine_learning.data.feature_harmonization", "intersection")).strip().lower()
     )
     if harmonization not in {"intersection", "union_impute"}:
-        harmonization = "intersection"
+        raise ValueError(
+            "Invalid machine_learning.data.feature_harmonization: "
+            f"{harmonization!r}. Expected one of: intersection, union_impute."
+        )
 
-    analysis_mode = str(get_config_value(config, "feature_engineering.analysis_mode", "group_stats")).strip()
+    analysis_mode = str(
+        get_config_value(config, "feature_engineering.analysis_mode", "group_stats")
+    ).strip()
     if analysis_mode != "trial_ml_safe":
-        require_safe = bool(get_config_value(config, "machine_learning.data.require_trial_ml_safe", True))
         msg = (
             "ML loading features while feature_engineering.analysis_mode='%s'. "
-            "If any extracted features use cross-trial estimates, this can leak information across CV folds. "
-            "For ML, prefer feature_engineering.analysis_mode='trial_ml_safe'."
+            "Current runtime config is advisory here; feature-table metadata remains the "
+            "source of truth for trial-safe provenance checks."
         ) % analysis_mode
-        if require_safe:
-            raise ValueError(msg + " (Blocked by machine_learning.data.require_trial_ml_safe=true)")
         log.warning(msg)
 
     requested_subject_ids = [_normalize_subject(str(s))[1] for s in subjects]
@@ -866,28 +923,18 @@ def load_active_matrix(
     first_cols: Optional[List[str]] = None
 
     for sub in subjects:
-        try:
-            X_df, y_sub, _y_col, meta_sub = _load_subject_ml_from_features(
-                sub,
-                task,
-                deriv_root,
-                config,
-                feature_families=resolved_families,
-                feature_input_root=feature_input_root,
-                target=target,
-                target_kind=target_kind,
-                binary_threshold=binary_threshold,
-                logger=log,
-            )
-        except (FileNotFoundError, ValueError) as exc:
-            log.warning("Skipping %s: %s", str(sub), exc)
-            excluded_subjects.append(
-                {
-                    "subject_id": _normalize_subject(str(sub))[1],
-                    "reason": str(exc),
-                }
-            )
-            continue
+        X_df, y_sub, _y_col, meta_sub = _load_subject_ml_from_features(
+            sub,
+            task,
+            deriv_root,
+            config,
+            feature_families=resolved_families,
+            feature_input_root=feature_input_root,
+            target=target,
+            target_kind=target_kind,
+            binary_threshold=binary_threshold,
+            logger=log,
+        )
 
         if len(y_sub) == 0:
             subject_bids = _normalize_subject(str(sub))[1]
@@ -993,14 +1040,14 @@ def load_active_matrix(
                 f"{leaking}. Target={target!r}."
             )
 
-        strict = bool(get_config_value(config, "machine_learning.data.covariates_strict", False))
         present = [c for c in cov_cfg if c in meta.columns]
         missing = [c for c in cov_cfg if c not in meta.columns]
         if missing:
             msg = f"Requested covariates missing from meta: {missing}. Available meta columns={list(meta.columns)}"
+            strict = bool(get_config_value(config, "machine_learning.data.covariates_strict", False))
             if strict:
                 raise ValueError(msg)
-            log.warning(msg + " (dropping missing covariates)")
+            log.warning("%s (dropping missing covariates)", msg)
         if present:
             cov_df = meta[present].apply(pd.to_numeric, errors="coerce")
             X = np.concatenate([X, cov_df.to_numpy(dtype=float)], axis=1)
@@ -1097,8 +1144,7 @@ def load_channels_mean_matrix(
             logger=log,
         )
         if epochs is None or aligned_events is None:
-            log.warning("No epochs for sub-%s; skipping", str(sub))
-            continue
+            _raise_subject_loading_error(sub, "No epochs")
 
         y_series, _y_col = _resolve_target_series(
             aligned_events,
@@ -1117,8 +1163,7 @@ def load_channels_mean_matrix(
             epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
         )
         if len(picks) == 0:
-            log.warning("No EEG channels for sub-%s; skipping", str(sub))
-            continue
+            _raise_subject_loading_error(sub, "No EEG channels")
 
         data = epochs.get_data(picks=picks)
         times = np.asarray(epochs.times, dtype=float)
@@ -1163,8 +1208,7 @@ def load_channels_mean_matrix(
         if feature_cols is None:
             feature_cols = list(np.asarray(epochs.ch_names)[picks])
         if X_sub.shape[0] != len(y_sub):
-            log.warning("Mismatch X/y for sub-%s; skipping", str(sub))
-            continue
+            _raise_subject_loading_error(sub, "Mismatch between epoch features and targets")
 
         _subject_raw, subject_bids = _normalize_subject(sub)
         X_blocks.append(X_sub)
@@ -1223,8 +1267,7 @@ def load_epoch_tensor_matrix(
             logger=log,
         )
         if epochs is None or aligned_events is None:
-            log.warning("No epochs for sub-%s; skipping", str(sub))
-            continue
+            _raise_subject_loading_error(sub, "No epochs")
 
         y_series, _y_col = _resolve_target_series(
             aligned_events,
@@ -1241,7 +1284,7 @@ def load_epoch_tensor_matrix(
 
         n_trials = min(len(epochs), len(y_sub), len(aligned_events))
         if n_trials < 1:
-            continue
+            _raise_subject_loading_error(sub, "No trials available")
         epochs = epochs[:n_trials]
         aligned_events = aligned_events.iloc[:n_trials].reset_index(drop=True)
         y_sub = y_sub[:n_trials]
@@ -1250,8 +1293,7 @@ def load_epoch_tensor_matrix(
             epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
         )
         if len(picks) == 0:
-            log.warning("No EEG channels available for sub-%s; skipping", str(sub))
-            continue
+            _raise_subject_loading_error(sub, "No EEG channels available")
 
         ch_names = [str(epochs.ch_names[p]) for p in picks]
         _subject_raw, subject_bids = _normalize_subject(sub)
@@ -1274,8 +1316,7 @@ def load_epoch_tensor_matrix(
         epochs_common = epochs.copy().pick(common_channels)
         X_sub = epochs_common.get_data(picks="eeg").astype(float)
         if X_sub.shape[0] != len(y_sub):
-            log.warning("Mismatch X/y for sub-%s; skipping", str(subject_bids))
-            continue
+            _raise_subject_loading_error(subject_bids, "Mismatch between epoch tensors and targets")
 
         X_blocks.append(X_sub)
         y_blocks.append(y_sub)

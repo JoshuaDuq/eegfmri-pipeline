@@ -262,29 +262,34 @@ def _apply_intersection_policy(
     """Apply intersection policy: subjects present in all sources and config."""
     all_discovered = [subject for _, subjects in discovered_by_source for subject in subjects]
     discovered_by_key = _subject_key_to_preferred_id(all_discovered)
-    
-    if subjects_from_config:
-        config_keys = {_subject_match_key(s) for s in _normalize_subject_list(subjects_from_config)}
-        final_subjects = sorted(
-            discovered_by_key[key]
-            for key in discovered_by_key
-            if key in config_keys
-        )
-        logger.info(
-            f"Using intersection: {len(final_subjects)} subjects "
-            f"(discovered={len(discovered_by_key)}, config={len(config_keys)})"
-        )
-        return final_subjects
-    
+
     if len(discovered_by_source) > 1:
         subject_key_sets = [
             {_subject_match_key(s) for s in _normalize_subject_list(subjects)}
             for _, subjects in discovered_by_source
         ]
-        final_keys = set.intersection(*subject_key_sets) if subject_key_sets else set()
+        discovered_keys = set.intersection(*subject_key_sets) if subject_key_sets else set()
+    else:
+        discovered_keys = set(discovered_by_key)
+
+    if subjects_from_config:
+        config_keys = {_subject_match_key(s) for s in _normalize_subject_list(subjects_from_config)}
+        final_keys = discovered_keys & config_keys
         final_subjects = sorted(
             discovered_by_key[key]
             for key in final_keys
+            if key in discovered_by_key
+        )
+        logger.info(
+            f"Using intersection: {len(final_subjects)} subjects "
+            f"(source_intersection={len(discovered_keys)}, config={len(config_keys)})"
+        )
+        return final_subjects
+
+    if len(discovered_by_source) > 1:
+        final_subjects = sorted(
+            discovered_by_key[key]
+            for key in discovered_keys
             if key in discovered_by_key
         )
         logger.info(
@@ -292,7 +297,7 @@ def _apply_intersection_policy(
             f"(from {len(discovered_by_source)} sources)"
         )
         return final_subjects
-    
+
     final_subjects = sorted(discovered_by_key.values())
     source_name = discovered_by_source[0][0] if discovered_by_source else "unknown"
     logger.info(f"Using discovered subjects: {len(final_subjects)} subjects (from {source_name})")
@@ -391,20 +396,68 @@ def get_available_subjects(
     )
 
 
-def _determine_discovery_sources(args: Any) -> List[str]:
+def _ml_discovery_sources(args: Any, config: Optional[EEGConfig] = None) -> List[str]:
+    """Determine the only valid discovery source for the requested ML mode."""
+    if hasattr(args, "command") and args.command == "ml":
+        mode = str(getattr(args, "mode", "") or "").strip().lower()
+        feature_set = ""
+        if config is not None and hasattr(config, "get"):
+            feature_set = str(
+                config.get("machine_learning.data.feature_set", "") or ""
+            ).strip().lower()
+        explicit_feature_families = getattr(args, "feature_families", None)
+        if feature_set == "channels_mean" and explicit_feature_families:
+            raise ValueError(
+                "machine_learning.data.feature_set='channels_mean' is incompatible with "
+                "explicit feature_families. Remove --feature-families or choose a "
+                "feature-table-based feature_set."
+            )
+        if mode == "timegen":
+            return ["derivatives_epochs"]
+        if feature_set == "channels_mean":
+            return ["derivatives_epochs"]
+        if mode == "classify":
+            classification_model = str(
+                getattr(args, "classification_model", "") or ""
+            ).strip().lower()
+            if not classification_model and config is not None and hasattr(config, "get"):
+                classification_model = str(
+                    config.get("machine_learning.classification.model", "") or ""
+                ).strip().lower()
+            if classification_model == "cnn":
+                return ["derivatives_epochs"]
+        return ["features"]
+
+
+def _explicit_discovery_sources(source: str) -> List[str]:
+    """Normalize an explicit CLI source selection into discovery source names."""
+    if source == "all":
+        return ["bids", "derivatives_epochs", "features", "source_data"]
+    if source == "epochs":
+        return ["derivatives_epochs"]
+    return [source]
+
+
+def _determine_discovery_sources(args: Any, config: Optional[EEGConfig] = None) -> List[str]:
     """Determine discovery sources based on command arguments."""
     if hasattr(args, "source") and args.source:
-        if args.source == "all":
-            return ["bids", "derivatives_epochs", "features", "source_data"]
-        elif args.source == "epochs":
-            return ["derivatives_epochs"]
-        else:
-            return [args.source]
-    
+        explicit_sources = _explicit_discovery_sources(str(args.source))
+        if hasattr(args, "command") and args.command == "ml":
+            valid_sources = _ml_discovery_sources(args, config)
+            if explicit_sources != valid_sources:
+                raise ValueError(
+                    "ML mode requires discovery source "
+                    f"{valid_sources!r}, got {explicit_sources!r}."
+                )
+        return explicit_sources
+
     # Preprocessing needs to discover from BIDS (epochs don't exist yet)
     if hasattr(args, "command") and args.command == "preprocessing":
         return ["bids"]
-    
+
+    if hasattr(args, "command") and args.command == "ml":
+        return _ml_discovery_sources(args, config)
+
     if hasattr(args, "mode"):
         if args.mode in {"raw-to-bids", "fmri-raw-to-bids"}:
             return ["source_data"]
@@ -449,7 +502,7 @@ def parse_subject_args(
     if task is None:
         task = config.get("project.task")
     
-    discovery_sources = _determine_discovery_sources(args)
+    discovery_sources = _determine_discovery_sources(args, config)
     subjects = _extract_subjects_from_args(args)
     
     if subjects is None:

@@ -742,11 +742,9 @@ def nested_loso_classification(
         
         # Skip if only one class in training
         if len(np.unique(y_train)) < 2:
-            log.warning(f"Fold {fold_number}: only one class in training, skipping")
-            y_pred[test_idx] = int(np.median(y_train))
-            fold_ids[test_idx] = fold_number
-            failed_fold_count += 1
-            continue
+            raise RuntimeError(
+                f"Fold {fold_number}: only one class in training for subject {test_subject}."
+            )
         
         # Inner CV: group-aware stratified CV to prevent within-subject mixing
         # This ensures hyperparameter tuning generalizes across subjects
@@ -767,10 +765,7 @@ def nested_loso_classification(
                 if hasattr(pipe_clone, "predict_proba"):
                     y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
             except Exception as e:
-                log.error(f"Fold {fold_number} fallback fit failed: {e}")
-                y_pred[test_idx] = int(np.median(y_train))
-                fold_ids[test_idx] = fold_number
-                failed_fold_count += 1
+                raise RuntimeError(f"Fold {fold_number} fallback fit failed: {e}") from e
             continue
             
         if min_class_count < effective_splits:
@@ -809,10 +804,7 @@ def nested_loso_classification(
             if hasattr(gs.best_estimator_, "predict_proba"):
                 y_prob[test_idx] = gs.best_estimator_.predict_proba(X_test)[:, 1]
         except Exception as e:
-            log.error(f"Fold {fold_number} failed: {e}")
-            y_pred[test_idx] = int(np.median(y_train))
-            fold_ids[test_idx] = fold_number
-            failed_fold_count += 1
+            raise RuntimeError(f"Fold {fold_number} failed: {e}") from e
     
     result = ClassificationResult(
         y_true=y,

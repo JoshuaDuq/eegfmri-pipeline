@@ -67,3 +67,35 @@ class TestInfraPathsPreferClean(unittest.TestCase):
 
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded["marker"].tolist(), ["bids"])
+
+    def test_find_clean_epochs_path_ignores_non_clean_epochs_files(self):
+        deriv_root = Path(tempfile.mkdtemp())
+        epochs_path = (
+            deriv_root
+            / "sub-0001"
+            / "eeg"
+            / "sub-0001_task-task_epo.fif"
+        )
+        epochs_path.parent.mkdir(parents=True, exist_ok=True)
+        epochs_path.write_text("epochs", encoding="utf-8")
+
+        found = self.paths.find_clean_epochs_path("0001", "task", deriv_root=deriv_root)
+
+        self.assertIsNone(found)
+
+    def test_find_clean_events_path_does_not_treat_raw_events_as_clean(self):
+        deriv_root = Path(tempfile.mkdtemp())
+        epochs_path = (
+            deriv_root
+            / "sub-0001"
+            / "eeg"
+            / "sub-0001_task-task_epo.fif"
+        )
+        raw_events_path = epochs_path.with_name("sub-0001_task-task_events.tsv")
+        epochs_path.parent.mkdir(parents=True, exist_ok=True)
+        epochs_path.write_text("epochs", encoding="utf-8")
+        pd.DataFrame({"onset": [0.0]}).to_csv(raw_events_path, sep="\t", index=False)
+
+        found = self.paths.find_clean_events_path("0001", "task", deriv_root=deriv_root)
+
+        self.assertIsNone(found)

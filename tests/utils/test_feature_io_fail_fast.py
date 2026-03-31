@@ -34,6 +34,7 @@ def _feature_io_import_stubs() -> dict[str, types.ModuleType]:
             "eeg_pipeline.utils.data.feature_alignment",
             attach_feature_alignment_columns=lambda df, *_args, **_kwargs: df,
             filter_feature_payload_columns=lambda df, *_args, **_kwargs: df,
+            require_trial_id_column=lambda frame, *, context: frame["trial_id"],
         ),
         "eeg_pipeline.utils.config.loader": _make_module(
             "eeg_pipeline.utils.config.loader",
@@ -144,6 +145,31 @@ class TestFeatureIoFailFast(unittest.TestCase):
         self.assertEqual(manifest_calls[-1]["task"], "runtime-task")
         self.assertEqual(manifest_calls[-1]["qc"], {"range_qc": {"status": "ok"}})
 
+    def test_save_feature_metadata_raises_when_manifest_generation_fails(self):
+        logger = Mock()
+        features_dir = Path(tempfile.mkdtemp()) / "sub-0001" / "eeg" / "features"
+        features_dir.mkdir(parents=True, exist_ok=True)
+        df = pd.DataFrame({"power_alpha": [1.0]})
+
+        with patch.dict(
+            sys.modules,
+            {
+                "eeg_pipeline.domain.features.naming": _make_module(
+                    "eeg_pipeline.domain.features.naming",
+                    generate_manifest=Mock(side_effect=TypeError("manifest boom")),
+                )
+            },
+        ):
+            with self.assertRaisesRegex(TypeError, "manifest boom"):
+                self.feature_io._save_feature_metadata(
+                    df=df,
+                    base_filename="features_power",
+                    features_dir=features_dir,
+                    config={"project": {"task": "config-task"}},
+                    logger=logger,
+                    task="runtime-task",
+                )
+
     def test_save_all_features_propagates_feature_qc_to_metadata(self):
         features_dir = Path(tempfile.mkdtemp())
         pow_df = pd.DataFrame({"power_alpha": [1.0]})
@@ -166,6 +192,29 @@ class TestFeatureIoFailFast(unittest.TestCase):
 
         self.assertTrue(mock_save_metadata.called)
         self.assertEqual(mock_save_metadata.call_args.kwargs["qc"], qc_payload)
+
+    def test_save_all_features_uses_normalized_columns_for_metadata(self):
+        features_dir = Path(tempfile.mkdtemp())
+        erp_df = pd.DataFrame({"raw_0": [1.0]})
+
+        with patch.object(self.feature_io, "_save_feature_metadata") as mock_save_metadata:
+            self.feature_io.save_all_features(
+                pow_df=pd.DataFrame(),
+                pow_cols=[],
+                baseline_df=pd.DataFrame(),
+                baseline_cols=[],
+                conn_df=None,
+                conn_cols=[],
+                aper_df=None,
+                aper_cols=[],
+                erp_df=erp_df,
+                erp_cols=["erp_peak_latency"],
+                features_dir=features_dir,
+                config={},
+            )
+
+        saved_df = mock_save_metadata.call_args.args[0]
+        self.assertEqual(list(saved_df.columns), ["erp_peak_latency"])
 
     def test_save_aperiodic_qc_writes_tsv_not_parquet(self):
         features_dir = Path(tempfile.mkdtemp())
@@ -199,14 +248,14 @@ class TestFeatureIoFailFast(unittest.TestCase):
 
         def _get_aligned_events(*_args, **kwargs):
             captured["deriv_root"] = kwargs["deriv_root"]
-            return pd.DataFrame({"rating": [1.0]})
+            return pd.DataFrame({"trial_id": [1], "rating": [1.0]})
 
         with patch.object(
             self.feature_io,
             "read_table",
             side_effect=[
-                pd.DataFrame({"power_alpha": [1.0]}),
-                pd.DataFrame({"power_alpha": [1.0]}),
+                pd.DataFrame({"trial_id": [1], "power_alpha": [1.0]}),
+                pd.DataFrame({"trial_id": [1], "power_alpha": [1.0]}),
             ],
         ), patch.object(
             self.feature_io,
@@ -230,3 +279,48 @@ class TestFeatureIoFailFast(unittest.TestCase):
             )
 
         self.assertEqual(captured["deriv_root"], deriv_root)
+
+    def test_load_features_and_targets_rejects_trial_id_order_mismatch(self):
+        deriv_root = Path(tempfile.mkdtemp())
+        features_dir = deriv_root / "sub-0001" / "eeg" / "features" / "power"
+        features_dir.mkdir(parents=True, exist_ok=True)
+        (features_dir / "features_power.parquet").write_text("x", encoding="utf-8")
+
+        active_df = pd.DataFrame(
+            {
+                "trial_id": [2, 1],
+                "power_alpha": [1.0, 2.0],
+            }
+        )
+        aligned_events = pd.DataFrame(
+            {
+                "trial_id": [1, 2],
+                "rating": [10.0, 20.0],
+            }
+        )
+
+        with patch.object(
+            self.feature_io,
+            "read_table",
+            side_effect=[active_df, active_df],
+        ), patch.object(
+            self.feature_io,
+            "pick_target_column",
+            return_value="rating",
+        ), patch.dict(
+            sys.modules,
+            {
+                "eeg_pipeline.utils.data.alignment": _make_module(
+                    "eeg_pipeline.utils.data.alignment",
+                    get_aligned_events=lambda *_args, **_kwargs: aligned_events,
+                )
+            },
+        ):
+            with self.assertRaisesRegex(ValueError, "trial_id"):
+                self.feature_io._load_features_and_targets(
+                    subject="0001",
+                    task="task",
+                    deriv_root=deriv_root,
+                    config={},
+                    epochs=object(),
+                )

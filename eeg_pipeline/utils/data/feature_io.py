@@ -24,6 +24,7 @@ from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.utils.data.feature_alignment import (
     attach_feature_alignment_columns,
     filter_feature_payload_columns,
+    require_trial_id_column,
 )
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.paths import (
@@ -106,6 +107,39 @@ def _validate_feature_lengths(
         )
 
 
+def _validate_trial_id_alignment(
+    subject: str,
+    task: str,
+    aligned_events: pd.DataFrame,
+    active_df: pd.DataFrame,
+    temporal_df: Optional[pd.DataFrame] = None,
+    conn_df: Optional[pd.DataFrame] = None,
+) -> None:
+    """Validate that feature tables preserve the canonical trial_id contract."""
+    event_trial_ids = require_trial_id_column(
+        aligned_events,
+        context=f"Aligned events for sub-{subject}, task-{task}",
+    ).reset_index(drop=True)
+
+    tables = (
+        ("active features", active_df),
+        ("temporal features", temporal_df),
+        ("connectivity features", conn_df),
+    )
+    for label, df in tables:
+        if df is None or df.empty:
+            continue
+        feature_trial_ids = require_trial_id_column(
+            df,
+            context=f"{label} for sub-{subject}, task-{task}",
+        ).reset_index(drop=True)
+        if not feature_trial_ids.equals(event_trial_ids):
+            raise ValueError(
+                f"trial_id alignment mismatch between {label} and aligned events "
+                f"for sub-{subject}, task-{task}."
+            )
+
+
 def _find_power_feature_path(feats_dir: Path, base_name: str) -> Path:
     """Find power feature file in subfolder."""
     return feats_dir / "power" / f"{base_name}.parquet"
@@ -184,6 +218,14 @@ def _load_features_and_targets(
 
     _validate_feature_lengths(
         subject, task, len(target_series), active_df, temporal_df, conn_df
+    )
+    _validate_trial_id_alignment(
+        subject,
+        task,
+        aligned_events,
+        active_df,
+        temporal_df,
+        conn_df,
     )
 
     return temporal_df, active_df, conn_df, target_series, getattr(epochs, "info", None)
@@ -485,37 +527,34 @@ def _save_feature_metadata(
     if df is None or df.empty:
         return
 
-    try:
-        from eeg_pipeline.domain.features.naming import generate_manifest
+    from eeg_pipeline.domain.features.naming import generate_manifest
 
-        folder_name = _get_folder_for_feature(base_filename, config, df=df)
-        metadata_dir = features_dir / folder_name / "metadata"
-        metadata_dir.mkdir(parents=True, exist_ok=True)
+    folder_name = _get_folder_for_feature(base_filename, config, df=df)
+    metadata_dir = features_dir / folder_name / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
 
-        subject_str = (
-            features_dir.parts[-3].replace("sub-", "")
-            if len(features_dir.parts) > 3
-            else "unknown"
-        )
+    subject_str = (
+        features_dir.parts[-3].replace("sub-", "")
+        if len(features_dir.parts) > 3
+        else "unknown"
+    )
 
-        base_out = Path(_build_filename(base_filename, suffix))
-        metadata_path = metadata_dir / base_out.with_suffix(".json").name
+    base_out = Path(_build_filename(base_filename, suffix))
+    metadata_path = metadata_dir / base_out.with_suffix(".json").name
 
-        manifest = generate_manifest(
-            feature_columns=filter_feature_payload_columns(df.columns),
-            config=config,
-            subject=subject_str,
-            task=task if task is not None else config.get("project.task") if config is not None else None,
-            qc=qc,
-            df_attrs=dict(getattr(df, "attrs", {}) or {}),
-        )
+    manifest = generate_manifest(
+        feature_columns=filter_feature_payload_columns(df.columns),
+        config=config,
+        subject=subject_str,
+        task=task if task is not None else config.get("project.task") if config is not None else None,
+        qc=qc,
+        df_attrs=dict(getattr(df, "attrs", {}) or {}),
+    )
 
-        with open(metadata_path, "w") as f:
-            json.dump(manifest, f, indent=2)
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
 
-        logger.info("Saved feature metadata: %s", metadata_path)
-    except (OSError, IOError, TypeError, KeyError, json.JSONDecodeError) as exc:
-        logger.warning("Failed to generate feature metadata for %s: %s", base_filename, exc)
+    logger.info("Saved feature metadata: %s", metadata_path)
 
 
 def _dedupe_identical_duplicate_columns(
@@ -813,7 +852,7 @@ def save_all_features(
 
     for df, cols, base_name, description in feature_save_configs:
         if df is not None and not df.empty:
-            _save_feature_dataframe(
+            normalized_df = _save_feature_dataframe(
                 df,
                 base_name,
                 features_dir,
@@ -825,7 +864,14 @@ def save_all_features(
                 aligned_events=aligned_events,
             )
             _save_feature_metadata(
-                df, base_name, features_dir, config, logger, suffix, task=task, qc=feature_qc
+                normalized_df,
+                base_name,
+                features_dir,
+                config,
+                logger,
+                suffix,
+                task=task,
+                qc=feature_qc,
             )
 
     if aper_qc:

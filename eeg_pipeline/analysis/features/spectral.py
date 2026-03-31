@@ -1335,7 +1335,8 @@ def compute_peak_frequency(
         
         if np.isfinite(aperiodic_at_peak) and aperiodic_at_peak > 0:
             peak_ratio = float(peak_power / aperiodic_at_peak)
-            peak_residual = float(np.log10(peak_power) - np.log10(aperiodic_at_peak))
+            if np.isfinite(peak_power) and peak_power > 0:
+                peak_residual = float(np.log10(peak_power) - np.log10(aperiodic_at_peak))
     
     return peak_freq, peak_power, peak_ratio, peak_residual
 

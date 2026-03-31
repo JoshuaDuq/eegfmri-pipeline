@@ -758,9 +758,10 @@ def create_within_subject_folds(
 
                     folds.append((fold_counter, train_idx, test_idx, subject, fold_params))
                 continue
-            logger.warning(
-                "Subject %s: ordered within-subject CV requested but no valid ordered block folds were found; falling back to GroupKFold.",
-                subject,
+            raise ValueError(
+                "Subject %s: ordered within-subject CV requested but no valid ordered block "
+                "folds were found."
+                % subject
             )
 
         block_cv, _ = create_block_aware_cv(subject_blocks, n_splits)
@@ -1099,26 +1100,39 @@ def run_permutation_test(
         get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
     )
 
-    perm_scheme = "within_subject_within_block"
+    perm_scheme = "within_subject"
     if config is not None:
         try:
-            perm_scheme = str(get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)).strip().lower()
+            perm_scheme = str(
+                get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)
+            ).strip().lower()
         except Exception:
-            perm_scheme = "within_subject_within_block"
+            perm_scheme = "within_subject"
     if perm_scheme not in {"within_subject", "within_subject_within_block"}:
-        perm_scheme = "within_subject_within_block"
+        raise ValueError(
+            "Invalid machine_learning.cv.permutation_scheme: "
+            f"{perm_scheme!r}. Expected one of: within_subject, within_subject_within_block."
+        )
 
     blocks_arr = None
     if perm_scheme == "within_subject_within_block":
         if blocks is None:
-            logger.warning("Permutation scheme 'within_subject_within_block' requested but blocks are missing; falling back to within_subject.")
-            perm_scheme = "within_subject"
+            raise ValueError(
+                "machine_learning.cv.permutation_scheme='within_subject_within_block' "
+                "requires block labels."
+            )
         else:
             blocks_arr = np.asarray(blocks)
             if len(blocks_arr) != len(y):
-                logger.warning("Permutation blocks length mismatch; falling back to within_subject.")
-                perm_scheme = "within_subject"
-                blocks_arr = None
+                raise ValueError(
+                    "Permutation blocks must have the same length as y when "
+                    "machine_learning.cv.permutation_scheme='within_subject_within_block'."
+                )
+            if np.all(pd.isna(blocks_arr)):
+                raise ValueError(
+                    "machine_learning.cv.permutation_scheme='within_subject_within_block' "
+                    "requires block labels."
+                )
 
     for perm in range(null_n_perm):
         y_perm = y.copy()

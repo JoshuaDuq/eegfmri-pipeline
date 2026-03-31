@@ -165,19 +165,23 @@ class PreprocessingPipeline(PipelineBase):
         self._refresh_processing_roots_if_initialized(task_is_rest)
         
         progress.subject_start(f"sub-{subject}")
-        
-        steps = self._get_steps_for_mode(mode)
-        
-        self._execute_steps(
-            steps=steps,
-            subjects=[subject],
-            task=resolved_task,
-            use_pyprep=use_pyprep,
-            use_icalabel=use_icalabel,
-            task_is_rest=task_is_rest,
-            n_jobs=n_jobs,
-            progress=progress,
-        )
+
+        try:
+            steps = self._get_steps_for_mode(mode)
+            
+            self._execute_steps(
+                steps=steps,
+                subjects=[subject],
+                task=resolved_task,
+                use_pyprep=use_pyprep,
+                use_icalabel=use_icalabel,
+                task_is_rest=task_is_rest,
+                n_jobs=n_jobs,
+                progress=progress,
+            )
+        except Exception:
+            progress.subject_done(f"sub-{subject}", success=False)
+            raise
         
         progress.subject_done(f"sub-{subject}", success=True)
     
@@ -232,12 +236,16 @@ class PreprocessingPipeline(PipelineBase):
 
             progress.complete(success=True)
             run_status = "success"
-            result = [{
-                "subjects": subjects,
-                "mode": mode,
-                "status": "success",
-            }]
+            result = [
+                {
+                    "subject": subject,
+                    "mode": mode,
+                    "status": "success",
+                }
+                for subject in subjects
+            ]
         except Exception as exc:
+            progress.complete(success=False)
             run_error = str(exc)
             caught_error = exc
         finally:
@@ -355,6 +363,9 @@ class PreprocessingPipeline(PipelineBase):
         self.logger.info("Running PyPREP bad channel detection for %s subject(s)", subject_count)
         
         pyprep_cfg = self.config.get("pyprep", {})
+        random_state = pyprep_cfg.get("random_state")
+        if random_state is None:
+            random_state = self.config.get("project.random_state", 42)
         run_bads_detection(
             bids_path=str(self.bids_root),
             pipeline_path=str(self.deriv_root / "preprocessed" / "eeg"),
@@ -376,7 +387,7 @@ class PreprocessingPipeline(PipelineBase):
             t_stop_before_next=pyprep_cfg.get("t_stop_before_next", 2),
             rename_anot_dict=pyprep_cfg.get("rename_anot_dict"),
             custom_bad_dict=pyprep_cfg.get("custom_bad_dict"),
-            random_state=pyprep_cfg.get("random_state") or self.config.get("project.random_state", 42),
+            random_state=random_state,
         )
         
         synchronize_bad_channels_across_runs(

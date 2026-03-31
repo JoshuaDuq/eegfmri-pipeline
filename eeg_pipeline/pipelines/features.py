@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import gc
 import json
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -115,6 +116,42 @@ def _fail_subject(progress: Any, subject: str, code: str, message: str) -> None:
     progress.error(code, message)
     progress.subject_done(f"sub-{subject}", success=False)
     raise RuntimeError(message)
+
+
+@contextmanager
+def _track_subject_completion(progress: Any, subject: str):
+    """Track subject completion and auto-report subject failure on uncaught errors."""
+    subject_completed = False
+    subject_started = False
+    subject_label = str(subject).strip()
+    if not subject_label.startswith("sub-"):
+        subject_label = f"sub-{subject_label}"
+
+    original_subject_start = progress.subject_start
+    original_subject_done = progress.subject_done
+
+    def _mark_subject_start(*args: Any, **kwargs: Any) -> Any:
+        nonlocal subject_started
+        subject_started = True
+        return original_subject_start(*args, **kwargs)
+
+    def _mark_subject_done(*args: Any, **kwargs: Any) -> Any:
+        nonlocal subject_completed
+        subject_completed = True
+        return original_subject_done(*args, **kwargs)
+
+    progress.subject_start = _mark_subject_start
+    progress.subject_done = _mark_subject_done
+    try:
+        yield lambda: subject_completed
+    except Exception:
+        if subject_started and not subject_completed:
+            original_subject_done(subject_label, success=False)
+            subject_completed = True
+        raise
+    finally:
+        progress.subject_start = original_subject_start
+        progress.subject_done = original_subject_done
 
 
 def _infer_retained_trial_count(
@@ -940,469 +977,516 @@ class FeaturePipeline(PipelineBase):
             self.config, kwargs.get("feature_categories")
         )
         progress = ensure_progress_reporter(kwargs.get("progress"))
-
-        self.logger.info("=== Feature extraction: sub-%s, task-%s ===", subject, task)
-        self.logger.info(
-            "Categories (%d): %s", len(feature_categories), ", ".join(feature_categories)
-        )
-        progress.subject_start(f"sub-{subject}")
-
-        features_dir = self._subject_feature_output_dir(
-            subject,
-            feature_output_root=kwargs.get("feature_output_root"),
-        )
-        ensure_dir(features_dir)
-        setup_matplotlib(self.config)
-
-        explicit_windows = kwargs.get("time_ranges")
-        time_ranges = _resolve_time_ranges(explicit_windows, kwargs.get("tmin"), kwargs.get("tmax"))
-        total_steps = _calculate_total_steps(len(time_ranges))
-        current_step = 0
-        if len(time_ranges) > 1:
+        with _track_subject_completion(progress, subject) as subject_completed:
+            self.logger.info("=== Feature extraction: sub-%s, task-%s ===", subject, task)
             self.logger.info(
-                "Time ranges (%d): %s",
-                len(time_ranges),
-                ", ".join(tr.get("name", "unnamed") or "unnamed" for tr in time_ranges),
+                "Categories (%d): %s", len(feature_categories), ", ".join(feature_categories)
             )
+            progress.subject_start(f"sub-{subject}")
 
-        current_step += 1
-        progress.step("Loading epochs", current=current_step, total=total_steps)
-        self.logger.info("Loading cleaned epochs...")
-        required_event_groups = _features_required_event_groups(self.config)
-        epochs, aligned_events = load_epochs_for_analysis(
-            subject,
-            task,
-            align="strict",
-            preload=True,
-            deriv_root=self.deriv_root,
-            logger=self.logger,
-            config=self.config,
-            task_is_rest=task_is_rest,
-            required_event_groups=required_event_groups,
-        )
-
-        if epochs is None:
-            message = f"No cleaned epochs for sub-{subject}"
-            self.logger.error("%s", message)
-            _fail_subject(progress, subject, "no_epochs", message)
-
-        if aligned_events is None:
-            message = f"No aligned events for sub-{subject}"
-            self.logger.error("%s", message)
-            _fail_subject(progress, subject, "no_events", message)
-
-        input_bids_root = resolve_eeg_bids_root(self.config, task_is_rest=task_is_rest)
-
-        try:
-            n_trials = len(epochs)
-        except Exception:
-            data_obj = getattr(epochs, "data", None)
-            n_trials = int(data_obj.shape[0]) if hasattr(data_obj, "shape") and len(data_obj.shape) > 0 else 0
-        n_channels = int(len(getattr(epochs, "ch_names", []) or []))
-        sfreq = float(getattr(epochs, "info", {}).get("sfreq", np.nan))
-        times = np.asarray(getattr(epochs, "times", np.array([], dtype=float)), dtype=float)
-        t_start = float(times[0]) if times.size else np.nan
-        t_end = float(times[-1]) if times.size else np.nan
-        self.logger.info(
-            "Epochs loaded: %d trials, %d channels, %.0f Hz, %.3f\u2013%.3fs",
-            int(n_trials), int(n_channels), sfreq, t_start, t_end,
-        )
-
-        original_events = _load_events_df(
-            subject,
-            task,
-            bids_root=str(input_bids_root),
-            config=self.config,
-            prefer_clean=False,
-        )
-        if original_events is not None:
-            n_dropped = len(original_events) - int(n_trials)
-            save_dropped_trials_log(
-                epochs, original_events, features_dir / "metadata" / "dropped_trials.tsv", self.logger
+            features_dir = self._subject_feature_output_dir(
+                subject,
+                feature_output_root=kwargs.get("feature_output_root"),
             )
-            if n_dropped > 0:
+            ensure_dir(features_dir)
+            setup_matplotlib(self.config)
+
+            explicit_windows = kwargs.get("time_ranges")
+            time_ranges = _resolve_time_ranges(
+                explicit_windows,
+                kwargs.get("tmin"),
+                kwargs.get("tmax"),
+            )
+            total_steps = _calculate_total_steps(len(time_ranges))
+            current_step = 0
+            if len(time_ranges) > 1:
                 self.logger.info(
-                    "Dropped trials: %d/%d (%.0f%% retained)",
-                    n_dropped, len(original_events),
-                    100 * int(n_trials) / len(original_events),
+                    "Time ranges (%d): %s",
+                    len(time_ranges),
+                    ", ".join(tr.get("name", "unnamed") or "unnamed" for tr in time_ranges),
                 )
 
-        # Feature extraction is label-agnostic; targets are handled in downstream stages.
-        y: Optional[pd.Series] = None
-
-        fixed_templates_path = kwargs.get("fixed_templates_path")
-        fixed_template_labels = None
-        loaded_templates = _load_fixed_templates(fixed_templates_path, self.logger)
-        if isinstance(loaded_templates, tuple) and len(loaded_templates) >= 2:
-            fixed_templates = loaded_templates[0]
-            fixed_template_ch_names = loaded_templates[1]
-            if len(loaded_templates) >= 3:
-                fixed_template_labels = loaded_templates[2]
-        else:
-            fixed_templates, fixed_template_ch_names = None, None
-
-        tfr_full = _precompute_tfr_if_needed(
-            epochs, time_ranges, feature_categories, self.config, self.logger
-        )
-
-        tfr_complex_full = _precompute_complex_tfr_if_needed(
-            epochs, time_ranges, feature_categories, self.config, self.logger
-        )
-
-        precomputed_full = _precompute_intermediates_if_needed(
-            epochs,
-            time_ranges,
-            feature_categories,
-            kwargs.get("bands"),
-            self.config,
-            self.logger,
-        )
-        if precomputed_full is not None:
-            if len(aligned_events) == int(precomputed_full.data.shape[0]):
-                precomputed_full.metadata = aligned_events.reset_index(drop=True).copy()
-                precomputed_full.condition_labels = _resolve_condition_labels_for_events(
-                    aligned_events,
-                    self.config,
+            current_step += 1
+            progress.step("Loading epochs", current=current_step, total=total_steps)
+            self.logger.info("Loading cleaned epochs...")
+            required_event_groups = _features_required_event_groups(self.config)
+            try:
+                epochs, aligned_events = load_epochs_for_analysis(
+                    subject,
+                    task,
+                    align="strict",
+                    preload=True,
+                    deriv_root=self.deriv_root,
+                    logger=self.logger,
+                    config=self.config,
+                    task_is_rest=task_is_rest,
+                    required_event_groups=required_event_groups,
                 )
-            else:
-                self.logger.warning(
-                    "Precomputed intermediates: aligned_events length (%d) != n_epochs (%d); skipping metadata.",
-                    len(aligned_events),
-                    int(precomputed_full.data.shape[0]),
+            except Exception:
+                if not subject_completed():
+                    progress.subject_done(f"sub-{subject}", success=False)
+                raise
+
+            if epochs is None:
+                message = f"No cleaned epochs for sub-{subject}"
+                self.logger.error("%s", message)
+                _fail_subject(progress, subject, "no_epochs", message)
+
+            if aligned_events is None:
+                message = f"No aligned events for sub-{subject}"
+                self.logger.error("%s", message)
+                _fail_subject(progress, subject, "no_events", message)
+
+            input_bids_root = resolve_eeg_bids_root(self.config, task_is_rest=task_is_rest)
+
+            try:
+                n_trials = len(epochs)
+            except Exception:
+                data_obj = getattr(epochs, "data", None)
+                n_trials = (
+                    int(data_obj.shape[0])
+                    if hasattr(data_obj, "shape") and len(data_obj.shape) > 0
+                    else 0
                 )
-
-        accumulated_features = _create_feature_accumulator()
-        accumulated_y = None
-        accumulated_qc: Dict[str, Dict[str, Any]] = {}
-        saved_range_count = 0
-
-        for tr_spec in time_ranges:
-            name = tr_spec.get("name")
-            tmin = tr_spec.get("tmin")
-            tmax = tr_spec.get("tmax")
-
-            if tmin is not None and tmax is not None and tmin > tmax:
-                raise ValueError(
-                    f"Time range '{name or 'default'}' has tmin ({tmin}) greater than tmax ({tmax})."
-                )
-
-            suffix = name
-            range_info = f"range '{name}'" if name else "default range"
-            if tmin is None or tmax is None:
-                self.logger.info("--- Processing %s ---", range_info)
-            else:
-                self.logger.info(
-                    "--- Processing %s (%.3f to %.3fs) ---",
-                    range_info,
-                    tmin,
-                    tmax,
-                )
-
-            spatial_modes = kwargs.get("spatial_modes") or self.config.get(
-                "feature_engineering.spatial_modes", ["roi", "channels", "global"]
+            n_channels = int(len(getattr(epochs, "ch_names", []) or []))
+            sfreq = float(getattr(epochs, "info", {}).get("sfreq", np.nan))
+            times = np.asarray(getattr(epochs, "times", np.array([], dtype=float)), dtype=float)
+            t_start = float(times[0]) if times.size else np.nan
+            t_end = float(times[-1]) if times.size else np.nan
+            self.logger.info(
+                "Epochs loaded: %d trials, %d channels, %.0f Hz, %.3f\u2013%.3fs",
+                int(n_trials), int(n_channels), sfreq, t_start, t_end,
             )
-            ctx = FeatureContext(
-                subject=subject,
-                task=task,
+
+            original_events = _load_events_df(
+                subject,
+                task,
+                bids_root=str(input_bids_root),
                 config=self.config,
-                deriv_root=self.deriv_root,
-                logger=self.logger,
-                epochs=epochs,
-                aligned_events=aligned_events,
-                fixed_templates=fixed_templates,
-                fixed_template_ch_names=fixed_template_ch_names,
-                fixed_template_labels=fixed_template_labels,
-                feature_categories=feature_categories,
-                bands=kwargs.get("bands"),
-                spatial_modes=spatial_modes,
-                tmin=tmin,
-                tmax=tmax,
-                name=name,
-                aggregation_method=kwargs.get("aggregation_method", "mean"),
-                tfr=tfr_full,
-                tfr_complex=tfr_complex_full,
-                precomputed=precomputed_full,
-                explicit_windows=explicit_windows,
-                train_mask=kwargs.get("train_mask"),
-                analysis_mode=kwargs.get(
-                    "analysis_mode",
-                    self.config.get("feature_engineering.analysis_mode", "group_stats"),
-                ),
+                prefer_clean=False,
             )
-            ctx.progress = progress
-            ctx.total_steps = total_steps
-            ctx.current_step = current_step
+            if original_events is not None:
+                n_dropped = len(original_events) - int(n_trials)
+                save_dropped_trials_log(
+                    epochs,
+                    original_events,
+                    features_dir / "metadata" / "dropped_trials.tsv",
+                    self.logger,
+                )
+                if n_dropped > 0:
+                    self.logger.info(
+                        "Dropped trials: %d/%d (%.0f%% retained)",
+                        n_dropped,
+                        len(original_events),
+                        100 * int(n_trials) / len(original_events),
+                    )
 
-            current_step += 1
-            progress.step(
-                f"Extracting features ({name or 'full'})",
-                current=current_step,
-                total=total_steps,
+            y: Optional[pd.Series] = None
+
+            fixed_templates_path = kwargs.get("fixed_templates_path")
+            fixed_template_labels = None
+            loaded_templates = _load_fixed_templates(fixed_templates_path, self.logger)
+            if isinstance(loaded_templates, tuple) and len(loaded_templates) >= 2:
+                fixed_templates = loaded_templates[0]
+                fixed_template_ch_names = loaded_templates[1]
+                if len(loaded_templates) >= 3:
+                    fixed_template_labels = loaded_templates[2]
+            else:
+                fixed_templates, fixed_template_ch_names = None, None
+
+            tfr_full = _precompute_tfr_if_needed(
+                epochs, time_ranges, feature_categories, self.config, self.logger
             )
-            features = extract_all_features(ctx)
-
-            unpacked = _unpack_feature_results(features)
-
-            current_step += 1
-            progress.step(
-                f"Aligning features ({name or 'full'})",
-                current=current_step,
-                total=total_steps,
+            tfr_complex_full = _precompute_complex_tfr_if_needed(
+                epochs, time_ranges, feature_categories, self.config, self.logger
             )
-            critical_features: List[str] = []
-            if y is not None:
-                critical_features.append("target")
-            if "power" in ctx.feature_categories:
-                critical_features.extend(["power", "baseline"])
-
-            extra_blocks = _build_extra_blocks(unpacked, features)
-
-            (
-                pow_df_aligned,
-                baseline_df_aligned,
-                conn_df_aligned,
-                aper_df_aligned,
-                y_aligned,
-                retention_stats,
-            ) = align_feature_dataframes(
-                unpacked["pow_df"],
-                unpacked["baseline_df"],
-                unpacked["conn_df"],
-                unpacked["aper_df"],
-                y,
-                aligned_events,
-                features_dir,
-                self.logger,
+            precomputed_full = _precompute_intermediates_if_needed(
+                epochs,
+                time_ranges,
+                feature_categories,
+                kwargs.get("bands"),
                 self.config,
-                critical_features=critical_features,
-                extra_blocks=extra_blocks,
-                requested_categories=ctx.feature_categories,
+                self.logger,
             )
+            if precomputed_full is not None:
+                if len(aligned_events) == int(precomputed_full.data.shape[0]):
+                    precomputed_full.metadata = aligned_events.reset_index(drop=True).copy()
+                    precomputed_full.condition_labels = _resolve_condition_labels_for_events(
+                        aligned_events,
+                        self.config,
+                    )
+                else:
+                    self.logger.warning(
+                        "Precomputed intermediates: aligned_events length (%d) != n_epochs (%d); skipping metadata.",
+                        len(aligned_events),
+                        int(precomputed_full.data.shape[0]),
+                    )
 
-            if retention_stats is None:
-                self.logger.error("Feature alignment failed for %s; skipping save", range_info)
-                continue
+            accumulated_features = _create_feature_accumulator()
+            accumulated_y = None
+            accumulated_qc: Dict[str, Dict[str, Any]] = {}
+            saved_range_count = 0
 
-            n_retained = retention_stats.get(
-                "n_retained",
-                _infer_retained_trial_count(
+            for tr_spec in time_ranges:
+                name = tr_spec.get("name")
+                tmin = tr_spec.get("tmin")
+                tmax = tr_spec.get("tmax")
+
+                if tmin is not None and tmax is not None and tmin > tmax:
+                    raise ValueError(
+                        f"Time range '{name or 'default'}' has tmin ({tmin}) greater than tmax ({tmax})."
+                    )
+
+                suffix = name
+                range_info = f"range '{name}'" if name else "default range"
+                if tmin is None or tmax is None:
+                    self.logger.info("--- Processing %s ---", range_info)
+                else:
+                    self.logger.info(
+                        "--- Processing %s (%.3f to %.3fs) ---",
+                        range_info,
+                        tmin,
+                        tmax,
+                    )
+
+                spatial_modes = kwargs.get("spatial_modes") or self.config.get(
+                    "feature_engineering.spatial_modes", ["roi", "channels", "global"]
+                )
+                ctx = FeatureContext(
+                    subject=subject,
+                    task=task,
+                    config=self.config,
+                    deriv_root=self.deriv_root,
+                    logger=self.logger,
+                    epochs=epochs,
+                    aligned_events=aligned_events,
+                    fixed_templates=fixed_templates,
+                    fixed_template_ch_names=fixed_template_ch_names,
+                    fixed_template_labels=fixed_template_labels,
+                    feature_categories=feature_categories,
+                    bands=kwargs.get("bands"),
+                    spatial_modes=spatial_modes,
+                    tmin=tmin,
+                    tmax=tmax,
+                    name=name,
+                    aggregation_method=kwargs.get("aggregation_method", "mean"),
+                    tfr=tfr_full,
+                    tfr_complex=tfr_complex_full,
+                    precomputed=precomputed_full,
+                    explicit_windows=explicit_windows,
+                    train_mask=kwargs.get("train_mask"),
+                    analysis_mode=kwargs.get(
+                        "analysis_mode",
+                        self.config.get("feature_engineering.analysis_mode", "group_stats"),
+                    ),
+                )
+                ctx.progress = progress
+                ctx.total_steps = total_steps
+                ctx.current_step = current_step
+
+                current_step += 1
+                progress.step(
+                    f"Extracting features ({name or 'full'})",
+                    current=current_step,
+                    total=total_steps,
+                )
+                try:
+                    features = extract_all_features(ctx)
+                except Exception:
+                    if not subject_completed():
+                        progress.subject_done(f"sub-{subject}", success=False)
+                    raise
+
+                unpacked = _unpack_feature_results(features)
+
+                current_step += 1
+                progress.step(
+                    f"Aligning features ({name or 'full'})",
+                    current=current_step,
+                    total=total_steps,
+                )
+                critical_features: List[str] = []
+                if y is not None:
+                    critical_features.append("target")
+                if "power" in ctx.feature_categories:
+                    critical_features.extend(["power", "baseline"])
+
+                extra_blocks = _build_extra_blocks(unpacked, features)
+                try:
+                    (
+                        pow_df_aligned,
+                        baseline_df_aligned,
+                        conn_df_aligned,
+                        aper_df_aligned,
+                        y_aligned,
+                        retention_stats,
+                    ) = align_feature_dataframes(
+                        unpacked["pow_df"],
+                        unpacked["baseline_df"],
+                        unpacked["conn_df"],
+                        unpacked["aper_df"],
+                        y,
+                        aligned_events,
+                        features_dir,
+                        self.logger,
+                        self.config,
+                        critical_features=critical_features,
+                        extra_blocks=extra_blocks,
+                        requested_categories=ctx.feature_categories,
+                    )
+                except Exception:
+                    if not subject_completed():
+                        progress.subject_done(f"sub-{subject}", success=False)
+                    raise
+
+                if retention_stats is None:
+                    self.logger.error("Feature alignment failed for %s; skipping save", range_info)
+                    continue
+
+                n_retained = retention_stats.get(
+                    "n_retained",
+                    _infer_retained_trial_count(
+                        retention_stats,
+                        y_aligned=y_aligned,
+                        pow_df_aligned=pow_df_aligned,
+                        baseline_df_aligned=baseline_df_aligned,
+                        conn_df_aligned=conn_df_aligned,
+                        aper_df_aligned=aper_df_aligned,
+                    ),
+                )
+                n_original = retention_stats.get("n_original", int(n_trials))
+                if n_retained < n_original:
+                    self.logger.info(
+                        "Alignment: %d/%d trials retained (%.0f%%)",
+                        n_retained,
+                        n_original,
+                        100 * n_retained / max(n_original, 1),
+                    )
+
+                extra_blocks = retention_stats.get("extra_blocks", {})
+                _update_from_aligned_extra(unpacked, features, extra_blocks)
+                aligned_events_retained = _retained_aligned_events(
+                    aligned_events,
+                    retention_stats,
+                )
+
+                feature_qc = _build_feature_qc(features, ctx)
+                if len(time_ranges) > 1 and feature_qc:
+                    accumulated_qc[name or "default"] = feature_qc
+
+                current_step += 1
+                progress.step(
+                    f"Saving features ({name or 'full'})",
+                    current=current_step,
+                    total=total_steps,
+                )
+                try:
+                    combined_df = save_all_features(
+                        pow_df=pow_df_aligned,
+                        pow_cols=unpacked["pow_cols"],
+                        baseline_df=baseline_df_aligned,
+                        baseline_cols=unpacked["baseline_cols"],
+                        conn_df=conn_df_aligned,
+                        conn_cols=unpacked["conn_cols"],
+                        aper_df=aper_df_aligned,
+                        aper_cols=unpacked["aper_cols"],
+                        erp_df=unpacked.get("erp_df"),
+                        erp_cols=unpacked.get("erp_cols"),
+                        itpc_df=unpacked.get("itpc_df"),
+                        itpc_cols=unpacked.get("itpc_cols"),
+                        pac_df=unpacked.get("pac_df"),
+                        pac_trials_df=unpacked.get("pac_trials_df"),
+                        pac_time_df=unpacked.get("pac_time_df"),
+                        aper_qc=getattr(features, "aper_qc", None),
+                        y=y_aligned,
+                        features_dir=features_dir,
+                        logger=self.logger,
+                        config=self.config,
+                        task=task,
+                        comp_df=unpacked.get("comp_df"),
+                        comp_cols=unpacked.get("comp_cols"),
+                        bursts_df=unpacked.get("bursts_df"),
+                        bursts_cols=unpacked.get("bursts_cols"),
+                        spectral_df=unpacked.get("spectral_df"),
+                        spectral_cols=unpacked.get("spectral_cols"),
+                        erds_df=unpacked.get("erds_df"),
+                        erds_cols=unpacked.get("erds_cols"),
+                        ratios_df=getattr(features, "ratios_df", None),
+                        ratios_cols=getattr(features, "ratios_cols", None),
+                        asymmetry_df=getattr(features, "asymmetry_df", None),
+                        asymmetry_cols=getattr(features, "asymmetry_cols", None),
+                        microstates_df=unpacked.get("microstates_df"),
+                        microstates_cols=unpacked.get("microstates_cols"),
+                        quality_df=getattr(features, "quality_df", None),
+                        quality_cols=getattr(features, "quality_cols", None),
+                        dconn_df=unpacked.get("dconn_df"),
+                        dconn_cols=unpacked.get("dconn_cols"),
+                        source_df=unpacked.get("source_df"),
+                        source_cols=unpacked.get("source_cols"),
+                        source_contrast_df=unpacked.get("source_contrast_df"),
+                        source_contrast_cols=unpacked.get("source_contrast_cols"),
+                        feature_qc=feature_qc or None,
+                        suffix=suffix,
+                        aligned_events=aligned_events_retained,
+                    )
+                except Exception:
+                    if not subject_completed():
+                        progress.subject_done(f"sub-{subject}", success=False)
+                    raise
+
+                if kwargs.get("save_canonical_trial_table", True):
+                    trial_table_suffix = suffix if len(time_ranges) > 1 else None
+                    trial_feature_tables = _collect_trial_table_feature_tables(
+                        direct_df=combined_df,
+                        conn_df_aligned=conn_df_aligned,
+                        aper_df_aligned=aper_df_aligned,
+                        unpacked=unpacked,
+                        features=features,
+                    )
+                    _save_canonical_trial_table_artifact(
+                        deriv_root=self.deriv_root,
+                        subject=subject,
+                        task=task,
+                        aligned_events=aligned_events_retained,
+                        feature_tables=trial_feature_tables,
+                        config=self.config,
+                        logger=self.logger,
+                        suffix=trial_table_suffix,
+                    )
+
+                if len(time_ranges) > 1:
+                    aligned_dict = {
+                        "pow_df_aligned": pow_df_aligned,
+                        "baseline_df_aligned": baseline_df_aligned,
+                        "conn_df_aligned": conn_df_aligned,
+                        "aper_df_aligned": aper_df_aligned,
+                    }
+                    _accumulate_features(
+                        accumulated_features,
+                        unpacked,
+                        features,
+                        aligned_dict,
+                        aligned_events=aligned_events_retained,
+                    )
+                    if accumulated_y is None and y_aligned is not None and len(y_aligned) > 0:
+                        accumulated_y = y_aligned
+
+                n_trials_saved = _infer_retained_trial_count(
                     retention_stats,
                     y_aligned=y_aligned,
                     pow_df_aligned=pow_df_aligned,
                     baseline_df_aligned=baseline_df_aligned,
                     conn_df_aligned=conn_df_aligned,
                     aper_df_aligned=aper_df_aligned,
-                ),
-            )
-            n_original = retention_stats.get("n_original", int(n_trials))
-            if n_retained < n_original:
-                self.logger.info(
-                    "Alignment: %d/%d trials retained (%.0f%%)",
-                    n_retained, n_original, 100 * n_retained / max(n_original, 1),
                 )
-
-            extra_blocks = retention_stats.get("extra_blocks", {})
-            _update_from_aligned_extra(unpacked, features, extra_blocks)
-            aligned_events_retained = _retained_aligned_events(
-                aligned_events,
-                retention_stats,
-            )
-
-            feature_qc = _build_feature_qc(features, ctx)
-            if len(time_ranges) > 1 and feature_qc:
-                accumulated_qc[name or "default"] = feature_qc
-
-            current_step += 1
-            progress.step(
-                f"Saving features ({name or 'full'})",
-                current=current_step,
-                total=total_steps,
-            )
-
-            combined_df = save_all_features(
-                pow_df=pow_df_aligned,
-                pow_cols=unpacked["pow_cols"],
-                baseline_df=baseline_df_aligned,
-                baseline_cols=unpacked["baseline_cols"],
-                conn_df=conn_df_aligned,
-                conn_cols=unpacked["conn_cols"],
-                aper_df=aper_df_aligned,
-                aper_cols=unpacked["aper_cols"],
-                erp_df=unpacked.get("erp_df"),
-                erp_cols=unpacked.get("erp_cols"),
-                itpc_df=unpacked.get("itpc_df"),
-                itpc_cols=unpacked.get("itpc_cols"),
-                pac_df=unpacked.get("pac_df"),
-                pac_trials_df=unpacked.get("pac_trials_df"),
-                pac_time_df=unpacked.get("pac_time_df"),
-                aper_qc=getattr(features, "aper_qc", None),
-                y=y_aligned,
-                features_dir=features_dir,
-                logger=self.logger,
-                config=self.config,
-                task=task,
-                comp_df=unpacked.get("comp_df"),
-                comp_cols=unpacked.get("comp_cols"),
-                bursts_df=unpacked.get("bursts_df"),
-                bursts_cols=unpacked.get("bursts_cols"),
-                spectral_df=unpacked.get("spectral_df"),
-                spectral_cols=unpacked.get("spectral_cols"),
-                erds_df=unpacked.get("erds_df"),
-                erds_cols=unpacked.get("erds_cols"),
-                ratios_df=getattr(features, "ratios_df", None),
-                ratios_cols=getattr(features, "ratios_cols", None),
-                asymmetry_df=getattr(features, "asymmetry_df", None),
-                asymmetry_cols=getattr(features, "asymmetry_cols", None),
-                microstates_df=unpacked.get("microstates_df"),
-                microstates_cols=unpacked.get("microstates_cols"),
-                quality_df=getattr(features, "quality_df", None),
-                quality_cols=getattr(features, "quality_cols", None),
-                dconn_df=unpacked.get("dconn_df"),
-                dconn_cols=unpacked.get("dconn_cols"),
-                source_df=unpacked.get("source_df"),
-                source_cols=unpacked.get("source_cols"),
-                source_contrast_df=unpacked.get("source_contrast_df"),
-                source_contrast_cols=unpacked.get("source_contrast_cols"),
-                feature_qc=feature_qc or None,
-                suffix=suffix,
-                aligned_events=aligned_events_retained,
-            )
-
-            if kwargs.get("save_canonical_trial_table", True):
-                trial_table_suffix = suffix if len(time_ranges) > 1 else None
-                trial_feature_tables = _collect_trial_table_feature_tables(
+                n_total = _count_saved_range_columns(
                     direct_df=combined_df,
-                    conn_df_aligned=conn_df_aligned,
-                    aper_df_aligned=aper_df_aligned,
+                    conn_df=conn_df_aligned,
+                    aper_df=aper_df_aligned,
                     unpacked=unpacked,
                     features=features,
                 )
-                _save_canonical_trial_table_artifact(
-                    deriv_root=self.deriv_root,
-                    subject=subject,
-                    task=task,
-                    aligned_events=aligned_events_retained,
-                    feature_tables=trial_feature_tables,
-                    config=self.config,
-                    logger=self.logger,
-                    suffix=trial_table_suffix,
+
+                extraction_config = {
+                    "cli_command": kwargs.get("cli_command"),
+                    "name": name,
+                    "spatial_modes": ctx.spatial_modes,
+                    "analysis_mode": str(ctx.analysis_mode or "").strip() or "group_stats",
+                    "connectivity_granularity": str(
+                        self.config.get("feature_engineering.connectivity.granularity", "trial")
+                    ).strip(),
+                    "aggregation_method": ctx.aggregation_method,
+                    "tmin": ctx.tmin,
+                    "tmax": ctx.tmax,
+                    "bands": ctx.bands,
+                    "feature_categories": feature_categories,
+                    "n_trials": n_trials_saved,
+                    "subject": subject,
+                    "task": task,
+                }
+                extraction_config.update(_feature_provenance_config(self.config))
+                _save_extraction_config(
+                    extraction_config,
+                    features_dir,
+                    suffix,
+                    self.logger,
+                    feature_categories,
+                    pipeline_config=self.config,
                 )
+                saved_range_count += 1
+
+                self.logger.info(
+                    "Saved %s: %d total columns \u00d7 %d trials",
+                    range_info,
+                    n_total,
+                    n_trials_saved,
+                )
+
+                del ctx, features, unpacked, extra_blocks, combined_df
+                del pow_df_aligned, baseline_df_aligned, conn_df_aligned, aper_df_aligned
+                gc.collect()
+
+            if saved_range_count == 0:
+                message = (
+                    f"No feature outputs were saved for sub-{subject}, task-{task}. "
+                    "Feature extraction failed for all requested time ranges."
+                )
+                self.logger.error("%s", message)
+                _fail_subject(progress, subject, "no_saved_features", message)
 
             if len(time_ranges) > 1:
-                aligned_dict = {
-                    "pow_df_aligned": pow_df_aligned,
-                    "baseline_df_aligned": baseline_df_aligned,
-                    "conn_df_aligned": conn_df_aligned,
-                    "aper_df_aligned": aper_df_aligned,
-                }
-                _accumulate_features(
-                    accumulated_features,
-                    unpacked,
-                    features,
-                    aligned_dict,
-                    aligned_events=aligned_events_retained,
-                )
-                if accumulated_y is None and y_aligned is not None and len(y_aligned) > 0:
-                    accumulated_y = y_aligned
-
-            n_trials_saved = _infer_retained_trial_count(
-                retention_stats,
-                y_aligned=y_aligned,
-                pow_df_aligned=pow_df_aligned,
-                baseline_df_aligned=baseline_df_aligned,
-                conn_df_aligned=conn_df_aligned,
-                aper_df_aligned=aper_df_aligned,
-            )
-            n_total = _count_saved_range_columns(
-                direct_df=combined_df,
-                conn_df=conn_df_aligned,
-                aper_df=aper_df_aligned,
-                unpacked=unpacked,
-                features=features,
-            )
-
-            extraction_config = {
-                "cli_command": kwargs.get("cli_command"),
-                "name": name,
-                "spatial_modes": ctx.spatial_modes,
-                "analysis_mode": str(ctx.analysis_mode or "").strip() or "group_stats",
-                "connectivity_granularity": str(
-                    self.config.get("feature_engineering.connectivity.granularity", "trial")
-                ).strip(),
-                "aggregation_method": ctx.aggregation_method,
-                "tmin": ctx.tmin,
-                "tmax": ctx.tmax,
-                "bands": ctx.bands,
-                "feature_categories": feature_categories,
-                "n_trials": n_trials_saved,
-                "subject": subject,
-                "task": task,
-            }
-            extraction_config.update(_feature_provenance_config(self.config))
-            _save_extraction_config(extraction_config, features_dir, suffix, self.logger, feature_categories, pipeline_config=self.config)
-            saved_range_count += 1
-
-            self.logger.info(
-                "Saved %s: %d total columns \u00d7 %d trials",
-                range_info, n_total, n_trials_saved,
-            )
-
-            del ctx, features, unpacked, extra_blocks, combined_df
-            del pow_df_aligned, baseline_df_aligned, conn_df_aligned, aper_df_aligned
-            gc.collect()
-
-        if saved_range_count == 0:
-            message = (
-                f"No feature outputs were saved for sub-{subject}, task-{task}. "
-                "Feature extraction failed for all requested time ranges."
-            )
-            self.logger.error("%s", message)
-            _fail_subject(progress, subject, "no_saved_features", message)
-
-        if len(time_ranges) > 1:
-            self.logger.info(
-                "Merging features from all time ranges into consolidated default files..."
-            )
-            _save_merged_features(
-                accumulated_features,
-                features_dir,
-                self.config,
-                self.logger,
-                aligned_events=aligned_events,
-                task=task,
-                qc=accumulated_qc or None,
-            )
-
-            merged_extraction_config = {
-                "cli_command": kwargs.get("cli_command"),
-                "merged": True,
-                "time_ranges": [tr.get("name") for tr in time_ranges],
-                "spatial_modes": kwargs.get("spatial_modes")
-                or self.config.get("feature_engineering.spatial_modes", ["roi", "global"]),
-                "analysis_mode": str(
-                    kwargs.get(
-                        "analysis_mode",
-                        self.config.get("feature_engineering.analysis_mode", "group_stats"),
+                try:
+                    self.logger.info(
+                        "Merging features from all time ranges into consolidated default files..."
                     )
-                    or "group_stats"
-                ).strip(),
-                "connectivity_granularity": str(
-                    self.config.get("feature_engineering.connectivity.granularity", "trial")
-                ).strip(),
-                "aggregation_method": kwargs.get("aggregation_method", "mean"),
-                "feature_categories": feature_categories,
-                "n_trials": int(len(accumulated_y)) if accumulated_y is not None else int(n_trials),
-                "subject": subject,
-                "task": task,
-            }
-            merged_extraction_config.update(_feature_provenance_config(self.config))
-            _save_extraction_config(
-                merged_extraction_config, features_dir, None, self.logger, feature_categories,
-                pipeline_config=self.config,
-            )
-            self.logger.info("Saved merged extraction config")
+                    _save_merged_features(
+                        accumulated_features,
+                        features_dir,
+                        self.config,
+                        self.logger,
+                        aligned_events=aligned_events,
+                        task=task,
+                        qc=accumulated_qc or None,
+                    )
 
-        progress.subject_done(f"sub-{subject}", success=True)
+                    merged_extraction_config = {
+                        "cli_command": kwargs.get("cli_command"),
+                        "merged": True,
+                        "time_ranges": [tr.get("name") for tr in time_ranges],
+                        "spatial_modes": kwargs.get("spatial_modes")
+                        or self.config.get("feature_engineering.spatial_modes", ["roi", "global"]),
+                        "analysis_mode": str(
+                            kwargs.get(
+                                "analysis_mode",
+                                self.config.get("feature_engineering.analysis_mode", "group_stats"),
+                            )
+                            or "group_stats"
+                        ).strip(),
+                        "connectivity_granularity": str(
+                            self.config.get("feature_engineering.connectivity.granularity", "trial")
+                        ).strip(),
+                        "aggregation_method": kwargs.get("aggregation_method", "mean"),
+                        "feature_categories": feature_categories,
+                        "n_trials": int(len(accumulated_y)) if accumulated_y is not None else int(n_trials),
+                        "subject": subject,
+                        "task": task,
+                    }
+                    merged_extraction_config.update(_feature_provenance_config(self.config))
+                    _save_extraction_config(
+                        merged_extraction_config,
+                        features_dir,
+                        None,
+                        self.logger,
+                        feature_categories,
+                        pipeline_config=self.config,
+                    )
+                    self.logger.info("Saved merged extraction config")
+                except Exception:
+                    if not subject_completed():
+                        progress.subject_done(f"sub-{subject}", success=False)
+                    raise
+
+            progress.subject_done(f"sub-{subject}", success=True)
 
 
 def process_subject(

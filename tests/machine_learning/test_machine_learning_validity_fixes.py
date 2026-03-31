@@ -105,6 +105,31 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     config=DotConfig({}),
                 )
 
+    def test_resolve_feature_families_prefers_configured_feature_categories_for_combined_defaults(
+        self,
+    ):
+        ml_data = self._import_ml_data()
+
+        def _import_with_failure(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "eeg_pipeline.utils.data.feature_discovery":
+                raise ImportError("feature-discovery-should-not-load")
+            return _real_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=_import_with_failure):
+            resolved = ml_data._resolve_feature_families(
+                feature_families=None,
+                feature_set="combined",
+                config=DotConfig(
+                    {
+                        "feature_engineering": {
+                            "feature_categories": ["power", "aperiodic", "erp"],
+                        }
+                    }
+                ),
+            )
+
+        self.assertEqual(resolved, ["power", "aperiodic", "erp"])
+
     def test_cnn_loso_surfaces_fold_failures(self):
         from eeg_pipeline.analysis.machine_learning import cnn
 
@@ -516,6 +541,326 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertEqual(y_col, "rating")
         self.assertEqual(meta["trial_id"].tolist(), [7])
 
+    def test_load_subject_feature_table_raises_when_any_requested_family_is_missing(self):
+        ml_data = self._import_ml_data()
+        cfg = DotConfig({"machine_learning": {"data": {"require_trial_ml_safe": False}}})
+
+        with tempfile.TemporaryDirectory() as td:
+            deriv_root = Path(td)
+            power_dir = deriv_root / "sub-0001" / "eeg" / "features" / "power"
+            power_dir.mkdir(parents=True, exist_ok=True)
+            (power_dir / "features_power.parquet").touch()
+
+            with patch.object(
+                ml_data,
+                "read_table",
+                return_value=pd.DataFrame(
+                    {
+                        "trial_id": [1, 2],
+                        "power_alpha_global_mean": [1.0, 2.0],
+                    }
+                ),
+            ):
+                with self.assertRaisesRegex(FileNotFoundError, "connectivity"):
+                    ml_data._load_subject_feature_table(
+                        subject="0001",
+                        task="task",
+                        deriv_root=deriv_root,
+                        config=cfg,
+                        feature_families=["power", "connectivity"],
+                        feature_input_root=None,
+                        logger=Mock(),
+                    )
+
+    def test_load_active_matrix_rejects_invalid_feature_harmonization(self):
+        ml_data = self._import_ml_data()
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {"analysis_mode": "trial_ml_safe"},
+                "machine_learning": {"data": {"feature_harmonization": "zscore"}},
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Invalid machine_learning.data.feature_harmonization",
+        ):
+            ml_data.load_active_matrix(
+                subjects=["0001"],
+                task="task",
+                deriv_root=Path("/tmp/deriv"),
+                config=cfg,
+                feature_families=["power"],
+            )
+
+    def test_load_active_matrix_rejects_feature_families_with_channels_mean_feature_set(self):
+        ml_data = self._import_ml_data()
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {"analysis_mode": "trial_ml_safe"},
+                "machine_learning": {"data": {"feature_set": "channels_mean"}},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "channels_mean"):
+            ml_data.load_active_matrix(
+                subjects=["0001"],
+                task="task",
+                deriv_root=Path("/tmp/deriv"),
+                config=cfg,
+                    feature_families=["power"],
+            )
+
+    def test_load_active_matrix_does_not_require_runtime_trial_safe_mode_when_subject_tables_load(
+        self,
+    ):
+        ml_data = self._import_ml_data()
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {"analysis_mode": "group_stats"},
+                "machine_learning": {"data": {"require_trial_ml_safe": True}},
+            }
+        )
+
+        payload = (
+            pd.DataFrame({"power_alpha_global_mean": [1.0, 2.0]}),
+            np.array([10.0, 20.0], dtype=float),
+            "rating",
+            pd.DataFrame(
+                {
+                    "subject_id": ["sub-0001", "sub-0001"],
+                    "trial_id": [1, 2],
+                }
+            ),
+        )
+
+        with patch.object(ml_data, "_load_subject_ml_from_features", return_value=payload):
+            X, y, groups, feature_names, meta = ml_data.load_active_matrix(
+                subjects=["0001"],
+                task="task",
+                deriv_root=Path("/tmp/deriv"),
+                config=cfg,
+                feature_families=["power"],
+            )
+
+        self.assertEqual(X.shape, (2, 1))
+        np.testing.assert_array_equal(y, np.array([10.0, 20.0], dtype=float))
+        np.testing.assert_array_equal(groups, np.array(["sub-0001", "sub-0001"], dtype=object))
+        self.assertEqual(feature_names, ["power_alpha_global_mean"])
+        self.assertEqual(meta["trial_id"].tolist(), [1, 2])
+
+    def test_load_active_matrix_raises_when_requested_covariates_are_missing_in_strict_mode(self):
+        ml_data = self._import_ml_data()
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {"analysis_mode": "trial_ml_safe"},
+                "machine_learning": {"data": {"covariates_strict": True}},
+            }
+        )
+
+        def _fake_load_subject(*_args, **_kwargs):
+            return (
+                pd.DataFrame({"power_alpha_global_mean": [1.0, 2.0]}),
+                np.array([10.0, 20.0], dtype=float),
+                "rating",
+                pd.DataFrame(
+                    {
+                        "subject_id": ["sub-0001", "sub-0001"],
+                        "trial_id": [1, 2],
+                    }
+                ),
+            )
+
+        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+            with self.assertRaisesRegex(ValueError, "Requested covariates missing from meta"):
+                ml_data.load_active_matrix(
+                    subjects=["0001"],
+                    task="task",
+                    deriv_root=Path("/tmp/deriv"),
+                    config=cfg,
+                    feature_families=["power"],
+                    covariates=["age"],
+                )
+
+    def test_load_active_matrix_drops_missing_covariates_when_not_strict(self):
+        ml_data = self._import_ml_data()
+
+        cfg = DotConfig(
+            {
+                "feature_engineering": {"analysis_mode": "trial_ml_safe"},
+                "machine_learning": {"data": {"covariates_strict": False}},
+            }
+        )
+
+        def _fake_load_subject(*_args, **_kwargs):
+            return (
+                pd.DataFrame({"power_alpha_global_mean": [1.0, 2.0]}),
+                np.array([10.0, 20.0], dtype=float),
+                "rating",
+                pd.DataFrame(
+                    {
+                        "subject_id": ["sub-0001", "sub-0001"],
+                        "trial_id": [1, 2],
+                    }
+                ),
+            )
+
+        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+            X, y, groups, feature_names, meta = ml_data.load_active_matrix(
+                subjects=["0001"],
+                task="task",
+                deriv_root=Path("/tmp/deriv"),
+                config=cfg,
+                feature_families=["power"],
+                covariates=["age"],
+            )
+
+        self.assertEqual(X.shape, (2, 1))
+        np.testing.assert_array_equal(y, np.array([10.0, 20.0], dtype=float))
+        np.testing.assert_array_equal(groups, np.array(["sub-0001", "sub-0001"], dtype=object))
+        self.assertEqual(feature_names, ["power_alpha_global_mean"])
+        self.assertEqual(meta["trial_id"].tolist(), [1, 2])
+
+    def test_load_active_matrix_surfaces_subject_loading_errors(self):
+        ml_data = self._import_ml_data()
+
+        cfg = DotConfig({"feature_engineering": {"analysis_mode": "trial_ml_safe"}})
+        payload = (
+            pd.DataFrame({"power_alpha_global_mean": [1.0, 2.0]}),
+            np.array([10.0, 20.0], dtype=float),
+            "rating",
+            pd.DataFrame(
+                {
+                    "subject_id": ["sub-0001", "sub-0001"],
+                    "trial_id": [1, 2],
+                }
+            ),
+        )
+
+        with patch.object(
+            ml_data,
+            "_load_subject_ml_from_features",
+            side_effect=[payload, FileNotFoundError("missing requested feature table")],
+        ):
+            with self.assertRaisesRegex(FileNotFoundError, "missing requested feature table"):
+                ml_data.load_active_matrix(
+                    subjects=["0001", "0002"],
+                    task="task",
+                    deriv_root=Path("/tmp/deriv"),
+                    config=cfg,
+                    feature_families=["power"],
+                )
+
+    def test_load_subject_ml_from_features_rejects_trial_id_order_mismatch(self):
+        ml_data = self._import_ml_data()
+        cfg = DotConfig(
+            {
+                "event_columns": {"outcome": ["rating"]},
+                "machine_learning": {"data": {"require_trial_ml_safe": False}},
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            deriv_root = Path(td)
+            power_dir = deriv_root / "sub-0001" / "eeg" / "features" / "power"
+            power_dir.mkdir(parents=True, exist_ok=True)
+            (power_dir / "features_power.parquet").touch()
+
+            feature_df = pd.DataFrame(
+                {
+                    "trial_id": [2, 1],
+                    "power_alpha_global_mean": [1.0, 2.0],
+                }
+            )
+            events_df = pd.DataFrame(
+                {
+                    "trial_id": [1, 2],
+                    "rating": [10.0, 20.0],
+                }
+            )
+
+            with patch.object(ml_data, "read_table", return_value=feature_df), patch.object(
+                ml_data,
+                "load_events_df",
+                return_value=events_df,
+            ):
+                with self.assertRaisesRegex(ValueError, "trial_id"):
+                    ml_data._load_subject_ml_from_features(
+                        subject="0001",
+                        task="task",
+                        deriv_root=deriv_root,
+                        config=cfg,
+                        feature_families=["power"],
+                        feature_input_root=None,
+                        target="rating",
+                        target_kind="continuous",
+                        binary_threshold=None,
+                        logger=Mock(),
+                    )
+
+    def test_load_epochs_with_targets_raises_when_requested_subject_has_no_epochs(self):
+        ml_data = self._import_ml_data()
+
+        fake_mne = types.SimpleNamespace(
+            channels=types.SimpleNamespace(make_standard_montage=lambda name: f"montage:{name}")
+        )
+
+        with patch.object(
+            ml_data,
+            "load_epochs_for_analysis",
+            return_value=(None, None),
+        ), patch.object(
+            ml_data,
+            "mne",
+            fake_mne,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No aligned epochs/events for sub-0001"):
+                ml_data.load_epochs_with_targets(
+                    deriv_root=Path("."),
+                    config=DotConfig({"event_columns": {"outcome": ["rating"]}}),
+                    subjects=["0001"],
+                    task="task",
+                    target="rating",
+                    logger=Mock(),
+                )
+
+    def test_load_epochs_with_targets_discovers_subjects_from_epochs_when_subjects_omitted(self):
+        ml_data = self._import_ml_data()
+        captured: dict[str, object] = {}
+
+        def _fake_discovery(**kwargs):
+            captured["discovery_sources"] = kwargs.get("discovery_sources")
+            return ["0001"]
+
+        with patch.dict(
+            sys.modules,
+            {
+                "eeg_pipeline.utils.data.subjects": types.SimpleNamespace(
+                    get_available_subjects=_fake_discovery
+                )
+            },
+        ), patch.object(
+            ml_data,
+            "load_epochs_for_analysis",
+            return_value=(None, None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No aligned epochs/events for sub-0001"):
+                ml_data.load_epochs_with_targets(
+                    deriv_root=Path("."),
+                    config=DotConfig({"event_columns": {"outcome": ["rating"]}}),
+                    subjects=None,
+                    task="task",
+                    target="rating",
+                    bids_root=Path("."),
+                    logger=Mock(),
+                )
+
+        self.assertEqual(captured["discovery_sources"], ["derivatives_epochs"])
+
     def test_load_channels_mean_matrix_rejects_empty_active_window(self):
         from eeg_pipeline.utils.data import machine_learning as ml_data
 
@@ -633,6 +978,32 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             )
 
         self.assertEqual(meta["trial_id"].tolist(), [7, 9])
+
+    def test_load_channels_mean_matrix_raises_when_requested_subject_has_no_epochs(self):
+        ml_data = self._import_ml_data()
+
+        config = DotConfig(
+            {
+                "time_frequency_analysis": {
+                    "baseline_window": [-0.2, 0.0],
+                    "active_window": [0.0, 0.2],
+                }
+            }
+        )
+
+        with patch.object(
+            ml_data,
+            "load_epochs_for_analysis",
+            return_value=(None, None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No epochs for sub-0001"):
+                ml_data.load_channels_mean_matrix(
+                    subjects=["0001"],
+                    task="task",
+                    deriv_root=Path("."),
+                    config=config,
+                    target="rating",
+                )
 
     def test_load_active_matrix_blocks_target_covariate_leakage_for_explicit_target_column(self):
         from eeg_pipeline.utils.data import machine_learning as ml_data
@@ -876,6 +1247,30 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 )
 
         self.assertEqual(captured.get("target"), "temperature")
+
+    def test_time_generalization_passes_runtime_config_to_epoch_loader(self):
+        from eeg_pipeline.analysis.machine_learning import time_generalization as tg
+
+        captured: dict[str, object] = {}
+        cfg = DotConfig({"event_columns": {"outcome": ["rating"]}})
+
+        def _fake_loader(*_args, **kwargs):
+            captured["config"] = kwargs.get("config")
+            raise RuntimeError("stop")
+
+        with patch.object(tg, "load_epochs_with_targets", side_effect=_fake_loader):
+            with self.assertRaisesRegex(RuntimeError, "stop"):
+                tg.time_generalization_regression(
+                    deriv_root=Path("."),
+                    subjects=["0001"],
+                    task="task",
+                    results_dir=None,
+                    config_dict=cfg,
+                    n_perm=0,
+                    seed=42,
+                )
+
+        self.assertIs(captured.get("config"), cfg)
 
     def test_uncertainty_requires_minimum_valid_fold_fraction(self):
         from sklearn.dummy import DummyRegressor
@@ -1349,6 +1744,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     "cv": {
                         "min_valid_permutation_fraction": 0.75,
                         "min_valid_permutation_fold_fraction": 0.75,
+                        "permutation_scheme": "within_subject",
                     },
                 }
             }
@@ -1587,6 +1983,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     "cv": {
                         "min_valid_permutation_fraction": 0.75,
                         "min_valid_permutation_fold_fraction": 0.75,
+                        "permutation_scheme": "within_subject",
                     },
                 }
             }
@@ -1658,6 +2055,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     "cv": {
                         "min_valid_permutation_fraction": 0.75,
                         "min_valid_permutation_fold_fraction": 0.75,
+                        "permutation_scheme": "within_subject",
                     },
                 }
             }
@@ -1948,6 +2346,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     "cv": {
                         "min_valid_permutation_fraction": 0.75,
                         "min_valid_permutation_fold_fraction": 0.75,
+                        "permutation_scheme": "within_subject",
                     },
                 }
             }
@@ -2272,7 +2671,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertEqual(captured["harmonize_calls"], 1)
         self.assertEqual(captured["n_test_features"], 1)
 
-    def test_within_subject_classification_permutations_enforce_failed_fold_fraction(self):
+    def test_within_subject_classification_permutation_failures_do_not_abort_inference(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
         X = np.ones((8, 2, 3), dtype=float)
@@ -2296,10 +2695,8 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
 
         def _fake_fit_predict_cnn_binary_classifier(*, X_test, **_kwargs):
             fit_calls["n"] += 1
-            # Empirical folds (first 2 calls) succeed.
-            # During permutations, fail every second fold to induce failed_fold_fraction=0.5.
-            if fit_calls["n"] > 2 and fit_calls["n"] % 2 == 0:
-                raise RuntimeError("synthetic cnn permutation fold failure")
+            if fit_calls["n"] > 2:
+                raise RuntimeError("synthetic cnn permutation crash")
             n_test = int(len(X_test))
             y_pred = np.array(([0, 1] * ((n_test + 1) // 2))[:n_test], dtype=int)
             y_prob = np.array(([0.1, 0.9] * ((n_test + 1) // 2))[:n_test], dtype=float)
@@ -2309,7 +2706,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "machine_learning": {
                     "classification": {"max_failed_fold_fraction": 0.25, "min_subjects_with_auc_for_inference": 1},
-                    "cv": {"min_valid_permutation_fraction": 0.75},
+                    "cv": {"min_valid_permutation_fraction": 0.0, "permutation_scheme": "within_subject"},
                 }
             }
         )
@@ -2329,21 +2726,24 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 orch, "export_subject_selection_report", return_value={}
             ), patch.object(
                 orch, "write_reproducibility_info", return_value=Path(td) / "reproducibility_info.json"
+            ), patch.object(
+                orch, "_maybe_generate_mode_plots", return_value=None
             ):
-                with self.assertRaisesRegex(RuntimeError, "Insufficient valid within-subject classification permutations"):
-                    orch.run_within_subject_classification_ml(
-                        subjects=["0001", "0002"],
-                        task="task",
-                        deriv_root=Path(td),
-                        config=cfg,
-                        n_perm=2,
-                        inner_splits=2,
-                        outer_jobs=1,
-                        rng_seed=42,
-                        results_root=Path(td),
-                        logger=Mock(),
-                        classification_model="cnn",
-                    )
+                results_dir = orch.run_within_subject_classification_ml(
+                    subjects=["0001", "0002"],
+                    task="task",
+                    deriv_root=Path(td),
+                    config=cfg,
+                    n_perm=1,
+                    inner_splits=2,
+                    outer_jobs=1,
+                    rng_seed=42,
+                    results_root=Path(td),
+                    logger=Mock(),
+                    classification_model="cnn",
+                )
+
+        self.assertEqual(results_dir, Path(td) / "within_subject_classification")
 
     def test_group_classification_permutations_enforce_failed_fold_fraction(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
@@ -2364,7 +2764,10 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "machine_learning": {
                     "classification": {"max_failed_fold_fraction": 0.25},
-                    "cv": {"min_valid_permutation_fraction": 0.75},
+                    "cv": {
+                        "min_valid_permutation_fraction": 0.75,
+                        "permutation_scheme": "within_subject",
+                    },
                 }
             }
         )
@@ -2400,7 +2803,10 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                         "max_failed_fold_fraction": 1.0,
                         "min_subjects_with_auc_for_inference": 2,
                     },
-                    "cv": {"min_valid_permutation_fraction": 0.75},
+                    "cv": {
+                        "min_valid_permutation_fraction": 0.75,
+                        "permutation_scheme": "within_subject",
+                    },
                 }
             }
         )
@@ -2434,6 +2840,44 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     harmonization_mode="intersection",
                 )
 
+    def test_group_classification_permutation_failures_do_not_abort_inference(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=float)
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "classification": {"max_failed_fold_fraction": 0.25},
+                    "cv": {
+                        "min_valid_permutation_fraction": 0.0,
+                        "permutation_scheme": "within_subject",
+                    },
+                }
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.machine_learning.classification.nested_loso_classification",
+            side_effect=RuntimeError("synthetic permutation crash"),
+        ):
+            out = orch._run_classification_permutations(
+                X=X,
+                y=y,
+                groups=groups,
+                blocks=None,
+                model="svm",
+                inner_splits=2,
+                seed=42,
+                n_perm=1,
+                config=cfg,
+                logger=Mock(),
+                harmonization_mode="intersection",
+            )
+
+        self.assertIsNone(out)
+
     def test_load_subject_feature_table_requires_explicit_trial_safe_provenance_when_strict(self):
         from eeg_pipeline.utils.data import machine_learning as ml_data
 
@@ -2453,7 +2897,12 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             with patch.object(
                 ml_data,
                 "read_table",
-                return_value=pd.DataFrame({"power_alpha_global_mean": [1.0, 2.0]}),
+                return_value=pd.DataFrame(
+                    {
+                        "trial_id": [1, 2],
+                        "power_alpha_global_mean": [1.0, 2.0],
+                    }
+                ),
             ):
                 with self.assertRaisesRegex(ValueError, "Cannot verify trial_ml_safe provenance"):
                     ml_data._load_subject_feature_table(
@@ -2490,7 +2939,12 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             with patch.object(
                 ml_data,
                 "read_table",
-                return_value=pd.DataFrame({"power_alpha_global_mean": [1.0, 2.0]}),
+                return_value=pd.DataFrame(
+                    {
+                        "trial_id": [1, 2],
+                        "power_alpha_global_mean": [1.0, 2.0],
+                    }
+                ),
             ):
                 df, cols = ml_data._load_subject_feature_table(
                     subject="0001",
@@ -2524,7 +2978,12 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             with patch.object(
                 ml_data,
                 "read_table",
-                return_value=pd.DataFrame({"conn_alpha_global_wpli_mean": [0.1, 0.2]}),
+                return_value=pd.DataFrame(
+                    {
+                        "trial_id": [1, 2],
+                        "conn_alpha_global_wpli_mean": [0.1, 0.2],
+                    }
+                ),
             ):
                 with self.assertRaisesRegex(ValueError, "Cannot verify connectivity granularity"):
                     ml_data._load_subject_feature_table(
@@ -2715,6 +3174,23 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             )
 
         self.assertEqual(meta["trial_id"].tolist(), [14, 18])
+
+    def test_load_epoch_tensor_matrix_raises_when_requested_subject_has_no_epochs(self):
+        ml_data = self._import_ml_data()
+
+        with patch.object(
+            ml_data,
+            "load_epochs_for_analysis",
+            return_value=(None, None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "No epochs for sub-0001"):
+                ml_data.load_epoch_tensor_matrix(
+                    subjects=["0001"],
+                    task="task",
+                    deriv_root=Path("."),
+                    config=DotConfig({}),
+                    target="rating",
+                )
 
     def test_load_epochs_with_targets_supports_resting_state_without_clean_events_file(self):
         ml_data = self._import_ml_data()
@@ -2960,6 +3436,162 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     config=cfg,
                 )
 
+    def test_resolve_permutation_scheme_rejects_invalid_value(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "cv": {"permutation_scheme": "not-a-scheme"},
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "Invalid machine_learning.cv.permutation_scheme"):
+            orch._resolve_permutation_scheme(cfg)
+
+    def test_resolve_permutation_scheme_defaults_to_within_subject(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        self.assertEqual(orch._resolve_permutation_scheme(DotConfig({})), "within_subject")
+
+    def test_generate_effective_permutation_requires_blocks_for_blockwise_scheme(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+
+        with self.assertRaisesRegex(ValueError, "requires block labels"):
+            orch._generate_effective_permutation(
+                y,
+                groups,
+                blocks=None,
+                rng=np.random.default_rng(42),
+                requested_scheme="within_subject_within_block",
+                min_changed_fraction=0.1,
+            )
+
+    def test_generate_effective_permutation_rejects_block_length_mismatch(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        blocks = np.array([1.0, 2.0], dtype=float)
+
+        with self.assertRaisesRegex(ValueError, "same length as y"):
+            orch._generate_effective_permutation(
+                y,
+                groups,
+                blocks=blocks,
+                rng=np.random.default_rng(42),
+                requested_scheme="within_subject_within_block",
+                min_changed_fraction=0.1,
+            )
+
+    def test_generate_effective_permutation_rejects_all_missing_blocks(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        blocks = np.array([np.nan, np.nan, np.nan, np.nan], dtype=float)
+
+        with self.assertRaisesRegex(ValueError, "requires block labels"):
+            orch._generate_effective_permutation(
+                y,
+                groups,
+                blocks=blocks,
+                rng=np.random.default_rng(42),
+                requested_scheme="within_subject_within_block",
+                min_changed_fraction=0.1,
+            )
+
+    def test_run_permutation_test_rejects_all_missing_blocks_for_blockwise_scheme(self):
+        from eeg_pipeline.analysis.machine_learning import cv
+
+        X = np.array([[0.0], [1.0], [2.0], [3.0]], dtype=float)
+        y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        blocks = np.array([np.nan, np.nan, np.nan, np.nan], dtype=float)
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "cv": {
+                        "permutation_scheme": "within_subject_within_block",
+                        "min_valid_permutation_fraction": 0.0,
+                    }
+                }
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(ValueError, "requires block labels"):
+                cv.run_permutation_test(
+                    X=X,
+                    y=y,
+                    groups=groups,
+                    blocks=blocks,
+                    pipe=Pipeline([("regressor", DummyRegressor(strategy="mean"))]),
+                    param_grid={},
+                    inner_cv_splits=2,
+                    inner_n_jobs=1,
+                    seed=42,
+                    model_name="elasticnet",
+                    null_n_perm=2,
+                    null_output_path=Path(td) / "null.npz",
+                    config=cfg,
+                )
+
+    def test_generate_effective_permutation_does_not_downgrade_blockwise_scheme(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        blocks = np.array([1.0, 2.0, 1.0, 2.0], dtype=float)
+
+        y_perm, effective, changed_fraction, used_scheme = orch._generate_effective_permutation(
+            y,
+            groups,
+            blocks=blocks,
+            rng=np.random.default_rng(42),
+            requested_scheme="within_subject_within_block",
+            min_changed_fraction=0.1,
+        )
+
+        self.assertFalse(effective)
+        self.assertEqual(used_scheme, "within_subject_within_block")
+        self.assertAlmostEqual(changed_fraction, 0.0, places=8)
+        np.testing.assert_array_equal(y_perm, y)
+
+    def test_nested_loso_classification_raises_when_training_fold_has_one_class(self):
+        from sklearn.dummy import DummyClassifier
+        from sklearn.pipeline import Pipeline
+
+        from eeg_pipeline.analysis.machine_learning import classification as clf
+
+        X = np.array([[0.0], [0.1], [1.0], [1.1]], dtype=float)
+        y = np.array([0, 0, 1, 1], dtype=int)
+        groups = np.array(
+            ["sub-0001", "sub-0001", "sub-0002", "sub-0002"],
+            dtype=object,
+        )
+        pipe = Pipeline([("clf", DummyClassifier(strategy="most_frequent"))])
+        cfg = DotConfig({"machine_learning": {"classification": {"scoring": "accuracy"}}})
+
+        with patch.object(clf, "create_svm_pipeline", return_value=pipe), patch.object(
+            clf, "build_svm_param_grid", return_value={}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "only one class in training"):
+                clf.nested_loso_classification(
+                    X=X,
+                    y=y,
+                    groups=groups,
+                    model="svm",
+                    inner_splits=2,
+                    seed=42,
+                    config=cfg,
+                    logger=Mock(),
+                )
+
     def test_create_within_subject_folds_supports_forward_ordering(self):
         from eeg_pipeline.analysis.machine_learning.cv import create_within_subject_folds
 
@@ -2983,6 +3615,272 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             train_blocks = blocks[np.asarray(train_idx, dtype=int)]
             test_blocks = blocks[np.asarray(test_idx, dtype=int)]
             self.assertLess(np.max(train_blocks), np.min(test_blocks))
+
+    def test_create_within_subject_folds_raises_when_ordered_blocks_cannot_be_formed(self):
+        from eeg_pipeline.analysis.machine_learning.cv import create_within_subject_folds
+
+        groups = np.array(["sub-0001"] * 4, dtype=object)
+        blocks = np.array(["run-a", "run-a", "run-b", "run-b"], dtype=object)
+        cfg = DotConfig({"machine_learning": {"cv": {"within_subject_ordered_blocks": True}}})
+
+        with self.assertRaisesRegex(ValueError, "ordered within-subject CV requested"):
+            create_within_subject_folds(
+                groups=groups,
+                blocks_all=blocks,
+                inner_cv_splits=2,
+                outer_cv_splits=2,
+                seed=42,
+                config=cfg,
+                epochs=None,
+                apply_hygiene=False,
+            )
+
+    def test_run_within_subject_classification_raises_when_training_fold_has_one_class(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.ones((4, 1, 2), dtype=float)
+        y = np.array([0, 0, 1, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": np.arange(len(groups), dtype=int),
+                "block": [0, 1, 0, 1],
+            }
+        )
+        folds = [(1, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int), "sub-0001", None)]
+
+        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_epoch_tensor_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ), patch.object(
+                orch, "create_within_subject_folds", return_value=folds
+            ):
+                with self.assertRaisesRegex(RuntimeError, "only one class in training"):
+                    orch.run_within_subject_classification_ml(
+                        subjects=["0001", "0002"],
+                        task="task",
+                        deriv_root=Path(td),
+                        config=cfg,
+                        n_perm=0,
+                        inner_splits=2,
+                        outer_jobs=1,
+                        rng_seed=42,
+                        results_root=Path(td),
+                        logger=Mock(),
+                        classification_model="cnn",
+                    )
+
+    def test_run_within_subject_classification_raises_when_cnn_fold_fit_fails(self):
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.ones((4, 1, 2), dtype=float)
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": np.arange(len(groups), dtype=int),
+                "block": [0, 1, 0, 1],
+            }
+        )
+        folds = [(1, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int), "sub-0001", None)]
+
+        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_epoch_tensor_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ), patch.object(
+                orch, "create_within_subject_folds", return_value=folds
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.cnn.fit_predict_cnn_binary_classifier",
+                side_effect=RuntimeError("synthetic cnn fold failure"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "synthetic cnn fold failure"):
+                    orch.run_within_subject_classification_ml(
+                        subjects=["0001", "0002"],
+                        task="task",
+                        deriv_root=Path(td),
+                        config=cfg,
+                        n_perm=0,
+                        inner_splits=2,
+                        outer_jobs=1,
+                        rng_seed=42,
+                        results_root=Path(td),
+                        logger=Mock(),
+                        classification_model="cnn",
+                    )
+
+    def test_run_within_subject_classification_raises_when_inner_cv_fails(self):
+        from sklearn.dummy import DummyClassifier
+        from sklearn.pipeline import Pipeline
+
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        X = np.array([[0.0], [0.1], [1.0], [1.1]], dtype=float)
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        meta = pd.DataFrame(
+            {
+                "subject_id": groups,
+                "trial_id": np.arange(len(groups), dtype=int),
+                "block": [0, 1, 0, 1],
+            }
+        )
+        folds = [(1, np.array([0, 1], dtype=int), np.array([2, 3], dtype=int), "sub-0001", None)]
+        pipe = Pipeline([("clf", DummyClassifier(strategy="most_frequent"))])
+        cfg = DotConfig({"machine_learning": {"classification": {"min_subjects_with_auc_for_inference": 1}}})
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(
+                orch, "load_active_matrix", return_value=(X, y, groups, ["f1"], meta)
+            ), patch.object(
+                orch, "create_within_subject_folds", return_value=folds
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.create_svm_pipeline",
+                return_value=pipe,
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.classification.build_svm_param_grid",
+                return_value={},
+            ), patch(
+                "eeg_pipeline.analysis.machine_learning.orchestration.GridSearchCV.fit",
+                side_effect=RuntimeError("synthetic inner cv failure"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "synthetic inner cv failure"):
+                    orch.run_within_subject_classification_ml(
+                        subjects=["0001", "0002"],
+                        task="task",
+                        deriv_root=Path(td),
+                        config=cfg,
+                        n_perm=0,
+                        inner_splits=2,
+                        outer_jobs=1,
+                        rng_seed=42,
+                        results_root=Path(td),
+                        logger=Mock(),
+                        classification_model="svm",
+                    )
+
+    def test_time_generalization_permutation_helper_rejects_invalid_scheme(self):
+        from eeg_pipeline.analysis.machine_learning import time_generalization as tg
+
+        y = np.array([0.0, 1.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001"], dtype=object)
+
+        with self.assertRaisesRegex(ValueError, "Unsupported permutation scheme"):
+            tg._permute_labels_within_subject_structure(
+                y,
+                groups,
+                blocks=np.array([0.0, 1.0], dtype=float),
+                rng=np.random.default_rng(42),
+                scheme="not-a-scheme",
+            )
+
+    def test_time_generalization_permutation_helper_requires_blocks_for_blockwise_scheme(self):
+        from eeg_pipeline.analysis.machine_learning import time_generalization as tg
+
+        y = np.array([0.0, 1.0], dtype=float)
+        groups = np.array(["sub-0001", "sub-0001"], dtype=object)
+
+        with self.assertRaisesRegex(ValueError, "requires block labels"):
+            tg._permute_labels_within_subject_structure(
+                y,
+                groups,
+                blocks=None,
+                rng=np.random.default_rng(42),
+                scheme="within_subject_within_block",
+            )
+
+    def test_time_generalization_regression_raises_when_blockwise_permutations_lack_blocks(self):
+        from eeg_pipeline.analysis.machine_learning import time_generalization as tg
+
+        class _FakeEpochs:
+            def __init__(self):
+                self.times = np.array([0.0, 0.1], dtype=float)
+                self.metadata = pd.DataFrame({"block": [np.nan, np.nan]})
+
+            def copy(self):
+                return _FakeEpochs()
+
+            def pick(self, _chs):
+                return self
+
+        trial_records = [
+            ("sub-0001", 0),
+            ("sub-0001", 1),
+            ("sub-0002", 0),
+            ("sub-0002", 1),
+        ]
+        y_arr = np.array([0.0, 1.0, 0.5, 1.5], dtype=float)
+        groups_arr = np.array([r[0] for r in trial_records], dtype=object)
+        subj_to_epochs = {"sub-0001": _FakeEpochs(), "sub-0002": _FakeEpochs()}
+
+        def _fake_prepare(_tuples):
+            return trial_records, y_arr, groups_arr, subj_to_epochs, None
+
+        def _fake_extract_epoch_data_block(indices, *_args, **_kwargs):
+            return np.ones((len(indices), 1, 2), dtype=float)
+
+        def _fake_extract_window_features(_data, records, *_args, **_kwargs):
+            vals = np.linspace(0.0, 1.0, max(len(records), 1), dtype=float)
+            return vals.reshape(len(records), 1, 1)
+
+        cfg = DotConfig(
+            {
+                "analysis": {"min_subjects_for_group": 2},
+                "machine_learning": {
+                    "cv": {"permutation_scheme": "within_subject_within_block"},
+                    "analysis": {
+                        "time_generalization": {
+                            "active_window": [0.0, 0.1],
+                            "window_len": 0.1,
+                            "step": 0.1,
+                            "min_samples_per_window": 1,
+                            "min_samples_for_corr": 1,
+                            "min_valid_fold_fraction": 0.8,
+                            "min_valid_permutation_fraction": 0.0,
+                            "min_subjects_per_cell": 1,
+                            "min_count_per_cell": 1,
+                            "cluster_threshold": 0.05,
+                            "use_ridgecv": False,
+                            "alpha_grid": [0.01, 0.1, 1.0],
+                            "default_alpha": 1.0,
+                        }
+                    },
+                },
+            }
+        )
+
+        with patch.object(tg, "load_epochs_with_targets", return_value=([], None)), patch.object(
+            tg, "prepare_trial_records_from_epochs", side_effect=_fake_prepare
+        ), patch.object(
+            tg, "find_common_channels_train_test", return_value=["Cz"]
+        ), patch.object(
+            tg, "get_min_channels_required", return_value=1
+        ), patch.object(
+            tg, "extract_epoch_data_block", side_effect=_fake_extract_epoch_data_block
+        ), patch.object(
+            tg, "_extract_window_features", side_effect=_fake_extract_window_features
+        ), patch.object(
+            tg, "build_time_windows", return_value=[(0.0, 0.1)]
+        ), patch.object(
+            tg, "safe_pearsonr", return_value=(0.5, 0.01)
+        ), patch.object(
+            tg, "r2_score", return_value=0.2
+        ):
+            with self.assertRaisesRegex(ValueError, "requires block labels"):
+                tg.time_generalization_regression(
+                    deriv_root=Path("."),
+                    subjects=["0001", "0002"],
+                    task="task",
+                    results_dir=None,
+                    config_dict=cfg,
+                    n_perm=1,
+                    seed=42,
+                )
 
     def test_classification_reports_subject_level_confidence_intervals(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch

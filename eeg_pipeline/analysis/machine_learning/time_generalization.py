@@ -89,12 +89,8 @@ def _permute_labels_within_subject_structure(
     """Permute labels within subject or within subject×block."""
     y_perm = np.asarray(y, dtype=float).copy()
     groups_arr = np.asarray(groups, dtype=object)
-    blocks_arr = np.asarray(blocks, dtype=object) if blocks is not None else None
-    perm_scheme = str(scheme).strip().lower()
-    if perm_scheme not in {"within_subject", "within_subject_within_block"}:
-        perm_scheme = "within_subject_within_block"
-    if perm_scheme == "within_subject_within_block" and blocks_arr is None:
-        perm_scheme = "within_subject"
+    perm_scheme = _resolve_permutation_scheme(scheme)
+    blocks_arr = _validate_permutation_blocks(y_perm, blocks, scheme=perm_scheme)
 
     for subject_id in np.unique(groups_arr):
         subject_mask = groups_arr == subject_id
@@ -109,6 +105,44 @@ def _permute_labels_within_subject_structure(
         else:
             y_perm[subject_mask] = rng.permutation(y_perm[subject_mask])
     return y_perm
+
+
+def _resolve_permutation_scheme(scheme: str) -> str:
+    mode = str(scheme).strip().lower()
+    if mode not in {"within_subject", "within_subject_within_block"}:
+        raise ValueError(
+            f"Unsupported permutation scheme: {scheme!r}. "
+            "Expected one of: within_subject, within_subject_within_block."
+        )
+    return mode
+
+
+def _validate_permutation_blocks(
+    y: np.ndarray,
+    blocks: Optional[np.ndarray],
+    *,
+    scheme: str,
+) -> Optional[np.ndarray]:
+    if scheme != "within_subject_within_block":
+        return None
+    if blocks is None:
+        raise ValueError(
+            "machine_learning.cv.permutation_scheme='within_subject_within_block' "
+            "requires block labels."
+        )
+
+    blocks_arr = np.asarray(blocks, dtype=object)
+    if len(blocks_arr) != len(y):
+        raise ValueError(
+            "Permutation blocks must have the same length as y when "
+            "machine_learning.cv.permutation_scheme='within_subject_within_block'."
+        )
+    if np.all(pd.isna(blocks_arr)):
+        raise ValueError(
+            "machine_learning.cv.permutation_scheme='within_subject_within_block' "
+            "requires block labels."
+        )
+    return blocks_arr
 
 
 def _aggregate_time_generalization_matrices(
@@ -359,6 +393,7 @@ def time_generalization_regression(
     """
     tuples, _ = load_epochs_with_targets(
         deriv_root,
+        config=config_dict,
         subjects=subjects,
         task=task,
         target=target,
@@ -628,24 +663,20 @@ def time_generalization_regression(
         min_shuffle_fraction = float(
             get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
         )
-        perm_scheme = str(
-            get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject_within_block")
-        ).strip().lower()
-        if perm_scheme not in {"within_subject", "within_subject_within_block"}:
-            perm_scheme = "within_subject_within_block"
-
-        if perm_scheme == "within_subject_within_block" and np.all(pd.isna(trial_blocks_arr)):
-            logger.warning(
-                "Time-generalization permutation requested subject×block shuffling but no block labels were found; "
-                "falling back to within-subject permutation."
-            )
-            perm_scheme = "within_subject"
+        perm_scheme = _resolve_permutation_scheme(
+            get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject")
+        )
+        blocks_for_permutation = _validate_permutation_blocks(
+            y_all_arr,
+            trial_blocks_arr,
+            scheme=perm_scheme,
+        )
 
         for perm_idx in range(n_perm):
             y_perm = _permute_labels_within_subject_structure(
                 y_all_arr,
                 groups_arr,
-                trial_blocks_arr if perm_scheme == "within_subject_within_block" else None,
+                blocks_for_permutation,
                 rng=rng,
                 scheme=perm_scheme,
             )

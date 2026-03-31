@@ -190,6 +190,7 @@ def _search_directory_for_epochs(
         for candidate in candidates:
             if _check_clean_tokens(candidate.name):
                 return candidate
+        return None
 
     return candidates[0]
 
@@ -213,7 +214,7 @@ def _find_clean_epochs_path(
     search_directories = [
         (root / subject_label / "eeg", True),
         (root / "preprocessed" / "eeg" / subject_label, True),
-        (root / subject_label, False),
+        (root / subject_label, True),
         (root / "preprocessed", True),
     ]
 
@@ -225,7 +226,7 @@ def _find_clean_epochs_path(
     return None
 
 
-def _derive_clean_events_from_epochs_path(epochs_path: Path) -> Path:
+def _derive_clean_events_from_epochs_path(epochs_path: Path) -> Optional[Path]:
     name = epochs_path.name
     if name.endswith("_proc-clean_epo.fif"):
         return epochs_path.with_name(name.replace("_proc-clean_epo.fif", "_proc-clean_events.tsv"))
@@ -233,10 +234,7 @@ def _derive_clean_events_from_epochs_path(epochs_path: Path) -> Path:
         return epochs_path.with_name(name.replace("_proc-cleaned_epo.fif", "_proc-cleaned_events.tsv"))
     if name.endswith("_clean_epo.fif"):
         return epochs_path.with_name(name.replace("_clean_epo.fif", "_clean_events.tsv"))
-    if name.endswith("_epo.fif"):
-        # Best-effort fallback; prefer explicit proc-clean naming.
-        return epochs_path.with_name(name.replace("_epo.fif", "_events.tsv"))
-    return epochs_path.with_suffix(".tsv")
+    return None
 
 
 def _find_clean_events_path(
@@ -256,7 +254,7 @@ def _find_clean_events_path(
     )
     if epochs_path is not None:
         candidate = _derive_clean_events_from_epochs_path(epochs_path)
-        if candidate.exists():
+        if candidate is not None and candidate.exists():
             return candidate
 
     root = _resolve_deriv_root(deriv_root, config, constants)

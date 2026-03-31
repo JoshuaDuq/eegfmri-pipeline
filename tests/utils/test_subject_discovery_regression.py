@@ -71,3 +71,35 @@ def test_info_subjects_fmri_status_json_includes_new_bids_subjects(tmp_path: Pat
     payload = json.loads(out.getvalue())
     ids = [subj["id"] for subj in payload["subjects"]]
     assert ids == ["0001", "0002"]
+
+
+def test_intersection_policy_requires_subjects_to_exist_in_all_sources_and_config(
+    tmp_path: Path,
+) -> None:
+    deriv_root = tmp_path / "derivatives"
+    bids_root = tmp_path / "bids"
+
+    (bids_root / "sub-0001").mkdir(parents=True, exist_ok=True)
+    (bids_root / "sub-0002").mkdir(parents=True, exist_ok=True)
+
+    features_dir = deriv_root / "sub-0001" / "eeg" / "features" / "power"
+    features_dir.mkdir(parents=True, exist_ok=True)
+    (features_dir / "features_power.tsv").write_text("power\n1.0\n", encoding="utf-8")
+
+    config = DotConfig(
+        {
+            "project": {"subject_list": ["0001", "0002"]},
+            "paths": {"bids_root": str(bids_root)},
+        }
+    )
+
+    subjects = get_available_subjects(
+        config=config,
+        deriv_root=deriv_root,
+        bids_root=bids_root,
+        task="task",
+        discovery_sources=["bids", "features"],
+        subject_discovery_policy="intersection",
+    )
+
+    assert subjects == ["0001"]

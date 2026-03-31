@@ -90,14 +90,13 @@ def run_ica_label_single_file(
         except Exception as e:
             logger.error(
                 **gen_log_kwargs(
-                    message=f"Error while finding bad components in {p}: {e}, skipping this file",
+                    message=f"Error while finding bad components in {p}: {e}",
                     subject=sub_num,
                     session=ses_num,
                     emoji="❌",
                 )
             )
-            bad_ica_frame.loc[p, "success"] = 0
-            bad_ica_frame.loc[p, "error_log"] = str(e)
+            raise
     
     return bad_ica_frame
 

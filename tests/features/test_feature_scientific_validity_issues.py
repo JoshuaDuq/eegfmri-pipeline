@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 import unittest
 
 import numpy as np
@@ -122,6 +123,25 @@ class TestScientificValidityIssues(unittest.TestCase):
         expected_residual = float(np.log10(peak_power) - np.log10(aperiodic_fit[global_peak_idx]))
         self.assertAlmostEqual(peak_ratio, expected_ratio, places=10)
         self.assertAlmostEqual(peak_residual, expected_residual, places=10)
+
+    def test_peak_metrics_do_not_emit_infinite_residual_for_zero_power_peak(self):
+        freqs = np.array([2.0, 4.0, 6.0, 8.0, 10.0, 12.0], dtype=float)
+        psd = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            peak_freq, peak_power, peak_ratio, peak_residual = compute_peak_frequency(
+                psd,
+                freqs,
+                fmin=4.0,
+                fmax=12.0,
+            )
+
+        self.assertEqual(len(caught), 0)
+        self.assertEqual(peak_freq, 12.0)
+        self.assertEqual(peak_power, 0.0)
+        self.assertEqual(peak_ratio, 0.0)
+        self.assertTrue(np.isnan(peak_residual))
 
     def test_quality_snr_uses_bandwidth_weighted_power_density(self):
         # Flat spectrum should yield ~0 dB SNR regardless of uneven bin counts.

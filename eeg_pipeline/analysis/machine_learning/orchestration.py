@@ -236,11 +236,42 @@ def _paired_signflip_p_value(
 
 def _resolve_permutation_scheme(config: Any) -> str:
     scheme = str(
-        get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject_within_block")
+        get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject")
     ).strip().lower()
     if scheme not in {"within_subject", "within_subject_within_block"}:
-        scheme = "within_subject_within_block"
+        raise ValueError(
+            "Invalid machine_learning.cv.permutation_scheme: "
+            f"{scheme!r}. Expected one of: within_subject, within_subject_within_block."
+        )
     return scheme
+
+
+def _validate_permutation_blocks(
+    y: np.ndarray,
+    blocks: Optional[np.ndarray],
+    *,
+    scheme: str,
+) -> Optional[np.ndarray]:
+    if scheme != "within_subject_within_block":
+        return None
+    if blocks is None:
+        raise ValueError(
+            "machine_learning.cv.permutation_scheme='within_subject_within_block' "
+            "requires block labels."
+        )
+
+    blocks_arr = np.asarray(blocks)
+    if len(blocks_arr) != len(y):
+        raise ValueError(
+            "Permutation blocks must have the same length as y when "
+            "machine_learning.cv.permutation_scheme='within_subject_within_block'."
+        )
+    if np.all(pd.isna(blocks_arr)):
+        raise ValueError(
+            "machine_learning.cv.permutation_scheme='within_subject_within_block' "
+            "requires block labels."
+        )
+    return blocks_arr
 
 
 def _permute_labels_by_scheme(
@@ -254,12 +285,13 @@ def _permute_labels_by_scheme(
     """Permute labels within-subject or within-subject×block."""
     y_perm = np.asarray(y, dtype=float).copy()
     groups_arr = np.asarray(groups, dtype=object)
-    blocks_arr = np.asarray(blocks) if blocks is not None else None
     mode = str(scheme).strip().lower()
     if mode not in {"within_subject", "within_subject_within_block"}:
-        mode = "within_subject_within_block"
-    if mode == "within_subject_within_block" and blocks_arr is None:
-        mode = "within_subject"
+        raise ValueError(
+            f"Unsupported permutation scheme: {scheme!r}. "
+            "Expected one of: within_subject, within_subject_within_block."
+        )
+    blocks_arr = _validate_permutation_blocks(y_perm, blocks, scheme=mode)
 
     for subj in np.unique(groups_arr):
         subj_mask = groups_arr == subj
@@ -291,10 +323,7 @@ def _generate_effective_permutation(
     requested_scheme: str,
     min_changed_fraction: float,
 ) -> Tuple[np.ndarray, bool, float, str]:
-    """
-    Generate one permutation, falling back from subject×block to within-subject
-    when the requested shuffle is ineffective.
-    """
+    """Generate one permutation under the requested scheme only."""
     y_perm = _permute_labels_by_scheme(
         y,
         groups,
@@ -309,22 +338,6 @@ def _generate_effective_permutation(
     )
     if effective:
         return y_perm, True, float(changed_fraction), requested_scheme
-
-    if requested_scheme == "within_subject_within_block":
-        y_perm_fallback = _permute_labels_by_scheme(
-            y,
-            groups,
-            blocks=blocks,
-            rng=rng,
-            scheme="within_subject",
-        )
-        effective_fallback, changed_fraction_fallback = is_effective_permutation(
-            y,
-            y_perm_fallback,
-            min_changed_fraction=min_changed_fraction,
-        )
-        if effective_fallback:
-            return y_perm_fallback, True, float(changed_fraction_fallback), "within_subject"
 
     return y_perm, False, float(changed_fraction), requested_scheme
 
@@ -1177,7 +1190,6 @@ def run_within_subject_regression_ml(
         logger.info(f"Running {n_perm} block-aware permutations for within-subject inference...")
         rng = np.random.default_rng(rng_seed)
         n_effective = 0
-        n_fallback_permutations = 0
         perm_scheme = _resolve_permutation_scheme(config)
         min_shuffle_fraction = float(
             get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
@@ -1198,8 +1210,6 @@ def run_within_subject_regression_ml(
             if not effective:
                 continue
             n_effective += 1
-            if used_scheme != perm_scheme:
-                n_fallback_permutations += 1
             
             perm_fold_records: List[Dict[str, Any]] = []
 
@@ -1271,13 +1281,6 @@ def run_within_subject_regression_ml(
             
             if (perm_idx + 1) % 10 == 0:
                 logger.info(f"Permutation {perm_idx + 1}/{n_perm}")
-
-        if n_fallback_permutations > 0:
-            logger.info(
-                "Within-subject regression permutations: %d/%d effective shuffles required fallback to within-subject scheme.",
-                int(n_fallback_permutations),
-                int(n_effective),
-            )
 
         if n_effective == 0:
             raise RuntimeError(
@@ -2173,24 +2176,13 @@ def run_within_subject_classification_ml(
                     n_covariates=n_covs,
                 )
 
-            # If training fold has only one class, fall back to majority-class prediction.
+            fold_label = f"Within-subject fold {int(fold_counter)} ({str(subject_id)})"
+
             unique_train = np.unique(y_train)
             if len(unique_train) < 2:
-                maj = int(unique_train[0]) if len(unique_train) == 1 else 0
-                y_pred = np.full(len(y_test), maj, dtype=int)
-                y_prob = np.full(len(y_test), np.nan, dtype=float)
-                failed_folds += 1
-                recs.append(
-                    {
-                        "fold": int(fold_counter),
-                        "y_true": y_test,
-                        "y_pred": y_pred,
-                        "y_prob": y_prob,
-                        "subject_id": [str(subject_id)] * len(y_test),
-                        "test_idx": np.asarray(test_idx, dtype=int),
-                    }
+                raise RuntimeError(
+                    f"{fold_label}: only one class in training."
                 )
-                continue
 
             # Inner CV: stratified and block-aware (within subject).
             n_unique_blocks = len(np.unique(blocks_train))
@@ -2206,11 +2198,8 @@ def run_within_subject_classification_ml(
                         config=config,
                         logger=logger,
                     )
-                except Exception:
-                    maj = int(np.median(y_train)) if len(y_train) else 0
-                    y_pred = np.full(len(y_test), maj, dtype=int)
-                    y_prob = np.full(len(y_test), np.nan, dtype=float)
-                    failed_folds += 1
+                except Exception as exc:
+                    raise RuntimeError(f"{fold_label}: CNN fit failed: {exc}") from exc
             else:
                 best_estimator = clone(base_pipe)
 
@@ -2233,15 +2222,12 @@ def run_within_subject_classification_ml(
                         grid.fit(X_train, y_train, groups=blocks_train)
                         best_estimator = grid.best_estimator_
                     except Exception as exc:
-                        logger.warning(
-                            "Within-subject fold %s (%s): inner CV failed (%s); fitting default pipeline.",
-                            int(fold_counter),
-                            str(subject_id),
-                            exc,
-                        )
-                        best_estimator.fit(X_train, y_train)
+                        raise RuntimeError(f"{fold_label}: inner CV failed: {exc}") from exc
                 else:
-                    best_estimator.fit(X_train, y_train)
+                    try:
+                        best_estimator.fit(X_train, y_train)
+                    except Exception as exc:
+                        raise RuntimeError(f"{fold_label}: model fit failed: {exc}") from exc
 
                 try:
                     y_pred = best_estimator.predict(X_test).astype(int)
@@ -2251,11 +2237,8 @@ def run_within_subject_classification_ml(
                             y_prob = best_estimator.predict_proba(X_test)[:, 1]
                         except Exception:
                             y_prob = None
-                except Exception:
-                    maj = int(np.median(y_train)) if len(y_train) else 0
-                    y_pred = np.full(len(y_test), maj, dtype=int)
-                    y_prob = np.full(len(y_test), np.nan, dtype=float)
-                    failed_folds += 1
+                except Exception as exc:
+                    raise RuntimeError(f"{fold_label}: prediction failed: {exc}") from exc
 
             recs.append(
                 {
@@ -2524,7 +2507,6 @@ def run_within_subject_classification_ml(
         rng = np.random.default_rng(rng_seed)
         null_auc = []
         n_effective = 0
-        n_fallback_permutations = 0
         min_shuffle_fraction = float(
             get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
         )
@@ -2543,10 +2525,15 @@ def run_within_subject_classification_ml(
             if not effective:
                 continue
             n_effective += 1
-            if used_scheme != perm_scheme:
-                n_fallback_permutations += 1
-
-            perm_records, perm_failed_folds = _run_with_labels(y_perm)
+            try:
+                perm_records, perm_failed_folds = _run_with_labels(y_perm)
+            except Exception as exc:
+                logger.warning(
+                    "Within-subject classification permutation %d failed and will be skipped: %s",
+                    i + 1,
+                    exc,
+                )
+                continue
             perm_failed_fraction = float(perm_failed_folds / max(len(folds), 1))
             if perm_failed_fraction > max_failed_perm_fraction:
                 continue
@@ -2583,13 +2570,6 @@ def run_within_subject_classification_ml(
                     null_auc.append(float(perm_auc_subj_mean))
             except Exception:
                 continue
-
-        if n_fallback_permutations > 0:
-            logger.info(
-                "Within-subject classification permutations: %d/%d effective shuffles required fallback to within-subject scheme.",
-                int(n_fallback_permutations),
-                int(n_effective),
-            )
 
         if n_effective == 0:
             raise RuntimeError(
@@ -2663,32 +2643,12 @@ def _run_classification_permutations(
     rng = np.random.default_rng(seed)
     null_aucs = []
     n_effective = 0
-    n_fallback_permutations = 0
     min_shuffle_fraction = float(
         get_config_value(config, "machine_learning.cv.min_label_shuffle_fraction", 0.01)
     )
 
-    perm_scheme = "within_subject_within_block"
-    try:
-        perm_scheme = str(get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)).strip().lower()
-    except Exception:
-        perm_scheme = "within_subject_within_block"
-    if perm_scheme not in {"within_subject", "within_subject_within_block"}:
-        perm_scheme = "within_subject_within_block"
-
-    blocks_arr = None
-    if perm_scheme == "within_subject_within_block":
-        if blocks is None:
-            logger.warning(
-                "Permutation scheme 'within_subject_within_block' requested but blocks are missing; falling back to within_subject."
-            )
-            perm_scheme = "within_subject"
-        else:
-            blocks_arr = np.asarray(blocks)
-            if len(blocks_arr) != len(y):
-                logger.warning("Permutation blocks length mismatch; falling back to within_subject.")
-                perm_scheme = "within_subject"
-                blocks_arr = None
+    perm_scheme = _resolve_permutation_scheme(config)
+    blocks_arr = _validate_permutation_blocks(y, blocks, scheme=perm_scheme)
     
     max_failed_perm_fraction = float(
         get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
@@ -2709,8 +2669,6 @@ def _run_classification_permutations(
         if not effective:
             continue
         n_effective += 1
-        if used_scheme != perm_scheme:
-            n_fallback_permutations += 1
         
         try:
             if str(model).strip().lower() == "cnn":
@@ -2744,18 +2702,16 @@ def _run_classification_permutations(
             n_subjects_with_auc = _count_finite_subject_metric(result.per_subject_metrics, "auc")
             if n_subjects_with_auc >= min_subjects_auc and np.isfinite(auc_subj_mean):
                 null_aucs.append(float(auc_subj_mean))
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Classification permutation %d failed and will be skipped: %s",
+                i + 1,
+                exc,
+            )
             continue
         
         if (i + 1) % 10 == 0:
             logger.info(f"Permutation {i + 1}/{n_perm}")
-
-    if n_fallback_permutations > 0:
-        logger.info(
-            "Classification permutations: %d/%d effective shuffles required fallback to within-subject scheme.",
-            int(n_fallback_permutations),
-            int(n_effective),
-        )
 
     if n_effective == 0:
         raise RuntimeError(

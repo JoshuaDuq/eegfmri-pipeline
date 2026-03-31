@@ -109,6 +109,30 @@ class _PreprocessingImportMixin:
         self.addCleanup(patcher.stop)
 
 
+class _TrackingProgress:
+    def __init__(self):
+        self.complete_calls = []
+        self.subject_done_calls = []
+
+    def start(self, *_args, **_kwargs):
+        return None
+
+    def step(self, *_args, **_kwargs):
+        return None
+
+    def subject_start(self, *_args, **_kwargs):
+        return None
+
+    def subject_done(self, subject, success=True):
+        self.subject_done_calls.append((subject, success))
+
+    def complete(self, success, duration=None, outputs=None):
+        self.complete_calls.append((success, duration, outputs))
+
+    def error(self, *_args, **_kwargs):
+        return None
+
+
 class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
     def test_preprocessing_helper_defaults_and_validation_edges(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -611,6 +635,58 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         self.assertIn("meta-fail", "".join(getattr(exc_info.exception, "__notes__", [])))
 
+    def test_run_batch_reports_failure_completion_to_progress_sink(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.name = "preprocessing"
+        p.config = DotConfig({"project": {"task": "task"}})
+        p.logger = Mock()
+        p.bids_root = Path(tempfile.mkdtemp()) / "bids"
+        p.deriv_root = Path(tempfile.mkdtemp())
+
+        progress = _TrackingProgress()
+        with patch.object(
+            PreprocessingPipeline,
+            "_execute_steps",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                p.run_batch(
+                    subjects=["0001"],
+                    task="task",
+                    mode="epochs",
+                    progress=progress,
+                )
+
+        self.assertEqual(progress.complete_calls, [(False, None, None)])
+
+    def test_run_batch_returns_per_subject_status_dicts(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.name = "preprocessing"
+        p.config = DotConfig({"project": {"task": "task"}})
+        p.logger = Mock()
+        p.bids_root = Path(tempfile.mkdtemp()) / "bids"
+        p.deriv_root = Path(tempfile.mkdtemp())
+
+        with patch.object(PreprocessingPipeline, "_execute_steps"):
+            out = p.run_batch(
+                subjects=["0001", "0002"],
+                task="task",
+                mode="epochs",
+                progress=_NoopProgress(),
+            )
+
+        self.assertEqual(
+            out,
+            [
+                {"subject": "0001", "mode": "epochs", "status": "success"},
+                {"subject": "0002", "mode": "epochs", "status": "success"},
+            ],
+        )
+
     def test_extract_params_and_process_subject(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -651,6 +727,33 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         ), patch.object(PreprocessingPipeline, "_execute_steps") as mock_exec:
             p.process_subject("0001", task=None)
         mock_exec.assert_called_once()
+
+    def test_process_subject_reports_failure_to_progress_sink(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.config = DotConfig({"project": {"task": "task"}})
+        p.logger = Mock()
+        p._refresh_processing_roots_if_initialized = Mock()
+
+        progress = _TrackingProgress()
+        with patch.object(
+            PreprocessingPipeline,
+            "_extract_preprocessing_params",
+            return_value=("task", "full", True, True, False, 1, progress),
+        ), patch.object(
+            PreprocessingPipeline,
+            "_get_steps_for_mode",
+            return_value=["bad-channels"],
+        ), patch.object(
+            PreprocessingPipeline,
+            "_execute_steps",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                p.process_subject("0001", task=None)
+
+        self.assertEqual(progress.subject_done_calls, [("sub-0001", False)])
 
     def test_execute_steps_and_epoch_related_branches(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -703,6 +806,35 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         with patch.dict(sys.modules, {"eeg_pipeline.preprocessing.pipeline.stats": fake_stats}):
             p._collect_stats("t")
         fake_stats.collect_preprocessing_stats.assert_called_once()
+
+    def test_run_bad_channel_detection_preserves_explicit_zero_random_state(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "project": {"random_state": 42},
+                "pyprep": {"random_state": 0},
+            }
+        )
+        p.bids_root = Path(tempfile.mkdtemp())
+        p.deriv_root = Path(tempfile.mkdtemp())
+
+        fake_preprocess = types.SimpleNamespace(
+            run_bads_detection=Mock(),
+            synchronize_bad_channels_across_runs=Mock(),
+        )
+        with patch.dict(
+            sys.modules,
+            {"eeg_pipeline.preprocessing.pipeline.preprocess": fake_preprocess},
+        ):
+            p._run_bad_channel_detection(["0001"], "task", n_jobs=2)
+
+        self.assertEqual(
+            fake_preprocess.run_bads_detection.call_args.kwargs["random_state"],
+            0,
+        )
 
     def test_resolve_and_write_clean_events(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
