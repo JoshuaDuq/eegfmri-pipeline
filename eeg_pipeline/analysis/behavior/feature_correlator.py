@@ -21,7 +21,7 @@ from eeg_pipeline.context.behavior import BehaviorContext, ComputationResult, Co
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.registry import get_feature_registry
 from eeg_pipeline.infra.paths import deriv_features_path
-from eeg_pipeline.infra.tsv import read_tsv, write_tsv
+from eeg_pipeline.infra.tsv import read_table, write_tsv
 from eeg_pipeline.utils.analysis.stats import (
     compute_partial_correlations_with_cov_predictor,
     compute_permutation_pvalues_with_cov_predictor,
@@ -43,6 +43,7 @@ from eeg_pipeline.utils.config.loader import (
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_feature_types
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
 from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
+from eeg_pipeline.utils.data.feature_discovery import _find_feature_file_path
 
 
 def _build_stats_config_snapshot(config: Any) -> Dict[str, Any]:
@@ -771,11 +772,11 @@ class FeatureBehaviorCorrelator:
 
         feature_counts = {}
         for feature_type, filename in self.registry.files.items():
-            file_path = self.features_dir / filename
+            file_path = _find_feature_file_path(self.features_dir, feature_type, filename)
             if not file_path.exists():
                 continue
             
-            dataframe = read_tsv(file_path)
+            dataframe = read_table(file_path)
             if dataframe is not None and not dataframe.empty:
                 self._feature_dfs[feature_type] = dataframe
                 feature_counts[feature_type] = len(dataframe.columns)

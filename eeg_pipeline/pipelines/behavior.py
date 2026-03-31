@@ -88,8 +88,11 @@ def _resolve_behavior_computation_flags(
             expanded.append(key)
     
     unknown = [k for k in expanded if k not in BEHAVIOR_COMPUTATION_FLAGS]
-    if unknown and logger:
-        logger.warning("Ignoring unrecognized behavior computations: %s", ", ".join(sorted(set(unknown))))
+    if unknown:
+        unknown_str = ", ".join(sorted(set(unknown)))
+        raise ValueError(
+            f"Unknown behavior computations: {unknown_str}"
+        )
     
     for key in expanded:
         if key in flags:
@@ -511,100 +514,115 @@ class BehaviorPipeline(PipelineBase):
         
         progress.subject_start(f"sub-{subject}")
 
-        base_seed = int(
-            require_config_value(self.config, "behavior_analysis.statistics.base_seed")
-        )
-        rng = np.random.default_rng(get_subject_seed(base_seed, subject))
-
-        stats_cfg = require_config_value(self.config, "behavior_analysis.statistics")
-        partial_covars = stats_cfg.get("partial_covariates", None)
-        
-        also_save_csv = bool(
-            require_config_value(self.config, "behavior_analysis.output.also_save_csv")
-        )
-        overwrite = bool(
-            require_config_value(self.config, "behavior_analysis.output.overwrite")
-        )
-
-        # Build context (step 1)
-        ctx = BehaviorContext(
-            subject=subject,
-            task=task,
-            config=self.config,
-            logger=logger,
-            deriv_root=self.deriv_root,
-            stats_dir=stats_dir,
-            use_spearman=(self.pipeline_config.method == "spearman"),
-            bootstrap=int(self.pipeline_config.bootstrap),
-            n_perm=int(self.pipeline_config.n_permutations),
-            rng=rng,
-            partial_covars=partial_covars,
-            control_predictor=self.pipeline_config.control_predictor,
-            control_trial_order=self.pipeline_config.control_trial_order,
-            compute_change_scores=self.pipeline_config.compute_change_scores,
-            compute_reliability=self.pipeline_config.compute_reliability,
-            stats_config=self.pipeline_config,
-            feature_categories=self.feature_categories,
-            selected_feature_files=self.feature_files,
-            selected_bands=kwargs.get("bands"),
-            computation_features=self.computation_features,
-            also_save_csv=also_save_csv,
-            overwrite=overwrite,
-        )
-        # Isolated runtime per subject prevents cross-subject cache leakage.
-        setattr(ctx, "_behavior_runtime", create_behavior_runtime())
-        
-        results = BehaviorPipelineResults(subject=subject)
-        
-        # Run all stages via DAG executor (step 2)
-        start_time = time.perf_counter()
         try:
+            base_seed = int(
+                require_config_value(self.config, "behavior_analysis.statistics.base_seed")
+            )
+            rng = np.random.default_rng(get_subject_seed(base_seed, subject))
+
+            stats_cfg = require_config_value(self.config, "behavior_analysis.statistics")
+            partial_covars = stats_cfg.get("partial_covariates", None)
+            
+            also_save_csv = bool(
+                require_config_value(self.config, "behavior_analysis.output.also_save_csv")
+            )
+            overwrite = bool(
+                require_config_value(self.config, "behavior_analysis.output.overwrite")
+            )
+
+            # Build context (step 1)
+            ctx = BehaviorContext(
+                subject=subject,
+                task=task,
+                config=self.config,
+                logger=logger,
+                deriv_root=self.deriv_root,
+                stats_dir=stats_dir,
+                use_spearman=(self.pipeline_config.method == "spearman"),
+                bootstrap=int(self.pipeline_config.bootstrap),
+                n_perm=int(self.pipeline_config.n_permutations),
+                rng=rng,
+                partial_covars=partial_covars,
+                control_predictor=self.pipeline_config.control_predictor,
+                control_trial_order=self.pipeline_config.control_trial_order,
+                compute_change_scores=self.pipeline_config.compute_change_scores,
+                compute_reliability=self.pipeline_config.compute_reliability,
+                stats_config=self.pipeline_config,
+                feature_categories=self.feature_categories,
+                selected_feature_files=self.feature_files,
+                selected_bands=kwargs.get("bands"),
+                computation_features=self.computation_features,
+                also_save_csv=also_save_csv,
+                overwrite=overwrite,
+            )
+            # Isolated runtime per subject prevents cross-subject cache leakage.
+            setattr(ctx, "_behavior_runtime", create_behavior_runtime())
+            
+            results = BehaviorPipelineResults(subject=subject)
+            
+            # Run all stages, then persist subject outputs under one failure guard so progress
+            # is always finalized consistently.
+            start_time = time.perf_counter()
             run_behavior_stages(
                 ctx=ctx,
                 pipeline_config=self.pipeline_config,
                 results=results,
                 progress=progress,
             )
+
+            elapsed = time.perf_counter() - start_time
+            logger.info("Stage execution completed in %.1fs", elapsed)
+
+            outputs_manifest_path = write_outputs_manifest(
+                ctx,
+                self.pipeline_config,
+                results,
+                {},
+            )
+            _write_analysis_metadata_impl(
+                ctx,
+                self.pipeline_config,
+                results,
+                stage_metrics={},
+                outputs_manifest=outputs_manifest_path,
+            )
+
+            summary = results.to_summary()
+            summary_dir = get_behavior_output_dir(ctx, "summary", ensure=True)
+            summary_path = summary_dir / "summary.json"
+            summary_path.write_text(json.dumps(summary, indent=2, default=str))
+
+            n_features = summary.get("n_features", 0)
+            n_sig_raw = summary.get("n_sig_raw", 0)
+            n_sig_controlled = summary.get("n_sig_controlled", 0)
+            n_sig_fdr = summary.get("n_sig_fdr", 0)
+
+            cluster_info = ""
+            n_clusters = summary.get("n_clusters")
+            if n_clusters:
+                n_sig_clusters = summary.get("n_sig_clusters", 0)
+                cluster_info = f", clusters: {n_sig_clusters}/{n_clusters} sig"
+                logger.info(
+                    "Clusters identified: %d total, %d significant",
+                    n_clusters,
+                    n_sig_clusters,
+                )
+            logger.info(
+                "Results: %d features tested, sig raw=%d, controlled=%d, FDR=%d%s (%.1fs)",
+                n_features,
+                n_sig_raw,
+                n_sig_controlled,
+                n_sig_fdr,
+                cluster_info,
+                elapsed,
+            )
+
+            progress.subject_done(f"sub-{subject}", success=True)
+            return results
         except Exception as exc:
             progress.error("pipeline_failed", str(exc))
             progress.subject_done(f"sub-{subject}", success=False)
             raise
-        
-        elapsed = time.perf_counter() - start_time
-        logger.info("Stage execution completed in %.1fs", elapsed)
-        
-        # Persist metadata (step 3)
-        outputs_manifest_path = write_outputs_manifest(ctx, self.pipeline_config, results, {})
-        _write_analysis_metadata_impl(
-            ctx, self.pipeline_config, results,
-            stage_metrics={},
-            outputs_manifest=outputs_manifest_path,
-        )
-        
-        summary = results.to_summary()
-        summary_dir = get_behavior_output_dir(ctx, "summary", ensure=True)
-        summary_path = summary_dir / "summary.json"
-        summary_path.write_text(json.dumps(summary, indent=2, default=str))
-
-        n_features = summary.get("n_features", 0)
-        n_sig_raw = summary.get("n_sig_raw", 0)
-        n_sig_controlled = summary.get("n_sig_controlled", 0)
-        n_sig_fdr = summary.get("n_sig_fdr", 0)
-        
-        cluster_info = ""
-        n_clusters = summary.get("n_clusters")
-        if n_clusters:
-            n_sig_clusters = summary.get("n_sig_clusters", 0)
-            cluster_info = f", clusters: {n_sig_clusters}/{n_clusters} sig"
-            logger.info("Clusters identified: %d total, %d significant", n_clusters, n_sig_clusters)
-        logger.info(
-            "Results: %d features tested, sig raw=%d, controlled=%d, FDR=%d%s (%.1fs)",
-            n_features, n_sig_raw, n_sig_controlled, n_sig_fdr, cluster_info, elapsed,
-        )
-        
-        progress.subject_done(f"sub-{subject}", success=True)
-        
-        return results
     
     def run_group_level(self, subjects: List[str], **kwargs) -> Any:
         """Run group-level behavior analysis across multiple subjects.

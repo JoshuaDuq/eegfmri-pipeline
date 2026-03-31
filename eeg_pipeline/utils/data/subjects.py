@@ -445,9 +445,17 @@ def _determine_discovery_sources(args: Any, config: Optional[EEGConfig] = None) 
         if hasattr(args, "command") and args.command == "ml":
             valid_sources = _ml_discovery_sources(args, config)
             if explicit_sources != valid_sources:
+                feature_set = ""
+                if config is not None and hasattr(config, "get"):
+                    feature_set = str(
+                        config.get("machine_learning.data.feature_set", "") or ""
+                    ).strip().lower()
+                feature_set_note = (
+                    f" machine_learning.data.feature_set='{feature_set}'." if feature_set else ""
+                )
                 raise ValueError(
                     "ML mode requires discovery source "
-                    f"{valid_sources!r}, got {explicit_sources!r}."
+                    f"{valid_sources!r}, got {explicit_sources!r}.{feature_set_note}"
                 )
         return explicit_sources
 

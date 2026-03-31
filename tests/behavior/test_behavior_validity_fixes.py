@@ -3,6 +3,9 @@ import unittest
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
+import importlib
+import sys
+import types
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -223,6 +226,129 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "bad table"):
                 ctx._load_selected_feature_files()
+
+    def test_behavior_context_bundle_loading_prefers_trialwise_pac_table(self):
+        sys.modules.pop("eeg_pipeline.context.behavior", None)
+        sys.modules.pop("eeg_pipeline.context", None)
+        with patch.dict(
+            sys.modules,
+            {
+                "eeg_pipeline.context.features": types.SimpleNamespace(FeatureContext=object),
+            },
+        ):
+            BehaviorContext = importlib.import_module(
+                "eeg_pipeline.context.behavior"
+            ).BehaviorContext
+
+            pac_summary = pd.DataFrame({"pac_summary_metric": [1.0, 2.0]})
+            pac_trials = pd.DataFrame({"pac_trial_metric": [10.0, 20.0]})
+            bundle = SimpleNamespace(
+                manifests={"pac": {"kind": "summary"}, "pac_trials": {"kind": "trials"}},
+                paths={"pac": Path("/tmp/features_pac.parquet"), "pac_trials": Path("/tmp/features_pac_trials.parquet")},
+                power_df=None,
+                connectivity_df=None,
+                directed_connectivity_df=None,
+                source_localization_df=None,
+                source_contrast_df=None,
+                aperiodic_df=None,
+                erp_df=None,
+                pac_df=pac_summary,
+                pac_trials_df=pac_trials,
+                pac_time_df=None,
+                itpc_df=None,
+                complexity_df=None,
+                bursts_df=None,
+                quality_df=None,
+                erds_df=None,
+                spectral_df=None,
+                ratios_df=None,
+                asymmetry_df=None,
+                microstates_df=None,
+                temporal_df=None,
+            )
+
+            ctx = BehaviorContext(
+                subject="0001",
+                task="task",
+                config=DotConfig({}),
+                logger=Mock(),
+                deriv_root=Path(tempfile.mkdtemp()),
+                stats_dir=Path(tempfile.mkdtemp()),
+            )
+
+            with patch("eeg_pipeline.utils.data.feature_io.load_feature_bundle", return_value=bundle):
+                ctx._load_all_features_from_bundle()
+
+        self.assertIs(ctx.pac_df, pac_trials)
+        self.assertEqual(ctx.feature_manifests["pac"], {"kind": "trials"})
+        self.assertEqual(ctx.feature_paths["pac"], Path("/tmp/features_pac_trials.parquet"))
+
+    def test_feature_correlator_load_all_features_uses_canonical_feature_paths(self):
+        deriv_root = Path(tempfile.mkdtemp())
+        features_dir = deriv_root / "sub-0001" / "eeg" / "features"
+        power_path = features_dir / "power" / "features_power.parquet"
+        power_path.parent.mkdir(parents=True, exist_ok=True)
+        power_path.write_text("placeholder", encoding="utf-8")
+
+        config = self._behavior_config(
+            {
+                "behavior_analysis": {
+                    "statistics": {
+                        "predictor_control": "none",
+                        "compute_reliability": False,
+                    },
+                    "correlations": {
+                        "compute_bayes_factors": False,
+                        "loso_stability": False,
+                    },
+                    "n_jobs": 1,
+                    "feature_registry": {
+                        "files": {"power": "features_power.parquet"},
+                        "source_to_feature_type": {"power": "power"},
+                        "feature_type_hierarchy": {"power": ["power"]},
+                        "feature_patterns": {"power": "^power_.*$"},
+                        "feature_classifiers": [{"label": "power", "startswith": ["power_"]}],
+                    },
+                },
+            }
+        )
+
+        sys.modules.pop("eeg_pipeline.analysis.behavior.feature_correlator", None)
+        sys.modules.pop("eeg_pipeline.analysis.behavior", None)
+        sys.modules.pop("eeg_pipeline.context.behavior", None)
+        sys.modules.pop("eeg_pipeline.context", None)
+        joblib_stub = types.SimpleNamespace(
+            Parallel=lambda *args, **kwargs: None,
+            cpu_count=lambda: 1,
+            delayed=lambda fn: fn,
+        )
+        with patch.dict(
+            sys.modules,
+            {
+                "joblib": joblib_stub,
+                "eeg_pipeline.context.features": types.SimpleNamespace(FeatureContext=object),
+            },
+        ):
+            module = importlib.import_module(
+                "eeg_pipeline.analysis.behavior.feature_correlator"
+            )
+            with patch.object(
+                module,
+                "read_table",
+                return_value=pd.DataFrame({"power_alpha": [0.1, 0.2]}),
+                create=True,
+            ) as read_table_mock:
+                correlator = module.FeatureBehaviorCorrelator(
+                    subject="0001",
+                    deriv_root=deriv_root,
+                    config=config,
+                    logger=Mock(),
+                )
+                counts = correlator.load_all_features()
+
+        self.assertEqual(counts, {"power": 1})
+        self.assertIn("power", correlator._feature_dfs)
+        self.assertEqual(read_table_mock.call_args.args[0], power_path)
 
     def test_predictor_residual_stage_updates_trial_table_cache(self):
         import pandas as pd

@@ -409,6 +409,107 @@ class TestBehaviorDeep(_BehaviorImportMixin, unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     p.process_subject("0001", progress=progress)
 
+        def test_behavior_process_subject_marks_failure_when_output_persistence_fails(self):
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+
+            p = object.__new__(BehaviorPipeline)
+            p.pipeline_config = SimpleNamespace(
+                method="spearman",
+                bootstrap=0,
+                n_permutations=0,
+                control_predictor=True,
+                control_trial_order=True,
+                compute_change_scores=True,
+                compute_reliability=False,
+                run_correlations=True,
+                run_condition_comparison=True,
+                run_temporal_correlations=True,
+                run_cluster_tests=True,
+            )
+            p.feature_categories = None
+            p.feature_files = None
+            p.computation_features = {}
+            p.deriv_root = Path(tempfile.mkdtemp())
+            p.config = _behavior_process_config()
+            p.logger = Mock()
+
+            fake_paths = types.SimpleNamespace(
+                deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
+                ensure_dir=lambda path: None,
+            )
+            fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: Mock())
+            fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
+            progress = Mock()
+
+            with patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.infra.paths": fake_paths,
+                    "eeg_pipeline.infra.logging": fake_logging,
+                    "eeg_pipeline.cli.common": fake_cli,
+                    "eeg_pipeline.analysis.behavior.orchestration": types.SimpleNamespace(_cache={}),
+                },
+            ), patch(
+                "eeg_pipeline.pipelines.behavior.run_behavior_stages",
+                side_effect=lambda **kwargs: None,
+            ), patch(
+                "eeg_pipeline.pipelines.behavior.write_outputs_manifest",
+                side_effect=RuntimeError("persist-fail"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "persist-fail"):
+                    p.process_subject("0001", progress=progress)
+
+            progress.subject_done.assert_called_once_with("sub-0001", success=False)
+
+        def test_behavior_process_subject_marks_failure_when_setup_fails(self):
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
+
+            p = object.__new__(BehaviorPipeline)
+            p.pipeline_config = SimpleNamespace(
+                method="spearman",
+                bootstrap=0,
+                n_permutations=0,
+                control_predictor=True,
+                control_trial_order=True,
+                compute_change_scores=True,
+                compute_reliability=False,
+                run_correlations=True,
+                run_condition_comparison=True,
+                run_temporal_correlations=True,
+                run_cluster_tests=True,
+            )
+            p.feature_categories = None
+            p.feature_files = None
+            p.computation_features = {}
+            p.deriv_root = Path(tempfile.mkdtemp())
+            p.config = _behavior_process_config()
+            p.logger = Mock()
+
+            fake_paths = types.SimpleNamespace(
+                deriv_stats_path=lambda deriv_root, subject: Path(tempfile.mkdtemp()),
+                ensure_dir=lambda path: None,
+            )
+            fake_logging = types.SimpleNamespace(get_subject_logger=lambda name, subject: Mock())
+            fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
+            progress = Mock()
+
+            with patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.infra.paths": fake_paths,
+                    "eeg_pipeline.infra.logging": fake_logging,
+                    "eeg_pipeline.cli.common": fake_cli,
+                    "eeg_pipeline.analysis.behavior.orchestration": types.SimpleNamespace(_cache={}),
+                },
+            ), patch(
+                "eeg_pipeline.pipelines.behavior.BehaviorContext",
+                side_effect=RuntimeError("setup-fail"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "setup-fail"):
+                    p.process_subject("0001", progress=progress)
+
+            progress.subject_done.assert_called_once_with("sub-0001", success=False)
+
 class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
         def test_behavior_init_and_group_level_logging_branches(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
@@ -618,7 +719,7 @@ class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
                     (5, 1, 1),
                     )
 
-        def test_behavior_computation_flags_expand_bundles_and_warn(self):
+        def test_behavior_computation_flags_expand_bundles_and_reject_unknown(self):
             with patch.dict(sys.modules, _behavior_import_stubs()):
                 from eeg_pipeline.pipelines.behavior import (
                     BEHAVIOR_COMPUTATION_BUNDLES,
@@ -631,12 +732,13 @@ class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
                     BEHAVIOR_COMPUTATION_BUNDLES["bundle"] = ["icc", "regression"]
 
                     logger = Mock()
-                    flags = _resolve_behavior_computation_flags(["bundle", "unknown"], logger=logger)
-
+                    with self.assertRaisesRegex(ValueError, "unknown"):
+                        _resolve_behavior_computation_flags(["bundle", "unknown"], logger=logger)
+                    flags = _resolve_behavior_computation_flags(["bundle"], logger=logger)
                     self.assertTrue(flags["icc"])
                     self.assertTrue(flags["regression"])
                     self.assertFalse(flags.get("run_cluster_tests", False))
-                    self.assertTrue(logger.warning.called)
+                    self.assertFalse(logger.warning.called)
                 finally:
                     BEHAVIOR_COMPUTATION_BUNDLES.clear()
                     BEHAVIOR_COMPUTATION_BUNDLES.update(original_bundles)

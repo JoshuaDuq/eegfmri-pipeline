@@ -128,7 +128,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         "erp": ["features_erp*.parquet"],
         "bursts": ["features_bursts*.parquet"],
         "itpc": ["features_itpc*.parquet"],
-        "pac": ["features_pac*.parquet"],
+        "pac": ["features_pac_trials.parquet"],
         "complexity": ["features_complexity*.parquet"],
         "quality": ["features_quality*.parquet"],
         "erds": ["features_erds*.parquet"],

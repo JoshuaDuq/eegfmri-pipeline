@@ -520,6 +520,16 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
             )
             self.assertEqual(count, 17)
 
+            unpacked["pac_trials_df"] = one_col
+            count_with_split_pac = _count_saved_range_columns(
+                direct_df=one_col,
+                conn_df=one_col,
+                aper_df=None,
+                unpacked=unpacked,
+                features=features,
+            )
+            self.assertEqual(count_with_split_pac, 18)
+
             tables = _collect_trial_table_feature_tables(
                 direct_df=one_col,
                 conn_df_aligned=one_col,
@@ -2361,6 +2371,60 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
             )
         cfg_file = features_dir / "features_power" / "metadata" / "extraction_config_x.json"
         self.assertTrue(cfg_file.exists())
+
+    def test_save_merged_features_preserves_all_pac_artifact_types(self):
+        from eeg_pipeline.pipelines.features import _save_merged_features
+
+        tmp = Path(tempfile.mkdtemp())
+        features_dir = tmp / "derivatives" / "sub-0001" / "task-task" / "features"
+        features_dir.mkdir(parents=True, exist_ok=True)
+
+        acc = {
+            "power": [],
+            "baseline": [],
+            "connectivity": [],
+            "directedconnectivity": [],
+            "sourcelocalization": [],
+            "sourcecontrast": [],
+            "aperiodic": [],
+            "erp": [],
+            "itpc": [],
+            "pac": [pd.DataFrame({"pac_summary": [1.0]})],
+            "pac_trials": [pd.DataFrame({"pac_trial": [0.1]})],
+            "pac_time": [pd.DataFrame({"pac_time": [0.2]})],
+            "complexity": [],
+            "bursts": [],
+            "spectral": [],
+            "erds": [],
+            "ratios": [],
+            "asymmetry": [],
+            "microstates": [],
+            "quality": [],
+        }
+
+        fake_feature_io = types.SimpleNamespace(_get_folder_for_feature=lambda name, config=None: name)
+        fake_naming = types.SimpleNamespace(
+            generate_manifest=lambda **kwargs: {"feature_columns": kwargs["feature_columns"]}
+        )
+
+        with patch.dict(
+            sys.modules,
+            {
+                "eeg_pipeline.utils.data.feature_io": fake_feature_io,
+                "eeg_pipeline.domain.features.naming": fake_naming,
+            },
+        ), patch("eeg_pipeline.pipelines.features.write_parquet") as mock_parquet:
+            _save_merged_features(
+                acc,
+                features_dir,
+                DotConfig({"project": {"task": "task"}}),
+                Mock(),
+            )
+
+        written_paths = {Path(call.args[1]).name for call in mock_parquet.call_args_list}
+        self.assertIn("features_pac.parquet", written_paths)
+        self.assertIn("features_pac_trials.parquet", written_paths)
+        self.assertIn("features_pac_time.parquet", written_paths)
 
 class TestFeatureGapfill(_FeatureImportMixin, unittest.TestCase):
     def test_feature_pipeline_init_and_precompute_early_returns(self):

@@ -1,23 +1,99 @@
 from __future__ import annotations
 
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
 import pandas as pd
 
+sys.modules.setdefault("mne_bids", types.SimpleNamespace(BIDSPath=object))
+
 from eeg_pipeline.infra.tsv import read_table
-from eeg_pipeline.utils.data.feature_discovery import STANDARD_FEATURE_FILES
+from eeg_pipeline.utils.data.feature_discovery import (
+    STANDARD_FEATURE_FILES,
+    discover_feature_files,
+)
+from eeg_pipeline.cli.commands.base_feature_availability import (
+    detect_feature_availability,
+)
 from eeg_pipeline.utils.data.feature_io import save_all_features
 from tests.pipelines_test_utils import DotConfig
 
 
 class TestFeatureIoPacOutputs(unittest.TestCase):
-    def test_feature_discovery_prefers_pac_trials_file(self):
+    def test_feature_discovery_uses_trialwise_pac_filename(self):
         self.assertEqual(
             STANDARD_FEATURE_FILES.get("pac"),
             "features_pac_trials.parquet",
         )
+
+    def test_feature_discovery_finds_pac_from_trialwise_output(self):
+        deriv_root = Path(tempfile.mkdtemp())
+        features_dir = deriv_root / "sub-0001" / "eeg" / "features"
+
+        save_all_features(
+            pow_df=pd.DataFrame({"power_active_alpha_global_logratio_mean": [0.1, 0.2]}),
+            pow_cols=["power_active_alpha_global_logratio_mean"],
+            baseline_df=pd.DataFrame(),
+            baseline_cols=[],
+            conn_df=None,
+            conn_cols=[],
+            aper_df=None,
+            aper_cols=[],
+            pac_trials_df=pd.DataFrame({"pac_active_theta_gamma_global_mvl": [1.0, 2.0]}),
+            features_dir=features_dir,
+            config=DotConfig({}),
+        )
+
+        discovered = discover_feature_files("0001", deriv_root)
+
+        self.assertIn("pac", discovered)
+        self.assertTrue(discovered["pac"].exists)
+        self.assertEqual(discovered["pac"].path.name, "features_pac_trials.parquet")
+
+    def test_feature_discovery_does_not_treat_summary_only_pac_as_behavior_pac(self):
+        deriv_root = Path(tempfile.mkdtemp())
+        features_dir = deriv_root / "sub-0001" / "eeg" / "features"
+
+        save_all_features(
+            pow_df=pd.DataFrame({"power_active_alpha_global_logratio_mean": [0.1, 0.2]}),
+            pow_cols=["power_active_alpha_global_logratio_mean"],
+            baseline_df=pd.DataFrame(),
+            baseline_cols=[],
+            conn_df=None,
+            conn_cols=[],
+            aper_df=None,
+            aper_cols=[],
+            pac_df=pd.DataFrame({"pac_summary_metric": [10.0, 20.0]}),
+            features_dir=features_dir,
+            config=DotConfig({}),
+        )
+
+        discovered = discover_feature_files("0001", deriv_root)
+
+        self.assertNotIn("pac", discovered)
+
+    def test_feature_availability_requires_trialwise_pac_artifact(self):
+        features_dir = Path(tempfile.mkdtemp())
+        (features_dir / "pac").mkdir(parents=True, exist_ok=True)
+
+        summary_only_path = features_dir / "pac" / "features_pac.parquet"
+        pd.DataFrame({"pac_summary_metric": [1.0]}).to_parquet(summary_only_path, index=False)
+
+        availability = detect_feature_availability(features_dir)
+        self.assertFalse(availability["features"]["pac"]["available"])
+
+        summary_only_path.unlink()
+        trials_path = features_dir / "pac" / "features_pac_trials.parquet"
+        pd.DataFrame({"pac_active_theta_gamma_global_mvl": [1.0]}).to_parquet(
+            trials_path,
+            index=False,
+        )
+
+        availability = detect_feature_availability(features_dir)
+        self.assertTrue(availability["features"]["pac"]["available"])
 
     def test_save_all_features_writes_distinct_pac_and_pac_trials(self):
         features_dir = Path(tempfile.mkdtemp())

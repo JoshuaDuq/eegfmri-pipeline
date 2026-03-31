@@ -55,6 +55,7 @@ COMPUTATION_TO_PIPELINE_ATTR = {
     "predictor_residual": "run_predictor_residual",
     "regression": "run_regression",
     "icc": "run_icc",
+    "validation": "run_validation",
     "correlations": "run_correlations",
     "condition": "run_condition_comparison",
     "temporal": "run_temporal_correlations",

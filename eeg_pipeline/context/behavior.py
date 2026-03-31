@@ -340,8 +340,6 @@ class BehaviorContext:
         self.connectivity_df = bundle.connectivity_df
         self.directed_connectivity_df = bundle.directed_connectivity_df
         self.source_localization_df = bundle.source_localization_df
-        # Prefer trial-level PAC if available, otherwise fall back to any PAC table.
-        # Keep the canonical key name "pac" for downstream prefixing.
         if bundle.pac_trials_df is not None and not bundle.pac_trials_df.empty:
             self.pac_df = bundle.pac_trials_df
             if "pac_trials" in self.feature_manifests and "pac" not in self.feature_manifests:

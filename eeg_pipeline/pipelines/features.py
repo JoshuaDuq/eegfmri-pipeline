@@ -76,7 +76,7 @@ from eeg_pipeline.utils.data.feature_alignment import (
 )
 
 
-_ACCUMULATOR_EXTRAS = ["baseline", "pac_time", "sourcecontrast"]
+_ACCUMULATOR_EXTRAS = ["baseline", "pac_trials", "pac_time", "sourcecontrast"]
 _FEATURE_ACCUMULATOR_KEYS = list(FEATURE_CATEGORIES) + _ACCUMULATOR_EXTRAS
 
 _TFR_CATEGORIES = {"power", "itpc", "pac"}
@@ -524,9 +524,8 @@ def _accumulate_features(
         "aperiodic": aligned.get("aper_df_aligned"),
         "erp": unpacked.get("erp_df"),
         "itpc": unpacked.get("itpc_df"),
-        "pac": unpacked.get("pac_trials_df")
-        if unpacked.get("pac_trials_df") is not None
-        else unpacked.get("pac_df"),
+        "pac": unpacked.get("pac_df"),
+        "pac_trials": unpacked.get("pac_trials_df"),
         "pac_time": unpacked.get("pac_time_df"),
         "complexity": unpacked.get("comp_df"),
         "bursts": unpacked.get("bursts_df"),
@@ -565,10 +564,6 @@ def _count_saved_range_columns(
     if itpc_trial_or_standard is None or getattr(itpc_trial_or_standard, "empty", False):
         itpc_trial_or_standard = unpacked.get("itpc_df")
 
-    pac_trial_or_standard = unpacked.get("pac_trials_df")
-    if pac_trial_or_standard is None or getattr(pac_trial_or_standard, "empty", False):
-        pac_trial_or_standard = unpacked.get("pac_df")
-
     tables = [
         direct_df,
         conn_df,
@@ -578,7 +573,8 @@ def _count_saved_range_columns(
         unpacked.get("source_contrast_df"),
         unpacked.get("erp_df"),
         itpc_trial_or_standard,
-        pac_trial_or_standard,
+        unpacked.get("pac_df"),
+        unpacked.get("pac_trials_df"),
         unpacked.get("pac_time_df"),
         unpacked.get("comp_df"),
         unpacked.get("bursts_df"),
@@ -652,7 +648,9 @@ def _save_merged_features(
         "aperiodic": ("features_aperiodic.parquet", ["aperiodic"]),
         "erp": ("features_erp.parquet", ["erp"]),
         "itpc": ("features_itpc.parquet", ["itpc"]),
-        "pac": ("features_pac_trials.parquet", ["pac"]),
+        "pac": ("features_pac.parquet", ["pac"]),
+        "pac_trials": ("features_pac_trials.parquet", ["pac_trials"]),
+        "pac_time": ("features_pac_time.parquet", ["pac_time"]),
         "complexity": ("features_complexity.parquet", ["complexity"]),
         "bursts": ("features_bursts.parquet", ["bursts"]),
         "spectral": ("features_spectral.parquet", ["spectral"]),

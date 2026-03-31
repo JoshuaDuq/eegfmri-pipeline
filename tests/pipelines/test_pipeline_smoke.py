@@ -203,7 +203,9 @@ class TestAllPipelines(unittest.TestCase):
     def test_behavior_flag_resolution_and_optional_int(self):
         from eeg_pipeline.pipelines.behavior import _resolve_behavior_computation_flags, _get_optional_int
 
-        flags = _resolve_behavior_computation_flags(["validation", "icc", "unknown"], logger=Mock())
+        with self.assertRaisesRegex(ValueError, "Unknown behavior computations"):
+            _resolve_behavior_computation_flags(["validation", "icc", "unknown"], logger=Mock())
+        flags = _resolve_behavior_computation_flags(["validation", "icc"], logger=Mock())
         self.assertTrue(flags["icc"])
         self.assertFalse(flags["regression"])
 

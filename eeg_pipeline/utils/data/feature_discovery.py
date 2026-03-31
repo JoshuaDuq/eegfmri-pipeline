@@ -157,7 +157,7 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
             if candidate.exists():
                 return candidate
         return candidates[0]
-    
+
     return features_dir / key / filename
 
 

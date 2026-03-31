@@ -142,13 +142,16 @@ class MLPipeline(PipelineBase):
 
     def _extract_ml_parameters(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """Extract and validate ML parameters from kwargs."""
+        rng_seed = kwargs.get("rng_seed")
+        if rng_seed is None:
+            rng_seed = self.config.get("project.random_state", DEFAULT_RNG_SEED)
         return {
             "cv_scope": kwargs.get("cv_scope", "group"),
             "progress": ensure_progress_reporter(kwargs.get("progress")),
             "n_perm": kwargs.get("n_perm", DEFAULT_N_PERM),
             "inner_splits": kwargs.get("inner_splits", self.config.get("machine_learning.cv.inner_splits", 5)),
             "outer_jobs": kwargs.get("outer_jobs", DEFAULT_OUTER_JOBS),
-            "rng_seed": kwargs.get("rng_seed") or self.config.get("project.random_state", DEFAULT_RNG_SEED),
+            "rng_seed": rng_seed,
             "model": kwargs.get("model", self.config.get("machine_learning.models.regression_default", DEFAULT_MODEL)),
             "uncertainty_alpha": kwargs.get("uncertainty_alpha", self.config.get("machine_learning.analysis.uncertainty.alpha", DEFAULT_UNCERTAINTY_ALPHA)),
             "perm_n_repeats": kwargs.get("perm_n_repeats", self.config.get("machine_learning.analysis.permutation_importance.n_repeats", DEFAULT_PERM_N_REPEATS)),
@@ -630,7 +633,10 @@ class MLPipeline(PipelineBase):
         )
         run_status = "failed"
         run_error: Optional[str] = None
+        caught_error: Optional[Exception] = None
         results_dir: Optional[Path] = None
+        result: Optional[List[Dict[str, Any]]] = None
+        progress_completed = False
 
         import time as _time
 
@@ -662,6 +668,7 @@ class MLPipeline(PipelineBase):
             )
             if results_dir is None:
                 params["progress"].complete(success=False)
+                progress_completed = True
                 raise RuntimeError(
                     f"ML pipeline ({mode}) produced no output. "
                     "Treating this as a failed run to avoid false-success reporting."
@@ -675,9 +682,10 @@ class MLPipeline(PipelineBase):
                 mode, results_dir or "no output", elapsed,
             )
             params["progress"].complete(success=True)
+            progress_completed = True
             run_status = "success"
 
-            return [
+            result = [
                 {
                     "subjects": subjects,
                     "status": "success",
@@ -688,8 +696,18 @@ class MLPipeline(PipelineBase):
             ]
         except Exception as exc:
             run_error = str(exc)
-            raise
-        finally:
+            caught_error = exc
+            if not progress_completed:
+                try:
+                    params["progress"].complete(success=False)
+                    progress_completed = True
+                except Exception as progress_exc:
+                    caught_error.add_note(
+                        f"Progress completion also failed: {progress_exc}"
+                    )
+
+        metadata_error: Optional[Exception] = None
+        try:
             self._write_run_metadata(
                 run_context,
                 status=run_status,
@@ -703,6 +721,20 @@ class MLPipeline(PipelineBase):
                     "cv_scope": params.get("cv_scope"),
                 },
             )
+        except Exception as exc:
+            metadata_error = exc
+
+        if caught_error is not None:
+            if metadata_error is not None:
+                caught_error.add_note(
+                    f"Run metadata writing also failed: {metadata_error}"
+                )
+            raise caught_error
+        if metadata_error is not None:
+            raise metadata_error
+        if result is None:
+            raise RuntimeError("ML pipeline completed without producing a result.")
+        return result
 
 
 

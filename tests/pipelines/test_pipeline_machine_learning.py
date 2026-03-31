@@ -295,6 +295,9 @@ class TestMachineLearningGapfill(_MachineLearningImportMixin, unittest.TestCase)
         self.assertEqual(params["feature_families"], ["power"])
         self.assertEqual(params["baseline_predictors"], ["age"])
 
+        params_zero_seed = p._extract_ml_parameters({"rng_seed": 0})
+        self.assertEqual(params_zero_seed["rng_seed"], 0)
+
     def test_run_batch_raises_when_mode_returns_none(self):
         from eeg_pipeline.pipelines.machine_learning import MLPipeline
 
@@ -382,3 +385,75 @@ class TestMachineLearningGapfill(_MachineLearningImportMixin, unittest.TestCase)
         ):
             with self.assertRaisesRegex(ValueError, "Unknown mode: bogus"):
                 p.run_batch(["0001"], task="task", mode="bogus")
+
+    def test_run_batch_marks_progress_failed_when_executor_raises(self):
+        from eeg_pipeline.pipelines.machine_learning import MLPipeline
+
+        p = object.__new__(MLPipeline)
+        p.name = "machine_learning"
+        p.config = DotConfig({})
+        p.logger = Mock()
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.results_root = p.deriv_root / "machine_learning"
+
+        progress = Mock()
+        params = {
+            "progress": progress,
+            "cv_scope": "group",
+            "model": "elasticnet",
+            "n_perm": 0,
+            "inner_splits": 3,
+        }
+
+        def _raise_executor(**_kwargs):
+            raise RuntimeError("boom")
+
+        with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
+            MLPipeline, "_validate_inputs", return_value="task"
+        ), patch.object(
+            MLPipeline,
+            "_get_mode_dispatcher",
+            return_value={"regression": _raise_executor},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                p.run_batch(["0001"], task="task", mode="regression")
+
+        progress.complete.assert_called_once_with(success=False)
+
+    def test_run_batch_preserves_original_exception_when_metadata_write_fails(self):
+        from eeg_pipeline.pipelines.machine_learning import MLPipeline
+
+        p = object.__new__(MLPipeline)
+        p.name = "machine_learning"
+        p.config = DotConfig({})
+        p.logger = Mock()
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.results_root = p.deriv_root / "machine_learning"
+
+        params = {
+            "progress": _NoopProgress(),
+            "cv_scope": "group",
+            "model": "elasticnet",
+            "n_perm": 0,
+            "inner_splits": 3,
+        }
+
+        def _raise_executor(**_kwargs):
+            raise RuntimeError("boom")
+
+        with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
+            MLPipeline, "_validate_inputs", return_value="task"
+        ), patch.object(
+            MLPipeline,
+            "_get_mode_dispatcher",
+            return_value={"regression": _raise_executor},
+        ), patch.object(
+            MLPipeline,
+            "_write_run_metadata",
+            side_effect=RuntimeError("meta-fail"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom") as ctx:
+                p.run_batch(["0001"], task="task", mode="regression")
+
+        notes = getattr(ctx.exception, "__notes__", [])
+        self.assertTrue(any("meta-fail" in note for note in notes))

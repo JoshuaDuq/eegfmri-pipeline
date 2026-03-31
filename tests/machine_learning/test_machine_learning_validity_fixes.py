@@ -518,10 +518,13 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             captured["deriv_root"] = deriv_root
             return pd.DataFrame({"trial_id": [7], "rating": [10.0]})
 
+        feature_df = pd.DataFrame({"power_feature": [1.0]})
+        feature_df.attrs["trial_id"] = np.array([7], dtype=int)
+
         with patch.object(ml_data, "load_events_df", side_effect=_load_events_df), patch.object(
             ml_data,
             "_load_subject_feature_table",
-            return_value=(pd.DataFrame({"power_feature": [1.0]}), ["power_feature"]),
+            return_value=(feature_df, ["power_feature"]),
         ):
             _X_df, y, y_col, meta = ml_data._load_subject_ml_from_features(
                 subject="0001",
@@ -3506,6 +3509,9 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             )
 
     def test_run_permutation_test_rejects_all_missing_blocks_for_blockwise_scheme(self):
+        from sklearn.dummy import DummyRegressor
+        from sklearn.pipeline import Pipeline
+
         from eeg_pipeline.analysis.machine_learning import cv
 
         X = np.array([[0.0], [1.0], [2.0], [3.0]], dtype=float)

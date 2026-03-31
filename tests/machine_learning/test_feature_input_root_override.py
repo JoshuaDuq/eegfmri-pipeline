@@ -28,7 +28,12 @@ def _write_feature_table(feature_root: Path) -> None:
     feature_dir = feature_root / "sub-0001" / "eeg" / "features" / "power"
     metadata_dir = feature_dir / "metadata"
     metadata_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"power_alpha_global_mean": [1.0]}).to_parquet(
+    pd.DataFrame(
+        {
+            "trial_id": [1],
+            "power_alpha_global_mean": [1.0],
+        }
+    ).to_parquet(
         feature_dir / "features_power.parquet",
         index=False,
     )
@@ -41,6 +46,7 @@ def _write_feature_table(feature_root: Path) -> None:
 def _events_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
+            "trial_id": [1],
             "trial_index": [1],
             "onset": [0.0],
             "duration": [1.0],
