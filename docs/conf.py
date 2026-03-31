@@ -42,6 +42,9 @@ exclude_patterns = [
     "plans/**",
     "superpowers/**",
     "architecture/**",
+    "index.md",
+    "eeg/**",
+    "fmri/**",
     "index_old.md",
 ]
 
