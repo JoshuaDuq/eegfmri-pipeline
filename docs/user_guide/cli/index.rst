@@ -122,7 +122,7 @@ Command Matrix
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: :octicon:`pulse` Preprocessing
+   .. grid-item-card:: Preprocessing
       :link: preprocessing
       :link-type: doc
 
@@ -130,7 +130,7 @@ Command Matrix
 
       Filtering, resampling, resting-state mode, PyPREP and ICLabel options.
 
-   .. grid-item-card:: :octicon:`graph` Feature Extraction
+   .. grid-item-card:: Feature Extraction
       :link: features
       :link-type: doc
 
@@ -138,7 +138,7 @@ Command Matrix
 
       Category selection, spatial transforms, IAF mode, analysis mode.
 
-   .. grid-item-card:: :octicon:`table` Behavioral Statistics
+   .. grid-item-card:: Behavioral Statistics
       :link: behavior
       :link-type: doc
 
@@ -146,7 +146,7 @@ Command Matrix
 
       Correlation, regression, ICC, and condition comparison flags.
 
-   .. grid-item-card:: :octicon:`dependabot` Machine Learning
+   .. grid-item-card:: Machine Learning
       :link: ml
       :link-type: doc
 
@@ -154,7 +154,7 @@ Command Matrix
 
       Full LOSO modeling suite, feature filtering, and harmonization.
 
-   .. grid-item-card:: :octicon:`container` fMRI Preprocessing
+   .. grid-item-card:: fMRI Preprocessing
       :link: fmri_preprocessing
       :link-type: doc
 
@@ -162,7 +162,7 @@ Command Matrix
 
       fMRIPrep container flags, output spaces, memory and thread controls.
 
-   .. grid-item-card:: :octicon:`workflow` fMRI Analysis
+   .. grid-item-card:: fMRI Analysis
       :link: fmri_analysis
       :link-type: doc
 
@@ -170,7 +170,7 @@ Command Matrix
 
       GLM specification, confound strategy, beta estimation, connectivity.
 
-   .. grid-item-card:: :octicon:`image` Plotting
+   .. grid-item-card:: Plotting
       :link: plotting
       :link-type: doc
 
@@ -178,7 +178,7 @@ Command Matrix
 
       40+ plot types, format flags, group vs. subject mode, style overrides.
 
-   .. grid-item-card:: :octicon:`shield-check` Validation
+   .. grid-item-card:: Validation
       :link: validation
       :link-type: doc
 
@@ -186,7 +186,7 @@ Command Matrix
 
       Data integrity checks at every pipeline stage.
 
-   .. grid-item-card:: :octicon:`info` Stats & Info
+   .. grid-item-card:: Stats & Info
       :link: stats_info
       :link-type: doc
 

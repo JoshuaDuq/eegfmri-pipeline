@@ -17,14 +17,14 @@ methods, configuration keys, and output schemas.
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: :octicon:`pulse` Preprocessing
+   .. grid-item-card:: Preprocessing
       :link: preprocessing
       :link-type: doc
 
       Bad channel detection (PyPREP), ICA fitting and ICLabel
       classification. Modes: ``bad-channels``, ``ica``, ``epochs``, ``full``.
 
-   .. grid-item-card:: :octicon:`graph` Feature Extraction
+   .. grid-item-card:: Feature Extraction
       :link: features
       :link-type: doc
 
@@ -32,14 +32,14 @@ methods, configuration keys, and output schemas.
       power, connectivity, aperiodic, ITPC, PAC, complexity, ERP, ERDS,
       microstates, spectral, and source ROI.
 
-   .. grid-item-card:: :octicon:`table` Behavioral Statistics
+   .. grid-item-card:: Behavioral Statistics
       :link: behavior
       :link-type: doc
 
       Trial-level correlations, regression, reliability (ICC), condition
       comparisons, and time-resolved analyses with FDR correction.
 
-   .. grid-item-card:: :octicon:`dependabot` Machine Learning
+   .. grid-item-card:: Machine Learning
       :link: machine_learning
       :link-type: doc
 
@@ -47,7 +47,7 @@ methods, configuration keys, and output schemas.
       selection, permutation testing, SHAP importance, and temporal
       generalization.
 
-   .. grid-item-card:: :octicon:`location` Source Localization
+   .. grid-item-card:: Source Localization
       :link: source_localization
       :link-type: doc
 

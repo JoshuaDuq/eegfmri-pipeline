@@ -8,24 +8,24 @@ reviewable and CI-passing.
 .. grid:: 4
    :gutter: 2
 
-   .. grid-item-card:: :octicon:`git-branch` Branch
+   .. grid-item-card:: Branch
 
       ``fix/``, ``feat/``,
       ``refactor/``, ``docs/``
 
-   .. grid-item-card:: :octicon:`git-commit` Commit
+   .. grid-item-card:: Commit
 
       Short imperative subject.
       Prefix: ``fix:``, ``feat:``,
       ``docs:``, ``test:``
 
-   .. grid-item-card:: :octicon:`check-circle` Test
+   .. grid-item-card:: Test
 
       ``make test`` must pass.
       Add tests beside the
       affected domain.
 
-   .. grid-item-card:: :octicon:`git-pull-request` PR
+   .. grid-item-card:: PR
 
       Summary, commands run,
       issue link, screenshots

@@ -14,14 +14,14 @@ expected inputs, methods, configuration keys, and output schemas.
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: :octicon:`file-code` Raw-to-BIDS Contract
+   .. grid-item-card:: Raw-to-BIDS Contract
       :link: raw_to_bids
       :link-type: doc
 
       BIDS input contract: directory layout, required NIfTI sidecars,
       ``events.tsv`` requirements, DICOM conversion, and validation.
 
-   .. grid-item-card:: :octicon:`workflow` fMRI Analysis Pipeline
+   .. grid-item-card:: fMRI Analysis Pipeline
       :link: pipeline
       :link-type: doc
 

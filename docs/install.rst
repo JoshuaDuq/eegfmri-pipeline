@@ -4,17 +4,17 @@ Installation
 .. grid:: 3
    :gutter: 2
 
-   .. grid-item-card:: :octicon:`cpu` Python ≥ 3.11
+   .. grid-item-card:: Python ≥ 3.11
 
       Required for all workflows.
       Install from `python.org <https://www.python.org/downloads/>`_.
 
-   .. grid-item-card:: :octicon:`mark-github` Git
+   .. grid-item-card:: Git
 
       Required to clone the repository.
       Install from `git-scm.com <https://git-scm.com/>`_.
 
-   .. grid-item-card:: :octicon:`terminal` Go 1.21+ *(optional)*
+   .. grid-item-card:: Go 1.21+ *(optional)*
 
       Required only for the interactive TUI.
       Install from `go.dev <https://go.dev/dl/>`_.

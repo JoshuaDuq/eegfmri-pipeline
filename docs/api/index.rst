@@ -22,14 +22,14 @@ are available without a full environment.
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: :octicon:`pulse` EEG Pipeline
+   .. grid-item-card:: EEG Pipeline
       :link: eeg_pipeline
       :link-type: doc
 
       Pipelines, analysis modules, feature families, plotting utilities,
       preprocessing helpers, CLI entry points, and shared infrastructure.
 
-   .. grid-item-card:: :octicon:`workflow` fMRI Pipeline
+   .. grid-item-card:: fMRI Pipeline
       :link: fmri_pipeline
       :link-type: doc
 

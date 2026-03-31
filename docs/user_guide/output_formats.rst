@@ -8,19 +8,19 @@ map, then jump to the methods reference for the scientific details.
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: :octicon:`table` Feature Tables
+   .. grid-item-card:: Feature Tables
 
       Parquet by default, optional TSV/CSV, with one table per feature family.
 
-   .. grid-item-card:: :octicon:`image` Plot Exports
+   .. grid-item-card:: Plot Exports
 
       PNG by default, with SVG and PDF available through ``--formats``.
 
-   .. grid-item-card:: :octicon:`workflow` Fusion Workflows
+   .. grid-item-card:: Fusion Workflows
 
       Trial-wise EEG→fMRI signature prediction and shared analysis modes.
 
-   .. grid-item-card:: :octicon:`container` Source / Resting-State Outputs
+   .. grid-item-card:: Source / Resting-State Outputs
 
       Source estimates, resting-state fMRI analyses, and EEG resting-state epochs.
 

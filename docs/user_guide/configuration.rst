@@ -20,17 +20,17 @@ Precedence (highest wins):
 .. grid:: 3
    :gutter: 2
 
-   .. grid-item-card:: :octicon:`file-code` ``eeg_config.yaml``
+   .. grid-item-card:: ``eeg_config.yaml``
 
       EEG preprocessing, feature extraction, machine learning,
       and fMRI integration defaults.
 
-   .. grid-item-card:: :octicon:`file-code` ``behavior_config.yaml``
+   .. grid-item-card:: ``behavior_config.yaml``
 
       Behavioral statistics pipeline: predictor type, analysis
       stages, permutation settings, and FDR parameters.
 
-   .. grid-item-card:: :octicon:`file-code` ``fmri_config.yaml``
+   .. grid-item-card:: ``fmri_config.yaml``
 
       fMRI pipeline defaults: fMRIPrep options, GLM specification,
       confound strategy, and group-level inference.

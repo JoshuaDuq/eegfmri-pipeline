@@ -25,7 +25,7 @@ that aligns EEG features, fMRI betas, and behavioral targets across all stages.
 .. grid:: 1
    :gutter: 0
 
-   .. grid-item-card:: :octicon:`cpu;1.1em;sd-text-primary` Stage 1 — EEG Preprocessing
+   .. grid-item-card:: Stage 1 — EEG Preprocessing
       :class-card: sd-border-1
 
       **Input:** BIDS EEG (``.vhdr`` · ``.edf`` · ``.fif``) + ``events.tsv``
@@ -44,7 +44,7 @@ that aligns EEG features, fMRI betas, and behavioral targets across all stages.
 .. grid:: 1
    :gutter: 0
 
-   .. grid-item-card:: :octicon:`graph;1.1em;sd-text-success` Stage 2 — Feature Extraction (16 families)
+   .. grid-item-card:: Stage 2 — Feature Extraction (16 families)
       :class-card: sd-border-1
 
       **Input:** ``proc-clean_epo.fif`` · ``proc-clean_events.tsv``
@@ -92,7 +92,7 @@ that aligns EEG features, fMRI betas, and behavioral targets across all stages.
 .. grid:: 2
    :gutter: 2
 
-   .. grid-item-card:: :octicon:`beaker;1.1em;sd-text-warning` Stage 3a — Behavioral Statistics
+   .. grid-item-card:: Stage 3a — Behavioral Statistics
       :class-card: sd-border-1
 
       - Partial Spearman correlations + permutation p-values
@@ -105,7 +105,7 @@ that aligns EEG features, fMRI betas, and behavioral targets across all stages.
 
       **Output:** ``stats/`` (TSV / Parquet per analysis stage)
 
-   .. grid-item-card:: :octicon:`dependabot;1.1em;sd-text-danger` Stage 3b — Machine Learning
+   .. grid-item-card:: Stage 3b — Machine Learning
       :class-card: sd-border-1
 
       - Nested LOSO CV: outer LeaveOneGroupOut · inner GroupKFold
@@ -125,7 +125,7 @@ that aligns EEG features, fMRI betas, and behavioral targets across all stages.
 .. grid:: 1
    :gutter: 0
 
-   .. grid-item-card:: :octicon:`telescope;1.1em;sd-text-muted` Stage 4 — fMRI Pipeline *(optional)*
+   .. grid-item-card:: Stage 4 — fMRI Pipeline *(optional)*
       :class-card: sd-border-1
 
       **Input:** BIDS fMRI + fMRIPrep derivatives

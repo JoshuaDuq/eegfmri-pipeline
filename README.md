@@ -10,6 +10,10 @@ EEG–fMRI research. The pipeline runs from BIDS-formatted raw data through
 preprocessing, feature extraction, behavioral statistics, machine learning,
 source localization, and fMRI analysis from a single CLI or interactive TUI.
 
+This is a personal research project I started in 2025 and have been actively building ever since. It grew out of a simple frustration: running EEG and fMRI analyses typically means juggling a dozen tools, writing long terminal commands from memory, and spending more time gluing scripts together than doing actual science.
+
+My goal is to build a pipeline that anyone doing EEG or fMRI research can pick up and use, regardless of their programming background. The pipeline covers the full analysis stack from raw BIDS-formatted recordings through preprocessing, feature extraction, behavioral statistics, machine learning, fMRI GLM, and source localization. Everything runs from a single CLI or through an interactive terminal UI (TUI) that guides you through each step with wizards, so you never have to remember a flag name again.
+
 The Sphinx documentation is the canonical source for all detailed methods,
 configuration, output formats, and command references.
 

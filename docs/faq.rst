@@ -6,37 +6,37 @@ Jump to a section:
 .. grid:: 3
    :gutter: 2
 
-   .. grid-item-card:: :octicon:`download` Installation
+   .. grid-item-card:: Installation
       :link: #installation
       :link-type: url
 
       Virtual environment, PyTorch, Go TUI, missing modules.
 
-   .. grid-item-card:: :octicon:`database` Data
+   .. grid-item-card:: Data
       :link: #data
       :link-type: url
 
       Subject discovery, events files, BIDS layout.
 
-   .. grid-item-card:: :octicon:`cpu` Preprocessing
+   .. grid-item-card:: Preprocessing
       :link: #preprocessing
       :link-type: url
 
       ICA failures, epoch rejection, epoch windows.
 
-   .. grid-item-card:: :octicon:`graph` Feature Extraction
+   .. grid-item-card:: Feature Extraction
       :link: #feature-extraction
       :link-type: url
 
       Performance, aperiodic fits, parallel jobs.
 
-   .. grid-item-card:: :octicon:`dependabot` Machine Learning
+   .. grid-item-card:: Machine Learning
       :link: #machine-learning
       :link-type: url
 
       NaN metrics, feature harmonization, LOSO debugging.
 
-   .. grid-item-card:: :octicon:`telescope` fMRI & Source
+   .. grid-item-card:: fMRI & Source
       :link: #fmri-and-source-localization
       :link-type: url
 
