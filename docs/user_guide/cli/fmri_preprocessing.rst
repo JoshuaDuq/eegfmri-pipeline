@@ -1,16 +1,43 @@
 fMRI Preprocessing
 ==================
 
+.. container:: page-intro
+
+   Interface for containerized fMRIPrep execution via Docker or Apptainer.
+   This command is the pipeline's BIDS-to-derivatives entry point for fMRI
+   data and writes the preprocessed outputs consumed by downstream GLM and
+   resting-state workflows.
+
 .. note::
 
    The fMRI pipeline is **still under active development**. Container wiring,
    defaults, and derivative paths may change between releases. Confirm outputs
    after upgrades before using them in downstream analyses.
 
-Interface for containerized fMRIPrep execution via Docker or Apptainer. This
-command is the pipeline's BIDS-to-derivatives entry point for fMRI data and
-writes the preprocessed outputs consumed by downstream GLM and resting-state
-workflows.
+.. rst-class:: section-kicker
+
+At A Glance
+
+.. rst-class:: at-a-glance
+
+.. grid:: 4
+   :gutter: 2
+
+   .. grid-item-card:: Purpose
+
+      Run fMRIPrep in a containerized, pipeline-managed workflow.
+
+   .. grid-item-card:: Inputs
+
+      BIDS fMRI data, a container engine, and a valid FreeSurfer license.
+
+   .. grid-item-card:: Outputs
+
+      Preprocessed fMRI derivatives under the configured derivatives tree.
+
+   .. grid-item-card:: Read this page when
+
+      You need engine selection, output-space control, or resource and container options.
 
 **Prerequisites:**
 
@@ -74,6 +101,8 @@ Examples
 
 Key Options
 -----------
+
+.. rst-class:: doc-table
 
 .. list-table::
    :header-rows: 1

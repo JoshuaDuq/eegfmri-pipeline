@@ -1,0 +1,146 @@
+:root {
+  --color-brand-primary: #0b5f6a;
+  --color-brand-content: #0b5f6a;
+  --color-brand-secondary: #7a8f30;
+  --color-doc-accent: #d9e8ea;
+  --color-doc-surface: #f5f8f8;
+  --color-doc-border: #d7e1e3;
+  --color-doc-text-soft: #51646a;
+}
+
+body {
+  text-wrap: pretty;
+}
+
+.page-intro {
+  margin-bottom: 1.5rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--color-doc-border);
+  border-left: 0.35rem solid var(--color-brand-primary);
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, var(--color-doc-surface), transparent);
+}
+
+.section-kicker {
+  margin-bottom: 0.35rem;
+  color: var(--color-brand-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sd-card {
+  border: 1px solid var(--color-doc-border) !important;
+  border-radius: 0.85rem !important;
+  box-shadow: 0 10px 24px -22px rgb(22 53 60 / 0.6);
+}
+
+.sd-card:hover {
+  border-color: var(--color-brand-primary) !important;
+  box-shadow: 0 18px 36px -28px rgb(11 95 106 / 0.55);
+}
+
+.sd-card .sd-card-header,
+.sd-card .sd-card-body,
+.sd-card .sd-card-footer {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.sd-card-title,
+.sd-card .sd-card-header {
+  font-weight: 700;
+}
+
+.summary-grid .sd-card,
+.dashboard-grid .sd-card {
+  height: 100%;
+}
+
+.summary-grid p:last-child,
+.dashboard-grid p:last-child {
+  margin-bottom: 0;
+}
+
+.doc-table table {
+  border-collapse: collapse;
+}
+
+.doc-table th {
+  background: var(--color-doc-surface);
+}
+
+.doc-table tr:nth-child(even) td {
+  background: rgb(245 248 248 / 0.55);
+}
+
+.doc-table th,
+.doc-table td {
+  vertical-align: top;
+}
+
+.at-a-glance .sd-card {
+  background: linear-gradient(180deg, rgb(245 248 248 / 0.9), transparent);
+}
+
+.toctree-wrapper ul {
+  line-height: 1.55;
+}
+
+.admonition,
+div.admonition {
+  border-radius: 0.8rem;
+  border-width: 1px;
+}
+
+.admonition-title {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+dl.glossary dt {
+  margin-top: 1.25rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+dl.glossary dd {
+  margin-left: 1rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--color-doc-border);
+}
+
+.sidebar-brand-text {
+  letter-spacing: 0.01em;
+}
+
+@media (max-width: 768px) {
+  .page-intro {
+    padding: 0.9rem 1rem;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-brand-primary: #79c8d4;
+    --color-brand-content: #79c8d4;
+    --color-brand-secondary: #b8cc6e;
+    --color-doc-accent: #17333a;
+    --color-doc-surface: #142126;
+    --color-doc-border: #29424b;
+    --color-doc-text-soft: #a8bec4;
+  }
+
+  .page-intro {
+    background: linear-gradient(135deg, rgb(20 33 38 / 0.9), transparent);
+  }
+
+  .sd-card {
+    box-shadow: none;
+  }
+
+  .doc-table tr:nth-child(even) td {
+    background: rgb(20 33 38 / 0.65);
+  }
+}

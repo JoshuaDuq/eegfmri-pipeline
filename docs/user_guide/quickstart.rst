@@ -1,16 +1,43 @@
 Quick Start
 ===========
 
-This page walks through the operational path from installation to derivative
-outputs. Each section states the purpose of the step, the files it reads or
-writes, and the commands used to run it. Use the tab panels in
-:ref:`step 5 <qs-run>` for the full command surface of each analysis family.
+.. container:: page-intro
+
+   This page walks through the operational path from installation to derivative
+   outputs. Each section states the purpose of the step, the files it reads or
+   writes, and the commands used to run it. Use the tab panels in
+   :ref:`step 5 <qs-run>` for the full command surface of each analysis family.
 
 .. note::
 
    **New to the pipeline?** Start with the :doc:`TUI <tui>`. It exposes the
    same workflow documented here, but interactively: configuration, subject
    selection, pipeline parameters, command assembly, and execution.
+
+.. rst-class:: section-kicker
+
+At A Glance
+
+.. rst-class:: at-a-glance
+
+.. grid:: 4
+   :gutter: 2
+
+   .. grid-item-card:: Goal
+
+      Move from installation and validation to derivative outputs with the minimum required steps.
+
+   .. grid-item-card:: Primary inputs
+
+      BIDS EEG or fMRI datasets plus pipeline configuration and derivative roots.
+
+   .. grid-item-card:: Primary outputs
+
+      Clean epochs, feature tables, statistics, ML artifacts, and optional fMRI derivatives.
+
+   .. grid-item-card:: Recommended first action
+
+      Run ``eeg-pipeline validate quick`` before processing a subject or cohort.
 
 .. _qs-overview:
 

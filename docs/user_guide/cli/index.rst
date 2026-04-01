@@ -1,6 +1,12 @@
 CLI Reference
 =============
 
+.. container:: page-intro
+
+   Command reference for scripted and headless use of the pipeline. Use this
+   section when you need the exact option surface, runtime flags, or mode names
+   behind the TUI workflows.
+
 .. tip::
 
    For interactive use, the :doc:`../tui` assembles these commands through
@@ -15,10 +21,39 @@ All commands follow the same pattern:
 
 Append ``--help`` to any command for full option details.
 
+.. rst-class:: section-kicker
+
+Common Workflows
+
+.. rst-class:: summary-grid
+
+.. grid:: 3
+   :gutter: 2
+
+   .. grid-item-card:: Dataset validation
+      :link: validation
+      :link-type: doc
+
+      Validate BIDS structure, epochs, features, and behavior tables before analysis.
+
+   .. grid-item-card:: EEG pipelines
+      :link: preprocessing
+      :link-type: doc
+
+      Run preprocessing and feature extraction stages for EEG analyses.
+
+   .. grid-item-card:: fMRI pipelines
+      :link: fmri_preprocessing
+      :link-type: doc
+
+      Run containerized preprocessing and downstream fMRI analysis commands.
+
 Shared Options
 --------------
 
 Most analysis commands accept these subject-selection and runtime flags:
+
+.. rst-class:: doc-table
 
 .. list-table::
    :header-rows: 1
@@ -81,6 +116,8 @@ Most analysis commands accept these subject-selection and runtime flags:
 Command Matrix
 --------------
 
+.. rst-class:: doc-table
+
 .. list-table::
    :header-rows: 1
    :widths: 22 28 50
@@ -118,6 +155,8 @@ Command Matrix
    * - ``stats``
      - ``summary`` · ``subjects`` · ``features`` · ``storage`` · ``timeline``
      - Project-wide summaries and storage/timeline inspection.
+
+.. rst-class:: dashboard-grid
 
 .. grid:: 2
    :gutter: 3

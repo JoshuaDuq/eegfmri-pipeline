@@ -1,9 +1,12 @@
 User Guide
 ==========
 
-Operational reference for data layout, configuration, and running the
-pipeline. New users: start with :doc:`/user_guide/quickstart` in the
-*Getting Started* section of the sidebar.
+.. container:: page-intro
+
+   Operational reference for dataset layout, configuration, outputs, and
+   running the pipeline in practice. New users should start with
+   :doc:`/user_guide/quickstart`; this section is for day-to-day execution,
+   inspection, and troubleshooting.
 
 .. toctree::
    :maxdepth: 1
@@ -15,8 +18,37 @@ pipeline. New users: start with :doc:`/user_guide/quickstart` in the
    tui
    cli/index
 
+.. rst-class:: section-kicker
+
+Use This Section For
+
+.. rst-class:: summary-grid
+
+.. grid:: 3
+   :gutter: 2
+
+   .. grid-item-card:: Preparing datasets
+      :link: data_layout
+      :link-type: doc
+
+      Confirm BIDS inputs, required columns, and derivative locations before running pipelines.
+
+   .. grid-item-card:: Freezing configuration
+      :link: configuration
+      :link-type: doc
+
+      Verify YAML defaults and runtime overrides before processing a cohort.
+
+   .. grid-item-card:: Operating the pipeline
+      :link: cli/index
+      :link-type: doc
+
+      Look up exact command surfaces for scripted or headless execution.
+
 Data and Configuration
 -----------------------
+
+.. rst-class:: dashboard-grid
 
 .. grid:: 3
    :gutter: 3
@@ -44,6 +76,8 @@ Data and Configuration
 
 Operate the CLI and TUI
 -----------------------
+
+.. rst-class:: dashboard-grid
 
 .. grid:: 2
    :gutter: 3

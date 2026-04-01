@@ -1,9 +1,11 @@
 Methods Reference
 =================
 
-Scientific and algorithmic reference for each pipeline stage. These pages
-define the method-level contract for the software: notation, model choices,
-configuration keys, and output schemas.
+.. container:: page-intro
+
+   Scientific and algorithmic reference for each pipeline stage. These pages
+   define the method-level contract for the software: notation, model choices,
+   configuration keys, and output schemas.
 
 .. toctree::
    :maxdepth: 2
@@ -12,8 +14,37 @@ configuration keys, and output schemas.
    eeg/index
    fmri/index
 
+.. rst-class:: section-kicker
+
+Use This Section For
+
+.. rst-class:: summary-grid
+
+.. grid:: 3
+   :gutter: 2
+
+   .. grid-item-card:: Checking method details
+      :link: eeg/index
+      :link-type: doc
+
+      Use these pages when you need algorithm choices, defaults, and derivations.
+
+   .. grid-item-card:: Validating outputs
+      :link: ../user_guide/output_formats
+      :link-type: doc
+
+      Pair methods pages with output schemas when confirming downstream analyses.
+
+   .. grid-item-card:: Mapping commands to methods
+      :link: ../user_guide/cli/index
+      :link-type: doc
+
+      Use the CLI reference when you need the exact runtime interface for a method.
+
 EEG
 ---
+
+.. rst-class:: dashboard-grid
 
 .. grid:: 2
    :gutter: 3
@@ -57,6 +88,8 @@ EEG
 
 fMRI
 ----
+
+.. rst-class:: dashboard-grid
 
 .. grid:: 2
    :gutter: 3
