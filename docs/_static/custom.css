@@ -454,6 +454,110 @@ details.sd-dropdown .sd-summary-content p:last-child {
 }
 
 /* ---------------------------------------------------------
+   Search results — native to the academic dark palette
+   --------------------------------------------------------- */
+.search-results .context {
+  font-size: 0.835rem;
+  color: var(--color-foreground-secondary);
+  line-height: 1.6;
+  border-left: 2px solid var(--color-foreground-border);
+  padding-left: 0.75rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.search-results li {
+  border-bottom: 1px solid var(--color-background-border);
+  padding: 0.6rem 0;
+  list-style: none;
+}
+
+.search-results li:last-child {
+  border-bottom: none;
+}
+
+.search-results a {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+}
+
+.search-results a:hover {
+  text-decoration: underline;
+  color: var(--color-brand-content);
+}
+
+/* Highlighted search term */
+.search-results .highlighted {
+  background: rgba(138, 180, 212, 0.18);
+  color: var(--color-foreground-primary);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+#search-results h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-foreground-muted);
+  border-bottom: none;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* ---------------------------------------------------------
+   Mobile / narrow viewport — card grid responsiveness
+   --------------------------------------------------------- */
+@media (max-width: 700px) {
+  /* Force 2-col and 3-col grids to single column */
+  .sd-row.sd-row-cols-3 > .sd-col,
+  .sd-row.sd-row-cols-xs-3 > .sd-col {
+    width: 100% !important;
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* 2-col grids stack on very narrow screens */
+  .sd-row.sd-row-cols-2 > .sd-col,
+  .sd-row.sd-row-cols-xs-2 > .sd-col {
+    width: 100% !important;
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+  }
+
+  h1 {
+    font-size: 1.45rem;
+  }
+
+  h2 {
+    font-size: 1.05rem;
+  }
+
+  .hero-intro {
+    font-size: 0.925rem;
+  }
+
+  table.docutils {
+    font-size: 0.78rem;
+  }
+
+  table.docutils th,
+  table.docutils td {
+    padding: 0.35rem 0.5rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  div.highlight pre {
+    font-size: 0.75rem;
+  }
+
+  .sd-card-body {
+    font-size: 0.8rem !important;
+  }
+}
+
+/* ---------------------------------------------------------
    Scrollbar — thin, unobtrusive
    --------------------------------------------------------- */
 ::-webkit-scrollbar {
@@ -491,6 +595,24 @@ dl.glossary dd {
 }
 
 /* ---------------------------------------------------------
+   Step-header cards (quickstart numbered steps)
+   Single-column grid-item-card used as a milestone marker
+   --------------------------------------------------------- */
+.sd-col-12 > .sd-card,
+.sd-col-xs-12 > .sd-card {
+  border-left: 3px solid var(--color-brand-primary) !important;
+  border-radius: 0 4px 4px 0 !important;
+  background: var(--color-background-secondary) !important;
+}
+
+.sd-col-12 > .sd-card .sd-card-body,
+.sd-col-xs-12 > .sd-card .sd-card-body {
+  padding: 0.5rem 1rem !important;
+  font-size: 0.855rem !important;
+  color: var(--color-foreground-secondary) !important;
+}
+
+/* ---------------------------------------------------------
    seealso blocks
    --------------------------------------------------------- */
 .admonition.seealso {
@@ -514,5 +636,115 @@ dl.glossary dd {
   vertical-align: middle;
   border-radius: 2px;
   opacity: 0.6;
+}
+
+/* ---------------------------------------------------------
+   Print / PDF — clean scholarly output
+   --------------------------------------------------------- */
+@media print {
+  /* Light background, dark text for print */
+  body,
+  .page,
+  .content,
+  article {
+    background: #ffffff !important;
+    color: #1a1a1a !important;
+  }
+
+  /* Hide sidebar, nav, TOC, copy buttons */
+  .sidebar-drawer,
+  .toc-drawer,
+  .mobile-header,
+  .related-pages,
+  button.copybtn,
+  footer,
+  nav {
+    display: none !important;
+  }
+
+  /* Full-width content */
+  .main,
+  .content,
+  article.bd-article {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 1cm 1.5cm !important;
+  }
+
+  h1, h2, h3, h4 {
+    color: #111111 !important;
+    border-color: #cccccc !important;
+    page-break-after: avoid;
+  }
+
+  /* Keep code blocks readable */
+  div.highlight,
+  pre {
+    background: #f5f5f5 !important;
+    border: 1px solid #cccccc !important;
+    color: #1a1a1a !important;
+    font-size: 0.78rem !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    page-break-inside: avoid;
+  }
+
+  /* Flatten cards to simple bordered boxes */
+  .sd-card {
+    border: 1px solid #cccccc !important;
+    background: #fafafa !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+  }
+
+  .sd-card-header {
+    color: #2a6496 !important;
+    border-bottom-color: #cccccc !important;
+    background: #f0f0f0 !important;
+  }
+
+  .sd-card-body {
+    color: #333333 !important;
+  }
+
+  /* Tables */
+  table.docutils th {
+    background: #eeeeee !important;
+    color: #333333 !important;
+    border-color: #aaaaaa !important;
+  }
+
+  table.docutils td {
+    border-color: #dddddd !important;
+    color: #1a1a1a !important;
+  }
+
+  /* Admonitions */
+  .admonition {
+    background: #f9f9f9 !important;
+    border-left-color: #2a6496 !important;
+  }
+
+  .admonition-title {
+    color: #2a6496 !important;
+  }
+
+  /* Links — show URL in print */
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.75em;
+    color: #666666;
+  }
+
+  /* Don't annotate internal anchors or nav links */
+  a[href^="#"]::after,
+  a[href^="javascript:"]::after {
+    content: "";
+  }
+
+  .hero-intro {
+    color: #444444 !important;
+    border-left-color: #aaaaaa !important;
+  }
 }
 

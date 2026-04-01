@@ -1,41 +1,47 @@
 Interactive TUI
 ===============
 
-Terminal UI for running the EEG/fMRI pipeline without memorizing commands.
-It wraps the Python CLI (``eeg-pipeline``) with guided wizards, live execution
-output, and persistent configuration. The TUI is built with Go 1.21 and
-`Bubble Tea <https://github.com/charmbracelet/bubbletea>`_.
+.. raw:: html
+
+   <p class="hero-intro">
+     Terminal UI for running the full pipeline without memorizing commands.
+     Guided wizards handle configuration, subject selection, feature families,
+     and execution. Built with Go 1.21 +
+     <a href="https://github.com/charmbracelet/bubbletea">Bubble Tea</a>;
+     compiles to a single static binary.
+   </p>
 
 .. figure:: ../screenshots/tui_main_menu.png
    :width: 800px
    :align: center
    :alt: TUI main menu
 
-   The main menu provides access to all pipeline stages and utilities.
+   The main menu — all pipeline stages accessible through guided wizards.
 
 Build and Run
 -------------
 
-Requirements:
+.. grid:: 2
+   :gutter: 2
 
-- Go 1.21+ (verify with ``go version``)
-- A Python environment with the ``eeg_pipeline`` package installed
+   .. grid-item-card:: Requirements
 
-.. code-block:: bash
+      Go 1.21+ (``go version``) · Python env with ``eeg_pipeline`` installed
 
-   cd eeg_pipeline/cli/tui
+   .. grid-item-card:: Quick start
 
-   # Build and launch
-   go mod download
-   go build -o eeg-tui .
-   ./eeg-tui
+      .. code-block:: bash
 
-   # Or run without building a binary
-   go run main.go
+         cd eeg_pipeline/cli/tui
+         go mod download
+         go build -o eeg-tui .
+         ./eeg-tui
 
-Repository root discovery:
-the TUI searches upward for the ``eeg_pipeline`` directory and runs all Python
-commands from that repository root.
+.. note::
+
+   The TUI searches upward for the ``eeg_pipeline/`` directory and runs all
+   Python commands from that repository root. Run ``go run main.go`` to skip
+   the build step.
 
 First-Run Setup
 ~~~~~~~~~~~~~~~

@@ -1,49 +1,42 @@
 fMRI Analysis Pipeline
 ======================
 
-.. note::
+.. warning::
 
-   This fMRI pipeline is **still under active development**. APIs, defaults,
+   This pipeline is **still under active development**. APIs, defaults,
    and on-disk layouts may change between releases; re-check outputs after upgrades.
 
-**Module:** ``fmri_pipeline``
+.. raw:: html
 
-.. seealso::
+   <p class="hero-intro">
+     Containerized fMRIPrep preprocessing, first-level GLM contrast analysis,
+     second-level group inference, trial-wise beta estimation (LSA / LSS),
+     resting-state ROI connectivity, and multivariate EEG–fMRI signature
+     readout. fMRI statistical maps feed back into EEG source localization.
+   </p>
 
-   :doc:`raw_to_bids`
-      BIDS input contract and validation requirements for fMRI data.
+.. grid:: 2
+   :gutter: 2
 
-   :doc:`../eeg/source_localization`
-      EEG source localization uses fMRI contrast maps as spatial priors.
+   .. grid-item-card:: Inputs
 
-   :doc:`../../user_guide/configuration`
-      Full ``fmri_preprocessing``, ``fmri_contrast``, ``fmri_group_level``, and ``fmri_resting_state`` key reference.
+      BIDS fMRI data · fMRIPrep derivatives · ``*_events.tsv``
 
-   :doc:`../../user_guide/cli/fmri_analysis`
-      CLI flags for all fMRI analysis modes.
+   .. grid-item-card:: Outputs
 
-Methods reference for the fMRI analysis pipeline. The pipeline starts from
-:term:`BIDS`-formatted inputs and covers :term:`fMRIPrep` preprocessing,
-first-level :term:`GLM` contrast analysis, explicit second-level group inference,
-trial-wise beta estimation (:term:`LSA` / :term:`LSS`), and multivariate signature
-readout using user-configured weight maps.
+      Contrast maps · trial-wise beta volumes · group inference maps ·
+      ROI connectivity matrices
 
-The resulting fMRI statistical maps are used to constrain EEG inverse solutions
-in the source localization stage.
+   .. grid-item-card:: CLI
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-   :stub-columns: 1
+      ``eeg-pipeline fmri preprocess`` ·
+      ``eeg-pipeline fmri-analysis [first-level | second-level |
+      beta-series | lss | rest]``
 
-   * - Inputs
-     - BIDS fMRI data + fMRIPrep derivatives, ``*_events.tsv``
-   * - Outputs
-     - Contrast maps, trial-wise beta volumes, group inference maps, connectivity matrices
-   * - CLI
-     - ``eeg-pipeline fmri preprocess`` / ``eeg-pipeline fmri-analysis [first-level | second-level | beta-series | lss | rest]``
-   * - Config
-     - ``fmri_preprocessing``, ``fmri_contrast``, ``fmri_group_level``, ``fmri_resting_state`` sections
+   .. grid-item-card:: Config
+
+      ``fmri_preprocessing`` · ``fmri_contrast`` ·
+      ``fmri_group_level`` · ``fmri_resting_state``
 
 Notation
 --------

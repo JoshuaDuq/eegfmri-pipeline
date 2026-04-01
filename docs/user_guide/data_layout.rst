@@ -1,8 +1,14 @@
 Data Requirements & Layout
 ==========================
 
-All paths default to ``data/`` at the repository root and are fully configurable
-via ``paths`` in ``eeg_config.yaml``. See :doc:`configuration` for all path keys.
+.. raw:: html
+
+   <p class="hero-intro">
+     What the pipeline expects on disk: BIDS directory layout, required TSV
+     columns, and the derivatives structure produced at each stage.
+     All paths are configurable via <code>paths</code> in
+     <code>eeg_config.yaml</code>.
+   </p>
 
 EEG BIDS Layout
 ---------------

@@ -4,8 +4,9 @@ Installation
 .. raw:: html
 
    <p class="hero-intro">
-     Environment setup, optional TUI build, FreeSurfer + MNE Docker image,
-     and required environment variables.
+     Clone, create a virtual environment, and install. The TUI and Docker
+     image are optional — needed only for interactive use and EEG source
+     localization respectively.
    </p>
 
 Prerequisites
@@ -46,31 +47,40 @@ Setup
 
 .. note::
 
-   The ``[ml]`` extra adds PyTorch, required only for the CNN classifier
-   (``ml classify --classification-model cnn``). Omit it for all other
+   ``[ml]`` adds PyTorch, required only for the CNN classifier
+   (``ml classify --classification-model cnn``). For all other
    workflows: ``pip install -e ".[dev]"``.
 
-TUI
----
+TUI *(optional)*
+----------------
 
-Recommended for interactive use. Requires **Go 1.21+** and compiles to a
-single static binary with no runtime dependencies.
+.. grid:: 2
+   :gutter: 2
 
-.. code-block:: bash
+   .. grid-item-card:: What it is
 
-   cd eeg_pipeline/cli/tui && go build -o eeg-tui . && cd -
-   ./eeg_pipeline/cli/tui/eeg-tui
+      Guided wizard UI for running any pipeline stage interactively.
+      Compiles to a single static binary — no runtime dependencies.
+      Requires **Go 1.21+**.
+
+   .. grid-item-card:: Build & launch
+
+      .. code-block:: bash
+
+         cd eeg_pipeline/cli/tui
+         go build -o eeg-tui .
+         ./eeg-tui
 
 On first launch, open **Global Setup** (press ``C`` from the main menu) to
-set your task name and data paths before running any pipeline.
+set your task name and data paths. See :doc:`user_guide/tui` for the full reference.
 
-See :doc:`user_guide/tui` for the full reference.
+Docker Image (FreeSurfer + MNE) *(optional)*
+--------------------------------------------
 
-Docker Image (FreeSurfer + MNE)
---------------------------------
+.. note::
 
-Required **only** for EEG source localization (BEM generation and coregistration).
-Skip this if you are not running ``features source-localization``.
+   Required **only** for EEG source localization (BEM generation and
+   coregistration). Skip if you are not running ``features sourcelocalization``.
 
 .. code-block:: bash
 

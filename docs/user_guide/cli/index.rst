@@ -1,11 +1,14 @@
 CLI Reference
 =============
 
-.. tip::
+.. raw:: html
 
-   For interactive use, the :doc:`../tui` assembles these commands through
-   guided wizards — no flags to memorize. Use the CLI reference when
-   scripting, running headless batch jobs, or overriding specific options.
+   <p class="hero-intro">
+     Full command surface for scripting, headless batch jobs, and option
+     overrides. For interactive use, the
+     <a href="../tui.html">TUI</a> assembles these commands through guided
+     wizards — no flags to memorize.
+   </p>
 
 All commands follow the same pattern:
 
@@ -120,7 +123,7 @@ Command Matrix
      - Project-wide summaries and storage/timeline inspection.
 
 .. grid:: 2
-   :gutter: 3
+   :gutter: 2
 
    .. grid-item-card:: Preprocessing
       :link: preprocessing

@@ -1,45 +1,34 @@
 Behavioral Statistics
 =====================
 
-**Module:** ``eeg_pipeline.analysis.behavior``
+.. raw:: html
 
-.. seealso::
+   <p class="hero-intro">
+     Dependency-resolved DAG of trial-level analyses linking EEG features to
+     behavioral variables. Paradigm-agnostic: supports continuous, binary, and
+     categorical predictors. FDR correction applied throughout.
+   </p>
 
-   :doc:`features`
-      Produces the EEG feature tables consumed by the behavior pipeline.
+.. grid:: 2
+   :gutter: 2
 
-   :doc:`machine_learning`
-      Uses the same aligned events as inputs for predictive modeling.
+   .. grid-item-card:: Inputs
 
-   :doc:`../../user_guide/configuration`
-      Full ``behavior_config.yaml`` key reference.
+      ``*_proc-clean_events.tsv`` · feature Parquet tables ·
+      ``behavior_config.yaml``
 
-   :doc:`../../user_guide/cli/behavior`
-      CLI flags for behavior compute and visualize modes.
+   .. grid-item-card:: Outputs
 
-Methods reference for the behavioral statistics pipeline. Analyses run as a
-dependency-resolved DAG over aligned EEG and behavioral data. The pipeline targets
-trial-level associations between behavioral variables and EEG-derived features, with
-explicit non-i.i.d. safeguards and per-stage outputs.
+      Per-analysis TSV results · correlation matrices ·
+      condition comparison tables
 
-The pipeline is **paradigm-agnostic**: supports any combination of continuous, binary,
-or categorical predictors and any scalar outcome measure.
-Multiple comparison correction uses :term:`FDR` throughout; all Fisher-z aggregations
-are described in the :term:`Fisher-z` glossary entry.
+   .. grid-item-card:: CLI
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-   :stub-columns: 1
+      ``eeg-pipeline behavior [compute | visualize]``
 
-   * - Inputs
-     - ``*_proc-clean_events.tsv``, feature Parquet tables, ``behavior_config.yaml``
-   * - Outputs
-     - Per-analysis TSV results tables, correlation matrices, condition comparison tables
-   * - CLI
-     - ``eeg-pipeline behavior [compute | visualize]``
-   * - Config
-     - ``behavior_config.yaml``
+   .. grid-item-card:: Config
+
+      ``behavior_config.yaml`` · ``feature_engineering.analysis_mode``
 
 Notation
 --------

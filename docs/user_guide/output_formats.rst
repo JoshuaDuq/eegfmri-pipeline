@@ -1,28 +1,34 @@
 Outputs & Advanced Workflows
 ============================
 
-This page summarizes where the main derived artifacts are written and which
-workflow flags change the output shape. Use the sections below as a compact
-map, then jump to the methods reference for the scientific details.
+.. raw:: html
+
+   <p class="hero-intro">
+     Where derived artifacts are written and which workflow flags change the
+     output shape. Use these as a compact map, then follow the links to the
+     methods reference for scientific details.
+   </p>
 
 .. grid:: 2
-   :gutter: 3
+   :gutter: 2
 
    .. grid-item-card:: Feature Tables
 
-      Parquet by default, optional CSV export, with one or more tables per feature family.
+      Parquet by default · optional CSV export · one table per family with
+      a metadata JSON sidecar.
 
    .. grid-item-card:: Plot Exports
 
-      PNG by default, with SVG and PDF available through ``--formats``.
+      PNG by default · SVG and PDF via ``--formats png svg pdf``.
 
-   .. grid-item-card:: Fusion Workflows
+   .. grid-item-card:: EEG–fMRI Fusion
 
-      Trial-wise EEG→fMRI signature prediction and shared analysis modes.
+      Trial-wise EEG → fMRI signature prediction using beta-series or LSS.
 
-   .. grid-item-card:: Source / Resting-State Outputs
+   .. grid-item-card:: Source / Resting-State
 
-      Source estimates, resting-state fMRI analyses, and EEG resting-state epochs.
+      Source estimates (LCMV / eLORETA) · resting-state fMRI connectivity ·
+      EEG resting-state fixed-length epochs.
 
 .. tab-set::
 

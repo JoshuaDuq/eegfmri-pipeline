@@ -1,34 +1,42 @@
 Contributing
 ============
 
-All contributions are welcome — bug fixes, new feature families, documentation
-improvements, and test coverage. Follow the workflow below to keep changes
-reviewable and CI-passing.
+.. raw:: html
+
+   <p class="hero-intro">
+     Bug fixes, new feature families, documentation improvements, and test
+     coverage are all welcome. Follow the four-step workflow below to keep
+     changes reviewable and CI-passing.
+   </p>
 
 .. grid:: 4
    :gutter: 2
 
-   .. grid-item-card:: Branch
+   .. grid-item-card:: 1 · Branch
 
-      ``fix/``, ``feat/``,
-      ``refactor/``, ``docs/``
+      ``fix/<topic>`` ·
+      ``feat/<topic>`` ·
+      ``refactor/<topic>`` ·
+      ``docs/<topic>``
 
-   .. grid-item-card:: Commit
+   .. grid-item-card:: 2 · Commit
 
-      Short imperative subject.
-      Prefix: ``fix:``, ``feat:``,
-      ``docs:``, ``test:``
+      Short imperative subject
+      (≤ 72 chars). Prefix:
+      ``fix:`` · ``feat:`` ·
+      ``docs:`` · ``test:``
 
-   .. grid-item-card:: Test
+   .. grid-item-card:: 3 · Test
 
       ``make test`` must pass.
-      Add tests beside the
-      affected domain.
+      Add tests in
+      ``tests/<domain>/test_*.py``
+      beside the affected domain.
 
-   .. grid-item-card:: PR
+   .. grid-item-card:: 4 · PR
 
-      Summary, commands run,
-      issue link, screenshots
+      Summary · commands run ·
+      issue link · screenshots
       for TUI / docs changes.
 
 Setup

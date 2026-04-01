@@ -1,15 +1,18 @@
 API Reference
 =============
 
-Public symbols for both packages listed by module. Docstrings are rendered
-when the package is installed (``pip install -e ".[dev]"``); the tables below
-are available without a full environment.
+.. raw:: html
+
+   <p class="hero-intro">
+     Public symbols for both packages, listed by module. Docstrings render
+     when the package is installed (<code>pip install -e ".[dev]"</code>).
+   </p>
 
 .. note::
 
    Full ``autodoc`` generation requires the complete project environment.
-   In CI the build mocks heavy dependencies (see ``autodoc_mock_imports``
-   in ``docs/conf.py``). To regenerate with live docstrings locally, run
+   In CI, heavy dependencies are mocked (see ``autodoc_mock_imports`` in
+   ``docs/conf.py``). To regenerate with live docstrings locally, run
    ``make docs`` inside the activated virtual environment.
 
 .. toctree::
@@ -20,7 +23,7 @@ are available without a full environment.
    fmri_pipeline
 
 .. grid:: 2
-   :gutter: 3
+   :gutter: 2
 
    .. grid-item-card:: EEG Pipeline
       :link: eeg_pipeline

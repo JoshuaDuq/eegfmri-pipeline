@@ -1,83 +1,102 @@
 Configuration
 =============
 
-This page is the canonical reference for the public YAML configuration
-entrypoints and their keys.
+.. raw:: html
+
+   <p class="hero-intro">
+     Canonical reference for the public YAML configuration entry points and
+     their keys. Override any key at runtime with
+     <code>--set KEY=VALUE</code> without editing files.
+   </p>
 
 .. tip::
 
-   The quickest way to set paths and task name before a first run is the
-   **TUI Global Setup** screen (main menu → *Utilities → Global Setup*, or
-   press ``C``). It edits the same values without touching any YAML file.
-   See :doc:`tui` for details.
+   The quickest way to set paths and task name is the **TUI Global Setup**
+   screen (main menu → *Utilities → Global Setup*, or press ``C``). It edits
+   the same values without touching any YAML file. See :doc:`tui`.
 
-Precedence (highest wins):
-
-1. ``--set KEY=VALUE`` runtime overrides
-2. Command flags (e.g., ``--tmin``, ``--categories``, ``--engine``)
-3. YAML defaults
+**Override precedence** (highest wins): ``--set`` overrides → CLI flags → YAML defaults.
 
 .. grid:: 3
    :gutter: 2
 
    .. grid-item-card:: ``eeg_config.yaml``
 
-      EEG preprocessing, feature extraction, machine learning,
-      and fMRI integration defaults.
+      EEG preprocessing · feature extraction · machine learning ·
+      fMRI integration defaults.
 
    .. grid-item-card:: ``behavior_config.yaml``
 
-      Behavioral statistics pipeline: predictor type, analysis
-      stages, permutation settings, and FDR parameters.
+      Behavioral statistics pipeline: predictor type, analysis stages,
+      permutation settings, and FDR parameters.
 
    .. grid-item-card:: ``fmri_config.yaml``
 
-      fMRI pipeline defaults: fMRIPrep options, GLM specification,
-      confound strategy, and group-level inference.
+      fMRI pipeline: fMRIPrep options · GLM specification ·
+      confound strategy · group-level inference.
 
 .. note::
 
-   All relative ``paths`` in the YAML are resolved relative to the
-   ``eeg_pipeline/utils/config/`` directory. Use absolute paths or the
-   ``../../../`` prefix to reach ``data/`` from the default config location.
+   All relative ``paths`` are resolved from ``eeg_pipeline/utils/config/``.
+   Use absolute paths or ``../../../`` to reach ``data/`` from that location.
 
 .. _configuration-quick-nav:
 
 Quick Navigation
 ----------------
 
-Jump to the section you need:
+.. grid:: 3
+   :gutter: 2
 
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
+   .. grid-item-card:: :ref:`Project & Paths <configuration-project-paths>`
 
-   * - Section
-     - Covers
-   * - :ref:`Project & Paths <configuration-project-paths>`
-     - Task naming and all filesystem roots.
-   * - :ref:`EEG & Preprocessing <configuration-eeg-preprocessing>`
-     - Montage/reference defaults and preprocessing stage settings.
-   * - :ref:`Bad Channels (PyPREP) <configuration-pyprep>`
-     - PyPREP and RANSAC-related bad-channel detection controls.
-   * - :ref:`ICA <configuration-ica>`
-     - ICA algorithm, labeling, and ICLabel thresholds.
-   * - :ref:`Epochs <configuration-epochs>`
-     - Epoch windows, baselines, and rejection settings.
-   * - :ref:`Frequency Bands & Time Windows <configuration-bands-windows>`
-     - Default band edges and named time windows.
-   * - :ref:`Feature Engineering <configuration-feature-engineering>`
-     - Feature-family selection, transforms, and per-family controls.
-   * - :ref:`fMRI Preprocessing (fMRIPrep) <configuration-fmri-preprocessing>`
-     - Container engine and fMRIPrep defaults.
-   * - :ref:`First-Level GLM <configuration-first-level-glm>`
-     - GLM specification and condition selection.
-   * - :ref:`Second-Level (Group) Inference <configuration-second-level>`
-     - Group model and permutation inference.
-   * - :ref:`Behavioral Statistics <configuration-behavior>`
-     - Predictor type, correlation/regression, and permutation/FDR controls.
-   * - :ref:`Runtime Overrides <configuration-runtime-overrides>`
-     - Final-precedence overrides for long-tail keys.
+      Task naming and all filesystem roots.
+
+   .. grid-item-card:: :ref:`EEG & Preprocessing <configuration-eeg-preprocessing>`
+
+      Montage, reference, filtering, and preprocessing stage settings.
+
+   .. grid-item-card:: :ref:`Bad Channels <configuration-pyprep>`
+
+      PyPREP and RANSAC bad-channel detection controls.
+
+   .. grid-item-card:: :ref:`ICA <configuration-ica>`
+
+      ICA algorithm, labeling, and ICLabel thresholds.
+
+   .. grid-item-card:: :ref:`Epochs <configuration-epochs>`
+
+      Epoch windows, baselines, and rejection settings.
+
+   .. grid-item-card:: :ref:`Bands & Time Windows <configuration-bands-windows>`
+
+      Default band edges and named time windows.
+
+   .. grid-item-card:: :ref:`Feature Engineering <configuration-feature-engineering>`
+
+      Feature-family selection, transforms, and per-family controls.
+
+   .. grid-item-card:: :ref:`fMRI Preprocessing <configuration-fmri-preprocessing>`
+
+      Container engine and fMRIPrep defaults.
+
+   .. grid-item-card:: :ref:`First-Level GLM <configuration-first-level-glm>`
+
+      GLM specification and condition selection.
+
+   .. grid-item-card:: :ref:`Group Inference <configuration-second-level>`
+
+      Second-level model and permutation inference.
+
+   .. grid-item-card:: :ref:`Behavioral Statistics <configuration-behavior>`
+
+      Predictor type, correlation/regression, permutation, FDR controls.
+
+   .. grid-item-card:: :ref:`Runtime Overrides <configuration-runtime-overrides>`
+
+      Final-precedence ``--set`` overrides for long-tail keys.
+
+----
 
 .. _configuration-project-paths:
 
