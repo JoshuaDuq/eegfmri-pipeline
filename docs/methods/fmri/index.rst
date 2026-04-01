@@ -1,12 +1,8 @@
 fMRI Methods
 ============
 
-.. container:: page-intro
-
-   Scientific reference for the fMRI analysis pipeline. These pages define the
-   expected inputs, method choices, configuration keys, and derivative schemas
-   for raw-to-BIDS preparation, preprocessing, GLM analysis, and resting-state
-   workflows.
+Scientific reference for the fMRI analysis pipeline. Each page covers the
+expected inputs, methods, configuration keys, and output schemas.
 
 .. toctree::
    :maxdepth: 1
@@ -14,29 +10,6 @@ fMRI Methods
 
    raw_to_bids
    pipeline
-
-.. rst-class:: section-kicker
-
-At A Glance
-
-.. rst-class:: summary-grid
-
-.. grid:: 3
-   :gutter: 2
-
-   .. grid-item-card:: Inputs
-
-      BIDS fMRI datasets and, for analysis stages, fMRIPrep derivatives or explicitly selected raw BOLD inputs.
-
-   .. grid-item-card:: Outputs
-
-      Preprocessed fMRI derivatives, first-level contrasts, beta-series volumes, and group results.
-
-   .. grid-item-card:: Stability note
-
-      Parts of the fMRI command surface are still evolving, so confirm derivative paths after upgrades.
-
-.. rst-class:: dashboard-grid
 
 .. grid:: 2
    :gutter: 3

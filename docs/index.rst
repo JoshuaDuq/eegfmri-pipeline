@@ -1,20 +1,18 @@
 EEG–fMRI Analysis Pipeline
 ===========================
 
-.. container:: page-intro
+The EEG–fMRI Analysis Pipeline is an integrated research software stack for
+EEG, fMRI, and multimodal EEG–fMRI studies. It operates on :term:`BIDS`-organized
+data and produces documented derivatives for preprocessing, feature extraction,
+behavioral statistics, machine learning, fMRI :term:`GLM`, and EEG source
+localization workflows. All stages are accessible through a single CLI and an
+interactive terminal UI (TUI).
 
-   The EEG–fMRI Analysis Pipeline is an integrated research software stack for
-   EEG, fMRI, and multimodal EEG–fMRI studies. It operates on
-   :term:`BIDS`-organized data and produces documented derivatives for
-   preprocessing, feature extraction, behavioral statistics, machine learning,
-   fMRI :term:`GLM`, and EEG source localization workflows. All stages are
-   accessible through a single CLI and an interactive terminal UI (TUI).
-
-   The project began as an attempt to replace ad hoc research scripting with a
-   single, documented workflow that makes analysis steps easier to inspect,
-   reproduce, and rerun. The current emphasis is on explicit data contracts,
-   method-specific documentation, and practical day-to-day usability for
-   research work.
+The project began as an attempt to replace ad hoc research scripting with a
+single, documented workflow that makes analysis steps easier to inspect,
+reproduce, and rerun. The current emphasis is on explicit data contracts,
+method-specific documentation, and practical day-to-day usability for research
+work.
 
 .. admonition:: Development status
 
@@ -26,33 +24,6 @@ EEG–fMRI Analysis Pipeline
    or produces unexpected outputs, open an issue or discussion so the behavior
    can be tightened and documented.
 
-.. rst-class:: section-kicker
-
-Start Here
-
-.. rst-class:: summary-grid
-
-.. grid:: 3
-   :gutter: 2
-
-   .. grid-item-card:: New to the pipeline
-      :link: user_guide/quickstart
-      :link-type: doc
-
-      Follow the end-to-end operational path from installation to derivatives.
-
-   .. grid-item-card:: Running real analyses
-      :link: user_guide/index
-      :link-type: doc
-
-      Use the user guide for data layout, configuration, outputs, and CLI/TUI operation.
-
-   .. grid-item-card:: Inspecting methodology
-      :link: methods/index
-      :link-type: doc
-
-      Use the methods reference for algorithms, defaults, and output contracts.
-
 .. figure:: screenshots/tui_main_menu.png
    :width: 760px
    :align: center
@@ -62,12 +33,6 @@ Start Here
    no terminal commands required.
 
 ----
-
-.. rst-class:: section-kicker
-
-Documentation
-
-.. rst-class:: dashboard-grid
 
 .. grid:: 2
    :gutter: 3

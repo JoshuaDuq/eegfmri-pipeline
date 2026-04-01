@@ -115,8 +115,8 @@ intersphinx_mapping = {
 # ---------------------------------------------------------------------------
 html_theme = "furo"
 html_title = "EEG–fMRI Pipeline"
-html_static_path = ["_static"]
-html_css_files = ["docs.css"]
+html_static_path: list[str] = []
+html_css_files: list[str] = []
 
 html_theme_options = {
     "sidebar_hide_name": False,

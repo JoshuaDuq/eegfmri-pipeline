@@ -1,11 +1,8 @@
 EEG Methods
 ===========
 
-.. container:: page-intro
-
-   Scientific reference for every EEG analysis stage. Each page covers
-   notation, methods, configuration keys, and output schemas for the EEG
-   portions of the pipeline.
+Scientific reference for every EEG analysis stage. Each page covers notation,
+methods, configuration keys, and output schemas.
 
 .. toctree::
    :maxdepth: 1
@@ -16,29 +13,6 @@ EEG Methods
    behavior
    machine_learning
    source_localization
-
-.. rst-class:: section-kicker
-
-At A Glance
-
-.. rst-class:: summary-grid
-
-.. grid:: 3
-   :gutter: 2
-
-   .. grid-item-card:: Inputs
-
-      Primarily BIDS EEG plus derivative epochs and trial tables produced by preprocessing.
-
-   .. grid-item-card:: Outputs
-
-      FIF derivatives, Parquet feature tables, statistics tables, model artifacts, and ROI summaries.
-
-   .. grid-item-card:: Use these pages when
-
-      You need method assumptions, parameter meanings, or precise derivative expectations.
-
-.. rst-class:: dashboard-grid
 
 .. grid:: 2
    :gutter: 3
