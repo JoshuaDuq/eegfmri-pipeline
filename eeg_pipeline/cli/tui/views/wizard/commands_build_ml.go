@@ -331,15 +331,6 @@ func (m Model) buildMLAdvancedArgs() []string {
 		if m.mlCnnKernelSize2 != 3 {
 			args = append(args, "--cnn-kernel-size2", fmt.Sprintf("%d", m.mlCnnKernelSize2))
 		}
-		if m.mlCnnPoolSize != 2 {
-			args = append(args, "--cnn-pool-size", fmt.Sprintf("%d", m.mlCnnPoolSize))
-		}
-		if m.mlCnnDenseUnits != 128 {
-			args = append(args, "--cnn-dense-units", fmt.Sprintf("%d", m.mlCnnDenseUnits))
-		}
-		if m.mlCnnDropoutConv != 0.25 {
-			args = append(args, "--cnn-dropout-conv", fmt.Sprintf("%.6g", m.mlCnnDropoutConv))
-		}
 		if m.mlCnnDropoutDense != 0.5 {
 			args = append(args, "--cnn-dropout-dense", fmt.Sprintf("%.6g", m.mlCnnDropoutDense))
 		}
@@ -354,9 +345,6 @@ func (m Model) buildMLAdvancedArgs() []string {
 		}
 		if m.mlCnnPatience != 10 {
 			args = append(args, "--cnn-patience", fmt.Sprintf("%d", m.mlCnnPatience))
-		}
-		if m.mlCnnMinDelta != 0.001 {
-			args = append(args, "--cnn-min-delta", fmt.Sprintf("%.6g", m.mlCnnMinDelta))
 		}
 		if m.mlCnnL2Lambda != 0.01 {
 			args = append(args, "--cnn-l2-lambda", fmt.Sprintf("%.6g", m.mlCnnL2Lambda))

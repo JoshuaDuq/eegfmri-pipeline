@@ -56,12 +56,6 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.ConnectivityNetworkTopFraction
 	case plotItemConfigFieldSourceSegment:
 		return cfg.SourceSegment
-	case plotItemConfigFieldSourceHemi:
-		return cfg.SourceHemi
-	case plotItemConfigFieldSourceViews:
-		return cfg.SourceViewsSpec
-	case plotItemConfigFieldSourceCortex:
-		return cfg.SourceCortex
 	case plotItemConfigFieldSourceSubjectsDir:
 		return cfg.SourceSubjectsDir
 	case plotItemConfigFieldSourceCondition:
@@ -194,12 +188,6 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 				m.ShowToast("Unknown segment: "+unknown[0], "warning")
 			}
 		}
-	case plotItemConfigFieldSourceHemi:
-		cfg.SourceHemi = strings.TrimSpace(value)
-	case plotItemConfigFieldSourceViews:
-		cfg.SourceViewsSpec = strings.Join(strings.Fields(value), " ")
-	case plotItemConfigFieldSourceCortex:
-		cfg.SourceCortex = strings.TrimSpace(value)
 	case plotItemConfigFieldSourceSubjectsDir:
 		cfg.SourceSubjectsDir = strings.TrimSpace(value)
 	case plotItemConfigFieldSourceCondition:

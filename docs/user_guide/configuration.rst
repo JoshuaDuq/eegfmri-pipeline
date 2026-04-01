@@ -520,10 +520,6 @@ Behavioral Statistics
      - Permutation count for non-parametric tests (default ``1000``)
    * - ``behavior_analysis.regression.model``
      - Linear model variant: ``"ols"``, ``"robust"``
-   * - ``behavior_analysis.icc.model``
-     - ICC model type: ``"ICC1"``, ``"ICC2"``, ``"ICC3"`` etc. (default ``"ICC2"``)
-   * - ``behavior_analysis.temporal.n_time_bins``
-     - Number of temporal bins for time-resolved correlations
    * - ``behavior_analysis.predictor_residual.method``
      - Residualization method: ``"spline"``, ``"polynomial"``
 

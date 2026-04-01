@@ -824,7 +824,6 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	ab.addIfNonZero("--pac-height-box", m.plotPacHeightBox, "%.4f")
 	ab.addIfNonZero("--aperiodic-width-per-column", m.plotAperiodicWidthPerColumn, "%.4f")
 	ab.addIfNonZero("--aperiodic-height-per-row", m.plotAperiodicHeightPerRow, "%.4f")
-	ab.addIfNonZeroInt("--aperiodic-n-perm", m.plotAperiodicNPerm)
 	ab.addIfNonZero("--complexity-width-per-measure", m.plotComplexityWidthPerMeasure, "%.4f")
 	ab.addIfNonZero("--complexity-height-per-segment", m.plotComplexityHeightPerSegment, "%.4f")
 	ab.addIfNonZero("--connectivity-width-per-circle", m.plotConnectivityWidthPerCircle, "%.4f")
@@ -844,8 +843,6 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	ab.addSpaceListFlag("--spectral-metrics", m.plotSpectralMetricsSpec)
 	ab.addSpaceListFlag("--bursts-metrics", m.plotBurstsMetricsSpec)
 	ab.addIfNonEmpty("--asymmetry-stat", m.plotAsymmetryStatSpec)
-	ab.addSpaceListFlag("--temporal-time-bins", m.plotTemporalTimeBinsSpec)
-	ab.addSpaceListFlag("--temporal-time-labels", m.plotTemporalTimeLabelsSpec)
 
 	// Comparisons
 	ab.addOptionalBoolFlag("--compare-windows", m.plotCompareWindows)

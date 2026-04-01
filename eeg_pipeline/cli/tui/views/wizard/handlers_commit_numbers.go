@@ -473,10 +473,6 @@ func (m *Model) commitPlottingNumber(val float64) {
 		if val >= 0 {
 			m.plotAperiodicHeightPerRow = val
 		}
-	case optPlotAperiodicNPerm:
-		if val >= 0 {
-			m.plotAperiodicNPerm = int(val)
-		}
 
 	case optPlotComplexityWidthPerMeasure:
 		if val >= 0 {
@@ -1318,18 +1314,6 @@ func (m *Model) commitMLNumber(val float64) {
 		if val >= 1 {
 			m.mlCnnKernelSize2 = int(val)
 		}
-	case optMLCnnPoolSize:
-		if val >= 1 {
-			m.mlCnnPoolSize = int(val)
-		}
-	case optMLCnnDenseUnits:
-		if val >= 1 {
-			m.mlCnnDenseUnits = int(val)
-		}
-	case optMLCnnDropoutConv:
-		if val >= 0 && val < 1 {
-			m.mlCnnDropoutConv = val
-		}
 	case optMLCnnDropoutDense:
 		if val >= 0 && val < 1 {
 			m.mlCnnDropoutDense = val
@@ -1349,10 +1333,6 @@ func (m *Model) commitMLNumber(val float64) {
 	case optMLCnnPatience:
 		if val >= 1 {
 			m.mlCnnPatience = int(val)
-		}
-	case optMLCnnMinDelta:
-		if val >= 0 {
-			m.mlCnnMinDelta = val
 		}
 	case optMLCnnL2Lambda:
 		if val >= 0 {

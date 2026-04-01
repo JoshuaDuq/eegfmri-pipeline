@@ -900,7 +900,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["plotPacHeightBox"] = m.plotPacHeightBox
 	cfg["plotAperiodicWidthPerColumn"] = m.plotAperiodicWidthPerColumn
 	cfg["plotAperiodicHeightPerRow"] = m.plotAperiodicHeightPerRow
-	cfg["plotAperiodicNPerm"] = m.plotAperiodicNPerm
 	cfg["plotComplexityWidthPerMeasure"] = m.plotComplexityWidthPerMeasure
 	cfg["plotComplexityHeightPerSegment"] = m.plotComplexityHeightPerSegment
 	cfg["plotConnectivityWidthPerCircle"] = m.plotConnectivityWidthPerCircle
@@ -913,8 +912,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["plotPacPairsSpec"] = m.plotPacPairsSpec
 	cfg["plotSpectralMetricsSpec"] = m.plotSpectralMetricsSpec
 	cfg["plotBurstsMetricsSpec"] = m.plotBurstsMetricsSpec
-	cfg["plotTemporalTimeBinsSpec"] = m.plotTemporalTimeBinsSpec
-	cfg["plotTemporalTimeLabelsSpec"] = m.plotTemporalTimeLabelsSpec
 	cfg["plotAsymmetryStatSpec"] = m.plotAsymmetryStatSpec
 	cfg["plotCompareWindows"] = m.plotCompareWindows
 	cfg["plotComparisonWindowsSpec"] = m.plotComparisonWindowsSpec
@@ -978,15 +975,11 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["mlCnnFilters2"] = m.mlCnnFilters2
 	cfg["mlCnnKernelSize1"] = m.mlCnnKernelSize1
 	cfg["mlCnnKernelSize2"] = m.mlCnnKernelSize2
-	cfg["mlCnnPoolSize"] = m.mlCnnPoolSize
-	cfg["mlCnnDenseUnits"] = m.mlCnnDenseUnits
-	cfg["mlCnnDropoutConv"] = m.mlCnnDropoutConv
 	cfg["mlCnnDropoutDense"] = m.mlCnnDropoutDense
 	cfg["mlCnnBatchSize"] = m.mlCnnBatchSize
 	cfg["mlCnnEpochs"] = m.mlCnnEpochs
 	cfg["mlCnnLearningRate"] = m.mlCnnLearningRate
 	cfg["mlCnnPatience"] = m.mlCnnPatience
-	cfg["mlCnnMinDelta"] = m.mlCnnMinDelta
 	cfg["mlCnnL2Lambda"] = m.mlCnnL2Lambda
 	cfg["mlCnnRandomSeed"] = m.mlCnnRandomSeed
 
@@ -2091,7 +2084,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.plotPacHeightBox = getFloat("plotPacHeightBox", m.plotPacHeightBox)
 	m.plotAperiodicWidthPerColumn = getFloat("plotAperiodicWidthPerColumn", m.plotAperiodicWidthPerColumn)
 	m.plotAperiodicHeightPerRow = getFloat("plotAperiodicHeightPerRow", m.plotAperiodicHeightPerRow)
-	m.plotAperiodicNPerm = getInt("plotAperiodicNPerm", m.plotAperiodicNPerm)
 	m.plotComplexityWidthPerMeasure = getFloat("plotComplexityWidthPerMeasure", m.plotComplexityWidthPerMeasure)
 	m.plotComplexityHeightPerSegment = getFloat("plotComplexityHeightPerSegment", m.plotComplexityHeightPerSegment)
 	m.plotConnectivityWidthPerCircle = getFloat("plotConnectivityWidthPerCircle", m.plotConnectivityWidthPerCircle)
@@ -2104,8 +2096,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.plotPacPairsSpec = getString("plotPacPairsSpec", m.plotPacPairsSpec)
 	m.plotSpectralMetricsSpec = getString("plotSpectralMetricsSpec", m.plotSpectralMetricsSpec)
 	m.plotBurstsMetricsSpec = getString("plotBurstsMetricsSpec", m.plotBurstsMetricsSpec)
-	m.plotTemporalTimeBinsSpec = getString("plotTemporalTimeBinsSpec", m.plotTemporalTimeBinsSpec)
-	m.plotTemporalTimeLabelsSpec = getString("plotTemporalTimeLabelsSpec", m.plotTemporalTimeLabelsSpec)
 	m.plotAsymmetryStatSpec = getString("plotAsymmetryStatSpec", m.plotAsymmetryStatSpec)
 	if v, ok := cfg["plotCompareWindows"].(bool); ok {
 		m.plotCompareWindows = &v
@@ -2173,15 +2163,11 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.mlCnnFilters2 = getInt("mlCnnFilters2", m.mlCnnFilters2)
 	m.mlCnnKernelSize1 = getInt("mlCnnKernelSize1", m.mlCnnKernelSize1)
 	m.mlCnnKernelSize2 = getInt("mlCnnKernelSize2", m.mlCnnKernelSize2)
-	m.mlCnnPoolSize = getInt("mlCnnPoolSize", m.mlCnnPoolSize)
-	m.mlCnnDenseUnits = getInt("mlCnnDenseUnits", m.mlCnnDenseUnits)
-	m.mlCnnDropoutConv = getFloat("mlCnnDropoutConv", m.mlCnnDropoutConv)
 	m.mlCnnDropoutDense = getFloat("mlCnnDropoutDense", m.mlCnnDropoutDense)
 	m.mlCnnBatchSize = getInt("mlCnnBatchSize", m.mlCnnBatchSize)
 	m.mlCnnEpochs = getInt("mlCnnEpochs", m.mlCnnEpochs)
 	m.mlCnnLearningRate = getFloat("mlCnnLearningRate", m.mlCnnLearningRate)
 	m.mlCnnPatience = getInt("mlCnnPatience", m.mlCnnPatience)
-	m.mlCnnMinDelta = getFloat("mlCnnMinDelta", m.mlCnnMinDelta)
 	m.mlCnnL2Lambda = getFloat("mlCnnL2Lambda", m.mlCnnL2Lambda)
 	m.mlCnnRandomSeed = getInt("mlCnnRandomSeed", m.mlCnnRandomSeed)
 

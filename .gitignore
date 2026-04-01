@@ -61,6 +61,8 @@ AGENTS.md
 .AGENTS.md
 agents.md
 .cursor/
+.agents/skills/
+skills-lock.json
 .codex/
 .aider*
 .continue/

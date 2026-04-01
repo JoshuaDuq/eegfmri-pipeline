@@ -286,7 +286,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     overrides.add_argument("--aperiodic-width-per-column", type=float, default=None, help="Aperiodic plot width per column (default from config)")
     overrides.add_argument("--aperiodic-height-per-row", type=float, default=None, help="Aperiodic plot height per row (default from config)")
-    overrides.add_argument("--aperiodic-n-perm", type=int, default=None, help="Aperiodic permutation count for comparisons (default from config)")
 
 
     overrides.add_argument("--complexity-width-per-measure", type=float, default=None, help="Complexity plot width per measure (default from config)")

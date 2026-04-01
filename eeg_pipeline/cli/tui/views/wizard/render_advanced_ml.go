@@ -36,9 +36,8 @@ func isMLRenderedOption(opt optionType) bool {
 		optMLEnsembleCalibrate,
 		optMLGroupCNN,
 		optMLCnnFilters1, optMLCnnFilters2, optMLCnnKernelSize1, optMLCnnKernelSize2,
-		optMLCnnPoolSize, optMLCnnDenseUnits, optMLCnnDropoutConv, optMLCnnDropoutDense,
-		optMLCnnBatchSize, optMLCnnEpochs, optMLCnnLearningRate, optMLCnnPatience,
-		optMLCnnMinDelta, optMLCnnL2Lambda, optMLCnnRandomSeed,
+		optMLCnnDropoutDense, optMLCnnBatchSize, optMLCnnEpochs, optMLCnnLearningRate, optMLCnnPatience,
+		optMLCnnL2Lambda, optMLCnnRandomSeed,
 		optMLGroupPreprocessing,
 		optMLImputer, optMLPowerTransformerMethod, optMLPowerTransformerStandardize,
 		optMLDeconfound, optMLFeatureSelectionPercentile, optMLSpatialRegionsAllowed,
@@ -372,12 +371,6 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "Conv1 Kernel Size", fmt.Sprintf("%d", m.mlCnnKernelSize1), "first conv kernel"
 		case optMLCnnKernelSize2:
 			label, value, hint = "Conv2 Kernel Size", fmt.Sprintf("%d", m.mlCnnKernelSize2), "second conv kernel"
-		case optMLCnnPoolSize:
-			label, value, hint = "Pool Size", fmt.Sprintf("%d", m.mlCnnPoolSize), "max pooling"
-		case optMLCnnDenseUnits:
-			label, value, hint = "Dense Units", fmt.Sprintf("%d", m.mlCnnDenseUnits), "FC layer units"
-		case optMLCnnDropoutConv:
-			label, value, hint = "Conv Dropout", fmt.Sprintf("%.6g", m.mlCnnDropoutConv), "0-1"
 		case optMLCnnDropoutDense:
 			label, value, hint = "Dense Dropout", fmt.Sprintf("%.6g", m.mlCnnDropoutDense), "0-1"
 		case optMLCnnBatchSize:
@@ -388,8 +381,6 @@ func (m Model) renderMLAdvancedConfig() string {
 			label, value, hint = "Learning Rate", fmt.Sprintf("%.6g", m.mlCnnLearningRate), "optimizer LR"
 		case optMLCnnPatience:
 			label, value, hint = "Early Stop Patience", fmt.Sprintf("%d", m.mlCnnPatience), "epochs without improvement"
-		case optMLCnnMinDelta:
-			label, value, hint = "Early Stop Min Delta", fmt.Sprintf("%.6g", m.mlCnnMinDelta), "minimum improvement"
 		case optMLCnnL2Lambda:
 			label, value, hint = "L2 Lambda", fmt.Sprintf("%.6g", m.mlCnnL2Lambda), "weight decay"
 		case optMLCnnRandomSeed:

@@ -410,8 +410,6 @@ def _apply_plot_sizing_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "plotting.plots.aperiodic.width_per_column", float(args.aperiodic_width_per_column))
     if _get_arg_value(args, "aperiodic_height_per_row") is not None:
         _apply_config_override(config, "plotting.plots.aperiodic.height_per_row", float(args.aperiodic_height_per_row))
-    if _get_arg_value(args, "aperiodic_n_perm") is not None:
-        _apply_config_override(config, "plotting.plots.aperiodic.n_perm", int(args.aperiodic_n_perm))
     if _get_arg_value(args, "complexity_width_per_measure") is not None:
         _apply_config_override(config, "plotting.plots.complexity.width_per_measure", float(args.complexity_width_per_measure))
     if _get_arg_value(args, "complexity_height_per_segment") is not None:
@@ -442,20 +440,10 @@ def _apply_feature_selection_overrides(args: argparse.Namespace, config: Any) ->
         _apply_config_override(config, "plotting.plots.features.bursts.metrics", list(args.bursts_metrics))
     if _get_arg_value(args, "asymmetry_stat"):
         _apply_config_override(config, "plotting.plots.features.asymmetry.stat", str(args.asymmetry_stat))
-    if _get_arg_value(args, "temporal_time_bins"):
-        _apply_config_override(config, "plotting.plots.features.temporal.time_bins", list(args.temporal_time_bins))
-    if _get_arg_value(args, "temporal_time_labels"):
-        _apply_config_override(config, "plotting.plots.features.temporal.time_labels", list(args.temporal_time_labels))
 
 
 def _apply_source_localization_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply source localization plot overrides."""
-    if _get_arg_value(args, "source_plot_hemi"):
-        _apply_config_override(config, "plotting.plots.features.sourcelocalization.hemi", str(args.source_plot_hemi))
-    if _get_arg_value(args, "source_plot_views"):
-        _apply_config_override(config, "plotting.plots.features.sourcelocalization.views", list(args.source_plot_views))
-    if _get_arg_value(args, "source_plot_cortex"):
-        _apply_config_override(config, "plotting.plots.features.sourcelocalization.cortex", str(args.source_plot_cortex))
     if _get_arg_value(args, "source_subjects_dir"):
         _apply_config_override(config, "feature_engineering.sourcelocalization.subjects_dir", str(args.source_subjects_dir))
 

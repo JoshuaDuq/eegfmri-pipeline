@@ -324,18 +324,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.plotSpectralMetricsSpec
 	case textFieldPlotBurstsMetrics:
 		return m.plotBurstsMetricsSpec
-	case textFieldPlotTemporalTimeBins:
-		return m.plotTemporalTimeBinsSpec
-	case textFieldPlotTemporalTimeLabels:
-		return m.plotTemporalTimeLabelsSpec
 	case textFieldPlotAsymmetryStat:
 		return m.plotAsymmetryStatSpec
-	case textFieldPlotSourceHemi:
-		return m.plotSourceHemi
-	case textFieldPlotSourceViews:
-		return m.plotSourceViews
-	case textFieldPlotSourceCortex:
-		return m.plotSourceCortex
 	case textFieldPlotSourceSubjectsDir:
 		return m.plotSourceSubjectsDir
 	case textFieldPlotComparisonWindows:
@@ -794,18 +784,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.plotSpectralMetricsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotBurstsMetrics:
 		m.plotBurstsMetricsSpec = strings.Join(strings.Fields(value), " ")
-	case textFieldPlotTemporalTimeBins:
-		m.plotTemporalTimeBinsSpec = strings.Join(strings.Fields(value), " ")
-	case textFieldPlotTemporalTimeLabels:
-		m.plotTemporalTimeLabelsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotAsymmetryStat:
 		m.plotAsymmetryStatSpec = value
-	case textFieldPlotSourceHemi:
-		m.plotSourceHemi = value
-	case textFieldPlotSourceViews:
-		m.plotSourceViews = strings.Join(strings.Fields(value), " ")
-	case textFieldPlotSourceCortex:
-		m.plotSourceCortex = value
 	case textFieldPlotSourceSubjectsDir:
 		m.plotSourceSubjectsDir = strings.TrimSpace(value)
 	case textFieldPlotComparisonWindows:

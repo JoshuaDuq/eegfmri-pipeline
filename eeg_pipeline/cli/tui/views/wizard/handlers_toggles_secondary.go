@@ -219,12 +219,11 @@ func (m *Model) toggleMLAdvancedOption() {
 		m.mlGroupCNNExpanded = !m.mlGroupCNNExpanded
 		m.useDefaultAdvanced = false
 	case optMLCnnFilters1, optMLCnnFilters2, optMLCnnKernelSize1, optMLCnnKernelSize2,
-		optMLCnnPoolSize, optMLCnnDenseUnits, optMLCnnBatchSize, optMLCnnEpochs,
+		optMLCnnBatchSize, optMLCnnEpochs,
 		optMLCnnPatience, optMLCnnRandomSeed:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optMLCnnDropoutConv, optMLCnnDropoutDense, optMLCnnLearningRate,
-		optMLCnnMinDelta, optMLCnnL2Lambda:
+	case optMLCnnDropoutDense, optMLCnnLearningRate, optMLCnnL2Lambda:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// CV / Evaluation / Analysis

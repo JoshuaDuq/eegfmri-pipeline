@@ -579,9 +579,6 @@ const (
 	plotItemConfigFieldConnectivityCircleMinLines
 	plotItemConfigFieldConnectivityNetworkTopFraction
 	plotItemConfigFieldSourceSegment
-	plotItemConfigFieldSourceHemi
-	plotItemConfigFieldSourceViews
-	plotItemConfigFieldSourceCortex
 	plotItemConfigFieldSourceSubjectsDir
 	plotItemConfigFieldSourceCondition
 	plotItemConfigFieldSourceConditionA
@@ -788,12 +785,7 @@ const (
 	textFieldPlotConnectivityMeasures
 	textFieldPlotSpectralMetrics
 	textFieldPlotBurstsMetrics
-	textFieldPlotTemporalTimeBins
-	textFieldPlotTemporalTimeLabels
 	textFieldPlotAsymmetryStat
-	textFieldPlotSourceHemi
-	textFieldPlotSourceViews
-	textFieldPlotSourceCortex
 	textFieldPlotSourceSubjectsDir
 	// Machine Learning advanced config text fields
 	textFieldMLTarget
@@ -1474,7 +1466,6 @@ type Model struct {
 
 	plotAperiodicWidthPerColumn float64
 	plotAperiodicHeightPerRow   float64
-	plotAperiodicNPerm          int
 
 	plotComplexityWidthPerMeasure  float64
 	plotComplexityHeightPerSegment float64
@@ -1490,13 +1481,8 @@ type Model struct {
 	plotPacPairsSpec             string
 	plotSpectralMetricsSpec      string
 	plotBurstsMetricsSpec        string
-	plotTemporalTimeBinsSpec     string
-	plotTemporalTimeLabelsSpec   string
 	plotAsymmetryStatSpec        string
 
-	plotSourceHemi        string
-	plotSourceViews       string
-	plotSourceCortex      string
 	plotSourceSubjectsDir string
 
 	// Plotting comparisons (global)
@@ -2234,15 +2220,11 @@ type Model struct {
 	mlCnnFilters2      int     // Conv2 filters
 	mlCnnKernelSize1   int     // Conv1 kernel size
 	mlCnnKernelSize2   int     // Conv2 kernel size
-	mlCnnPoolSize      int     // Max pool size
-	mlCnnDenseUnits    int     // Dense layer units
-	mlCnnDropoutConv   float64 // Conv dropout rate
 	mlCnnDropoutDense  float64 // Dense dropout rate
 	mlCnnBatchSize     int     // Training batch size
 	mlCnnEpochs        int     // Training epochs
 	mlCnnLearningRate  float64 // Learning rate
 	mlCnnPatience      int     // Early stopping patience
-	mlCnnMinDelta      float64 // Early stopping min delta
 	mlCnnL2Lambda      float64 // L2 regularization
 	mlCnnRandomSeed    int     // CNN random seed
 
@@ -3039,15 +3021,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mlCnnFilters2:     64,
 		mlCnnKernelSize1:  3,
 		mlCnnKernelSize2:  3,
-		mlCnnPoolSize:     2,
-		mlCnnDenseUnits:   128,
-		mlCnnDropoutConv:  0.25,
 		mlCnnDropoutDense: 0.5,
 		mlCnnBatchSize:    32,
 		mlCnnEpochs:       100,
 		mlCnnLearningRate: 0.001,
 		mlCnnPatience:     10,
-		mlCnnMinDelta:     0.001,
 		mlCnnL2Lambda:     0.01,
 		mlCnnRandomSeed:   42,
 

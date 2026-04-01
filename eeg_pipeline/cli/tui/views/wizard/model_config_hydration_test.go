@@ -759,9 +759,6 @@ func TestApplyConfigKeys_HydratesPlottingSourceLocalizationAndComparisons(t *tes
 	m := New(types.PipelinePlotting, ".")
 	values := map[string]interface{}{
 		"feature_engineering.sourcelocalization.subjects_dir": "/fs/subjects",
-		"plotting.plots.features.sourcelocalization.hemi":     "both",
-		"plotting.plots.features.sourcelocalization.views":    []interface{}{"lateral", "medial"},
-		"plotting.plots.features.sourcelocalization.cortex":   "classic",
 		"plotting.comparisons.compare_windows":                true,
 		"plotting.comparisons.comparison_windows":             []interface{}{"baseline", "plateau"},
 		"plotting.comparisons.compare_columns":                false,
@@ -777,15 +774,6 @@ func TestApplyConfigKeys_HydratesPlottingSourceLocalizationAndComparisons(t *tes
 
 	if m.plotSourceSubjectsDir != "/fs/subjects" {
 		t.Fatalf("expected plotSourceSubjectsDir '/fs/subjects', got %q", m.plotSourceSubjectsDir)
-	}
-	if m.plotSourceHemi != "both" {
-		t.Fatalf("expected plotSourceHemi='both', got %q", m.plotSourceHemi)
-	}
-	if m.plotSourceViews != "lateral medial" {
-		t.Fatalf("expected plotSourceViews='lateral medial', got %q", m.plotSourceViews)
-	}
-	if m.plotSourceCortex != "classic" {
-		t.Fatalf("expected plotSourceCortex='classic', got %q", m.plotSourceCortex)
 	}
 	if m.plotCompareWindows == nil || !*m.plotCompareWindows {
 		t.Fatalf("expected plotCompareWindows=true")
@@ -834,8 +822,6 @@ func TestApplyConfigKeys_HydratesPlottingConnectivityAndSelectionOverrides(t *te
 		"plotting.plots.features.spectral.metrics":                  []interface{}{"peak_frequency", "iaf"},
 		"plotting.plots.features.bursts.metrics":                    []interface{}{"rate", "duration"},
 		"plotting.plots.features.asymmetry.stat":                    "effect_size_d",
-		"plotting.plots.features.temporal.time_bins":                []interface{}{"early", "late"},
-		"plotting.plots.features.temporal.time_labels":              []interface{}{"Early", "Late"},
 	}
 
 	m.ApplyConfigKeys(values)
@@ -872,12 +858,6 @@ func TestApplyConfigKeys_HydratesPlottingConnectivityAndSelectionOverrides(t *te
 	}
 	if m.plotAsymmetryStatSpec != "effect_size_d" {
 		t.Fatalf("expected plotAsymmetryStatSpec='effect_size_d', got %q", m.plotAsymmetryStatSpec)
-	}
-	if m.plotTemporalTimeBinsSpec != "early late" {
-		t.Fatalf("expected plotTemporalTimeBinsSpec='early late', got %q", m.plotTemporalTimeBinsSpec)
-	}
-	if m.plotTemporalTimeLabelsSpec != "Early Late" {
-		t.Fatalf("expected plotTemporalTimeLabelsSpec='Early Late', got %q", m.plotTemporalTimeLabelsSpec)
 	}
 }
 
@@ -929,7 +909,6 @@ func TestApplyConfigKeys_HydratesPlottingDefaultsStylingAndTfrConfig(t *testing.
 		"plotting.plots.power.height_per_segment":                        5.5,
 		"plotting.plots.itpc.width_per_bin":                              2.2,
 		"plotting.plots.pac.cmap":                                        "magma",
-		"plotting.plots.aperiodic.n_perm":                                float64(2000),
 		"plotting.plots.complexity.width_per_measure":                    3.3,
 	}
 
@@ -1010,7 +989,7 @@ func TestApplyConfigKeys_HydratesPlottingDefaultsStylingAndTfrConfig(t *testing.
 	if m.plotRoiWidthPerBand != 4.0 || m.plotPowerHeightPerSegment != 5.5 || m.plotItpcWidthPerBin != 2.2 {
 		t.Fatalf("expected sizing settings hydrated, got roi=%v power=%v itpc=%v", m.plotRoiWidthPerBand, m.plotPowerHeightPerSegment, m.plotItpcWidthPerBin)
 	}
-	if m.plotPacCmap != "magma" || m.plotAperiodicNPerm != 2000 || m.plotComplexityWidthPerMeasure != 3.3 {
-		t.Fatalf("expected pac/aperiodic/complexity settings hydrated, got pac=%q aper=%d comp=%v", m.plotPacCmap, m.plotAperiodicNPerm, m.plotComplexityWidthPerMeasure)
+	if m.plotPacCmap != "magma" || m.plotComplexityWidthPerMeasure != 3.3 {
+		t.Fatalf("expected pac/complexity settings hydrated, got pac=%q comp=%v", m.plotPacCmap, m.plotComplexityWidthPerMeasure)
 	}
 }

@@ -1715,21 +1715,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.plotSourceSubjectsDir = s
 			}
 		}},
-		{key: "plotting.plots.features.sourcelocalization.hemi", apply: func(v interface{}) {
-			if s, ok := asString(v); ok {
-				m.plotSourceHemi = s
-			}
-		}},
-		{key: "plotting.plots.features.sourcelocalization.views", apply: func(v interface{}) {
-			if list, ok := asStringList(v); ok && len(list) > 0 {
-				m.plotSourceViews = strings.Join(list, " ")
-			}
-		}},
-		{key: "plotting.plots.features.sourcelocalization.cortex", apply: func(v interface{}) {
-			if s, ok := asString(v); ok {
-				m.plotSourceCortex = s
-			}
-		}},
 		{key: "plotting.plots.features.sourcelocalization.subjects_dir", apply: func(v interface{}) {
 			if s, ok := asString(v); ok && strings.TrimSpace(s) != "" {
 				m.plotSourceSubjectsDir = s
@@ -1788,16 +1773,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "plotting.plots.features.asymmetry.stat", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				m.plotAsymmetryStatSpec = strings.TrimSpace(s)
-			}
-		}},
-		{key: "plotting.plots.features.temporal.time_bins", apply: func(v interface{}) {
-			if list, ok := asStringList(v); ok && len(list) > 0 {
-				m.plotTemporalTimeBinsSpec = strings.Join(list, " ")
-			}
-		}},
-		{key: "plotting.plots.features.temporal.time_bin_labels", apply: func(v interface{}) {
-			if list, ok := asStringList(v); ok && len(list) > 0 {
-				m.plotTemporalTimeLabelsSpec = strings.Join(list, " ")
 			}
 		}},
 		{key: "plotting.comparisons.compare_windows", apply: func(v interface{}) {
@@ -2623,21 +2598,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				m.mlCnnKernelSize2 = n
 			}
 		}},
-		{key: "machine_learning.models.cnn.pool_size", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.mlCnnPoolSize = n
-			}
-		}},
-		{key: "machine_learning.models.cnn.dense_units", apply: func(v interface{}) {
-			if n, ok := asInt(v); ok {
-				m.mlCnnDenseUnits = n
-			}
-		}},
-		{key: "machine_learning.models.cnn.dropout_conv", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.mlCnnDropoutConv = f
-			}
-		}},
 		{key: "machine_learning.models.cnn.dropout", apply: func(v interface{}) {
 			if f, ok := asFloat(v); ok {
 				m.mlCnnDropoutDense = f
@@ -2661,11 +2621,6 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		{key: "machine_learning.models.cnn.patience", apply: func(v interface{}) {
 			if n, ok := asInt(v); ok {
 				m.mlCnnPatience = n
-			}
-		}},
-		{key: "machine_learning.models.cnn.min_delta", apply: func(v interface{}) {
-			if f, ok := asFloat(v); ok {
-				m.mlCnnMinDelta = f
 			}
 		}},
 		{key: "machine_learning.models.cnn.weight_decay", apply: func(v interface{}) {
@@ -3263,12 +3218,8 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		bindFloat("plotting.plots.pac.height_box", func(f float64) { m.plotPacHeightBox = f }),
 		bindFloat("plotting.plots.aperiodic.width_per_column", func(f float64) { m.plotAperiodicWidthPerColumn = f }),
 		bindFloat("plotting.plots.aperiodic.height_per_row", func(f float64) { m.plotAperiodicHeightPerRow = f }),
-		bindInt("plotting.plots.aperiodic.n_perm", func(n int) { m.plotAperiodicNPerm = n }),
 		bindFloat("plotting.plots.complexity.width_per_measure", func(f float64) { m.plotComplexityWidthPerMeasure = f }),
 		bindFloat("plotting.plots.complexity.height_per_segment", func(f float64) { m.plotComplexityHeightPerSegment = f }),
-		bindStringList("plotting.plots.features.temporal.time_labels", func(list []string) {
-			m.plotTemporalTimeLabelsSpec = strings.Join(list, " ")
-		}),
 	)
 
 	for _, b := range binders {

@@ -1174,8 +1174,7 @@ func (m *Model) togglePlottingAdvancedOption() {
 				m.startPlotTextEdit(row.plotID, row.plotField)
 			}
 			m.useDefaultAdvanced = false
-		case plotItemConfigFieldSourceHemi, plotItemConfigFieldSourceViews, plotItemConfigFieldSourceCortex,
-			plotItemConfigFieldSourceSubjectsDir, plotItemConfigFieldSourceConditionA, plotItemConfigFieldSourceConditionB:
+		case plotItemConfigFieldSourceSubjectsDir, plotItemConfigFieldSourceConditionA, plotItemConfigFieldSourceConditionB:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonValues:
@@ -1483,7 +1482,6 @@ func (m *Model) togglePlottingAdvancedOption() {
 		optPlotPacHeightBox,
 		optPlotAperiodicWidthPerColumn,
 		optPlotAperiodicHeightPerRow,
-		optPlotAperiodicNPerm,
 		optPlotComplexityWidthPerMeasure,
 		optPlotComplexityHeightPerSegment,
 		optPlotConnectivityWidthPerCircle,
@@ -1532,21 +1530,6 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPlotAsymmetryStat:
 		m.startTextEdit(textFieldPlotAsymmetryStat)
-		m.useDefaultAdvanced = false
-	case optPlotTemporalTimeBins:
-		m.startTextEdit(textFieldPlotTemporalTimeBins)
-		m.useDefaultAdvanced = false
-	case optPlotTemporalTimeLabels:
-		m.startTextEdit(textFieldPlotTemporalTimeLabels)
-		m.useDefaultAdvanced = false
-	case optPlotSourceHemi:
-		m.startTextEdit(textFieldPlotSourceHemi)
-		m.useDefaultAdvanced = false
-	case optPlotSourceViews:
-		m.startTextEdit(textFieldPlotSourceViews)
-		m.useDefaultAdvanced = false
-	case optPlotSourceCortex:
-		m.startTextEdit(textFieldPlotSourceCortex)
 		m.useDefaultAdvanced = false
 	case optPlotSourceSubjectsDir:
 		m.startTextEdit(textFieldPlotSourceSubjectsDir)

@@ -783,15 +783,6 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 			lines = append(lines, expandedLines...)
 		}
 		return lines
-	case plotItemConfigFieldSourceHemi:
-		value := m.getPlotFieldTextValue(cfg.SourceHemi, "both", row, plotItemConfigFieldSourceHemi)
-		return []renderLine{m.renderPlotValueLine("source_hemi", value, "lh, rh, or both", focused, labelWidth)}
-	case plotItemConfigFieldSourceViews:
-		value := m.getPlotFieldTextValue(cfg.SourceViewsSpec, "lateral medial", row, plotItemConfigFieldSourceViews)
-		return []renderLine{m.renderPlotValueLine("source_views", value, "space-separated views", focused, labelWidth)}
-	case plotItemConfigFieldSourceCortex:
-		value := m.getPlotFieldTextValue(cfg.SourceCortex, "classic", row, plotItemConfigFieldSourceCortex)
-		return []renderLine{m.renderPlotValueLine("source_cortex", value, "colormap (e.g. classic)", focused, labelWidth)}
 	case plotItemConfigFieldSourceSubjectsDir:
 		value := m.getPlotFieldTextValue(cfg.SourceSubjectsDir, "(auto)", row, plotItemConfigFieldSourceSubjectsDir)
 		return []renderLine{m.renderPlotValueLine("source_subjects_dir", value, "FreeSurfer subjects dir", focused, labelWidth)}
@@ -1643,9 +1634,6 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optPlotAperiodicHeightPerRow:
 		value := m.getFloatFieldValue(optPlotAperiodicHeightPerRow, m.plotAperiodicHeightPerRow, plotDefaults.aperiodicHeightPerRow, "%.4f")
 		return []renderLine{m.renderValueLine(opt, "aper_h_per_row", value, "float", focused, labelWidth)}
-	case optPlotAperiodicNPerm:
-		value := m.getIntFieldValue(optPlotAperiodicNPerm, m.plotAperiodicNPerm, 0)
-		return []renderLine{m.renderValueLine(opt, "aper_n_perm", value, "int", focused, labelWidth)}
 	case optPlotComplexityWidthPerMeasure:
 		value := m.getFloatFieldValue(optPlotComplexityWidthPerMeasure, m.plotComplexityWidthPerMeasure, plotDefaults.complexityWidthPerMeasure, "%.4f")
 		return []renderLine{m.renderValueLine(opt, "comp_w_per_meas", value, "float", focused, labelWidth)}
@@ -1686,21 +1674,6 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 	case optPlotAsymmetryStat:
 		value := m.formatTextFieldWithBuffer(textFieldPlotAsymmetryStat, m.plotAsymmetryStatSpec, "index")
 		return []renderLine{m.renderValueLine(opt, "asymmetry_stat", value, "e.g. index", focused, labelWidth)}
-	case optPlotTemporalTimeBins:
-		value := m.formatTextFieldWithBuffer(textFieldPlotTemporalTimeBins, m.plotTemporalTimeBinsSpec, "")
-		return []renderLine{m.renderValueLine(opt, "temporal_bins", value, "space-separated", focused, labelWidth)}
-	case optPlotTemporalTimeLabels:
-		value := m.formatTextFieldWithBuffer(textFieldPlotTemporalTimeLabels, m.plotTemporalTimeLabelsSpec, "")
-		return []renderLine{m.renderValueLine(opt, "temporal_labels", value, "space-separated", focused, labelWidth)}
-	case optPlotSourceHemi:
-		value := m.formatTextFieldWithBuffer(textFieldPlotSourceHemi, m.plotSourceHemi, "both")
-		return []renderLine{m.renderValueLine(opt, "hemi", value, "lh, rh, or both", focused, labelWidth)}
-	case optPlotSourceViews:
-		value := m.formatTextFieldWithBuffer(textFieldPlotSourceViews, m.plotSourceViews, "lateral medial")
-		return []renderLine{m.renderValueLine(opt, "views", value, "lateral, medial, etc.", focused, labelWidth)}
-	case optPlotSourceCortex:
-		value := m.formatTextFieldWithBuffer(textFieldPlotSourceCortex, m.plotSourceCortex, "classic")
-		return []renderLine{m.renderValueLine(opt, "cortex", value, "colormap (e.g. classic, bone)", focused, labelWidth)}
 	case optPlotSourceSubjectsDir:
 		value := m.formatTextFieldWithBuffer(textFieldPlotSourceSubjectsDir, m.plotSourceSubjectsDir, "")
 		return []renderLine{m.renderValueLine(opt, "subjects_dir", value, "path to freesurfer subjects", focused, labelWidth)}

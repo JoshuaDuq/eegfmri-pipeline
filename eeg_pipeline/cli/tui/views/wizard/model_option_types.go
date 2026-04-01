@@ -711,7 +711,6 @@ const (
 	optPlotPacHeightBox
 	optPlotAperiodicWidthPerColumn
 	optPlotAperiodicHeightPerRow
-	optPlotAperiodicNPerm
 	optPlotComplexityWidthPerMeasure
 	optPlotComplexityHeightPerSegment
 	optPlotConnectivityWidthPerCircle
@@ -725,13 +724,8 @@ const (
 	optPlotSpectralMetrics
 	optPlotBurstsMetrics
 	optPlotAsymmetryStat
-	optPlotTemporalTimeBins
-	optPlotTemporalTimeLabels
 
 	// Source Localization overrides
-	optPlotSourceHemi
-	optPlotSourceViews
-	optPlotSourceCortex
 	optPlotSourceSubjectsDir
 
 	// Plotting comparisons (global)
@@ -1057,15 +1051,11 @@ const (
 	optMLCnnFilters2
 	optMLCnnKernelSize1
 	optMLCnnKernelSize2
-	optMLCnnPoolSize
-	optMLCnnDenseUnits
-	optMLCnnDropoutConv
 	optMLCnnDropoutDense
 	optMLCnnBatchSize
 	optMLCnnEpochs
 	optMLCnnLearningRate
 	optMLCnnPatience
-	optMLCnnMinDelta
 	optMLCnnL2Lambda
 	optMLCnnRandomSeed
 

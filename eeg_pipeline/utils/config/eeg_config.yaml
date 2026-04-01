@@ -200,8 +200,6 @@ event_columns:
   # Keep as ["outcome"] for paradigm-agnostic use; add "predictor"/"condition"/"binary_outcome"
   # when those analyses are required.
   required: ["outcome"]
-  temperature: ["stimulus_temp", "stimulus_temperature", "temp", "temperature"]
-  rating: ["vas_final_coded_rating", "vas_final_rating", "vas_rating", "pain_intensity", "pain_rating", "rating"]
   binary_outcome: ["binary_outcome", "binary_outcome_coded", "outcome_binary", "label", "pain"]
 
 alignment:
@@ -457,7 +455,6 @@ feature_engineering:
     line_noise_freqs: [60.0]         # Must match preprocessing.line_freq
     line_noise_width_hz: 1.0
     line_noise_harmonics: 3
-    segments: ["baseline"]           # Restrict spectral/IAF to baseline by default; add "active" if needed
     min_segment_sec: 2.0             # Minimum segment duration for reliable PSD (sec)
     min_cycles_at_fmin: 3.0          # Require at least this many cycles at lowest freq in band
 
@@ -597,6 +594,7 @@ feature_engineering:
   #
   sourcelocalization:
     mode: "eeg_only"                    # "eeg_only" (template-based) or "fmri_informed" (subject-specific)
+    allow_template_fallback: false
     method: "lcmv"                 # "lcmv" or "eloreta"
     spacing: "oct6"                # "oct5" | "oct6" | "ico4" | "ico5"
     parcellation: "aparc"          # "aparc" | "aparc.a2009s" | "HCPMMP1"
@@ -612,11 +610,13 @@ feature_engineering:
     subject: null                  # e.g., "sub-0001"
     trans: null                    # e.g., "../../../data/derivatives/coreg/sub-0001-trans.fif"
     bem: null                      # e.g., "../../../data/derivatives/bem/sub-0001-bem-sol.fif"
+    save_stc: false
     fmri:
       enabled: false
       stats_map_path: null         # NIfTI statistical map in the subject's FreeSurfer MRI space (e.g., orig.mgz space)
       provenance: "independent"    # "independent" (recommended) or "same_dataset" (circularity risk)
       require_provenance: true     # If true, error when provenance is unknown
+      allow_same_dataset_provenance: false
       threshold: 3.1
       thresholding:
         mode: "z"                  # "z" or "fdr"
@@ -660,8 +660,12 @@ feature_engineering:
 
     # Plotting-only contrast labels (used to build condition contrasts from precomputed STCs).
     contrast:
-      condition_a: null
-      condition_b: null
+      enabled: false
+      condition_column: ""
+      condition_a: ""
+      condition_b: ""
+      min_trials_per_condition: 5
+      emit_welch_stats: false
 
   pac:
     source: "precomputed"        # "precomputed" (Hilbert PAC, recommended) or "tfr" (wavelet PAC, prone to spurious coupling)
@@ -700,7 +704,6 @@ feature_engineering:
     skip_invalid_segments: true
 
   output:
-    save_subject_level_features: true
     also_save_csv: false
 
   erp:
@@ -740,8 +743,9 @@ feature_engineering:
     min_active_power: 1.0e-12        # Clamp active power for log computation
     min_segment_sec: 0.5             # Minimum segment duration in seconds
     bands: ["alpha", "beta"]         # Bands for ERDS computation (subset of frequency_bands)
-    # Pain-focused alpha markers (trial-level contralateral somatosensory kinetics)
-    pain_marker_bands: ["alpha"]     # Bands where contralateral pain markers are extracted
+    enable_laterality_markers: false
+    laterality_marker_identifier: "Somatosensory_Contralateral"
+    laterality_marker_bands: ["alpha"]  # Bands where contralateral pain markers are extracted
     laterality_columns: ["stim_side", "stimulated_side", "pain_side", "side", "stimulus_side", "hand"]
     infer_contralateral_when_missing: true
     somatosensory_left_channels: ["C1", "C3", "C5", "CP1", "CP3", "CP5", "FC1", "FC3", "FC5"]
@@ -825,7 +829,6 @@ machine_learning:
 
   constants:
     variance_threshold: 0.0
-    min_variance_for_correlation: 1e-10
 
   preprocessing:
     imputer_strategy: "median"
@@ -965,11 +968,6 @@ statistics:
     log_base: *log_base
     percentage_multiplier: *percentage_multiplier
 
-cluster_correction:
-  enabled: false
-  n_permutations: 1000
-  forming_threshold: *default_alpha
-
 validation:
   min_epochs: 20
   min_channels: 10
@@ -1085,6 +1083,7 @@ plotting:
         marker: "o"
         markerfacecolor: "white"
         markeredgecolor: "black"
+        linewidth: 0.8
         markeredgewidth: 0.8
         markersize: 4
     tfr:
@@ -1101,12 +1100,20 @@ plotting:
     power:
       width_per_band: 3.5
       height_per_segment: 4.0
+    roi:
+      width_per_band: 3.5
+      width_per_metric: 3.5
+      height_per_roi: 4.0
     itpc:
       width_per_bin: 4.5
       height_per_band: 4.0
       width_per_band_box: 4.0
       height_box: 5.0
       shared_colorbar: true
+    connectivity:
+      width_per_circle: 3.5
+      width_per_band: 3.5
+      height_per_measure: 4.0
     pac:
       cmap: "magma"
       width_per_roi: 4.0
@@ -1143,7 +1150,6 @@ plotting:
         bands: []
         source_condition_a: null
         source_condition_b: null
-
     behavior:
       scatter:
         features: ["power"]
@@ -1157,16 +1163,12 @@ plotting:
         response_column: []
         binary_outcome_column: ""
         segment: ""
-        stat: "mean"
+        bands: []
+        rois: []
+        scopes: []
+        stat: ""
 
 ###################################################################
-# 7. SYSTEM
-###################################################################
-system:
-  n_jobs: -1
-
 io:
   constants:
-    temperature_range: [35.0, 55.0]
-    max_missing_channels_fraction: 0.5
     percent_threshold: 5.0

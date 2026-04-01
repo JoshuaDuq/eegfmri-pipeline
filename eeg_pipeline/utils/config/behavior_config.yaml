@@ -148,6 +148,7 @@ behavior_analysis:
     compare_column: ""          # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
     compare_values: []           # Explicit values to compare. Leave empty only for binary columns with exactly 2 observed levels.
     compare_labels: null         # Optional labels for compare_values (same length)
+    min_trials_per_condition: 0   # 0 = unset
     primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
     overwrite: true
     p_primary_mode: "perm_if_available"   # "asymptotic" | "perm_if_available"
@@ -169,7 +170,6 @@ behavior_analysis:
     condition_values: []               # Specific values to compute for (empty = all unique values in column)
     # Output options for unified temporal correlations file
     include_roi_averages: true         # Include ROI-averaged rows (replaces power_topomap_correlations)
-    include_tf_grid: true              # Include individual frequency rows (replaces corr_stats_tf_*)
     # Feature selection for temporal correlations
     features:
       power: true                      # Power (spectral power in bands) - default, already implemented

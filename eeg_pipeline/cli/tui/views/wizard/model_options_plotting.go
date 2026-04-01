@@ -174,9 +174,6 @@ func (m Model) getGlobalStylingOptions() []optionType {
 	options = append(options, optPlotGroupSourceLoc)
 	if m.plotGroupSourceLocExpanded {
 		options = append(options,
-			optPlotSourceHemi,
-			optPlotSourceViews,
-			optPlotSourceCortex,
 			optPlotSourceSubjectsDir,
 		)
 	}
