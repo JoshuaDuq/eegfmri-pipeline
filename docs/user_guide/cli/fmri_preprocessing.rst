@@ -4,9 +4,13 @@ fMRI Preprocessing
 .. note::
 
    The fMRI pipeline is **still under active development**. Container wiring,
-   defaults, and derivative paths may change; confirm outputs after upgrades.
+   defaults, and derivative paths may change between releases. Confirm outputs
+   after upgrades before using them in downstream analyses.
 
-Containerized fMRIPrep-style preprocessing via Docker or Apptainer.
+Interface for containerized fMRIPrep execution via Docker or Apptainer. This
+command is the pipeline's BIDS-to-derivatives entry point for fMRI data and
+writes the preprocessed outputs consumed by downstream GLM and resting-state
+workflows.
 
 **Prerequisites:**
 
@@ -189,13 +193,14 @@ Key Options
 
 .. note::
 
-   For container runs, the pipeline automatically ignores macOS metadata files
-   (``._*``, ``.DS_Store``) by mounting a sanitized temporary BIDS view.
+   For container runs, the pipeline mounts a sanitized temporary BIDS view that
+   excludes macOS metadata files such as ``._*`` and ``.DS_Store``.
 
 .. note::
 
-   ``fmri preprocess`` accepts shared CLI flags like ``--task`` for interface
-   consistency, but fMRIPrep task filtering is controlled by ``--task-id``.
+   ``fmri preprocess`` accepts shared CLI flags such as ``--task`` for
+   interface consistency, but actual fMRIPrep task filtering is controlled by
+   ``--task-id``.
 
 .. seealso::
 

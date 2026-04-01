@@ -1,26 +1,26 @@
 Quick Start
 ===========
 
-This page walks through the complete pipeline from installation to outputs.
-Each section describes what the step does, what it produces, and the commands
-to run it. Use the tab panels in :ref:`step 5 <qs-run>` for the full command
-surface of each analysis family.
+This page walks through the operational path from installation to derivative
+outputs. Each section states the purpose of the step, the files it reads or
+writes, and the commands used to run it. Use the tab panels in
+:ref:`step 5 <qs-run>` for the full command surface of each analysis family.
 
 .. note::
 
-   **New to the pipeline?** Start with the :doc:`TUI <tui>` — it walks you
-   through all configuration and pipeline steps interactively, builds the
-   command, and runs it for you. The numbered steps below document the same
-   workflow for scripted or headless use.
+   **New to the pipeline?** Start with the :doc:`TUI <tui>`. It exposes the
+   same workflow documented here, but interactively: configuration, subject
+   selection, pipeline parameters, command assembly, and execution.
 
 .. _qs-overview:
 
 Pipeline Overview
 -----------------
 
-Four sequential stages. Each stage writes BIDS derivatives that the next stage
-reads. The ``trial_id`` column in ``proc-clean_events.tsv`` is the join key
-that aligns EEG features, fMRI betas, and behavioral targets across all stages.
+The pipeline is organized as four derivative-producing stages. Each stage reads
+documented inputs and writes outputs that downstream stages consume. The
+``trial_id`` column in ``proc-clean_events.tsv`` is the canonical join key that
+aligns EEG features, fMRI betas, and behavioral targets across stages.
 
 .. grid:: 1
    :gutter: 0
@@ -278,6 +278,10 @@ Override any key at runtime without editing the YAML:
      --set feature_engineering.parallel.n_jobs_connectivity=-1
 
 See :doc:`configuration` for the complete key reference.
+
+Treat configuration as part of the analysis specification. Before processing a
+full cohort, confirm that dataset roots, task labels, time windows, feature
+families, and analysis mode match the protocol you intend to run.
 
 .. _qs-run:
 

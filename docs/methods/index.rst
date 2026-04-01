@@ -1,8 +1,9 @@
 Methods Reference
 =================
 
-Scientific documentation for every pipeline stage. Each page provides
-notation, method details, configuration keys, and output schemas.
+Scientific and algorithmic reference for each pipeline stage. These pages
+define the method-level contract for the software: notation, model choices,
+configuration keys, and output schemas.
 
 .. toctree::
    :maxdepth: 2
@@ -21,32 +22,31 @@ EEG
       :link: eeg/preprocessing
       :link-type: doc
 
-      Bad channel detection (PyPREP), ICA fitting and ICLabel
-      classification, epoch creation and rejection.
-      Supports task-based and resting-state modes.
+      Bad-channel detection (PyPREP), ICA fitting, ICLabel
+      classification, epoch creation, and rejection.
+      Covers both task-based and resting-state modes.
 
    .. grid-item-card:: Feature Extraction
       :link: eeg/features
       :link-type: doc
 
-      16 feature families with full mathematical derivations —
-      power, connectivity, aperiodic, complexity, microstates,
-      source ROI, and more. Supports task-based and resting-state
-      paradigms.
+      Sixteen feature families with formulas, configuration keys,
+      and derivative schemas: power, connectivity, aperiodic,
+      complexity, microstates, source ROI, and more.
 
    .. grid-item-card:: Behavioral Statistics
       :link: eeg/behavior
       :link-type: doc
 
       Trial-level correlations, regression, ICC, condition
-      comparisons, and time-resolved analyses with FDR correction.
+      comparisons, and time-resolved inference with FDR control.
 
    .. grid-item-card:: Machine Learning
       :link: eeg/machine_learning
       :link-type: doc
 
       LOSO cross-validation, permutation inference, SHAP feature
-      importance, and temporal generalization.
+      importance, temporal generalization, and performance reporting.
 
    .. grid-item-card:: Source Localization
       :link: eeg/source_localization
@@ -66,7 +66,7 @@ fMRI
       :link-type: doc
 
       BIDS input contract, ``events.tsv`` requirements,
-      and BIDS validation steps.
+      and validation expectations for raw fMRI datasets.
 
    .. grid-item-card:: fMRI Analysis Pipeline
       :link: fmri/pipeline

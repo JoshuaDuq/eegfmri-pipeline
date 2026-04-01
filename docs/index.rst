@@ -1,31 +1,28 @@
 EEG–fMRI Analysis Pipeline
 ===========================
 
-This is a personal research project I started in 2025 and have been actively
-building ever since. It grew out of a simple frustration: running EEG and fMRI
-analyses typically means juggling a dozen tools, writing long terminal commands
-from memory, and spending more time gluing scripts together than doing actual
-science.
+The EEG–fMRI Analysis Pipeline is an integrated research software stack for
+EEG, fMRI, and multimodal EEG–fMRI studies. It operates on :term:`BIDS`-organized
+data and produces documented derivatives for preprocessing, feature extraction,
+behavioral statistics, machine learning, fMRI :term:`GLM`, and EEG source
+localization workflows. All stages are accessible through a single CLI and an
+interactive terminal UI (TUI).
 
-My goal is to build a pipeline that **anyone doing EEG or fMRI research can
-pick up and use**, regardless of their programming background. The pipeline
-covers the full analysis stack from raw :term:`BIDS`-formatted recordings
-through preprocessing, feature extraction, behavioral statistics, machine
-learning, fMRI :term:`GLM`, and source localization. Everything runs from a
-single CLI or through an interactive terminal UI (TUI) that guides you through
-each step with wizards, so you never have to remember a flag name again.
+The project began as an attempt to replace ad hoc research scripting with a
+single, documented workflow that makes analysis steps easier to inspect,
+reproduce, and rerun. The current emphasis is on explicit data contracts,
+method-specific documentation, and practical day-to-day usability for research
+work.
 
-.. admonition:: Work in progress
+.. admonition:: Development status
 
-   This project is still growing. Several parts, particularly the **plotting
-   pipeline** and the **fMRI analysis** command surface, along with a number
-   of smaller features throughout, are incomplete or actively being redesigned.
-   I have a long list of things I still want to add and improve.
+   The project is under active development. The **plotting pipeline** and parts
+   of the **fMRI analysis** command surface remain in flux, and some interfaces
+   or derivative layouts may change between releases.
 
-   **If you use this pipeline and have ideas, find bugs, or think something
-   could work better, I would genuinely love to hear from you.** Suggestions
-   for new features, better defaults, clearer docs, or anything else are very
-   welcome. Feel free to open an issue or a discussion on GitHub.
+   Feedback from real datasets is useful. If a workflow is unclear, incomplete,
+   or produces unexpected outputs, open an issue or discussion so the behavior
+   can be tightened and documented.
 
 .. figure:: screenshots/tui_main_menu.png
    :width: 760px
@@ -44,48 +41,54 @@ each step with wizards, so you never have to remember a flag name again.
       :link: install
       :link-type: doc
 
-      Python environment, TUI binary, Docker image for FreeSurfer + MNE,
-      and environment variables.
+      Environment setup, optional TUI build, FreeSurfer + MNE Docker image,
+      and required environment variables.
 
    .. grid-item-card:: Quick Start
       :link: user_guide/quickstart
       :link-type: doc
 
-      Full walkthrough from install to results: pipeline overview, validation,
-      preprocessing, features, ML, fMRI, and a complete chained workflow.
+      End-to-end operational walkthrough from installation to derivatives:
+      validation, preprocessing, feature extraction, ML, and fMRI.
 
    .. grid-item-card:: User Guide
       :link: user_guide/index
       :link-type: doc
 
-      Data layout, YAML configuration, CLI command reference,
-      output formats, and the interactive TUI.
+      Operational reference for input layout, YAML configuration, command
+      usage, derivative locations, and the interactive TUI.
 
    .. grid-item-card:: Methods Reference
       :link: methods/index
       :link-type: doc
 
-      Full scientific documentation: notation, formulas, configuration keys,
-      and output schemas for every pipeline stage.
+      Algorithmic reference: methods, notation, configuration keys, and output
+      schemas for each analysis stage.
 
    .. grid-item-card:: FAQ
       :link: faq
       :link-type: doc
 
-      Common issues: subject discovery, ICA failures, epoch rejection,
-      aperiodic fits, NaN metrics, fMRIPrep paths, and the TUI.
+      Common operational issues: subject discovery, ICA failures, epoch
+      rejection, aperiodic fits, NaN metrics, fMRIPrep paths, and TUI usage.
 
    .. grid-item-card:: Glossary
       :link: glossary
       :link-type: doc
 
       Definitions for :term:`BIDS`, :term:`ICA`, :term:`wPLI`, :term:`PAC`,
-      :term:`LOSO`, :term:`HRF`, and all other domain terms.
+      :term:`LOSO`, :term:`HRF`, and other domain-specific terms used
+      throughout the documentation.
 
 ----
 
 Pipeline Stages
 ---------------
+
+The pipeline is organized as explicit derivative-producing stages. Each stage
+documents its expected inputs, method family, and primary outputs so downstream
+analyses can be validated against concrete files rather than implicit workflow
+state.
 
 .. grid:: 3
    :gutter: 2
@@ -140,8 +143,9 @@ Pipeline Stages
 .. note::
 
    The **fMRI pipeline** and the **plotting** command (``eeg-pipeline plotting``)
-   are **still under active development**. Interfaces and outputs may change;
-   validate critical workflows after upgrading.
+   are **still under active development**. Validate critical workflows after
+   upgrades and confirm derivative paths before using them in downstream
+   analyses or manuscripts.
 
 ----
 

@@ -1,22 +1,23 @@
 Glossary
 ========
 
-Definitions for domain-specific terms and acronyms used throughout this
-documentation. Terms are linked from methods pages via ``:term:`` references.
+Definitions for domain-specific terms and acronyms used throughout the
+documentation. Terms are linked from methods pages via ``:term:`` references
+so operational guidance and methods pages share the same vocabulary.
 
 .. glossary::
    :sorted:
 
    BIDS
-      Brain Imaging Data Structure. A standard for organizing and describing
-      neuroimaging and electrophysiology data and metadata.
+      Brain Imaging Data Structure. A community standard for organizing and
+      describing neuroimaging and electrophysiology datasets and metadata.
       See `bids-specification.readthedocs.io <https://bids-specification.readthedocs.io/>`_.
 
    ICA
-      Independent Component Analysis. A blind source separation method used
-      to decompose EEG recordings into statistically independent components.
-      Artifact components (eye movements, cardiac, muscle) are identified
-      with ICLabel and removed before epoching.
+      Independent Component Analysis. A blind source separation method used to
+      decompose EEG recordings into statistically independent components.
+      Artifact components (for example eye, cardiac, and muscle sources) are
+      identified with ICLabel and removed before epoching.
 
    ICLabel
       A deep learning classifier that assigns probability scores to ICA
@@ -25,15 +26,15 @@ documentation. Terms are linked from methods pages via ``:term:`` references.
       ``ica.probability_threshold`` in artifact classes are removed.
 
    TFR
-      Time-Frequency Representation. A 2-D power (or complex-valued) signal
-      decomposed across both time and frequency using Morlet wavelets. Used
-      as the basis for power, ERDS, ITPC, and PAC feature extraction.
+      Time-Frequency Representation. A two-dimensional power or complex-valued
+      signal decomposed across time and frequency, here primarily using Morlet
+      wavelets. Used as the basis for power, ERDS, ITPC, and PAC extraction.
 
    wPLI
       Weighted Phase Lag Index. A connectivity measure that weights
       cross-spectrum phase differences by the imaginary component, suppressing
-      volume-conduction artefacts. Ranges from −1 to 1; unsigned values
-      typically used.
+      volume-conduction artefacts. Signed estimates range from −1 to 1; in
+      practice, unsigned magnitudes are typically reported.
 
    AEC
       Amplitude Envelope Correlation. A connectivity measure computed as the
@@ -86,9 +87,9 @@ documentation. Terms are linked from methods pages via ``:term:`` references.
 
    GLM
       General Linear Model. A statistical model expressing the BOLD signal as
-      a linear combination of predictors (stimulus regressors, confounds, drift
-      terms). Used for both first-level (per-subject) and second-level
-      (group) fMRI analysis.
+      a linear combination of predictors such as stimulus regressors,
+      confounds, and drift terms. Used for both first-level (per-subject) and
+      second-level (group) fMRI analysis.
 
    confound strategy
       A named preset for selecting nuisance regressors from fMRIPrep's
@@ -135,8 +136,8 @@ documentation. Terms are linked from methods pages via ``:term:`` references.
       A canonical integer column written by the preprocessing stage into
       ``*_proc-clean_events.tsv``. Each value identifies a single kept epoch
       after artifact rejection. All downstream tables (feature Parquet files,
-      fMRI beta volumes, behavioral targets) must be joined on ``trial_id``;
-      row-order alignment across files is not valid.
+      fMRI beta volumes, behavioral targets) must be joined on ``trial_id``.
+      Row-order alignment across files is not a valid substitute.
 
    task_is_rest
       A boolean config key (``preprocessing.task_is_rest`` and
@@ -148,8 +149,8 @@ documentation. Terms are linked from methods pages via ``:term:`` references.
 
    Parquet
       A columnar binary file format (Apache Parquet) used for storing feature
-      tables. Preserves dtype precision, supports metadata sidecar JSON,
-      and is significantly faster to read than CSV for wide tables.
+      tables. It preserves dtype precision, supports metadata sidecar JSON, and
+      is substantially faster to read than CSV for wide tables.
 
    SUBJECTS_DIR
       FreeSurfer's environment variable pointing to the directory containing

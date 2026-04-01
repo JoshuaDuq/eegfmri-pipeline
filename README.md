@@ -10,9 +10,14 @@ EEG–fMRI research. The pipeline runs from BIDS-formatted raw data through
 preprocessing, feature extraction, behavioral statistics, machine learning,
 source localization, and fMRI analysis from a single CLI or interactive TUI.
 
-This is a personal research project I started in 2025 and have been actively building ever since. It grew out of a simple frustration: running EEG and fMRI analyses typically means juggling a dozen tools, writing long terminal commands from memory, and spending more time gluing scripts together than doing actual science.
+The project is organized around explicit data contracts, documented derivatives,
+and method-specific reference pages so that analysis steps can be inspected and
+reproduced rather than reconstructed from ad hoc scripts.
 
-My goal is to build a pipeline that anyone doing EEG or fMRI research can pick up and use, regardless of their programming background. The pipeline covers the full analysis stack from raw BIDS-formatted recordings through preprocessing, feature extraction, behavioral statistics, machine learning, fMRI GLM, and source localization. Everything runs from a single CLI or through an interactive terminal UI (TUI) that guides you through each step with wizards, so you never have to remember a flag name again.
+It began as an effort to reduce the amount of one-off glue code required for
+day-to-day EEG and fMRI work. That motivation is still visible in the emphasis
+on a single command surface, BIDS-aligned inputs, and a TUI that exposes the
+same workflows without requiring users to memorize flags.
 
 The Sphinx documentation is the canonical source for all detailed methods,
 configuration, output formats, and command references.
@@ -23,18 +28,18 @@ configuration, output formats, and command references.
 
 ## What It Does
 
-- EEG preprocessing with artifact detection, ICA, epoching, and cleaning
-- Trial-level and **resting-state** EEG feature extraction across 16 feature families
+- EEG preprocessing with artifact detection, ICA, epoching, and cleaned derivative generation
+- Trial-level and **resting-state** EEG feature extraction across 16 documented feature families
 - Behavioral statistics with robust inference and multiple-comparison control
 - Nested machine-learning workflows for regression and classification
-- Source localization workflows for EEG analyses
-- fMRI preprocessing and GLM-based analysis
-- Interactive TUI and CLI interfaces for configuration and batch execution
+- EEG source localization workflows with template and subject-specific paths
+- fMRI preprocessing plus GLM-based first-level, second-level, and trial-wise analysis
+- Interactive TUI and CLI interfaces for configuration, inspection, and batch execution
 
 ## Documentation
 
-The project documentation lives in Sphinx and is the source of truth for
-implementation details.
+The Sphinx documentation is the source of truth for operational guidance,
+methods, configuration keys, and output schemas.
 
 - [Documentation home](https://joshuaduq.github.io/eegfmri-pipeline/)
 - [Installation guide](https://joshuaduq.github.io/eegfmri-pipeline/install.html)
@@ -72,10 +77,11 @@ If you do not need that model, `pip install -e ".[dev]"` is sufficient.
 
 ## Quick Start
 
-Before running any pipeline, configuration must be set: paths to your BIDS
-root, derivatives directory, task type, number of parallel jobs, and—for
-feature extraction—which feature families, frequency bands, and analysis mode
-to use. **The recommended way to handle all of this is the TUI.**
+Before running any workflow, verify the dataset roots, derivatives directory,
+task label, and analysis configuration. For EEG feature extraction, this also
+includes the active feature families, frequency bands, and analysis mode.
+**The recommended entry point is the TUI**, which writes the same settings the
+CLI consumes.
 
 ### Using the TUI (recommended)
 
@@ -111,6 +117,9 @@ directly to the wizard steps in the TUI. See the
 [Quick start guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html)
 for the full walkthrough.
 
+Run `eeg-pipeline validate quick` before any batch job so dataset and
+configuration errors surface early.
+
 ## Feature Extraction
 
 Feature extraction supports both **task-based** (event-related, trial-level)
@@ -126,12 +135,17 @@ For resting-state extraction, set `task_is_rest: true` (config) or pass
 Feature families (power spectra, connectivity, complexity, etc.) and frequency
 bands are selected per-run via the TUI wizard or the corresponding CLI flags.
 
+For method details, formulas, and output contracts, use the
+[Methods reference](https://joshuaduq.github.io/eegfmri-pipeline/methods/index.html)
+rather than the README.
+
 ## Current Scope
 
 The EEG pipeline, feature extraction, behavioral statistics, machine learning,
 and source-localization workflows are documented and maintained. The fMRI
-pipeline and plotting commands are still evolving, so verify critical workflows
-after upgrading.
+pipeline and plotting commands are still evolving, so validate critical
+workflows after upgrading and confirm derivative paths before using them in
+downstream analyses.
 
 ## Contributing
 
