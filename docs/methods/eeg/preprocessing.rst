@@ -1,29 +1,39 @@
 EEG Preprocessing
 =================
 
-**Module:** ``eeg_pipeline.preprocessing``
+.. raw:: html
 
-Automated, reproducible EEG preprocessing built on :term:`MNE-Python`, MNE-BIDS-Pipeline,
-PyPREP, and MNE-ICAlabel. Operates on :term:`BIDS`-formatted EEG data and produces clean,
-epoched datasets ready for feature extraction and statistical analysis.
+   <p class="hero-intro">
+     Automated, reproducible EEG preprocessing built on MNE-Python,
+     MNE-BIDS-Pipeline, PyPREP, and MNE-ICAlabel. Operates on
+     BIDS-formatted data and produces clean, epoched datasets ready for
+     feature extraction. Supports task-based and resting-state paradigms.
+   </p>
 
-Supports both **task-based** (event-locked epochs) and **resting-state** paradigms.
-Set ``preprocessing.task_is_rest: true`` to create fixed-length segments without
-requiring ``events.tsv`` condition labels.
+.. grid:: 2
+   :gutter: 2
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-   :stub-columns: 1
+   .. grid-item-card:: Inputs
 
-   * - Inputs
-     - BIDS EEG data (``.vhdr/.edf``), ``channels.tsv``, ``events.tsv``
-   * - Outputs
-     - ``*_proc-clean_epo.fif``, ``*_proc-clean_events.tsv``, ICA files, preprocessing stats TSV
-   * - CLI
-     - ``eeg-pipeline preprocessing [full | bad-channels | ica | epochs]``
-   * - Config
-     - ``pyprep``, ``ica``, ``epochs`` sections of ``eeg_config.yaml``
+      BIDS EEG (``.vhdr`` / ``.edf``) · ``channels.tsv`` · ``events.tsv``
+
+   .. grid-item-card:: Outputs
+
+      ``*_proc-clean_epo.fif`` · ``*_proc-clean_events.tsv`` ·
+      ICA files · preprocessing stats TSV
+
+   .. grid-item-card:: CLI
+
+      ``eeg-pipeline preprocessing [full | bad-channels | ica | epochs]``
+
+   .. grid-item-card:: Config
+
+      ``pyprep``, ``ica``, ``epochs`` sections of ``eeg_config.yaml``
+
+.. note::
+
+   Set ``preprocessing.task_is_rest: true`` to create fixed-length segments
+   without requiring ``events.tsv`` condition labels.
 
 Notation
 --------

@@ -1,7 +1,35 @@
 EEG Feature Extraction
 ======================
 
-**Module:** ``eeg_pipeline.analysis.features``
+.. raw:: html
+
+   <p class="hero-intro">
+     Sixteen trial-level feature families extracted from clean epochs.
+     Supports task-based (event-locked, one row per trial) and resting-state
+     (segment-averaged) paradigms. All families are config-driven and
+     composable. See the <a href="../../glossary.html">Glossary</a> for
+     term definitions.
+   </p>
+
+.. grid:: 2
+   :gutter: 2
+
+   .. grid-item-card:: Inputs
+
+      ``*_proc-clean_epo.fif`` (clean epochs from preprocessing)
+
+   .. grid-item-card:: Outputs
+
+      ``features/<category>/features_<category>.parquet`` +
+      ``metadata/<category>.json``
+
+   .. grid-item-card:: CLI
+
+      ``eeg-pipeline features compute [--categories ...]``
+
+   .. grid-item-card:: Config
+
+      ``feature_engineering`` section of ``eeg_config.yaml``
 
 .. seealso::
 
@@ -16,31 +44,6 @@ EEG Feature Extraction
 
    :doc:`../../user_guide/cli/features`
       CLI flags for feature category selection, spatial transforms, and IAF mode.
-
-EEG feature extraction pipeline. Supports both **task-based** (event-related, trial-level)
-and **resting-state** paradigms:
-
-- **Task mode** (default): each trial (epoch) produces one row in the feature matrix;
-  time windows are relative to event onset.
-- **Rest mode** (``preprocessing.task_is_rest: true``): fixed-length segments replace
-  trials; features are averaged across segments per subject.
-
-See :doc:`../../glossary` for definitions of :term:`TFR`, :term:`wPLI`, :term:`AEC`,
-:term:`PAC`, :term:`ITPC`, :term:`ERDS`, :term:`IAF`, and :term:`CSD`.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-   :stub-columns: 1
-
-   * - Inputs
-     - ``*_proc-clean_epo.fif`` (clean epochs from preprocessing)
-   * - Outputs
-     - ``features/<category>/features_<category>.parquet`` + metadata JSON
-   * - CLI
-     - ``eeg-pipeline features compute [--categories ...]``
-   * - Config
-     - ``feature_engineering`` section of ``eeg_config.yaml``
 
 Notation
 --------

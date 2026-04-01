@@ -27,6 +27,7 @@ extensions = [
     "sphinx.ext.intersphinx",
     "myst_parser",
     "sphinx_design",
+    "sphinx_copybutton",
 ]
 
 # ---------------------------------------------------------------------------
@@ -115,10 +116,43 @@ intersphinx_mapping = {
 # ---------------------------------------------------------------------------
 html_theme = "furo"
 html_title = "EEG–fMRI Pipeline"
-html_static_path: list[str] = []
-html_css_files: list[str] = []
+html_static_path = ["_static"]
+html_css_files = [
+    "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
+    "custom.css",
+]
+pygments_style = "friendly"
+pygments_dark_style = "monokai"
+copybutton_prompt_text = r"\$ |>>> |\.\.\. "
+copybutton_prompt_is_regexp = True
+copybutton_line_continuation_character = "\\"
+html_favicon = "_static/favicon.svg"
 
 html_theme_options = {
+    "dark_css_variables": {
+        "color-background-primary": "#141720",
+        "color-background-secondary": "#1b1f2e",
+        "color-background-hover": "#222638",
+        "color-background-border": "#252a3a",
+        "color-foreground-primary": "#dce2ef",
+        "color-foreground-secondary": "#8e97b0",
+        "color-foreground-muted": "#525a72",
+        "color-foreground-border": "#2c3148",
+        "color-brand-primary": "#8ab4d4",
+        "color-brand-content": "#6d9dbf",
+        "color-highlight-on-target": "rgba(138, 180, 212, 0.07)",
+        "color-admonition-background": "#1b1f2e",
+        "font-stack": "'Inter', 'Segoe UI', system-ui, sans-serif",
+        "font-stack--monospace": "'JetBrains Mono', 'Fira Code', ui-monospace, monospace",
+    },
+    "light_css_variables": {
+        "color-background-primary": "#f5f6fa",
+        "color-background-secondary": "#eceef5",
+        "color-brand-primary": "#2a6496",
+        "color-brand-content": "#1f5280",
+        "font-stack": "'Inter', 'Segoe UI', system-ui, sans-serif",
+        "font-stack--monospace": "'JetBrains Mono', 'Fira Code', ui-monospace, monospace",
+    },
     "sidebar_hide_name": False,
     "navigation_with_keys": True,
     "source_repository": "https://github.com/JoshuaDuq/eegfmri-pipeline",

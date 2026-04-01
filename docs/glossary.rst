@@ -1,9 +1,12 @@
 Glossary
 ========
 
-Definitions for domain-specific terms and acronyms used throughout the
-documentation. Terms are linked from methods pages via ``:term:`` references
-so operational guidance and methods pages share the same vocabulary.
+.. raw:: html
+
+   <p class="hero-intro">
+     Domain-specific terms and acronyms used throughout the documentation.
+     Terms are cross-referenced from methods pages via <code>:term:</code> roles.
+   </p>
 
 .. glossary::
    :sorted:

@@ -1,0 +1,518 @@
+/* =========================================================
+   EEG–fMRI Pipeline — Furo theme overrides
+   Academic dark: warm slate, muted steel-blue accent, no neon
+   ========================================================= */
+
+/* ---------------------------------------------------------
+   Root tokens — academic dark palette
+   --------------------------------------------------------- */
+body[data-theme="dark"],
+body[data-theme="auto"] {
+  /* Backgrounds: warm dark slate, not cold black */
+  --color-background-primary:    #141720;
+  --color-background-secondary:  #1b1f2e;
+  --color-background-hover:      #222638;
+  --color-background-border:     #252a3a;
+
+  /* Text: warm off-white, never pure white */
+  --color-foreground-primary:    #dce2ef;
+  --color-foreground-secondary:  #8e97b0;
+  --color-foreground-muted:      #525a72;
+  --color-foreground-border:     #2c3148;
+
+  /* Accent: muted steel-blue — scholarly, not electric */
+  --color-brand-primary:         #8ab4d4;
+  --color-brand-content:         #6d9dbf;
+
+  --color-highlight-on-target:   rgba(138, 180, 212, 0.07);
+  --color-admonition-background: #1b1f2e;
+
+  /* Typography */
+  --font-stack:            "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-stack--monospace: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+
+body[data-theme="light"] {
+  --color-background-primary:   #f5f6fa;
+  --color-background-secondary: #eceef5;
+  --color-brand-primary:        #2a6496;
+  --color-brand-content:        #1f5280;
+  --font-stack:            "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-stack--monospace: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+
+body {
+  font-family: var(--font-stack);
+  letter-spacing: 0.01em;
+}
+
+/* ---------------------------------------------------------
+   Typography hierarchy — academic weight/size scale
+   --------------------------------------------------------- */
+h1 {
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  border-bottom: 1px solid var(--color-foreground-border);
+  padding-bottom: 0.55rem;
+  margin-bottom: 1.6rem;
+  color: var(--color-foreground-primary);
+}
+
+h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--color-foreground-secondary);
+  border-bottom: 1px solid var(--color-background-border);
+  padding-bottom: 0.3rem;
+  margin-top: 2.4rem;
+  margin-bottom: 0.9rem;
+}
+
+h3 {
+  font-size: 0.975rem;
+  font-weight: 600;
+  color: var(--color-foreground-primary);
+  margin-top: 1.6rem;
+}
+
+h4 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-foreground-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+p {
+  line-height: 1.72;
+  color: var(--color-foreground-primary);
+}
+
+/* ---------------------------------------------------------
+   Sidebar — understated, not competing with content
+   --------------------------------------------------------- */
+.sidebar-brand {
+  padding: 1.1rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--color-foreground-border);
+  margin-bottom: 0.5rem;
+}
+
+.sidebar-brand-text {
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.015em;
+  color: var(--color-brand-primary);
+}
+
+.sidebar-tree .reference {
+  font-size: 0.84rem;
+  color: var(--color-foreground-secondary);
+}
+
+.sidebar-tree .reference:hover {
+  color: var(--color-brand-primary);
+}
+
+/* Section captions in sidebar */
+.sidebar-tree .caption-text {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-foreground-muted);
+  margin-top: 1rem;
+  padding-bottom: 0.25rem;
+}
+
+/* ---------------------------------------------------------
+   sphinx-design cards — muted border, subtle hover
+   --------------------------------------------------------- */
+.sd-card {
+  border: 1px solid var(--color-foreground-border) !important;
+  background: var(--color-background-secondary) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.sd-card:hover {
+  border-color: var(--color-brand-primary) !important;
+  background: var(--color-background-hover) !important;
+}
+
+.sd-card-header {
+  background: transparent !important;
+  border-bottom: 1px solid var(--color-foreground-border) !important;
+  padding: 0.6rem 1rem !important;
+  font-weight: 600 !important;
+  font-size: 0.875rem !important;
+  color: var(--color-brand-primary) !important;
+  letter-spacing: 0.005em;
+}
+
+.sd-card-body {
+  padding: 0.7rem 1rem !important;
+  font-size: 0.835rem !important;
+  color: var(--color-foreground-secondary) !important;
+  line-height: 1.58;
+}
+
+.sd-card-body p {
+  margin-bottom: 0.35rem;
+}
+
+.sd-card-body strong {
+  color: var(--color-foreground-primary);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------
+   Tab set — understated, line-style active indicator
+   --------------------------------------------------------- */
+.sd-tab-set {
+  margin: 1.2rem 0;
+}
+
+.sd-tab-set > input ~ label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.015em;
+  padding: 0.4rem 0.85rem;
+  border-bottom: 2px solid transparent;
+  color: var(--color-foreground-secondary);
+  transition: color 0.15s, border-color 0.15s;
+  background: transparent;
+}
+
+.sd-tab-set > input:checked ~ label {
+  color: var(--color-brand-primary);
+  border-bottom-color: var(--color-brand-primary);
+}
+
+.sd-tab-content {
+  border: 1px solid var(--color-foreground-border);
+  border-radius: 0 4px 4px 4px;
+  padding: 1rem 1.15rem;
+  background: var(--color-background-secondary);
+}
+
+/* ---------------------------------------------------------
+   Admonitions — single left rule, no heavy box
+   --------------------------------------------------------- */
+.admonition {
+  border: none !important;
+  border-left: 3px solid var(--color-brand-primary) !important;
+  border-radius: 0 4px 4px 0 !important;
+  background: var(--color-admonition-background) !important;
+  padding: 0.65rem 1rem !important;
+  margin: 1.1rem 0 !important;
+}
+
+.admonition-title {
+  font-size: 0.77rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.09em !important;
+  margin-bottom: 0.3rem !important;
+  color: var(--color-brand-primary) !important;
+}
+
+.admonition-title::before {
+  display: none !important;
+}
+
+.admonition p:last-child {
+  margin-bottom: 0;
+}
+
+/* Variant colors — muted, not alarming */
+.admonition.note {
+  border-left-color: #6d9dbf !important;
+}
+.admonition.note .admonition-title {
+  color: #6d9dbf !important;
+}
+
+.admonition.warning {
+  border-left-color: #c8924a !important;
+}
+.admonition.warning .admonition-title {
+  color: #c8924a !important;
+}
+
+.admonition.important {
+  border-left-color: #5a9e82 !important;
+}
+.admonition.important .admonition-title {
+  color: #5a9e82 !important;
+}
+
+.admonition.tip {
+  border-left-color: #7a9abf !important;
+}
+.admonition.tip .admonition-title {
+  color: #7a9abf !important;
+}
+
+/* ---------------------------------------------------------
+   Code blocks — dark, readable, well-spaced
+   --------------------------------------------------------- */
+div.highlight {
+  border-radius: 5px !important;
+  border: 1px solid var(--color-foreground-border) !important;
+  position: relative;
+}
+
+div.highlight pre {
+  font-size: 0.815rem;
+  line-height: 1.65;
+  padding: 0.9rem 1rem !important;
+}
+
+/* Copy button from sphinx-copybutton */
+button.copybtn {
+  opacity: 0 !important;
+  transition: opacity 0.2s !important;
+  background: var(--color-background-hover) !important;
+  border: 1px solid var(--color-foreground-border) !important;
+  border-radius: 4px !important;
+  color: var(--color-foreground-secondary) !important;
+  padding: 2px 6px !important;
+  font-size: 0.75rem !important;
+}
+
+div.highlight:hover button.copybtn {
+  opacity: 1 !important;
+}
+
+button.copybtn:hover {
+  color: var(--color-brand-primary) !important;
+  border-color: var(--color-brand-primary) !important;
+}
+
+/* Inline code */
+code.literal,
+p code,
+li code,
+td code {
+  background: var(--color-background-hover) !important;
+  border: 1px solid var(--color-foreground-border) !important;
+  border-radius: 3px !important;
+  padding: 0.1em 0.38em !important;
+  font-size: 0.83em !important;
+  color: var(--color-brand-primary) !important;
+  font-family: var(--font-stack--monospace);
+}
+
+/* ---------------------------------------------------------
+   Tables — clean rows, no heavy borders
+   --------------------------------------------------------- */
+table.docutils {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.845rem;
+  margin: 1rem 0;
+}
+
+table.docutils th {
+  background: var(--color-background-secondary) !important;
+  color: var(--color-foreground-secondary) !important;
+  font-weight: 600;
+  font-size: 0.775rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border-bottom: 1px solid var(--color-foreground-border) !important;
+  border-top: 1px solid var(--color-foreground-border) !important;
+  padding: 0.5rem 0.75rem !important;
+}
+
+table.docutils td {
+  border-bottom: 1px solid var(--color-background-border) !important;
+  padding: 0.42rem 0.75rem !important;
+  vertical-align: top;
+  color: var(--color-foreground-primary);
+}
+
+table.docutils tr:last-child td {
+  border-bottom: none !important;
+}
+
+table.docutils tr:hover td {
+  background: var(--color-background-hover);
+}
+
+/* ---------------------------------------------------------
+   Horizontal rule
+   --------------------------------------------------------- */
+hr.docutils {
+  border: none !important;
+  border-top: 1px solid var(--color-foreground-border) !important;
+  margin: 2.2rem 0 !important;
+  opacity: 0.4;
+}
+
+/* ---------------------------------------------------------
+   Hero intro paragraph
+   --------------------------------------------------------- */
+.hero-intro {
+  font-size: 1.025rem;
+  line-height: 1.75;
+  color: var(--color-foreground-secondary);
+  max-width: 74ch;
+  margin-bottom: 1.8rem;
+  border-left: 3px solid var(--color-foreground-border);
+  padding-left: 1rem;
+}
+
+/* ---------------------------------------------------------
+   Pipeline stage arrows
+   --------------------------------------------------------- */
+.sd-text-center.sd-fs-3 {
+  font-size: 1.1rem !important;
+  color: var(--color-foreground-muted) !important;
+  margin: 0 !important;
+  line-height: 1.2;
+}
+
+/* ---------------------------------------------------------
+   Breadcrumb / prev-next navigation
+   --------------------------------------------------------- */
+.related-pages a {
+  font-size: 0.82rem;
+  color: var(--color-foreground-secondary);
+}
+
+.related-pages a:hover {
+  color: var(--color-brand-primary);
+}
+
+/* ---------------------------------------------------------
+   Footer
+   --------------------------------------------------------- */
+footer {
+  font-size: 0.775rem;
+  color: var(--color-foreground-muted);
+  border-top: 1px solid var(--color-foreground-border);
+  padding-top: 1rem;
+  margin-top: 2rem;
+}
+
+/* ---------------------------------------------------------
+   Search input
+   --------------------------------------------------------- */
+input[type="search"] {
+  border-radius: 4px !important;
+  border: 1px solid var(--color-foreground-border) !important;
+  background: var(--color-background-hover) !important;
+  font-size: 0.84rem !important;
+  color: var(--color-foreground-primary) !important;
+}
+
+/* ---------------------------------------------------------
+   Dropdown (sphinx-design) — FAQ collapsibles
+   --------------------------------------------------------- */
+details.sd-dropdown {
+  border: 1px solid var(--color-foreground-border) !important;
+  border-radius: 5px !important;
+  background: var(--color-background-secondary) !important;
+  margin: 0.5rem 0 !important;
+}
+
+details.sd-dropdown summary {
+  padding: 0.6rem 1rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  color: var(--color-foreground-primary) !important;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+details.sd-dropdown summary:hover {
+  background: var(--color-background-hover) !important;
+  color: var(--color-brand-primary) !important;
+}
+
+details.sd-dropdown[open] summary {
+  border-bottom: 1px solid var(--color-foreground-border);
+  color: var(--color-brand-primary) !important;
+}
+
+details.sd-dropdown .sd-summary-content {
+  padding: 0.75rem 1rem !important;
+  font-size: 0.855rem !important;
+  color: var(--color-foreground-secondary) !important;
+  line-height: 1.62;
+}
+
+details.sd-dropdown .sd-summary-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------
+   Scrollbar — thin, unobtrusive
+   --------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-background-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-foreground-muted);
+  border-radius: 3px;
+}
+
+/* ---------------------------------------------------------
+   Glossary terms — tighter spacing
+   --------------------------------------------------------- */
+dl.glossary dt {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-brand-primary);
+  margin-top: 1.1rem;
+  padding-bottom: 0.15rem;
+  border-bottom: 1px solid var(--color-background-border);
+}
+
+dl.glossary dd {
+  margin-left: 1rem;
+  font-size: 0.855rem;
+  color: var(--color-foreground-secondary);
+  line-height: 1.65;
+  margin-bottom: 0.2rem;
+}
+
+/* ---------------------------------------------------------
+   seealso blocks
+   --------------------------------------------------------- */
+.admonition.seealso {
+  border-left-color: var(--color-foreground-muted) !important;
+}
+
+.admonition.seealso .admonition-title {
+  color: var(--color-foreground-muted) !important;
+}
+
+/* ---------------------------------------------------------
+   Method step headings (h3 inside methods pages)
+   --------------------------------------------------------- */
+.rst-content h3::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 0.85em;
+  background: var(--color-brand-primary);
+  margin-right: 0.45em;
+  vertical-align: middle;
+  border-radius: 2px;
+  opacity: 0.6;
+}
+

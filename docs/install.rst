@@ -1,23 +1,36 @@
 Installation
 ============
 
+.. raw:: html
+
+   <p class="hero-intro">
+     Environment setup, optional TUI build, FreeSurfer + MNE Docker image,
+     and required environment variables.
+   </p>
+
+Prerequisites
+-------------
+
 .. grid:: 3
    :gutter: 2
 
    .. grid-item-card:: Python ≥ 3.11
+      :link: https://www.python.org/downloads/
+      :link-type: url
 
       Required for all workflows.
-      Install from `python.org <https://www.python.org/downloads/>`_.
 
    .. grid-item-card:: Git
+      :link: https://git-scm.com/
+      :link-type: url
 
       Required to clone the repository.
-      Install from `git-scm.com <https://git-scm.com/>`_.
 
    .. grid-item-card:: Go 1.21+ *(optional)*
+      :link: https://go.dev/dl/
+      :link-type: url
 
       Required only for the interactive TUI.
-      Install from `go.dev <https://go.dev/dl/>`_.
 
 Setup
 -----

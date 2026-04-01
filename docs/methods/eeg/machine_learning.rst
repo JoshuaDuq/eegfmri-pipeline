@@ -1,7 +1,36 @@
 Machine Learning
 ================
 
-**Module:** ``eeg_pipeline.analysis.machine_learning``
+.. raw:: html
+
+   <p class="hero-intro">
+     Trial-level predictive modeling under nested LOSO cross-validation.
+     Supports continuous regression and binary classification. The subject
+     is the statistical unit — all primary metrics are subject-level
+     aggregates.
+   </p>
+
+.. grid:: 2
+   :gutter: 2
+
+   .. grid-item-card:: Inputs
+
+      Feature Parquet tables · behavioral target column from
+      ``*_proc-clean_events.tsv``
+
+   .. grid-item-card:: Outputs
+
+      Per-subject metrics · permutation p-values · SHAP values ·
+      model weights
+
+   .. grid-item-card:: CLI
+
+      ``eeg-pipeline ml [regression | classify | timegen | shap |
+      permutation | ...]``
+
+   .. grid-item-card:: Config
+
+      ``machine_learning`` section of ``eeg_config.yaml``
 
 .. seealso::
 
@@ -16,25 +45,6 @@ Machine Learning
 
    :doc:`../../user_guide/cli/ml`
       CLI flags for all ML modes.
-
-Trial-level predictive modeling pipeline. Supports continuous regression
-and binary classification. **The subject is the statistical unit** throughout:
-all primary metrics are subject-level aggregates computed under
-:term:`LOSO` cross-validation.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-   :stub-columns: 1
-
-   * - Inputs
-     - Feature Parquet tables; behavioral target column from ``*_proc-clean_events.tsv``
-   * - Outputs
-     - Per-subject metrics, permutation p-values, SHAP values, model weights
-   * - CLI
-     - ``eeg-pipeline ml [regression | classify | timegen | shap | permutation | ...]``
-   * - Config
-     - ``machine_learning`` section of ``eeg_config.yaml``
 
 Notation
 --------

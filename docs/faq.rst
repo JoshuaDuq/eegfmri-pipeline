@@ -1,88 +1,51 @@
 Frequently Asked Questions
 ==========================
 
-Jump to a section:
+.. raw:: html
 
-.. grid:: 3
-   :gutter: 2
-
-   .. grid-item-card:: Installation
-      :link: #installation
-      :link-type: url
-
-      Virtual environment, PyTorch, Go TUI, missing modules.
-
-   .. grid-item-card:: Data
-      :link: #data
-      :link-type: url
-
-      Subject discovery, events files, BIDS layout.
-
-   .. grid-item-card:: Preprocessing
-      :link: #preprocessing
-      :link-type: url
-
-      ICA failures, epoch rejection, epoch windows.
-
-   .. grid-item-card:: Feature Extraction
-      :link: #feature-extraction
-      :link-type: url
-
-      Performance, aperiodic fits, parallel jobs.
-
-   .. grid-item-card:: Machine Learning
-      :link: #machine-learning
-      :link-type: url
-
-      NaN metrics, feature harmonization, LOSO debugging.
-
-   .. grid-item-card:: fMRI & Source
-      :link: #fmri-and-source-localization
-      :link-type: url
-
-      fMRIPrep paths, contrast maps, BEM generation.
-
-----
+   <p class="hero-intro">
+     Common operational issues organized by pipeline stage. Expand a question
+     to see the diagnosis and resolution.
+   </p>
 
 .. _faq-installation:
 
 Installation
 ------------
 
-**ModuleNotFoundError: No module named 'mne' after installing.**
+.. dropdown:: ModuleNotFoundError: No module named 'mne' after installing.
+   :animate: fade-in
 
-The virtual environment is not activated. Run:
+   The virtual environment is not activated. Run:
 
-.. code-block:: bash
+   .. code-block:: bash
 
-   source .venv311/bin/activate     # macOS / Linux
-   .venv311\Scripts\activate        # Windows
+      source .venv311/bin/activate     # macOS / Linux
+      .venv311\Scripts\activate        # Windows
 
-Then reinstall if needed: ``pip install -e ".[dev,ml]"``.
+   Then reinstall if needed: ``pip install -e ".[dev,ml]"``.
 
-----
+.. dropdown:: PyTorch install fails.
+   :animate: fade-in
 
-**PyTorch install fails.**
+   PyTorch is only needed for the CNN classifier
+   (``ml classify --classification-model cnn``). Omit ``[ml]`` for all other
+   workflows, or install the CPU-only build separately:
 
-PyTorch is only needed for the CNN classifier
-(``ml classify --classification-model cnn``). Omit ``[ml]`` for all other
-workflows, or install the CPU-only build separately:
+   .. code-block:: bash
 
-.. code-block:: bash
+      pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-   pip install torch --index-url https://download.pytorch.org/whl/cpu
+.. dropdown:: Go TUI build fails: 'go' not found.
+   :animate: fade-in
 
-----
+   Install Go 1.21+ from `go.dev/dl <https://go.dev/dl/>`_, then:
 
-**Go TUI build fails: 'go' not found.**
+   .. code-block:: bash
 
-Install Go 1.21+ from `go.dev/dl <https://go.dev/dl/>`_, then:
-
-.. code-block:: bash
-
-   cd eeg_pipeline/cli/tui
-   go mod download
-   go build -o eeg-tui .
+      cd eeg_pipeline/cli/tui
+      go mod download
+      go build -o eeg-tui .
 
 ----
 
@@ -91,51 +54,49 @@ Install Go 1.21+ from `go.dev/dl <https://go.dev/dl/>`_, then:
 Data
 ----
 
-**The pipeline reports zero subjects.**
+.. dropdown:: The pipeline reports zero subjects.
+   :animate: fade-in
 
-1. ``paths.bids_root`` must point to the folder *containing* ``sub-XXXX/``
-   folders (not inside a subject folder).
-2. Subject folders must be named exactly ``sub-XXXX`` (BIDS convention).
-3. EEG files must match ``pyprep.file_extension`` (default ``.vhdr``).
+   1. ``paths.bids_root`` must point to the folder *containing* ``sub-XXXX/``
+      folders (not inside a subject folder).
+   2. Subject folders must be named exactly ``sub-XXXX`` (BIDS convention).
+   3. EEG files must match ``pyprep.file_extension`` (default ``.vhdr``).
 
-Run ``eeg-pipeline info subjects`` to see what is discovered and why
-subjects might be missing.
+   Run ``eeg-pipeline info subjects`` to see what is discovered and why
+   subjects might be missing.
 
-----
+.. dropdown:: Do I need one events.tsv per run?
+   :animate: fade-in
 
-**Do I need one** ``events.tsv`` **per run?**
+   Yes — name each file ``sub-XXXX_task-<task>_run-0N_events.tsv``.
+   The pipeline concatenates them automatically with run-offset alignment.
+   Required columns: ``onset``, ``duration``, ``trial_type``.
+   Any additional predictor or outcome columns are read alongside these.
 
-Yes — name each file ``sub-XXXX_task-<task>_run-0N_events.tsv``.
-The pipeline concatenates them automatically with run-offset alignment.
-The required columns are ``onset``, ``duration``, and ``trial_type``.
-Any additional predictor or outcome columns are read alongside these.
+.. dropdown:: What is trial_id and why does it matter?
+   :animate: fade-in
 
-----
+   After preprocessing, ``proc-clean_events.tsv`` is written to derivatives
+   containing only kept epochs, each assigned a canonical ``trial_id`` integer.
+   Every downstream stage (feature tables, fMRI betas, behavioral targets) must
+   join on ``trial_id`` — it is the only valid alignment key across modalities.
+   Row-order alignment is not accepted.
 
-**What is** ``trial_id`` **and why does it matter?**
+.. dropdown:: How do I process only a subset of subjects?
+   :animate: fade-in
 
-After preprocessing, the pipeline writes ``proc-clean_events.tsv`` to
-derivatives. This file contains only rows for kept epochs, each assigned a
-canonical ``trial_id`` integer. Every downstream stage (feature tables, fMRI
-betas, behavioral targets) must join on ``trial_id`` — it is the only valid
-alignment key across modalities. Row-order alignment is not accepted.
+   Either pass ``--subject XXXX`` flags on the command line:
 
-----
+   .. code-block:: bash
 
-**How do I process only a subset of subjects?**
+      eeg-pipeline features compute --subject 0001 --subject 0002
 
-Either pass ``--subject XXXX`` flags on the command line:
+   Or set a fixed list in the config to apply globally:
 
-.. code-block:: bash
+   .. code-block:: yaml
 
-   eeg-pipeline features compute --subject 0001 --subject 0002
-
-Or set a fixed list in the config to apply globally:
-
-.. code-block:: yaml
-
-   project:
-     subject_list: ["0001", "0002", "0003"]
+      project:
+        subject_list: ["0001", "0002", "0003"]
 
 ----
 
@@ -144,40 +105,39 @@ Or set a fixed list in the config to apply globally:
 Preprocessing
 -------------
 
-**ICA fitting fails: no ICA components found.**
+.. dropdown:: ICA fitting fails: no ICA components found.
+   :animate: fade-in
 
-``ica.n_components`` exceeds the data rank after bad-channel removal.
-Lower it:
+   ``ica.n_components`` exceeds the data rank after bad-channel removal.
+   Lower it:
 
-.. code-block:: yaml
+   .. code-block:: yaml
 
-   ica:
-     n_components: 0.95
+      ica:
+        n_components: 0.95
 
-----
+.. dropdown:: Most epochs are being rejected.
+   :animate: fade-in
 
-**Most epochs are being rejected.**
+   Long epochs accumulate slow drift that trips fixed PTP thresholds.
+   Use local autoreject instead:
 
-Long epochs accumulate slow drift that trips fixed PTP thresholds.
-Use local autoreject instead:
+   .. code-block:: yaml
 
-.. code-block:: yaml
+      epochs:
+        reject: "autoreject_local"
+        autoreject_n_interpolate: [4, 8, 16]
 
-   epochs:
-     reject: "autoreject_local"
-     autoreject_n_interpolate: [4, 8, 16]
+   Also verify that ``epochs.tmin`` ≤ ``time_windows.baseline_tfr[0]``
+   so the baseline window falls inside the epoch.
 
-Also verify that ``epochs.tmin`` ≤ ``time_windows.baseline_tfr[0]``
-so the baseline window falls inside the epoch.
+.. dropdown:: Bad channels detected in one run are not propagated to other runs.
+   :animate: fade-in
 
-----
-
-**Bad channels detected in one run are not propagated to other runs.**
-
-The ``full`` and ``bad-channels`` modes synchronize bads across runs
-by default (union of bads per subject and task). If you re-run only
-``epochs`` after modifying ``channels.tsv`` manually, run ``bad-channels``
-first to trigger re-synchronization.
+   The ``full`` and ``bad-channels`` modes synchronize bads across runs by
+   default (union of bads per subject and task). If you re-run only ``epochs``
+   after modifying ``channels.tsv`` manually, run ``bad-channels`` first to
+   trigger re-synchronization.
 
 ----
 
@@ -186,97 +146,93 @@ first to trigger re-synchronization.
 Feature Extraction
 ------------------
 
-**How do I run the pipeline on resting-state EEG data?**
+.. dropdown:: How do I run the pipeline on resting-state EEG data?
+   :animate: fade-in
 
-Set ``task_is_rest: true`` in ``eeg_config.yaml`` (or pass ``--task-is-rest``
-to preprocessing) and point ``paths.bids_rest_root`` at your resting-state
-BIDS directory:
+   Set ``task_is_rest: true`` in ``eeg_config.yaml`` (or pass
+   ``--task-is-rest`` to preprocessing) and point ``paths.bids_rest_root``
+   at your resting-state BIDS directory:
 
-.. code-block:: yaml
+   .. code-block:: yaml
 
-   preprocessing:
-     task_is_rest: true
-     rest_epochs_duration: 10.0   # seconds per segment
-     rest_epochs_overlap: 0.0
-   paths:
-     bids_rest_root: "../../../data/bids_output/eeg_rest"
-     deriv_rest_root: "../../../data/derivatives/rest"
+      preprocessing:
+        task_is_rest: true
+        rest_epochs_duration: 10.0
+        rest_epochs_overlap: 0.0
+      paths:
+        bids_rest_root: "../../../data/bids_output/eeg_rest"
+        deriv_rest_root: "../../../data/derivatives/rest"
 
-No ``events.tsv`` is required. Event-locked families (``erp``, ``erds``,
-``itpc``, ``pac``) are not valid in rest mode and raise an error if requested.
-Use only rest-compatible families (for example: ``power``, ``connectivity``,
-``aperiodic``, ``spectral``, ``complexity``).
+   No ``events.tsv`` is required. Event-locked families (``erp``, ``erds``,
+   ``itpc``, ``pac``) are invalid in rest mode and raise an error if requested.
 
-.. code-block:: bash
+   .. code-block:: bash
 
-   eeg-pipeline preprocessing full --subject 0001 --task-is-rest
-   eeg-pipeline features compute --subject 0001 \
-     --categories power connectivity aperiodic spectral complexity
+      eeg-pipeline preprocessing full --subject 0001 --task-is-rest
+      eeg-pipeline features compute --subject 0001 \
+        --categories power connectivity aperiodic spectral complexity
 
-See :doc:`user_guide/output_formats` for the full resting-state workflow, and
-:doc:`user_guide/configuration` for all related config keys.
+   See :doc:`user_guide/output_formats` and :doc:`user_guide/configuration`
+   for the full resting-state config reference.
 
-----
+.. dropdown:: Feature extraction is slow.
+   :animate: fade-in
 
-**Feature extraction is slow.**
+   Enable parallelism in the config:
 
-Enable parallelism in the config:
+   .. code-block:: yaml
 
-.. code-block:: yaml
+      feature_engineering:
+        parallel:
+          n_jobs_bands: -1
+          n_jobs_connectivity: -1
+          n_jobs_aperiodic: -1
 
-   feature_engineering:
-     parallel:
-       n_jobs_bands: -1
-       n_jobs_connectivity: -1
-       n_jobs_aperiodic: -1
+   Or pass it at runtime:
 
-Or pass it at runtime for a specific run:
+   .. code-block:: bash
 
-.. code-block:: bash
+      eeg-pipeline features compute --all-subjects \
+        --n-jobs-bands -1 \
+        --n-jobs-connectivity -1 \
+        --n-jobs-aperiodic -1
 
-   eeg-pipeline features compute --all-subjects \
-     --n-jobs-bands -1 \
-     --n-jobs-connectivity -1 \
-     --n-jobs-aperiodic -1
+   Limit to the families you need:
 
-Limit to the families you need for the current analysis:
+   .. code-block:: bash
 
-.. code-block:: bash
+      eeg-pipeline features compute --all-subjects \
+        --categories power aperiodic connectivity
 
-   eeg-pipeline features compute --all-subjects \
-     --categories power aperiodic connectivity
+.. dropdown:: Aperiodic fits are failing or have very low R².
+   :animate: fade-in
 
-----
+   Relax the minimum R² or switch to the knee model:
 
-**Aperiodic fits are failing or have very low R².**
+   .. code-block:: yaml
 
-Relax the minimum R² or switch to the knee model:
+      feature_engineering:
+        aperiodic:
+          min_r2: 0.5
+          model: "knee"
 
-.. code-block:: yaml
+   Also ensure the PSD frequency range covers the aperiodic background
+   (at least 1–40 Hz).
 
-   feature_engineering:
-     aperiodic:
-       min_r2: 0.5
-       model: "knee"   # better for data with strong low-frequency peaks
+.. dropdown:: The connectivity family is very slow.
+   :animate: fade-in
 
-Also ensure the PSD is computed over a frequency range that includes the
-aperiodic background (at least 1–40 Hz).
+   Restrict to the most informative measure and band:
 
-----
+   .. code-block:: yaml
 
-**The** ``connectivity`` **family is very slow.**
+      feature_engineering:
+        connectivity:
+          methods: ["wpli"]
+          granularity: "trial"
 
-Restrict to the most informative measure and band:
-
-.. code-block:: yaml
-
-   feature_engineering:
-     connectivity:
-       methods: ["wpli"]
-       granularity: "trial"
-
-Alternatively, compute only the connectivity family with ``--categories connectivity``
-and a low ``n_jobs_connectivity`` to avoid memory pressure.
+   Or compute only connectivity with ``--categories connectivity`` and a
+   low ``n_jobs_connectivity`` to avoid memory pressure.
 
 ----
 
@@ -285,40 +241,38 @@ and a low ``n_jobs_connectivity`` to avoid memory pressure.
 Machine Learning
 ----------------
 
-**LOSO regression returns NaN metrics for every subject.**
+.. dropdown:: LOSO regression returns NaN metrics for every subject.
+   :animate: fade-in
 
-- Check for all-NaN feature columns: ``eeg-pipeline info features 0001``
-- At least two subjects are required for LOSO; check ``info subjects``
-- Try the union-impute harmonization strategy:
+   - Check for all-NaN feature columns: ``eeg-pipeline info features 0001``
+   - At least two subjects are required for LOSO; check ``info subjects``
+   - Try the union-impute harmonization strategy:
 
-.. code-block:: bash
+   .. code-block:: bash
 
-   eeg-pipeline ml regression --all-subjects \
-     --set machine_learning.data.feature_harmonization=union_impute
+      eeg-pipeline ml regression --all-subjects \
+        --set machine_learning.data.feature_harmonization=union_impute
 
-----
+.. dropdown:: ML uses features I haven't extracted yet.
+   :animate: fade-in
 
-**ML uses features I haven't extracted yet.**
+   Run feature extraction with ``--analysis-mode trial_ml_safe`` before ML:
 
-Run feature extraction with ``--analysis-mode trial_ml_safe`` before ML:
+   .. code-block:: bash
 
-.. code-block:: bash
+      eeg-pipeline features compute --all-subjects --analysis-mode trial_ml_safe
+      eeg-pipeline ml regression --all-subjects
 
-   eeg-pipeline features compute --all-subjects --analysis-mode trial_ml_safe
-   eeg-pipeline ml regression --all-subjects
+.. dropdown:: Classification returns uniform predictions (all same class).
+   :animate: fade-in
 
-----
+   ``class_weight="balanced"`` is always applied, but extreme class imbalance
+   can still collapse predictions. Try SMOTE resampling:
 
-**Classification returns uniform predictions (all same class).**
+   .. code-block:: bash
 
-``class_weight="balanced"`` is always applied, but extreme class imbalance
-can still collapse predictions. Lower the classification threshold or try
-SMOTE resampling:
-
-.. code-block:: bash
-
-   eeg-pipeline ml classify --subject 0001 --subject 0002 \
-     --set machine_learning.classification.resampler=smote
+      eeg-pipeline ml classify --subject 0001 --subject 0002 \
+        --set machine_learning.classification.resampler=smote
 
 ----
 
@@ -327,68 +281,71 @@ SMOTE resampling:
 fMRI and Source Localization
 -----------------------------
 
-**fMRIPrep crashes: Permission denied on the work directory.**
+.. dropdown:: fMRIPrep crashes: Permission denied on the work directory.
+   :animate: fade-in
 
-Set an absolute writable path:
+   Set an absolute writable path:
 
-.. code-block:: yaml
+   .. code-block:: yaml
 
-   fmri_preprocessing:
-     fmriprep:
-       work_dir: "/tmp/fmriprep_work"
+      fmri_preprocessing:
+        fmriprep:
+          work_dir: "/tmp/fmriprep_work"
 
-----
+.. dropdown:: First-level GLM produces empty contrast maps.
+   :animate: fade-in
 
-**First-level GLM produces empty contrast maps.**
+   1. ``fmri_contrast.condition_a.value`` must exactly match a ``trial_type``
+      value in your ``events.tsv``. Use ``eeg-pipeline info fmri-conditions``
+      to list available values.
+   2. Confirm fMRIPrep outputs exist under the expected derivatives path.
 
-1. ``fmri_contrast.condition_a.value`` must exactly match a ``trial_type``
-   value in your ``events.tsv``. Use ``eeg-pipeline info fmri-conditions``
-   to list available values.
-2. Confirm fMRIPrep outputs exist under the expected derivatives path.
+   .. code-block:: bash
 
-.. code-block:: bash
+      eeg-pipeline info fmri-conditions
+      eeg-pipeline validate bids
+      bids-validator /path/to/bids_root
 
-   eeg-pipeline info fmri-conditions
-   eeg-pipeline validate bids
-   bids-validator /path/to/bids_root
+.. dropdown:: BEM generation fails: no T1w image found.
+   :animate: fade-in
 
-----
+   Run FreeSurfer ``recon-all`` first, then point the config at the output:
 
-**BEM generation fails: no T1w image found.**
+   .. code-block:: bash
 
-Run FreeSurfer ``recon-all`` first, then point the config at the output:
+      recon-all -s sub-0001 -i /path/to/T1w.nii.gz -all
 
-.. code-block:: bash
+   .. code-block:: yaml
 
-   recon-all -s sub-0001 -i /path/to/T1w.nii.gz -all
-
-.. code-block:: yaml
-
-   paths:
-     freesurfer_dir: "../../../data/derivatives/freesurfer"
-
-----
-
-**Do I need to edit YAML files before running a pipeline?**
-
-Not if you use the TUI. Open **Global Setup** (press ``C`` from the main menu
-or navigate to *Utilities → Global Setup*) to set the task name and all data
-paths interactively. Settings persist across sessions. YAML editing is only
-necessary for parameters not exposed in Global Setup (ICA thresholds,
-aperiodic model, etc.).
+      paths:
+        freesurfer_dir: "../../../data/derivatives/freesurfer"
 
 ----
 
-**The TUI cannot find my Python environment.**
+.. _faq-tui:
 
-The TUI searches for a virtual environment in this order:
-``eeg_pipeline/.venv311`` → ``.venv311`` → ``.venv`` → ``venv`` →
-system ``python3``. Ensure one exists at a recognized path and has the
-package installed.
+TUI
+---
 
-----
+.. dropdown:: Do I need to edit YAML files before running a pipeline?
+   :animate: fade-in
 
-**The TUI exits immediately with** ``panic: terminal not attached``.
+   Not if you use the TUI. Open **Global Setup** (press ``C`` from the main
+   menu or navigate to *Utilities → Global Setup*) to set the task name and
+   all data paths interactively. Settings persist across sessions. YAML editing
+   is only necessary for parameters not exposed in Global Setup (ICA
+   thresholds, aperiodic model, etc.).
 
-The TUI requires an interactive TTY. Do not run it inside a non-interactive
-shell, a subshell without a TTY, or a pipe. Use a regular terminal session.
+.. dropdown:: The TUI cannot find my Python environment.
+   :animate: fade-in
+
+   The TUI searches for a virtual environment in this order:
+   ``eeg_pipeline/.venv311`` → ``.venv311`` → ``.venv`` → ``venv`` →
+   system ``python3``. Ensure one exists at a recognized path and has the
+   package installed.
+
+.. dropdown:: The TUI exits immediately with "panic: terminal not attached".
+   :animate: fade-in
+
+   The TUI requires an interactive TTY. Do not run it inside a non-interactive
+   shell, a subshell without a TTY, or a pipe. Use a regular terminal session.
