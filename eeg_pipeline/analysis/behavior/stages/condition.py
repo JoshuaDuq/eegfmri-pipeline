@@ -50,8 +50,14 @@ def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> st
         config, "behavior_analysis.condition.compare_column", None
     )
     compare_col = str(compare_col_value or "").strip()
-    if compare_col and compare_col in df_trials.columns:
-        return compare_col
+    if compare_col:
+        if compare_col in df_trials.columns:
+            return compare_col
+        raise ValueError(
+            "Configured behavior_analysis.condition.compare_column="
+            f"{compare_col!r} but that column is not present in the trial table. "
+            f"Available columns: {sorted(df_trials.columns.tolist())}"
+        )
 
     fallback_col = get_condition_column_from_config(config, df_trials)
     if fallback_col and fallback_col in df_trials.columns:
@@ -67,6 +73,61 @@ def resolve_condition_compare_column(df_trials: pd.DataFrame, config: Any) -> st
         "'event_columns.condition' / 'event_columns.binary_outcome' to match "
         "a column in the trial table. "
         f"Available columns: {sorted(df_trials.columns.tolist())}"
+    )
+
+
+def _filter_sparse_run_condition_cells(
+    df_trials: pd.DataFrame,
+    *,
+    config: Any,
+    logger: Any,
+    context: str,
+) -> pd.DataFrame:
+    """Drop run×condition cells below the configured minimum trial count."""
+    min_trials = int(
+        require_config_value(config, "behavior_analysis.condition.min_trials_per_condition")
+    )
+    if min_trials <= 0:
+        return df_trials
+    if "n_trials_cell" not in df_trials.columns:
+        raise ValueError(
+            f"{context} requires 'n_trials_cell' after run-level aggregation."
+        )
+
+    keep_mask = pd.to_numeric(df_trials["n_trials_cell"], errors="coerce") >= min_trials
+    dropped = int((~keep_mask).sum())
+    if dropped > 0:
+        logger.info(
+            "%s: dropped %d run×condition cells with n_trials_cell < %d",
+            context,
+            dropped,
+            min_trials,
+    )
+    return df_trials.loc[keep_mask].reset_index(drop=True)
+
+
+def _require_complete_run_level_condition_keys(
+    df_trials: pd.DataFrame,
+    *,
+    run_col: str,
+    compare_col: str,
+    context: str,
+) -> None:
+    """Validate that run-level condition aggregation keys are complete."""
+    if run_col not in df_trials.columns:
+        raise ValueError(
+            f"{context} requested run-level inference but run column {run_col!r} is missing."
+        )
+
+    missing_run = int(df_trials[run_col].isna().sum())
+    missing_condition = int(df_trials[compare_col].isna().sum())
+    if missing_run == 0 and missing_condition == 0:
+        return
+
+    raise ValueError(
+        f"{context} requested run-level inference but aggregation keys require non-missing values. "
+        f"Found {missing_run} missing values in {run_col!r} and {missing_condition} missing values "
+        f"in {compare_col!r}."
     )
 
 
@@ -149,12 +210,33 @@ def stage_condition_column_impl(
     _ = bool(
         require_config_value(ctx.config, "behavior_analysis.condition.overwrite")
     )
-    if use_run_unit and run_col in df_trials.columns and compare_col in df_trials.columns:
+    if use_run_unit:
+        _require_complete_run_level_condition_keys(
+            df_trials,
+            run_col=run_col,
+            compare_col=compare_col,
+            context="Condition column comparison",
+        )
         ctx.logger.info("Condition: aggregating to run×condition level (primary_unit=%s)", primary_unit)
         group_keys = [run_col, compare_col]
-        df_agg = df_trials.groupby(group_keys, dropna=True)[feature_cols].mean(numeric_only=True).reset_index()
-        cell_counts = df_trials.groupby(group_keys, dropna=True).size().rename("n_trials_cell").reset_index()
+        df_agg = (
+            df_trials.groupby(group_keys, dropna=False)[feature_cols]
+            .mean(numeric_only=True)
+            .reset_index()
+        )
+        cell_counts = (
+            df_trials.groupby(group_keys, dropna=False)
+            .size()
+            .rename("n_trials_cell")
+            .reset_index()
+        )
         df_trials = df_agg.merge(cell_counts, on=group_keys, how="left")
+        df_trials = _filter_sparse_run_condition_cells(
+            df_trials,
+            config=ctx.config,
+            logger=ctx.logger,
+            context="Condition",
+        )
         ctx.logger.info("  Run×condition level: %d observations", len(df_trials))
 
     if not feature_cols:
@@ -236,7 +318,7 @@ def stage_condition_column_impl(
             config=ctx.config,
             groups=groups,
             paired=bool(use_run_unit),
-            pair_ids=df_trials[run_col].to_numpy() if bool(use_run_unit and run_col in df_trials.columns) else None,
+            pair_ids=df_trials[run_col].to_numpy() if use_run_unit else None,
             p_primary_mode=p_primary_mode,
         )
 
@@ -390,27 +472,35 @@ def stage_condition_multigroup_impl(
     ).strip()
     use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
     if use_run_unit:
-        if run_col not in df_trials.columns:
-            raise ValueError(
-                f"Run-level multigroup condition comparisons requested but run column '{run_col}' is missing."
-            )
+        _require_complete_run_level_condition_keys(
+            df_trials,
+            run_col=run_col,
+            compare_col=compare_column,
+            context="Condition multigroup comparison",
+        )
         ctx.logger.info(
             "Condition multigroup: aggregating to run×condition level (primary_unit=%s)",
             primary_unit,
         )
         group_keys = [run_col, compare_column]
         df_agg = (
-            df_trials.groupby(group_keys, dropna=True)[feature_cols]
+            df_trials.groupby(group_keys, dropna=False)[feature_cols]
             .mean(numeric_only=True)
             .reset_index()
         )
         cell_counts = (
-            df_trials.groupby(group_keys, dropna=True)
+            df_trials.groupby(group_keys, dropna=False)
             .size()
             .rename("n_trials_cell")
             .reset_index()
         )
         df_trials = df_agg.merge(cell_counts, on=group_keys, how="left")
+        df_trials = _filter_sparse_run_condition_cells(
+            df_trials,
+            config=ctx.config,
+            logger=ctx.logger,
+            context="Condition multigroup",
+        )
 
     if isinstance(compare_labels, (list, tuple)) and len(compare_labels) >= len(compare_values):
         group_labels = [str(l).strip() for l in compare_labels[: len(compare_values)]]

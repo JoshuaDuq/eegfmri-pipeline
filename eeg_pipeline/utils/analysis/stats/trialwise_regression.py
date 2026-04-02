@@ -293,7 +293,10 @@ class TrialwiseRegressionConfig:
             _get(config, "behavior_analysis.permutation.scheme", "shuffle")
         ).strip().lower()
         if permutation_scheme not in {"shuffle", "circular_shift"}:
-            permutation_scheme = "shuffle"
+            raise ValueError(
+                "Invalid behavior_analysis.permutation.scheme value: "
+                f"{permutation_scheme!r}. Expected one of: 'shuffle', 'circular_shift'."
+            )
         max_features = _get(config, f"{base_path}.max_features", None)
         n_jobs = int(_get(config, "behavior_analysis.n_jobs", 1))
         
@@ -789,6 +792,11 @@ def run_trialwise_feature_regressions(
         groups_arr = np.asarray(groups_for_permutation)
         if groups_arr.shape[0] == len(trial_df):
             groups_v = groups_arr[valid_mask]
+            if bool(np.any(pd.isna(groups_v))):
+                raise ValueError(
+                    "Trial-level regression with permutation inference requires "
+                    "complete non-missing grouped labels."
+                )
 
     candidates = _screen_feature_candidates(trial_df, feature_cols, valid_mask, cfg)
     

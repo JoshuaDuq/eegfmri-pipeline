@@ -97,6 +97,26 @@ class TestEventColumnValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Could not resolve a numeric behavior outcome column"):
             require_outcome_column(events_df, config_without_match)
 
+    def test_behavior_resolution_rejects_missing_explicit_outcome_override(self):
+        events_df = pd.DataFrame(
+            {
+                "outcome": [1.0, 2.0],
+                "custom_score": [3.0, 4.0],
+            }
+        )
+        config = DotConfig(
+            {
+                "behavior_analysis": {"outcome_column": "vas_rating"},
+                "event_columns": {"outcome": ["custom_score"]},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "behavior_analysis.outcome_column"):
+            resolve_outcome_column(events_df, config)
+
+        with self.assertRaisesRegex(ValueError, "behavior_analysis.outcome_column"):
+            require_outcome_column(events_df, config)
+
     def test_behavior_resolution_does_not_fallback_to_unconfigured_predictor_column(self):
         events_df = pd.DataFrame(
             {
@@ -124,6 +144,26 @@ class TestEventColumnValidation(unittest.TestCase):
         self.assertIsNone(resolve_predictor_column(events_df, config_without_match))
         with self.assertRaisesRegex(ValueError, "Could not resolve a numeric behavior predictor column"):
             require_predictor_column(events_df, config_without_match)
+
+    def test_behavior_resolution_rejects_nonnumeric_explicit_predictor_override(self):
+        events_df = pd.DataFrame(
+            {
+                "predictor_label": ["low", "high"],
+                "stim_temp": [45.0, 46.0],
+            }
+        )
+        config = DotConfig(
+            {
+                "behavior_analysis": {"predictor_column": "predictor_label"},
+                "event_columns": {"predictor": ["stim_temp"]},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "behavior_analysis.predictor_column"):
+            resolve_predictor_column(events_df, config)
+
+        with self.assertRaisesRegex(ValueError, "behavior_analysis.predictor_column"):
+            require_predictor_column(events_df, config)
 
     def test_trialwise_regression_requires_configured_predictor_when_enabled(self):
         trial_df = pd.DataFrame(

@@ -1105,6 +1105,10 @@ class FeatureBehaviorCorrelator:
             )
 
         method_label = format_correlation_method_label(effective_config.method, effective_config.robust_method)
+        permutation_group_series = None
+        if effective_config.groups is not None:
+            aligned_groups = _align_groups_to_series(targets, effective_config.groups)
+            permutation_group_series = pd.Series(aligned_groups, index=targets.index)
         records: List[Dict[str, Any]] = []
         for band in bands:
             band_lower = str(band).lower()
@@ -1118,10 +1122,9 @@ class FeatureBehaviorCorrelator:
                 if preferred_columns:
                     band_columns = preferred_columns
                 else:
-                    self.logger.debug(
-                        "Power ROI correlations: segment '%s' not present for band '%s'; using all segments.",
-                        preferred_segment,
-                        band,
+                    raise ValueError(
+                        "Configured behavior_analysis.correlations.power_segment_preference="
+                        f"{preferred_segment!r} but no matching power columns were found for band {band!r}."
                     )
             
             if not band_columns:
@@ -1159,6 +1162,10 @@ class FeatureBehaviorCorrelator:
                 pred_aligned = None
                 if effective_config.control_predictor and effective_config.predictor_series is not None:
                     pred_aligned = effective_config.predictor_series.reindex(df_pair.index)
+
+                perm_groups = None
+                if permutation_group_series is not None:
+                    perm_groups = _align_groups_to_series(df_pair["y"], permutation_group_series)
 
                 correlation_coefficient, p_value, n_valid = safe_correlation(
                     df_pair["x"].values,
@@ -1226,7 +1233,7 @@ class FeatureBehaviorCorrelator:
                         effective_config.method,
                         effective_config.n_permutations,
                         rng,
-                        perm_groups=None,
+                        perm_groups=perm_groups,
                         config=self.config,
                     )
                     _update_primary_perm_pvalue(record)
@@ -1247,6 +1254,10 @@ class FeatureBehaviorCorrelator:
                 pred_aligned = None
                 if effective_config.control_predictor and effective_config.predictor_series is not None:
                     pred_aligned = effective_config.predictor_series.reindex(df_pair.index)
+
+                perm_groups = None
+                if permutation_group_series is not None:
+                    perm_groups = _align_groups_to_series(df_pair["y"], permutation_group_series)
 
                 correlation_coefficient, p_value, n_valid = safe_correlation(
                     df_pair["x"].values,
@@ -1314,7 +1325,7 @@ class FeatureBehaviorCorrelator:
                         effective_config.method,
                         effective_config.n_permutations,
                         rng,
-                        perm_groups=None,
+                        perm_groups=perm_groups,
                         config=self.config,
                     )
                     _update_primary_perm_pvalue(record)

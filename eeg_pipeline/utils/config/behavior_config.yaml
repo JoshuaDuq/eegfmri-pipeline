@@ -5,7 +5,8 @@
 behavior_analysis:
   predictor_type: "continuous"  # "continuous" | "binary" | "categorical"
   # Canonical behavior columns used across stages. If empty, auto-resolve from
-  # event_columns.* aliases and existing trial-table columns.
+  # event_columns.* aliases and existing trial-table columns. If set, the named
+  # column must exist and be numeric.
   predictor_column: ""   # e.g., stimulus intensity / dose / temperature
   outcome_column: ""     # e.g., rating / arousal / detection score
   predictor_control_enabled: true  # Partial-out predictor in correlations
@@ -114,6 +115,7 @@ behavior_analysis:
     # "spline" uses a restricted cubic spline basis (linear regression on nonlinear terms).
     predictor_control: "spline"  # "linear" | "spline"
     # If false, trial-level tests require permutation or aggregation.
+    # Grouped permutation also requires complete non-missing run/block labels.
     # Set true only if you explicitly accept i.i.d. trial assumptions.
     allow_iid_trials: false
 
@@ -125,14 +127,14 @@ behavior_analysis:
   correlations:
     enabled: true
     types: ["partial_cov_predictor"]
-    target_column: ""                 # Empty = auto-resolve from event_columns.outcome
-    power_segment_preference: ""      # Empty = default/auto segment selection
-    targets: []                     # Empty = auto-resolve outcome column and optional residual target
+    target_column: ""                 # Empty = auto-resolve from event_columns.outcome; if set, this exact target column must exist and be numeric
+    power_segment_preference: ""      # Empty = default/auto segment selection; if set, the requested power segment must exist for analyzed bands
+    targets: []                       # Empty = auto-resolve outcome column and optional residual target; explicit entries must all exist and be numeric
     compute_change_scores: true
     loso_stability: true
     compute_bayes_factors: false
     prefer_predictor_residual: true
-    use_crossfit_predictor_residual: true
+    use_crossfit_predictor_residual: true  # Only used when predictor_residual_cv has finite values
     primary_unit: "trial"            # "trial" | "run_mean"
     min_runs: 5                      # Minimum run count when primary_unit="run_mean"
     p_primary_mode: "perm_if_available"  # "asymptotic" | "perm_if_available"
@@ -145,11 +147,11 @@ behavior_analysis:
     enabled: true
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum |Hedges' g| flagged as reportable/highlighted in condition reports
-    compare_column: ""          # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
+    compare_column: ""          # Column to split by; if set, this exact trial-table column must exist
     compare_values: []           # Explicit values to compare. Leave empty only for binary columns with exactly 2 observed levels.
     compare_labels: null         # Optional labels for compare_values (same length)
-    min_trials_per_condition: 0   # 0 = unset
-    primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
+    min_trials_per_condition: 0   # 0 = unset; when primary_unit=run_mean, drop run×condition cells below this count
+    primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication and requires complete run/condition labels)
     overwrite: true
     p_primary_mode: "perm_if_available"   # "asymptotic" | "perm_if_available"
     permutation:
@@ -159,15 +161,16 @@ behavior_analysis:
   # Temporal correlations computation
   temporal:
     enabled: true
-    target_column: ""                 # Empty = use event_columns.outcome
+    target_column: ""                 # Empty = use behavior_analysis.outcome_column, then event_columns.outcome
     time_resolution_ms: 50
     time_range_ms: [-200, 1000]
     smooth_window_ms: 100
-    correction_method: "cluster"      # "fdr" | "bonferroni" | "cluster"
+    correction_method: "cluster"      # "fdr" | "bonferroni" | "cluster"; cluster failures raise
     # Condition-based splitting (similar to condition comparison)
-    split_by_condition: true           # If true, compute separate correlations per condition value
-    condition_column: ""               # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
+    split_by_condition: true           # If true, compute separate correlations per condition value; requires a valid condition column
+    condition_column: ""               # Column to split by; if set, this exact events column must exist
     condition_values: []               # Specific values to compute for (empty = all unique values in column)
+    selected_bands: []                 # If set, every requested band name must match an available configured band
     # Output options for unified temporal correlations file
     include_roi_averages: true         # Include ROI-averaged rows (replaces power_topomap_correlations)
     # Feature selection for temporal correlations
@@ -195,8 +198,8 @@ behavior_analysis:
     forming_threshold: 0.05
     min_cluster_size: 2
     tail: 0  # 0=two-tailed, 1=upper, -1=lower
-    condition_column: ""         # Column to split by (empty = use event_columns.condition, then event_columns.binary_outcome)
-    condition_values: []         # Exactly 2 values to compare (default [0, 1] if empty)
+    condition_column: ""         # Column to split by; if set, this exact aligned-events column must exist
+    condition_values: []         # Exactly 2 values to compare when set; empty = infer the observed binary contrast; condition labels must be complete
     fwer_method: "cluster"
 
   cluster_correction:

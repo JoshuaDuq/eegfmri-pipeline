@@ -35,7 +35,10 @@ from eeg_pipeline.utils.data.columns import (
     get_condition_column_from_config,
 )
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh_values, fdr_bh
-from eeg_pipeline.utils.analysis.stats.effect_size import compute_cohens_d_with_bootstrap_ci
+from eeg_pipeline.utils.analysis.stats.effect_size import (
+    compute_cohens_d_with_bootstrap_ci,
+    resolve_binary_condition_values,
+)
 
 
 ###################################################################
@@ -1072,32 +1075,47 @@ def _run_cluster_test_core(
     condition_column_config = str(
         get_config_value(config, "behavior_analysis.cluster.condition_column", "") or ""
     ).strip()
-    condition_column = (
-        condition_column_config
-        if condition_column_config and condition_column_config in aligned_events.columns
-        else (
+    if condition_column_config:
+        if condition_column_config not in aligned_events.columns:
+            raise ValueError(
+                "Configured behavior_analysis.cluster.condition_column="
+                f"{condition_column_config!r} but that column is not present in aligned events. "
+                f"Available columns: {list(aligned_events.columns)}"
+            )
+        condition_column = condition_column_config
+    else:
+        condition_column = (
             get_condition_column_from_config(config, aligned_events)
             or get_binary_outcome_column_from_config(config, aligned_events)
         )
-    )
     if condition_column is None or condition_column not in aligned_events.columns:
         logger.warning("Cluster condition column not found; skipping cluster test.")
         return None
 
+    condition_series = aligned_events[condition_column]
+    if condition_series.isna().any():
+        raise ValueError(
+            "Cluster test requires complete condition labeling; missing condition labels were found in "
+            f"{condition_column!r}."
+        )
+
     condition_values_config = (
         get_config_value(config, "behavior_analysis.cluster.condition_values", []) or []
     )
-    condition_values_list: List[Any] = (
-        list(condition_values_config)
-        if isinstance(condition_values_config, (list, tuple))
-        else [condition_values_config]
-    )
-    if len(condition_values_list) >= 2:
+    if isinstance(condition_values_config, (list, tuple)):
+        condition_values_list = list(condition_values_config)
+    elif condition_values_config in (None, ""):
+        condition_values_list = []
+    else:
+        condition_values_list = [condition_values_config]
+    if condition_values_list:
+        if len(condition_values_list) != 2:
+            raise ValueError(
+                "behavior_analysis.cluster.condition_values must contain exactly two values when explicitly set."
+            )
         value_a, value_b = condition_values_list[0], condition_values_list[1]
     else:
-        value_a, value_b = 0, 1
-
-    condition_series = aligned_events[condition_column]
+        value_a, value_b = resolve_binary_condition_values(aligned_events, config)
 
     def _match_condition_values(
         series: pd.Series, val_a: Any, val_b: Any
@@ -1122,7 +1140,7 @@ def _run_cluster_test_core(
     mask_group_a, mask_group_b = _match_condition_values(
         condition_series, value_a, value_b
     )
-    keep_mask = (mask_group_a | mask_group_b) & condition_series.notna()
+    keep_mask = mask_group_a | mask_group_b
     n_kept = int(keep_mask.sum())
     if n_kept == 0:
         logger.warning(

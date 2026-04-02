@@ -359,9 +359,19 @@ def _compute_batch_permutation_pvalues(
     valid_data = data_matrix[valid_indices, :]
     valid_labels = cond_a_mask[valid_indices].astype(bool, copy=False)
     valid_groups = groups[valid_indices] if groups is not None else None
+    if valid_groups is not None and bool(np.any(pd.isna(valid_groups))):
+        raise ValueError(
+            "Condition permutation groups contain missing values. "
+            "Provide complete non-missing grouped labels."
+        )
     rng = np.random.default_rng(base_seed)
     log_interval = max(1, n_perm // 10)
     scheme = str(scheme or "shuffle").strip().lower()
+    if scheme not in {"shuffle", "circular_shift"}:
+        raise ValueError(
+            "Invalid behavior_analysis.permutation.scheme value: "
+            f"{scheme!r}. Expected one of: 'shuffle', 'circular_shift'."
+        )
     p_values = np.full(n_features, np.nan, dtype=float)
     finite_patterns: Dict[bytes, Tuple[np.ndarray, List[int]]] = {}
 
@@ -760,6 +770,11 @@ def compute_condition_effects(
     scheme = str(
         require_config_value(config, "behavior_analysis.permutation.scheme")
     ).strip().lower()
+    if scheme not in {"shuffle", "circular_shift"}:
+        raise ValueError(
+            "Invalid behavior_analysis.permutation.scheme value: "
+            f"{scheme!r}. Expected one of: 'shuffle', 'circular_shift'."
+        )
     base_seed = int(
         require_config_value(config, "behavior_analysis.statistics.base_seed")
     )

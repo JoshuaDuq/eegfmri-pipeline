@@ -74,14 +74,20 @@ def filter_feature_cols_for_computation_impl(
     if not selected_features:
         return feature_cols
 
-    allowed_prefixes = tuple(category_prefix_map[cat] for cat in selected_features if cat in category_prefix_map)
-    if not allowed_prefixes:
-        ctx.logger.warning(
-            "Computation '%s' has feature filter %s but no matching prefixes found. Using all features.",
-            computation_name,
-            selected_features,
+    invalid_features = [
+        str(category)
+        for category in selected_features
+        if category not in category_prefix_map
+    ]
+    if invalid_features:
+        raise ValueError(
+            f"Computation '{computation_name}' has invalid feature filter value(s): "
+            f"{', '.join(repr(item) for item in invalid_features)}. "
+            f"Allowed values: {sorted(category_prefix_map)}."
         )
-        return feature_cols
+
+    allowed_prefixes = tuple(category_prefix_map[cat] for cat in selected_features)
+
 
     filtered = [c for c in feature_cols if str(c).startswith(allowed_prefixes)]
     if len(filtered) < len(feature_cols):

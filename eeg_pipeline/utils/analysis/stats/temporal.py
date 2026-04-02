@@ -86,18 +86,14 @@ def _resolve_temporal_target_column(
             )
         return target_col
 
-    outcome_columns = (
-        list(config.get("event_columns.outcome", []) or [])
-        if config is not None and hasattr(config, "get")
-        else []
-    )
-    from eeg_pipeline.utils.data.columns import pick_target_column
+    from eeg_pipeline.utils.data.columns import resolve_outcome_column
 
-    outcome_col = pick_target_column(events, target_columns=outcome_columns)
+    outcome_col = resolve_outcome_column(events, config)
     if outcome_col is None:
         raise ValueError(
-            f"{analysis_name}: no outcome column found. Configure event_columns.outcome or set "
-            f"behavior_analysis.temporal.target_column. Available columns: {list(events.columns)}"
+            f"{analysis_name}: no outcome column found. Configure behavior_analysis.outcome_column, "
+            f"event_columns.outcome, or set behavior_analysis.temporal.target_column. "
+            f"Available columns: {list(events.columns)}"
         )
     return outcome_col
 
@@ -111,6 +107,12 @@ def _resolve_temporal_condition_column(
     """Resolve the events column used for temporal condition splitting."""
     condition_column = str(temporal_cfg.get("condition_column", "") or "").strip()
     if condition_column:
+        if condition_column not in events.columns:
+            raise ValueError(
+                "Configured behavior_analysis.temporal.condition_column="
+                f"{condition_column!r} but that column is not present in events. "
+                f"Available columns: {list(events.columns)}"
+            )
         return condition_column
     resolved = get_condition_column_from_config(config, events)
     if resolved is None:
@@ -151,6 +153,29 @@ def _validate_temporal_split_configuration(
         "correlations can be computed. Choose a different temporal target column or disable "
         "split_by_condition."
     )
+
+
+def _resolve_selected_temporal_bands(
+    all_bands: Dict[str, Tuple[float, float]],
+    selected_bands: Optional[List[str]],
+    *,
+    analysis_name: str,
+    logger: logging.Logger,
+) -> Dict[str, Tuple[float, float]]:
+    """Resolve requested temporal bands and fail if none match."""
+    if not selected_bands:
+        return all_bands
+
+    selected_names = {str(name).strip().lower() for name in selected_bands if str(name).strip()}
+    bands = {name: limits for name, limits in all_bands.items() if name.lower() in selected_names}
+    if not bands:
+        raise ValueError(
+            f"{analysis_name}: selected_bands={selected_bands!r} did not match any available bands. "
+            f"Available bands: {list(all_bands.keys())}"
+        )
+
+    logger.info("%s: using selected bands %s", analysis_name, list(bands.keys()))
+    return bands
 
 
 def _get_temporal_targets_from_events(
@@ -937,8 +962,10 @@ def _determine_condition_values(
         if not split_by_condition:
             logger.info(f"{analysis_name}: split_by_condition=False, computing over all trials")
         else:
-            logger.warning(
-                f"{analysis_name}: condition column '{condition_column}' not found, computing over all trials"
+            raise ValueError(
+                f"{analysis_name}: split_by_condition=True requires a valid condition column. "
+                "Set behavior_analysis.temporal.condition_column or configure "
+                "event_columns.condition / event_columns.binary_outcome."
             )
         condition_values = ["all"]
         condition_vec = np.array(["all"] * n_trials)
@@ -1389,30 +1416,26 @@ def _compute_roi_correlations_for_condition(
                         denom = max(MIN_DENOMINATOR_THRESHOLD, 1.0 - r_val**2)
                         t_stat[w_idx] = r_val * np.sqrt(float(dof) / denom)
 
-                try:
-                    labels, p_corr, sig_mask, _records, _perm_max, _thresh = compute_cluster_correction_2d(
-                        correlations=t_stat[:, None],
-                        p_values=p_vec[:, None],
-                        bin_data=roi_bin_data,
-                        informative_bins=informative_bins,
-                        y_array=y_c,
-                        cluster_alpha=c_alpha,
-                        n_cluster_perm=n_cluster_perm,
-                        alpha=c_alpha,
-                        min_valid_points=req_samples,
-                        use_spearman=use_spearman,
-                        cluster_rng=cluster_rng,
-                        covariates_matrix=cov_vals,
-                        groups=groups_c,
-                        cluster_forming_threshold=cluster_forming_threshold,
-                        config=config,
-                    )
-                    cluster_id_vec = labels[:, 0].astype(int)
-                    p_cluster_vec = p_corr[:, 0].astype(float)
-                    cluster_sig_vec = sig_mask[:, 0].astype(bool)
-                except Exception:
-                    # Fall back to uncorrected output if cluster correction fails.
-                    pass
+                labels, p_corr, sig_mask, _records, _perm_max, _thresh = compute_cluster_correction_2d(
+                    correlations=t_stat[:, None],
+                    p_values=p_vec[:, None],
+                    bin_data=roi_bin_data,
+                    informative_bins=informative_bins,
+                    y_array=y_c,
+                    cluster_alpha=c_alpha,
+                    n_cluster_perm=n_cluster_perm,
+                    alpha=c_alpha,
+                    min_valid_points=req_samples,
+                    use_spearman=use_spearman,
+                    cluster_rng=cluster_rng,
+                    covariates_matrix=cov_vals,
+                    groups=groups_c,
+                    cluster_forming_threshold=cluster_forming_threshold,
+                    config=config,
+                )
+                cluster_id_vec = labels[:, 0].astype(int)
+                p_cluster_vec = p_corr[:, 0].astype(float)
+                cluster_sig_vec = sig_mask[:, 0].astype(bool)
 
             for window_idx in range(n_windows):
                 if not (np.isfinite(r_vec[window_idx]) and np.isfinite(p_vec[window_idx])):
@@ -1578,15 +1601,12 @@ def _run_temporal_by_condition_core(
 
     fmax = float(np.max(tfr.freqs))
     all_bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
-    if selected_bands:
-        bands = {k: v for k, v in all_bands.items() if k.lower() in [b.lower() for b in selected_bands]}
-        if not bands:
-            logger.warning(f"Temporal correlations: no matching bands in {selected_bands}, using all bands")
-            bands = all_bands
-        else:
-            logger.info(f"Temporal correlations: using selected bands {list(bands.keys())}")
-    else:
-        bands = all_bands
+    bands = _resolve_selected_temporal_bands(
+        all_bands,
+        selected_bands,
+        analysis_name="Temporal correlations",
+        logger=logger,
+    )
     
     corr_fn = spearmanr if use_spearman else pearsonr
     alpha = float(get_config_value(config, "statistics.sig_alpha", 0.05))
@@ -1866,16 +1886,12 @@ def _run_itpc_temporal_by_condition_core(
     
     fmax = float(np.max(freqs))
     all_bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
-    
-    if selected_bands:
-        bands = {k: v for k, v in all_bands.items() if k.lower() in [b.lower() for b in selected_bands]}
-        if not bands:
-            logger.warning(f"ITPC temporal: no matching bands in {selected_bands}, using all bands")
-            bands = all_bands
-        else:
-            logger.info(f"ITPC temporal: using selected bands {list(bands.keys())}")
-    else:
-        bands = all_bands
+    bands = _resolve_selected_temporal_bands(
+        all_bands,
+        selected_bands,
+        analysis_name="ITPC temporal",
+        logger=logger,
+    )
     
     out_dir = stats_dir
     ensure_dir(out_dir)
@@ -2114,15 +2130,12 @@ def _run_erds_temporal_by_condition_core(
     
     fmax = float(np.max(freqs))
     all_bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
-    if selected_bands:
-        bands = {k: v for k, v in all_bands.items() if k.lower() in [b.lower() for b in selected_bands]}
-        if not bands:
-            logger.warning(f"ERDS temporal: no matching bands in {selected_bands}, using all bands")
-            bands = all_bands
-        else:
-            logger.info(f"ERDS temporal: using selected bands {list(bands.keys())}")
-    else:
-        bands = all_bands
+    bands = _resolve_selected_temporal_bands(
+        all_bands,
+        selected_bands,
+        analysis_name="ERDS temporal",
+        logger=logger,
+    )
     
     out_dir = stats_dir
     ensure_dir(out_dir)

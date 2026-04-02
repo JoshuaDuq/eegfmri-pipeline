@@ -116,6 +116,17 @@ def _has_explicit_raw_only_correlation_types(config: Any) -> bool:
     return bool(normalized_types) and normalized_types.issubset({"raw", "run_mean"})
 
 
+def _target_has_finite_numeric_values(
+    df_trials: pd.DataFrame,
+    column: str,
+) -> bool:
+    """Return whether a target column contributes any finite numeric observations."""
+    if not column or column not in df_trials.columns:
+        return False
+    values = pd.to_numeric(df_trials[column], errors="coerce").to_numpy(dtype=float)
+    return bool(np.isfinite(values).any())
+
+
 def _resolve_default_target_columns(
     df_trials: pd.DataFrame,
     config: Any,
@@ -127,9 +138,9 @@ def _resolve_default_target_columns(
         True,
     )
     residual_target = ""
-    if use_cv_resid and "predictor_residual_cv" in df_trials.columns:
+    if use_cv_resid and _target_has_finite_numeric_values(df_trials, "predictor_residual_cv"):
         residual_target = "predictor_residual_cv"
-    elif "predictor_residual" in df_trials.columns:
+    elif _target_has_finite_numeric_values(df_trials, "predictor_residual"):
         residual_target = "predictor_residual"
 
     outcome_column = resolve_outcome_column(df_trials, config)
@@ -140,6 +151,50 @@ def _resolve_default_target_columns(
     if outcome_column and outcome_column != residual_target:
         targets.append(str(outcome_column))
     return targets
+
+
+def _require_explicit_correlation_targets(
+    df_trials: pd.DataFrame,
+    targets: Sequence[str],
+    *,
+    config_key: str,
+) -> List[str]:
+    """Validate explicit correlation targets against the trial table."""
+    resolved: List[str] = []
+    missing: List[str] = []
+    non_numeric: List[str] = []
+    no_finite_values: List[str] = []
+
+    for target in targets:
+        target_name = str(target).strip()
+        if not target_name:
+            continue
+        if target_name not in df_trials.columns:
+            missing.append(target_name)
+            continue
+        target_values = pd.to_numeric(df_trials[target_name], errors="coerce")
+        if not target_values.notna().any():
+            original = df_trials[target_name]
+            if original.notna().any():
+                non_numeric.append(target_name)
+            else:
+                no_finite_values.append(target_name)
+            continue
+        resolved.append(target_name)
+
+    if missing or non_numeric or no_finite_values:
+        problems: List[str] = []
+        if missing:
+            problems.append(f"missing columns: {missing}")
+        if non_numeric:
+            problems.append(f"non-numeric targets: {non_numeric}")
+        if no_finite_values:
+            problems.append(f"no finite numeric values: {no_finite_values}")
+        raise ValueError(
+            f"Configured {config_key} contains invalid explicit target columns ({'; '.join(problems)}). "
+            f"Available columns: {sorted(df_trials.columns.tolist())}"
+        )
+    return resolved
 
 
 def _correlation_measure_is_available(
@@ -391,8 +446,13 @@ def stage_correlate_design_impl(
     explicit_target_column = str(
         get_config_value(ctx.config, "behavior_analysis.correlations.target_column", "") or ""
     ).strip()
+    configured_targets = get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
     if explicit_target_column:
-        targets = [explicit_target_column]
+        targets = _require_explicit_correlation_targets(
+            df_trials,
+            [explicit_target_column],
+            config_key="behavior_analysis.correlations.target_column",
+        )
     else:
         default_targets = _resolve_default_target_columns(df_trials, ctx.config)
         targets = resolve_correlation_targets(
@@ -400,12 +460,22 @@ def stage_correlate_design_impl(
             logger=ctx.logger,
             default_targets=default_targets,
         )
+        if configured_targets is not None:
+            targets = _require_explicit_correlation_targets(
+                df_trials,
+                targets,
+                config_key="behavior_analysis.correlations.targets",
+            )
         use_cv_resid = get_config_bool(
             ctx.config,
             "behavior_analysis.correlations.use_crossfit_predictor_residual",
             True,
         )
-        if (not explicit_target_column) and use_cv_resid and "predictor_residual_cv" in df_trials.columns:
+        if (
+            (not explicit_target_column)
+            and use_cv_resid
+            and _target_has_finite_numeric_values(df_trials, "predictor_residual_cv")
+        ):
             targets = ["predictor_residual_cv", *[t for t in targets if t != "predictor_residual_cv"]]
         prefer_predictor_residual = get_config_bool(
             ctx.config,
@@ -414,9 +484,9 @@ def stage_correlate_design_impl(
         )
         if prefer_predictor_residual:
             preferred_target: Optional[str] = None
-            if use_cv_resid and "predictor_residual_cv" in df_trials.columns:
+            if use_cv_resid and _target_has_finite_numeric_values(df_trials, "predictor_residual_cv"):
                 preferred_target = "predictor_residual_cv"
-            elif "predictor_residual" in df_trials.columns:
+            elif _target_has_finite_numeric_values(df_trials, "predictor_residual"):
                 preferred_target = "predictor_residual"
             if preferred_target is not None:
                 updated_targets: List[str] = []
@@ -432,7 +502,8 @@ def stage_correlate_design_impl(
                     or "predictor_residual_cv" in targets
                 ):
                     targets = [preferred_target, *[t for t in updated_targets if t != preferred_target]]
-    targets = [t for t in targets if t in df_trials.columns]
+    if configured_targets is None and not explicit_target_column:
+        targets = [t for t in targets if t in df_trials.columns]
 
     if not targets:
         ctx.logger.warning("Correlations design: no valid target columns found.")
@@ -1016,6 +1087,11 @@ def stage_correlate_pvalues_impl(
     perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
     n_perm = _resolve_correlation_permutation_count(ctx.config, perm_enabled=perm_enabled)
     perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
+    if perm_scheme not in {"shuffle", "circular_shift"}:
+        raise ValueError(
+            "Invalid behavior_analysis.permutation.scheme value: "
+            f"{perm_scheme!r}. Expected one of: 'shuffle', 'circular_shift'."
+        )
 
     perm_ok_standard = (
         perm_enabled

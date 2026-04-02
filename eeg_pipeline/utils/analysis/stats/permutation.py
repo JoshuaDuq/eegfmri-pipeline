@@ -68,7 +68,12 @@ def _get_permutation_scheme(config: Optional[Any]) -> str:
     if config is None:
         return "shuffle"
     scheme = str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
-    return scheme if scheme in {"shuffle", "circular_shift"} else "shuffle"
+    if scheme in {"shuffle", "circular_shift"}:
+        return scheme
+    raise ValueError(
+        "Invalid behavior_analysis.permutation.scheme value: "
+        f"{scheme!r}. Expected one of: 'shuffle', 'circular_shift'."
+    )
 
 
 def permute_within_groups(
@@ -88,7 +93,10 @@ def permute_within_groups(
     """
     scheme = str(scheme or "shuffle").strip().lower()
     if scheme not in {"shuffle", "circular_shift"}:
-        scheme = "shuffle"
+        raise ValueError(
+            "Unsupported permutation scheme: "
+            f"{scheme!r}. Expected 'shuffle' or 'circular_shift'."
+        )
 
     if groups is None:
         idx = np.arange(n)
@@ -99,6 +107,14 @@ def permute_within_groups(
             return np.roll(idx, shift)
         rng.shuffle(idx)
         return idx
+
+    groups = np.asarray(groups)
+    missing_mask = pd.isna(groups)
+    if bool(np.any(missing_mask)):
+        raise ValueError(
+            "Grouped permutation labels contain missing values. "
+            "Provide complete non-missing labels."
+        )
 
     unique, counts = np.unique(groups, return_counts=True)
     small_groups = unique[counts < min_group_size]

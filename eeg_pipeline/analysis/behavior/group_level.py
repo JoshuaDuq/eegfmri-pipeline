@@ -233,6 +233,11 @@ def run_group_level_correlations_impl(
     if control_predictor:
         predictor_column = require_predictor_column(combined, config)
     block_col = _resolve_group_level_block_column(combined, config)
+    if use_block_permutation and block_col is None:
+        raise ValueError(
+            "Group-level block permutation requires a run/block column in the trial tables, "
+            "but none could be resolved."
+        )
     if control_run_effects and block_col is None:
         raise ValueError(
             "Group-level correlations requested run adjustment, but no run/block column "
@@ -492,12 +497,12 @@ def run_group_level_correlations_impl(
         if null_rs:
             p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (n_perm_effective + 1)
             null_rs_sorted = np.sort(null_rs)
-            ci_lower = float(np.percentile(null_rs_sorted, 2.5))
-            ci_upper = float(np.percentile(null_rs_sorted, 97.5))
+            null_q_lower = float(np.percentile(null_rs_sorted, 2.5))
+            null_q_upper = float(np.percentile(null_rs_sorted, 97.5))
         else:
             p_perm = np.nan
-            ci_lower = np.nan
-            ci_upper = np.nan
+            null_q_lower = np.nan
+            null_q_upper = np.nan
             
         # Parametric fallback using 1-sample t-test on Fisher Z-transformed correlations
         p_parametric = np.nan
@@ -527,8 +532,8 @@ def run_group_level_correlations_impl(
                 "estimator": estimator,
                 "p_parametric": float(p_parametric),
                 "p_perm": p_perm,
-                "ci_lower_2_5": ci_lower,
-                "ci_upper_97_5": ci_upper,
+                "r_null_q_2_5": null_q_lower,
+                "r_null_q_97_5": null_q_upper,
                 "permutation_method": perm_method,
                 "permutation_scheme": permutation_scheme if int(n_perm) > 0 else None,
                 "n_perm_requested": int(n_perm),

@@ -122,6 +122,19 @@ Non-i.i.d. Trial Structure
 Trials within a subject are clustered within runs/blocks and are not exchangeable.
 The following stages enforce grouped permutation unless ``allow_iid_trials = true``
 is explicitly set: ``correlate_*``, ``regression``, ``condition_column``.
+Grouped permutation labels must be complete and non-missing for every analyzed
+trial; partially missing run/block labels now raise instead of being silently
+excluded from the permutation sample.
+Permutation scheme values are validated strictly; unsupported values raise instead
+of silently falling back to ``shuffle``.
+
+Group-Level Permutation Outputs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Group-level multilevel correlation tables report permutation-null quantiles as
+``r_null_q_2_5`` and ``r_null_q_97_5``. These columns summarize the null
+distribution used for permutation inference; they are not confidence intervals
+for the observed group-level correlation estimate.
 
 Predictor Type Validation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -189,9 +202,26 @@ stimulus intensity:
 Model selection: spline OLS candidates ``outcome ~ bs(predictor, df=d, degree=3)``
 for configurable degrees of freedom, lowest-AIC selection; fallback to polynomial.
 Optional cross-fit residuals (``GroupKFold``) via ``--predictor-residual-crossfit``.
+Correlation target selection only promotes ``predictor_residual_cv`` when that
+column contains finite residual values; if crossfitting is skipped and the
+cross-fit residual column is all missing, the standard ``predictor_residual``
+target remains primary. Predictor-residual construction itself is strict:
+fit failures now surface as errors instead of silently dropping the residual
+columns and allowing downstream analyses to revert to the raw outcome target.
 
 Stage 4 — Correlations
 ~~~~~~~~~~~~~~~~~~~~~~~~
+
+Canonical behavior-column overrides are strict: if
+``behavior_analysis.outcome_column`` or
+``behavior_analysis.predictor_column`` is set, that named column must exist and
+be numeric. The pipeline no longer silently falls back to ``event_columns.*``
+aliases when an explicit canonical override is invalid.
+Explicit correlation targets are also strict: if
+``behavior_analysis.correlations.target_column`` is set, that exact target
+column must exist and contribute numeric data; if
+``behavior_analysis.correlations.targets`` is explicitly listed, every entry
+must resolve to a valid numeric trial-table column.
 
 **Correlation types:**
 
@@ -286,6 +316,24 @@ Stage 7 — Condition Comparisons
 **Multi-group (3+ levels):** pairwise Mann–Whitney U (unpaired) or Wilcoxon
 signed-rank (paired). Omnibus tests are not performed.
 
+When ``primary_unit = run_mean``, the pipeline first aggregates to run×condition
+cells and drops cells below ``behavior_analysis.condition.min_trials_per_condition``
+before running paired condition statistics.
+Run-level condition inference is strict about aggregation keys: the configured
+run column must exist, and both the run column and condition column must be
+fully labeled before run×condition aggregation begins.
+If ``behavior_analysis.condition.compare_column`` is explicitly set, that exact
+trial-table column must exist; the stage no longer substitutes a fallback
+condition column on configuration errors.
+
+For ROI power correlations, an explicit
+``behavior_analysis.correlations.power_segment_preference`` must match actual
+segment columns for the analyzed band; the pipeline no longer widens back to
+all segments when the requested segment is absent.
+When permutation testing is enabled for ROI power correlations, grouped
+trial-label structure is now propagated into ROI permutation p-values instead
+of defaulting to an i.i.d. shuffle null.
+
 Stage 8 — Temporal Statistics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -302,6 +350,17 @@ Correlation-to-:math:`t` transform for cluster forming:
    t = r\sqrt{\frac{\mathrm{dof}}{1 - r^2}}.
 
 Temporal multiple-comparison correction: ``fdr``, ``bonferroni``, ``cluster``, or ``none``.
+When no explicit ``behavior_analysis.temporal.target_column`` is set, temporal
+target resolution follows the canonical outcome resolver, so
+``behavior_analysis.outcome_column`` takes precedence over ``event_columns.outcome``.
+Under ``correction_method = cluster``, cluster-correction failures now surface
+as errors instead of degrading silently to uncorrected output.
+If ``split_by_condition = true``, temporal analyses require a valid condition
+column; missing condition columns now raise instead of silently reverting to
+pooled all-trials correlations.
+If temporal ``selected_bands`` is set, every requested band name must match an
+available configured band; mismatches now raise instead of widening the
+analysis to every band.
 
 **ERDS trial metrics:**
 
@@ -321,6 +380,18 @@ Cluster-mass permutation test over time–frequency maps:
 
    M_c = \sum_{i \in c} |t_i|, \qquad
    p_c = \frac{\#\{M_\text{max}^\text{perm} \ge M_c\} + 1}{n_\text{perm} + 1}.
+
+If ``behavior_analysis.cluster.condition_column`` is set, that exact
+aligned-events column must exist. The cluster stage no longer falls back to
+``event_columns.condition`` or ``event_columns.binary_outcome`` when an
+explicit split column is invalid.
+If ``behavior_analysis.cluster.condition_values`` is set, it must contain
+exactly two values; otherwise the cluster contrast now fails instead of being
+silently reinterpreted. When ``behavior_analysis.cluster.condition_values`` is
+left empty, the cluster stage now infers the observed binary contrast from the
+resolved condition column instead of assuming ``0`` vs ``1``. Cluster tests
+also require complete condition labels in the selected condition column and no
+longer drop unlabeled trials silently.
 
 Group-Level Analysis
 --------------------

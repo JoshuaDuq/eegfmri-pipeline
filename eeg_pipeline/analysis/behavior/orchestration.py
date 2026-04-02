@@ -468,6 +468,17 @@ def _sanitize_permutation_groups(
     groups_array = np.asarray(groups)
     if groups_array.size == 0:
         return None
+    missing_mask = pd.isna(groups_array)
+    missing_count = int(missing_mask.sum())
+    if missing_count > 0:
+        logger.warning(
+            "%s: %d/%d grouped permutation labels are missing. "
+            "Grouped permutation requires complete non-missing labels.",
+            context,
+            missing_count,
+            int(groups_array.size),
+        )
+        return None
     unique_groups, counts = np.unique(groups_array[pd.notna(groups_array)], return_counts=True)
     small_group_count = int((counts < int(min_group_size)).sum())
     if small_group_count > 0:

@@ -32,6 +32,37 @@ def normalize_temporal_feature_name(name: str) -> Optional[str]:
     return alias_map.get(key, None)
 
 
+def _resolve_explicit_temporal_filters(raw_filters: List[str]) -> Optional[set[str]]:
+    """Resolve explicit temporal feature requests or return None when no filter is provided."""
+    if not raw_filters:
+        return None
+
+    requested: set[str] = set()
+    invalid: List[str] = []
+    for item in raw_filters:
+        item_norm = str(item).strip().lower()
+        if not item_norm:
+            continue
+        if item_norm == "all":
+            return {"power", "itpc", "erds"}
+
+        normalized = normalize_temporal_feature_name(item_norm)
+        if normalized is None:
+            invalid.append(str(item))
+            continue
+        requested.add(normalized)
+
+    if invalid:
+        raise ValueError(
+            "Invalid temporal feature filter value(s): "
+            f"{', '.join(repr(item) for item in invalid)}. "
+            "Allowed values are 'power', 'itpc', 'erds', or 'all'."
+        )
+    if not requested:
+        return None
+    return requested
+
+
 def resolve_temporal_feature_selection_impl(
     ctx: Any,
     selected_features: Optional[List[str]] = None,
@@ -63,22 +94,8 @@ def resolve_temporal_feature_selection_impl(
         if ctx.computation_features and "temporal" in ctx.computation_features:
             raw_filters.extend([str(x) for x in (ctx.computation_features.get("temporal") or []) if str(x).strip()])
 
-    explicit_filter = False
-    requested: set[str] = set()
-    for item in raw_filters:
-        item_norm = str(item).strip().lower()
-        if not item_norm:
-            continue
-        if item_norm == "all":
-            explicit_filter = True
-            requested.update(required_keys)
-            continue
-        normalized = normalize_temporal_feature_name(item_norm)
-        if normalized is not None:
-            explicit_filter = True
-            requested.add(normalized)
-
-    if not explicit_filter:
+    requested = _resolve_explicit_temporal_filters(raw_filters)
+    if requested is None:
         requested = set(required_keys)
 
     enabled = [feat for feat in ["power", "itpc", "erds"] if cfg_enabled.get(feat, False) and feat in requested]
@@ -353,4 +370,9 @@ def stage_cluster_impl(ctx: Any, config: Any) -> Dict[str, Any]:
     ctx.logger.info("Running cluster permutation tests...")
     ctx.n_perm = config.n_permutations
     results = run_cluster_test_from_context(ctx)
-    return results if results else {"status": "completed"}
+    if results is None:
+        raise RuntimeError(
+            "Cluster stage was enabled but did not produce a result. "
+            "Surface the upstream cluster configuration or data error instead of treating it as completed."
+        )
+    return results

@@ -166,23 +166,12 @@ def stage_predictor_residual_impl(
     predictor_column = require_predictor_column(df, ctx.config)
     outcome_column = require_outcome_column(df, ctx.config)
 
-    try:
-        df_augmented, resid_meta = add_predictor_residual(
-            df,
-            ctx.config,
-            predictor_col=predictor_column,
-            outcome_col=outcome_column,
-        )
-    except ValueError as exc:
-        resid_meta = {
-            "status": "skipped_incompatible_predictor",
-            "error": str(exc),
-            "predictor_column": predictor_column,
-            "outcome_column": outcome_column,
-        }
-        ctx.data_qc["predictor_residual"] = resid_meta
-        ctx.logger.warning("Predictor residual skipped: %s", exc)
-        return None
+    df_augmented, resid_meta = add_predictor_residual(
+        df,
+        ctx.config,
+        predictor_col=predictor_column,
+        outcome_col=outcome_column,
+    )
 
     suffix = feature_suffix_from_context_fn(ctx)
     out_dir = get_stats_subfolder_fn(ctx, "predictor_residual")

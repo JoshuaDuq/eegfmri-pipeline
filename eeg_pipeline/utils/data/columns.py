@@ -133,16 +133,42 @@ def _get_explicit_behavior_column(
     return value if value else None
 
 
+def _resolve_explicit_numeric_behavior_column(
+    events_df: pd.DataFrame,
+    config: Any,
+    *,
+    key: str,
+    label: str,
+) -> Optional[str]:
+    """Resolve an explicit numeric behavior column or fail fast."""
+    explicit = _get_explicit_behavior_column(config, key=key)
+    if explicit is None:
+        return None
+    if explicit not in events_df.columns:
+        raise ValueError(
+            f"Configured {key!r}={explicit!r} but that column is not present in events. "
+            f"Available columns: {list(events_df.columns)}"
+        )
+    if not _is_numeric_series(events_df, explicit):
+        raise ValueError(
+            f"Configured {key!r}={explicit!r} but that column is not numeric. "
+            f"{label} columns must be numeric."
+        )
+    return explicit
+
+
 def resolve_outcome_column(
     events_df: pd.DataFrame,
     config: Any,
 ) -> Optional[str]:
     """Resolve behavior outcome column from explicit config, then outcome aliases."""
-    explicit = _get_explicit_behavior_column(
+    explicit = _resolve_explicit_numeric_behavior_column(
+        events_df,
         config,
         key="behavior_analysis.outcome_column",
+        label="Outcome",
     )
-    if explicit and _is_numeric_series(events_df, explicit):
+    if explicit is not None:
         return explicit
 
     outcome_candidates: List[str] = []
@@ -156,11 +182,13 @@ def resolve_predictor_column(
     config: Any,
 ) -> Optional[str]:
     """Resolve behavior predictor column from explicit config, then predictor aliases."""
-    explicit = _get_explicit_behavior_column(
+    explicit = _resolve_explicit_numeric_behavior_column(
+        events_df,
         config,
         key="behavior_analysis.predictor_column",
+        label="Predictor",
     )
-    if explicit and _is_numeric_series(events_df, explicit):
+    if explicit is not None:
         return explicit
 
     predictor_candidates: List[str] = []
