@@ -152,6 +152,12 @@ Stage 3 — First-Level GLM
 Subject-level statistical contrasts between experimental conditions via nilearn's
 ``FirstLevelModel``.
 
+.. warning::
+
+   First-level GLM and trial-wise beta estimation now require ``input_source=fmriprep``.
+   Raw BIDS inputs are rejected because they bypass fMRIPrep preprocessing, spatial
+   normalization, and the standard confounds outputs that the downstream models assume.
+
 Confound Regression
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -203,17 +209,17 @@ GLM Specification
      - ``ar1``
      - Temporal autocorrelation model
    * - ``standardize``
-     - ``true``
-     - Standardize BOLD signal
+     - ``false``
+     - Do not z-score the BOLD signal inside nilearn
    * - ``signal_scaling``
      - ``0``
-     - Scale signal to percent signal change
+     - Disable nilearn signal scaling; keep the input image scaling unchanged
    * - ``smoothing_fwhm``
      - ``null``
      - Optional spatial smoothing (mm FWHM)
    * - ``mask_img``
      - auto
-     - fMRIPrep brain mask; intersection across runs for multi-run models
+     - Required fMRIPrep brain mask; intersection across runs for multi-run models
 
 Multi-Run GLM
 ~~~~~~~~~~~~~~
@@ -241,7 +247,18 @@ Contrast Computation
    * - Custom formula
      - User-provided string (e.g., ``"stimulation - fixation_rest"``)
 
-Output types: ``z-score`` (default), ``t-stat`` (t-statistic), ``cope`` (contrast of parameter estimates), ``beta`` (raw parameter estimates).
+Output types: ``z-score`` (default), ``t-stat`` (t-statistic), and ``cope`` (contrast of parameter estimates).
+
+Current implementation note:
+``beta`` is not a distinct raw-beta export. It is currently an alias of nilearn's
+``effect_size`` output, the same quantity used for ``cope``.
+
+Current plotting/reporting note:
+the HTML report and plotting utilities now require z-statistic maps. If you
+request plotting/report generation for a first-level contrast, use
+``output_type=z-score``. ``t-stat`` maps can still be written as analysis
+outputs, but they are rejected by the report/plotting path because its
+threshold calibration and labels are defined only for z-statistics.
 
 Caching: contrast maps are named with an MD5 hash of key configuration parameters.
 A JSON sidecar records full provenance (subject, task, contrast definition, run inputs,
@@ -251,8 +268,7 @@ Stage 3b — Second-Level Group Inference
 -----------------------------------------
 
 Explicit mode (``eeg-pipeline fmri-analysis second-level``) consuming previously
-generated first-level maps. Inputs must be first-level ``cope`` or ``beta`` maps in
-``MNI152NLin2009cAsym`` space.
+generated first-level effect-size maps in ``MNI152NLin2009cAsym`` space.
 
 Supported designs:
 
@@ -263,6 +279,15 @@ Supported designs:
 
 Optional permutation inference (``--group-permutation-inference``) adds max-T
 permutation inference for second-level t-contrasts.
+
+.. warning::
+
+   The current permutation path does not encode exchangeability blocks. It is therefore
+   appropriate for one-sample models, two-sample models, and paired analyses after
+   collapsing each subject to a difference map, but it is not exchangeability-safe for
+   repeated-measures designs that keep multiple rows per subject in the design matrix.
+   Repeated-measures permutation inference should be treated as unsupported until
+   restricted permutations are implemented.
 
 Stage 4 — Trial-Wise Beta Estimation
 --------------------------------------
@@ -298,9 +323,15 @@ Condition-Level Averaging
    * - Method
      - Formula
    * - ``variance`` *(default)*
-     - Inverse-variance weighted mean: :math:`\hat\beta = \sum_i w_i \beta_i / \sum_i w_i`, where :math:`w_i = 1/\sigma^2_i`
+     - Implemented as inverse-variance weighting, but this should be treated cautiously for LSS condition summaries because trial-wise beta estimates within a subject/run are correlated rather than independent fixed-effect observations
    * - ``mean``
      - Simple arithmetic mean
+
+Current implementation note:
+for ``beta-series``, condition summary maps are built from run-level averaged contrasts
+and then combined across runs. For ``lss``, condition summary maps are built by combining
+all trial-level beta images directly, so the default inverse-variance weighting is a
+descriptive heuristic rather than a valid fixed-effects estimator.
 
 Trial-Wise Outputs
 ~~~~~~~~~~~~~~~~~~~
@@ -357,6 +388,12 @@ Stage 6 — Resting-State Connectivity
 
 Atlas-based ROI connectivity analysis from fMRIPrep resting-state BOLD data.
 
+.. warning::
+
+   Resting-state connectivity now requires ``input_source=fmriprep``. Raw BIDS inputs are
+   rejected because, without fMRIPrep preprocessing and confounds, motion and spatial
+   misalignment can dominate the ROI correlation structure.
+
 **Per-subject workflow:**
 
 1. Discover BOLD runs and load fMRIPrep confound regressors.
@@ -364,14 +401,26 @@ Atlas-based ROI connectivity analysis from fMRIPrep resting-state BOLD data.
    with simultaneous denoising (band-pass filtering, standardization, detrending).
 3. Scrub motion-outlier frames via ``sample_mask``.
 4. Compute per-run Pearson correlation connectivity matrices.
-5. Aggregate multi-run matrices via **Fisher-z weighted averaging**
-   (weights = number of retained frames per run):
+5. Aggregate multi-run matrices via Fisher-z averaging.
+
+Current implementation detail:
+the run weights are the number of retained frames per run, i.e.
 
 .. math::
 
    \bar{Z}_{ij} = \frac{\sum_r n_r \cdot \mathrm{arctanh}(r_{ij}^{(r)})}{\sum_r n_r},
    \qquad
    \hat{r}_{ij} = \tanh(\bar{Z}_{ij}).
+
+This should be treated as a validity limitation rather than a target method:
+for Fisher-z averaging the variance-stabilizing weight is proportional to
+:math:`n_r - 3`, not :math:`n_r`, so short runs are currently misweighted.
+
+Current implementation limitation:
+the masker is built from the atlas alone and does not yet intersect each run with
+the corresponding fMRIPrep brain mask. ROIs near susceptibility dropout or partial
+coverage can therefore contribute non-brain voxels without necessarily becoming
+degenerate enough to trigger the existing guards.
 
 Key configuration (``RestingStateAnalysisConfig``):
 
@@ -384,7 +433,7 @@ Key configuration (``RestingStateAnalysisConfig``):
      - Description
    * - ``input_source``
      - ``fmriprep``
-     - BOLD source (``fmriprep`` or ``bids_raw``)
+     - Required BOLD source for scientifically valid resting-state connectivity analysis
    * - ``confounds_strategy``
      - ``auto``
      - fMRIPrep confound strategy
@@ -462,6 +511,13 @@ For each image :math:`\mathbf{x}` and signature weight map :math:`\mathbf{w}`:
      - :math:`s_r = \mathrm{corr}(\mathbf{w}, \mathbf{x})`
 
 Spatial constraint: trial-wise signature extraction requires MNI-space images.
+
+Current implementation note:
+signature expression rejects continuous resampling whenever the moving image
+contains non-finite voxels. This avoids mixing unsupported NaN-coded voxels into
+neighboring weights or effect estimates during interpolation. In practice,
+signature maps and target images should already share a compatible finite-valued
+grid whenever possible.
 
 Output Layout
 -------------

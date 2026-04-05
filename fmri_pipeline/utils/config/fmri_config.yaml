@@ -158,9 +158,9 @@ fmri_contrast:
   enabled: false
   
   # Input source for BOLD data
-  input_source: "fmriprep"     # "fmriprep" (recommended) or "bids_raw"
+  input_source: "fmriprep"     # "fmriprep" only; inferential first-level analysis rejects raw BIDS inputs
   fmriprep_space: "T1w"        # fMRIPrep output space
-  require_fmriprep: true       # Fail if preproc BOLD is missing
+  require_fmriprep: true       # Fail if preproc BOLD or matching brain masks are missing
   output_dir: null             # Optional first-level output root
   freesurfer_dir: null         # Optional FreeSurfer SUBJECTS_DIR override
   
@@ -223,7 +223,7 @@ fmri_contrast:
   write_design_matrix: false    # Write design matrix TSV/PNG under qc/
   
   # Output format
-  output_type: "z-score"       # "z-score" | "t-stat" | "cope" | "beta"
+  output_type: "z-score"       # "z-score" | "t-stat" | "cope" | "beta" (beta currently aliases cope/effect_size; plots/reports require z-score)
   resample_to_freesurfer: true # Auto-resample to FreeSurfer subject space
 
 ###################################################################

@@ -16,7 +16,12 @@ def _load_image(image_or_path: Any) -> Any:
 
 def _align_mask_to_image(mask_img: Any, ref_img: Any) -> np.ndarray:
     mask = _load_image(mask_img)
-    if tuple(getattr(mask, "shape", ())) != tuple(getattr(ref_img, "shape", ())):
+    same_shape = tuple(getattr(mask, "shape", ())) == tuple(getattr(ref_img, "shape", ()))
+    same_affine = np.allclose(
+        np.asarray(mask.affine, dtype=float),
+        np.asarray(ref_img.affine, dtype=float),
+    )
+    if not same_shape or not same_affine:
         from nilearn.image import resample_to_img  # type: ignore
 
         mask = resample_to_img(

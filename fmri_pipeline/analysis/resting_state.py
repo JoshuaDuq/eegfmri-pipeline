@@ -12,6 +12,7 @@ import pandas as pd
 from fmri_pipeline.analysis.contrast_builder import discover_confounds
 from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
 from fmri_pipeline.utils.bold_discovery import (
+    discover_brain_mask_for_bold,
     discover_fmriprep_preproc_bold,
     get_tr_from_bold,
     select_confounds,
@@ -45,9 +46,10 @@ class RestingStateAnalysisConfig:
 
     def normalized(self) -> "RestingStateAnalysisConfig":
         input_source = str(self.input_source or "fmriprep").strip().lower()
-        if input_source not in {"fmriprep", "bids_raw"}:
+        if input_source != "fmriprep":
             raise ValueError(
-                f"input_source must be 'fmriprep' or 'bids_raw', got {input_source!r}."
+                "input_source must be 'fmriprep'. "
+                "fMRIPrep derivatives are required for resting-state connectivity analysis."
             )
 
         confounds_strategy = str(self.confounds_strategy or "auto").strip().lower()
@@ -104,6 +106,15 @@ def atlas_output_name(atlas_labels_img: Path | str) -> str:
     else:
         name = atlas_path.stem
     return safe_slug(name, default="atlas")
+
+
+def _require_rest_brain_mask_path(bold_path: Path) -> Path:
+    mask_path = discover_brain_mask_for_bold(bold_path)
+    if mask_path is None or not mask_path.exists():
+        raise FileNotFoundError(
+            f"Missing fMRIPrep brain mask for resting-state run: {bold_path}"
+        )
+    return mask_path
 
 
 def _prepare_confounds_and_sample_mask(
@@ -201,16 +212,22 @@ def _aggregate_connectivity_matrices(
     if len(run_matrices) != len(run_weights):
         raise ValueError("run_matrices and run_weights must have the same length.")
 
-    weights = np.asarray(run_weights, dtype=float)
-    if weights.ndim != 1 or weights.size != len(run_matrices):
+    retained_frames = np.asarray(run_weights, dtype=float)
+    if retained_frames.ndim != 1 or retained_frames.size != len(run_matrices):
         raise ValueError("run_weights must define exactly one weight per connectivity matrix.")
-    if np.any(~np.isfinite(weights)) or np.any(weights <= 0):
+    if np.any(~np.isfinite(retained_frames)) or np.any(retained_frames <= 0):
         raise ValueError("run_weights must be finite and strictly positive.")
 
     if len(run_matrices) == 1:
         matrix = np.asarray(run_matrices[0], dtype=float)
         return matrix, _fisher_z_matrix(matrix)
 
+    if np.any(retained_frames <= 3):
+        raise ValueError(
+            "Multi-run Fisher-z aggregation requires at least 4 retained frames per run."
+        )
+
+    weights = retained_frames - 3.0
     fisher_stack = np.stack([_fisher_z_matrix(matrix) for matrix in run_matrices], axis=0)
     fisher_mean = np.average(fisher_stack, axis=0, weights=weights)
     connectivity = np.tanh(fisher_mean)
@@ -260,6 +277,7 @@ def run_resting_state_analysis_for_subject(
             strategy=normalized_cfg.confounds_strategy,
         )
         repetition_time = get_tr_from_bold(bold_path)
+        brain_mask_path = _require_rest_brain_mask_path(bold_path)
         _validate_filter_settings(repetition_time, normalized_cfg)
         masker_confounds, sample_mask, scrub_columns = _prepare_confounds_and_sample_mask(confounds_df)
         original_n_volumes = int(confounds_df.shape[0]) if confounds_df is not None else None
@@ -269,6 +287,7 @@ def run_resting_state_analysis_for_subject(
             )
         masker = NiftiLabelsMasker(
             labels_img=str(normalized_cfg.atlas_labels_img),
+            mask_img=str(brain_mask_path),
             smoothing_fwhm=normalized_cfg.smoothing_fwhm,
             standardize=normalized_cfg.standardize,
             detrend=normalized_cfg.detrend,

@@ -9,6 +9,7 @@ from scipy import stats
 
 from eeg_pipeline.analysis.behavior.result_types import GroupLevelResult
 from eeg_pipeline.analysis.behavior.config_resolver import resolve_correlation_method
+from eeg_pipeline.domain.features.naming import infer_feature_provenance
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.config.behavior_loader import ensure_behavior_config
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
@@ -61,14 +62,87 @@ def _resolve_group_level_target_column(
     return requested or None
 
 
+def _resolve_group_level_partial_min_samples(config: Any, n_covariates: int) -> int:
+    """Return the minimum observations required for subject-level partial estimates."""
+    min_samples_per_covariate = int(
+        require_config_value(
+            config,
+            "behavior_analysis.statistics.min_samples_per_covariate",
+        )
+    )
+    partial_corr_base_samples = int(
+        require_config_value(
+            config,
+            "behavior_analysis.statistics.partial_corr_base_samples",
+        )
+    )
+    min_observations = int(
+        require_config_value(
+            config,
+            "behavior_analysis.statistics.min_observations_for_correlation",
+        )
+    )
+    required_samples = n_covariates * min_samples_per_covariate + partial_corr_base_samples
+    return max(required_samples, min_observations)
+
+
+def _filter_group_level_feature_columns(
+    feature_columns: List[str],
+    *,
+    config: Any,
+    logger: Any,
+) -> List[str]:
+    """Exclude non-trialwise features from group-level trialwise correlations."""
+    if not feature_columns:
+        return feature_columns
+
+    exclude_non_trialwise = bool(
+        get_config_value(
+            config,
+            "behavior_analysis.features.exclude_non_trialwise_features",
+            True,
+        )
+    )
+    if not exclude_non_trialwise:
+        return feature_columns
+
+    provenance = infer_feature_provenance(
+        feature_columns=feature_columns,
+        config=config,
+        df_attrs={},
+    )
+    column_provenance = provenance.get("columns") or {}
+
+    kept: List[str] = []
+    dropped: List[str] = []
+    for feature_name in feature_columns:
+        props = column_provenance.get(feature_name) or {}
+        trialwise_valid = bool(props.get("trialwise_valid", True))
+        broadcasted = bool(props.get("broadcasted", False))
+        if trialwise_valid and not broadcasted:
+            kept.append(feature_name)
+            continue
+        dropped.append(feature_name)
+
+    if dropped:
+        logger.warning(
+            "Group-level correlations: excluded %d/%d non-trialwise features. Examples=%s",
+            len(dropped),
+            len(feature_columns),
+            ",".join(dropped[:5]),
+        )
+    return kept
+
+
 def _build_subject_partial_permutation_state(
     x: pd.Series,
     y: pd.Series,
     cov_df: pd.DataFrame,
     method: str,
+    min_samples_required: int,
 ) -> Optional[Dict[str, Any]]:
     aligned = pd.concat([x.rename("x"), y.rename("y"), cov_df], axis=1).dropna()
-    if len(aligned) < max(3, cov_df.shape[1] + 3):
+    if len(aligned) < int(min_samples_required):
         return None
 
     x_values = aligned["x"].to_numpy(dtype=float)
@@ -245,6 +319,15 @@ def run_group_level_correlations_impl(
         )
 
     feature_cols = [c for c in combined.columns if str(c).startswith(tuple(feature_prefixes))]
+    feature_cols = _filter_group_level_feature_columns(
+        feature_cols,
+        config=config,
+        logger=logger,
+    )
+    if not feature_cols:
+        logger.warning("Multilevel correlations: no trialwise-valid feature columns after filtering.")
+        return pd.DataFrame()
+
     outcome = pd.to_numeric(combined[target_column], errors="coerce").to_numpy(dtype=float)
     subject_all = combined["subject_id"].astype(str).to_numpy(dtype=object)
     block_all = combined[block_col].to_numpy() if block_col is not None else None
@@ -370,11 +453,16 @@ def run_group_level_correlations_impl(
                 continue
 
             if cov_final is not None and not cov_final.empty:
+                min_samples_required = _resolve_group_level_partial_min_samples(
+                    config,
+                    cov_final.shape[1],
+                )
                 partial_state = _build_subject_partial_permutation_state(
                     x_final,
                     y_final,
                     cov_final,
                     correlation_method,
+                    min_samples_required,
                 )
                 if partial_state is None:
                     continue

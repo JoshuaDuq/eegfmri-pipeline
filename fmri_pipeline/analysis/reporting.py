@@ -19,6 +19,8 @@ from fmri_pipeline.analysis.multivariate_signatures import (
 
 logger = logging.getLogger(__name__)
 
+_SUPPORTED_REPORT_STAT_MAP_TYPES = frozenset({"z_score"})
+
 
 @dataclass(frozen=True)
 class ReportImage:
@@ -715,6 +717,18 @@ def _maybe_import_nibabel():
         return None
 
 
+def _normalize_report_stat_map_type(stat_map_type: str) -> str:
+    normalized = str(stat_map_type or "").strip().lower().replace("-", "_")
+    if normalized not in _SUPPORTED_REPORT_STAT_MAP_TYPES:
+        supported = ", ".join(sorted(_SUPPORTED_REPORT_STAT_MAP_TYPES))
+        raise ValueError(
+            "fMRI plotting/reporting requires z-score statistic maps because thresholded "
+            "report panels are calibrated only for z-statistics. "
+            f"Got stat_map_type={stat_map_type!r}; supported values: {supported}."
+        )
+    return normalized
+
+
 def _build_mean_bold_background_from_run_meta(run_meta: Optional[Dict[str, Any]]) -> Optional[Any]:
     """
     Build a 3D mean-BOLD background image from the first included run.
@@ -1227,6 +1241,7 @@ def run_fmri_plotting_and_report(
     task: str,
     contrast_name: str,
     cfg: FmriPlottingConfig,
+    stat_map_type: str,
     run_meta: Optional[Dict[str, Any]] = None,
     native_stat_map_path: Optional[Path] = None,
     mni_stat_map_path: Optional[Path] = None,
@@ -1257,9 +1272,15 @@ def run_fmri_plotting_and_report(
         return {"enabled": False}
 
     cfg.validate()
+    normalized_stat_map_type = _normalize_report_stat_map_type(stat_map_type)
 
     sections: List[ReportSpaceSection] = []
-    meta: Dict[str, Any] = {"enabled": True, "spaces": [], "formats": list(cfg.formats)}
+    meta: Dict[str, Any] = {
+        "enabled": True,
+        "spaces": [],
+        "formats": list(cfg.formats),
+        "stat_map_type": normalized_stat_map_type,
+    }
 
     want_native = cfg.space in {"native", "both"}
     want_mni = cfg.space in {"mni", "both"}
@@ -1536,6 +1557,7 @@ def run_fmri_plotting_and_report(
             "plotting_cfg": {
                 k: v for k, v in cfg.__dict__.items()
             },
+            "stat_map_type": normalized_stat_map_type,
             "run_meta": run_meta,
             "signature_root": str(signature_root) if signature_root else None,
         }
@@ -1570,6 +1592,7 @@ def run_fmri_plotting_and_report(
         "subject": subject,
         "task": task,
         "contrast": contrast_name,
+        "stat_map_type": normalized_stat_map_type,
         "plotting_cfg": {k: v for k, v in cfg.__dict__.items()},
         "spaces_rendered": meta.get("spaces", []),
         "report_html": meta.get("report_html"),

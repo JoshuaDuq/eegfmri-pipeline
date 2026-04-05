@@ -13,6 +13,8 @@ from typing import Optional, Tuple, List, Union, Dict, Any
 import numpy as np
 import pandas as pd
 
+from .validation import assert_continuous_predictor
+
 
 # Numerical stability threshold
 _NUMERICAL_TOLERANCE = 1e-12
@@ -291,26 +293,39 @@ def _build_predictor_covariates(
             covariates.append("outcome_hat_from_predictor")
             meta.update({"predictor_control_used": "outcome_hat", "predictor_control_column": "outcome_hat_from_predictor"})
         else:
-            meta.update({"predictor_control_used": "none", "predictor_control_reason": "missing_outcome_hat"})
+            raise ValueError(
+                "Regression predictor_control='outcome_hat' requires "
+                "'outcome_hat_from_predictor' in the trial table."
+            )
 
     # Spline / RCS control
     elif ctrl in ("spline", "rcs", "restricted_cubic"):
         if predictor_col in trial_df.columns:
             from eeg_pipeline.utils.analysis.stats.splines import build_predictor_rcs_design
 
+            assert_continuous_predictor(
+                trial_df[predictor_col],
+                config,
+                context="behavior_analysis.regression.predictor_control='spline'",
+            )
             design_df, spline_cols, spline_meta = build_predictor_rcs_design(
                 trial_df[predictor_col],
                 config=config,
                 key_prefix=key_prefix,
                 name_prefix="predictor_rcs",
             )
+            spline_status = str(spline_meta.get("status", "")).strip().lower()
+            if spline_status != "ok":
+                raise ValueError(
+                    "Regression predictor_control='spline' requires an identifiable "
+                    "nonlinear predictor spline basis, but the current predictor is "
+                    f"underidentified (status={spline_status or 'unknown'})."
+                )
             for col in spline_cols:
                 if col not in covariates:
                     covariates.append(col)
             meta.update({
-                "predictor_control_used": (
-                    "spline" if spline_meta.get("status") in ("ok", "ok_linear_only") else "linear"
-                ),
+                "predictor_control_used": "spline",
                 "predictor_control_column": predictor_col,
                 "predictor_spline": spline_meta,
             })

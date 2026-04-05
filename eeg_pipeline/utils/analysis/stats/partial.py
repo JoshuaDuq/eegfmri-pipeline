@@ -27,6 +27,7 @@ from scipy.linalg import lstsq
 
 from .base import get_statistics_constants, get_config_value
 from .correlation import compute_correlation
+from .validation import assert_continuous_predictor
 
 
 # Constants
@@ -66,14 +67,27 @@ def _build_predictor_covariates(
     if mode == "linear":
         return pd.DataFrame({"predictor": predictor_series})
 
+    assert_continuous_predictor(
+        predictor_series,
+        config,
+        context="behavior_analysis.statistics.predictor_control='spline'",
+    )
+
     from .splines import build_predictor_rcs_design
 
-    df_cols, covariate_names, _meta = build_predictor_rcs_design(
+    df_cols, covariate_names, spline_meta = build_predictor_rcs_design(
         predictor_series,
         config=config,
         key_prefix="behavior_analysis.regression.predictor_spline",
         name_prefix="predictor_rcs",
     )
+    spline_status = str(spline_meta.get("status", "")).strip().lower()
+    if spline_status != "ok":
+        raise ValueError(
+            "behavior_analysis.statistics.predictor_control='spline' requires an identifiable "
+            "nonlinear predictor spline basis, but the current predictor is underidentified "
+            f"(status={spline_status or 'unknown'})."
+        )
 
     rename_map = {"predictor": "predictor"}
     for name in covariate_names:

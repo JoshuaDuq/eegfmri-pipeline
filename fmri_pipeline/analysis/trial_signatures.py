@@ -27,9 +27,10 @@ logger = logging.getLogger(__name__)
 
 def _normalize_input_source(input_source: str) -> str:
     normalized = str(input_source or "fmriprep").strip().lower()
-    if normalized not in {"fmriprep", "bids_raw"}:
+    if normalized != "fmriprep":
         raise ValueError(
-            f"input_source must be 'fmriprep' or 'bids_raw', got {input_source!r}."
+            "input_source must be 'fmriprep'. "
+            "fMRIPrep derivatives are required for trial-wise fMRI inference."
         )
     return normalized
 
@@ -51,7 +52,7 @@ def _normalize_optional_frequency(value: Any, *, field_name: str) -> Optional[fl
 @dataclass(frozen=True)
 class TrialSignatureExtractionConfig:
     # Data selection
-    input_source: str  # "fmriprep" | "bids_raw"
+    input_source: str  # "fmriprep"
     fmriprep_space: str  # e.g. "MNI152NLin2009cAsym" or "T1w"
     require_fmriprep: bool
     runs: Optional[List[int]]

@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class ContrastBuilderConfig:
     enabled: bool
-    input_source: str  # "fmriprep" (preferred) or "bids_raw"
+    input_source: str  # "fmriprep"
     fmriprep_space: Optional[str]  # e.g., "T1w", "MNI152NLin6Asym"
     require_fmriprep: bool
     contrast_type: str
@@ -96,7 +96,7 @@ class ContrastBuilderConfig:
 
 
 SUPPORTED_CONTRAST_TYPES = frozenset({"custom", "t-test"})
-SUPPORTED_INPUT_SOURCES = frozenset({"bids_raw", "fmriprep"})
+SUPPORTED_INPUT_SOURCES = frozenset({"fmriprep"})
 OUTPUT_TYPE_MAP = {
     "z-score": "z_score",
     "z_score": "z_score",
@@ -130,10 +130,9 @@ def _normalize_contrast_type(raw_value: Any) -> str:
 def _normalize_input_source(raw_value: Any) -> str:
     input_source = str(raw_value or "fmriprep").strip().lower()
     if input_source not in SUPPORTED_INPUT_SOURCES:
-        supported = ", ".join(sorted(SUPPORTED_INPUT_SOURCES))
         raise ValueError(
-            f"Unsupported fmri input_source {raw_value!r}. "
-            f"Supported values: {supported}."
+            "Unsupported fmri input_source "
+            f"{raw_value!r}. fMRIPrep derivatives are required for fMRI inference."
         )
     return input_source
 
@@ -570,28 +569,34 @@ def _validate_events_against_bold_run(
         )
 
 
-def _load_matching_brain_mask_for_bold(bold_path: Path) -> Optional[Any]:
+def _load_matching_brain_mask_for_bold(bold_path: Path) -> Any:
     import nibabel as nib
 
     mask_path = _discover_brain_mask_for_bold(bold_path)
     if mask_path is None:
-        return None
+        raise FileNotFoundError(
+            "First-level GLM requires a matching fMRIPrep brain mask for "
+            f"{bold_path.name}."
+        )
     return nib.load(str(mask_path))
 
 
-def _build_intersection_brain_mask(bold_paths: Sequence[Path]) -> Optional[Any]:
+def _build_intersection_brain_mask(bold_paths: Sequence[Path]) -> Any:
     import nibabel as nib
     from nilearn.masking import intersect_masks
+
+    if not bold_paths:
+        raise ValueError("Cannot build an intersection brain mask without any BOLD runs.")
 
     mask_paths: list[Path] = []
     for bold_path in bold_paths:
         mask_path = _discover_brain_mask_for_bold(bold_path)
         if mask_path is None:
-            return None
+            raise FileNotFoundError(
+                "Multi-run first-level GLM requires matching fMRIPrep brain masks for every "
+                f"included run. Missing mask for {bold_path.name}."
+            )
         mask_paths.append(mask_path)
-
-    if not mask_paths:
-        return None
 
     mask_imgs = [nib.load(str(path)) for path in mask_paths]
     return intersect_masks(mask_imgs, threshold=1.0)
@@ -1160,7 +1165,7 @@ def fit_first_level_glm(
             )
         logger.info("Using %d confound regressors", confounds.shape[1])
 
-    # Use a matching brain mask when available (best practice with fMRIPrep outputs).
+    # First-level inference requires an explicit fMRIPrep analysis mask.
     mask_img = _load_matching_brain_mask_for_bold(bold_path)
 
     flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)
@@ -1339,7 +1344,7 @@ def fit_first_level_glm_multi_run(
     tr = _validate_consistent_trs(valid_bold_paths)
     logger.info("Fitting multi-run GLM (%d runs, TR=%.2fs)", len(valid_bold_paths), tr)
 
-    # If fMRIPrep brain masks exist, use their intersection to stabilize masking.
+    # Multi-run first-level inference requires an explicit intersection mask across runs.
     mask_img = _build_intersection_brain_mask(valid_bold_paths)
 
     flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img)

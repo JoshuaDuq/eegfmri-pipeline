@@ -357,6 +357,7 @@ class FmriAnalysisPipeline(PipelineBase):
                 task=task,
                 contrast_name=contrast_name,
                 cfg=cfg_obj,
+                stat_map_type=output_type_actual,
                 run_meta=run_meta if isinstance(run_meta, dict) else None,
                 native_stat_img=contrast_img_for_plotting,
                 mni_stat_img=mni_img,

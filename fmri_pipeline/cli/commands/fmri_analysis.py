@@ -56,9 +56,9 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
     in_group = parser.add_argument_group("Input selection")
     in_group.add_argument(
         "--input-source",
-        choices=["fmriprep", "bids_raw"],
+        choices=["fmriprep"],
         default=None,
-        help="Use preprocessed BOLD from fMRIPrep derivatives or raw BIDS BOLD (default from config if set)",
+        help="Use preprocessed BOLD from fMRIPrep derivatives (default from config if set)",
     )
     in_group.add_argument(
         "--fmriprep-space",
@@ -1201,9 +1201,10 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
     input_source = str(
         _coalesce(args.input_source, _cfg_value("input_source"), "fmriprep")
     ).strip().lower()
-    if input_source not in {"fmriprep", "bids_raw"}:
+    if input_source != "fmriprep":
         raise ValueError(
-            f"input_source must be 'fmriprep' or 'bids_raw', got {input_source!r}."
+            "input_source must be 'fmriprep'. "
+            "fMRIPrep derivatives are required for fMRI inference."
         )
 
     drift_model = _coalesce(args.drift_model, _cfg_value("drift_model"))

@@ -165,6 +165,13 @@ Predictor Control Strategies
      - Restricted cubic spline of predictor as covariate
      - ``continuous`` only
 
+Requested controlled estimands are now strict: spline predictor control requires
+``behavior_analysis.predictor_type = continuous`` and a successfully
+identified nonlinear spline basis, while ``outcome_hat`` regression control
+requires the precomputed ``outcome_hat_from_predictor`` column. These analyses
+fail fast when the requested control cannot actually be applied instead of
+degrading to linear adjustment or no adjustment.
+
 Stage Definitions
 -----------------
 
@@ -185,7 +192,18 @@ one column per behavioral or EEG-feature variable.
 .. note::
 
    Row-order-only alignment is not considered valid scientific evidence of
-   correspondence. The ``trial_id`` column is the only accepted join key.
+   correspondence. By default, behavior trial tables require explicit
+   ``trial_id``-based feature/event alignment before feature columns are
+   combined with clean events.
+
+.. warning::
+
+   The implementation still exposes an explicit
+   ``behavior_analysis.trial_table.disallow_positional_alignment = false``
+   override that permits positional row-order alignment when feature tables do
+   not carry canonical ``trial_id`` metadata. Analyses produced under that
+   override should be treated as methodologically unsafe until key-based
+   alignment is restored.
 
 Stage 3 — Predictor Residual
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -399,11 +417,12 @@ Group-Level Analysis
 Group-level computations run outside the per-subject DAG via
 ``BehaviorPipeline.run_group_level(...)``.
 
-**Mixed effects models:** feature-wise ``MixedLM`` across subjects with subject
-as a random effect, then hierarchical FDR across features.
-
-**Multilevel correlations:** per-subject correlation estimates :math:`r_s` aggregated
-via Fisher :math:`z`-averaging:
+The current implementation exposes **multilevel correlations only**. The
+repository does not currently ship a separate behavioral ``MixedLM`` stage.
+For each feature, the pipeline computes a within-subject correlation estimate
+:math:`r_s` (optionally after within-subject covariate adjustment), aggregates
+subjects with equal weight via Fisher :math:`z`-averaging, and uses
+subject-restricted or block-restricted trial permutations when configured:
 
 .. math::
 

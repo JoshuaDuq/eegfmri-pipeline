@@ -26,10 +26,13 @@ from fmri_pipeline.analysis.contrast_builder import (
     compute_contrast_map,
     discover_bold_runs,
     discover_confounds,
+    fit_first_level_glm,
+    fit_first_level_glm_multi_run,
     load_contrast_config,
     load_contrast_config_section,
     _remap_events_by_condition_columns,
 )
+from fmri_pipeline.analysis.constraint_masking import _align_mask_to_image
 from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
 from fmri_pipeline.analysis.reporting import run_fmri_plotting_and_report
 from fmri_pipeline.analysis.trial_signatures import (
@@ -113,6 +116,18 @@ def test_load_contrast_config_rejects_invalid_input_source() -> None:
     }
 
     with pytest.raises(ValueError, match="Unsupported fmri input_source"):
+        load_contrast_config(config)
+
+
+def test_load_contrast_config_rejects_raw_bids_input_source() -> None:
+    config = {
+        "fmri_contrast": {
+            "input_source": "bids_raw",
+            "condition_a": {"column": "trial_type", "value": "pain"},
+        }
+    }
+
+    with pytest.raises(ValueError, match="fMRIPrep derivatives are required"):
         load_contrast_config(config)
 
 
@@ -252,6 +267,31 @@ def test_trial_signature_config_defaults_do_not_inject_scope_columns() -> None:
     )
 
     with pytest.raises(ValueError, match="condition_scope_trial_types"):
+        cfg.normalized()
+
+
+def test_trial_signature_config_rejects_raw_bids_input_source() -> None:
+    cfg = TrialSignatureExtractionConfig(
+        input_source="bids_raw",
+        fmriprep_space="T1w",
+        require_fmriprep=False,
+        runs=None,
+        task="pain",
+        name="trial-signatures",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="auto",
+        method="beta-series",
+    )
+
+    with pytest.raises(ValueError, match="fMRIPrep derivatives are required"):
         cfg.normalized()
 
 
@@ -574,6 +614,24 @@ def test_build_intersection_brain_mask_surfaces_intersection_errors(tmp_path) ->
             _build_intersection_brain_mask([bold_path])
 
 
+def test_align_mask_to_image_resamples_when_affine_differs_even_if_shape_matches() -> None:
+    import nibabel as nib
+
+    mask_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
+    ref_affine = np.eye(4)
+    ref_affine[0, 3] = 4.0
+    ref_img = nib.Nifti1Image(np.zeros((2, 2, 2), dtype=np.float32), ref_affine)
+    resampled_mask = nib.Nifti1Image(np.zeros((2, 2, 2), dtype=np.float32), ref_affine)
+
+    fake_image = SimpleNamespace(resample_to_img=lambda *_args, **_kwargs: resampled_mask)
+
+    with patch.dict(sys.modules, {"nilearn.image": fake_image}):
+        aligned = _align_mask_to_image(mask_img, ref_img)
+
+    assert aligned.shape == (2, 2, 2)
+    assert not aligned.any()
+
+
 def test_trial_signature_condition_overlap_raises(tmp_path) -> None:
     cfg = TrialSignatureExtractionConfig(
         input_source="fmriprep",
@@ -726,7 +784,7 @@ def test_discover_bold_runs_rejects_mixed_raw_and_fmriprep_inputs(tmp_path) -> N
         )
 
 
-def test_discover_bold_runs_rejects_missing_requested_runs(tmp_path) -> None:
+def test_discover_bold_runs_rejects_raw_bids_input_source(tmp_path) -> None:
     bids_root = tmp_path / "bids"
     func_dir = bids_root / "sub-0001" / "func"
     func_dir.mkdir(parents=True, exist_ok=True)
@@ -760,7 +818,7 @@ def test_discover_bold_runs_rejects_missing_requested_runs(tmp_path) -> None:
         resample_to_freesurfer=False,
     )
 
-    with pytest.raises(FileNotFoundError, match="Some requested runs could not be resolved"):
+    with pytest.raises(ValueError, match="fMRIPrep derivatives are required"):
         discover_bold_runs(
             bids_fmri_root=bids_root,
             bids_derivatives=None,
@@ -771,7 +829,7 @@ def test_discover_bold_runs_rejects_missing_requested_runs(tmp_path) -> None:
         )
 
 
-def test_discover_bold_runs_rejects_auto_discovered_runs_with_missing_inputs(tmp_path) -> None:
+def test_discover_bold_runs_rejects_raw_bids_input_source_for_auto_discovery(tmp_path) -> None:
     bids_root = tmp_path / "bids"
     func_dir = bids_root / "sub-0001" / "func"
     func_dir.mkdir(parents=True, exist_ok=True)
@@ -809,7 +867,7 @@ def test_discover_bold_runs_rejects_auto_discovered_runs_with_missing_inputs(tmp
         resample_to_freesurfer=False,
     )
 
-    with pytest.raises(FileNotFoundError, match="matching BOLD \\+ events inputs"):
+    with pytest.raises(ValueError, match="fMRIPrep derivatives are required"):
         discover_bold_runs(
             bids_fmri_root=bids_root,
             bids_derivatives=None,
@@ -985,7 +1043,7 @@ def test_trial_signature_config_rejects_invalid_method() -> None:
         cfg.normalized()
 
 
-def test_trial_signature_discover_runs_rejects_missing_requested_runs(tmp_path) -> None:
+def test_trial_signature_discover_runs_rejects_raw_bids_input_source(tmp_path) -> None:
     bids_root = tmp_path / "bids"
     func_dir = bids_root / "sub-0001" / "func"
     func_dir.mkdir(parents=True, exist_ok=True)
@@ -996,7 +1054,7 @@ def test_trial_signature_discover_runs_rejects_missing_requested_runs(tmp_path) 
     )
     (func_dir / "sub-0001_task-task_run-01_bold.nii.gz").write_bytes(b"")
 
-    with pytest.raises(FileNotFoundError, match="Some requested runs could not be resolved"):
+    with pytest.raises(ValueError, match="fMRIPrep derivatives are required"):
         _discover_runs(
             bids_fmri_root=bids_root,
             bids_derivatives=None,
@@ -1153,6 +1211,136 @@ def test_build_contrast_from_runs_detailed_raises_when_requested_design_qc_write
             )
 
 
+def test_fit_first_level_glm_requires_matching_brain_mask(tmp_path: Path) -> None:
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        formula=None,
+        name="pain-vs-rest",
+        runs=[1],
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+        write_design_matrix=False,
+        confounds_strategy="none",
+    )
+    bold_path = tmp_path / "sub-0001_task-pain_run-01_space-T1w_desc-preproc_bold.nii.gz"
+    events_path = tmp_path / "sub-0001_task-pain_run-01_events.tsv"
+    bold_path.write_bytes(b"")
+    pd.DataFrame(
+        {
+            "onset": [0.0, 8.0],
+            "duration": [1.0, 1.0],
+            "trial_type": ["pain", "rest"],
+        }
+    ).to_csv(events_path, sep="\t", index=False)
+
+    with patch(
+        "fmri_pipeline.analysis.contrast_builder._get_tr_from_bold",
+        return_value=2.0,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._validate_events_against_bold_run",
+        return_value=None,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._load_matching_brain_mask_for_bold",
+        side_effect=FileNotFoundError(
+            f"First-level GLM requires a matching fMRIPrep brain mask for {bold_path.name}."
+        ),
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._build_first_level_model",
+        side_effect=AssertionError("GLM build should not be reached without a brain mask"),
+    ):
+        with pytest.raises(FileNotFoundError, match="requires a matching fMRIPrep brain mask"):
+            fit_first_level_glm(
+                bold_path=bold_path,
+                events_path=events_path,
+                confounds_path=None,
+                cfg=cfg,
+            )
+
+
+def test_fit_first_level_glm_multi_run_requires_intersection_brain_mask(tmp_path: Path) -> None:
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        formula=None,
+        name="pain-vs-rest",
+        runs=[1, 2],
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+        write_design_matrix=False,
+        confounds_strategy="none",
+    )
+    bold_paths = [
+        tmp_path / "sub-0001_task-pain_run-01_space-T1w_desc-preproc_bold.nii.gz",
+        tmp_path / "sub-0001_task-pain_run-02_space-T1w_desc-preproc_bold.nii.gz",
+    ]
+    events_paths = [
+        tmp_path / "sub-0001_task-pain_run-01_events.tsv",
+        tmp_path / "sub-0001_task-pain_run-02_events.tsv",
+    ]
+    for bold_path, events_path in zip(bold_paths, events_paths):
+        bold_path.write_bytes(b"")
+        pd.DataFrame(
+            {
+                "onset": [0.0, 8.0],
+                "duration": [1.0, 1.0],
+                "trial_type": ["pain", "rest"],
+            }
+        ).to_csv(events_path, sep="\t", index=False)
+
+    with patch(
+        "fmri_pipeline.analysis.contrast_builder._validate_events_against_bold_run",
+        return_value=None,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._validate_consistent_trs",
+        return_value=2.0,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._build_intersection_brain_mask",
+        side_effect=FileNotFoundError(
+            "Multi-run first-level GLM requires matching fMRIPrep brain masks for every included run."
+        ),
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._build_first_level_model",
+        side_effect=AssertionError("GLM build should not be reached without an intersection mask"),
+    ):
+        with pytest.raises(
+            FileNotFoundError,
+            match="requires matching fMRIPrep brain masks for every included run",
+        ):
+            fit_first_level_glm_multi_run(
+                bold_paths=bold_paths,
+                events_paths=events_paths,
+                confounds_paths=[None, None],
+                cfg=cfg,
+            )
+
+
 def test_run_fmri_plotting_and_report_raises_when_provenance_write_fails(tmp_path: Path) -> None:
     cfg = FmriPlottingConfig(
         enabled=True,
@@ -1180,4 +1368,32 @@ def test_run_fmri_plotting_and_report_raises_when_provenance_write_fails(tmp_pat
                 task="pain",
                 contrast_name="pain-vs-rest",
                 cfg=cfg,
+                stat_map_type="z_score",
             )
+
+
+def test_run_fmri_plotting_and_report_rejects_non_z_stat_maps(tmp_path: Path) -> None:
+    cfg = FmriPlottingConfig(
+        enabled=True,
+        html_report=False,
+        formats=("png",),
+        space="both",
+        include_motion_qc=False,
+        include_carpet_qc=False,
+        include_tsnr_qc=False,
+        include_design_qc=False,
+        include_signatures=False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires z-score statistic maps",
+    ):
+        run_fmri_plotting_and_report(
+            contrast_dir=tmp_path,
+            subject="0001",
+            task="pain",
+            contrast_name="pain-vs-rest",
+            cfg=cfg,
+            stat_map_type="stat",
+        )

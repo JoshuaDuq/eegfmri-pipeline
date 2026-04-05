@@ -98,7 +98,7 @@ def test_compute_signature_expression_rejects_missing_requested_signature(tmp_pa
         )
 
 
-def test_resample_to_img_ignores_nonfinite_voxels_in_moving_image() -> None:
+def test_resample_to_img_rejects_nonfinite_voxels_in_continuous_resampling() -> None:
     effect_data = np.ones((2, 2, 2), dtype=np.float32)
     effect_data[0, 0, 0] = np.nan
     effect_img = nib.Nifti1Image(effect_data, np.eye(4))
@@ -109,14 +109,16 @@ def test_resample_to_img_ignores_nonfinite_voxels_in_moving_image() -> None:
 
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
-        resampled = _maybe_resample_to_img(
-            moving_img=effect_img,
-            target_img=target_img,
-            interpolation="continuous",
-        )
+        with pytest.raises(
+            ValueError,
+            match="continuous resampling does not support non-finite voxels",
+        ):
+            _maybe_resample_to_img(
+                moving_img=effect_img,
+                target_img=target_img,
+                interpolation="continuous",
+            )
 
-    resampled_data = resampled.get_fdata()
-    assert np.isfinite(resampled_data).all()
     warning_messages = [str(w.message) for w in captured]
     assert not any(
         "NaNs or infinite values are present in the data passed to resample" in msg

@@ -177,6 +177,12 @@ class SecondLevelConfig:
             else SecondLevelPermutationConfig()
         )
 
+        if model == "repeated-measures" and bool(permutation.enabled):
+            raise ValueError(
+                "Repeated-measures permutation inference is unsupported because "
+                "it requires subject-level exchangeability blocks."
+            )
+
         return SecondLevelConfig(
             model=model,
             contrast_names=contrast_names,

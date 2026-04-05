@@ -117,7 +117,7 @@ Key Options
      - Description
      - Default
    * - ``--input-source``
-     - ``fmriprep`` or ``bids_raw``
+     - ``fmriprep`` only; raw BIDS inputs are rejected for inferential analyses
      - ``fmriprep``
    * - ``--hrf-model``
      - ``spm``, ``flobs``, ``fir``
@@ -129,7 +129,7 @@ Key Options
      - Spatial smoothing kernel (mm)
      - ``null``
    * - ``--output-type``
-     - ``z-score``, ``t-stat``, ``cope``, ``beta``
+     - ``z-score``, ``t-stat``, ``cope``; ``beta`` currently aliases ``cope``/effect-size rather than exporting a distinct raw-beta map. Plot/report generation now requires ``z-score`` because the plotting thresholds and labels are calibrated only for z-statistics.
      - ``z-score``
    * - ``--group-model``
      - ``one-sample``, ``two-sample``, ``paired``, ``repeated-measures``
@@ -141,7 +141,7 @@ Key Options
      - Subject-level TSV/CSV for groups and covariates
      - none
    * - ``--group-permutation-inference``
-     - Add max-T permutation inference to second-level mode
+     - Add max-T permutation inference to second-level mode; avoid this for repeated-measures designs until restricted permutations are implemented
      - disabled
    * - ``--plots``
      - Generate per-subject figures

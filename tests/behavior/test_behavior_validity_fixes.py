@@ -154,6 +154,46 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         )
         self.assertTrue(out.empty)
 
+    def test_permutation_spline_predictor_control_rejects_noncontinuous_predictor_type(self):
+        from eeg_pipeline.utils.analysis.stats.permutation import _build_predictor_covariates
+
+        predictor = pd.Series([0.0, 1.0, 0.0, 1.0], name="predictor")
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "predictor_type": "binary",
+                    "statistics": {"predictor_control": "spline"},
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "predictor_type='continuous'"):
+            _build_predictor_covariates(predictor, config=cfg)
+
+    def test_permutation_spline_predictor_control_rejects_linear_only_spline_basis(self):
+        from eeg_pipeline.utils.analysis.stats.permutation import _build_predictor_covariates
+
+        predictor = pd.Series(np.linspace(1.0, 5.0, 5), name="predictor")
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "predictor_type": "continuous",
+                    "statistics": {"predictor_control": "spline"},
+                }
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.splines.build_predictor_rcs_design",
+            return_value=(
+                pd.DataFrame({"predictor": predictor}),
+                ["predictor"],
+                {"status": "ok_linear_only"},
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "underidentified"):
+                _build_predictor_covariates(predictor, config=cfg)
+
     def test_permutation_scheme_rejects_invalid_value(self):
         from eeg_pipeline.utils.analysis.stats.permutation import _get_permutation_scheme
 
@@ -175,6 +215,46 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "bad config"):
             _get_predictor_control_mode(self._BadConfig())
+
+    def test_partial_spline_predictor_control_rejects_noncontinuous_predictor_type(self):
+        from eeg_pipeline.utils.analysis.stats.partial import _build_predictor_covariates
+
+        predictor = pd.Series([0.0, 1.0, 0.0, 1.0], name="predictor")
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "predictor_type": "binary",
+                    "statistics": {"predictor_control": "spline"},
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "predictor_type='continuous'"):
+            _build_predictor_covariates(predictor, config=cfg)
+
+    def test_partial_spline_predictor_control_rejects_linear_only_spline_basis(self):
+        from eeg_pipeline.utils.analysis.stats.partial import _build_predictor_covariates
+
+        predictor = pd.Series(np.linspace(1.0, 5.0, 5), name="predictor")
+        cfg = DotConfig(
+            {
+                "behavior_analysis": {
+                    "predictor_type": "continuous",
+                    "statistics": {"predictor_control": "spline"},
+                }
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.splines.build_predictor_rcs_design",
+            return_value=(
+                pd.DataFrame({"predictor": predictor}),
+                ["predictor"],
+                {"status": "ok_linear_only"},
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "underidentified"):
+                _build_predictor_covariates(predictor, config=cfg)
 
     def test_selected_feature_files_reject_unknown_keys(self):
         from eeg_pipeline.context.behavior import BehaviorContext
@@ -1647,7 +1727,52 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(meta["predictor_column"], "temperature")
         self.assertFalse(out.empty)
         self.assertEqual(str(out.iloc[0]["target"]), "rating")
-        self.assertTrue(np.isfinite(float(out.iloc[0]["beta_interaction"])))
+
+    def test_group_correlations_exclude_non_trialwise_features(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        df_a = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, 12),
+                "power_alpha": np.linspace(0.1, 1.2, 12),
+                "itpc_active_alpha_global_mean": np.linspace(0.2, 0.8, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+        df_b = pd.DataFrame(
+            {
+                "rating": np.linspace(15, 75, 12),
+                "power_alpha": np.linspace(0.2, 1.3, 12),
+                "itpc_active_alpha_global_mean": np.linspace(0.3, 0.9, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df_a, df_b],
+        ), patch(
+            "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
+            side_effect=lambda df, **_kwargs: df,
+        ):
+            out = run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=self._behavior_config(),
+                logger=Mock(),
+                use_block_permutation=False,
+                n_perm=0,
+                target_col="rating",
+            )
+
+        self.assertFalse(out.empty)
+        self.assertEqual(set(out["feature"].astype(str)), {"power_alpha"})
 
     def test_stage_regression_run_mean_rejects_run_block_covariate(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_regression
@@ -3276,6 +3401,52 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             with self.assertRaises(ValueError):
                 fit_predictor_outcome_curve(predictor, outcome, config=cfg)
 
+    def test_regression_outcome_hat_control_requires_fitted_outcome_column(self):
+        from eeg_pipeline.utils.analysis.stats._regression_utils import _build_predictor_covariates
+
+        trial_df = pd.DataFrame(
+            {
+                "outcome": [10.0, 11.0, 12.0, 13.0, 14.0],
+                "predictor": [44.0, 45.0, 46.0, 47.0, 48.0],
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "outcome_hat_from_predictor"):
+            _build_predictor_covariates(
+                trial_df,
+                outcome="outcome",
+                predictor_control="outcome_hat",
+                include_predictor=True,
+                predictor_col="predictor",
+            )
+
+    def test_regression_spline_control_rejects_linear_only_basis(self):
+        from eeg_pipeline.utils.analysis.stats._regression_utils import _build_predictor_covariates
+
+        trial_df = pd.DataFrame(
+            {
+                "outcome": [10.0, 11.0, 12.0, 13.0, 14.0],
+                "predictor": [44.0, 45.0, 46.0, 47.0, 48.0],
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.splines.build_predictor_rcs_design",
+            return_value=(
+                pd.DataFrame({"predictor": trial_df["predictor"]}),
+                ["predictor"],
+                {"status": "ok_linear_only"},
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "underidentified"):
+                _build_predictor_covariates(
+                    trial_df,
+                    outcome="outcome",
+                    predictor_control="spline",
+                    include_predictor=True,
+                    predictor_col="predictor",
+                )
+
     def test_predictor_residual_crossfit_uses_same_spline_estimator_path(self):
         from eeg_pipeline.utils.analysis.stats.predictor_residual import (
             crossfit_predictor_outcome_curve,
@@ -3706,6 +3877,70 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertFalse(out.empty)
         self.assertLess(abs(float(out.iloc[0]["r"])), 0.25)
         self.assertIn("partial", str(out.iloc[0]["estimator"]))
+
+    def test_group_correlations_require_subject_level_partial_sample_threshold(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        df_a = pd.DataFrame(
+            {
+                "rating": [10.0, 11.0, 12.0, 13.0, 14.0],
+                "temperature": [44.0, 44.5, 45.0, 45.5, 46.0],
+                "power_alpha": [0.1, 0.2, 0.3, 0.4, 0.5],
+                "run_id": [1, 1, 2, 2, 3],
+            }
+        )
+        df_b = pd.DataFrame(
+            {
+                "rating": [9.0, 10.0, 11.0, 12.0, 13.0],
+                "temperature": [43.5, 44.0, 44.5, 45.0, 45.5],
+                "power_alpha": [0.2, 0.3, 0.4, 0.5, 0.6],
+                "run_id": [1, 1, 2, 2, 3],
+            }
+        )
+        cfg = self._behavior_config(
+            {
+                "behavior_analysis": {
+                    "statistics": {
+                        "min_samples_per_covariate": 2,
+                        "partial_corr_base_samples": 4,
+                    },
+                    "predictor_column": "temperature",
+                    "group_level": {
+                        "multilevel_correlations": {
+                            "target": "rating",
+                            "control_predictor": True,
+                            "control_trial_order": False,
+                            "control_run_effects": False,
+                        }
+                    },
+                }
+            }
+        )
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df_a, df_b],
+        ):
+            out = run_group_level_correlations(
+                subjects=["0001", "0002"],
+                deriv_root=Path("/tmp"),
+                config=cfg,
+                logger=Mock(),
+                use_block_permutation=False,
+                n_perm=0,
+                target_col="rating",
+                control_predictor=True,
+                control_trial_order=False,
+                control_run_effects=False,
+            )
+
+        self.assertTrue(out.empty)
 
     def test_group_correlations_reports_effective_permutation_count(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
@@ -4907,7 +5142,13 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         x = pd.Series([0.5, 1.2, 1.9, 2.4, 3.8, 3.1], dtype=float)
         y = pd.Series([1.0, 1.8, 2.9, 2.2, 3.3, 4.1], dtype=float)
 
-        state = _build_subject_partial_permutation_state(x, y, cov, method="spearman")
+        state = _build_subject_partial_permutation_state(
+            x,
+            y,
+            cov,
+            method="spearman",
+            min_samples_required=4,
+        )
 
         self.assertIsNotNone(state)
         r_ref, _p_ref, _n_ref = compute_partial_corr(x, y, cov, method="spearman")

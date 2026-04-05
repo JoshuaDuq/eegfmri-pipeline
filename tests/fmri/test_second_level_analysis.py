@@ -10,6 +10,7 @@ import pytest
 from fmri_pipeline.analysis.second_level import (
     FirstLevelMapRecord,
     SecondLevelConfig,
+    SecondLevelPermutationConfig,
     prepare_second_level_input,
 )
 
@@ -176,6 +177,17 @@ def test_prepare_second_level_repeated_measures_defaults_to_omnibus_f(
             ]
         ),
     )
+
+
+def test_second_level_config_rejects_repeated_measures_permutation_inference() -> None:
+    cfg = SecondLevelConfig(
+        model="repeated-measures",
+        contrast_names=("low", "high"),
+        permutation=SecondLevelPermutationConfig(enabled=True),
+    )
+
+    with pytest.raises(ValueError, match="Repeated-measures permutation inference is unsupported"):
+        cfg.normalized()
 
 
 def test_prepare_second_level_rejects_cross_contrast_model_mismatch(
