@@ -1,6 +1,7 @@
 package mainmenu
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -238,6 +239,29 @@ func TestView_CompactLayoutFitsSmallWindow(t *testing.T) {
 
 	if strings.Contains(normalized, "Selected") {
 		t.Fatalf("did not expect the wide preview pane in compact layout\nview:\n%s", view)
+	}
+}
+
+func TestShortPathUsesNativeHomePrefix(t *testing.T) {
+	m := New()
+	home := homeDir()
+	if home == "" {
+		t.Skip("home directory unavailable")
+	}
+
+	got := m.shortPath(filepath.Join(home, "project", "data"))
+	want := filepath.Join("~", "project", "data")
+	if got != want {
+		t.Fatalf("shortPath() = %q, want %q", got, want)
+	}
+}
+
+func TestHomeRelativePathRejectsFalsePrefixOnWindows(t *testing.T) {
+	home := `C:\Users\Jo`
+	path := `C:\Users\John\project`
+
+	if relative, ok := homeRelativePath("windows", home, path); ok {
+		t.Fatalf("expected false-prefix path to be rejected, got ok=true with relative=%q", relative)
 	}
 }
 

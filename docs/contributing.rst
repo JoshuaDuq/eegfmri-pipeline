@@ -42,12 +42,27 @@ Contributing
 Setup
 -----
 
+macOS / Linux
+~~~~~~~~~~~~~
+
 .. code-block:: bash
 
    git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
    cd eegfmri-pipeline
    python3.11 -m venv .venv311
    source .venv311/bin/activate
+   pip install -e ".[dev,ml]"
+   pre-commit install
+
+Windows PowerShell
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: powershell
+
+   git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
+   cd eegfmri-pipeline
+   py -3.11 -m venv .venv311
+   .venv311\Scripts\Activate.ps1
    pip install -e ".[dev,ml]"
    pre-commit install
 

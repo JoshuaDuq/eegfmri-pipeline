@@ -102,12 +102,24 @@ the canonical join key aligning EEG features, fMRI betas, and behavioral targets
 
 Create an isolated Python environment and install the package:
 
+macOS / Linux:
+
 .. code-block:: bash
 
    git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
    cd eegfmri-pipeline
    python3.11 -m venv .venv311
    source .venv311/bin/activate
+   pip install -e ".[dev,ml]"
+
+Windows PowerShell:
+
+.. code-block:: powershell
+
+   git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
+   cd eegfmri-pipeline
+   py -3.11 -m venv .venv311
+   .venv311\Scripts\Activate.ps1
    pip install -e ".[dev,ml]"
 
 .. note::
@@ -117,7 +129,9 @@ Create an isolated Python environment and install the package:
    workflows, ``pip install -e ".[dev]"`` is sufficient.
 
 See :doc:`../install` for environment variables, the optional TUI build, and
-the FreeSurfer/MNE Docker image for source localization.
+the FreeSurfer/MNE Docker image for source localization. On native Windows,
+use WSL2 or a Linux/macOS host for container-backed fMRI preprocessing and
+Docker-based BEM/source-localization helpers.
 
 .. _qs-prepare:
 

@@ -2,10 +2,12 @@ package pipelinesmoke
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/eeg-pipeline/tui/animation"
+	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/styles"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -163,15 +165,19 @@ func (m *Model) SetTask(task string) {
 }
 
 func (m Model) BuildCommand() string {
-	cmd := "scripts/tui_pipeline_smoke.py"
+	return executor.JoinCommand(runtime.GOOS, m.BuildCommandArgs())
+}
+
+func (m Model) BuildCommandArgs() []string {
+	args := []string{"scripts/tui_pipeline_smoke.py"}
 	if m.task != "" {
-		cmd += " --task " + m.task
+		args = append(args, "--task", m.task)
 	}
 	ids := m.selectedIDs()
 	if len(ids) > 0 && len(ids) < len(smokeItems) {
-		cmd += " --pipelines " + strings.Join(ids, ",")
+		args = append(args, "--pipelines", strings.Join(ids, ","))
 	}
-	return cmd
+	return args
 }
 
 func (m *Model) Reset() {

@@ -62,13 +62,33 @@ See the [installation guide](https://joshuaduq.github.io/eegfmri-pipeline/instal
 for environment variables, optional components, and the Docker image used by
 the source-localization path.
 
+## Platform Support
+
+| Platform | Native support | Notes |
+| --- | --- | --- |
+| macOS | Yes | Full CLI/TUI support. |
+| Windows | Yes, for install + CLI + TUI + validation + smoke checks | Use native Windows for the repo-owned interface layer. |
+| Windows heavy imaging workflows | No native guarantee | Use WSL2 or containers for container-backed fMRI preprocessing and Docker-based BEM/source-localization helpers. |
+
 ## Install
+
+### macOS / Linux
 
 ```bash
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
 cd eegfmri-pipeline
 python3.11 -m venv .venv311
 source .venv311/bin/activate
+pip install -e ".[dev,ml]"
+```
+
+### Windows PowerShell
+
+```powershell
+git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
+cd eegfmri-pipeline
+py -3.11 -m venv .venv311
+.venv311\Scripts\Activate.ps1
 pip install -e ".[dev,ml]"
 ```
 
@@ -87,9 +107,19 @@ CLI consumes.
 
 Build and launch the TUI once after installation:
 
+macOS / Linux:
+
 ```bash
 cd eeg_pipeline/cli/tui && go build -o eeg-tui . && cd -
 ./eeg_pipeline/cli/tui/eeg-tui
+```
+
+Windows PowerShell:
+
+```powershell
+cd eeg_pipeline/cli/tui
+go build -o eeg-tui.exe .
+.\eeg-tui.exe
 ```
 
 The TUI walks you through every configuration step interactively—pipeline
@@ -119,6 +149,11 @@ for the full walkthrough.
 
 Run `eeg-pipeline validate quick` before any batch job so dataset and
 configuration errors surface early.
+
+For native Windows users, keep the lightweight repo-owned workflows native
+(install, TUI, CLI, validation, smoke checks). Use WSL2 or container-backed
+execution for fMRI preprocessing and Docker-based BEM/source-localization
+helpers.
 
 ## Feature Extraction
 

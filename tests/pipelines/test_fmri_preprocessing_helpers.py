@@ -94,3 +94,11 @@ class TestFmriPreprocessingHelpers(unittest.TestCase):
             self.assertEqual(resolved_root, bids_dir)
             self.assertIsNone(temp_dir)
             logger.warning.assert_not_called()
+
+    def test_require_supported_container_host_rejects_native_windows(self) -> None:
+        module = self._import_module()
+
+        with patch.object(module, "platform", create=True) as platform_mod:
+            platform_mod.system.return_value = "Windows"
+            with self.assertRaisesRegex(RuntimeError, "not supported on native Windows"):
+                module._require_supported_container_host("fMRI preprocessing")

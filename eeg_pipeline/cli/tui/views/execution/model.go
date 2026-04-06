@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -61,6 +60,7 @@ func (s Status) String() string {
 // resource usage and UI layout.
 type Model struct {
 	Command        string
+	CommandArgs    []string
 	Status         Status
 	Progress       float64
 	OutputLines    []string
@@ -86,12 +86,13 @@ type Model struct {
 	FailedSubjects   []string          // List of failed subject IDs
 
 	// Resource metrics
-	CPUUsage        float64
-	MemoryUsage     float64
-	PeakMemoryUsage float64
-	CPUCoreUsages   []float64 // Per-core CPU usage percentages
-	NumCPUCores     int       // Total number of CPU cores
-	EpochInfo       string
+	CPUUsage          float64
+	CPUUsageAvailable bool
+	MemoryUsage       float64
+	PeakMemoryUsage   float64
+	CPUCoreUsages     []float64 // Per-core CPU usage percentages
+	NumCPUCores       int       // Total number of CPU cores
+	EpochInfo         string
 
 	// Error tracking
 	ErrorLines         []string
@@ -139,21 +140,23 @@ func New(command string) Model {
 	vp.MouseWheelDelta = styles.MouseWheelScrollLines
 
 	m := Model{
-		Command:          command,
-		Status:           StatusPending,
-		Progress:         0,
-		OutputLines:      []string{},
-		MaxOutputLines:   styles.UnlimitedScrollback,
-		StartTime:        time.Now(),
-		width:            80,
-		height:           24,
-		columnGap:        2,
-		logViewport:      vp,
-		RepoRoot:         "",
-		SubjectDurations: []time.Duration{},
-		SubjectOrder:     []string{},
-		SubjectStatuses:  make(map[string]string),
-		FailedSubjects:   []string{},
+		Command:           command,
+		CommandArgs:       nil,
+		Status:            StatusPending,
+		Progress:          0,
+		OutputLines:       []string{},
+		MaxOutputLines:    styles.UnlimitedScrollback,
+		StartTime:         time.Now(),
+		width:             80,
+		height:            24,
+		columnGap:         2,
+		logViewport:       vp,
+		RepoRoot:          "",
+		SubjectDurations:  []time.Duration{},
+		SubjectOrder:      []string{},
+		SubjectStatuses:   make(map[string]string),
+		FailedSubjects:    []string{},
+		CPUUsageAvailable: true,
 	}
 	m.updateLayout()
 	m.updateViewportSize()
@@ -167,6 +170,14 @@ func New(command string) Model {
 func NewWithRoot(command string, repoRoot string) Model {
 	m := New(command)
 	m.RepoRoot = repoRoot
+	return m
+}
+
+func NewWithRootAndArgs(command string, commandArgs []string, repoRoot string) Model {
+	m := NewWithRoot(command, repoRoot)
+	if len(commandArgs) > 0 {
+		m.CommandArgs = append([]string(nil), commandArgs...)
+	}
 	return m
 }
 
@@ -208,10 +219,7 @@ func (m *Model) Start() tea.Cmd {
 	m.cancel = cancel
 
 	return func() tea.Msg {
-		parts, err := splitShellWords(m.Command)
-		if err != nil {
-			parts = strings.Fields(m.Command)
-		}
+		parts := m.commandParts()
 		if len(parts) == 0 {
 			return messages.CommandDoneMsg{ExitCode: 1}
 		}
@@ -234,23 +242,15 @@ func (m *Model) Start() tea.Cmd {
 			args = append(args, "--progress-json")
 		}
 
-		pyCmd := executor.GetPythonCommand(m.RepoRoot)
-		cmd := exec.CommandContext(ctx, pyCmd, args...)
+		pyCmd := executor.ResolvePythonCommand(m.RepoRoot)
+		cmd := exec.CommandContext(ctx, pyCmd.Executable, pyCmd.Args(args...)...)
 		cmd.Dir = m.RepoRoot
 		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		configureExecutionCommand(cmd)
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			// Fallback to python3 if primary command fails
-			cmd = exec.CommandContext(ctx, "python3", args...)
-			cmd.Dir = m.RepoRoot
-			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			stdout, err = cmd.StdoutPipe()
-			if err != nil {
-				return messages.CommandDoneMsg{ExitCode: 1, Error: err}
-			}
+			return messages.CommandDoneMsg{ExitCode: 1, Error: err}
 		}
 
 		stderr, _ := cmd.StderrPipe()
@@ -292,6 +292,18 @@ func (m *Model) Start() tea.Cmd {
 
 		return CommandStartedMsg{Cmd: cmd, OutputChan: outputChan, DoneChan: doneChan}
 	}
+}
+
+func (m Model) commandParts() []string {
+	if len(m.CommandArgs) > 0 {
+		return append([]string(nil), m.CommandArgs...)
+	}
+
+	parts, err := splitShellWords(m.Command)
+	if err != nil {
+		return strings.Fields(m.Command)
+	}
+	return parts
 }
 
 func splitShellWords(raw string) ([]string, error) {
@@ -496,6 +508,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messages.ResourceUpdateMsg:
 		m.CPUUsage = msg.CPUUsage
+		m.CPUUsageAvailable = msg.CPUAvailable
 		m.MemoryUsage = msg.MemoryUsage
 		if msg.MemoryUsage > m.PeakMemoryUsage {
 			m.PeakMemoryUsage = msg.MemoryUsage
@@ -541,9 +554,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cancel != nil {
 				m.cancel()
 			}
-			if m.cmd != nil && m.cmd.Process != nil {
-				syscall.Kill(-m.cmd.Process.Pid, syscall.SIGKILL)
-			}
+			terminateExecutionCommand(m.cmd)
 			m.updateViewportSize()
 			return m, nil
 		case "c":

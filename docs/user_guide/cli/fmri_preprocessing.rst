@@ -20,6 +20,12 @@ workflows.
 - A FreeSurfer ``license.txt`` at ``paths.freesurfer_license`` or
   ``$EEG_PIPELINE_FREESURFER_LICENSE`` (required by current fMRIPrep execution path)
 
+.. note::
+
+   Native Windows is supported for the repo-owned CLI/TUI surface, but this
+   specific workflow launches containerized neuroimaging tooling directly.
+   Run it from WSL2 or a Linux/macOS host.
+
 .. code-block:: bash
 
    eeg-pipeline fmri preprocess [options]

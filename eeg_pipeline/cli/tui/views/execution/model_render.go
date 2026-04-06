@@ -415,6 +415,10 @@ func (m Model) renderCPUHeatmap() string {
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
+	if !m.CPUUsageAvailable {
+		return "  " + labelStyle.Render("CPU ") + valueStyle.Render("unavailable on Windows")
+	}
+
 	if m.NumCPUCores == 0 || len(m.CPUCoreUsages) == 0 {
 		return "  " + labelStyle.Render("Cpu ") + valueStyle.Render(fmt.Sprintf("%.0f%%", m.CPUUsage))
 	}

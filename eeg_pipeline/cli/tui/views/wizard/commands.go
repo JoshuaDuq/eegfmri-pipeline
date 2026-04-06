@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
 )
@@ -396,6 +398,10 @@ func (ab *argBuilder) build() []string {
 }
 
 func (m Model) BuildCommand() string {
+	return executor.JoinCommand(runtime.GOOS, m.BuildCommandArgs())
+}
+
+func (m Model) BuildCommandArgs() []string {
 	parts := []string{"eeg-pipeline", m.Pipeline.CLICommand()}
 
 	needsMode := m.Pipeline == types.PipelinePreprocessing ||
@@ -645,7 +651,7 @@ func (m Model) BuildCommand() string {
 		parts = append(parts, "--dry-run")
 	}
 
-	return joinShellCommand(parts)
+	return parts
 }
 
 func (m Model) buildPlottingAdvancedArgs() []string {
@@ -1109,42 +1115,6 @@ func splitLooseList(raw string) []string {
 	return splitSpaceList(normalized)
 }
 
-func joinShellCommand(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	quoted := make([]string, 0, len(args))
-	for _, arg := range args {
-		quoted = append(quoted, shellQuote(arg))
-	}
-	return strings.Join(quoted, " ")
-}
-
-func shellQuote(arg string) string {
-	if arg == "" {
-		return "''"
-	}
-	if isShellSafe(arg) {
-		return arg
-	}
-	// POSIX-safe single-quote escaping:
-	// abc'def -> 'abc'"'"'def'
-	return "'" + strings.ReplaceAll(arg, "'", `'"'"'`) + "'"
-}
-
-func isShellSafe(arg string) bool {
-	for _, r := range arg {
-		if (r >= 'a' && r <= 'z') ||
-			(r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') ||
-			strings.ContainsRune("@%_+=:,./-~", r) {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
 func splitShellWords(raw string) ([]string, error) {
 	type quoteState int
 	const (
@@ -1230,13 +1200,22 @@ func expandUserPath(value string) string {
 	if strings.HasPrefix(value, "~") {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			if value == "~" {
-				return filepath.Clean(home)
-			}
-			if strings.HasPrefix(value, "~/") {
-				return filepath.Clean(filepath.Join(home, value[2:]))
-			}
+			return expandUserPathWithHome(value, home)
 		}
+	}
+	return filepath.Clean(value)
+}
+
+func expandUserPathWithHome(value string, home string) string {
+	if value == "~" {
+		return filepath.Clean(home)
+	}
+	if len(value) >= 2 && (value[1] == '/' || value[1] == '\\') {
+		relative := strings.NewReplacer(
+			"/", string(filepath.Separator),
+			"\\", string(filepath.Separator),
+		).Replace(value[2:])
+		return filepath.Clean(filepath.Join(home, relative))
 	}
 	return filepath.Clean(value)
 }

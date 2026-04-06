@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 
 	"github.com/eeg-pipeline/tui/app"
 
@@ -27,6 +28,9 @@ func exitAlternateScreen() {
 }
 
 func resetTerminalAttributes() {
+	if runtime.GOOS == "windows" {
+		return
+	}
 	cmd := exec.Command("stty", "sane")
 	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {

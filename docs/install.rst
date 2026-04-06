@@ -36,12 +36,27 @@ Prerequisites
 Setup
 -----
 
+macOS / Linux
+~~~~~~~~~~~~~
+
 .. code-block:: bash
 
    git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
    cd eegfmri-pipeline
    python3.11 -m venv .venv311
-   source .venv311/bin/activate        # Windows: .venv311\Scripts\activate
+   source .venv311/bin/activate
+   pip install -e ".[dev,ml]"
+   eeg-pipeline --help
+
+Windows PowerShell
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: powershell
+
+   git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
+   cd eegfmri-pipeline
+   py -3.11 -m venv .venv311
+   .venv311\Scripts\Activate.ps1
    pip install -e ".[dev,ml]"
    eeg-pipeline --help
 
@@ -71,8 +86,30 @@ TUI *(optional)*
          go build -o eeg-tui .
          ./eeg-tui
 
+      .. code-block:: powershell
+
+         cd eeg_pipeline/cli/tui
+         go build -o eeg-tui.exe .
+         .\eeg-tui.exe
+
 On first launch, open **Global Setup** (press ``C`` from the main menu) to
 set your task name and data paths. See :doc:`user_guide/tui` for the full reference.
+
+Windows support contract
+------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Area
+     - Support level
+   * - Install, CLI, TUI, validation, smoke checks
+     - Supported natively on macOS and Windows.
+   * - fMRI preprocessing (container-backed)
+     - Use WSL2 or a Linux/macOS host. Native Windows is not supported in this pass.
+   * - Docker-based BEM/source-localization helpers
+     - Use WSL2 or a Linux/macOS host. Native Windows is not supported in this pass.
 
 Docker Image (FreeSurfer + MNE) *(optional)*
 --------------------------------------------

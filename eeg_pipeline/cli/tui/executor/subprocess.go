@@ -613,8 +613,8 @@ func (ps *ProgressStreamer) Start() tea.Cmd {
 		args = append(args, "--progress-json")
 
 		startTime := time.Now()
-		pyCmd := GetPythonCommand(ps.RepoRoot)
-		cmd := exec.Command(pyCmd, args...)
+		pyCmd := ResolvePythonCommand(ps.RepoRoot)
+		cmd := exec.Command(pyCmd.Executable, pyCmd.Args(args...)...)
 		cmd.Dir = ps.RepoRoot
 		// Disable colored output and enable unbuffered output
 		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
@@ -731,8 +731,8 @@ func (ps *ProgressStreamer) WaitForEvent() tea.Cmd {
 }
 
 func runPythonJSONCommand(repoRoot string, args []string) ([]byte, error) {
-	pyCmd := GetPythonCommand(repoRoot)
-	cmd := exec.Command(pyCmd, args...)
+	pyCmd := ResolvePythonCommand(repoRoot)
+	cmd := exec.Command(pyCmd.Executable, pyCmd.Args(args...)...)
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
 

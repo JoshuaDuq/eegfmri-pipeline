@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,7 +19,7 @@ class TestTuiConfigGapAudit(unittest.TestCase):
             md_out = Path(tmpdir) / "audit.md"
             proc = subprocess.run(
                 [
-                    "python3",
+                    sys.executable,
                     str(self.script),
                     "--repo-root",
                     str(self.repo_root),
@@ -52,7 +53,7 @@ class TestTuiConfigGapAudit(unittest.TestCase):
     def test_strict_mode_has_no_missing_backend_keys(self) -> None:
         proc = subprocess.run(
             [
-                "python3",
+                sys.executable,
                 str(self.script),
                 "--repo-root",
                 str(self.repo_root),

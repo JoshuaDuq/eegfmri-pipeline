@@ -47,6 +47,12 @@ Installation
       go mod download
       go build -o eeg-tui .
 
+   .. code-block:: powershell
+
+      cd eeg_pipeline/cli/tui
+      go mod download
+      go build -o eeg-tui.exe .
+
 ----
 
 .. _faq-data:
@@ -341,8 +347,18 @@ TUI
 
    The TUI searches for a virtual environment in this order:
    ``eeg_pipeline/.venv311`` → ``.venv311`` → ``.venv`` → ``venv`` →
-   system ``python3``. Ensure one exists at a recognized path and has the
-   package installed.
+   system interpreter. On macOS/Linux it falls back to ``python3``; on
+   Windows it tries ``python`` and then ``py -3``. Ensure one of those
+   environments has the package installed.
+
+.. dropdown:: Why does native Windows reject fMRI preprocessing or Docker-based BEM helpers?
+   :animate: fade-in
+
+   That support boundary is intentional. Native Windows is supported for the
+   repo-owned interface layer: install, CLI bootstrap, TUI, validation, and
+   smoke checks. Container-backed fMRI preprocessing and Docker-based
+   BEM/source-localization helpers should be run from WSL2 or a Linux/macOS
+   host.
 
 .. dropdown:: The TUI exits immediately with "panic: terminal not attached".
    :animate: fade-in

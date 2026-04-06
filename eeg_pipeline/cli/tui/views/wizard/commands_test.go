@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -67,6 +68,24 @@ func TestBuildCommand_AppendsConfigSetOverrides(t *testing.T) {
 	}
 	if !strings.Contains(cmd, "--set analysis.min_subjects_for_group=4") {
 		t.Fatalf("expected second --set override in command, got: %s", cmd)
+	}
+}
+
+func TestExpandUserPathWithHomeSupportsWindowsAndUnixPrefixes(t *testing.T) {
+	home := filepath.Join("Users", "tester")
+
+	cases := map[string]string{
+		"~":             home,
+		"~/project":     filepath.Join(home, "project"),
+		"~\\project":    filepath.Join(home, "project"),
+		"~\\data\\out":  filepath.Join(home, "data", "out"),
+		"relative/path": filepath.Clean("relative/path"),
+	}
+
+	for input, want := range cases {
+		if got := expandUserPathWithHome(input, home); got != want {
+			t.Fatalf("expandUserPathWithHome(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

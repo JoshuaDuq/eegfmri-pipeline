@@ -173,8 +173,9 @@ func (m Model) handlePipelineSmokeUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		command := m.pipelineSmoke.RunCommand
+		commandArgs := m.pipelineSmoke.BuildCommandArgs()
 		m.pipelineSmoke.Reset()
-		return m.startExecution(command)
+		return m.startExecutionWithArgs(command, commandArgs)
 	}
 
 	return m, cmd
@@ -198,8 +199,9 @@ func (m Model) handleWizardUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.wizard.ReadyToExecute {
+		commandArgs := m.wizard.BuildCommandArgs()
 		command := m.wizard.BuildCommand()
-		return m.startExecution(command)
+		return m.startExecutionWithArgs(command, commandArgs)
 	}
 
 	return m, cmd
@@ -320,6 +322,15 @@ func (m Model) handleQuickAction(action quickactions.ActionType) (tea.Model, tea
 // startExecution starts pipeline execution locally.
 func (m Model) startExecution(command string) (tea.Model, tea.Cmd) {
 	m.execution = execution.NewWithRoot(command, m.repoRoot)
+	return m.finishStartExecution(command)
+}
+
+func (m Model) startExecutionWithArgs(command string, commandArgs []string) (tea.Model, tea.Cmd) {
+	m.execution = execution.NewWithRootAndArgs(command, commandArgs, m.repoRoot)
+	return m.finishStartExecution(command)
+}
+
+func (m Model) finishStartExecution(command string) (tea.Model, tea.Cmd) {
 	m.execution.SetSize(m.width, m.height)
 	m.pushState(StateExecution)
 	m.wizard.ReadyToExecute = false
