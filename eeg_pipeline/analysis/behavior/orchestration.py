@@ -20,7 +20,6 @@ from eeg_pipeline.analysis.behavior.result_types import (
 )
 from eeg_pipeline.analysis.behavior.result_cache import BehaviorResultCache
 from eeg_pipeline.analysis.behavior import (
-    change_scores as _change_scores,
     common_helpers as _common_helpers,
     feature_filters as _feature_filters,
     feature_inference as _feature_inference,
@@ -196,10 +195,8 @@ CATEGORY_PREFIX_MAP = {prefix.rstrip("_"): prefix for prefix in FEATURE_COLUMN_P
 
 # Constants for validation thresholds
 MIN_SAMPLES_DEFAULT = 10
-MIN_SAMPLES_RUN_LEVEL = 3
 MIN_VARIANCE_THRESHOLD = 1e-10
 CONSTANT_VARIANCE_THRESHOLD = 1e-12
-MAX_MISSING_PCT_DEFAULT = 0.2
 FDR_ALPHA_DEFAULT = 0.05
 MIN_FEATURES_FOR_ANALYSIS = 1
 MIN_TRIALS_FOR_ANALYSIS = 1
@@ -314,26 +311,6 @@ def _attach_predictor_metadata(
     target_col: Optional[str] = None,
 ) -> pd.DataFrame:
     return _common_helpers.attach_predictor_metadata_impl(df, metadata_dict, target_col=target_col)
-
-
-def _has_precomputed_change_scores(df: Optional[pd.DataFrame]) -> bool:
-    return _change_scores.has_precomputed_change_scores_impl(df)
-
-
-def _augment_dataframe_with_change_scores(df: Optional[pd.DataFrame], config: Any) -> Optional[pd.DataFrame]:
-    return _change_scores.augment_dataframe_with_change_scores_impl(
-        df,
-        config,
-        is_dataframe_valid_fn=_common_helpers.is_dataframe_valid_impl,
-    )
-
-
-def add_change_scores(ctx: BehaviorContext) -> None:
-    _change_scores.add_change_scores_impl(
-        ctx,
-        augment_dataframe_with_change_scores_fn=_augment_dataframe_with_change_scores,
-        has_precomputed_change_scores_fn=_has_precomputed_change_scores,
-    )
 
 
 def stage_load(ctx: BehaviorContext) -> bool:
@@ -548,7 +525,6 @@ def write_trial_table(ctx: BehaviorContext, result: TrialTableResult) -> Path:
     )
     cache = _get_cache(ctx)
     cache._trial_table_df = result.df
-    cache._trial_table_path = out_path
     return out_path
 
 
@@ -570,7 +546,6 @@ def _try_reuse_cached_trial_table(
     out_path, df_cached = reused
     cache = _get_cache(ctx)
     cache._trial_table_df = df_cached
-    cache._trial_table_path = out_path
     return out_path
 
 
@@ -674,7 +649,6 @@ def _infer_feature_band(feature: str, config: Any) -> str:
 
 def _build_result_cache() -> BehaviorResultCache:
     return BehaviorResultCache(
-        feature_column_prefixes=FEATURE_COLUMN_PREFIXES,
         ensure_dir_fn=ensure_dir,
         trial_table_suffix_from_context_fn=_trial_table_suffix_from_context,
         trial_table_output_dir_fn=lambda ctx, ensure: _trial_table_output_dir(ctx, ensure=ensure),

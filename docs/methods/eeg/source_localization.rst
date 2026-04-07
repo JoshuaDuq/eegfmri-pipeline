@@ -109,6 +109,12 @@ CLI equivalent:
 Manual Docker Workflow
 ~~~~~~~~~~~~~~~~~~~~~~~
 
+.. note::
+
+   The Docker workflow below should be run from WSL2 or a Linux/macOS host.
+   Native Windows is supported for the repo-owned interface layer, not for
+   these direct container-based helper steps.
+
 **Step 1: Build FreeSurfer + MNE Docker image**
 
 .. code-block:: bash

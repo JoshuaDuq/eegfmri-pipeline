@@ -15,17 +15,9 @@ from .base import get_n_bootstrap, get_ci_level
 
 # Minimum sample sizes for valid statistics
 MIN_SAMPLES_BOOTSTRAP_CORR = 4
-MIN_SAMPLES_BCA = 5
 
 # Minimum bootstrap replicates for valid confidence intervals
 MIN_BOOTSTRAP_REPLICATES = 10
-MIN_BOOTSTRAP_REPLICATES_BCA = 50
-MIN_JACKKNIFE_REPLICATES = 3
-
-# Numerical thresholds
-DENOMINATOR_THRESHOLD = 1e-12
-PERCENTILE_CLIP_MIN = 0.01
-PERCENTILE_CLIP_MAX = 0.99
 
 
 def _get_bootstrap_config(
@@ -157,4 +149,3 @@ def compute_bootstrap_ci(
         rng = np.random.default_rng()
     x_valid, y_valid = _filter_finite_pairs(x, y)
     return _bootstrap_corr_ci_impl(x_valid, y_valid, method, n_bootstrap, ci_level, rng)
-

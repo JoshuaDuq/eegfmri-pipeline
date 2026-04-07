@@ -365,6 +365,7 @@ def test_plot_connectivity_circle_renders_rest_safe_summary(
         captured["matrix"] = np.asarray(matrix, dtype=float)
         captured["node_names"] = list(node_names)
         captured["n_lines"] = n_lines
+        captured["show"] = show
 
     def fake_save_fig(_fig, output_name, **_kwargs) -> None:
         captured["output_name"] = str(output_name)

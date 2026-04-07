@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -89,29 +91,37 @@ def _preview_output(text: str, max_lines: int = 6) -> str:
     return " | ".join(preview) + suffix
 
 
-def _candidate_python_paths(repo_root: Path) -> List[str]:
+def _candidate_python_commands(repo_root: Path, *, os_name: Optional[str] = None) -> List[List[str]]:
+    os_name = os_name or os.name
+    bin_dir = "Scripts" if os_name == "nt" else "bin"
+    executable = "python.exe" if os_name == "nt" else "python"
     candidates = [
-        repo_root / "eeg_pipeline" / ".venv311" / "bin" / "python",
-        repo_root / ".venv311" / "bin" / "python",
-        repo_root / ".venv" / "bin" / "python",
-        repo_root / "venv" / "bin" / "python",
+        repo_root / "eeg_pipeline" / ".venv311" / bin_dir / executable,
+        repo_root / ".venv311" / bin_dir / executable,
+        repo_root / ".venv" / bin_dir / executable,
+        repo_root / "venv" / bin_dir / executable,
     ]
-    out: List[str] = [str(path) for path in candidates if path.exists()]
+
+    out: List[List[str]] = [[str(path)] for path in candidates if path.exists()]
     if sys.executable:
-        out.append(sys.executable)
+        out.append([sys.executable])
+    if os_name == "nt" and shutil.which("py"):
+        out.append(["py", "-3"])
+
     seen = set()
-    deduped: List[str] = []
+    deduped: List[List[str]] = []
     for item in out:
-        if item in seen:
+        key = tuple(item)
+        if key in seen:
             continue
-        seen.add(item)
+        seen.add(key)
         deduped.append(item)
     return deduped
 
 
-def _has_core_deps(py_cmd: str, repo_root: Path) -> bool:
+def _has_core_deps(py_cmd: List[str], repo_root: Path) -> bool:
     probe = subprocess.run(
-        [py_cmd, "-c", "import yaml"],
+        [*py_cmd, "-c", "import yaml"],
         cwd=str(repo_root),
         text=True,
         capture_output=True,
@@ -120,16 +130,23 @@ def _has_core_deps(py_cmd: str, repo_root: Path) -> bool:
     return probe.returncode == 0
 
 
-def _resolve_python(repo_root: Path) -> str:
-    for candidate in _candidate_python_paths(repo_root):
+def _resolve_python_command(repo_root: Path, *, os_name: Optional[str] = None) -> List[str]:
+    os_name = os_name or os.name
+    for candidate in _candidate_python_commands(repo_root, os_name=os_name):
         if _has_core_deps(candidate, repo_root):
             return candidate
-    return sys.executable or "python3"
+    if os_name == "nt":
+        if shutil.which("python"):
+            return ["python"]
+        if shutil.which("py"):
+            return ["py", "-3"]
+        return ["python"]
+    return [sys.executable] if sys.executable else ["python3"]
 
 
-def _run_case(case: SmokeCase, *, python_cmd: str, repo_root: Path, timeout_s: float) -> subprocess.CompletedProcess[str]:
+def _run_case(case: SmokeCase, *, python_cmd: List[str], repo_root: Path, timeout_s: float) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [python_cmd, *case.argv],
+        [*python_cmd, *case.argv],
         cwd=str(repo_root),
         text=True,
         capture_output=True,
@@ -140,7 +157,7 @@ def _run_case(case: SmokeCase, *, python_cmd: str, repo_root: Path, timeout_s: f
 
 def run(progress_json: bool, task: str, timeout_s: float, pipelines: Optional[List[str]] = None) -> int:
     repo_root = Path(__file__).resolve().parents[1]
-    python_cmd = _resolve_python(repo_root)
+    python_cmd = _resolve_python_command(repo_root)
     all_cases = _cases(task)
     by_name = {case.name: case for case in all_cases}
     if pipelines:
@@ -173,7 +190,7 @@ def run(progress_json: bool, task: str, timeout_s: float, pipelines: Optional[Li
         )
     else:
         print(f"Running {len(cases)} pipeline smoke checks", flush=True)
-    _emit_log(progress_json, f"Using Python interpreter: {python_cmd}")
+    _emit_log(progress_json, f"Using Python interpreter: {' '.join(python_cmd)}")
 
     if not _has_core_deps(python_cmd, repo_root):
         _emit_log(

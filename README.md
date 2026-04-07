@@ -62,15 +62,45 @@ See the [installation guide](https://joshuaduq.github.io/eegfmri-pipeline/instal
 for environment variables, optional components, and the Docker image used by
 the source-localization path.
 
+## Platform Support
+
+| Platform | Native support | Notes |
+| --- | --- | --- |
+| macOS | Yes | Full CLI/TUI support. |
+| Windows | Yes, for install + CLI + TUI + validation + smoke checks | Use native Windows for the repo-owned interface layer. |
+| Windows heavy imaging workflows | No native guarantee | Use WSL2 or containers for container-backed fMRI preprocessing and Docker-based BEM/source-localization helpers. |
+
 ## Install
+
+### macOS / Linux
 
 ```bash
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
 cd eegfmri-pipeline
-python3.11 -m venv .venv311
-source .venv311/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev,ml]"
 ```
+
+### Windows PowerShell
+
+```powershell
+git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
+cd eegfmri-pipeline
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev,ml]"
+```
+
+Windows setup is different from macOS/Linux:
+- use `PowerShell` or `cmd`, not `source`
+- create the env with any `Python 3.11+` interpreter
+- activate with `.venv\Scripts\Activate.ps1`
+- use `python.exe` from `Scripts\`, not `bin/python`
+
+If you have multiple Python versions installed, make sure the selected
+interpreter is `3.11+`. For example, use `python3.12 -m venv .venv` or
+`py -3.12 -m venv .venv`.
 
 The `ml` extra installs PyTorch and is only required for the CNN classifier.
 If you do not need that model, `pip install -e ".[dev]"` is sufficient.
@@ -87,10 +117,24 @@ CLI consumes.
 
 Build and launch the TUI once after installation:
 
+macOS / Linux:
+
 ```bash
 cd eeg_pipeline/cli/tui && go build -o eeg-tui . && cd -
 ./eeg_pipeline/cli/tui/eeg-tui
 ```
+
+Windows PowerShell:
+
+```powershell
+cd eeg_pipeline/cli/tui
+go build -o eeg-tui.exe .
+.\eeg-tui.exe
+```
+
+On Windows, do not use the macOS/Linux launch pattern (`./eeg-tui` or
+`source .../bin/activate`). The native path is `.\eeg-tui.exe` from
+PowerShell and the Python environment lives under `Scripts\`.
 
 The TUI walks you through every configuration step interactively—pipeline
 selection, subject selection, feature families, frequency bands, spatial
@@ -119,6 +163,11 @@ for the full walkthrough.
 
 Run `eeg-pipeline validate quick` before any batch job so dataset and
 configuration errors surface early.
+
+For native Windows users, keep the lightweight repo-owned workflows native
+(install, TUI, CLI, validation, smoke checks). Use WSL2 or container-backed
+execution for fMRI preprocessing and Docker-based BEM/source-localization
+helpers.
 
 ## Feature Extraction
 

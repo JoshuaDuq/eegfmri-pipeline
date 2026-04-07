@@ -19,6 +19,7 @@ from itertools import combinations
 from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
 from eeg_pipeline.plotting.config import get_plot_config
@@ -80,20 +81,17 @@ def _format_count_range(counts: List[int]) -> str:
     return f"{count_min}-{count_max}"
 
 
-def get_numeric_feature_columns(
-    df: pd.DataFrame,
-    *,
-    exclude: Optional[List[str]] = None,
-) -> List[str]:
-    """Return numeric feature columns excluding common metadata columns."""
-    if not _is_valid_dataframe(df):
-        return []
+def _t_critical_95(sample_size: int) -> float:
+    """Return the two-sided 95% t critical value for a sample size."""
+    n_samples = int(sample_size)
+    if n_samples < 2:
+        return 0.0
+    return float(stats.t.ppf(0.975, df=n_samples - 1))
 
-    default_exclude = {"epoch", "trial", "subject", "index", "condition"}
-    exclude_set = set(exclude or []) | default_exclude
 
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    return [col for col in numeric_cols if col not in exclude_set]
+def _format_fdr_stars_legend() -> str:
+    """Return the q-value legend used for FDR-significance star annotations."""
+    return "(*q<.05, **q<.01, ***q<.001)"
 
 
 def get_named_segments(
@@ -119,116 +117,12 @@ def get_named_segments(
     return sorted(segments)
 
 
-def get_named_bands(
-    df: pd.DataFrame,
-    *,
-    group: Optional[str] = None,
-    segment: Optional[str] = None,
-) -> List[str]:
-    """Return available NamingSchema bands for a feature group/segment."""
-    if not _is_valid_dataframe(df):
-        return []
-    
-    bands = set()
-    for col in df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if group and parsed.get("group") != group:
-            continue
-        parsed_segment = parsed.get("segment") or ""
-        if segment and str(parsed_segment) != str(segment):
-            continue
-        band = parsed.get("band")
-        if band:
-            bands.add(str(band))
-    
-    return sorted(bands)
-
-
-def select_named_columns(
-    df: pd.DataFrame,
-    *,
-    group: str,
-    segment: str,
-    band: str,
-    identifier: Optional[str] = None,
-    stat_preference: Optional[List[str]] = None,
-    scope_preference: Optional[List[str]] = None,
-) -> Tuple[List[str], Optional[str], Optional[str]]:
-    """Return columns and matched scope/stat for NamingSchema features."""
-    if not _is_valid_dataframe(df):
-        return [], None, None
-
-    stat_prefs = list(stat_preference or [None])
-    scope_prefs = list(scope_preference or [None])
-
-    for scope in scope_prefs:
-        for stat in stat_prefs:
-            matching_columns = []
-            for col in df.columns:
-                parsed = NamingSchema.parse(str(col))
-                if not parsed.get("valid"):
-                    continue
-                if parsed.get("group") != group:
-                    continue
-                if str(parsed.get("segment") or "") != str(segment):
-                    continue
-                if str(parsed.get("band") or "") != str(band):
-                    continue
-                if scope and str(parsed.get("scope") or "") != str(scope):
-                    continue
-                if identifier is not None and str(parsed.get("identifier") or "") != str(identifier):
-                    continue
-                if stat and str(parsed.get("stat") or "") != str(stat):
-                    continue
-                matching_columns.append(str(col))
-            
-            if matching_columns:
-                return matching_columns, scope, stat
-    
-    return [], None, None
-
-
-def collect_named_series(
-    df: pd.DataFrame,
-    *,
-    group: str,
-    segment: str,
-    band: str,
-    identifier: Optional[str] = None,
-    stat_preference: Optional[List[str]] = None,
-    scope_preference: Optional[List[str]] = None,
-) -> Tuple[pd.Series, Optional[str], Optional[str]]:
-    """Return per-trial series aggregated across matching NamingSchema columns."""
-    matching_columns, matched_scope, matched_stat = select_named_columns(
-        df,
-        group=group,
-        segment=segment,
-        band=band,
-        identifier=identifier,
-        stat_preference=stat_preference,
-        scope_preference=scope_preference,
-    )
-    if not matching_columns:
-        return pd.Series(dtype=float), None, None
-
-    if len(matching_columns) == 1:
-        series = pd.to_numeric(df[matching_columns[0]], errors="coerce")
-    else:
-        numeric_data = df[matching_columns].apply(pd.to_numeric, errors="coerce")
-        series = numeric_data.mean(axis=1)
-    return series, matched_scope, matched_stat
-
-
 def extract_multi_segment_data(
     df: pd.DataFrame,
     group: str,
     bands: List[str],
     segments: List[str],
     identifiers: Optional[List[str]] = None,
-    stat_preference: Optional[List[str]] = None,
-    scope_preference: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, np.ndarray]]:
     """Extract feature data by band for multiple segments.
     
@@ -240,8 +134,6 @@ def extract_multi_segment_data(
         bands: List of frequency bands to extract
         segments: List of segment names (e.g., ['baseline', 'plateau', 'rampdown', 'rampup'])
         identifiers: Optional list of channel/ROI identifiers to filter by
-        stat_preference: Preferred stat types (e.g., ['mean', 'median'])
-        scope_preference: Preferred scope types (e.g., ['ch', 'roi', 'global'])
     
     Returns:
         Dict mapping band -> {segment_name -> values array}
@@ -433,7 +325,7 @@ def _format_qvalue_label(q_value: float) -> str:
 
 
 def _compute_mean_ci(values: np.ndarray) -> Tuple[float, float]:
-    """Return mean and 95% CI half-width for finite values."""
+    """Return mean and 95% t-interval half-width for finite values."""
     finite_values = np.asarray(values, dtype=float)
     finite_values = finite_values[np.isfinite(finite_values)]
     if finite_values.size == 0:
@@ -442,7 +334,7 @@ def _compute_mean_ci(values: np.ndarray) -> Tuple[float, float]:
     if finite_values.size < 2:
         return mean_value, 0.0
     sem = float(np.nanstd(finite_values, ddof=1) / np.sqrt(finite_values.size))
-    return mean_value, 1.96 * sem
+    return mean_value, _t_critical_95(finite_values.size) * sem
 
 
 def _compute_paired_differences(
@@ -1437,7 +1329,7 @@ def plot_multi_window_comparison(
         _summarize_multi_window_sample_counts(data_by_band, sample_unit),
         "Wilcoxon signed-rank",
         f"Displayed comparisons: {displayed_pair_text}",
-        f"FDR: {n_significant}/{n_tests} significant (*p<.05, **p<.01, ***p<.001)"
+        f"FDR: {n_significant}/{n_tests} significant {_format_fdr_stars_legend()}"
     ]
     title_parts.append(" | ".join(info_parts))
     
@@ -1975,7 +1867,7 @@ def _plot_multi_group_separate_bands(
             info_parts.append(f"ROI: {roi_display}")
         info_parts.extend([
             f"{len(groups)} groups",
-            f"FDR: {band_sig}/{band_tests} sig (*p<.05)"
+            f"FDR: {band_sig}/{band_tests} sig {_format_fdr_stars_legend()}"
         ])
         title_parts.append(" | ".join(info_parts))
         

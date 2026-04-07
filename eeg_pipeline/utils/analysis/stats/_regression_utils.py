@@ -42,66 +42,6 @@ def _ols_fit(X: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
     return beta
 
 
-def _ols_regression(
-    y: np.ndarray,
-    X: np.ndarray,
-    compute_r2: bool = False,
-) -> Tuple[np.ndarray, np.ndarray, float, Optional[float]]:
-    """Complete OLS regression with standard errors and optional R².
-    
-    Consolidated implementation shared by regression helpers.
-    
-    Parameters
-    ----------
-    y : np.ndarray
-        Dependent variable (n_samples,)
-    X : np.ndarray
-        Design matrix including intercept (n_samples, n_features)
-    compute_r2 : bool
-        Whether to compute R² (default: False)
-        
-    Returns
-    -------
-    beta : np.ndarray
-        Coefficients (n_features,)
-    se : np.ndarray
-        Standard errors (n_features,)
-    sigma_squared : float
-        Residual variance
-    r_squared : Optional[float]
-        R² value if compute_r2=True, otherwise None
-    """
-    n, p = X.shape
-    
-    try:
-        XtX_inv = np.linalg.inv(X.T @ X)
-    except np.linalg.LinAlgError:
-        nan_array = np.full(p, np.nan)
-        r_squared = np.nan if compute_r2 else None
-        return nan_array, nan_array, np.nan, r_squared
-    
-    beta = XtX_inv @ X.T @ y
-    residuals = y - X @ beta
-    
-    df = n - p
-    if df <= 0:
-        r_squared = np.nan if compute_r2 else None
-        return beta, np.full(p, np.nan), np.nan, r_squared
-    
-    sigma_squared = np.sum(residuals**2) / df
-    var_beta = sigma_squared * np.diag(XtX_inv)
-    se = np.sqrt(var_beta)
-    
-    if compute_r2:
-        ss_res = np.sum(residuals**2)
-        ss_tot = np.sum((y - np.mean(y)) ** 2)
-        r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else np.nan
-    else:
-        r_squared = None
-    
-    return beta, se, sigma_squared, r_squared
-
-
 def _hc3_se(X: np.ndarray, y: np.ndarray, beta: np.ndarray, min_denominator: float = _NUMERICAL_TOLERANCE) -> np.ndarray:
     """Compute HC3 heteroscedasticity-consistent standard errors.
     

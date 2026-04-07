@@ -273,7 +273,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 
 func (m Model) handleRestart() (tea.Model, tea.Cmd) {
 	if m.state == StateExecution && m.execution.IsDone() {
-		return m.startExecution(m.wizard.BuildCommand())
+		return m.startExecutionWithArgs(m.wizard.BuildCommand(), m.wizard.BuildCommandArgs())
 	}
 	return m, nil
 }

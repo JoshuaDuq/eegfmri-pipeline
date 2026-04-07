@@ -3,12 +3,40 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pandas as pd
 
 from tests.pipelines_test_utils import DotConfig
 
 
 class TestDoseResponsePlotting(unittest.TestCase):
+    def test_format_grouped_spearman_annotation_omits_p_value(self):
+        from eeg_pipeline.plotting.behavioral.dose_response import _format_grouped_spearman_annotation
+
+        annotation = _format_grouped_spearman_annotation(
+            rho=0.75,
+            slope=0.125,
+            n_levels=4,
+        )
+
+        self.assertIn("Spearman ρ=0.75 across dose-level means", annotation)
+        self.assertIn("Slope=0.125/unit (n_levels=4)", annotation)
+        self.assertNotIn("p=", annotation)
+
+    def test_compute_wilson_interval_bounds_returns_probability_bounded_asymmetric_errors(self):
+        from eeg_pipeline.plotting.behavioral.dose_response import _compute_wilson_interval_bounds
+
+        lower, upper = _compute_wilson_interval_bounds(
+            successes=np.array([0.0, 2.0, 5.0], dtype=float),
+            totals=np.array([5.0, 5.0, 5.0], dtype=float),
+        )
+
+        self.assertTrue(np.all(lower >= 0.0))
+        self.assertTrue(np.all(upper <= 1.0))
+        self.assertGreater(upper[0] - 0.0, 0.0)
+        self.assertGreater(1.0 - lower[2], 0.0)
+        self.assertNotAlmostEqual(0.4 - lower[1], upper[1] - 0.4)
+
     def test_stat_matching_logratio_does_not_match_db_mean(self):
         from eeg_pipeline.plotting.behavioral.dose_response import _stat_matches_request
 

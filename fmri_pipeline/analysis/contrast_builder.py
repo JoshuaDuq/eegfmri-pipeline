@@ -1482,27 +1482,6 @@ def compute_contrast_map(
 # Multi-run Processing
 ###################################################################
 
-
-def build_contrast_from_runs(
-    bids_fmri_root: Path,
-    bids_derivatives: Path,
-    subject: str,
-    task: str,
-    cfg: ContrastBuilderConfig,
-    *,
-    output_dir: Optional[Path] = None,
-) -> Tuple["Nifti1Image", Dict[str, Any]]:
-    contrast_map, meta, _glm_result, _contrast_def, _output_type = build_contrast_from_runs_detailed(
-        bids_fmri_root=bids_fmri_root,
-        bids_derivatives=bids_derivatives,
-        subject=subject,
-        task=task,
-        cfg=cfg,
-        output_dir=output_dir,
-    )
-    return contrast_map, meta
-
-
 def build_contrast_from_runs_detailed(
     bids_fmri_root: Path,
     bids_derivatives: Path,

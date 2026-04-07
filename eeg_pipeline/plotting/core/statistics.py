@@ -18,7 +18,7 @@ from eeg_pipeline.utils.config.loader import (
 )
 from .utils import log
 from eeg_pipeline.plotting.io.figures import get_viz_params
-from ...utils.analysis.stats import cluster_test_epochs
+from ...utils.analysis.stats import cluster_test_epochs, get_fdr_alpha
 
 
 MIN_SUBJECTS_REQUIRED = 2
@@ -108,6 +108,7 @@ def compute_cluster_significance(
     tmax: float,
     config=None,
     diff_data_len: Optional[int] = None,
+    paired: bool = False,
     logger=None,
 ) -> Tuple[Optional[np.ndarray], Optional[float], Optional[int], Optional[float]]:
     """Compute cluster significance for TFR data.
@@ -137,7 +138,7 @@ def compute_cluster_significance(
             fmax=fmax_eff,
             tmin=tmin,
             tmax=tmax,
-            paired=False,
+            paired=paired,
             config=config
         )
         
@@ -212,7 +213,7 @@ def build_statistical_title(
         return ""
     
     config = ensure_config(config)
-    alpha = get_config_value(config, "statistics.sig_alpha", DEFAULT_ALPHA)
+    alpha = get_fdr_alpha(config)
     n_perm = int(require_config_value(config, "statistics.cluster_n_perm"))
     
     parts = []
@@ -233,6 +234,6 @@ def build_statistical_title(
     parts.append(_format_baseline_correction(baseline_used))
     parts.append("data transformation: log10(power/baseline)")
     parts.append("adjacency: channel spatial adjacency matrix")
-    parts.append("cluster threshold: mass-based")
+    parts.append("cluster statistic: mass (sum of |t|)")
     
     return " | ".join(parts)

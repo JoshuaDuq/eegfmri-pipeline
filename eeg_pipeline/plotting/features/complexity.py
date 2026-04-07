@@ -35,11 +35,7 @@ COMPLEXITY_GROUP = "comp"
 DEFAULT_METRICS = ["lzc", "pe", "sampen"]
 METRIC_LABELS = {"lzc": "LZC", "pe": "PE", "sampen": "SampEn"}
 MIN_SEGMENTS_FOR_COMPARISON = 2
-VIOLIN_WIDTH = 0.7
-VIOLIN_ALPHA = 0.6
-SCATTER_ALPHA = 0.2
 SCATTER_SIZE = 5
-JITTER_RANGE = 0.1
 BOXPLOT_WIDTH = 0.4
 BOXPLOT_ALPHA = 0.6
 BOXPLOT_SCATTER_ALPHA = 0.3
@@ -66,18 +62,6 @@ def _metric_label(metric: str) -> str:
     if m:
         return f"MSE (scale {int(m.group(1))})"
     return metric.upper()
-
-
-def _extract_segments_from_data(features_df: pd.DataFrame) -> set[str]:
-    """Extract unique segment names from complexity feature columns."""
-    segments = set()
-    for col in features_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if parsed.get("valid") and parsed.get("group") == COMPLEXITY_GROUP:
-            segment = parsed.get("segment")
-            if segment:
-                segments.add(str(segment))
-    return segments
 
 
 def _extract_bands_from_data(features_df: pd.DataFrame) -> List[str]:

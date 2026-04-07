@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import platform
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -26,6 +27,14 @@ from eeg_pipeline.utils.config.loader import get_config_value
 
 logger = logging.getLogger(__name__)
 FS_LICENSE_ENV_VAR = "EEG_PIPELINE_FREESURFER_LICENSE"
+
+
+def _require_supported_container_host(workflow_name: str) -> None:
+    if platform.system() == "Windows":
+        raise RuntimeError(
+            f"{workflow_name} is not supported on native Windows. "
+            "Use WSL2 or run this workflow from macOS/Linux because it launches containerized neuroimaging tooling directly."
+        )
 
 
 def check_docker_available() -> bool:
@@ -368,6 +377,7 @@ def generate_coregistration_transform(
             "of an identity transform for debugging only."
         )
 
+    _require_supported_container_host("BEM/source-localization container workflows")
     if not check_docker_available():
         raise RuntimeError(
             "Docker is not available. Please install Docker and ensure it is running. "
@@ -474,6 +484,7 @@ def generate_bem_model_and_solution(
     bem_solution_path : Path or None
         Path to generated BEM solution file
     """
+    _require_supported_container_host("BEM/source-localization container workflows")
     if not check_docker_available():
         raise RuntimeError(
             "Docker is not available. Please install Docker and ensure it is running. "
@@ -730,41 +741,3 @@ def ensure_bem_and_trans_files(
         )
 
     return trans_path, bem_model_path, bem_solution_path
-
-
-def ensure_bem_files(
-    subject: str,
-    subjects_dir: Path,
-    config: Any,
-    logger_instance: Optional[logging.Logger] = None,
-) -> Tuple[Optional[Path], Optional[Path]]:
-    """
-    Ensure BEM model and solution files exist, creating them if configured.
-
-    Backward-compatible wrapper around ensure_bem_and_trans_files.
-
-    Parameters
-    ----------
-    subject : str
-        FreeSurfer subject name
-    subjects_dir : Path
-        Path to FreeSurfer SUBJECTS_DIR
-    config : Any
-        Pipeline configuration containing bem_generation settings
-    logger_instance : Logger, optional
-        Logger instance to use
-
-    Returns
-    -------
-    bem_model_path : Path or None
-        Path to BEM model file (None if not available)
-    bem_solution_path : Path or None
-        Path to BEM solution file (None if not available)
-    """
-    _, bem_model_path, bem_solution_path = ensure_bem_and_trans_files(
-        subject=subject,
-        subjects_dir=subjects_dir,
-        config=config,
-        logger_instance=logger_instance,
-    )
-    return bem_model_path, bem_solution_path

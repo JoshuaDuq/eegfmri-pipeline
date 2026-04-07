@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -15,7 +15,6 @@ class BehaviorResultCache:
     def __init__(
         self,
         *,
-        feature_column_prefixes: Sequence[str],
         ensure_dir_fn: Callable[[Path], None],
         trial_table_suffix_from_context_fn: Callable[[Any], str],
         trial_table_output_dir_fn: Callable[[Any, bool], Path],
@@ -27,7 +26,6 @@ class BehaviorResultCache:
         infer_feature_type_fn: Callable[[str, Any], str],
         infer_feature_band_fn: Callable[[str, Any], str],
     ):
-        self._feature_column_prefixes = tuple(feature_column_prefixes)
         self._ensure_dir_fn = ensure_dir_fn
         self._trial_table_suffix_from_context_fn = trial_table_suffix_from_context_fn
         self._trial_table_output_dir_fn = trial_table_output_dir_fn
@@ -40,10 +38,7 @@ class BehaviorResultCache:
         self._infer_feature_band_fn = infer_feature_band_fn
 
         self._trial_table_df: Optional[pd.DataFrame] = None
-        self._trial_table_path: Optional[Path] = None
-        self._feature_cols: Dict[str, List[str]] = {}
         self._filtered_feature_cols: Dict[Tuple[str, ...], List[str]] = {}
-        self._discovered_files: Dict[str, List[Path]] = {}
         self._fdr_results: Optional[Dict[str, Any]] = None
         self._feature_types: Dict[str, str] = {}
         self._feature_bands: Dict[str, str] = {}
@@ -104,16 +99,7 @@ class BehaviorResultCache:
 
         self._trial_table_df = read_table(trial_table_path)
         self._validate_trial_table_contract_metadata_fn(ctx, trial_table_path, self._trial_table_df)
-        self._trial_table_path = trial_table_path
         return self._trial_table_df
-
-    def get_feature_cols(self, df: pd.DataFrame, ctx: Any) -> List[str]:
-        """Get cached feature columns or compute from DataFrame."""
-        _ = ctx
-        cache_key = id(df)
-        if cache_key not in self._feature_cols:
-            self._feature_cols[cache_key] = [c for c in df.columns if str(c).startswith(self._feature_column_prefixes)]
-        return self._feature_cols[cache_key]
 
     def get_filtered_feature_cols(
         self,
@@ -135,16 +121,6 @@ class BehaviorResultCache:
             self._filtered_feature_cols[cache_key] = filtered
 
         return self._filtered_feature_cols[cache_key]
-
-    def get_discovered_files(self, ctx: Any, patterns: List[str]) -> List[Path]:
-        """Get cached discovered files matching patterns."""
-        cache_key = "_".join(sorted(patterns))
-        if cache_key not in self._discovered_files:
-            files: List[Path] = []
-            for pat in patterns:
-                files.extend(sorted(ctx.stats_dir.rglob(pat)))
-            self._discovered_files[cache_key] = sorted({p.resolve() for p in files if p.exists()})
-        return self._discovered_files[cache_key]
 
     def set_fdr_results(self, results: Dict[str, Any]) -> None:
         self._fdr_results = results
@@ -204,16 +180,9 @@ class BehaviorResultCache:
         self._feature_bands[feature] = self._infer_feature_band_fn(feature, config)
         return self._feature_bands[feature]
 
-    def clear_feature_types(self) -> None:
-        self._feature_types.clear()
-        self._feature_bands.clear()
-
     def clear(self) -> None:
         self._trial_table_df = None
-        self._trial_table_path = None
-        self._feature_cols.clear()
         self._filtered_feature_cols.clear()
-        self._discovered_files.clear()
         self._fdr_results = None
         self._feature_types.clear()
         self._feature_bands.clear()

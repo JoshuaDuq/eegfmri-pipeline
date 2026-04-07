@@ -42,14 +42,33 @@ Contributing
 Setup
 -----
 
+macOS / Linux
+~~~~~~~~~~~~~
+
 .. code-block:: bash
 
    git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
    cd eegfmri-pipeline
-   python3.11 -m venv .venv311
-   source .venv311/bin/activate
+   python3 -m venv .venv
+   source .venv/bin/activate
    pip install -e ".[dev,ml]"
    pre-commit install
+
+Windows PowerShell
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: powershell
+
+   git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
+   cd eegfmri-pipeline
+   py -m venv .venv
+   .venv\Scripts\Activate.ps1
+   pip install -e ".[dev,ml]"
+   pre-commit install
+
+Use any Python interpreter that is ``3.11+``. If multiple versions are
+installed, select one explicitly, for example ``python3.12 -m venv .venv``
+or ``py -3.12 -m venv .venv``.
 
 Branches and Commits
 --------------------

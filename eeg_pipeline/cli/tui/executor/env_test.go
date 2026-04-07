@@ -3,11 +3,10 @@ package executor
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
-func TestGetPythonCommandPrefersFirstVenv(t *testing.T) {
+func TestResolvePythonCommandPrefersFirstVenv(t *testing.T) {
 	repoRoot := t.TempDir()
 
 	venvPaths := []string{
@@ -18,14 +17,7 @@ func TestGetPythonCommandPrefersFirstVenv(t *testing.T) {
 	}
 
 	for i, venvPath := range venvPaths {
-		binDir := "bin"
-		if runtime.GOOS == "windows" {
-			binDir = "Scripts"
-		}
-		pythonPath := filepath.Join(venvPath, binDir, "python")
-		if runtime.GOOS == "windows" {
-			pythonPath += ".exe"
-		}
+		pythonPath := filepath.Join(venvPath, "Scripts", "python.exe")
 		if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 			t.Fatalf("mkdir %d: %v", i, err)
 		}
@@ -34,30 +26,61 @@ func TestGetPythonCommandPrefersFirstVenv(t *testing.T) {
 		}
 	}
 
-	got := GetPythonCommand(repoRoot)
-	want := filepath.Join(venvPaths[0], func() string {
-		if runtime.GOOS == "windows" {
-			return "Scripts/python.exe"
-		}
-		return "bin/python"
-	}())
-	if got != want {
-		t.Fatalf("GetPythonCommand() = %q, want %q", got, want)
+	got := resolvePythonCommand("windows", repoRoot, func(name string) (string, error) {
+		return "", os.ErrNotExist
+	})
+	want := filepath.Join(venvPaths[0], "Scripts", "python.exe")
+	if got.Executable != want {
+		t.Fatalf("resolvePythonCommand().Executable = %q, want %q", got.Executable, want)
+	}
+	if len(got.PrefixArgs) != 0 {
+		t.Fatalf("resolvePythonCommand().PrefixArgs = %#v, want empty", got.PrefixArgs)
 	}
 }
 
-func TestGetPythonCommandFallsBackWhenNoVenvExists(t *testing.T) {
+func TestResolvePythonCommandWindowsFallsBackToPythonThenPyLauncher(t *testing.T) {
 	repoRoot := t.TempDir()
 
-	got := GetPythonCommand(repoRoot)
-	if runtime.GOOS == "windows" {
-		if got != "python" {
-			t.Fatalf("GetPythonCommand() = %q, want python", got)
+	got := resolvePythonCommand("windows", repoRoot, func(name string) (string, error) {
+		if name == "python" {
+			return "C:\\Python311\\python.exe", nil
 		}
-		return
+		return "", os.ErrNotExist
+	})
+	if got.Executable != "C:\\Python311\\python.exe" {
+		t.Fatalf("resolvePythonCommand().Executable = %q, want python.exe", got.Executable)
 	}
-	if got != "python3" {
-		t.Fatalf("GetPythonCommand() = %q, want python3", got)
+	if len(got.PrefixArgs) != 0 {
+		t.Fatalf("resolvePythonCommand().PrefixArgs = %#v, want empty", got.PrefixArgs)
+	}
+
+	got = resolvePythonCommand("windows", repoRoot, func(name string) (string, error) {
+		if name == "py" {
+			return "C:\\Windows\\py.exe", nil
+		}
+		return "", os.ErrNotExist
+	})
+	if got.Executable != "C:\\Windows\\py.exe" {
+		t.Fatalf("resolvePythonCommand().Executable = %q, want py launcher", got.Executable)
+	}
+	if len(got.PrefixArgs) != 1 || got.PrefixArgs[0] != "-3" {
+		t.Fatalf("resolvePythonCommand().PrefixArgs = %#v, want [-3]", got.PrefixArgs)
 	}
 }
 
+func TestResolvePythonCommandUnixFallsBackToPython3(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	got := resolvePythonCommand("darwin", repoRoot, func(name string) (string, error) {
+		if name == "python3" {
+			return "/usr/bin/python3", nil
+		}
+		return "", os.ErrNotExist
+	})
+	if got.Executable != "/usr/bin/python3" {
+		t.Fatalf("resolvePythonCommand().Executable = %q, want /usr/bin/python3", got.Executable)
+	}
+	if len(got.PrefixArgs) != 0 {
+		t.Fatalf("resolvePythonCommand().PrefixArgs = %#v, want empty", got.PrefixArgs)
+	}
+}

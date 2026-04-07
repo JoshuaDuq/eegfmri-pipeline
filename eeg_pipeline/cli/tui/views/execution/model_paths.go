@@ -72,6 +72,17 @@ func (m Model) GetOutputPaths() []string {
 
 // extractDerivRoot extracts the --deriv-root argument from the command string
 func (m Model) extractDerivRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return m.extractDerivRootFromCommand(home)
+}
+
+func (m Model) extractDerivRootFromCommand(home string) string {
+	if path, ok := m.extractFlagPath("--deriv-root", home); ok {
+		return path
+	}
 	if m.Command == "" {
 		return ""
 	}
@@ -87,24 +98,12 @@ func (m Model) extractDerivRoot() string {
 		if matches[1] != "" {
 			path = matches[1] // Double-quoted
 		} else if matches[2] != "" {
-			path = matches[2] // Single-quoted
+			path = strings.ReplaceAll(matches[2], "''", "'") // Single-quoted
 		} else {
 			path = matches[3] // Unquoted
 		}
 
-		// Expand user home directory if path starts with ~
-		if strings.HasPrefix(path, "~") {
-			home, err := os.UserHomeDir()
-			if err == nil {
-				path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-			}
-		}
-		// Convert to absolute path
-		if !filepath.IsAbs(path) {
-			// If relative, make it relative to repo root
-			path = filepath.Join(m.RepoRoot, path)
-		}
-		return filepath.Clean(path)
+		return normalizeExtractedPath(path, home, m.RepoRoot)
 	}
 
 	return ""
@@ -112,6 +111,17 @@ func (m Model) extractDerivRoot() string {
 
 // extractBidsFmriRoot extracts the --bids-fmri-root argument from the command string
 func (m Model) extractBidsFmriRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return m.extractBidsFmriRootFromCommand(home)
+}
+
+func (m Model) extractBidsFmriRootFromCommand(home string) string {
+	if path, ok := m.extractFlagPath("--bids-fmri-root", home); ok {
+		return path
+	}
 	if m.Command == "" {
 		return ""
 	}
@@ -124,23 +134,63 @@ func (m Model) extractBidsFmriRoot() string {
 		if matches[1] != "" {
 			path = matches[1]
 		} else if matches[2] != "" {
-			path = matches[2]
+			path = strings.ReplaceAll(matches[2], "''", "'")
 		} else {
 			path = matches[3]
 		}
 
-		if strings.HasPrefix(path, "~") {
-			home, err := os.UserHomeDir()
-			if err == nil {
-				path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-			}
-		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(m.RepoRoot, path)
-		}
-		return filepath.Clean(path)
+		return normalizeExtractedPath(path, home, m.RepoRoot)
 	}
 	return ""
+}
+
+func (m Model) extractFlagPath(flag string, home string) (string, bool) {
+	if len(m.CommandArgs) == 0 {
+		return "", false
+	}
+	parts := m.CommandArgs
+
+	for index := 0; index < len(parts); index++ {
+		part := parts[index]
+		if part == flag {
+			if index+1 >= len(parts) {
+				return "", false
+			}
+			return normalizeExtractedPath(parts[index+1], home, m.RepoRoot), true
+		}
+
+		prefix := flag + "="
+		if strings.HasPrefix(part, prefix) {
+			return normalizeExtractedPath(strings.TrimPrefix(part, prefix), home, m.RepoRoot), true
+		}
+	}
+
+	return "", false
+}
+
+func normalizeExtractedPath(path string, home string, repoRoot string) string {
+	path = expandParsedPathWithHome(path, home)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repoRoot, path)
+	}
+	return filepath.Clean(path)
+}
+
+func expandParsedPathWithHome(path string, home string) string {
+	if home == "" {
+		return path
+	}
+	if path == "~" {
+		return filepath.Clean(home)
+	}
+	if len(path) >= 2 && (path[1] == '/' || path[1] == '\\') {
+		relative := strings.NewReplacer(
+			"/", string(filepath.Separator),
+			"\\", string(filepath.Separator),
+		).Replace(path[2:])
+		return filepath.Clean(filepath.Join(home, relative))
+	}
+	return path
 }
 
 // OpenResultsFolder opens the first output path in the system file browser

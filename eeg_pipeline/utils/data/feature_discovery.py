@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.utils.data.source_localization_paths import (
     source_localization_candidate_paths,
@@ -223,79 +221,3 @@ def discover_feature_files(
     return result
 
 
-def get_available_feature_keys(subject: str, deriv_root: Path) -> list[str]:
-    """
-    Get list of available feature file keys for a subject.
-    
-    Parameters
-    ----------
-    subject : str
-        Subject ID (without 'sub-' prefix)
-    deriv_root : Path
-        Path to derivatives root
-        
-    Returns
-    -------
-    list[str]
-        List of feature file keys that exist
-    """
-    feature_files = discover_feature_files(subject, deriv_root, include_empty=False)
-    return list(feature_files.keys())
-
-
-def validate_feature_file_selection(
-    selected: list[str],
-    subject: str,
-    deriv_root: Path,
-) -> tuple[list[str], list[str]]:
-    """
-    Validate selected feature files against what's available.
-    
-    Parameters
-    ----------
-    selected : list[str]
-        List of feature file keys to validate
-    subject : str
-        Subject ID (without 'sub-' prefix)
-    deriv_root : Path
-        Path to derivatives root
-        
-    Returns
-    -------
-    tuple[list[str], list[str]]
-        (valid_keys, missing_keys)
-    """
-    available_keys = set(get_available_feature_keys(subject, deriv_root))
-    valid_keys = [key for key in selected if key in available_keys]
-    missing_keys = [key for key in selected if key not in available_keys]
-    return valid_keys, missing_keys
-
-
-def feature_files_to_json(files: dict[str, FeatureFileInfo]) -> list[dict[str, Any]]:
-    """
-    Convert feature file info to JSON-serializable format.
-    
-    Used by TUI to display feature file information.
-    
-    Parameters
-    ----------
-    files : dict[str, FeatureFileInfo]
-        Mapping from key to FeatureFileInfo
-        
-    Returns
-    -------
-    list[dict[str, Any]]
-        List of dictionaries with serialized feature file information
-    """
-    return [
-        {
-            "key": file_info.key,
-            "display_name": file_info.display_name,
-            "filename": file_info.filename,
-            "exists": file_info.exists,
-            "n_columns": file_info.n_columns,
-            "n_rows": file_info.n_rows,
-            "file_size_kb": round(file_info.file_size_kb, 1),
-        }
-        for file_info in files.values()
-    ]

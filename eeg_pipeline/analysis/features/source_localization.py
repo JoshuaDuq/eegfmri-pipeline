@@ -26,7 +26,6 @@ from scipy import stats
 from eeg_pipeline.analysis.features.rest import (
     is_resting_state_feature_mode,
     select_single_rest_analysis_segment,
-    valid_rest_analysis_segment_masks,
 )
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
@@ -48,14 +47,6 @@ def _as_path(value: Any) -> Optional[Path]:
     if value is None:
         return None
     return Path(str(value)).expanduser()
-
-
-def _valid_source_segment_masks(
-    masks: Dict[str, np.ndarray],
-) -> Dict[str, np.ndarray]:
-    return valid_rest_analysis_segment_masks(masks)
-
-
 def _resolve_source_segment(
     *,
     times: Optional[np.ndarray],

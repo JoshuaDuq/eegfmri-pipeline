@@ -66,12 +66,6 @@ def _log_info(logger: Any, message: str, *args: Any) -> None:
         logger.info(message, *args)
 
 
-def _log_debug(logger: Any, message: str, *args: Any) -> None:
-    """Log debug if logger is available."""
-    if logger:
-        logger.debug(message, *args)
-
-
 def _extract_iaf_config(config: Any) -> Dict[str, Any]:
     """Extract IAF configuration from config object."""
     if hasattr(config, "get"):

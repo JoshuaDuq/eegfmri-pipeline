@@ -3496,7 +3496,7 @@ def _run_permutation_importance_stage(
         build_feature_metadata,
     )
     
-    resolved_model, base_pipe, param_grid = _build_regression_model_spec(
+    _resolved_model, base_pipe, param_grid = _build_regression_model_spec(
         model_name,
         seed=seed,
         config=config,

@@ -37,6 +37,20 @@ Build and Run
          go build -o eeg-tui .
          ./eeg-tui
 
+      .. code-block:: powershell
+
+         cd eeg_pipeline/cli/tui
+         go mod download
+         go build -o eeg-tui.exe .
+         .\eeg-tui.exe
+
+.. note::
+
+   Windows and macOS/Linux do not use the same setup commands.
+   On Windows, use PowerShell, ``.\eeg-tui.exe``, and virtual environments
+   under ``Scripts\python.exe``. On macOS/Linux, use ``./eeg-tui`` and
+   ``bin/python``.
+
 .. note::
 
    The TUI searches upward for the ``eeg_pipeline/`` directory and runs all
@@ -345,11 +359,15 @@ Python Environment Discovery
 
 The TUI searches for a Python interpreter in this order:
 
-1. ``eeg_pipeline/.venv311/bin/python``
-2. ``.venv311/bin/python``
-3. ``.venv/bin/python``
-4. ``venv/bin/python``
-5. System ``python3`` (or ``python`` on Windows)
+1. ``eeg_pipeline/.venv311/bin/python`` or ``eeg_pipeline\.venv311\Scripts\python.exe``
+2. ``.venv311/bin/python`` or ``.venv311\Scripts\python.exe``
+3. ``.venv/bin/python`` or ``.venv\Scripts\python.exe``
+4. ``venv/bin/python`` or ``venv\Scripts\python.exe``
+5. System ``python3`` on macOS/Linux, or ``python`` then ``py -3`` on Windows
+
+Native Windows support covers the TUI, CLI bootstrap, validation, and smoke
+checks. Container-backed fMRI preprocessing and Docker-based BEM/source-localization
+helpers should be run from WSL2 or a Linux/macOS host.
 
 Design Principles
 -----------------

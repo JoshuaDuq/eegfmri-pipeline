@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 
 def normalize_trial_type_list(value: Any) -> Optional[List[str]]:
@@ -40,18 +40,3 @@ def normalize_trial_type_list(value: Any) -> Optional[List[str]]:
         out.append(s)
 
     return out or None
-
-
-def filter_trial_types(trial_types: Iterable[Any], allowed: Optional[Sequence[str]]) -> List[str]:
-    """
-    Filter a sequence of trial_type values using an allow-list (case-sensitive).
-
-    Returns normalized strings for kept trial types.
-    """
-    allowed_norm = normalize_trial_type_list(allowed)
-    if not allowed_norm:
-        return [str(t) for t in trial_types]
-
-    allow_set = set(allowed_norm)
-    return [str(t) for t in trial_types if str(t) in allow_set]
-

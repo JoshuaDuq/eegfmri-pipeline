@@ -191,6 +191,45 @@ def _linear_slope(x: np.ndarray, y: np.ndarray) -> float:
     return float(np.sum(x2c * (y2 - float(np.mean(y2)))) / denom)
 
 
+def _format_grouped_spearman_annotation(rho: float, slope: float, n_levels: int) -> str:
+    """Format a descriptive annotation for dose-level mean summaries."""
+    return (
+        f"Spearman ρ={rho:.2f} across dose-level means\n"
+        f"Slope={slope:.3f}/unit (n_levels={int(n_levels)})"
+    )
+
+
+def _compute_wilson_interval_bounds(
+    successes: np.ndarray,
+    totals: np.ndarray,
+    *,
+    confidence_level: float = 0.95,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return Wilson score interval bounds for binomial proportions."""
+    success_counts = np.asarray(successes, dtype=float)
+    total_counts = np.asarray(totals, dtype=float)
+    if success_counts.shape != total_counts.shape:
+        raise ValueError("Wilson interval requires successes and totals with matching shapes.")
+    if np.any(total_counts < 1):
+        raise ValueError("Wilson interval requires totals >= 1.")
+    if not (0.0 < float(confidence_level) < 1.0):
+        raise ValueError("confidence_level must be between 0 and 1.")
+
+    proportions = success_counts / total_counts
+    z_value = float(stats.norm.ppf(0.5 + confidence_level / 2.0))
+    z_sq = z_value**2
+    denominator = 1.0 + z_sq / total_counts
+    center = (proportions + z_sq / (2.0 * total_counts)) / denominator
+    half_width = (
+        z_value
+        * np.sqrt((proportions * (1.0 - proportions) + z_sq / (4.0 * total_counts)) / total_counts)
+        / denominator
+    )
+    lower = np.clip(center - half_width, 0.0, 1.0)
+    upper = np.clip(center + half_width, 0.0, 1.0)
+    return lower, upper
+
+
 def _require_column(df: pd.DataFrame, name: str) -> pd.Series:
     if name not in df.columns:
         raise ValueError(f"Missing required column: {name}. Available: {list(df.columns)}")
@@ -1108,12 +1147,12 @@ def _plot_roi_bands_vs_dose_single_subject(
 
             # Effect sizes computed on predictor means (avoid trials-as-independent)
             try:
-                rho, p, n = _spearman_xy(summ["x"].to_numpy(float), summ["mean"].to_numpy(float))
+                rho, _p, n = _spearman_xy(summ["x"].to_numpy(float), summ["mean"].to_numpy(float))
                 slope = _linear_slope(summ["x"].to_numpy(float), summ["mean"].to_numpy(float))
                 ax.text(
                     0.02,
                     0.02,
-                    f"Spearman ρ={rho:.2f}, p={p:.3g}\nSlope={slope:.3f}/unit (n={n})",
+                    _format_grouped_spearman_annotation(rho, slope, n),
                     transform=ax.transAxes,
                     ha="left",
                     va="bottom",
@@ -1211,13 +1250,23 @@ def _plot_binary_outcome_probability_vs_predictor(
         ax = fig.add_subplot(111)
         _style_axes(ax)
 
-        g = d.groupby(dose_col)["_binary_outcome"].agg(["count", "mean"]).reset_index().rename(columns={"count": "n"})
-        g["sem_binomial"] = np.sqrt(g["mean"] * (1.0 - g["mean"]) / g["n"].clip(lower=1))
+        g = (
+            d.groupby(dose_col)["_binary_outcome"]
+            .agg(["count", "mean", "sum"])
+            .reset_index()
+            .rename(columns={"count": "n", "sum": "successes"})
+        )
+        lower, upper = _compute_wilson_interval_bounds(
+            successes=g["successes"].to_numpy(float),
+            totals=g["n"].to_numpy(float),
+        )
+        mean_values = g["mean"].to_numpy(float)
+        yerr = np.vstack([mean_values - lower, upper - mean_values])
 
         ax.errorbar(
             g[dose_col].to_numpy(float),
-            g["mean"].to_numpy(float),
-            yerr=g["sem_binomial"].to_numpy(float),
+            mean_values,
+            yerr=yerr,
             fmt="o",
             linestyle="-",
             capsize=3.0,
@@ -1230,7 +1279,7 @@ def _plot_binary_outcome_probability_vs_predictor(
         )
         ax.set_ylim(-0.05, 1.05)
         ax.set_xlabel(dose_col)
-        ax.set_ylabel(f"P({binary_outcome_col}=1)")
+        ax.set_ylabel(f"P({binary_outcome_col}=1) with Wilson 95% CI")
         ax.set_title(f"Binary outcome probability vs {dose_col} (sub-{subject})")
         ax.legend(frameon=False, loc="best")
 

@@ -8,11 +8,13 @@ import mne
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 from eeg_pipeline.plotting.features.power import (
     _build_topomap_panel,
     _compute_group_band_summary_stats,
     _compute_column_effect_summary,
+    _compute_mean_ci as _compute_power_mean_ci,
     _compute_group_curve_significance_mask,
     _compute_group_paired_effect_forest_data,
     _compute_group_paired_effect_summary,
@@ -30,6 +32,8 @@ from eeg_pipeline.plotting.features.power import (
 )
 from eeg_pipeline.plotting.features.utils import (
     _format_count_range,
+    _format_fdr_stars_legend,
+    _compute_mean_ci as _compute_utils_mean_ci,
     _compute_paired_wilcoxon_stats,
     _compute_paired_differences,
     _summarize_multi_window_sample_counts,
@@ -135,6 +139,26 @@ class _FakeEpochsSpectralTFR:
         self.times = self.times[time_mask]
         self.data = self.data[:, :, :, time_mask]
         return self
+
+
+def test_compute_mean_ci_uses_t_critical_half_width() -> None:
+    values = np.array([1.0, 2.0, 5.0], dtype=float)
+    expected_mean = float(np.mean(values))
+    expected_half_width = float(
+        stats.t.ppf(0.975, df=values.size - 1) * np.std(values, ddof=1) / np.sqrt(values.size)
+    )
+
+    utils_mean, utils_half_width = _compute_utils_mean_ci(values)
+    power_mean, power_half_width = _compute_power_mean_ci(values)
+
+    assert utils_mean == pytest.approx(expected_mean)
+    assert power_mean == pytest.approx(expected_mean)
+    assert utils_half_width == pytest.approx(expected_half_width)
+    assert power_half_width == pytest.approx(expected_half_width)
+
+
+def test_format_fdr_stars_legend_uses_q_value_thresholds() -> None:
+    assert _format_fdr_stars_legend() == "(*q<.05, **q<.01, ***q<.001)"
 
 
 def _fake_apply_baseline_and_crop(

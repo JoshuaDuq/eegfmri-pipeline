@@ -9,7 +9,7 @@ Uses violin/strip plots for distributions and summary comparisons.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 
 import numpy as np
 import pandas as pd
@@ -34,212 +34,16 @@ _SECONDS_TO_MILLISECONDS = 1000.0
 _ZERO_LINE_COLOR = "black"
 _ZERO_LINE_WIDTH = 1
 _NO_DATA_MESSAGE = "No data"
-_UNKNOWN_SEGMENT_LABEL = "unknown"
 
 
 ###################################################################
 # Helper Functions
 ###################################################################
 
-def _get_erds_segments(features_df: pd.DataFrame) -> List[str]:
-    """Extract unique ERDS segment names from feature columns."""
-    segments = set()
-    for col in features_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if parsed.get("group") != "erds":
-            continue
-        segment = str(parsed.get("segment") or "")
-        if segment:
-            segments.add(segment)
-    return sorted(segments)
-
-
-def _select_erds_segment(
-    features_df: pd.DataFrame, preferred: str = "active"
-) -> Optional[str]:
-    """Select segment from available ERDS segments, preferring specified one."""
-    segments = _get_erds_segments(features_df)
-    if not segments:
-        return None
-    if preferred in segments:
-        return preferred
-    return segments[0]
-
-
-def _matches_erds_criteria(
-    parsed: Dict[str, Any],
-    segment: str,
-    band: str,
-    stat: str,
-    scope: str,
-) -> bool:
-    """Check if parsed column name matches ERDS selection criteria."""
-    if not parsed.get("valid"):
-        return False
-    if parsed.get("group") != "erds":
-        return False
-    if str(parsed.get("segment") or "") != str(segment):
-        return False
-    if str(parsed.get("band") or "") != str(band):
-        return False
-    if scope and str(parsed.get("scope") or "") != str(scope):
-        return False
-    if str(parsed.get("stat") or "") != str(stat):
-        return False
-    return True
-
-
-def _collect_erds_values(
-    features_df: pd.DataFrame,
-    *,
-    band: str,
-    segment: str,
-    stat: str,
-    scope: str = "global",
-) -> np.ndarray:
-    """Collect ERDS values matching specified criteria."""
-    matching_columns = []
-    for col in features_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if _matches_erds_criteria(parsed, segment, band, stat, scope):
-            matching_columns.append(str(col))
-
-    if not matching_columns:
-        return np.array([])
-
-    if len(matching_columns) == 1:
-        series = pd.to_numeric(
-            features_df[matching_columns[0]], errors="coerce"
-        )
-    else:
-        series = (
-            features_df[matching_columns]
-            .apply(pd.to_numeric, errors="coerce")
-            .mean(axis=1)
-        )
-    values = series.dropna().values
-    return values[np.isfinite(values)]
-
-
-def _collect_band_data(
-    features_df: pd.DataFrame,
-    bands: List[str],
-    band_colors: Dict[str, str],
-    segment: Optional[str],
-    stat: str,
-    scope: str,
-    scale_factor: float = 1.0,
-) -> Tuple[List[np.ndarray], List[int], List[str]]:
-    """Collect ERDS values for each band, returning data, positions, and colors."""
-    data_list = []
-    positions = []
-    colors = []
-
-    if segment is not None:
-        for position, band in enumerate(bands):
-            values = _collect_erds_values(
-                features_df,
-                band=band,
-                segment=segment,
-                stat=stat,
-                scope=scope,
-            )
-            if values.size > 0:
-                scaled_values = values * scale_factor
-                data_list.append(scaled_values)
-                positions.append(position)
-                colors.append(band_colors[band])
-
-    return data_list, positions, colors
-
-
-def _create_violin_plot(
-    ax: plt.Axes,
-    data_list: List[np.ndarray],
-    positions: List[int],
-    colors: List[str],
-    band_labels: List[str],
-) -> None:
-    """Create violin plot with specified data, positions, and colors."""
-    if not data_list:
-        ax.text(
-            0.5,
-            0.5,
-            _NO_DATA_MESSAGE,
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-        )
-        ax.set_xticks([])
-        return
-
-    violin_parts = ax.violinplot(
-        data_list,
-        positions=positions,
-        showmedians=True,
-        widths=_VIOLIN_WIDTH,
-    )
-    for index, body in enumerate(violin_parts.get("bodies", [])):
-        body.set_facecolor(colors[index])
-        body.set_alpha(_VIOLIN_ALPHA)
-
-    ax.set_xticks(range(len(band_labels)))
-    ax.set_xticklabels([band.capitalize() for band in band_labels])
-
-
-def _add_scatter_overlay(
-    ax: plt.Axes,
-    positions: List[int],
-    data_list: List[np.ndarray],
-    colors: List[str],
-    seed: Optional[int] = None,
-) -> None:
-    """Add jittered scatter points over violin plots for better data visibility."""
-    if seed is not None:
-        rng = np.random.RandomState(seed)
-    else:
-        rng = np.random
-
-    for position, values, color in zip(positions, data_list, colors):
-        jitter = rng.uniform(-_JITTER_RANGE, _JITTER_RANGE, len(values))
-        ax.scatter(
-            position + jitter,
-            values,
-            c=color,
-            alpha=_SCATTER_ALPHA,
-            s=_SCATTER_SIZE,
-        )
-
-
 def _format_axis_style(ax: plt.Axes) -> None:
     """Apply standard axis styling: remove top and right spines."""
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-
-
-def _create_figure_title(
-    fig: plt.Figure,
-    title: str,
-    segment: Optional[str],
-    plot_cfg: Any,
-) -> None:
-    """Add suptitle to figure with segment information."""
-    segment_label = segment if segment is not None else _UNKNOWN_SEGMENT_LABEL
-    fig.suptitle(
-        f"{title} ({segment_label})",
-        fontsize=plot_cfg.font.figure_title,
-        fontweight="bold",
-        y=1.02,
-    )
-
-
-def _save_and_close_figure(fig: plt.Figure, save_path: Path, config: Any = None) -> None:
-    """Save figure and close to free memory."""
-    plt.tight_layout()
-    save_fig(fig, save_path, config=config)
-    plt.close(fig)
 
 
 ###################################################################

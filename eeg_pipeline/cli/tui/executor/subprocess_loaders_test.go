@@ -2,6 +2,7 @@ package executor
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -236,83 +237,80 @@ func writeFakePythonBinary(t *testing.T) string {
 	t.Helper()
 
 	repoRoot := t.TempDir()
-	pythonPath := filepath.Join(repoRoot, "eeg_pipeline", ".venv311", "bin", "python")
-	if runtime.GOOS == "windows" {
-		pythonPath += ".exe"
-	}
+	pythonPath := fakePythonPath(repoRoot)
 	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 		t.Fatalf("mkdir fake python: %v", err)
 	}
 
-	script := `#!/bin/sh
-mode="${FAKE_EXECUTOR_MODE:-}"
-case "$mode" in
-  config_summary)
-    cat <<'JSON'
-{"task":"rest","bids_root":"/bids","bids_rest_root":"/bids-rest","bids_fmri_root":"/fmri","deriv_root":"/deriv","deriv_rest_root":"/deriv-rest","source_root":"/source","preprocessing_n_jobs":8}
-JSON
-    ;;
-  config_keys)
-    cat <<'JSON'
-{"project":{"task":"rest","random_state":7,"subject_list":["sub-01","sub-02"]},"paths":{"bids_root":"/bids","freesurfer_license":"license.txt"}}
-JSON
-    ;;
-  subjects_populated)
-    cat <<'JSON'
-{"subjects":[{"id":"sub-01","has_source_data":true,"has_bids":true,"has_derivatives":false,"has_epochs":false,"has_features":false,"has_stats":false}],"available_windows":["window-a"],"available_windows_by_feature":{"power":["window-a"]},"available_event_columns":["trial_type"],"available_channels":["Cz"],"unavailable_channels":["Pz"]}
-JSON
-    ;;
-  columns_trial_table)
-    cat <<'JSON'
-{"columns":["trial_type","condition"],"values":{"trial_type":["a","b"]},"windows":["win-a"],"source":"trial_table"}
-JSON
-    ;;
-  columns_condition_effects)
-    cat <<'JSON'
-{"columns":["effect"],"values":{"effect":["x"]},"windows":["win-b"],"source":"condition_effects"}
-JSON
-    ;;
-  fmri_conditions_error)
-    cat <<'JSON'
-{"error":"invalid fmri conditions"}
-JSON
-    ;;
-  multigroup_ok)
-    cat <<'JSON'
-{"available":true,"groups":["control","treated"],"n_features":12,"n_significant":3,"file":"stats.json"}
-JSON
-    ;;
-  rois_ok)
-    cat <<'JSON'
-{"rois":["roi-1","roi-2"]}
-JSON
-    ;;
-  plotters)
-    cat <<'JSON'
-{"feature_plotters":{"power":[{"id":"power.topo","category":"power","name":"Power Topography"}]}}
-JSON
-    ;;
-  progress)
-    printf '%s\n' '{"event":"start","operation":"analyze","subjects":["sub-01"],"total_subjects":1}'
-    printf '%s\n' '{"event":"subject_start","subject":"sub-01"}'
-    printf '%s\n' '{"event":"progress","subject":"sub-01","step":"prep","current":1,"total":2,"pct":50}'
-    printf '%s\n' '{"event":"subject_done","subject":"sub-01","success":true}'
-    printf '%s\n' '{"event":"log","level":"info","message":"done","subject":"sub-01"}'
-    printf '%s\n' 'plain log line'
-    ;;
-  stderr_error)
-    printf '%s\n' 'python failed' >&2
-    exit 1
-    ;;
-  *)
-    printf '%s\n' '{}'
-    ;;
-esac
-`
+	buildDir := t.TempDir()
+	sourcePath := filepath.Join(buildDir, "main.go")
+	if err := os.WriteFile(sourcePath, []byte(fakePythonProgram), 0o644); err != nil {
+		t.Fatalf("write fake python source: %v", err)
+	}
 
-	if err := os.WriteFile(pythonPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake python: %v", err)
+	cmd := exec.Command("go", "build", "-o", pythonPath, sourcePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build fake python: %v\n%s", err, output)
 	}
 
 	return repoRoot
 }
+
+func fakePythonPath(repoRoot string) string {
+	binDir := "bin"
+	executable := "python"
+	if runtime.GOOS == "windows" {
+		binDir = "Scripts"
+		executable = "python.exe"
+	}
+
+	return filepath.Join(repoRoot, "eeg_pipeline", ".venv311", binDir, executable)
+}
+
+const fakePythonProgram = `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func printLine(line string) {
+	fmt.Fprintln(os.Stdout, line)
+}
+
+func main() {
+	switch os.Getenv("FAKE_EXECUTOR_MODE") {
+	case "config_summary":
+		printLine("{\"task\":\"rest\",\"bids_root\":\"/bids\",\"bids_rest_root\":\"/bids-rest\",\"bids_fmri_root\":\"/fmri\",\"deriv_root\":\"/deriv\",\"deriv_rest_root\":\"/deriv-rest\",\"source_root\":\"/source\",\"preprocessing_n_jobs\":8}")
+	case "config_keys":
+		printLine("{\"project\":{\"task\":\"rest\",\"random_state\":7,\"subject_list\":[\"sub-01\",\"sub-02\"]},\"paths\":{\"bids_root\":\"/bids\",\"freesurfer_license\":\"license.txt\"}}")
+	case "subjects_populated":
+		printLine("{\"subjects\":[{\"id\":\"sub-01\",\"has_source_data\":true,\"has_bids\":true,\"has_derivatives\":false,\"has_epochs\":false,\"has_features\":false,\"has_stats\":false}],\"available_windows\":[\"window-a\"],\"available_windows_by_feature\":{\"power\":[\"window-a\"]},\"available_event_columns\":[\"trial_type\"],\"available_channels\":[\"Cz\"],\"unavailable_channels\":[\"Pz\"]}")
+	case "columns_trial_table":
+		printLine("{\"columns\":[\"trial_type\",\"condition\"],\"values\":{\"trial_type\":[\"a\",\"b\"]},\"windows\":[\"win-a\"],\"source\":\"trial_table\"}")
+	case "columns_condition_effects":
+		printLine("{\"columns\":[\"effect\"],\"values\":{\"effect\":[\"x\"]},\"windows\":[\"win-b\"],\"source\":\"condition_effects\"}")
+	case "fmri_conditions_error":
+		printLine("{\"error\":\"invalid fmri conditions\"}")
+	case "multigroup_ok":
+		printLine("{\"available\":true,\"groups\":[\"control\",\"treated\"],\"n_features\":12,\"n_significant\":3,\"file\":\"stats.json\"}")
+	case "rois_ok":
+		printLine("{\"rois\":[\"roi-1\",\"roi-2\"]}")
+	case "plotters":
+		printLine("{\"feature_plotters\":{\"power\":[{\"id\":\"power.topo\",\"category\":\"power\",\"name\":\"Power Topography\"}]}}")
+	case "progress":
+		printLine("{\"event\":\"start\",\"operation\":\"analyze\",\"subjects\":[\"sub-01\"],\"total_subjects\":1}")
+		printLine("{\"event\":\"subject_start\",\"subject\":\"sub-01\"}")
+		printLine("{\"event\":\"progress\",\"subject\":\"sub-01\",\"step\":\"prep\",\"current\":1,\"total\":2,\"pct\":50}")
+		printLine("{\"event\":\"subject_done\",\"subject\":\"sub-01\",\"success\":true}")
+		printLine("{\"event\":\"log\",\"level\":\"info\",\"message\":\"done\",\"subject\":\"sub-01\"}")
+		printLine("plain log line")
+	case "stderr_error":
+		fmt.Fprintln(os.Stderr, "python failed")
+		os.Exit(1)
+	default:
+		printLine("{}")
+	}
+}
+`

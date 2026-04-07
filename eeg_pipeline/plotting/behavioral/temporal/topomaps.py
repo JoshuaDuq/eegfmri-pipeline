@@ -157,7 +157,7 @@ def _format_roi_label(
         return label
 
     if roi_p_uncorr is not None and np.isfinite(roi_p_uncorr) and roi_p_uncorr < DEFAULT_UNCORRECTED_ALPHA:
-        label += f" (p={roi_p_uncorr:.3f})"
+        label += f" (uncorr p={roi_p_uncorr:.3f})"
     return label
 
 

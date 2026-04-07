@@ -55,3 +55,43 @@ jobs:
         run: |
           python -m compileall -q eeg_pipeline fmri_pipeline scripts tests
           python -m pytest -q
+
+  windows-compat:
+    needs: lint
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Install package and test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Verify CLI/TUI config coverage
+        run: |
+          python eeg_pipeline/utils/config/introspect.py --repo-root . --strict
+
+      - name: Run targeted Windows compatibility tests
+        run: |
+          python -m pytest -q tests/utils/test_tui_config_gap_audit.py tests/scripts/test_tui_pipeline_smoke_script.py tests/pipelines/test_fmri_preprocessing_helpers.py tests/pipelines/test_bem_generation_strict_failures.py
+
+      - name: Run TUI tests
+        working-directory: eeg_pipeline/cli/tui
+        run: |
+          go test ./...
+          go build -o eeg-tui.exe .
+
+      - name: Run lightweight CLI smoke checks
+        run: |
+          python scripts/tui_pipeline_smoke.py --pipelines validate,info,runtime_version --timeout-s 20

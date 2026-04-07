@@ -459,7 +459,7 @@ def compute_tfr_for_subject(
     baseline_window: Optional[Tuple[float, float]] = None,
     power_bands: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> Tuple[mne.time_frequency.EpochsTFR, pd.DataFrame, List[str], float, float]:
-    freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
+    freq_min, freq_max, n_freqs, n_cycles_factor, _tfr_decim, tfr_picks = get_tfr_config(config)
 
     freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)

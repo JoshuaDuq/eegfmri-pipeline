@@ -32,10 +32,6 @@ def _to_float(value: Any) -> float:
     return float(value)
 
 
-def _to_float_list(value: Any) -> list[float]:
-    return [float(v) for v in (value or [])]
-
-
 def _to_stripped(value: Any) -> str:
     return str(value).strip()
 
@@ -52,10 +48,6 @@ def _to_stripped_list(value: Any) -> list[str]:
     return [str(v).strip() for v in (value or [])]
 
 
-def _to_lower_stripped_list(value: Any) -> list[str]:
-    return [str(v).strip().lower() for v in (value or [])]
-
-
 def _to_float_list(value: Any) -> list[float]:
     return [float(v) for v in (value or [])]
 
@@ -63,16 +55,6 @@ def _to_float_list(value: Any) -> list[float]:
 def _to_optional_int_max(value: Any) -> int | None:
     parsed = int(value)
     return None if parsed <= 0 else parsed
-
-
-def _to_optional_float_threshold(value: Any) -> float | None:
-    parsed = float(value)
-    return None if parsed <= 0 else parsed
-
-
-def _to_auto_blank_or_lower(value: Any) -> str:
-    parsed = _to_lower_stripped(value)
-    return "" if parsed == "auto" else parsed
 
 
 def _to_optional_robust_method(value: Any) -> str | None:

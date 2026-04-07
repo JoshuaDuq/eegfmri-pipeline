@@ -34,7 +34,10 @@ from fmri_pipeline.analysis.contrast_builder import (
 )
 from fmri_pipeline.analysis.constraint_masking import _align_mask_to_image
 from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
-from fmri_pipeline.analysis.reporting import run_fmri_plotting_and_report
+from fmri_pipeline.analysis.reporting import (
+    _compute_threshold_for_cfg,
+    run_fmri_plotting_and_report,
+)
 from fmri_pipeline.analysis.trial_signatures import (
     TrialInfo,
     TrialSignatureExtractionConfig,
@@ -1397,3 +1400,15 @@ def test_run_fmri_plotting_and_report_rejects_non_z_stat_maps(tmp_path: Path) ->
             cfg=cfg,
             stat_map_type="stat",
         )
+
+
+def test_compute_threshold_for_cfg_raises_when_fdr_thresholding_fails() -> None:
+    cfg = FmriPlottingConfig(enabled=True, threshold_mode="fdr", fdr_q=0.05)
+
+    with patch(
+        "nilearn.glm.threshold_stats_img",
+        side_effect=RuntimeError("fdr unavailable"),
+        create=True,
+    ):
+        with pytest.raises(RuntimeError, match="fdr unavailable"):
+            _compute_threshold_for_cfg(stat_img=object(), cfg=cfg)

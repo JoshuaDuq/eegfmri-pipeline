@@ -114,10 +114,10 @@ func (m Model) loadStats() tea.Cmd {
 }
 
 func (m Model) executeStatsCommand() (string, error) {
-	pythonCmd := executor.GetPythonCommand(m.repoRoot)
+	pythonCmd := executor.ResolvePythonCommand(m.repoRoot)
 	args := []string{"-m", "eeg_pipeline", "stats", "--json"}
 
-	cmd := exec.Command(pythonCmd, args...)
+	cmd := exec.Command(pythonCmd.Executable, pythonCmd.Args(args...)...)
 	cmd.Dir = m.repoRoot
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
 

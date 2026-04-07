@@ -3,6 +3,7 @@ package mainmenu
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -1131,8 +1132,11 @@ func (m Model) shortPath(path string) string {
 
 	home := homeDir()
 	clean := filepath.Clean(path)
-	if home != "" && strings.HasPrefix(clean, home) {
-		return "~/" + strings.TrimPrefix(clean, home+string(filepath.Separator))
+	if relative, ok := homeRelativePath(runtime.GOOS, home, clean); ok {
+		if relative == "" {
+			return "~"
+		}
+		return filepath.Join("~", relative)
 	}
 	parent := filepath.Base(filepath.Dir(clean))
 	base := filepath.Base(clean)
@@ -1147,6 +1151,31 @@ func homeDir() string {
 		return h
 	}
 	return ""
+}
+
+func homeRelativePath(goos string, home string, path string) (string, bool) {
+	if home == "" {
+		return "", false
+	}
+
+	compareHome := filepath.Clean(home)
+	comparePath := filepath.Clean(path)
+	if goos == "windows" {
+		compareHome = strings.ToLower(compareHome)
+		comparePath = strings.ToLower(comparePath)
+	}
+
+	relative, err := filepath.Rel(compareHome, comparePath)
+	if err != nil {
+		return "", false
+	}
+	if relative == "." {
+		return "", true
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return relative, true
 }
 
 func (m Model) renderFooterHints(width int, hints []footerHint) string {

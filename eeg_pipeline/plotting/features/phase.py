@@ -22,8 +22,6 @@ from ..config import get_plot_config
 # Constants
 ITPC_MIN = 0.0
 ITPC_MAX = 1.0
-PAC_DEFAULT_MIN = 0.0
-PAC_DEFAULT_MAX = 0.5
 PERCENTILE_LOW = 5
 PERCENTILE_HIGH = 95
 MIN_COLOR_RANGE = 0.01
@@ -33,8 +31,6 @@ BOXPLOT_WIDTH = 0.4
 Y_RANGE_PADDING_LOW = 0.1
 Y_RANGE_PADDING_HIGH = 0.3
 STATS_ANNOTATION_OFFSET = 0.05
-DEFAULT_ALPHA_SIG = 0.05
-ROI_NAME_MAX_LENGTH = 20
 
 
 def _compute_color_limits(values: np.ndarray, default_min: float = 0.0, 

@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from eeg_pipeline.analysis.behavior.stage_catalog import (
     STAGE_SPEC_DEFINITIONS,
     config_to_stage_names_impl as _config_to_stage_names_impl,
 )
 from eeg_pipeline.utils.config.loader import get_config_value
-
-if TYPE_CHECKING:
-    from eeg_pipeline.context.behavior import BehaviorContext
-
 
 @dataclass(frozen=True)
 class StageSpec:
@@ -30,26 +26,8 @@ class StageRegistry:
 
     _stages: Dict[str, StageSpec] = {}
 
-    RESOURCE_TRIAL_TABLE = "trial_table"
-    RESOURCE_EPOCHS = "epochs"
-    RESOURCE_TFR = "tfr"
-    RESOURCE_POWER_DF = "power_df"
-    RESOURCE_PREDICTOR = "predictor"
-    RESOURCE_OUTCOME = "outcome"
-    RESOURCE_FEATURES = "features"
-    RESOURCE_DESIGN = "correlate_design"
     RESOURCE_EFFECT_SIZES = "effect_sizes"
     RESOURCE_PVALUES = "pvalues"
-    RESOURCE_CORRELATIONS = "correlations"
-    RESOURCE_CONDITION_EFFECTS = "condition_effects"
-
-    GROUP_DATA_PREP = "data_prep"
-    GROUP_CORRELATIONS = "correlations"
-    GROUP_CONDITION = "condition"
-    GROUP_TEMPORAL = "temporal"
-    GROUP_ADVANCED = "advanced"
-    GROUP_VALIDATION = "validation"
-    GROUP_EXPORT = "export"
 
     @classmethod
     def register(cls, spec: StageSpec) -> None:
@@ -62,10 +40,6 @@ class StageRegistry:
     @classmethod
     def all_stages(cls) -> Dict[str, StageSpec]:
         return cls._stages.copy()
-
-    @classmethod
-    def stages_in_group(cls, group: str) -> List[StageSpec]:
-        return [s for s in cls._stages.values() if s.group == group]
 
     @classmethod
     def get_prerequisites(cls, stage_name: str) -> List[str]:
@@ -83,16 +57,6 @@ class StageRegistry:
                         if pre not in prerequisites:
                             prerequisites.append(pre)
         return prerequisites
-
-    @classmethod
-    def validate_stage_combo(cls, stages: List[str]) -> Tuple[bool, List[str]]:
-        missing: List[str] = []
-        for stage in stages:
-            prereqs = cls.get_prerequisites(stage)
-            for prereq in prereqs:
-                if prereq not in stages and prereq not in missing:
-                    missing.append(prereq)
-        return (len(missing) == 0, missing)
 
     @classmethod
     def auto_resolve_stages(cls, stages: List[str]) -> List[str]:
@@ -128,36 +92,6 @@ class StageRegistry:
                     }
                 )
         return steps
-
-    @classmethod
-    def get_available_stages_for_context(cls, ctx: "BehaviorContext") -> List[str]:
-        available_resources = set()
-
-        if ctx.aligned_events is not None:
-            available_resources.add(cls.RESOURCE_TRIAL_TABLE)
-        if ctx.power_df is not None and not ctx.power_df.empty:
-            available_resources.add(cls.RESOURCE_POWER_DF)
-            available_resources.add(cls.RESOURCE_FEATURES)
-        if ctx.predictor_series is not None:
-            available_resources.add(cls.RESOURCE_PREDICTOR)
-        if ctx.aligned_events is not None:
-            outcome_col = ctx._find_outcome_column() if hasattr(ctx, "_find_outcome_column") else None
-            if outcome_col is not None:
-                available_resources.add(cls.RESOURCE_OUTCOME)
-        if ctx.epochs_info is not None:
-            available_resources.add(cls.RESOURCE_EPOCHS)
-
-        available: List[str] = []
-        for name, spec in cls._stages.items():
-            can_run = True
-            for req in spec.requires:
-                is_stage_output = any(req in s.produces for s in cls._stages.values())
-                if not is_stage_output and req not in available_resources:
-                    can_run = False
-                    break
-            if can_run:
-                available.append(name)
-        return available
 
     @classmethod
     def list_stages(cls) -> List[Dict[str, Any]]:

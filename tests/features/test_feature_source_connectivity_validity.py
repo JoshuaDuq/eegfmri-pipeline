@@ -668,9 +668,6 @@ class TestSourceConnectivityValidity(unittest.TestCase):
         epochs = _TrackingEpochStub(n_epochs=n_epochs, sfreq=100.0)
 
         class _FakeEnvelopeCon:
-            def combine(self):
-                return self
-
             def get_data(self, output="dense"):
                 _ = output
                 return np.array(

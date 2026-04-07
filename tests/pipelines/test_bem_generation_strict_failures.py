@@ -2,16 +2,57 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fmri_pipeline.analysis.bem_generation import generate_bem_model_and_solution
+from fmri_pipeline.analysis.bem_generation import (
+    generate_bem_model_and_solution,
+    generate_coregistration_transform,
+)
 
 
 class TestBemGenerationStrictFailures(unittest.TestCase):
+    def test_bem_generation_rejects_native_windows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            subjects_dir = root / "subjects"
+            subject_dir = subjects_dir / "sub-0001"
+            subject_dir.mkdir(parents=True, exist_ok=True)
+            license_path = root / "license.txt"
+            license_path.write_text("license", encoding="utf-8")
+
+            with patch.object(sys.modules["fmri_pipeline.analysis.bem_generation"], "platform", create=True) as platform_mod:
+                platform_mod.system.return_value = "Windows"
+                with self.assertRaisesRegex(RuntimeError, "not supported on native Windows"):
+                    generate_bem_model_and_solution(
+                        subject="sub-0001",
+                        subjects_dir=subjects_dir,
+                        fs_license_path=license_path,
+                    )
+
+    def test_identity_transform_generation_rejects_native_windows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            subjects_dir = root / "subjects"
+            subject_dir = subjects_dir / "sub-0001"
+            subject_dir.mkdir(parents=True, exist_ok=True)
+            license_path = root / "license.txt"
+            license_path.write_text("license", encoding="utf-8")
+
+            with patch.object(sys.modules["fmri_pipeline.analysis.bem_generation"], "platform", create=True) as platform_mod:
+                platform_mod.system.return_value = "Windows"
+                with self.assertRaisesRegex(RuntimeError, "not supported on native Windows"):
+                    generate_coregistration_transform(
+                        subject="sub-0001",
+                        subjects_dir=subjects_dir,
+                        fs_license_path=license_path,
+                        allow_identity_trans=True,
+                    )
+
     def test_bem_generation_failure_writes_qc_artifact_and_raises(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

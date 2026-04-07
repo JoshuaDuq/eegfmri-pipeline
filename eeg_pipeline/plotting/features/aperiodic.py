@@ -16,8 +16,7 @@ import pandas as pd
 from scipy import stats
 
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path
-from eeg_pipeline.infra.tsv import read_table
+from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.data.columns import get_outcome_column_from_config
@@ -28,15 +27,7 @@ from .utils import get_fdr_alpha
 
 
 # Constants
-MIN_CHANNELS_FOR_APERIODIC_CORR_DEFAULT = 10
-MIN_RUNS_FOR_CORRELATION = 5
-MIN_PERMUTATIONS = 10
-DEFAULT_N_PERMUTATIONS = 1000
-DEFAULT_RANDOM_STATE = 42
-PERCENTILE_LOW = 5
-PERCENTILE_HIGH = 95
 TOPO_CONTOURS = 6
-SCATTER_ALPHA = 0.6
 BOX_ALPHA = 0.6
 SCATTER_SIZE = 6
 DEFAULT_APERIODIC_METRICS: List[Tuple[str, str]] = [("broadband", "slope"), ("broadband", "offset")]
@@ -187,95 +178,6 @@ def _extract_aperiodic_data(
             found_chs.append(ch_name)
 
     return np.array(data), found_chs
-
-
-def _load_aperiodic_qc(
-    subject: str, config: Any, logger: logging.Logger
-) -> Optional[Dict[str, Any]]:
-    """Load aperiodic QC data from TSV file.
-
-    Args:
-        subject: Subject identifier
-        config: Configuration object
-        logger: Logger instance
-
-    Returns:
-        Loaded QC data as dict or None if not found
-    """
-    try:
-        stats_dir = deriv_stats_path(config.deriv_root, subject)
-        qc_path = stats_dir / "aperiodic_qc.tsv"
-    except (AttributeError, TypeError):
-        qc_path = None
-
-    if qc_path is None or not qc_path.exists():
-        log_if_present(
-            logger, "warning", "Aperiodic QC sidecar not found; skipping QC plots"
-        )
-        return None
-
-    try:
-        df = read_table(qc_path)
-        if df.empty:
-            return None
-
-        qc_data: Dict[str, Any] = {}
-
-        residual_rows = df[df["residual_mean"].notna() & df["frequency"].notna()]
-        if not residual_rows.empty:
-            channels = residual_rows["channel"].unique()
-            freqs = residual_rows["frequency"].unique()
-            residual_mean = np.full((len(channels), len(freqs)), np.nan)
-
-            for ch_idx, ch in enumerate(channels):
-                ch_data = residual_rows[residual_rows["channel"] == ch]
-                for freq_idx, freq in enumerate(freqs):
-                    row = ch_data[ch_data["frequency"] == freq]
-                    if not row.empty:
-                        residual_mean[ch_idx, freq_idx] = row["residual_mean"].values[0]
-
-            qc_data["residual_mean"] = residual_mean
-            qc_data["freqs"] = freqs
-
-        r2_rows = df[df["r2"].notna()]
-        if not r2_rows.empty:
-            channels = r2_rows["channel"].unique()
-            r2 = np.full(len(channels), np.nan)
-            for ch_idx, ch in enumerate(channels):
-                ch_data = r2_rows[r2_rows["channel"] == ch]
-                if not ch_data.empty:
-                    r2[ch_idx] = ch_data["r2"].values[0]
-            qc_data["r2"] = r2
-
-        slope_rows = df[df["slope"].notna()]
-        if not slope_rows.empty:
-            trials = slope_rows["trial"].unique()
-            channels = slope_rows["channel"].unique()
-            slopes = np.full((len(trials), len(channels)), np.nan)
-            offsets = np.full((len(trials), len(channels)), np.nan)
-
-            for trial_idx, trial in enumerate(trials):
-                trial_data = slope_rows[slope_rows["trial"] == trial]
-                for ch_idx, ch in enumerate(channels):
-                    ch_data = trial_data[trial_data["channel"] == ch]
-                    if not ch_data.empty:
-                        slopes[trial_idx, ch_idx] = ch_data["slope"].values[0]
-                        offsets[trial_idx, ch_idx] = ch_data["offset"].values[0]
-
-            qc_data["slopes"] = slopes
-            qc_data["offsets"] = offsets
-            qc_data["run_labels"] = trials
-
-        if "channel" in df.columns:
-            qc_data["channel_names"] = df["channel"].unique().tolist()
-
-        return qc_data
-
-    except (OSError, IOError, ValueError, KeyError) as exc:
-        log_if_present(
-            logger, "warning", f"Failed to load aperiodic QC TSV: {exc}"
-        )
-        return None
 
 
 def _extract_condition_masks(
@@ -753,73 +655,6 @@ def _find_outcome_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
             f"Available columns: {list(events_df.columns)[:30]}"
         )
     return outcome_col
-
-
-def _find_common_slope_columns(
-    features_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    config: Any,
-) -> List[str]:
-    """Find slope columns common across conditions using NamingSchema.
-    
-    Returns:
-        List of column names
-    """
-    slope_cols = []
-    for col in features_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if (parsed.get("valid") and 
-            parsed.get("group") == "aperiodic" and 
-            parsed.get("stat") == "slope"):
-            slope_cols.append(col)
-    
-    if not slope_cols:
-        return []
-    
-    comp = extract_comparison_mask(events_df, config, require_enabled=False)
-    if comp is None:
-        return [
-            col for col in slope_cols
-            if pd.to_numeric(features_df[col], errors="coerce").notna().all()
-        ]
-    
-    mask1, mask2, _, _ = comp
-    mask1 = np.asarray(mask1, dtype=bool)
-    mask2 = np.asarray(mask2, dtype=bool)
-    
-    common_cols = []
-    for col in slope_cols:
-        vals = pd.to_numeric(features_df[col], errors="coerce")
-        if vals[mask1].notna().all() and vals[mask2].notna().all():
-            common_cols.append(col)
-    
-    return common_cols
-
-
-def _compute_permutation_pvalue(
-    ratings: np.ndarray,
-    slopes: np.ndarray,
-    n_permutations: int,
-    rng: np.random.Generator,
-) -> float:
-    """Compute permutation p-value for correlation.
-    
-    Returns:
-        Permutation p-value
-    """
-    observed_correlation, _ = stats.spearmanr(ratings, slopes)
-    observed_abs = abs(observed_correlation)
-    
-    n_iter = max(MIN_PERMUTATIONS, n_permutations)
-    perm_ge_count = 0
-    
-    for _ in range(n_iter):
-        shuffled_ratings = rng.permutation(ratings)
-        perm_correlation, _ = stats.spearmanr(shuffled_ratings, slopes)
-        if abs(perm_correlation) >= observed_abs:
-            perm_ge_count += 1
-    
-    return (perm_ge_count + 1) / (n_iter + 1)
 
 
 def plot_aperiodic_by_condition(

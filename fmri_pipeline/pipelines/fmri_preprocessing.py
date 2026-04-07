@@ -6,6 +6,7 @@ import shlex
 import shutil
 import subprocess
 import os
+import platform
 import tempfile
 from pathlib import Path
 from typing import Any, List, Optional
@@ -21,6 +22,14 @@ FS_LICENSE_DEFAULT_PATH = "~/license.txt"
 MACOS_METADATA_FILENAMES = {".DS_Store"}
 MACOS_METADATA_PREFIX = "._"
 BIDS_SANITIZED_SOURCE_MOUNT = "/bids_source"
+
+
+def _require_supported_container_host(workflow_name: str) -> None:
+    if platform.system() == "Windows":
+        raise RuntimeError(
+            f"{workflow_name} is not supported on native Windows. "
+            "Use WSL2 or run this workflow from macOS/Linux because it launches containerized neuroimaging tooling directly."
+        )
 
 
 def _require_executable(name: str) -> None:
@@ -182,6 +191,7 @@ class FmriPreprocessingPipeline(PipelineBase):
                 raise ValueError(
                     "fmri_preprocessing.engine must be 'docker' or 'apptainer'"
                 )
+            _require_supported_container_host("fMRI preprocessing")
 
             fmriprep_cfg = self.config.get("fmri_preprocessing.fmriprep", {}) or {}
             image = fmriprep_cfg.get("image", "nipreps/fmriprep:25.2.4")

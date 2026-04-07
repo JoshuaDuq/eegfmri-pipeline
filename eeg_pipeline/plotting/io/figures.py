@@ -258,7 +258,7 @@ def _get_robust_vlim_defaults(config: Optional[Dict[str, Any]]) -> Dict[str, flo
     
     if config is not None:
         vlim_config = config.get("visualization.robust_vlim", {})
-        for key, default_value in defaults.items():
+        for key, _default_value in defaults.items():
             if key in vlim_config:
                 defaults[key] = float(vlim_config[key])
     

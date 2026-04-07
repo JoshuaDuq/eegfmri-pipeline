@@ -20,10 +20,21 @@ Installation
 
    .. code-block:: bash
 
-      source .venv311/bin/activate     # macOS / Linux
-      .venv311\Scripts\activate        # Windows
+      source .venv/bin/activate
+
+   .. code-block:: powershell
+
+      .venv\Scripts\Activate.ps1
 
    Then reinstall if needed: ``pip install -e ".[dev,ml]"``.
+
+   Windows and macOS/Linux use different activation paths:
+
+   - macOS/Linux: ``source .venv/bin/activate``
+   - Windows: ``.venv\Scripts\Activate.ps1``
+
+   The project requires Python ``3.11+``, but it does not require exactly
+   ``3.11``. Any supported interpreter version is fine.
 
 .. dropdown:: PyTorch install fails.
    :animate: fade-in
@@ -46,6 +57,17 @@ Installation
       cd eeg_pipeline/cli/tui
       go mod download
       go build -o eeg-tui .
+
+   .. code-block:: powershell
+
+      cd eeg_pipeline/cli/tui
+      go mod download
+      go build -o eeg-tui.exe .
+
+   Launch the TUI with the platform-specific binary:
+
+   - macOS/Linux: ``./eeg-tui``
+   - Windows PowerShell: ``.\eeg-tui.exe``
 
 ----
 
@@ -341,8 +363,18 @@ TUI
 
    The TUI searches for a virtual environment in this order:
    ``eeg_pipeline/.venv311`` → ``.venv311`` → ``.venv`` → ``venv`` →
-   system ``python3``. Ensure one exists at a recognized path and has the
-   package installed.
+   system interpreter. On macOS/Linux it falls back to ``python3``; on
+   Windows it tries ``python`` and then ``py -3``. Ensure one of those
+   environments has the package installed.
+
+.. dropdown:: Why does native Windows reject fMRI preprocessing or Docker-based BEM helpers?
+   :animate: fade-in
+
+   That support boundary is intentional. Native Windows is supported for the
+   repo-owned interface layer: install, CLI bootstrap, TUI, validation, and
+   smoke checks. Container-backed fMRI preprocessing and Docker-based
+   BEM/source-localization helpers should be run from WSL2 or a Linux/macOS
+   host.
 
 .. dropdown:: The TUI exits immediately with "panic: terminal not attached".
    :animate: fade-in
