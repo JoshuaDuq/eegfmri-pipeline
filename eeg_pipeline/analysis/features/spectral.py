@@ -1047,7 +1047,7 @@ def _robust_aperiodic_fit(
     
     slope, intercept = None, None
     
-    for iteration in range(max_iterations):
+    for _ in range(max_iterations):
         kept_indices = np.flatnonzero(keep_mask)
         if len(kept_indices) < min_fit_points:
             break

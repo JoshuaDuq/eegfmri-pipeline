@@ -98,7 +98,6 @@ class FeaturePlotContext:
     itpc_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
     sourcelocalization_df: Optional[pd.DataFrame] = None
-    all_features: Optional[pd.DataFrame] = None
 
     window_ranges: Dict[str, Tuple[float, float]] = field(default_factory=dict)
     time_range_suffixes: List[str] = field(default_factory=list)
@@ -127,7 +126,6 @@ class FeaturePlotContext:
         self._load_extraction_configs()
         self._apply_window_overrides()
         self._load_feature_tables()
-        self._build_all_features()
 
         self.n_trials = self._infer_trial_count()
         if self.n_trials > 0:
@@ -504,20 +502,6 @@ class FeaturePlotContext:
             return base[len(prefix):]
         return None
 
-    def _is_feature_payload(self, path: Path) -> bool:
-        """Check if path points to a feature data file (not metadata)."""
-        return not self._is_metadata_file(path)
-
-    def _dedupe_paths(self, paths: Sequence[Path]) -> List[Path]:
-        """Remove duplicate paths while preserving order."""
-        seen = set()
-        unique_paths = []
-        for path in paths:
-            if path not in seen:
-                seen.add(path)
-                unique_paths.append(path)
-        return unique_paths
-
     def _infer_trial_count(self) -> int:
         """Infer trial count from first available non-empty dataframe."""
         candidate_dataframes = [
@@ -542,37 +526,6 @@ class FeaturePlotContext:
                 return len(df)
         return 0
 
-    def _build_all_features(self) -> None:
-        """Merge individual feature dataframes into all_features."""
-        merge_candidates = [
-            self.power_df,
-            self.connectivity_df,
-            self.aperiodic_df,
-            self.erds_df,
-            self.spectral_df,
-            self.ratios_df,
-            self.asymmetry_df,
-            self.complexity_df,
-            self.bursts_df,
-            self.itpc_df,
-            self.quality_df,
-            self.sourcelocalization_df,
-        ]
-        frames = [df for df in merge_candidates if df is not None and not df.empty]
-        if not frames:
-            return
-
-        base_len = len(frames[0])
-        valid_frames = [df for df in frames if len(df) == base_len]
-
-        if not valid_frames:
-            return
-
-        combined = pd.concat(valid_frames, axis=1)
-        if combined.columns.duplicated().any():
-            combined = combined.loc[:, ~combined.columns.duplicated()]
-        self.all_features = combined
-    
     def get_or_compute_tfr(self) -> Optional[mne.time_frequency.EpochsTFR]:
         """Get cached TFR or compute if not available."""
         if self.tfr is not None and self._tfr_cached:

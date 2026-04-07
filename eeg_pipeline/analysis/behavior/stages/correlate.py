@@ -301,7 +301,7 @@ def _select_requested_primary_measure(
             # the primary measure when a stricter control target was configured.
             continue
         if run_mean:
-            p_key, r_key, source = keys
+            p_key, _r_key, source = keys
             if p_key == "p_raw":
                 return "p_run_mean", "r_run_mean", "run_mean"
             return (

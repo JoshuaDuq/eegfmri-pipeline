@@ -857,20 +857,16 @@ def _compute_threshold_for_cfg(stat_img: Any, cfg: FmriPlottingConfig) -> Tuple[
         return None, None, "none"
 
     if cfg.threshold_mode == "fdr":
-        try:
-            from nilearn.glm import threshold_stats_img  # type: ignore
+        from nilearn.glm import threshold_stats_img  # type: ignore
 
-            thr_img, thr = threshold_stats_img(
-                stat_img,
-                alpha=float(cfg.fdr_q),
-                height_control="fdr",
-                cluster_threshold=int(cfg.cluster_min_voxels) if cfg.cluster_min_voxels > 0 else 0,
-                two_sided=bool(cfg.two_sided),
-            )
-            return thr_img, float(thr), f"fdr q={cfg.fdr_q:.3f}"
-        except Exception:
-            # Fall back to plain z-threshold if FDR is unavailable.
-            return None, float(cfg.z_threshold), f"z |z|>{cfg.z_threshold:.2f}"
+        thr_img, thr = threshold_stats_img(
+            stat_img,
+            alpha=float(cfg.fdr_q),
+            height_control="fdr",
+            cluster_threshold=int(cfg.cluster_min_voxels) if cfg.cluster_min_voxels > 0 else 0,
+            two_sided=bool(cfg.two_sided),
+        )
+        return thr_img, float(thr), f"fdr q={cfg.fdr_q:.3f}"
 
     # cfg.threshold_mode == "z"
     return None, float(cfg.z_threshold), f"z |z|>{cfg.z_threshold:.2f}"

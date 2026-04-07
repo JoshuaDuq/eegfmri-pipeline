@@ -44,8 +44,6 @@ DISCOVERY_SOURCE_DERIVATIVES_EPOCHS = "derivatives_epochs"
 DISCOVERY_SOURCE_FEATURES = "features"
 DISCOVERY_SOURCE_SOURCE_DATA = "source_data"
 
-EXTRACTION_CONFIG_FILENAME = "extraction_config.json"
-EXTRACTION_CONFIG_PATTERN = "extraction_config_*.json"
 FEATURES_FILE_PATTERN = "features_*.tsv"
 STATS_FILE_PATTERNS = ("*.tsv", "*.npz", "*.csv", "*.json")
 
@@ -475,67 +473,6 @@ def _collect_available_time_windows(
         for group, group_windows in sorted(windows_by_group.items())
         if group_windows
     }
-
-
-def _get_available_time_windows(features_dir: Path, config: Any, feature_group: Optional[str] = None) -> List[str]:
-    """Extract available time windows by scanning window-specific feature files and column names.
-    
-    Detects windows from:
-    1. Filenames matching pattern: features/{category}/features_{category}_{window}.{tsv,parquet}
-    2. Column names in feature files using NamingSchema (e.g., itpc_plateau_alpha_ch_Fz_val)
-    
-    Args:
-        features_dir: Directory containing feature files
-        config: Configuration object
-        feature_group: Optional feature group to filter by (e.g., "itpc", "power", "connectivity")
-                      If provided, only returns windows/segments for this feature group.
-    """
-    if not features_dir.exists():
-        return []
-
-    windows = set()
-    
-    # Method 1: Check window-specific files (both .tsv and .parquet) in all subdirectories
-    for ext in ["tsv", "parquet"]:
-        for fpath in features_dir.rglob(f"*/features_*.{ext}"):
-            category = fpath.parent.name
-            stem = fpath.stem
-            prefix = f"features_{category}_"
-            
-            if stem.startswith(prefix):
-                window = stem[len(prefix):]
-                if window:
-                    # If filtering by feature group, check if category matches
-                    if feature_group is None or category == feature_group:
-                        windows.add(window)
-    
-    # Method 2: Scan feature files and extract segments from column names
-    from eeg_pipeline.domain.features.naming import NamingSchema
-    import pandas as pd
-    import pyarrow.parquet as pq
-    
-    for fpath in features_dir.rglob("features_*"):
-        # Read only column names, not full data
-        if fpath.suffix.lower() == ".parquet":
-            parquet_file = pq.ParquetFile(fpath)
-            columns = parquet_file.schema_arrow.names
-        else:
-            # For TSV, read just the header
-            df = pd.read_csv(fpath, sep="\t", nrows=0)
-            columns = df.columns.tolist()
-        
-        # Extract segments from column names
-        for col in columns:
-            parsed = NamingSchema.parse(str(col))
-            if parsed.get("valid"):
-                # If filtering by feature group, check if group matches
-                if feature_group is not None and parsed.get("group") != feature_group:
-                    continue
-                segment = parsed.get("segment")
-                if segment:
-                    windows.add(str(segment))
-
-    return sorted(windows)
 
 
 def _get_available_event_columns(bids_root: Path, subject_id: str, task: str) -> List[str]:

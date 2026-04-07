@@ -434,7 +434,7 @@ class ClassificationResult:
         else:
             rec["balanced_accuracy"] = float(balanced_accuracy_score(y_true, y_pred))
         cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-        tn, fp, fn, tp = cm.ravel()
+        tn, fp, fn, _tp = cm.ravel()
         rec["specificity"] = float(tn / (tn + fp)) if (tn + fp) > 0 else np.nan
         if y_prob is not None and len(np.unique(y_true)) == 2:
             try:

@@ -20,10 +20,21 @@ Installation
 
    .. code-block:: bash
 
-      source .venv311/bin/activate     # macOS / Linux
-      .venv311\Scripts\activate        # Windows
+      source .venv/bin/activate
+
+   .. code-block:: powershell
+
+      .venv\Scripts\Activate.ps1
 
    Then reinstall if needed: ``pip install -e ".[dev,ml]"``.
+
+   Windows and macOS/Linux use different activation paths:
+
+   - macOS/Linux: ``source .venv/bin/activate``
+   - Windows: ``.venv\Scripts\Activate.ps1``
+
+   The project requires Python ``3.11+``, but it does not require exactly
+   ``3.11``. Any supported interpreter version is fine.
 
 .. dropdown:: PyTorch install fails.
    :animate: fade-in
@@ -52,6 +63,11 @@ Installation
       cd eeg_pipeline/cli/tui
       go mod download
       go build -o eeg-tui.exe .
+
+   Launch the TUI with the platform-specific binary:
+
+   - macOS/Linux: ``./eeg-tui``
+   - Windows PowerShell: ``.\eeg-tui.exe``
 
 ----
 

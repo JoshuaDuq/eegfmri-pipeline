@@ -112,9 +112,12 @@ def _compute_roi_waveform_statistics(
     
     n_trials = len(channel_averaged)
     mean_waveform = np.mean(channel_averaged, axis=0) * _MICROVOLTS_PER_VOLT
-    sem_waveform = (
-        np.std(channel_averaged, axis=0) / np.sqrt(n_trials)
-    ) * _MICROVOLTS_PER_VOLT
+    if n_trials > 1:
+        sem_waveform = (
+            np.std(channel_averaged, axis=0, ddof=1) / np.sqrt(n_trials)
+        ) * _MICROVOLTS_PER_VOLT
+    else:
+        sem_waveform = np.zeros_like(mean_waveform)
     
     return mean_waveform, sem_waveform
 

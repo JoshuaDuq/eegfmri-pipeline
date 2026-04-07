@@ -412,7 +412,7 @@ def _build_scatter_covariates(
             )
             controls.append("predictor")
         else:
-            pred_design, cov_names, _meta = build_predictor_rcs_design(
+            pred_design, _cov_names, _meta = build_predictor_rcs_design(
                 predictor_series,
                 config=config,
                 key_prefix="behavior_analysis.regression.predictor_spline",
@@ -608,7 +608,6 @@ def _generate_scatter_plot(
         target_vals=y_plot,
         roi=location,
         band=band,
-        band_title=band.capitalize(),
         band_color=band_color,
         metric=metric,
         target_type=target_col,
@@ -736,7 +735,7 @@ def plot_behavior_scatter(
         _,
         _,
         _,
-        info,
+        _,
         _,
         _,
         _,

@@ -2796,7 +2796,7 @@ def _compute_directed_connectivity_epoch(
     freqs = np.linspace(fmin, fmax, n_freqs)
     
     if "psi" in methods:
-        csd, freqs_csd = _compute_cross_spectrum(
+        csd, _freqs_csd = _compute_cross_spectrum(
             data[np.newaxis, :, :], sfreq, fmin, fmax
         )
         if csd.size > 0:

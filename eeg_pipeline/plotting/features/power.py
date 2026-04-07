@@ -30,6 +30,7 @@ from eeg_pipeline.plotting.features.roi import (
     get_roi_channels,
     extract_channels_from_columns,
 )
+from eeg_pipeline.plotting.features.utils import _t_critical_95
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_and_crop,
     extract_trial_spectral_profiles,
@@ -48,13 +49,7 @@ logger = logging.getLogger(__name__)
 FDR_ALPHA_DEFAULT = 0.05
 MIN_TRIALS_FOR_STATISTICS = 3
 MIN_CHANNELS_FOR_TOPO = 3
-HEATMAP_TEXT_THRESHOLD = 200
-MIN_TRIALS_FOR_VARIABILITY = 5
 MIN_EPOCHS_FOR_SEM = 2
-BAR_LABEL_OFFSET = 0.02
-HISTOGRAM_BINS = 15
-MIN_FONT_SIZE = 6
-MAX_FONT_SIZE = 10
 HEATMAP_EFFECT_ANNOTATION_THRESHOLD = 40
 TOPO_MASK_MARKER_SIZE = 4.0
 TIMECOURSE_BASELINE_MODE = "ratio"
@@ -1632,7 +1627,9 @@ def _plot_column_comparison(
                 mean_value = float(np.nanmean(values))
                 ci_half_width = 0.0
                 if len(values) > 1:
-                    ci_half_width = 1.96 * float(np.nanstd(values, ddof=1) / np.sqrt(len(values)))
+                    ci_half_width = _t_critical_95(len(values)) * float(
+                        np.nanstd(values, ddof=1) / np.sqrt(len(values))
+                    )
                 ax.errorbar(
                     [box_center],
                     [mean_value],
@@ -2215,33 +2212,6 @@ def plot_cross_frequency_power_correlation(
     return saved_files
 
 
-def _setup_subplot_grid(n_items: int, n_cols: int = 2, config: Any = None) -> Tuple[plt.Figure, List[plt.Axes]]:
-    """Create a subplot grid for multiple plots.
-    
-    Args:
-        n_items: Number of subplots needed
-        n_cols: Number of columns (default: 2)
-        config: Configuration object
-    
-    Returns:
-        Tuple of (figure, list of axes)
-    """
-    plot_cfg = get_plot_config(config)
-    n_rows = (n_items + n_cols - 1) // n_cols
-    width_per_col = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_col", 6.0))
-    height_per_row = float(plot_cfg.plot_type_configs.get("power", {}).get("height_per_row", 4.0))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(width_per_col * n_cols, height_per_row * n_rows))
-    
-    if n_items == 1:
-        axes = [axes]
-    elif n_rows == 1:
-        axes = axes.reshape(1, -1)
-    else:
-        axes = axes.flatten()
-    
-    return fig, axes
-
-
 def _validate_epochs_tfr(tfr: Any, function_name: str, logger: logging.Logger) -> bool:
     """Validate that TFR is EpochsTFR (4D) and raise if AverageTFR (3D).
     
@@ -2306,32 +2276,8 @@ def _get_plotting_tfr_baseline_window(config: Any) -> tuple[float, float]:
     return float(baseline[0]), float(baseline[1])
 
 
-def _crop_tfr_to_active(tfr: Any, active_window: List[float], logger: logging.Logger) -> Optional[Any]:
-    """Crop TFR to active window.
-    
-    Args:
-        tfr: TFR object to crop
-        active_window: List of [start, end] times
-        logger: Logger instance
-    
-    Returns:
-        Cropped TFR or None if window is invalid
-    """
-    times = np.asarray(tfr.times)
-    active_start = float(active_window[0])
-    active_end = float(active_window[1])
-    tmin = max(times.min(), active_start)
-    tmax = min(times.max(), active_end)
-    
-    if tmax <= tmin:
-        logger.warning("Invalid active window; skipping PSD")
-        return None
-    
-    return tfr.copy().crop(tmin, tmax)
-
-
 def _compute_mean_ci(values: np.ndarray) -> Tuple[float, float]:
-    """Return the mean and 95% CI half-width for finite values."""
+    """Return the mean and 95% t-interval half-width for finite values."""
     finite_values = np.asarray(values, dtype=float)
     finite_values = finite_values[np.isfinite(finite_values)]
     if finite_values.size == 0:
@@ -2340,7 +2286,7 @@ def _compute_mean_ci(values: np.ndarray) -> Tuple[float, float]:
     if finite_values.size < 2:
         return mean_value, 0.0
     sem = float(np.nanstd(finite_values, ddof=1) / np.sqrt(finite_values.size))
-    return mean_value, 1.96 * sem
+    return mean_value, _t_critical_95(finite_values.size) * sem
 
 
 def _compute_window_mean_series(
@@ -2365,86 +2311,6 @@ def _compute_window_mean_series(
         raise ValueError(f"{context} window {window!r} does not overlap the plotted time axis.")
 
     return np.nanmean(values[:, window_mask], axis=1)
-
-
-def _draw_active_window_summary_inset(
-    ax: Any,
-    *,
-    summary_by_label: Dict[str, np.ndarray],
-    condition_labels: List[str],
-    condition_color_map: Dict[str, Any],
-    config: Any,
-) -> None:
-    """Draw a compact active-window summary inset with raw values and mean ± CI."""
-    plotted_labels = [label for label in condition_labels if label in summary_by_label]
-    if not plotted_labels:
-        return
-
-    inset_ax = ax.inset_axes([0.68, 0.56, 0.28, 0.32])
-    inset_ax.set_facecolor("white")
-    inset_ax.axhline(1.0, color="0.55", linestyle="--", linewidth=0.8, alpha=0.7, zorder=0)
-
-    if len(plotted_labels) == 2:
-        values_1 = np.asarray(summary_by_label[plotted_labels[0]], dtype=float)
-        values_2 = np.asarray(summary_by_label[plotted_labels[1]], dtype=float)
-        if values_1.shape == values_2.shape:
-            finite_mask = np.isfinite(values_1) & np.isfinite(values_2)
-            if np.any(finite_mask):
-                inset_ax.plot(
-                    [0.0, 1.0],
-                    np.vstack([values_1[finite_mask], values_2[finite_mask]]),
-                    color="0.78",
-                    linewidth=0.55,
-                    alpha=0.55,
-                    zorder=1,
-                )
-
-    for index, label in enumerate(plotted_labels):
-        values = np.asarray(summary_by_label[label], dtype=float)
-        finite_values = values[np.isfinite(values)]
-        if finite_values.size == 0:
-            continue
-
-        color = condition_color_map[label]
-        rng = np.random.default_rng(900 + index)
-        jitter = rng.uniform(index - 0.08, index + 0.08, size=finite_values.size)
-        inset_ax.scatter(
-            jitter,
-            finite_values,
-            s=10,
-            color=color,
-            alpha=0.65,
-            linewidths=0,
-            zorder=3,
-        )
-
-        mean_value, ci_half_width = _compute_mean_ci(finite_values)
-        inset_ax.errorbar(
-            [index],
-            [mean_value],
-            yerr=[[ci_half_width], [ci_half_width]],
-            fmt="o",
-            color="black",
-            markerfacecolor="white",
-            markersize=4.2,
-            capsize=2.0,
-            linewidth=0.9,
-            zorder=5,
-        )
-
-    plot_cfg = get_plot_config(config)
-    inset_labels = [
-        textwrap.fill(_format_condition_display_label(label, config), width=10)
-        for label in plotted_labels
-    ]
-    inset_ax.set_xlim(-0.35, max(len(plotted_labels) - 0.35, 0.35))
-    inset_ax.set_xticks(list(range(len(plotted_labels))))
-    inset_ax.set_xticklabels(inset_labels, fontsize=max(plot_cfg.font.small - 1, 6))
-    inset_ax.tick_params(axis="y", labelsize=max(plot_cfg.font.small - 1, 6))
-    inset_ax.set_title("Active window", fontsize=plot_cfg.font.small, pad=3)
-    inset_ax.yaxis.grid(True, alpha=0.15, linewidth=0.5)
-    inset_ax.xaxis.grid(False)
-    sns.despine(ax=inset_ax, trim=True)
 
 
 def _compute_paired_effect_matrix(
@@ -2560,37 +2426,6 @@ def _validate_predictor_data(
     return temps
 
 
-def _get_band_frequency_mask(tfr: Any, band: str, config: Any, logger: logging.Logger) -> Optional[np.ndarray]:
-    """Get frequency mask for a given band.
-    
-    Args:
-        tfr: TFR object
-        band: Band name (e.g., 'alpha')
-        config: Configuration object
-        logger: Logger instance
-    
-    Returns:
-        Boolean mask array or None if band not found
-    """
-    if config is None:
-        logger.warning("Config is required to get band frequency mask")
-        return None
-        
-    freq_bands = get_frequency_bands(config)
-    if not freq_bands or band not in freq_bands:
-        logger.warning(f"Band '{band}' not found in configuration")
-        return None
-        
-    fmin, fmax = freq_bands[band]
-    mask = (tfr.freqs >= fmin) & (tfr.freqs <= fmax)
-    
-    if not mask.any():
-        logger.warning(f"No frequencies found for band '{band}' ({fmin}-{fmax} Hz)")
-        return None
-        
-    return mask
-
-
 def _summarize_trial_spectral_profiles(
     tfr_epochs: Any,
     *,
@@ -2615,8 +2450,9 @@ def _summarize_trial_spectral_profiles(
     mean_profile = np.nanmean(trial_profiles, axis=0)
     if trial_profiles.shape[0] >= MIN_EPOCHS_FOR_SEM:
         sem_profile = np.nanstd(trial_profiles, axis=0, ddof=1) / np.sqrt(trial_profiles.shape[0])
-        ci_lower = mean_profile - 1.96 * sem_profile
-        ci_upper = mean_profile + 1.96 * sem_profile
+        ci_half_width = _t_critical_95(trial_profiles.shape[0]) * sem_profile
+        ci_lower = mean_profile - ci_half_width
+        ci_upper = mean_profile + ci_half_width
     else:
         sem_profile = np.zeros_like(mean_profile)
         ci_lower = mean_profile
@@ -2802,7 +2638,7 @@ def _plot_psd_by_conditions(
     footer_text = (
         f"Subject: {subject} | Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}] s | "
         f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}] s | "
-        "Descriptive within-subject mean ± 95% CI across trials"
+        "Descriptive within-subject mean ± 95% t-interval across trials"
     )
     output_path = save_dir / f'sub-{subject}_power_spectral_density_by_condition{roi_suffix}'
     save_fig(
@@ -2821,199 +2657,6 @@ def _plot_psd_by_conditions(
         roi_suffix,
     )
     return True
-
-
-def _plot_psd_by_predictor(
-    tfr_epochs: Any,
-    temps: pd.Series,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> bool:
-    """Plot PSD by predictor condition with uncertainty visualization and frequency band annotations.
-    
-    Applies baseline normalization at the trial level, then averages
-    channel/time-collapsed spectral profiles across trials.
-    Shows descriptive mean ± SEM with shaded confidence intervals.
-    Includes frequency band annotations.
-    
-    Args:
-        tfr_epochs: EpochsTFR object
-        preds: Series of predictor values
-        subject: Subject identifier
-        save_dir: Directory to save plots
-        logger: Logger instance
-        config: Configuration object
-    
-    Returns:
-        True if plot was created, False otherwise
-    """
-    MIN_TEMPERATURES_FOR_COMPARISON = 2
-    unique_temps = sorted(temps.dropna().unique())
-    if len(unique_temps) < MIN_TEMPERATURES_FOR_COMPARISON:
-        return False
-    
-    plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
-    fig, ax = plt.subplots(figsize=fig_size)
-    fig.patch.set_facecolor("white")
-    _style_publication_axis(ax)
-    temp_palette = sns.color_palette("coolwarm", n_colors=len(unique_temps))
-    
-    active_window = _get_active_window(config)
-    tfr_baseline = _get_plotting_tfr_baseline_window(config)
-    
-    freq_bands = get_frequency_bands(config)
-    features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
-    
-    psd_data_by_temp = []
-    
-    for idx, temp in enumerate(unique_temps):
-        temp_mask = (temps == temp).to_numpy()
-        n_trials_temp = int(temp_mask.sum())
-        if n_trials_temp < 1:
-            continue
-        
-        tfr_temp = tfr_epochs[temp_mask]
-        if len(tfr_temp) == 0:
-            continue
-        spectral_summary = _summarize_trial_spectral_profiles(
-            tfr_temp,
-            active_window=(float(active_window[0]), float(active_window[1])),
-            baseline_window=tfr_baseline,
-            logger=logger,
-        )
-        if spectral_summary is None:
-            continue
-        
-        psd_data_by_temp.append({
-            'label': f'{temp:.0f}°C',
-            'freqs': spectral_summary["freqs"],
-            'mean': spectral_summary["mean"],
-            'sem': spectral_summary["sem"],
-            'ci_lower': spectral_summary["ci_lower"],
-            'ci_upper': spectral_summary["ci_upper"],
-            'n_trials': n_trials_temp,
-            'color': temp_palette[idx],
-        })
-    
-    if not psd_data_by_temp:
-        plt.close(fig)
-        return False
-    
-    for psd_data in psd_data_by_temp:
-        has_uncertainty = np.any(psd_data['sem'] > 0)
-        
-        if has_uncertainty:
-            ax.fill_between(
-                psd_data['freqs'],
-                psd_data['ci_lower'],
-                psd_data['ci_upper'],
-                color=psd_data['color'],
-                alpha=0.15,
-                linewidth=0,
-                zorder=1,
-            )
-        
-        ax.plot(
-            psd_data['freqs'],
-            psd_data['mean'],
-            color=psd_data['color'],
-            linewidth=2.0,
-            label=f"{psd_data['label']} (n={psd_data['n_trials']})",
-            zorder=3,
-        )
-
-    _annotate_frequency_bands(
-        ax,
-        features_freq_bands,
-        float(psd_data_by_temp[0]['freqs'].max()),
-        config,
-    )
-    
-    ax.axhline(0, color="0.4", linewidth=1.0, alpha=0.5, linestyle='--', zorder=2)
-    ax.set_xscale('log')
-    import matplotlib.ticker as ticker
-    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda y, _: '{:g}'.format(y)))
-    ax.set_xticks([2, 4, 8, 16, 32, 64])
-    ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
-    ax.set_ylabel(r"$\log_{10}$(power / baseline)", fontsize=plot_cfg.font.ylabel, fontweight='medium')
-    ax.legend(loc='best', fontsize=plot_cfg.font.medium, frameon=False, handlelength=1.5)
-    ax.grid(True, alpha=0.25, linestyle='-', linewidth=0.5, zorder=0)
-    ax.tick_params(labelsize=plot_cfg.font.small)
-    
-    footer_text = (
-        f"Subject: {subject} | Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}] s | "
-        f"Window: [{active_window[0]:.1f}, {active_window[1]:.1f}] s | "
-        "Descriptive within-subject mean ± 95% CI across trials"
-    )
-    output_path = save_dir / f'sub-{subject}_power_spectral_density_by_predictor'
-    save_fig(
-        fig,
-        output_path,
-        footer=footer_text,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-        tight_layout_rect=(0, 0.04, 1, 0.98),
-        config=config,
-    )
-    logger.debug("Saved PSD by predictor (Induced) with uncertainty visualization")
-    return True
-
-
-def _plot_psd_overall(
-    tfr_avg_win: Any,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> None:
-    """Plot overall PSD (internal helper).
-    
-    Args:
-        tfr_avg_win: AverageTFR object (already averaged, baselined, and cropped)
-        subject: Subject identifier
-        save_dir: Directory to save plots
-        logger: Logger instance
-        config: Configuration object
-    """
-    psd_avg = tfr_avg_win.data.mean(axis=(0, 2))
-    
-    fig, ax = plt.subplots(figsize=(4.0, 2.5), constrained_layout=True)
-    fig.patch.set_facecolor("white")
-    _style_publication_axis(ax)
-    ax.plot(tfr_avg_win.freqs, psd_avg, color="0.2", linewidth=1.0)
-
-    ax.axhline(0, color="0.7", linewidth=0.5, alpha=0.6)
-    
-    freq_bands = get_frequency_bands(config)
-    features_freq_bands = {name: tuple(freqs) for name, freqs in freq_bands.items()}
-
-    _annotate_frequency_bands(
-        ax,
-        features_freq_bands,
-        float(tfr_avg_win.freqs.max()),
-        config,
-    )
-    
-    plot_cfg = get_plot_config(config)
-    ax.set_xscale('log')
-    import matplotlib.ticker as ticker
-    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda y, _: '{:g}'.format(y)))
-    ax.set_xticks([2, 4, 8, 16, 32, 64])
-    ax.set_xlabel("Frequency (Hz)", fontsize=plot_cfg.font.medium)
-    ax.set_ylabel(r"$\log_{10}$(power/baseline)", fontsize=plot_cfg.font.medium)
-    ax.tick_params(labelsize=plot_cfg.font.small)
-    sns.despine(ax=ax, trim=True)
-    
-    output_path = save_dir / f'sub-{subject}_power_spectral_density'
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, config=config)
-    plt.close(fig)
-    logger.debug("Saved PSD (Induced)")
 
 
 def plot_power_spectral_density(
@@ -4679,8 +4322,9 @@ def plot_group_band_power_evolution(
 
             mean_trace = np.nanmean(subject_matrix, axis=0)
             sem_trace = np.nanstd(subject_matrix, axis=0, ddof=1) / np.sqrt(subject_matrix.shape[0])
-            ci_lower = mean_trace - 1.96 * sem_trace
-            ci_upper = mean_trace + 1.96 * sem_trace
+            ci_half_width = _t_critical_95(subject_matrix.shape[0]) * sem_trace
+            ci_lower = mean_trace - ci_half_width
+            ci_upper = mean_trace + ci_half_width
 
             ax.plot(
                 times,
@@ -4748,7 +4392,7 @@ def plot_group_band_power_evolution(
             f"Group: {subject} | n={subject_count} subjects | "
             f"Baseline: [{baseline_window[0]:.2f}, {baseline_window[1]:.2f}] s | "
             f"Active window: [{active_window[0]:.2f}, {active_window[1]:.2f}] s | "
-            "Thin lines: subject means | thick line: between-subject mean ± 95% CI"
+            "Thin lines: subject means | thick line: between-subject mean ± 95% t-interval"
         )
         save_fig(
             fig,
@@ -4834,8 +4478,9 @@ def plot_group_band_power_effect_evolution(
 
         mean_trace = np.nanmean(effect_matrix, axis=0)
         sem_trace = np.nanstd(effect_matrix, axis=0, ddof=1) / np.sqrt(effect_matrix.shape[0])
-        ci_lower = mean_trace - 1.96 * sem_trace
-        ci_upper = mean_trace + 1.96 * sem_trace
+        ci_half_width = _t_critical_95(effect_matrix.shape[0]) * sem_trace
+        ci_lower = mean_trace - ci_half_width
+        ci_upper = mean_trace + ci_half_width
 
         display_label_1 = _format_condition_display_label(label1, config)
         display_label_2 = _format_condition_display_label(label2, config)
@@ -4905,7 +4550,7 @@ def plot_group_band_power_effect_evolution(
             f"Effect: {display_label_2} - {display_label_1} | "
             f"Baseline: [{baseline_window[0]:.2f}, {baseline_window[1]:.2f}] s | "
             f"Active window: [{active_window[0]:.2f}, {active_window[1]:.2f}] s | "
-            "Thin lines: paired subject effects | thick line: mean paired effect ± 95% CI | "
+            "Thin lines: paired subject effects | thick line: mean paired effect ± 95% t-interval | "
             "Inset: active-window paired effects"
         )
         save_fig(
@@ -4937,7 +4582,7 @@ def plot_band_power_evolution(
     roi_suffix: str = "",
     roi_name: Optional[str] = None,
 ) -> bool:
-    """Plot continuous time-resolved band power trace with 95% CI.
+    """Plot continuous time-resolved band power trace with 95% t-interval.
     
     Shows the Time vs Power trajectory per frequency band to better 
     illustrate the onset/offset of ERS/ERD dynamics relative to events.
@@ -5013,11 +4658,12 @@ def plot_band_power_evolution(
             band_power_trials = psd_per_trial_roi[:, fmask, :].mean(axis=1)
             band_mean = band_power_trials.mean(axis=0)
             band_sem = band_power_trials.std(axis=0, ddof=1) / np.sqrt(len(band_power_trials))
+            ci_half_width = _t_critical_95(len(band_power_trials)) * band_sem
             band_series[band_name][label] = {
                 "times": times,
                 "mean": band_mean,
-                "ci_lower": band_mean - 1.96 * band_sem,
-                "ci_upper": band_mean + 1.96 * band_sem,
+                "ci_lower": band_mean - ci_half_width,
+                "ci_upper": band_mean + ci_half_width,
                 "n_trials": n_trials_cond,
             }
 
@@ -5025,7 +4671,7 @@ def plot_band_power_evolution(
     footer = (
         f"Subject: {subject} | Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}] s | "
         f"Active window: [{active_window[0]:.2f}, {active_window[1]:.2f}] s | "
-        "Within-subject mean ± 95% CI"
+        "Within-subject mean ± 95% t-interval"
     )
 
     for band_name in freq_bands.keys():

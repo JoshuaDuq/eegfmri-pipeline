@@ -348,7 +348,13 @@ def cluster_test_two_sample(
     group_a_eeg = np.asarray(group_a)[:, eeg_picks]
     group_b_eeg = np.asarray(group_b)[:, eeg_picks]
 
-    if paired and group_a_eeg.shape[0] == group_b_eeg.shape[0]:
+    if paired and group_a_eeg.shape[0] != group_b_eeg.shape[0]:
+        raise ValueError(
+            "paired cluster test requires equal sample counts "
+            f"(got n_a={group_a_eeg.shape[0]}, n_b={group_b_eeg.shape[0]})."
+        )
+
+    if paired:
         differences = group_a_eeg - group_b_eeg
         t_stat, clusters, pvals, _ = permutation_cluster_1samp_test(
             differences,

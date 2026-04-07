@@ -183,20 +183,6 @@ def _align_groups_to_dataframe(
     return pd.Series(groups_array, index=x_index)
 
 
-def _subset_groups_after_dropna(
-    groups_series: Optional[pd.Series],
-    df_index: pd.Index,
-) -> Optional[np.ndarray]:
-    """Subset groups to match non-NaN rows in dataframe."""
-    if groups_series is None:
-        return None
-    
-    groups_subset = groups_series.reindex(df_index)
-    if groups_subset.isna().any():
-        return None
-    return groups_subset.to_numpy()
-
-
 def _prepare_ranked_data(
     df: pd.DataFrame,
     z_columns: pd.Index,

@@ -6,12 +6,6 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.plotting.features.utils import (
-    get_band_colors,
-    get_band_names,
-    get_condition_colors,
-)
-
 # Regex patterns for extracting channel information from column names
 _CHANNEL_PATTERN_WITH_SEPARATOR = re.compile(r"_ch_([A-Za-z0-9]+)_")
 _CHANNEL_PATTERN_END_OF_COLUMN = re.compile(r"_ch_([A-Za-z0-9]+)")
@@ -118,21 +112,6 @@ def aggregate_by_roi(
         return pd.Series([np.nan] * len(features_df), index=features_df.index)
 
     return features_df[matching_columns].mean(axis=1)
-
-
-def _get_bands_and_palettes(config: Any) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
-    """Get bands and color palettes from config.
-
-    Args:
-        config: Configuration object.
-
-    Returns:
-        Tuple of (band_names, band_colors, condition_colors).
-    """
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
-    condition_colors = get_condition_colors(config)
-    return bands, band_colors, condition_colors
 
 
 def extract_channel_pairs_from_columns(columns: List[str]) -> List[Tuple[str, str]]:

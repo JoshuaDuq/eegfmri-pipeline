@@ -35,6 +35,7 @@ from eeg_pipeline.plotting.features.context import (
     VisualizationManager,
     VisualizationRegistry,
 )
+from eeg_pipeline.plotting.features.utils import _t_critical_95
 from eeg_pipeline.domain.features.naming import NamingSchema
 
 
@@ -2586,8 +2587,9 @@ def visualize_power_spectral_density_for_group(
 
             if stacked.shape[0] >= 2:
                 sem_psd = np.nanstd(stacked, axis=0, ddof=1) / np.sqrt(stacked.shape[0])
-                ci_lower = mean_psd - 1.96 * sem_psd
-                ci_upper = mean_psd + 1.96 * sem_psd
+                ci_half_width = _t_critical_95(stacked.shape[0]) * sem_psd
+                ci_lower = mean_psd - ci_half_width
+                ci_upper = mean_psd + ci_half_width
                 ax.fill_between(freqs, ci_lower, ci_upper, color=color, alpha=0.18, linewidth=0, zorder=2)
 
             ax.plot(
@@ -2659,7 +2661,7 @@ def visualize_power_spectral_density_for_group(
                 f"active window=[{active_window[0]:.3f}, {active_window[1]:.3f}] s | "
                 f"baseline=[{baseline_window[0]:.3f}, {baseline_window[1]:.3f}] s | "
                 f"band sig={n_significant_bands}/{len(frequency_bands)} | "
-                "Thin lines: subject means | thick line: between-subject mean ± 95% CI"
+                "Thin lines: subject means | thick line: between-subject mean ± 95% t-interval"
             ),
             formats=plot_cfg.formats,
             dpi=plot_cfg.dpi,

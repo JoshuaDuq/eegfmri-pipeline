@@ -1074,7 +1074,7 @@ def _run_tf_correlations_core(
     rng = np.random.default_rng(int(get_config_value(config, "project.random_state", 42)))
     cov_mat = cov_df.to_numpy() if cov_df is not None and not cov_df.empty else None
 
-    c_labels, c_pvals, c_sig, c_recs, perm_masses, c_thresh = (
+    c_labels, c_pvals, c_sig, _c_recs, _perm_masses, c_thresh = (
         np.zeros_like(corrs, dtype=int),
         np.full_like(corrs, np.nan),
         np.zeros_like(corrs, dtype=bool),
@@ -1085,7 +1085,7 @@ def _run_tf_correlations_core(
     if n_perm > 0:
         run_col = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
         groups = events[run_col].to_numpy() if run_col and events is not None and run_col in events.columns else None
-        c_labels, c_pvals, c_sig, c_recs, perm_masses, c_thresh = compute_cluster_correction_2d(
+        c_labels, c_pvals, c_sig, _c_recs, _perm_masses, c_thresh = compute_cluster_correction_2d(
             correlations=cluster_stat,
             p_values=pvals,
             bin_data=bin_data,

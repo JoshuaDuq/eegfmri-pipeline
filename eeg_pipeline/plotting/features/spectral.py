@@ -67,13 +67,6 @@ class SpectralColumn:
     stat: str
 
 
-def _create_empty_plot(message: str) -> plt.Figure:
-    """Create an empty plot with a centered message."""
-    fig, ax = plt.subplots()
-    ax.text(0.5, 0.5, message, ha="center", va="center")
-    return fig
-
-
 def _parse_spectral_column(col: str) -> Optional[SpectralColumn]:
     """Parse a spectral column name into structured components."""
     parsed = NamingSchema.parse(str(col))
@@ -103,35 +96,6 @@ def _select_segment(segments: List[str], preferred: str = "active") -> Optional[
     if preferred in segments:
         return preferred
     return segments[0]
-
-
-def _select_columns(
-    entries: List[SpectralColumn],
-    *,
-    segment: str,
-    band: str,
-    stat_preference: List[str],
-    scope_preference: List[str],
-) -> Tuple[List[str], Optional[str], Optional[str]]:
-    for scope in scope_preference:
-        for stat in stat_preference:
-            cols = [
-                e.name
-                for e in entries
-                if e.segment == segment and e.band == band and e.scope == scope and e.stat == stat
-            ]
-            if cols:
-                return cols, scope, stat
-    return [], None, None
-
-
-def _get_metric_values(features_df: pd.DataFrame, columns: List[str]) -> np.ndarray:
-    """Extract numeric values from feature columns, averaging if multiple."""
-    if len(columns) == 1:
-        series = pd.to_numeric(features_df[columns[0]], errors="coerce")
-    else:
-        series = features_df[columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-    return series.dropna().values
 
 
 def _format_metric_label(metric: str) -> str:

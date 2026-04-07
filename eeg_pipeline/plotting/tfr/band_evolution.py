@@ -21,10 +21,10 @@ import pandas as pd
 
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
-from eeg_pipeline.plotting.io.figures import save_fig
+from eeg_pipeline.plotting.io.figures import logratio_to_pct, save_fig
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 
-from ...utils.analysis.tfr import get_bands_for_tfr
+from ...utils.analysis.tfr import apply_baseline_and_crop, get_bands_for_tfr
 from ..config import get_plot_config
 
 
@@ -136,7 +136,10 @@ def _compute_mean_sem(power_data: np.ndarray, n_trials: int) -> Tuple[np.ndarray
         sem_power: Standard error of the mean (n_times,)
     """
     mean_power = np.nanmean(power_data, axis=0)
-    sem_power = np.nanstd(power_data, axis=0) / np.sqrt(n_trials)
+    if n_trials > 1:
+        sem_power = np.nanstd(power_data, axis=0, ddof=1) / np.sqrt(n_trials)
+    else:
+        sem_power = np.zeros_like(mean_power)
     return mean_power, sem_power
 
 
@@ -339,19 +342,25 @@ def _create_condition_masks(
     return masks, label1, label2
 
 
-def _apply_baseline(
-    power: np.ndarray,
-    times: np.ndarray,
+def _prepare_baselined_tfr(
+    tfr: mne.time_frequency.EpochsTFR,
     baseline: Tuple[float, float],
-) -> np.ndarray:
-    """Apply baseline correction (percent change from baseline)."""
-    baseline_mask = (times >= baseline[0]) & (times <= baseline[1])
-    if not np.any(baseline_mask):
-        return power
-    
-    baseline_mean = power[:, baseline_mask].mean(axis=1, keepdims=True)
-    baseline_mean = np.where(baseline_mean > 0, baseline_mean, np.nan)
-    return (power - baseline_mean) / baseline_mean * 100
+    logger: Optional[logging.Logger] = None,
+) -> mne.time_frequency.EpochsTFR:
+    """Return a copy baseline-corrected with the shared TFR logratio transform."""
+    baselined_tfr = tfr.copy()
+    apply_baseline_and_crop(
+        baselined_tfr,
+        baseline=baseline,
+        mode="logratio",
+        logger=logger,
+    )
+    return baselined_tfr
+
+
+def _convert_logratio_power_to_percent(power: np.ndarray) -> np.ndarray:
+    """Convert logratio band-power traces to percent-change display units."""
+    return np.asarray(logratio_to_pct(power), dtype=float)
 
 
 # =============================================================================
@@ -398,8 +407,9 @@ def plot_band_power_evolution_all_conditions(
 
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
+    baselined_tfr = _prepare_baselined_tfr(tfr, baseline, logger)
 
-    bands = _get_bands_from_config(tfr, config)
+    bands = _get_bands_from_config(baselined_tfr, config)
     from eeg_pipeline.utils.config.loader import get_frequency_bands
     bands_dict = get_frequency_bands(config)
     n_bands = len(bands)
@@ -407,11 +417,11 @@ def plot_band_power_evolution_all_conditions(
     fig, axes = plt.subplots(n_bands, n_conds, figsize=(4 * n_conds, 3 * n_bands), squeeze=False)
 
     for i, band in enumerate(bands):
-        times, power = _get_band_power_timecourse(tfr, band, config)
+        times, power = _get_band_power_timecourse(baselined_tfr, band, config)
         if len(times) == 0:
             continue
 
-        power_bl = _apply_baseline(power, times, baseline)
+        power_pct = _convert_logratio_power_to_percent(power)
 
         for j, cond in enumerate(conditions):
             ax = axes[i, j]
@@ -421,7 +431,7 @@ def plot_band_power_evolution_all_conditions(
                 ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
                 continue
 
-            cond_power = power_bl[mask]
+            cond_power = power_pct[mask]
             mean_power, sem_power = _compute_mean_sem(cond_power, mask.sum())
             _plot_mean_sem_with_reference_lines(ax, times, mean_power, sem_power, _get_band_color(band))
 
@@ -507,13 +517,14 @@ def plot_band_power_by_roi(
     masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
+    baselined_tfr = _prepare_baselined_tfr(tfr, baseline, logger)
 
-    available_rois = _get_available_rois(tfr, config)
+    available_rois = _get_available_rois(baselined_tfr, config)
     if not available_rois:
         logger.warning("No ROIs found in TFR channels")
         return saved
 
-    bands = _get_bands_from_config(tfr, config)
+    bands = _get_bands_from_config(baselined_tfr, config)
     from eeg_pipeline.utils.config.loader import get_frequency_bands
     bands_dict = get_frequency_bands(config)
     _get_condition_title_labels(label1, label2)
@@ -533,11 +544,11 @@ def plot_band_power_by_roi(
         fig, axes = plt.subplots(n_bands, n_conds, figsize=(4 * n_conds, 3 * n_bands), squeeze=False)
 
         for i, band in enumerate(bands):
-            times, power = _get_band_power_timecourse(tfr, band, config, roi_indices)
+            times, power = _get_band_power_timecourse(baselined_tfr, band, config, roi_indices)
             if len(times) == 0:
                 continue
 
-            power_bl = _apply_baseline(power, times, baseline)
+            power_pct = _convert_logratio_power_to_percent(power)
 
             for j, cond in enumerate(conditions):
                 ax = axes[i, j]
@@ -547,7 +558,7 @@ def plot_band_power_by_roi(
                     ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
                     continue
 
-                cond_power = power_bl[mask]
+                cond_power = power_pct[mask]
                 mean_power, sem_power = _compute_mean_sem(cond_power, mask.sum())
                 _plot_mean_sem_with_reference_lines(
                     ax, times, mean_power, sem_power, _get_band_color(band), SUBPLOT_LINE_WIDTH
@@ -667,6 +678,7 @@ def plot_condition_comparison_per_band(
     masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
+    baselined_tfr = _prepare_baselined_tfr(tfr, baseline, logger)
 
     has_conditions = "condition_1" in masks and "condition_2" in masks
     
@@ -674,24 +686,24 @@ def plot_condition_comparison_per_band(
         logger.warning("No valid conditions found for comparison plots")
         return saved
     
-    bands = _get_bands_from_config(tfr, config)
+    bands = _get_bands_from_config(baselined_tfr, config)
     from eeg_pipeline.utils.config.loader import get_frequency_bands
     bands_dict = get_frequency_bands(config)
     fig, axes = plt.subplots(1, len(bands), figsize=(3 * len(bands), 3), squeeze=False)
 
     for j, band in enumerate(bands):
-        times, power = _get_band_power_timecourse(tfr, band, config)
+        times, power = _get_band_power_timecourse(baselined_tfr, band, config)
         if len(times) == 0:
             continue
 
-        power_bl = _apply_baseline(power, times, baseline)
+        power_pct = _convert_logratio_power_to_percent(power)
 
         ax = axes[0, j]
         condition_specs = [
             ("condition_2", CONDITION_COLORS["condition_2"], label2),
             ("condition_1", CONDITION_COLORS["condition_1"], label1),
         ]
-        _plot_condition_overlay(ax, times, power_bl, masks, condition_specs)
+        _plot_condition_overlay(ax, times, power_pct, masks, condition_specs)
         band_range = _get_band_range_label(band, bands_dict)
         ax.set_title(f"{band.upper()}\n({band_range})", fontsize=10, fontweight="bold", color=_get_band_color(band))
         if j == 0:
@@ -754,12 +766,13 @@ def plot_roi_condition_comparison(
     masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
+    baselined_tfr = _prepare_baselined_tfr(tfr, baseline, logger)
 
-    bands = _get_bands_from_config(tfr, config)
+    bands = _get_bands_from_config(baselined_tfr, config)
     from eeg_pipeline.utils.config.loader import get_frequency_bands
     bands_dict = get_frequency_bands(config)
     
-    available_rois = _get_available_rois(tfr, config)
+    available_rois = _get_available_rois(baselined_tfr, config)
     if not available_rois:
         return saved
 
@@ -783,19 +796,19 @@ def plot_roi_condition_comparison(
 
         col_idx = 0
         for band in bands:
-            times, power = _get_band_power_timecourse(tfr, band, config, roi_indices)
+            times, power = _get_band_power_timecourse(baselined_tfr, band, config, roi_indices)
             if len(times) == 0:
                 col_idx += 1
                 continue
 
-            power_bl = _apply_baseline(power, times, baseline)
+            power_pct = _convert_logratio_power_to_percent(power)
             
             ax = axes[0, col_idx]
             condition_specs = [
                 ("condition_2", CONDITION_COLORS["condition_2"], label2),
                 ("condition_1", CONDITION_COLORS["condition_1"], label1),
             ]
-            _plot_condition_overlay(ax, times, power_bl, masks, condition_specs)
+            _plot_condition_overlay(ax, times, power_pct, masks, condition_specs)
 
             band_range = _get_band_range_label(band, bands_dict)
             ax.set_title(
@@ -944,18 +957,19 @@ def plot_band_power_summary(
     masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
+    baselined_tfr = _prepare_baselined_tfr(tfr, baseline, logger)
 
-    bands = _get_bands_from_config(tfr, config)
+    bands = _get_bands_from_config(baselined_tfr, config)
     from eeg_pipeline.utils.config.loader import get_frequency_bands
     get_frequency_bands(config)
     summary_data = []
 
     for band in bands:
-        times, power = _get_band_power_timecourse(tfr, band, config)
+        times, power = _get_band_power_timecourse(baselined_tfr, band, config)
         if len(times) == 0:
             continue
 
-        power_bl = _apply_baseline(power, times, baseline)
+        power_pct = _convert_logratio_power_to_percent(power)
 
         active_mask = (times >= active_window[0]) & (times <= active_window[1])
         if not np.any(active_mask):
@@ -965,9 +979,9 @@ def plot_band_power_summary(
             if mask.sum() < MIN_TRIALS_FOR_PLOT:
                 continue
 
-            cond_power = power_bl[mask][:, active_mask]
+            cond_power = power_pct[mask][:, active_mask]
             mean_active = np.nanmean(cond_power)
-            sem_active = np.nanstd(cond_power.mean(axis=1)) / np.sqrt(mask.sum())
+            sem_active = np.nanstd(cond_power.mean(axis=1), ddof=1) / np.sqrt(mask.sum())
 
             summary_data.append(
                 {

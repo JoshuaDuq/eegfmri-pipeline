@@ -248,7 +248,7 @@ def _apply_residual_based_peak_rejection(
     keep_mask = finite_mask.copy()
     max_iterations = 3
     
-    for iteration in range(max_iterations):
+    for _ in range(max_iterations):
         kept_indices = np.flatnonzero(keep_mask)
         if len(kept_indices) < min_fit_points:
             break
@@ -2179,26 +2179,3 @@ def extract_aperiodic_from_precomputed(
         "peak_height": "peak amplitude above aperiodic fit (log10 power residual)",
     }
     return df, list(df.columns), qc_payload
-
-
-def _aggregate_aperiodic_features(
-    data_dict: Dict[str, Any],
-    n_epochs: int,
-    seg_name: str,
-    ch_names: List[str],
-    slopes: np.ndarray,
-    offsets: np.ndarray,
-    spatial_modes: List[str],
-    config: Any,
-) -> None:
-    """Aggregate aperiodic features by spatial mode (legacy function for extract_aperiodic_from_precomputed)."""
-    roi_map = build_roi_map_if_needed(spatial_modes, ch_names, config)
-    metrics = {
-        "slope": ("broadband", "slope", slopes),
-        "exponent": ("broadband", "exponent", (-slopes).copy()),
-        "offset": ("broadband", "offset", offsets),
-    }
-    aggregated = _aggregate_features_by_spatial_mode(
-        metrics, ch_names, seg_name, spatial_modes, roi_map
-    )
-    data_dict.update(aggregated)

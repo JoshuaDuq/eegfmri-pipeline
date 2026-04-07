@@ -24,15 +24,6 @@ def test_build_subject_status_json_uses_window_summary_helper(
         raising=False,
     )
 
-    def fail_if_legacy_window_scan_runs(*args, **kwargs):
-        raise AssertionError("_get_available_time_windows should not be called")
-
-    monkeypatch.setattr(
-        info_helpers,
-        "_get_available_time_windows",
-        fail_if_legacy_window_scan_runs,
-    )
-
     payload = info_helpers._build_subject_status_json(
         discovered_subjects=["0001"],
         epochs_subjects=set(),

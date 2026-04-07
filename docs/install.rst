@@ -43,8 +43,8 @@ macOS / Linux
 
    git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
    cd eegfmri-pipeline
-   python3.11 -m venv .venv311
-   source .venv311/bin/activate
+   python3 -m venv .venv
+   source .venv/bin/activate
    pip install -e ".[dev,ml]"
    eeg-pipeline --help
 
@@ -55,10 +55,21 @@ Windows PowerShell
 
    git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
    cd eegfmri-pipeline
-   py -3.11 -m venv .venv311
-   .venv311\Scripts\Activate.ps1
+   py -m venv .venv
+   .venv\Scripts\Activate.ps1
    pip install -e ".[dev,ml]"
    eeg-pipeline --help
+
+.. note::
+
+   Windows setup is different from macOS/Linux:
+
+   - use PowerShell or ``cmd`` instead of ``source``
+   - create the environment with any ``Python 3.11+`` interpreter
+   - activate from ``.venv\Scripts\Activate.ps1``
+   - the interpreter lives under ``Scripts\python.exe`` rather than ``bin/python``
+   - if multiple Python versions are installed, select one explicitly, for
+     example ``python3.12 -m venv .venv`` or ``py -3.12 -m venv .venv``
 
 .. note::
 
@@ -91,6 +102,9 @@ TUI *(optional)*
          cd eeg_pipeline/cli/tui
          go build -o eeg-tui.exe .
          .\eeg-tui.exe
+
+      Windows uses ``.\eeg-tui.exe``; macOS/Linux uses ``./eeg-tui``.
+      Do not reuse the Unix launch command on Windows.
 
 On first launch, open **Global Setup** (press ``C`` from the main menu) to
 set your task name and data paths. See :doc:`user_guide/tui` for the full reference.

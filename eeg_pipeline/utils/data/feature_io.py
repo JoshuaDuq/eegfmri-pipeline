@@ -55,17 +55,6 @@ def _safe_read_table(
     return read_table(path)
 
 
-def _extract_target_series(target_df: pd.DataFrame, target_path: Path) -> pd.Series:
-    """Extract target series from target dataframe."""
-    if target_df.shape[1] == 1:
-        return pd.to_numeric(target_df.iloc[:, 0], errors="coerce")
-    
-    numeric_cols = target_df.select_dtypes(exclude=["object"]).columns
-    if len(numeric_cols) == 0:
-        raise ValueError(f"No numeric target columns found in {target_path}")
-    return pd.to_numeric(target_df[numeric_cols[0]], errors="coerce")
-
-
 def _preferred_target_columns(config: Optional[Any]) -> List[str]:
     """Build ordered target column candidates (explicit outcome first, then rating aliases)."""
     columns: List[str] = []
@@ -314,38 +303,6 @@ def _safe_read_feature_table_with_path(
         return read_table(candidate), candidate
 
     return None, None
-
-
-def _extract_targets_from_dataframe(
-    targets_df: pd.DataFrame,
-    config: Optional[Any],
-    logger: logging.Logger,
-) -> pd.Series:
-    """Extract target series from targets dataframe with config-aware column selection."""
-    if targets_df.shape[1] == 1:
-        return pd.to_numeric(targets_df.iloc[:, 0], errors="coerce")
-    
-    target_col = pick_target_column(
-        targets_df,
-        target_columns=_preferred_target_columns(config),
-    )
-    
-    if target_col is None:
-        numeric_cols = targets_df.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) == 0:
-            raise ValueError(
-                "No numeric target columns found. "
-                f"Available columns: {list(targets_df.columns)}"
-            )
-        if len(numeric_cols) > 1:
-            logger.warning(
-                "Multiple numeric target columns found; using '%s'. Candidates=%s",
-                str(numeric_cols[0]),
-                ",".join(str(c) for c in numeric_cols),
-            )
-        target_col = str(numeric_cols[0])
-    
-    return pd.to_numeric(targets_df[target_col], errors="coerce")
 
 
 def load_feature_bundle(

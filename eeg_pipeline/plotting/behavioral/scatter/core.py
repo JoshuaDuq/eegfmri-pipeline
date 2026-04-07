@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import mne
 import numpy as np
 import pandas as pd
 
@@ -18,23 +17,6 @@ from eeg_pipeline.utils.analysis.stats import (
 
 
 @dataclass
-class SubjectScatterData:
-    temporal_df: pd.DataFrame
-    features_df: pd.DataFrame
-    outcome_series: pd.Series
-    info: mne.Info
-    temp_series: Optional[pd.Series]
-    covariate_df_full: Optional[pd.DataFrame]
-    covariate_df_temp: Optional[pd.DataFrame]
-    roi_map: Dict[str, List[str]]
-    stats_dir: Path
-    plots_dir: Path
-    conn_df: Optional[pd.DataFrame] = None
-
-
-
-
-@dataclass
 class ScatterPlotConfig:
     """Configuration for scatter plot generation."""
 
@@ -43,7 +25,6 @@ class ScatterPlotConfig:
     rng: np.random.Generator
     min_samples_for_plot: int
     significance_threshold: float
-    target_rating: str
 
 
 @dataclass
@@ -54,7 +35,6 @@ class ScatterPlotParams:
     target_vals: pd.Series
     roi: str
     band: str
-    band_title: str
     band_color: str
     metric: Optional[str]
     target_type: str
@@ -84,7 +64,6 @@ def _get_scatter_plot_config_from_config(config: Any) -> ScatterPlotConfig:
         significance_threshold=float(
             behavioral_config.get("significance_threshold", 0.05)
         ),
-        target_rating=behavioral_config.get("target_rating", "outcome"),
     )
 
 
@@ -206,7 +185,6 @@ def _generate_single_scatter(
 
 
 __all__ = [
-    "SubjectScatterData",
     "ScatterPlotConfig",
     "ScatterPlotParams",
 ]

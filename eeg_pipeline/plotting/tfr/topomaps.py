@@ -189,6 +189,7 @@ def _compute_statistical_mask(
     diff_data: np.ndarray,
     config,
     viz_params: Dict,
+    paired: bool = False,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[Optional[np.ndarray], Optional[float], Optional[int], Optional[float]]:
     """Compute statistical significance mask for topomap.
@@ -202,7 +203,7 @@ def _compute_statistical_mask(
     return compute_cluster_significance(
         tfr_sub, condition_mask_a, condition_mask_b,
         fmin, fmax_eff, tmin_win, tmax_win,
-        config, diff_data_len=len(diff_data), logger=logger
+        config, diff_data_len=len(diff_data), paired=paired, logger=logger
     )
 
 
@@ -261,7 +262,7 @@ def _plot_single_topomap_window(
     sig_mask, cluster_p_min, cluster_k, cluster_mass = _compute_statistical_mask(
         tfr_sub, condition_mask_a, condition_mask_b,
         fmin, fmax_eff, tmin_win, tmax_win,
-        diff_data, config, viz_params, logger
+        diff_data, config, viz_params, paired=paired, logger=logger
     )
     
     annotation_mask = sig_mask if viz_params["diff_annotation_enabled"] else None

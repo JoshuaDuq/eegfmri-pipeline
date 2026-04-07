@@ -152,3 +152,23 @@ def test_plot_roi_erp_applies_baseline_correction_before_statistics(
     baseline_corrected = captured["data"][:, 0, :]
     assert np.allclose(baseline_corrected[:, :2].mean(axis=1), 0.0)
     assert np.allclose(baseline_corrected[:, 2:], [[2.0, 2.0], [1.5, 1.5]])
+
+
+def test_compute_roi_waveform_statistics_uses_sample_standard_deviation() -> None:
+    data = np.array(
+        [
+            [[1.0, 2.0], [3.0, 4.0]],
+            [[5.0, 6.0], [7.0, 8.0]],
+            [[9.0, 10.0], [11.0, 12.0]],
+        ],
+        dtype=float,
+    )
+
+    mean_waveform, sem_waveform = erp_waveform._compute_roi_waveform_statistics(data)
+
+    channel_averaged = np.mean(data, axis=1)
+    expected_mean = np.mean(channel_averaged, axis=0) * 1e6
+    expected_sem = np.std(channel_averaged, axis=0, ddof=1) / np.sqrt(3.0) * 1e6
+
+    assert np.allclose(mean_waveform, expected_mean)
+    assert np.allclose(sem_waveform, expected_sem)

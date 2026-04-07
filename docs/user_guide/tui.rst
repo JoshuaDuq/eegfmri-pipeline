@@ -46,6 +46,13 @@ Build and Run
 
 .. note::
 
+   Windows and macOS/Linux do not use the same setup commands.
+   On Windows, use PowerShell, ``.\eeg-tui.exe``, and virtual environments
+   under ``Scripts\python.exe``. On macOS/Linux, use ``./eeg-tui`` and
+   ``bin/python``.
+
+.. note::
+
    The TUI searches upward for the ``eeg_pipeline/`` directory and runs all
    Python commands from that repository root. Run ``go run main.go`` to skip
    the build step.

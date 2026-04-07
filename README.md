@@ -77,8 +77,8 @@ the source-localization path.
 ```bash
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
 cd eegfmri-pipeline
-python3.11 -m venv .venv311
-source .venv311/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev,ml]"
 ```
 
@@ -87,10 +87,20 @@ pip install -e ".[dev,ml]"
 ```powershell
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
 cd eegfmri-pipeline
-py -3.11 -m venv .venv311
-.venv311\Scripts\Activate.ps1
+py -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install -e ".[dev,ml]"
 ```
+
+Windows setup is different from macOS/Linux:
+- use `PowerShell` or `cmd`, not `source`
+- create the env with any `Python 3.11+` interpreter
+- activate with `.venv\Scripts\Activate.ps1`
+- use `python.exe` from `Scripts\`, not `bin/python`
+
+If you have multiple Python versions installed, make sure the selected
+interpreter is `3.11+`. For example, use `python3.12 -m venv .venv` or
+`py -3.12 -m venv .venv`.
 
 The `ml` extra installs PyTorch and is only required for the CNN classifier.
 If you do not need that model, `pip install -e ".[dev]"` is sufficient.
@@ -121,6 +131,10 @@ cd eeg_pipeline/cli/tui
 go build -o eeg-tui.exe .
 .\eeg-tui.exe
 ```
+
+On Windows, do not use the macOS/Linux launch pattern (`./eeg-tui` or
+`source .../bin/activate`). The native path is `.\eeg-tui.exe` from
+PowerShell and the Python environment lives under `Scripts\`.
 
 The TUI walks you through every configuration step interactively—pipeline
 selection, subject selection, feature families, frequency bands, spatial

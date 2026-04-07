@@ -14,15 +14,11 @@ class PlotDefinition:
     group: str
     label: str
     description: str
-    required_files: List[str]
     feature_categories: Optional[List[str]] = None
     feature_plot_patterns: Optional[List[str]] = None
     behavior_plots: Optional[List[str]] = None
     tfr_plots: Optional[List[str]] = None
     erp_plots: Optional[List[str]] = None
-    requires_epochs: bool = False
-    requires_features: bool = False
-    requires_stats: bool = False
 
 
 def _load_plot_catalog() -> List[PlotDefinition]:
@@ -36,15 +32,11 @@ def _load_plot_catalog() -> List[PlotDefinition]:
                 group=str(entry["group"]),
                 label=str(entry.get("label", "")),
                 description=str(entry.get("description", "")),
-                required_files=list(entry.get("required_files", [])),
                 feature_categories=entry.get("feature_categories"),
                 feature_plot_patterns=entry.get("feature_plot_patterns"),
                 behavior_plots=entry.get("behavior_plots"),
                 tfr_plots=entry.get("tfr_plots"),
                 erp_plots=entry.get("erp_plots"),
-                requires_epochs=bool(entry.get("requires_epochs", False)),
-                requires_features=bool(entry.get("requires_features", False)),
-                requires_stats=bool(entry.get("requires_stats", False)),
             )
         )
     return plots
