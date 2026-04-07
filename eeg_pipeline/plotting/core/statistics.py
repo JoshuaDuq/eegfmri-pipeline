@@ -13,7 +13,6 @@ import mne
 
 from eeg_pipeline.utils.config.loader import (
     ensure_config,
-    get_config_value,
     require_config_value,
 )
 from .utils import log
