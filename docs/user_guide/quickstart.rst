@@ -118,9 +118,9 @@ Windows PowerShell:
 
    git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
    cd eegfmri-pipeline
-   py -m venv .venv
-   .venv\Scripts\Activate.ps1
-   pip install -e ".[dev,ml]"
+   py -3.12 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+   .\.venv\Scripts\python.exe -m pip install -e ".[dev,ml]"
 
 .. note::
 
@@ -128,10 +128,21 @@ Windows PowerShell:
 
    - use PowerShell or ``cmd`` instead of ``source``
    - create the environment with any ``Python 3.11+`` interpreter
-   - activate from ``.venv\Scripts\Activate.ps1``
+   - prefer calling ``.\.venv\Scripts\python.exe`` and ``.\.venv\Scripts\eeg-pipeline.exe`` directly
+   - activation from ``.venv\Scripts\Activate.ps1`` is optional
    - use ``Scripts\python.exe`` rather than ``bin/python``
    - if multiple Python versions are installed, select one explicitly, for
      example ``python3.12 -m venv .venv`` or ``py -3.12 -m venv .venv``
+
+.. note::
+
+   If PowerShell blocks ``Activate.ps1``, either skip activation entirely or
+   enable scripts for the current shell only:
+
+   .. code-block:: powershell
+
+      Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+      .\.venv\Scripts\Activate.ps1
 
 .. note::
 
@@ -197,6 +208,7 @@ Run read-only checks before touching any data:
 
    eeg-pipeline validate quick        # BIDS structure + config consistency
    eeg-pipeline info subjects         # List discovered subjects and run counts
+   eeg-pipeline info subjects --status # Show which subjects already have epochs/features
    eeg-pipeline info config           # Print resolved active configuration
    eeg-pipeline info ml-feature-space # Show feature matrix dimensions (post-extraction)
 
@@ -204,6 +216,8 @@ Run read-only checks before touching any data:
 exist, and the ``eeg_config.yaml`` values are internally consistent.
 ``info subjects`` lists every subject the pipeline will process when
 ``--all-subjects`` is used. Run this before any batch job.
+``info subjects --status`` is especially useful when you expect the TUI or CLI
+to reuse existing epochs/features from an external derivatives directory.
 
 For a deeper sweep:
 
@@ -250,7 +264,11 @@ Key entries to verify before feature extraction:
    * - Key
      - What to check
    * - ``project.task``
-     - Matches the ``task-<name>`` label in your BIDS files
+     - Matches the ``task-<name>`` label in your BIDS files and any existing epochs/features you want to reuse
+   * - ``paths.bids_root``
+     - Points to the EEG BIDS directory that contains ``sub-*/``
+   * - ``paths.deriv_root``
+     - Points to the derivatives root where epochs/features are written or already stored
    * - ``project.subject_list``
      - Set to a list of IDs to restrict processing; ``null`` = all discovered subjects
    * - ``feature_engineering.feature_categories``
@@ -717,12 +735,19 @@ Then predict fMRI signature expression from EEG features:
 
       **Step 7 of 8** — Use the interactive terminal UI for guided execution.
 
-Build and launch the TUI from the repository root:
+Build and launch the TUI from the repository root. Go is required only for this
+optional interface; you can use the Python CLI without Go.
 
 .. code-block:: bash
 
    cd eeg_pipeline/cli/tui && go build -o eeg-tui . && cd -
    ./eeg_pipeline/cli/tui/eeg-tui
+
+.. code-block:: powershell
+
+   cd eeg_pipeline\cli\tui
+   go build -o eeg-tui.exe .
+   .\eeg-tui.exe
 
 The TUI covers the full workflow above — configuration, subject selection,
 feature family and band selection, mode selection, and execution — all

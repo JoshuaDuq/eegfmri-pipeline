@@ -48,8 +48,10 @@ Build and Run
 
    Windows and macOS/Linux do not use the same setup commands.
    On Windows, use PowerShell, ``.\eeg-tui.exe``, and virtual environments
-   under ``Scripts\python.exe``. On macOS/Linux, use ``./eeg-tui`` and
-   ``bin/python``.
+   under ``Scripts\python.exe``. The most reliable Windows workflow is to call
+   ``.\.venv\Scripts\python.exe`` and ``.\.venv\Scripts\eeg-pipeline.exe``
+   directly rather than relying on shell activation. On macOS/Linux, use
+   ``./eeg-tui`` and ``bin/python``.
 
 .. note::
 
@@ -67,6 +69,12 @@ Global Setup*, or press ``C`` from the main menu) and set:
 - **BIDS root / BIDS rest root** — paths to your EEG (and optionally resting-state) BIDS datasets
 - **Derivatives root** — where processed outputs are written
 - **fMRI BIDS root** — required only for fMRI workflows
+
+If the TUI shows subjects but marks epochs as missing, first check that
+**Task name** matches the ``task-<name>`` segment in your epoch filenames as
+well as your raw BIDS files. Existing files such as
+``sub-0001_task-thermalactive_proc-clean_epo.fif`` will not be discovered if
+the configured task is still ``task``.
 
 These overrides are saved to ``data/derivatives/.tui_overrides.json`` and
 persist across sessions. You do not need to edit the YAML config files directly.

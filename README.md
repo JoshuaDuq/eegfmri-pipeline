@@ -87,20 +87,39 @@ pip install -e ".[dev,ml]"
 ```powershell
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
 cd eegfmri-pipeline
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e ".[dev,ml]"
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,ml]"
+.\.venv\Scripts\eeg-pipeline.exe --help
 ```
 
 Windows setup is different from macOS/Linux:
 - use `PowerShell` or `cmd`, not `source`
 - create the env with any `Python 3.11+` interpreter
-- activate with `.venv\Scripts\Activate.ps1`
+- prefer calling `.\.venv\Scripts\python.exe` and `.\.venv\Scripts\eeg-pipeline.exe` directly
+- treat activation with `.venv\Scripts\Activate.ps1` as optional convenience, not required
 - use `python.exe` from `Scripts\`, not `bin/python`
 
 If you have multiple Python versions installed, make sure the selected
 interpreter is `3.11+`. For example, use `python3.12 -m venv .venv` or
 `py -3.12 -m venv .venv`.
+
+If PowerShell blocks activation scripts, either skip activation entirely or
+allow scripts for the current shell only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+If `venv` or `pip` reports `Permission denied` in the default Windows `%TEMP%`
+directory, redirect temp files into the repository for the current session:
+
+```powershell
+New-Item -ItemType Directory -Force .tmp | Out-Null
+$env:TEMP = (Resolve-Path .tmp).Path
+$env:TMP = $env:TEMP
+```
 
 The `ml` extra installs PyTorch and is only required for the CNN classifier.
 If you do not need that model, `pip install -e ".[dev]"` is sufficient.
@@ -115,7 +134,8 @@ CLI consumes.
 
 ### Using the TUI (recommended)
 
-Build and launch the TUI once after installation:
+Build and launch the TUI once after installation. Go is required only for this
+optional interface; the Python CLI works without Go.
 
 macOS / Linux:
 
@@ -136,6 +156,15 @@ On Windows, do not use the macOS/Linux launch pattern (`./eeg-tui` or
 `source .../bin/activate`). The native path is `.\eeg-tui.exe` from
 PowerShell and the Python environment lives under `Scripts\`.
 
+Before running a workflow from the TUI, open **Global Setup** and verify:
+
+- `project.task` matches the `task-<name>` label in your BIDS filenames
+- `paths.bids_root` points to the EEG BIDS folder containing `sub-*/`
+- `paths.deriv_root` points to the derivatives root you want to reuse/write
+
+If subjects appear but the TUI reports missing epochs, the most common cause is
+that `project.task` does not match the task label used in your epoch filenames.
+
 The TUI walks you through every configuration step interactively—pipeline
 selection, subject selection, feature families, frequency bands, spatial
 options, time ranges, preprocessing stages, and advanced options—before
@@ -151,6 +180,7 @@ If you prefer scripting or headless execution, configure
 ```bash
 eeg-pipeline validate quick
 eeg-pipeline info subjects
+eeg-pipeline info subjects --status
 eeg-pipeline preprocessing full --subject 0001
 eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
 eeg-pipeline ml regression --all-subjects

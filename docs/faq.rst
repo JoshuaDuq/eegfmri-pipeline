@@ -16,7 +16,16 @@ Installation
 .. dropdown:: ModuleNotFoundError: No module named 'mne' after installing.
    :animate: fade-in
 
-   The virtual environment is not activated. Run:
+   The wrong Python interpreter is being used. The most reliable fix on
+   Windows is to skip activation and call the virtual environment executables
+   directly:
+
+   .. code-block:: powershell
+
+      .\.venv\Scripts\python.exe -m pip install -e ".[dev,ml]"
+      .\.venv\Scripts\eeg-pipeline.exe --help
+
+   Activation also works if your shell allows it:
 
    .. code-block:: bash
 
@@ -35,6 +44,23 @@ Installation
 
    The project requires Python ``3.11+``, but it does not require exactly
    ``3.11``. Any supported interpreter version is fine.
+
+.. dropdown:: PowerShell says running scripts is disabled when I activate the venv.
+   :animate: fade-in
+
+   You can avoid activation entirely:
+
+   .. code-block:: powershell
+
+      .\.venv\Scripts\python.exe -m pip install -e ".[dev,ml]"
+      .\.venv\Scripts\eeg-pipeline.exe info subjects
+
+   Or enable scripts for the current PowerShell window only:
+
+   .. code-block:: powershell
+
+      Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+      .\.venv\Scripts\Activate.ps1
 
 .. dropdown:: PyTorch install fails.
    :animate: fade-in
@@ -83,9 +109,30 @@ Data
       folders (not inside a subject folder).
    2. Subject folders must be named exactly ``sub-XXXX`` (BIDS convention).
    3. EEG files must match ``pyprep.file_extension`` (default ``.vhdr``).
+   4. ``project.task`` must match the ``task-<name>`` segment in your BIDS
+      filenames if you want the TUI and status views to discover epochs and
+      features consistently.
 
    Run ``eeg-pipeline info subjects`` to see what is discovered and why
    subjects might be missing.
+
+.. dropdown:: The TUI shows subjects, but says epochs are missing.
+   :animate: fade-in
+
+   This usually means the configured task label does not match the epoch
+   filenames already on disk. For example, files named
+   ``sub-0001_task-thermalactive_proc-clean_epo.fif`` will not be found if
+   ``project.task`` is still ``task``.
+
+   Check both subject discovery and derivative status:
+
+   .. code-block:: bash
+
+      eeg-pipeline info subjects
+      eeg-pipeline info subjects --status
+
+   Then update ``project.task`` in ``eeg_config.yaml`` or via the TUI Global
+   Setup screen so it matches the ``task-<name>`` segment used by your data.
 
 .. dropdown:: Do I need one events.tsv per run?
    :animate: fade-in

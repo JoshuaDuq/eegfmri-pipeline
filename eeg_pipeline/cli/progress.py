@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import json
 import os
-import resource
 import sys
 import time
+import ctypes
 from enum import Enum
 from typing import Any, Dict, List
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - exercised on Windows
+    resource = None
 
 
 _BYTES_PER_GB = 1024 ** 3
@@ -134,16 +139,19 @@ class ProgressReporter:
 
     def _get_memory_usage_gb(self) -> float:
         """Get current memory usage in GB."""
-        usage = resource.getrusage(resource.RUSAGE_SELF)
-        maxrss = usage.ru_maxrss
-        
-        is_darwin = sys.platform == 'darwin'
-        if is_darwin:
-            memory_gb = maxrss / _BYTES_PER_GB
-        else:
-            memory_gb = maxrss / _KB_PER_GB
-        
-        return memory_gb
+        if resource is not None:
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            maxrss = usage.ru_maxrss
+
+            is_darwin = sys.platform == "darwin"
+            if is_darwin:
+                return maxrss / _BYTES_PER_GB
+            return maxrss / _KB_PER_GB
+
+        if sys.platform == "win32":
+            return self._get_windows_memory_usage_gb()
+
+        raise OSError("Memory usage reporting is unavailable on this platform")
 
     def _get_cpu_usage_percent(self) -> float:
         """Get CPU usage as percentage since reporter initialization."""
@@ -167,8 +175,36 @@ class ProgressReporter:
 
     def _get_current_cpu_time(self) -> float:
         """Get cumulative CPU time (user + system) in seconds."""
-        usage = resource.getrusage(resource.RUSAGE_SELF)
-        return usage.ru_utime + usage.ru_stime
+        return time.process_time()
+
+    def _get_windows_memory_usage_gb(self) -> float:
+        """Get current process working set size on Windows."""
+
+        class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.c_ulong),
+                ("PageFaultCount", ctypes.c_ulong),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        counters = PROCESS_MEMORY_COUNTERS()
+        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
+        process = ctypes.windll.kernel32.GetCurrentProcess()
+        ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+            process,
+            ctypes.byref(counters),
+            counters.cb,
+        )
+        if not ok:
+            raise OSError("GetProcessMemoryInfo failed")
+        return counters.WorkingSetSize / _BYTES_PER_GB
 
 
 def create_progress_reporter(args) -> ProgressReporter:

@@ -55,10 +55,10 @@ Windows PowerShell
 
    git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
    cd eegfmri-pipeline
-   py -m venv .venv
-   .venv\Scripts\Activate.ps1
-   pip install -e ".[dev,ml]"
-   eeg-pipeline --help
+   py -3.12 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+   .\.venv\Scripts\python.exe -m pip install -e ".[dev,ml]"
+   .\.venv\Scripts\eeg-pipeline.exe --help
 
 .. note::
 
@@ -66,10 +66,33 @@ Windows PowerShell
 
    - use PowerShell or ``cmd`` instead of ``source``
    - create the environment with any ``Python 3.11+`` interpreter
-   - activate from ``.venv\Scripts\Activate.ps1``
+   - prefer calling ``.\.venv\Scripts\python.exe`` and ``.\.venv\Scripts\eeg-pipeline.exe`` directly
+   - activation from ``.venv\Scripts\Activate.ps1`` is optional
    - the interpreter lives under ``Scripts\python.exe`` rather than ``bin/python``
    - if multiple Python versions are installed, select one explicitly, for
      example ``python3.12 -m venv .venv`` or ``py -3.12 -m venv .venv``
+
+.. note::
+
+   If PowerShell blocks ``Activate.ps1``, either skip activation entirely or
+   enable scripts for the current shell only:
+
+   .. code-block:: powershell
+
+      Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+      .\.venv\Scripts\Activate.ps1
+
+.. note::
+
+   If ``venv`` or ``pip`` fails with ``Permission denied`` under the default
+   Windows temp directory, redirect temp files into the repository for the
+   current session before installing:
+
+   .. code-block:: powershell
+
+      New-Item -ItemType Directory -Force .tmp | Out-Null
+      $env:TEMP = (Resolve-Path .tmp).Path
+      $env:TMP = $env:TEMP
 
 .. note::
 
@@ -107,7 +130,10 @@ TUI *(optional)*
       Do not reuse the Unix launch command on Windows.
 
 On first launch, open **Global Setup** (press ``C`` from the main menu) to
-set your task name and data paths. See :doc:`user_guide/tui` for the full reference.
+set your task name and data paths. Make sure ``project.task`` matches the
+``task-<name>`` segment in your BIDS and epoch filenames; otherwise the TUI can
+show subjects with missing epochs even when derivative files already exist.
+See :doc:`user_guide/tui` for the full reference.
 
 Windows support contract
 ------------------------
