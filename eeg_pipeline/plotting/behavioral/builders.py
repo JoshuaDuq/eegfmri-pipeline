@@ -442,5 +442,6 @@ def generate_correlation_scatter(
         pad_inches=plot_cfg.pad_inches,
         footer=_get_behavior_footer(config, inference=inference, alpha=significance_threshold),
         logger=logger,
+        config=config,
     )
     plt.close(fig)

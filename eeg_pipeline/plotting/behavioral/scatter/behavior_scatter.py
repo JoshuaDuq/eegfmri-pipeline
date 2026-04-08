@@ -374,8 +374,19 @@ def _build_scatter_covariates(
     config: Any,
 ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """Build a covariate matrix so scatter plots reflect analysis controls."""
-    control_predictor = bool(get_config_value(config, "behavior_analysis.predictor_control_enabled", True))
-    control_trial_order = bool(get_config_value(config, "behavior_analysis.control_trial_order", True))
+    scatter_cfg = get_config_value(config, "plotting.plots.behavior.scatter", {}) or {}
+
+    control_predictor_override = scatter_cfg.get("control_predictor")
+    if control_predictor_override is None:
+        control_predictor = bool(get_config_value(config, "behavior_analysis.predictor_control_enabled", True))
+    else:
+        control_predictor = bool(control_predictor_override)
+
+    control_trial_order_override = scatter_cfg.get("control_trial_order")
+    if control_trial_order_override is None:
+        control_trial_order = bool(get_config_value(config, "behavior_analysis.control_trial_order", True))
+    else:
+        control_trial_order = bool(control_trial_order_override)
 
     cov_df = build_covariate_matrix(events_df, requested_covariates=None, config=config)
     if cov_df is None or cov_df.empty:
@@ -396,17 +407,20 @@ def _build_scatter_covariates(
     predictor_col = resolve_predictor_column(events_df, config)
     if include_predictor and predictor_col and predictor_col in cov_df.columns:
         from eeg_pipeline.utils.analysis.stats.splines import build_predictor_rcs_design
+        predictor_series = cov_df[predictor_col]
 
         mode = str(
-            get_config_value(
+            scatter_cfg.get("predictor_control_mode")
+            or get_config_value(
                 config,
                 "behavior_analysis.statistics.predictor_control",
                 get_config_value(config, "behavior_analysis.regression.predictor_control", "spline"),
             )
         ).strip().lower() or "spline"
 
-        predictor_series = cov_df[predictor_col]
-        if mode == "linear":
+        if mode == "none":
+            include_predictor = False
+        elif mode == "linear":
             parts.append(
                 pd.DataFrame({"predictor": pd.to_numeric(predictor_series, errors="coerce")}, index=cov_df.index)
             )

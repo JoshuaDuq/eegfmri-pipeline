@@ -1031,6 +1031,14 @@ func (m *Model) togglePlottingAdvancedOption() {
 			cfg.ItpcSharedColorbar = cycleTriState(cfg.ItpcSharedColorbar)
 			m.plotItemConfigs[row.plotID] = cfg
 			m.useDefaultAdvanced = false
+		case plotItemConfigFieldBehaviorScatterControlPredictor:
+			cfg.BehaviorScatterControlPredictor = cycleTriState(cfg.BehaviorScatterControlPredictor)
+			m.plotItemConfigs[row.plotID] = cfg
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldBehaviorScatterControlTrialOrder:
+			cfg.BehaviorScatterControlTrialOrder = cycleTriState(cfg.BehaviorScatterControlTrialOrder)
+			m.plotItemConfigs[row.plotID] = cfg
+			m.useDefaultAdvanced = false
 		case plotItemConfigFieldComparisonWindows, plotItemConfigFieldComparisonSegment, plotItemConfigFieldTopomapWindow, plotItemConfigFieldSourceSegment:
 			// Open dropdown if windows available for this feature, otherwise text edit
 			featureGroup := m.getFeatureGroupForPlot(row.plotID)
@@ -1237,7 +1245,8 @@ func (m *Model) togglePlottingAdvancedOption() {
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldBehaviorScatterSegment:
 			// Open dropdown if windows available, otherwise text edit
-			windows := m.GetPlottingComparisonWindows()
+			cfg := m.ensurePlotItemConfig(row.plotID)
+			windows := m.GetBehaviorScatterSegments(cfg.BehaviorScatterFeaturesSpec)
 			if len(windows) > 0 {
 				m.expandedOption = expandedBehaviorScatterSegment
 				m.subCursor = 0
@@ -1246,6 +1255,12 @@ func (m *Model) togglePlottingAdvancedOption() {
 			} else {
 				m.startPlotTextEdit(row.plotID, row.plotField)
 			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldBehaviorScatterPredictorControlMode:
+			m.expandedOption = expandedBehaviorScatterPredictorControlMode
+			m.subCursor = 0
+			m.editingPlotID = row.plotID
+			m.editingPlotField = row.plotField
 			m.useDefaultAdvanced = false
 		case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
 			folders, err := m.discoverTemporalTopomapsStatsFeatureFolders()
@@ -1258,6 +1273,17 @@ func (m *Model) togglePlottingAdvancedOption() {
 
 			if len(folders) > 0 {
 				m.expandedOption = expandedTemporalTopomapsFeatureDir
+				m.subCursor = 0
+				m.editingPlotID = row.plotID
+				m.editingPlotField = row.plotField
+			} else {
+				m.startPlotTextEdit(row.plotID, row.plotField)
+			}
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldPsychometricsPredictorColumn, plotItemConfigFieldPsychometricsOutcomeColumn:
+			plotCols := m.GetPlottingComparisonColumns()
+			if len(plotCols) > 0 {
+				m.expandedOption = expandedPlotComparisonColumn
 				m.subCursor = 0
 				m.editingPlotID = row.plotID
 				m.editingPlotField = row.plotField

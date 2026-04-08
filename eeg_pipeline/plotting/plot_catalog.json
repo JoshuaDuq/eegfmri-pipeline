@@ -562,7 +562,19 @@
       ],
       "behavior_plots": [
         "psychometrics"
-      ]
+      ],
+      "configurable": {
+        "predictor_column": {
+          "type": "single_select",
+          "label": "Predictor Column",
+          "description": "events.tsv column to use on the x-axis"
+        },
+        "outcome_column": {
+          "type": "single_select",
+          "label": "Outcome Column",
+          "description": "events.tsv column to use on the y-axis"
+        }
+      }
     },
     {
       "id": "behavior_scatter",

@@ -915,11 +915,28 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		// When dropdown is expanded for this field, treat as focused
 		isEditing := m.expandedOption == expandedBehaviorScatterSegment && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldBehaviorScatterSegment
 		lines := []renderLine{m.renderPlotValueLine("segment", value, hint, focused || isEditing, labelWidth)}
-		// Show dropdown if expanded for this field - get all available segments
-		windows := m.GetPlottingComparisonWindows()
+		windows := m.GetBehaviorScatterSegments(cfg.BehaviorScatterFeaturesSpec)
 		if isEditing && len(windows) > 0 {
 			expandedLines := m.renderExpandedListItems(windows, func(w string) bool {
 				return cfg.BehaviorScatterSegmentSpec == w
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldBehaviorScatterControlPredictor:
+		value := formatTriState(cfg.BehaviorScatterControlPredictor)
+		return []renderLine{m.renderPlotValueLine("control_predictor", value, "default/ON/OFF", focused, labelWidth)}
+	case plotItemConfigFieldBehaviorScatterControlTrialOrder:
+		value := formatTriState(cfg.BehaviorScatterControlTrialOrder)
+		return []renderLine{m.renderPlotValueLine("control_trial_order", value, "default/ON/OFF", focused, labelWidth)}
+	case plotItemConfigFieldBehaviorScatterPredictorControlMode:
+		value := m.getPlotFieldTextValue(cfg.BehaviorScatterPredictorControlMode, "(default: spline)", row, plotItemConfigFieldBehaviorScatterPredictorControlMode)
+		hint := fmt.Sprintf("Space to select · %d modes", len(behaviorScatterPredictorControlModes))
+		isEditing := m.expandedOption == expandedBehaviorScatterPredictorControlMode && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldBehaviorScatterPredictorControlMode
+		lines := []renderLine{m.renderPlotValueLine("predictor_control_mode", value, hint, focused || isEditing, labelWidth)}
+		if isEditing {
+			expandedLines := m.renderExpandedListItems(behaviorScatterPredictorControlModes, func(mode string) bool {
+				return cfg.BehaviorScatterPredictorControlMode == mode
 			})
 			lines = append(lines, expandedLines...)
 		}
@@ -939,6 +956,38 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		if isEditing && len(m.temporalTopomapsStatsFeatureFolders) > 0 {
 			expandedLines := m.renderExpandedListItems(m.temporalTopomapsStatsFeatureFolders, func(folder string) bool {
 				return cfg.BehaviorTemporalStatsFeatureFolder == folder
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldPsychometricsPredictorColumn:
+		value := m.getPlotFieldTextValue(cfg.PsychometricsPredictorColumn, "(default predictor)", row, plotItemConfigFieldPsychometricsPredictorColumn)
+		plotCols := m.GetPlottingComparisonColumns()
+		hint := "Space to select (events.tsv) or type manually"
+		if len(plotCols) > 0 {
+			hint = fmt.Sprintf("Space to select · %d columns", len(plotCols))
+		}
+		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldPsychometricsPredictorColumn
+		lines := []renderLine{m.renderPlotValueLine("predictor_column", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(plotCols) > 0 {
+			expandedLines := m.renderExpandedListItems(plotCols, func(col string) bool {
+				return cfg.PsychometricsPredictorColumn == col
+			})
+			lines = append(lines, expandedLines...)
+		}
+		return lines
+	case plotItemConfigFieldPsychometricsOutcomeColumn:
+		value := m.getPlotFieldTextValue(cfg.PsychometricsOutcomeColumn, "(default outcome)", row, plotItemConfigFieldPsychometricsOutcomeColumn)
+		plotCols := m.GetPlottingComparisonColumns()
+		hint := "Space to select (events.tsv) or type manually"
+		if len(plotCols) > 0 {
+			hint = fmt.Sprintf("Space to select · %d columns", len(plotCols))
+		}
+		isEditing := m.expandedOption == expandedPlotComparisonColumn && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldPsychometricsOutcomeColumn
+		lines := []renderLine{m.renderPlotValueLine("outcome_column", value, hint, focused || isEditing, labelWidth)}
+		if isEditing && len(plotCols) > 0 {
+			expandedLines := m.renderExpandedListItems(plotCols, func(col string) bool {
+				return cfg.PsychometricsOutcomeColumn == col
 			})
 			lines = append(lines, expandedLines...)
 		}

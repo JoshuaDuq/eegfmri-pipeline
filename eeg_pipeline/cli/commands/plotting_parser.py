@@ -354,7 +354,10 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "connectivity_circle_top_fraction, connectivity_circle_min_lines, "
             "connectivity_network_top_fraction, itpc_shared_colorbar, "
             "scatter_features, scatter_columns, scatter_aggregation_modes, scatter_segment, "
-            "temporal_stats_feature_folder."
+            "scatter_control_predictor, scatter_control_trial_order, scatter_predictor_control_mode, "
+            "dose_response_dose_column, dose_response_response_column, dose_response_binary_outcome_column, "
+            "dose_response_segment, dose_response_bands, dose_response_rois, dose_response_scopes, dose_response_stat, "
+            "psychometrics_predictor_column, psychometrics_outcome_column, temporal_stats_feature_folder."
         ),
     )
 

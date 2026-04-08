@@ -1007,6 +1007,21 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		if strings.TrimSpace(cfg.BehaviorScatterSegmentSpec) != "" {
 			args = append(args, "--plot-item-config", plotID, "scatter_segment", strings.TrimSpace(cfg.BehaviorScatterSegmentSpec))
 		}
+		if cfg.BehaviorScatterControlPredictor != nil {
+			args = append(args, "--plot-item-config", plotID, "scatter_control_predictor", strconv.FormatBool(*cfg.BehaviorScatterControlPredictor))
+		}
+		if cfg.BehaviorScatterControlTrialOrder != nil {
+			args = append(args, "--plot-item-config", plotID, "scatter_control_trial_order", strconv.FormatBool(*cfg.BehaviorScatterControlTrialOrder))
+		}
+		if strings.TrimSpace(cfg.BehaviorScatterPredictorControlMode) != "" {
+			args = append(args, "--plot-item-config", plotID, "scatter_predictor_control_mode", strings.TrimSpace(cfg.BehaviorScatterPredictorControlMode))
+		}
+		if strings.TrimSpace(cfg.PsychometricsPredictorColumn) != "" {
+			args = append(args, "--plot-item-config", plotID, "psychometrics_predictor_column", strings.TrimSpace(cfg.PsychometricsPredictorColumn))
+		}
+		if strings.TrimSpace(cfg.PsychometricsOutcomeColumn) != "" {
+			args = append(args, "--plot-item-config", plotID, "psychometrics_outcome_column", strings.TrimSpace(cfg.PsychometricsOutcomeColumn))
+		}
 		// Behavior dose-response config
 		if strings.TrimSpace(cfg.DoseResponseDoseColumn) != "" {
 			args = append(args, "--plot-item-config", plotID, "dose_response_dose_column", strings.TrimSpace(cfg.DoseResponseDoseColumn))

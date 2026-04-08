@@ -369,7 +369,7 @@ def _load_temporal_primary_lookup(
     primary_p_map: Dict[Tuple[str, str, float, float, str], float] = {}
     primary_sig_map: Dict[Tuple[str, str, float, float, str], bool] = {}
 
-    for (cond, band, t0, t1, ch), p_val, sig_val in zip(
+    for cond, band, t0, t1, ch, p_val, sig_val in zip(
         df["condition"],
         df["band"],
         df["time_start"],
@@ -634,6 +634,87 @@ def _get_condition_labels(config: Optional[Any]) -> Optional[List[str]]:
     return None
 
 
+def _get_requested_condition_values(config: Optional[Any]) -> List[str]:
+    """Resolve optional requested condition values for temporal topomap rows."""
+    raw_values = get_config_value(config, "plotting.comparisons.comparison_values", None)
+    if raw_values in (None, ""):
+        raw_values = get_config_value(config, "behavior_analysis.temporal.condition_values", None)
+
+    if raw_values is None:
+        return []
+    if isinstance(raw_values, str):
+        value = raw_values.strip()
+        return [value] if value else []
+    if isinstance(raw_values, np.ndarray):
+        raw_values = raw_values.tolist()
+    if isinstance(raw_values, (list, tuple, set)):
+        return [str(value).strip() for value in raw_values if str(value).strip()]
+    value = str(raw_values).strip()
+    return [value] if value else []
+
+
+def _normalize_condition_token(value: Any) -> str:
+    """Normalize condition tokens so numeric strings match NPZ labels robustly."""
+    text = str(value).strip()
+    if text == "":
+        return ""
+    try:
+        numeric = float(text)
+    except (TypeError, ValueError):
+        return text
+    if not np.isfinite(numeric):
+        return text
+    if float(numeric).is_integer():
+        return str(int(numeric))
+    return format(float(numeric), "g")
+
+
+def _select_condition_results(
+    condition_results: Dict[str, Dict[str, Any]],
+    requested_values: List[str],
+    logger: logging.Logger,
+) -> Dict[str, Dict[str, Any]]:
+    """Subset and order condition rows using requested comparison values."""
+    if not requested_values:
+        return condition_results
+
+    normalized_to_actual: Dict[str, str] = {}
+    for actual_name in condition_results:
+        normalized_to_actual.setdefault(_normalize_condition_token(actual_name), actual_name)
+
+    selected: Dict[str, Dict[str, Any]] = {}
+    missing: List[str] = []
+    for requested in requested_values:
+        requested_text = str(requested).strip()
+        if requested_text == "":
+            continue
+        actual_name = condition_results.get(requested_text)
+        if actual_name is None:
+            matched_name = normalized_to_actual.get(_normalize_condition_token(requested_text))
+            if matched_name is None:
+                missing.append(requested_text)
+                continue
+            actual_name = condition_results[matched_name]
+            selected[matched_name] = actual_name
+            continue
+        selected[requested_text] = actual_name
+
+    if missing:
+        logger.warning(
+            "Requested temporal topomap condition values were not found in stats output: %s",
+            missing,
+        )
+    if selected:
+        logger.info("Filtered temporal topomaps to conditions: %s", list(selected.keys()))
+        return selected
+
+    logger.warning(
+        "No requested temporal topomap condition values matched available stats conditions: %s",
+        list(condition_results.keys()),
+    )
+    return condition_results
+
+
 def _build_global_fdr_mask(
     ch_names: List[str],
     condition_name: str,
@@ -877,9 +958,7 @@ def plot_temporal_correlation_topomaps_by_condition(
 ) -> None:
     """Plot temporal correlation topomaps by condition.
     
-    Supports user-configurable condition splits.
-    Conditions are determined by the temporal.condition_column and 
-    temporal.condition_values settings in the config.
+    Uses precomputed temporal stats, with optional row filtering/relabeling at plot time.
     """
     feature_folder = get_config_value(
         config,
@@ -916,7 +995,17 @@ def plot_temporal_correlation_topomaps_by_condition(
     if not condition_results:
         logger.warning("No condition results found in data file")
         return
-    
+
+    requested_condition_values = _get_requested_condition_values(config)
+    condition_results = _select_condition_results(
+        condition_results,
+        requested_condition_values,
+        logger,
+    )
+    if not condition_results:
+        logger.warning("No temporal topomap conditions remain after applying filters")
+        return
+
     condition_names = list(condition_results.keys())
     logger.info(f"Found {len(condition_names)} conditions: {condition_names}")
 

@@ -2110,9 +2110,9 @@ func TestBuildPlotItemConfigArgs_TemporalTopomapsEmitComparisonOverrides(t *test
 	m.plotSelected = map[int]bool{0: true}
 	m.plotItemConfigs = map[string]PlotItemConfig{
 		"behavior_temporal_topomaps": {
-			ComparisonColumn:                   "condition",
-			ComparisonValuesSpec:               "0 1",
-			ComparisonLabelsSpec:               "low high",
+			ComparisonColumn:                 "condition",
+			ComparisonValuesSpec:             "0 1",
+			ComparisonLabelsSpec:             "low high",
 			BehaviorTemporalStatsFeatureFolder: "power",
 		},
 	}

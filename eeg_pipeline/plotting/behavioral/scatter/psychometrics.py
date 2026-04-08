@@ -9,7 +9,7 @@ import pandas as pd
 
 from eeg_pipeline.plotting.config import PlotConfig, get_plot_config
 from eeg_pipeline.plotting.behavioral.builders import generate_correlation_scatter
-from eeg_pipeline.utils.data import _pick_first_column
+from eeg_pipeline.utils.data.manipulation import find_column
 from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir, _load_events_df
 from eeg_pipeline.utils.analysis.stats.validation import (
     assert_predictor_type_continuous,
@@ -21,20 +21,17 @@ from eeg_pipeline.infra.logging import get_subject_logger
 
 def _load_and_validate_psychometric_data(
     events: pd.DataFrame,
-    predictor_columns: list[str],
-    outcome_columns: list[str],
+    predictor_column: str,
+    outcome_column: str,
     logger: logging.Logger,
-) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
+) -> tuple[Optional[pd.Series], Optional[pd.Series], int]:
     """Load and validate predictor and rating data from events DataFrame."""
-    predictor_column = _pick_first_column(events, predictor_columns)
-    if predictor_column is None:
-        return None, None
-
-    outcome_column = _pick_first_column(events, outcome_columns)
+    if predictor_column not in events.columns:
+        return None, None, 0
     predictor = pd.to_numeric(events[predictor_column], errors="coerce")
 
     valid_mask = predictor.notna()
-    if outcome_column is not None:
+    if outcome_column in events.columns:
         rating = pd.to_numeric(events[outcome_column], errors="coerce")
         valid_mask = valid_mask & rating.notna()
     else:
@@ -43,7 +40,29 @@ def _load_and_validate_psychometric_data(
     predictor_valid = predictor[valid_mask]
     rating_valid = rating[valid_mask] if rating is not None else None
 
-    return predictor_valid, rating_valid
+    return predictor_valid, rating_valid, int(valid_mask.sum())
+
+
+def _resolve_psychometric_columns(
+    events: pd.DataFrame,
+    config,
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolve psychometrics columns with plot-specific overrides first."""
+    psychometrics_config = config.get("plotting.plots.behavior.psychometrics", {}) or {}
+
+    predictor_override = str(psychometrics_config.get("predictor_column") or "").strip()
+    outcome_override = str(psychometrics_config.get("outcome_column") or "").strip()
+
+    predictor_candidates = [predictor_override] if predictor_override else list(
+        config.get("event_columns.predictor", []) or []
+    )
+    outcome_candidates = [outcome_override] if outcome_override else list(
+        config.get("event_columns.outcome", []) or []
+    )
+
+    predictor_column = find_column(events, predictor_candidates) if predictor_candidates else None
+    outcome_column = find_column(events, outcome_candidates) if outcome_candidates else None
+    return predictor_column, outcome_column
 
 
 def _plot_predictor_rating_correlation(
@@ -54,20 +73,24 @@ def _plot_predictor_rating_correlation(
     plot_config: PlotConfig,
     config,
     logger: logging.Logger,
+    predictor_label: str,
+    outcome_label: str,
 ) -> None:
     """Generate scatter plot of predictor vs rating with correlation statistics."""
     behavioral_config = plot_config.get_behavioral_config()
     rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = np.random.default_rng(rng_seed)
 
-    output_path = output_dir / f"psychometrics_temp_vs_rating_sub-{subject}"
+    safe_predictor = predictor_label.lower().replace(" ", "_")
+    safe_outcome = outcome_label.lower().replace(" ", "_")
+    output_path = output_dir / f"psychometrics_{safe_predictor}_vs_{safe_outcome}_sub-{subject}"
 
     generate_correlation_scatter(
         x_data=predictor,
         y_data=rating,
-        x_label="Temperature (°C)",
-        y_label="Rating",
-        title_prefix=f"Psychometrics — Temperature vs Rating — sub-{subject}",
+        x_label=predictor_label,
+        y_label=outcome_label,
+        title_prefix=f"Psychometrics: {predictor_label} vs {outcome_label} - sub-{subject}",
         band_color=get_band_color("alpha", config),
         output_path=output_path,
         rng=rng,
@@ -106,13 +129,23 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
         logger.warning(f"No events for psychometrics: sub-{subject}")
         return
 
-    predictor_columns = config.get("event_columns.predictor", [])
-    outcome_columns = config.get("event_columns.outcome", [])
+    predictor_column, outcome_column = _resolve_psychometric_columns(events, config)
 
-    predictor_valid, rating_valid = _load_and_validate_psychometric_data(
+    if predictor_column is None:
+        logger.warning(
+            f"Psychometrics: no predictor column found; skipping for sub-{subject}."
+        )
+        return
+    if outcome_column is None:
+        logger.warning(
+            f"Psychometrics: no outcome column found; skipping for sub-{subject}."
+        )
+        return
+
+    predictor_valid, rating_valid, n_valid = _load_and_validate_psychometric_data(
         events,
-        predictor_columns,
-        outcome_columns,
+        predictor_column,
+        outcome_column,
         logger,
     )
 
@@ -124,7 +157,6 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
 
     assert_continuous_predictor(predictor_valid, config, context="psychometrics")
 
-    n_valid = len(predictor_valid)
     min_samples_for_plot = plot_config.validation.get("min_samples_for_plot", 5)
     if n_valid < min_samples_for_plot:
         logger.warning(
@@ -145,6 +177,9 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
             plot_config,
             config,
             logger,
+            predictor_column,
+            outcome_column,
         )
 
     logger.info(f"Completed psychometrics plotting for sub-{subject}")
+

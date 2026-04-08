@@ -222,6 +222,16 @@ def apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> N
             _apply_config_override(config, "plotting.plots.behavior.scatter.aggregation_modes", list(values))
         elif key == "scatter_segment" and values:
             _apply_config_override(config, "plotting.plots.behavior.scatter.segment", values[0])
+        elif key == "scatter_control_predictor" and values:
+            parsed = parse_bool(values[0])
+            if parsed is not None:
+                _apply_config_override(config, "behavior_analysis.predictor_control_enabled", parsed)
+        elif key == "scatter_control_trial_order" and values:
+            parsed = parse_bool(values[0])
+            if parsed is not None:
+                _apply_config_override(config, "behavior_analysis.control_trial_order", parsed)
+        elif key == "scatter_predictor_control_mode" and values:
+            _apply_config_override(config, "behavior_analysis.statistics.predictor_control", values[0])
         elif key == "dose_response_dose_column" and values:
             _apply_config_override(
                 config,
@@ -270,6 +280,18 @@ def apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> N
                 "plotting.plots.behavior.dose_response.stat",
                 values[0],
             )
+        elif key == "psychometrics_predictor_column" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.psychometrics.predictor_column",
+                values[0],
+            )
+        elif key == "psychometrics_outcome_column" and values:
+            _apply_config_override(
+                config,
+                "plotting.plots.behavior.psychometrics.outcome_column",
+                values[0],
+            )
 
 
 PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
@@ -309,6 +331,9 @@ PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "scatter_columns": "plotting.plots.behavior.scatter.columns",
     "scatter_aggregation_modes": "plotting.plots.behavior.scatter.aggregation_modes",
     "scatter_segment": "plotting.plots.behavior.scatter.segment",
+    "scatter_control_predictor": "behavior_analysis.predictor_control_enabled",
+    "scatter_control_trial_order": "behavior_analysis.control_trial_order",
+    "scatter_predictor_control_mode": "behavior_analysis.statistics.predictor_control",
     "dose_response_dose_column": "plotting.plots.behavior.dose_response.dose_column",
     "dose_response_response_column": "plotting.plots.behavior.dose_response.response_column",
     "dose_response_binary_outcome_column": "plotting.plots.behavior.dose_response.binary_outcome_column",
@@ -317,6 +342,8 @@ PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "dose_response_rois": "plotting.plots.behavior.dose_response.rois",
     "dose_response_scopes": "plotting.plots.behavior.dose_response.scopes",
     "dose_response_stat": "plotting.plots.behavior.dose_response.stat",
+    "psychometrics_predictor_column": "plotting.plots.behavior.psychometrics.predictor_column",
+    "psychometrics_outcome_column": "plotting.plots.behavior.psychometrics.outcome_column",
 }
 
 
@@ -336,7 +363,7 @@ def validate_plot_item_configs(
                 errors.append(f"Unknown key '{key}' for plot_id '{plot_id}'. Allowed keys: {allowed}.")
                 continue
 
-            if key in {"compare_windows", "compare_columns"}:
+            if key in {"compare_windows", "compare_columns", "scatter_control_predictor", "scatter_control_trial_order"}:
                 if not values:
                     errors.append(f"plot_id '{plot_id}': {key} expects a boolean value (true/false).")
                     continue
@@ -351,6 +378,7 @@ def validate_plot_item_configs(
                 "comparison_segment",
                 "comparison_column",
                 "scatter_segment",
+                "scatter_predictor_control_mode",
                 "dose_response_dose_column",
                 "dose_response_response_column",
                 "dose_response_binary_outcome_column",
@@ -359,6 +387,8 @@ def validate_plot_item_configs(
                 "dose_response_rois",
                 "dose_response_scopes",
                 "dose_response_stat",
+                "psychometrics_predictor_column",
+                "psychometrics_outcome_column",
                 "connectivity_circle_top_fraction",
                 "connectivity_circle_min_lines",
                 "connectivity_network_top_fraction",
@@ -417,6 +447,14 @@ def validate_plot_item_configs(
                     val_str = str(values[0]).lower()
                     if val_str not in {"true", "false"}:
                         errors.append(f"plot_id '{plot_id}': {key} must be 'true' or 'false'.")
+                continue
+
+            if key == "scatter_predictor_control_mode":
+                val_str = str(values[0]).strip().lower()
+                if val_str not in {"spline", "linear", "none"}:
+                    errors.append(
+                        f"plot_id '{plot_id}': {key} must be one of spline, linear, none."
+                    )
                 continue
 
             if key in {"comparison_windows", "comparison_values", "comparison_rois",

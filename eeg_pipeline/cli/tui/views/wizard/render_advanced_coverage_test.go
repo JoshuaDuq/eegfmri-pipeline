@@ -303,6 +303,76 @@ func TestPlottingAdvancedExpandedListScrollsOnCursorMove(t *testing.T) {
 	}
 }
 
+func TestPlottingAdvancedIncludesPsychometricsEventColumnRows(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.width = 120
+	m.height = 24
+	m.contentWidth = 100
+	m.CurrentStep = types.StepAdvancedConfig
+	m.plotItemConfigExpanded["behavior_psychometrics"] = true
+
+	rows := m.getPlottingAdvancedRows()
+	foundPredictor := false
+	foundOutcome := false
+	for _, row := range rows {
+		if row.kind != plottingRowPlotField || row.plotID != "behavior_psychometrics" {
+			continue
+		}
+		if row.plotField == plotItemConfigFieldPsychometricsPredictorColumn {
+			foundPredictor = true
+		}
+		if row.plotField == plotItemConfigFieldPsychometricsOutcomeColumn {
+			foundOutcome = true
+		}
+	}
+
+	if !foundPredictor || !foundOutcome {
+		t.Fatalf("expected psychometrics predictor/outcome rows, got predictor=%v outcome=%v", foundPredictor, foundOutcome)
+	}
+}
+
+func TestPlottingAdvancedIncludesTemporalTopomapConditionLabelsRow(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.width = 120
+	m.height = 24
+	m.contentWidth = 100
+	m.CurrentStep = types.StepAdvancedConfig
+	m.plotItemConfigExpanded["behavior_temporal_topomaps"] = true
+
+	rows := m.getPlottingAdvancedRows()
+	foundColumn := false
+	foundValues := false
+	foundLabels := false
+	foundFeatureFolder := false
+	for _, row := range rows {
+		if row.kind != plottingRowPlotField || row.plotID != "behavior_temporal_topomaps" {
+			continue
+		}
+		if row.plotField == plotItemConfigFieldComparisonColumn {
+			foundColumn = true
+		}
+		if row.plotField == plotItemConfigFieldComparisonValues {
+			foundValues = true
+		}
+		if row.plotField == plotItemConfigFieldComparisonLabels {
+			foundLabels = true
+		}
+		if row.plotField == plotItemConfigFieldBehaviorTemporalStatsFeatureFolder {
+			foundFeatureFolder = true
+		}
+	}
+
+	if !foundColumn || !foundValues || !foundLabels || !foundFeatureFolder {
+		t.Fatalf(
+			"expected temporal topomap comparison rows, got column=%v values=%v labels=%v feature_folder=%v",
+			foundColumn,
+			foundValues,
+			foundLabels,
+			foundFeatureFolder,
+		)
+	}
+}
+
 // TestAdvancedConfigScrollWindowFitsContentFrame verifies that the scroll window
 // used by advanced config renderers never exceeds the lines actually available
 // after accounting for the fixed overhead (step header + info hint).

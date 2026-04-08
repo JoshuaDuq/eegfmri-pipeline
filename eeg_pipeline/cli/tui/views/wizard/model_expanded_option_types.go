@@ -81,4 +81,5 @@ const (
 	expandedFmriSecondLevelGroupColumn           = 75
 	expandedFmriSecondLevelGroupAValue           = 76
 	expandedFmriSecondLevelGroupBValue           = 77
+	expandedBehaviorScatterPredictorControlMode  = 78
 )

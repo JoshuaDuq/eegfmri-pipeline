@@ -34,7 +34,14 @@ var comparisonCapablePlotIDs = map[string]struct{}{
 }
 
 var preComparisonFieldsByPlotID = map[string][]plotItemConfigField{
+	"behavior_psychometrics": {
+		plotItemConfigFieldPsychometricsPredictorColumn,
+		plotItemConfigFieldPsychometricsOutcomeColumn,
+	},
 	"behavior_temporal_topomaps": {
+		plotItemConfigFieldComparisonColumn,
+		plotItemConfigFieldComparisonValues,
+		plotItemConfigFieldComparisonLabels,
 		plotItemConfigFieldBehaviorTemporalStatsFeatureFolder,
 	},
 	"behavior_dose_response": {
@@ -137,6 +144,9 @@ var extraPlotFieldsByPlotID = map[string][]plotItemConfigField{
 		plotItemConfigFieldBehaviorScatterColumns,
 		plotItemConfigFieldBehaviorScatterAggregationModes,
 		plotItemConfigFieldBehaviorScatterSegment,
+		plotItemConfigFieldBehaviorScatterControlPredictor,
+		plotItemConfigFieldBehaviorScatterControlTrialOrder,
+		plotItemConfigFieldBehaviorScatterPredictorControlMode,
 	},
 	"tfr_topomaps": {
 		plotItemConfigFieldTfrTopomapActiveWindow,

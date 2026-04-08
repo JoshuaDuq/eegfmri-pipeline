@@ -220,7 +220,14 @@ func (m Model) getExpandedListLength() int {
 	case expandedBehaviorScatterAggregation:
 		return len(behaviorScatterAggregationModes)
 	case expandedBehaviorScatterSegment:
-		return len(m.GetPlottingComparisonWindows())
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				return len(m.GetBehaviorScatterSegments(cfg.BehaviorScatterFeaturesSpec))
+			}
+		}
+		return len(m.GetBehaviorScatterSegments(""))
+	case expandedBehaviorScatterPredictorControlMode:
+		return len(behaviorScatterPredictorControlModes)
 	case expandedSourcePlotCondition:
 		return len(m.GetSourcePlotConditions())
 	case expandedSourcePlotBands:
@@ -535,7 +542,14 @@ func (m Model) getExpandedListItems() []string {
 	case expandedBehaviorScatterAggregation:
 		return behaviorScatterAggregationModes
 	case expandedBehaviorScatterSegment:
-		return m.GetPlottingComparisonWindows()
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				return m.GetBehaviorScatterSegments(cfg.BehaviorScatterFeaturesSpec)
+			}
+		}
+		return m.GetBehaviorScatterSegments("")
+	case expandedBehaviorScatterPredictorControlMode:
+		return behaviorScatterPredictorControlModes
 	case expandedSourcePlotCondition:
 		return m.GetSourcePlotConditions()
 	case expandedSourcePlotBands:
@@ -688,6 +702,12 @@ func (m Model) isColumnValueSelected(value string) bool {
 				selectedValues = cfg.BehaviorScatterSegmentSpec
 			}
 		}
+	case expandedBehaviorScatterPredictorControlMode:
+		if m.editingPlotID != "" {
+			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
+				selectedValues = cfg.BehaviorScatterPredictorControlMode
+			}
+		}
 	case expandedSourcePlotCondition:
 		if m.editingPlotID != "" {
 			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
@@ -814,6 +834,10 @@ func (m *Model) handleExpandedListToggle() {
 			cfg := m.ensurePlotItemConfig(plotID)
 
 			switch m.editingPlotField {
+			case plotItemConfigFieldPsychometricsPredictorColumn:
+				cfg.PsychometricsPredictorColumn = selectedItem
+			case plotItemConfigFieldPsychometricsOutcomeColumn:
+				cfg.PsychometricsOutcomeColumn = selectedItem
 			case plotItemConfigFieldDoseResponseDoseColumn:
 				cfg.DoseResponseDoseColumn = selectedItem
 			case plotItemConfigFieldDoseResponseResponseColumn:
@@ -1330,6 +1354,16 @@ func (m *Model) handleExpandedListToggle() {
 			cfg := m.ensurePlotItemConfig(m.editingPlotID)
 			// Segment is single-select
 			cfg.BehaviorScatterSegmentSpec = selectedItem
+			m.plotItemConfigs[m.editingPlotID] = cfg
+			m.editingPlotID = ""
+			m.editingPlotField = plotItemConfigFieldNone
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+	case expandedBehaviorScatterPredictorControlMode:
+		if m.editingPlotID != "" {
+			cfg := m.ensurePlotItemConfig(m.editingPlotID)
+			cfg.BehaviorScatterPredictorControlMode = selectedItem
 			m.plotItemConfigs[m.editingPlotID] = cfg
 			m.editingPlotID = ""
 			m.editingPlotField = plotItemConfigFieldNone

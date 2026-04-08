@@ -723,6 +723,30 @@ func (m Model) GetPlottingComparisonWindows(featureGroup ...string) []string {
 	return m.availableWindows
 }
 
+func (m Model) GetBehaviorScatterSegments(featuresSpec string) []string {
+	selected := strings.Fields(strings.TrimSpace(featuresSpec))
+	if len(selected) == 0 {
+		selected = []string{"power"}
+	}
+
+	seen := make(map[string]struct{})
+	var segments []string
+	for _, feature := range selected {
+		for _, window := range m.GetPlottingComparisonWindows(feature) {
+			if _, ok := seen[window]; ok {
+				continue
+			}
+			seen[window] = struct{}{}
+			segments = append(segments, window)
+		}
+	}
+
+	if len(segments) > 0 {
+		return segments
+	}
+	return m.availableWindows
+}
+
 // getPlotByID returns the PlotItem for the given plot ID.
 func (m Model) getPlotByID(plotID string) PlotItem {
 	for _, plot := range m.plotItems {

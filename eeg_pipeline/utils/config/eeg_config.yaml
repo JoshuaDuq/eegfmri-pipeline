@@ -1156,6 +1156,9 @@ plotting:
         columns: ["outcome"]
         aggregation_modes: ["roi", "global"]
         segment: null
+        control_predictor: null
+        control_trial_order: null
+        predictor_control_mode: ""
       temporal_topomaps:
         stats_feature_folder: null
       dose_response:
@@ -1167,6 +1170,9 @@ plotting:
         rois: []
         scopes: []
         stat: ""
+      psychometrics:
+        predictor_column: ""
+        outcome_column: ""
 
 ###################################################################
 io:

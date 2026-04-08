@@ -68,6 +68,12 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.SourceBandsSpec
 	case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
 		return cfg.BehaviorTemporalStatsFeatureFolder
+	case plotItemConfigFieldBehaviorScatterPredictorControlMode:
+		return cfg.BehaviorScatterPredictorControlMode
+	case plotItemConfigFieldPsychometricsPredictorColumn:
+		return cfg.PsychometricsPredictorColumn
+	case plotItemConfigFieldPsychometricsOutcomeColumn:
+		return cfg.PsychometricsOutcomeColumn
 	case plotItemConfigFieldDoseResponseDoseColumn:
 		return cfg.DoseResponseDoseColumn
 	case plotItemConfigFieldDoseResponseResponseColumn:
@@ -200,6 +206,24 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 		cfg.SourceBandsSpec = strings.Join(strings.Fields(value), " ")
 	case plotItemConfigFieldBehaviorTemporalStatsFeatureFolder:
 		cfg.BehaviorTemporalStatsFeatureFolder = strings.TrimSpace(value)
+	case plotItemConfigFieldBehaviorScatterPredictorControlMode:
+		cfg.BehaviorScatterPredictorControlMode = strings.TrimSpace(value)
+	case plotItemConfigFieldPsychometricsPredictorColumn:
+		cfg.PsychometricsPredictorColumn = strings.TrimSpace(value)
+		if cfg.PsychometricsPredictorColumn != "" && len(m.availableColumns) > 0 {
+			unknown := unknownFromList([]string{cfg.PsychometricsPredictorColumn}, m.availableColumns)
+			if len(unknown) > 0 {
+				m.ShowToast("Unknown events.tsv column: "+unknown[0], "warning")
+			}
+		}
+	case plotItemConfigFieldPsychometricsOutcomeColumn:
+		cfg.PsychometricsOutcomeColumn = strings.TrimSpace(value)
+		if cfg.PsychometricsOutcomeColumn != "" && len(m.availableColumns) > 0 {
+			unknown := unknownFromList([]string{cfg.PsychometricsOutcomeColumn}, m.availableColumns)
+			if len(unknown) > 0 {
+				m.ShowToast("Unknown events.tsv column: "+unknown[0], "warning")
+			}
+		}
 	case plotItemConfigFieldDoseResponseDoseColumn:
 		cfg.DoseResponseDoseColumn = strings.TrimSpace(value)
 		if cfg.DoseResponseDoseColumn != "" && len(m.availableColumns) > 0 {

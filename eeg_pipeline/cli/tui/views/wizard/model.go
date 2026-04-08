@@ -433,6 +433,12 @@ var behaviorScatterAggregationModes = []string{
 	"channel",
 }
 
+var behaviorScatterPredictorControlModes = []string{
+	"spline",
+	"linear",
+	"none",
+}
+
 // computationApplicableFeatures maps each computation to the feature files it can use.
 // Features not in this list for a given computation won't be shown in the feature selection.
 var computationApplicableFeatures = map[string][]string{
@@ -535,9 +541,16 @@ type PlotItemConfig struct {
 	BehaviorScatterColumnsSpec          string
 	BehaviorScatterAggregationModesSpec string
 	BehaviorScatterSegmentSpec          string
+	BehaviorScatterControlPredictor     *bool
+	BehaviorScatterControlTrialOrder    *bool
+	BehaviorScatterPredictorControlMode string
 
 	// Behavior temporal topomaps
 	BehaviorTemporalStatsFeatureFolder string
+
+	// Behavior psychometrics
+	PsychometricsPredictorColumn string
+	PsychometricsOutcomeColumn   string
 
 	// Behavior dose response
 	DoseResponseDoseColumn          string
@@ -590,8 +603,14 @@ const (
 	plotItemConfigFieldBehaviorScatterColumns
 	plotItemConfigFieldBehaviorScatterAggregationModes
 	plotItemConfigFieldBehaviorScatterSegment
+	plotItemConfigFieldBehaviorScatterControlPredictor
+	plotItemConfigFieldBehaviorScatterControlTrialOrder
+	plotItemConfigFieldBehaviorScatterPredictorControlMode
 	// Behavior temporal topomaps
 	plotItemConfigFieldBehaviorTemporalStatsFeatureFolder
+	// Behavior psychometrics
+	plotItemConfigFieldPsychometricsPredictorColumn
+	plotItemConfigFieldPsychometricsOutcomeColumn
 	// Behavior dose response
 	plotItemConfigFieldDoseResponseDoseColumn
 	plotItemConfigFieldDoseResponseResponseColumn
