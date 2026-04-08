@@ -33,7 +33,7 @@ eeg_pipeline/.venv311/
 .pytest_cache/
 .matplotlib_cache/
 .matplotlib/
-.coverage
+.coverage*
 coverage.xml
 htmlcov/
 .cache/
@@ -42,6 +42,8 @@ htmlcov/
 .hypothesis/
 .mypy_cache/
 .ruff_cache/
+.tmp/
+pytest-cache-files-*/
 .ipynb_checkpoints/
 .python-version
 
