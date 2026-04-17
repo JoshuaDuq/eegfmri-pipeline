@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 import tomllib
 
+import yaml
+
 from tests import REPO_ROOT
 
 
@@ -118,3 +120,27 @@ def test_requirements_installs_full_test_stack() -> None:
         "requirements.txt must install both dev and ml extras so a fresh environment "
         "can run the full pytest suite."
     )
+
+
+def test_targeted_pytest_invocations_do_not_inherit_coverage_gate() -> None:
+    pytest_config = (REPO_ROOT / "pytest.ini").read_text(encoding="utf-8")
+
+    assert "--cov-fail-under" not in pytest_config
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    windows_steps = workflow["jobs"]["windows-compat"]["steps"]
+    targeted_step = next(
+        step for step in windows_steps if step.get("name") == "Run targeted Windows compatibility tests"
+    )
+
+    assert "--no-cov" in targeted_step["run"]
+
+
+def test_full_ci_pytest_invocation_enforces_pipeline_coverage() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    test_steps = workflow["jobs"]["test"]["steps"]
+    run_tests_step = next(step for step in test_steps if step.get("name") == "Run tests")
+
+    assert "--cov=eeg_pipeline/pipelines" in run_tests_step["run"]
+    assert "--cov=fmri_pipeline/pipelines" in run_tests_step["run"]
+    assert "--cov-fail-under=75" in run_tests_step["run"]
