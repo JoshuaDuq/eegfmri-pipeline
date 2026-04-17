@@ -141,6 +141,21 @@ def test_resolve_single_path_keeps_docker_image_like_values() -> None:
     assert resolved == "nipreps/fmriprep:25.2.4"
 
 
+def test_resolve_single_path_keeps_windows_drive_absolute_paths(tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    project_root = tmp_path / "project"
+    config_dir.mkdir()
+    project_root.mkdir()
+
+    resolved = loader._resolve_single_path(
+        "D:/EEG_fMRI_data/derivatives",
+        config_dir,
+        project_root,
+    )
+
+    assert resolved == "D:/EEG_fMRI_data/derivatives"
+
+
 def test_resolve_paths_recursive_skips_non_path_scalar_keys(tmp_path) -> None:
     config = {
         "project": {

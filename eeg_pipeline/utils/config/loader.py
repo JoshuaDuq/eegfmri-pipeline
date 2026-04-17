@@ -73,11 +73,20 @@ def _looks_like_path_string(value: str) -> bool:
     return False
 
 
+def _is_windows_drive_absolute_path(value: str) -> bool:
+    return len(value) >= 3 and value[0].isalpha() and value[1] == ":" and value[2] in ("/", "\\")
+
+
 def _resolve_single_path(value: str, config_dir: Path, project_root: Path) -> str:
     if _is_blank(value):
         return value
 
     if not _looks_like_path_string(value):
+        return value
+
+    if _is_windows_drive_absolute_path(value):
+        if os.name == "nt":
+            return str(Path(value).expanduser().resolve())
         return value
 
     path_obj = Path(value).expanduser()

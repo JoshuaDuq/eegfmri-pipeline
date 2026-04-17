@@ -21,3 +21,10 @@ def test_gitignore_keeps_private_studies_out_of_public_repo() -> None:
     ignored_entries = {line.strip() for line in gitignore_text.splitlines() if line.strip()}
 
     assert "studies/" in ignored_entries
+
+
+def test_gitignore_ignores_coverage_artifacts() -> None:
+    gitignore_text = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    ignored_entries = {line.strip() for line in gitignore_text.splitlines() if line.strip()}
+
+    assert ".coverage*" in ignored_entries

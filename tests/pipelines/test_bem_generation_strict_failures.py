@@ -16,6 +16,16 @@ from fmri_pipeline.analysis.bem_generation import (
 
 
 class TestBemGenerationStrictFailures(unittest.TestCase):
+    def _set_bem_host_platform(self, system_name: str) -> None:
+        patcher = patch.object(
+            sys.modules["fmri_pipeline.analysis.bem_generation"],
+            "platform",
+            create=True,
+        )
+        platform_mod = patcher.start()
+        self.addCleanup(patcher.stop)
+        platform_mod.system.return_value = system_name
+
     def test_bem_generation_rejects_native_windows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -25,14 +35,13 @@ class TestBemGenerationStrictFailures(unittest.TestCase):
             license_path = root / "license.txt"
             license_path.write_text("license", encoding="utf-8")
 
-            with patch.object(sys.modules["fmri_pipeline.analysis.bem_generation"], "platform", create=True) as platform_mod:
-                platform_mod.system.return_value = "Windows"
-                with self.assertRaisesRegex(RuntimeError, "not supported on native Windows"):
-                    generate_bem_model_and_solution(
-                        subject="sub-0001",
-                        subjects_dir=subjects_dir,
-                        fs_license_path=license_path,
-                    )
+            self._set_bem_host_platform("Windows")
+            with self.assertRaisesRegex(RuntimeError, "not supported on native Windows"):
+                generate_bem_model_and_solution(
+                    subject="sub-0001",
+                    subjects_dir=subjects_dir,
+                    fs_license_path=license_path,
+                )
 
     def test_identity_transform_generation_rejects_native_windows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -43,15 +52,14 @@ class TestBemGenerationStrictFailures(unittest.TestCase):
             license_path = root / "license.txt"
             license_path.write_text("license", encoding="utf-8")
 
-            with patch.object(sys.modules["fmri_pipeline.analysis.bem_generation"], "platform", create=True) as platform_mod:
-                platform_mod.system.return_value = "Windows"
-                with self.assertRaisesRegex(RuntimeError, "not supported on native Windows"):
-                    generate_coregistration_transform(
-                        subject="sub-0001",
-                        subjects_dir=subjects_dir,
-                        fs_license_path=license_path,
-                        allow_identity_trans=True,
-                    )
+            self._set_bem_host_platform("Windows")
+            with self.assertRaisesRegex(RuntimeError, "not supported on native Windows"):
+                generate_coregistration_transform(
+                    subject="sub-0001",
+                    subjects_dir=subjects_dir,
+                    fs_license_path=license_path,
+                    allow_identity_trans=True,
+                )
 
     def test_bem_generation_failure_writes_qc_artifact_and_raises(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -68,6 +76,7 @@ class TestBemGenerationStrictFailures(unittest.TestCase):
                 stdout="docker stdout",
                 stderr="docker stderr",
             )
+            self._set_bem_host_platform("Linux")
 
             with (
                 patch(
@@ -106,6 +115,7 @@ class TestBemGenerationStrictFailures(unittest.TestCase):
             license_path.write_text("license", encoding="utf-8")
 
             timeout_error = subprocess.TimeoutExpired(cmd="docker run", timeout=3600)
+            self._set_bem_host_platform("Linux")
 
             with (
                 patch(
