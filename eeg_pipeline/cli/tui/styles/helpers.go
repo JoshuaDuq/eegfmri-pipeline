@@ -181,12 +181,25 @@ func RenderFooterSeparator() string {
 	return lipgloss.NewStyle().Foreground(Secondary).Render(FooterHintSeparator)
 }
 
+// RenderKeyHint renders a footer key hint as "[Key] Label" with the key
+// emphasized in the primary accent color. The bracketed form reads closer to
+// standard CLI documentation than background-filled chips and pairs better
+// with a restrained, research-app aesthetic.
 func RenderKeyHint(key, label string) string {
-	return FooterKeyPrimaryStyle.Render(key) + " " + FooterLabelPrimaryStyle.Render(label)
+	return FooterKeyBracketStyle.Render("[") +
+		FooterKeyTextPrimary.Render(key) +
+		FooterKeyBracketStyle.Render("] ") +
+		FooterLabelPrimaryStyle.Render(label)
 }
 
+// RenderKeyHintSecondary is the de-emphasized variant of RenderKeyHint; used
+// for lower-priority bindings that should recede when horizontal space is
+// scarce.
 func RenderKeyHintSecondary(key, label string) string {
-	return FooterKeySecondaryStyle.Render(key) + " " + FooterLabelSecondaryStyle.Render(label)
+	return FooterKeyBracketStyle.Render("[") +
+		FooterKeyTextSecondary.Render(key) +
+		FooterKeyBracketStyle.Render("] ") +
+		FooterLabelSecondaryStyle.Render(label)
 }
 
 // RenderHeaderSeparator returns a styled horizontal line (e.g. for under titles).
@@ -377,8 +390,8 @@ func RenderStepHeader(title string, width int) string {
 }
 
 // RenderProgressBar renders a static filled/empty progress bar with a percentage label.
-// Color shifts warning→primary→success as fill progresses; a sub-block partial cell
-// gives a smoother leading edge.
+// Fill is monochrome (bright foreground) so progress is communicated by width
+// alone; a sub-block partial cell gives a smoother leading edge.
 // progress is clamped to [0.0, 1.0]; width is clamped to [MinProgressBarWidth, MaxProgressBarWidth].
 func RenderProgressBar(progress float64, width int) string {
 	if width < MinProgressBarWidth {
@@ -394,17 +407,7 @@ func RenderProgressBar(progress float64, width int) string {
 		progress = 1
 	}
 
-	var fillColor lipgloss.Color
-	switch {
-	case progress >= 1.0:
-		fillColor = Success
-	case progress >= 0.6:
-		fillColor = Primary
-	case progress >= 0.25:
-		fillColor = Accent
-	default:
-		fillColor = Warning
-	}
+	fillColor := Text
 
 	subBlocks := []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
 	exact := progress * float64(width)

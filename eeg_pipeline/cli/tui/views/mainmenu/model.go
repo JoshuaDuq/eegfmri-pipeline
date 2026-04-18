@@ -1,6 +1,7 @@
 package mainmenu
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -438,22 +439,29 @@ func (m Model) renderHeader() string {
 		lineWidth = 0
 	}
 
-	glyph := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("◆")
-	logo := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("eegfmri-pipeline")
+	// Quiet, single-line brand treatment. No glyph — the name + thin rule beneath
+	// is enough visual anchor for a research-app header.
+	logo := styles.TitleAccentStyle.Render("eegfmri-pipeline")
 
 	v := m.version
 	if v == "" {
 		v = "dev"
 	}
-	versionText := lipgloss.NewStyle().Foreground(styles.TextDim).Render(v)
+	// Prepend "v" only for release-looking versions (digit-leading); keep
+	// placeholder labels like "dev" / "nightly" bare.
+	versionLabel := v
+	if len(v) > 0 && v[0] >= '0' && v[0] <= '9' {
+		versionLabel = "v" + v
+	}
+	versionText := styles.SubtitleStyle.Render(versionLabel)
 
-	left := "  " + glyph + " " + logo + "  " + versionText
+	left := "  " + logo + "  " + versionText
 
 	right := ""
 	if task := strings.TrimSpace(m.Task); task != "" {
-		taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(task)
-		taskLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render("task  ")
-		right = taskLabel + taskValue + "  "
+		right = styles.RenderLabelValueInline("task", task) + "  "
+	} else {
+		right = styles.HintStyle.Render("task not configured") + "  "
 	}
 
 	spacer := ""
@@ -465,11 +473,31 @@ func (m Model) renderHeader() string {
 	return titleRow + "\n" + styles.RenderHeaderSeparator(lineWidth)
 }
 
+// renderSectionHeader renders a section label in plain uppercase with an
+// accent-bar indicator. Active sections use the bright bar + text color;
+// inactive sections use a thinner muted bar + muted text. This matches the
+// "DETAILS / WORKSPACE / FOCUS" sub-header convention elsewhere in the app.
 func (m Model) renderSectionHeader(title string, isActive bool) string {
+	upper := strings.ToUpper(title)
 	if isActive {
-		return styles.RenderActiveSectionLabel(title)
+		bar := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(styles.SectionIconActive)
+		heading := lipgloss.NewStyle().Foreground(styles.Text).Bold(true).Render(upper)
+		return bar + " " + heading
 	}
-	return styles.RenderDimSectionLabel(title)
+	dimBar := lipgloss.NewStyle().Foreground(styles.Secondary).Render(styles.SectionIcon)
+	dimHeading := lipgloss.NewStyle().Foreground(styles.Muted).Bold(true).Render(upper)
+	return dimBar + " " + dimHeading
+}
+
+// renderSectionHeaderWithCount renders a section header and, when the section
+// is currently active, appends a subtle "N/Total" position counter.
+func (m Model) renderSectionHeaderWithCount(title string, isActive bool, cursor, total int) string {
+	base := m.renderSectionHeader(title, isActive)
+	if !isActive || total <= 1 {
+		return base
+	}
+	counter := styles.MutedTextStyle.Render(fmt.Sprintf("  %d/%d", cursor+1, total))
+	return base + counter
 }
 
 type sectionRenderConfig struct {
@@ -486,27 +514,27 @@ type menuPaneConfig struct {
 }
 
 func (m Model) renderItem(name, description string, selected bool, config sectionRenderConfig) string {
+	// Selection is signaled with a steady left-edge accent bar (no blink),
+	// the item name in the primary accent color + bold, and a subtle dot
+	// separator before the description. Unselected rows are aligned to the
+	// same left column using a single space + gutter.
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+
 	if selected {
-		cursorChar := styles.SelectedMark + " "
-		if !m.animQueue.CursorVisible() {
-			cursorChar = "  "
-		}
-		cursor := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(cursorChar)
+		bar := styles.RenderAccentBar(true)
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		var inner string
 		if config.showDescriptions {
-			sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
-			inner = cursor + nameStyle.Render(name) + sep + descStyle.Render(description)
+			inner = bar + " " + nameStyle.Render(name) + sep + descStyle.Render(description)
 		} else {
-			inner = cursor + nameStyle.Render(name)
+			inner = bar + " " + nameStyle.Render(name)
 		}
 		return styles.TruncateLine(inner, config.width)
 	}
 
 	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
 	var rawLine string
 	if config.showDescriptions {
 		rawLine = "  " + nameStyle.Render(name) + sep + descStyle.Render(description)
@@ -517,13 +545,14 @@ func (m Model) renderItem(name, description string, selected bool, config sectio
 }
 
 func (m Model) renderFooter() string {
-	hints := []footerHint{
-		{key: "↑↓", label: "Navigate", compact: "Nav", priority: 0},
-		{key: "⏎", label: "Open", compact: "Open", priority: 0},
-		{key: "R", label: "Resume", compact: "Resume", priority: 1},
-		{key: "Q", label: "Quit", compact: "Quit", priority: 1},
-		{key: "D", label: "Dashboard", compact: "Dash", priority: 2},
-		{key: "H", label: "History", compact: "Hist", priority: 2},
+	hints := []styles.FooterHint{
+		{Key: "↑↓", Label: "Navigate", Compact: "Nav", Priority: 0},
+		{Key: "⏎", Label: "Open", Compact: "Open", Priority: 0},
+		{Key: "R", Label: "Resume", Compact: "Resume", Priority: 1},
+		{Key: "Q", Label: "Quit", Compact: "Quit", Priority: 1},
+		{Key: "D", Label: "Dashboard", Compact: "Dash", Priority: 2},
+		{Key: "H", Label: "History", Compact: "Hist", Priority: 2},
+		{Key: "Ctrl+K", Label: "Quick Actions", Compact: "Quick", Priority: 2},
 	}
 
 	width := m.width - 4
@@ -531,7 +560,7 @@ func (m Model) renderFooter() string {
 		width = 20
 	}
 	divider := styles.RenderDivider(width)
-	bar := styles.RenderNoWrapBlock(styles.FooterStyle, m.renderFooterHints(width, hints), width)
+	bar := styles.RenderNoWrapBlock(styles.FooterStyle, styles.RenderFooterHints(width, hints), width)
 	return divider + "\n" + bar
 }
 
@@ -548,13 +577,6 @@ type selectionDetail struct {
 	focusAreas  []string
 	lastUsed    bool
 	rows        []detailRow
-}
-
-type footerHint struct {
-	key      string
-	label    string
-	compact  string
-	priority int
 }
 
 func (m Model) renderContent(width, height int) string {
@@ -768,7 +790,7 @@ func (m Model) appendPipelineSectionLines(
 	items []pipelineItem,
 	config sectionRenderConfig,
 ) []string {
-	lines = append(lines, m.renderSectionHeader(title, m.currentSection == sectionID))
+	lines = append(lines, m.renderSectionHeaderWithCount(title, m.currentSection == sectionID, cursor, len(items)))
 	for idx, item := range items {
 		isSelected := m.currentSection == sectionID && idx == cursor
 		if isSelected {
@@ -788,7 +810,7 @@ func (m Model) appendUtilitySectionLines(
 	items []utilityItem,
 	config sectionRenderConfig,
 ) []string {
-	lines = append(lines, m.renderSectionHeader(title, m.currentSection == sectionID))
+	lines = append(lines, m.renderSectionHeaderWithCount(title, m.currentSection == sectionID, cursor, len(items)))
 	for idx, item := range items {
 		isSelected := m.currentSection == sectionID && idx == cursor
 		if isSelected {
@@ -1176,40 +1198,6 @@ func homeRelativePath(goos string, home string, path string) (string, bool) {
 		return "", false
 	}
 	return relative, true
-}
-
-func (m Model) renderFooterHints(width int, hints []footerHint) string {
-	render := func(useCompact bool, maxPriority int) string {
-		parts := make([]string, 0, len(hints))
-		for _, hint := range hints {
-			if hint.priority > maxPriority {
-				continue
-			}
-			label := hint.label
-			if useCompact && hint.compact != "" {
-				label = hint.compact
-			}
-			if hint.priority == 0 {
-				parts = append(parts, styles.RenderKeyHint(hint.key, label))
-			} else {
-				parts = append(parts, styles.RenderKeyHintSecondary(hint.key, label))
-			}
-		}
-		return strings.Join(parts, styles.RenderFooterSeparator())
-	}
-
-	if full := render(false, 2); lipgloss.Width(full) <= width {
-		return full
-	}
-	if compact := render(true, 2); lipgloss.Width(compact) <= width {
-		return compact
-	}
-	for maxPriority := 1; maxPriority >= 0; maxPriority-- {
-		if compact := render(true, maxPriority); compact != "" && lipgloss.Width(compact) <= width {
-			return compact
-		}
-	}
-	return render(true, 0)
 }
 
 ///////////////////////////////////////////////////////////////////

@@ -56,20 +56,20 @@ func (m Model) View() string {
 }
 
 func (m Model) renderFooter() string {
-	hints := []string{
-		styles.RenderKeyHint("↑/↓", "Navigate"),
-		styles.RenderKeyHint("←/→", "Section"),
-		styles.RenderKeyHint("Enter", "Edit"),
-		styles.RenderKeyHint("B", "Browse"),
-		styles.RenderKeyHint("R", "Reset"),
-		styles.RenderKeyHint("Esc", "Back"),
+	hints := []styles.FooterHint{
+		{Key: "↑/↓", Label: "Navigate", Compact: "Nav", Priority: 0},
+		{Key: "←/→", Label: "Section", Compact: "Sec", Priority: 0},
+		{Key: "Enter", Label: "Edit", Compact: "Edit", Priority: 0},
+		{Key: "B", Label: "Browse", Compact: "Browse", Priority: 1},
+		{Key: "R", Label: "Reset", Compact: "Reset", Priority: 1},
+		{Key: "Esc", Label: "Back", Compact: "Back", Priority: 0},
 	}
 
 	if m.editingText {
-		hints = []string{
-			styles.RenderKeyHint("Type", "Edit"),
-			styles.RenderKeyHint("Enter", "Save"),
-			styles.RenderKeyHint("Esc", "Cancel"),
+		hints = []styles.FooterHint{
+			{Key: "Type", Label: "Edit", Compact: "Edit", Priority: 0},
+			{Key: "Enter", Label: "Save", Compact: "Save", Priority: 0},
+			{Key: "Esc", Label: "Cancel", Compact: "Cancel", Priority: 0},
 		}
 	}
 
@@ -78,7 +78,7 @@ func (m Model) renderFooter() string {
 		width = 20
 	}
 	divider := styles.RenderDivider(width)
-	bar := styles.RenderNoWrapBlock(styles.FooterStyle, strings.Join(hints, styles.RenderFooterSeparator()), width)
+	bar := styles.RenderNoWrapBlock(styles.FooterStyle, styles.RenderFooterHints(width, hints), width)
 	return divider + "\n" + bar
 }
 
@@ -163,7 +163,7 @@ func (m Model) renderFields(maxWidth int) string {
 
 		if field.isPath && isFocused {
 			suffix.WriteString(sep)
-			suffix.WriteString(styles.FooterKeySecondaryStyle.Render("B"))
+			suffix.WriteString(styles.RenderKeyBadge("B", false))
 			suffix.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(" browse"))
 		}
 

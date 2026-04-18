@@ -226,8 +226,8 @@ func TestView_CompactLayoutFitsSmallWindow(t *testing.T) {
 
 	normalized := normalizeWhitespace(view)
 	required := []string{
-		"Analysis",
-		"Utilities",
+		"ANALYSIS",
+		"UTILITIES",
 		"Pipeline Smoke Test",
 		"more",
 	}

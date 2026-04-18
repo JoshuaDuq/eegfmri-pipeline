@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"github.com/eeg-pipeline/tui/app"
+	"github.com/eeg-pipeline/tui/styles"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -54,6 +55,9 @@ func handlePanic() {
 
 func main() {
 	defer handlePanic()
+
+	// Respect the NO_COLOR env var (https://no-color.org) before any styling runs.
+	styles.ApplyNoColorProfile()
 
 	appModel := app.New(Version)
 	program := tea.NewProgram(

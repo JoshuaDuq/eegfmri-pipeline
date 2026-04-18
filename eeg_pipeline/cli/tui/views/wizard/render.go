@@ -10,11 +10,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// footerHint is the wizard-internal hint representation; delegates to the
+// shared renderer via toStylesHints + styles.RenderFooterHints.
 type footerHint struct {
 	key      string
 	label    string
 	compact  string
 	priority int
+}
+
+func toStylesHints(hints []footerHint) []styles.FooterHint {
+	out := make([]styles.FooterHint, len(hints))
+	for i, h := range hints {
+		out[i] = styles.FooterHint{Key: h.key, Label: h.label, Compact: h.compact, Priority: h.priority}
+	}
+	return out
 }
 
 const (
@@ -224,52 +234,18 @@ func (m Model) buildStepPill() string {
 	if len(m.steps) == 0 {
 		return ""
 	}
-	stepNumber := m.stepIndex + 1
-	if stepNumber < 1 {
-		stepNumber = 1
-	}
-	if stepNumber > len(m.steps) {
-		stepNumber = len(m.steps)
-	}
-	return lipgloss.NewStyle().Foreground(styles.TextDim).
-		Render(fmt.Sprintf("%d/%d", stepNumber, len(m.steps)))
+	return styles.RenderStepPill(m.stepIndex+1, len(m.steps))
 }
 
 func (m Model) buildProgressBar(width int) string {
-	if width <= 0 || len(m.steps) == 0 {
+	if len(m.steps) == 0 {
 		return ""
 	}
-	total := len(m.steps)
 	filled := m.stepIndex + 1
 	if filled < 1 {
 		filled = 1
 	}
-	if filled > total {
-		filled = total
-	}
-	if width < 4 {
-		width = 4
-	}
-
-	progress := float64(filled) / float64(total)
-	var fillColor lipgloss.Color
-	switch {
-	case progress >= 1.0:
-		fillColor = styles.Success
-	case progress >= 0.6:
-		fillColor = styles.Primary
-	case progress >= 0.25:
-		fillColor = styles.Accent
-	default:
-		fillColor = styles.Warning
-	}
-
-	filledW := width * filled / total
-	emptyW := width - filledW
-
-	filledStr := lipgloss.NewStyle().Foreground(fillColor).Render(strings.Repeat("━", filledW))
-	emptyStr := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat("─", emptyW))
-	return filledStr + emptyStr
+	return styles.RenderStepperBar(filled, len(m.steps), width)
 }
 
 func (m Model) buildSubjectBadge() string {
@@ -293,40 +269,15 @@ func (m Model) buildPresetBadge() string {
 }
 
 func (m Model) buildBreadcrumbRow(width int) string {
-	var parts []string
-	isCompact := styles.IsNarrowLayout(width)
-	connector := lipgloss.NewStyle().Foreground(styles.Border).Render("  ·  ")
-
-	for i, step := range m.steps {
+	crumbs := make([]styles.BreadcrumbStep, 0, len(m.steps))
+	for _, step := range m.steps {
 		name := stepDisplayNames[step]
 		if name == "" {
 			name = step.String()
 		}
-
-		var segment string
-		switch {
-		case i < m.stepIndex:
-			if isCompact {
-				segment = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
-			} else {
-				check := lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark)
-				segment = check + lipgloss.NewStyle().Foreground(styles.Muted).Render(" "+name)
-			}
-		case i == m.stepIndex:
-			segment = lipgloss.NewStyle().
-				Foreground(styles.Primary).
-				Bold(true).Underline(true).
-				Render(name)
-		default:
-			segment = lipgloss.NewStyle().Foreground(styles.Border).Render(name)
-		}
-		parts = append(parts, segment)
+		crumbs = append(crumbs, styles.BreadcrumbStep{Name: name})
 	}
-
-	if isCompact {
-		connector = lipgloss.NewStyle().Foreground(styles.Border).Render(" ")
-	}
-	return strings.Join(parts, connector)
+	return styles.RenderBreadcrumb(crumbs, m.stepIndex, styles.IsNarrowLayout(width))
 }
 
 func (m Model) renderFooter(width int) string {
@@ -361,41 +312,7 @@ func (m Model) renderFooter(width int) string {
 }
 
 func (m Model) renderFooterHints(width int, hints []footerHint) string {
-	if len(hints) == 0 {
-		return ""
-	}
-
-	render := func(useCompact bool, maxPriority int) string {
-		parts := make([]string, 0, len(hints))
-		for _, hint := range hints {
-			if hint.priority > maxPriority {
-				continue
-			}
-			label := hint.label
-			if useCompact && hint.compact != "" {
-				label = hint.compact
-			}
-			if hint.priority == 0 {
-				parts = append(parts, styles.RenderKeyHint(hint.key, label))
-			} else {
-				parts = append(parts, styles.RenderKeyHintSecondary(hint.key, label))
-			}
-		}
-		return strings.Join(parts, styles.RenderFooterSeparator())
-	}
-
-	if full := render(false, 2); lipgloss.Width(full) <= width {
-		return full
-	}
-	if compact := render(true, 2); lipgloss.Width(compact) <= width {
-		return compact
-	}
-	for maxPriority := 1; maxPriority >= 0; maxPriority-- {
-		if compact := render(true, maxPriority); compact != "" && lipgloss.Width(compact) <= width {
-			return compact
-		}
-	}
-	return render(true, 0)
+	return styles.RenderFooterHints(width, toStylesHints(hints))
 }
 
 func (m Model) renderFooterStatus(width int) string {

@@ -156,10 +156,7 @@ func (m Model) renderAction(action Action, isCursor bool) string {
 		cursor = styles.RenderCursorOptional(m.animQueue.CursorVisible())
 	}
 
-	shortcutStyle := styles.FooterKeySecondaryStyle
-	if isCursor {
-		shortcutStyle = styles.FooterKeyPrimaryStyle
-	}
+	badge := styles.RenderKeyBadge(action.Shortcut, isCursor)
 
 	iconStyle := lipgloss.NewStyle().Foreground(styles.Border)
 	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
@@ -171,7 +168,7 @@ func (m Model) renderAction(action Action, isCursor bool) string {
 	}
 
 	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
-	line := cursor + shortcutStyle.Render(action.Shortcut) + " " +
+	line := cursor + badge + " " +
 		iconStyle.Render(action.Icon) + " " + nameStyle.Render(action.Name)
 	if isCursor {
 		line += sep + descStyle.Render(action.Description)
