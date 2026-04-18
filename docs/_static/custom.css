@@ -1,42 +1,61 @@
 /* =========================================================
    EEG–fMRI Pipeline — Furo theme overrides
-   Academic dark: warm slate, muted steel-blue accent, no neon
+   Monochrome Research Terminal: pure grayscale palette
+   matched 1:1 to the TUI. The only chromatic tones are
+   amber (#C49A5B) and muted red (#C07878), reserved for
+   Warning and Error states where typography alone would
+   be unsafe. All other emphasis is carried by weight + value.
    ========================================================= */
 
 /* ---------------------------------------------------------
-   Root tokens — academic dark palette
+   Root tokens — TUI palette mapped to Furo CSS variables
    --------------------------------------------------------- */
 body[data-theme="dark"],
 body[data-theme="auto"] {
-  /* Backgrounds: warm dark slate, not cold black */
-  --color-background-primary:    #141720;
-  --color-background-secondary:  #1b1f2e;
-  --color-background-hover:      #222638;
-  --color-background-border:     #252a3a;
+  --color-background-primary:    #0A0B0D;
+  --color-background-secondary:  #131518;
+  --color-background-hover:      #1A1C20;
+  --color-background-border:     #24262A;
 
-  /* Text: warm off-white, never pure white */
-  --color-foreground-primary:    #dce2ef;
-  --color-foreground-secondary:  #8e97b0;
-  --color-foreground-muted:      #525a72;
-  --color-foreground-border:     #2c3148;
+  --color-foreground-primary:    #E6E8EB;
+  --color-foreground-secondary:  #A4A8AD;
+  --color-foreground-muted:      #6A6D72;
+  --color-foreground-border:     #3D4045;
 
-  /* Accent: muted steel-blue — scholarly, not electric */
-  --color-brand-primary:         #8ab4d4;
-  --color-brand-content:         #6d9dbf;
+  --color-brand-primary:         #F2F3F5;
+  --color-brand-content:         #BFC3C7;
 
-  --color-highlight-on-target:   rgba(138, 180, 212, 0.07);
-  --color-admonition-background: #1b1f2e;
+  --color-highlight-on-target:   rgba(242, 243, 245, 0.07);
+  --color-admonition-background: #131518;
 
-  /* Typography */
+  /* Semantic accents — used only for Warning/Error */
+  --color-semantic-warning: #C49A5B;
+  --color-semantic-error:   #C07878;
+
   --font-stack:            "Inter", "Segoe UI", system-ui, sans-serif;
   --font-stack--monospace: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
 body[data-theme="light"] {
-  --color-background-primary:   #f5f6fa;
-  --color-background-secondary: #eceef5;
-  --color-brand-primary:        #2a6496;
-  --color-brand-content:        #1f5280;
+  --color-background-primary:    #FAFAFB;
+  --color-background-secondary:  #F1F2F4;
+  --color-background-hover:      #E8EAEC;
+  --color-background-border:     #D8DADD;
+
+  --color-foreground-primary:    #1A1C20;
+  --color-foreground-secondary:  #4A4D52;
+  --color-foreground-muted:      #74777C;
+  --color-foreground-border:     #C4C6C9;
+
+  --color-brand-primary:         #1A1C20;
+  --color-brand-content:         #3D4045;
+
+  --color-highlight-on-target:   rgba(26, 28, 32, 0.06);
+  --color-admonition-background: #F1F2F4;
+
+  --color-semantic-warning: #8A6322;
+  --color-semantic-error:   #8A3A3A;
+
   --font-stack:            "Inter", "Segoe UI", system-ui, sans-serif;
   --font-stack--monospace: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
@@ -47,7 +66,7 @@ body {
 }
 
 /* ---------------------------------------------------------
-   Typography hierarchy — academic weight/size scale
+   Typography hierarchy — emphasis by weight, not hue
    --------------------------------------------------------- */
 h1 {
   font-size: 1.85rem;
@@ -91,7 +110,7 @@ p {
 }
 
 /* ---------------------------------------------------------
-   Sidebar — understated, not competing with content
+   Sidebar — understated, recedes from content
    --------------------------------------------------------- */
 .sidebar-brand {
   padding: 1.1rem 1rem 0.75rem;
@@ -103,7 +122,7 @@ p {
   font-weight: 600;
   font-size: 0.9rem;
   letter-spacing: 0.015em;
-  color: var(--color-brand-primary);
+  color: var(--color-foreground-primary);
 }
 
 .sidebar-tree .reference {
@@ -112,10 +131,14 @@ p {
 }
 
 .sidebar-tree .reference:hover {
-  color: var(--color-brand-primary);
+  color: var(--color-foreground-primary);
 }
 
-/* Section captions in sidebar */
+.sidebar-tree .current > .reference {
+  color: var(--color-foreground-primary);
+  font-weight: 600;
+}
+
 .sidebar-tree .caption-text {
   font-size: 0.72rem;
   font-weight: 700;
@@ -127,7 +150,7 @@ p {
 }
 
 /* ---------------------------------------------------------
-   sphinx-design cards — muted border, subtle hover
+   sphinx-design cards — subtle border, monochrome hover
    --------------------------------------------------------- */
 .sd-card {
   border: 1px solid var(--color-foreground-border) !important;
@@ -138,7 +161,7 @@ p {
 }
 
 .sd-card:hover {
-  border-color: var(--color-brand-primary) !important;
+  border-color: var(--color-foreground-secondary) !important;
   background: var(--color-background-hover) !important;
 }
 
@@ -148,7 +171,7 @@ p {
   padding: 0.6rem 1rem !important;
   font-weight: 600 !important;
   font-size: 0.875rem !important;
-  color: var(--color-brand-primary) !important;
+  color: var(--color-foreground-primary) !important;
   letter-spacing: 0.005em;
 }
 
@@ -169,7 +192,7 @@ p {
 }
 
 /* ---------------------------------------------------------
-   Tab set — understated, line-style active indicator
+   Tab set — line-style indicator, no chromatic accent
    --------------------------------------------------------- */
 .sd-tab-set {
   margin: 1.2rem 0;
@@ -187,8 +210,9 @@ p {
 }
 
 .sd-tab-set > input:checked ~ label {
-  color: var(--color-brand-primary);
-  border-bottom-color: var(--color-brand-primary);
+  color: var(--color-foreground-primary);
+  border-bottom-color: var(--color-foreground-primary);
+  font-weight: 600;
 }
 
 .sd-tab-content {
@@ -199,11 +223,12 @@ p {
 }
 
 /* ---------------------------------------------------------
-   Admonitions — single left rule, no heavy box
+   Admonitions — single left rule, monochrome by default;
+   amber/red appear only on Warning/Error variants.
    --------------------------------------------------------- */
 .admonition {
   border: none !important;
-  border-left: 3px solid var(--color-brand-primary) !important;
+  border-left: 3px solid var(--color-foreground-secondary) !important;
   border-radius: 0 4px 4px 0 !important;
   background: var(--color-admonition-background) !important;
   padding: 0.65rem 1rem !important;
@@ -216,7 +241,7 @@ p {
   text-transform: uppercase !important;
   letter-spacing: 0.09em !important;
   margin-bottom: 0.3rem !important;
-  color: var(--color-brand-primary) !important;
+  color: var(--color-foreground-primary) !important;
 }
 
 .admonition-title::before {
@@ -227,51 +252,133 @@ p {
   margin-bottom: 0;
 }
 
-/* Variant colors — muted, not alarming */
-.admonition.note {
-  border-left-color: #6d9dbf !important;
-}
-.admonition.note .admonition-title {
-  color: #6d9dbf !important;
-}
-
-.admonition.warning {
-  border-left-color: #c8924a !important;
-}
-.admonition.warning .admonition-title {
-  color: #c8924a !important;
+/* Note / tip / important / hint — all grayscale; meaning is in the title */
+.admonition.note,
+.admonition.tip,
+.admonition.important,
+.admonition.hint {
+  border-left-color: var(--color-foreground-secondary) !important;
 }
 
-.admonition.important {
-  border-left-color: #5a9e82 !important;
-}
-.admonition.important .admonition-title {
-  color: #5a9e82 !important;
+.admonition.note .admonition-title,
+.admonition.tip .admonition-title,
+.admonition.important .admonition-title,
+.admonition.hint .admonition-title {
+  color: var(--color-foreground-primary) !important;
 }
 
-.admonition.tip {
-  border-left-color: #7a9abf !important;
+/* See-also — most de-emphasized */
+.admonition.seealso {
+  border-left-color: var(--color-foreground-muted) !important;
 }
-.admonition.tip .admonition-title {
-  color: #7a9abf !important;
+.admonition.seealso .admonition-title {
+  color: var(--color-foreground-muted) !important;
+}
+
+/* Warning / caution — amber, the only non-grayscale tone */
+.admonition.warning,
+.admonition.caution,
+.admonition.attention {
+  border-left-color: var(--color-semantic-warning) !important;
+}
+.admonition.warning .admonition-title,
+.admonition.caution .admonition-title,
+.admonition.attention .admonition-title {
+  color: var(--color-semantic-warning) !important;
+}
+
+/* Danger / error — muted red, semantic only */
+.admonition.danger,
+.admonition.error {
+  border-left-color: var(--color-semantic-error) !important;
+}
+.admonition.danger .admonition-title,
+.admonition.error .admonition-title {
+  color: var(--color-semantic-error) !important;
 }
 
 /* ---------------------------------------------------------
-   Code blocks — dark, readable, well-spaced
+   Code blocks — monochrome syntax tokens, weight-based emphasis
    --------------------------------------------------------- */
 div.highlight {
   border-radius: 5px !important;
   border: 1px solid var(--color-foreground-border) !important;
   position: relative;
+  background: var(--color-background-secondary) !important;
 }
 
 div.highlight pre {
   font-size: 0.815rem;
   line-height: 1.65;
   padding: 0.9rem 1rem !important;
+  background: transparent !important;
+  color: var(--color-foreground-primary);
 }
 
-/* Copy button from sphinx-copybutton */
+/* Pygments token overrides — neutralize all theme colors to grayscale.
+   Selectors cover every common token class so the look is identical
+   regardless of which pygments_style is configured. */
+.highlight .hll { background-color: var(--color-background-hover); }
+.highlight .c, .highlight .ch, .highlight .cm, .highlight .c1,
+.highlight .cs, .highlight .cp, .highlight .cpf {
+  color: var(--color-foreground-muted);
+  font-style: italic;
+}
+.highlight .k, .highlight .kc, .highlight .kd, .highlight .kn,
+.highlight .kp, .highlight .kr, .highlight .kt {
+  color: var(--color-brand-primary);
+  font-weight: 600;
+}
+.highlight .o, .highlight .ow {
+  color: var(--color-foreground-primary);
+}
+.highlight .p {
+  color: var(--color-foreground-secondary);
+}
+.highlight .n, .highlight .nx, .highlight .nv, .highlight .vc,
+.highlight .vg, .highlight .vi {
+  color: var(--color-foreground-primary);
+}
+.highlight .nb, .highlight .bp {
+  color: var(--color-foreground-primary);
+  font-weight: 500;
+}
+.highlight .nf, .highlight .nc, .highlight .nn {
+  color: var(--color-brand-content);
+  font-weight: 600;
+}
+.highlight .nd, .highlight .ni, .highlight .ne, .highlight .nl,
+.highlight .no, .highlight .py {
+  color: var(--color-brand-content);
+}
+.highlight .s, .highlight .s1, .highlight .s2, .highlight .sb,
+.highlight .sc, .highlight .sd, .highlight .se, .highlight .sh,
+.highlight .si, .highlight .sx, .highlight .sr, .highlight .ss,
+.highlight .sa, .highlight .dl {
+  color: var(--color-foreground-secondary);
+}
+.highlight .m, .highlight .mf, .highlight .mh, .highlight .mi,
+.highlight .mo, .highlight .il, .highlight .mb {
+  color: var(--color-brand-content);
+}
+.highlight .gh, .highlight .gu {
+  color: var(--color-brand-primary);
+  font-weight: 700;
+}
+.highlight .gd { color: var(--color-semantic-error); }
+.highlight .gi { color: var(--color-foreground-primary); font-weight: 600; }
+.highlight .ge { font-style: italic; }
+.highlight .gs { font-weight: 700; }
+.highlight .gr, .highlight .gt {
+  color: var(--color-semantic-error);
+}
+.highlight .err {
+  color: var(--color-semantic-error);
+  border: none;
+  background: transparent;
+}
+
+/* Copy button (sphinx-copybutton) */
 button.copybtn {
   opacity: 0 !important;
   transition: opacity 0.2s !important;
@@ -288,8 +395,8 @@ div.highlight:hover button.copybtn {
 }
 
 button.copybtn:hover {
-  color: var(--color-brand-primary) !important;
-  border-color: var(--color-brand-primary) !important;
+  color: var(--color-foreground-primary) !important;
+  border-color: var(--color-foreground-secondary) !important;
 }
 
 /* Inline code */
@@ -302,12 +409,27 @@ td code {
   border-radius: 3px !important;
   padding: 0.1em 0.38em !important;
   font-size: 0.83em !important;
-  color: var(--color-brand-primary) !important;
+  color: var(--color-foreground-primary) !important;
   font-family: var(--font-stack--monospace);
 }
 
 /* ---------------------------------------------------------
-   Tables — clean rows, no heavy borders
+   Links — underline on hover, no chromatic emphasis
+   --------------------------------------------------------- */
+a, a:visited {
+  color: var(--color-foreground-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--color-foreground-border);
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--color-foreground-primary);
+  text-decoration-color: var(--color-foreground-secondary);
+}
+
+/* ---------------------------------------------------------
+   Tables — clean rows, hairline borders
    --------------------------------------------------------- */
 table.docutils {
   border-collapse: collapse;
@@ -385,7 +507,7 @@ hr.docutils {
 }
 
 .related-pages a:hover {
-  color: var(--color-brand-primary);
+  color: var(--color-foreground-primary);
 }
 
 /* ---------------------------------------------------------
@@ -434,12 +556,13 @@ details.sd-dropdown summary {
 
 details.sd-dropdown summary:hover {
   background: var(--color-background-hover) !important;
-  color: var(--color-brand-primary) !important;
+  color: var(--color-foreground-primary) !important;
 }
 
 details.sd-dropdown[open] summary {
   border-bottom: 1px solid var(--color-foreground-border);
-  color: var(--color-brand-primary) !important;
+  color: var(--color-foreground-primary) !important;
+  font-weight: 600 !important;
 }
 
 details.sd-dropdown .sd-summary-content {
@@ -454,7 +577,7 @@ details.sd-dropdown .sd-summary-content p:last-child {
 }
 
 /* ---------------------------------------------------------
-   Search results — native to the academic dark palette
+   Search results
    --------------------------------------------------------- */
 .search-results .context {
   font-size: 0.835rem;
@@ -478,21 +601,21 @@ details.sd-dropdown .sd-summary-content p:last-child {
 .search-results a {
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--color-brand-primary);
+  color: var(--color-foreground-primary);
   text-decoration: none;
 }
 
 .search-results a:hover {
   text-decoration: underline;
-  color: var(--color-brand-content);
+  color: var(--color-foreground-primary);
 }
 
-/* Highlighted search term */
 .search-results .highlighted {
-  background: rgba(138, 180, 212, 0.18);
+  background: var(--color-background-hover);
   color: var(--color-foreground-primary);
   border-radius: 2px;
   padding: 0 2px;
+  font-weight: 600;
 }
 
 #search-results h2 {
@@ -509,15 +632,8 @@ details.sd-dropdown .sd-summary-content p:last-child {
    Mobile / narrow viewport — card grid responsiveness
    --------------------------------------------------------- */
 @media (max-width: 700px) {
-  /* Force 2-col and 3-col grids to single column */
   .sd-row.sd-row-cols-3 > .sd-col,
-  .sd-row.sd-row-cols-xs-3 > .sd-col {
-    width: 100% !important;
-    flex: 0 0 100% !important;
-    max-width: 100% !important;
-  }
-
-  /* 2-col grids stack on very narrow screens */
+  .sd-row.sd-row-cols-xs-3 > .sd-col,
   .sd-row.sd-row-cols-2 > .sd-col,
   .sd-row.sd-row-cols-xs-2 > .sd-col {
     width: 100% !important;
@@ -525,17 +641,9 @@ details.sd-dropdown .sd-summary-content p:last-child {
     max-width: 100% !important;
   }
 
-  h1 {
-    font-size: 1.45rem;
-  }
-
-  h2 {
-    font-size: 1.05rem;
-  }
-
-  .hero-intro {
-    font-size: 0.925rem;
-  }
+  h1 { font-size: 1.45rem; }
+  h2 { font-size: 1.05rem; }
+  .hero-intro { font-size: 0.925rem; }
 
   table.docutils {
     font-size: 0.78rem;
@@ -580,7 +688,7 @@ details.sd-dropdown .sd-summary-content p:last-child {
 dl.glossary dt {
   font-weight: 600;
   font-size: 0.9rem;
-  color: var(--color-brand-primary);
+  color: var(--color-foreground-primary);
   margin-top: 1.1rem;
   padding-bottom: 0.15rem;
   border-bottom: 1px solid var(--color-background-border);
@@ -596,11 +704,10 @@ dl.glossary dd {
 
 /* ---------------------------------------------------------
    Step-header cards (quickstart numbered steps)
-   Single-column grid-item-card used as a milestone marker
    --------------------------------------------------------- */
 .sd-col-12 > .sd-card,
 .sd-col-xs-12 > .sd-card {
-  border-left: 3px solid var(--color-brand-primary) !important;
+  border-left: 3px solid var(--color-foreground-secondary) !important;
   border-radius: 0 4px 4px 0 !important;
   background: var(--color-background-secondary) !important;
 }
@@ -613,36 +720,25 @@ dl.glossary dd {
 }
 
 /* ---------------------------------------------------------
-   seealso blocks
-   --------------------------------------------------------- */
-.admonition.seealso {
-  border-left-color: var(--color-foreground-muted) !important;
-}
-
-.admonition.seealso .admonition-title {
-  color: var(--color-foreground-muted) !important;
-}
-
-/* ---------------------------------------------------------
    Method step headings (h3 inside methods pages)
+   Thin left bar — rendered in foreground-muted to stay quiet.
    --------------------------------------------------------- */
 .rst-content h3::before {
   content: "";
   display: inline-block;
   width: 3px;
   height: 0.85em;
-  background: var(--color-brand-primary);
+  background: var(--color-foreground-muted);
   margin-right: 0.45em;
   vertical-align: middle;
   border-radius: 2px;
-  opacity: 0.6;
+  opacity: 0.8;
 }
 
 /* ---------------------------------------------------------
-   Print / PDF — clean scholarly output
+   Print / PDF — clean grayscale scholarly output
    --------------------------------------------------------- */
 @media print {
-  /* Light background, dark text for print */
   body,
   .page,
   .content,
@@ -651,7 +747,6 @@ dl.glossary dd {
     color: #1a1a1a !important;
   }
 
-  /* Hide sidebar, nav, TOC, copy buttons */
   .sidebar-drawer,
   .toc-drawer,
   .mobile-header,
@@ -662,7 +757,6 @@ dl.glossary dd {
     display: none !important;
   }
 
-  /* Full-width content */
   .main,
   .content,
   article.bd-article {
@@ -677,7 +771,6 @@ dl.glossary dd {
     page-break-after: avoid;
   }
 
-  /* Keep code blocks readable */
   div.highlight,
   pre {
     background: #f5f5f5 !important;
@@ -689,7 +782,6 @@ dl.glossary dd {
     page-break-inside: avoid;
   }
 
-  /* Flatten cards to simple bordered boxes */
   .sd-card {
     border: 1px solid #cccccc !important;
     background: #fafafa !important;
@@ -698,7 +790,7 @@ dl.glossary dd {
   }
 
   .sd-card-header {
-    color: #2a6496 !important;
+    color: #1a1a1a !important;
     border-bottom-color: #cccccc !important;
     background: #f0f0f0 !important;
   }
@@ -707,7 +799,6 @@ dl.glossary dd {
     color: #333333 !important;
   }
 
-  /* Tables */
   table.docutils th {
     background: #eeeeee !important;
     color: #333333 !important;
@@ -719,24 +810,41 @@ dl.glossary dd {
     color: #1a1a1a !important;
   }
 
-  /* Admonitions */
   .admonition {
     background: #f9f9f9 !important;
-    border-left-color: #2a6496 !important;
+    border-left-color: #666666 !important;
   }
 
   .admonition-title {
-    color: #2a6496 !important;
+    color: #111111 !important;
   }
 
-  /* Links — show URL in print */
+  .admonition.warning,
+  .admonition.caution,
+  .admonition.attention {
+    border-left-color: #8A6322 !important;
+  }
+  .admonition.warning .admonition-title,
+  .admonition.caution .admonition-title,
+  .admonition.attention .admonition-title {
+    color: #8A6322 !important;
+  }
+
+  .admonition.danger,
+  .admonition.error {
+    border-left-color: #8A3A3A !important;
+  }
+  .admonition.danger .admonition-title,
+  .admonition.error .admonition-title {
+    color: #8A3A3A !important;
+  }
+
   a[href]::after {
     content: " (" attr(href) ")";
     font-size: 0.75em;
     color: #666666;
   }
 
-  /* Don't annotate internal anchors or nav links */
   a[href^="#"]::after,
   a[href^="javascript:"]::after {
     content: "";
@@ -747,4 +855,3 @@ dl.glossary dd {
     border-left-color: #aaaaaa !important;
   }
 }
-
