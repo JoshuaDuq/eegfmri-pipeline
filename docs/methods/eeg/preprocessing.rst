@@ -64,64 +64,40 @@ Notation
 Pipeline Overview
 -----------------
 
-.. code-block:: text
+BIDS EEG (``.vhdr`` / ``.edf``) enters at step 1; each stage feeds the next until
+clean epochs and derivatives are written.
 
-   BIDS EEG Data (.vhdr/.edf)
-           │
-           ▼
-   ┌───────────────────────────────────┐
-   │  1. Bad Channel Detection         │  PyPREP (NoisyChannels)
-   │     Deviation + correlation       │  Repeated N times; union of bads
-   │     Optional: RANSAC              │
-   └───────────┬───────────────────────┘
-               │
-               ▼
-   ┌───────────────────────────────────┐
-   │  2. Bad Channel Synchronization   │  Union of bads across runs
-   │     per subject                   │  Written back to channels.tsv
-   └───────────┬───────────────────────┘
-               │
-               ▼
-   ┌───────────────────────────────────┐
-   │  3. ICA Fitting                   │  MNE-BIDS-Pipeline subprocess
-   │     Bandpass filter               │  Steps: init → _01 → _04 → _05 → _06a1
-   │     Artifact regression           │
-   │     ICA decomposition             │
-   └───────────┬───────────────────────┘
-               │
-               ▼
-   ┌───────────────────────────────────┐
-   │  4. ICA Component Labeling        │  MNE-ICAlabel (ICLabel classifier)
-   │     Probabilistic classification  │  Threshold: p > 0.8
-   │     Exclude non-brain/other       │  Labels kept: ["brain", "other"]
-   └───────────┬───────────────────────┘
-               │
-               ▼
-   ┌───────────────────────────────────┐
-   │  5. Epoch Creation & Rejection    │  MNE-BIDS-Pipeline subprocess
-   │     Epoch segmentation            │  Steps: _07 → _08a → _09
-   │     ICA component removal         │
-   │     PTP / autoreject              │
-   └───────────┬───────────────────────┘
-               │
-               ▼
-   ┌───────────────────────────────────┐
-   │  6. Clean Events Export           │  Epoch-aligned events.tsv
-   │     Rejected epochs excluded      │  Written to derivatives
-   └───────────┬───────────────────────┘
-               │
-               ▼
-   ┌───────────────────────────────────┐
-   │  7. Preprocessing Statistics      │  Per-subject summary TSV
-   │     Bad channels, ICA exclusions  │  + descriptive statistics
-   │     Epoch rejection counts        │
-   └───────────┬───────────────────────┘
-               │
-               ▼
-   ┌───────────────────────────────────┐
-   │  8. TFR Computation (optional)    │  Morlet wavelets
-   │     Power / ITC per condition     │  Configurable freq range & decimation
-   └───────────────────────────────────┘
+.. list-table::
+   :header-rows: 1
+   :widths: 5 25 70
+
+   * - Step
+     - Transformer
+     - Behavior
+   * - 1
+     - ``NoisyChannels`` (PyPREP)
+     - Deviation + correlation; optional RANSAC. Repeated :math:`N` times; union of bads. Writes ``channels.tsv``
+   * - 2
+     - ``synchronize_bad_channels_across_runs``
+     - Union of bads across runs per subject; written back to every run's ``channels.tsv`` before ICA
+   * - 3
+     - MNE-BIDS-Pipeline (ICA fit)
+     - Subprocess: ``init`` → ``_01`` → ``_04`` → ``_05`` → ``_06a1`` — bandpass, artifact regression, extended Infomax ICA
+   * - 4
+     - ``run_ica_label`` / ICLabel
+     - Probabilistic component classes; exclude when :math:`p > 0.8` and class not in ``ica.labels_to_keep`` (default retain brain + other)
+   * - 5
+     - MNE-BIDS-Pipeline (epochs)
+     - ``_07`` → ``_08a`` → ``_09`` — make epochs, apply ICA, PTP / autoreject
+   * - 6
+     - Clean events export
+     - Epoch-aligned ``*_proc-clean_events.tsv``; rejected epochs excluded; written to derivatives
+   * - 7
+     - ``collect_preprocessing_stats``
+     - Per-subject summary TSV: bad channels, ICA exclusions, epoch rejection counts, per-condition tallies
+   * - 8
+     - ``custom_tfr`` *(optional)*
+     - Morlet wavelets on clean epochs; power / ITC per condition; configurable frequency range and decimation
 
 Input Data Requirements
 -----------------------
