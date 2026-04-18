@@ -27,4 +27,4 @@ docs:
 	@echo "Build finished. Open $(DOCS_BUILD)/index.html"
 
 docs-clean:
-	rm -rf $(DOCS_BUILD) docs/api/generated
+	rm -rf $(DOCS_BUILD)

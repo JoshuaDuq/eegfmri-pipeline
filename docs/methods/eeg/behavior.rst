@@ -3,7 +3,7 @@ Behavioral Statistics
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Dependency-resolved DAG of trial-level analyses linking EEG features to
      behavioral variables. Paradigm-agnostic: supports continuous, binary, and
      categorical predictors. FDR correction applied throughout.

@@ -3,7 +3,7 @@ CLI Reference
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Full command surface for scripting, headless batch jobs, and option
      overrides. For interactive use, the
      <a href="../tui.html">TUI</a> assembles these commands through guided
@@ -123,7 +123,8 @@ Command Matrix
      - Project-wide summaries and storage/timeline inspection.
 
 .. grid:: 2
-   :gutter: 2
+   :gutter: 3
+   :class-container: nav-cards
 
    .. grid-item-card:: Preprocessing
       :link: preprocessing

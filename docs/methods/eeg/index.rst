@@ -1,8 +1,13 @@
 EEG Methods
 ===========
 
-Scientific reference for every EEG analysis stage. Each page covers notation,
-methods, configuration keys, and output schemas.
+.. raw:: html
+
+   <p class="hero-lede">
+     Scientific reference for every EEG analysis stage. Each page covers
+     <strong>notation</strong>, <strong>methods</strong>, <strong>configuration
+     keys</strong>, and <strong>output schemas</strong>.
+   </p>
 
 .. toctree::
    :maxdepth: 1
@@ -16,6 +21,7 @@ methods, configuration keys, and output schemas.
 
 .. grid:: 2
    :gutter: 3
+   :class-container: nav-cards
 
    .. grid-item-card:: Preprocessing
       :link: preprocessing

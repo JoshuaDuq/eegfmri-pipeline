@@ -3,13 +3,25 @@ Quick Start
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Operational walkthrough from raw BIDS data to derivatives. Each section
      states the purpose, files read/written, and commands. Use the tab panels
      in <a href="#run-the-pipeline">step 5</a> for the full command surface.
    </p>
 
-.. admonition:: New to the pipeline?
+   <nav class="step-progress" aria-label="Quick Start steps">
+     <span class="step-count">8 steps</span>
+     <a href="#install">Install</a><span class="sep">·</span>
+     <a href="#prepare-data">Prepare</a><span class="sep">·</span>
+     <a href="#validate-and-inspect">Validate</a><span class="sep">·</span>
+     <a href="#configure">Configure</a><span class="sep">·</span>
+     <a href="#run-the-pipeline">Run</a><span class="sep">·</span>
+     <a href="#typical-full-workflow">Workflow</a><span class="sep">·</span>
+     <a href="#tui-reference">TUI</a><span class="sep">·</span>
+     <a href="#documentation-build">Docs</a>
+   </nav>
+
+.. tip::
 
    Start with the :doc:`TUI <tui>`. It exposes the same workflow interactively:
    configuration, subject selection, pipeline parameters, command assembly, and
@@ -93,13 +105,6 @@ the canonical join key aligning EEG features, fMRI betas, and behavioral targets
 1. Install
 ----------
 
-.. grid:: 1
-   :gutter: 0
-
-   .. grid-item-card::
-
-      **Step 1 of 8** — Create an isolated environment and install the package.
-
 Create an isolated Python environment and install the package:
 
 macOS / Linux:
@@ -160,13 +165,6 @@ Docker-based BEM/source-localization helpers.
 2. Prepare Data
 ---------------
 
-.. grid:: 1
-   :gutter: 0
-
-   .. grid-item-card::
-
-      **Step 2 of 8** — Organize BIDS-formatted EEG data on disk.
-
 Place BIDS-formatted EEG data under ``paths.bids_root``
 (default ``data/bids_output/eeg/``):
 
@@ -194,13 +192,6 @@ Full data layout and fMRI BIDS requirements: :doc:`data_layout`.
 
 3. Validate and Inspect
 -----------------------
-
-.. grid:: 1
-   :gutter: 0
-
-   .. grid-item-card::
-
-      **Step 3 of 8** — Run read-only checks before processing any subjects.
 
 Run read-only checks before touching any data:
 
@@ -232,13 +223,6 @@ For a deeper sweep:
 
 4. Configure
 ------------
-
-.. grid:: 1
-   :gutter: 0
-
-   .. grid-item-card::
-
-      **Step 4 of 8** — Set task name, paths, and pipeline parameters.
 
 All pipeline behavior is controlled by ``eeg_pipeline/utils/config/eeg_config.yaml``
 (and ``behavior_config.yaml`` / ``fmri_config.yaml`` for their respective domains).
@@ -301,13 +285,6 @@ families, and analysis mode match the protocol you intend to run.
 
 5. Run the Pipeline
 -------------------
-
-.. grid:: 1
-   :gutter: 0
-
-   .. grid-item-card::
-
-      **Step 5 of 8** — Execute preprocessing, feature extraction, and analysis.
 
 Use the tabs below for the full command matrix and focused examples.
 
@@ -668,13 +645,6 @@ Use the tabs below for the full command matrix and focused examples.
 6. Typical Full Workflow
 ------------------------
 
-.. grid:: 1
-   :gutter: 0
-
-   .. grid-item-card::
-
-      **Step 6 of 8** — End-to-end script from raw BIDS to ML results.
-
 A complete subject-level run from raw BIDS data to ML-ready features:
 
 .. code-block:: bash
@@ -728,13 +698,6 @@ Then predict fMRI signature expression from EEG features:
 7. TUI Reference
 ----------------
 
-.. grid:: 1
-   :gutter: 0
-
-   .. grid-item-card::
-
-      **Step 7 of 8** — Use the interactive terminal UI for guided execution.
-
 Build and launch the TUI from the repository root. Go is required only for this
 optional interface; you can use the Python CLI without Go.
 
@@ -759,13 +722,6 @@ See :doc:`tui` for the complete reference, keyboard shortcuts, and persistence d
 
 8. Documentation Build
 ----------------------
-
-.. grid:: 1
-   :gutter: 0
-
-   .. grid-item-card::
-
-      **Step 8 of 8** — Build and validate these docs locally.
 
 Build and validate the docs locally:
 

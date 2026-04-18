@@ -46,7 +46,6 @@ methods, configuration keys, and output schemas.
 - [Quick start](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html)
 - [User guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/index.html)
 - [Methods reference](https://joshuaduq.github.io/eegfmri-pipeline/methods/index.html)
-- [API reference](https://joshuaduq.github.io/eegfmri-pipeline/api/index.html)
 - [FAQ](https://joshuaduq.github.io/eegfmri-pipeline/faq.html)
 - [Contributing](https://joshuaduq.github.io/eegfmri-pipeline/contributing.html)
 

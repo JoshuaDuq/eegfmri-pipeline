@@ -1,8 +1,13 @@
 fMRI Methods
 ============
 
-Scientific reference for the fMRI analysis pipeline. Each page covers the
-expected inputs, methods, configuration keys, and output schemas.
+.. raw:: html
+
+   <p class="hero-lede">
+     Scientific reference for the fMRI analysis pipeline. Each page covers the
+     expected <strong>inputs</strong>, <strong>methods</strong>,
+     <strong>configuration keys</strong>, and <strong>output schemas</strong>.
+   </p>
 
 .. toctree::
    :maxdepth: 1
@@ -13,6 +18,7 @@ expected inputs, methods, configuration keys, and output schemas.
 
 .. grid:: 2
    :gutter: 3
+   :class-container: nav-cards
 
    .. grid-item-card:: Raw-to-BIDS Contract
       :link: raw_to_bids

@@ -3,7 +3,7 @@ Data Requirements & Layout
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      What the pipeline expects on disk: BIDS directory layout, required TSV
      columns, and the derivatives structure produced at each stage.
      All paths are configurable via <code>paths</code> in

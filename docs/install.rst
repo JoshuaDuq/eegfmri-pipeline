@@ -3,17 +3,18 @@ Installation
 
 .. raw:: html
 
-   <p class="hero-intro">
-     Clone, create a virtual environment, and install. The TUI and Docker
-     image are optional — needed only for interactive use and EEG source
-     localization respectively.
+   <p class="hero-lede">
+     Clone, create a virtual environment, and install. The <strong>TUI</strong>
+     and <strong>Docker image</strong> are optional — needed only for
+     interactive use and EEG source localization respectively.
    </p>
 
 Prerequisites
 -------------
 
 .. grid:: 3
-   :gutter: 2
+   :gutter: 3
+   :class-container: nav-cards
 
    .. grid-item-card:: Python ≥ 3.11
       :link: https://www.python.org/downloads/

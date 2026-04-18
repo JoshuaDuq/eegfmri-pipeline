@@ -8,7 +8,7 @@ fMRI Analysis Pipeline
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Containerized fMRIPrep preprocessing, first-level GLM contrast analysis,
      second-level group inference, trial-wise beta estimation (LSA / LSS),
      resting-state ROI connectivity, and multivariate EEG–fMRI signature

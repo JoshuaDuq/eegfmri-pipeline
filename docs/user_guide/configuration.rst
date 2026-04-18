@@ -3,7 +3,7 @@ Configuration
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Canonical reference for the public YAML configuration entry points and
      their keys. Override any key at runtime with
      <code>--set KEY=VALUE</code> without editing files.

@@ -19,10 +19,7 @@ copyright = "2026, JoshuaDuq"
 # Extensions
 # ---------------------------------------------------------------------------
 extensions = [
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
-    "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
     "sphinx.ext.intersphinx",
     "myst_parser",
@@ -47,44 +44,6 @@ exclude_patterns = [
     "eeg/**",
     "fmri/**",
     "index_old.md",
-]
-
-# ---------------------------------------------------------------------------
-# Autodoc / autosummary
-# ---------------------------------------------------------------------------
-autosummary_generate = False
-autodoc_member_order = "bysource"
-autodoc_typehints = "description"
-autodoc_default_options = {
-    "members": True,
-    "undoc-members": False,
-    "show-inheritance": True,
-}
-add_module_names = False
-autodoc_mock_imports = [
-    "pandas",
-    "numpy",
-    "scipy",
-    "mne",
-    "mne_bids",
-    "mne_bids_pipeline",
-    "mne_icalabel",
-    "mne_connectivity",
-    "nilearn",
-    "nibabel",
-    "sklearn",
-    "torch",
-    "joblib",
-    "specparam",
-    "antropy",
-    "networkx",
-    "statsmodels",
-    "imblearn",
-    "shap",
-    "pyprep",
-    "matplotlib",
-    "seaborn",
-    "pyarrow",
 ]
 
 # ---------------------------------------------------------------------------

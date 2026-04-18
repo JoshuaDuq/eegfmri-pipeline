@@ -3,7 +3,7 @@ EEG Feature Extraction
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Sixteen trial-level feature families extracted from clean epochs.
      Supports task-based (event-locked, one row per trial) and resting-state
      (segment-averaged) paradigms. All families are config-driven and

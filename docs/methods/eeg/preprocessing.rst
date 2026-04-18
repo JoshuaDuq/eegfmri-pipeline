@@ -3,7 +3,7 @@ EEG Preprocessing
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Automated, reproducible EEG preprocessing built on MNE-Python,
      MNE-BIDS-Pipeline, PyPREP, and MNE-ICAlabel. Operates on
      BIDS-formatted data and produces clean, epoched datasets ready for

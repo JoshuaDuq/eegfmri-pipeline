@@ -3,7 +3,7 @@ Outputs & Advanced Workflows
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Where derived artifacts are written and which workflow flags change the
      output shape. Use these as a compact map, then follow the links to the
      methods reference for scientific details.

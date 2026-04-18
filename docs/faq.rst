@@ -3,7 +3,7 @@ Frequently Asked Questions
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Common operational issues organized by pipeline stage. Expand a question
      to see the diagnosis and resolution.
    </p>

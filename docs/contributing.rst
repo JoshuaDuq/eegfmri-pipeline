@@ -3,10 +3,10 @@ Contributing
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Bug fixes, new feature families, documentation improvements, and test
-     coverage are all welcome. Follow the four-step workflow below to keep
-     changes reviewable and CI-passing.
+     coverage are all welcome. Follow the <strong>four-step workflow</strong>
+     below to keep changes reviewable and CI-passing.
    </p>
 
 .. grid:: 4

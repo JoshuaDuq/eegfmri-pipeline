@@ -3,7 +3,7 @@ Interactive TUI
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Terminal UI for running the full pipeline without memorizing commands.
      Guided wizards handle configuration, subject selection, feature families,
      and execution. Built with Go 1.21 +

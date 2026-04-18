@@ -3,7 +3,7 @@ User Guide
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Operational reference for data layout, configuration, and running the
      pipeline. New users: start with the
      <a href="quickstart.html">Quick Start</a> or the
@@ -24,43 +24,45 @@ Data and Configuration
 -----------------------
 
 .. grid:: 3
-   :gutter: 2
+   :gutter: 3
+   :class-container: nav-cards
 
    .. grid-item-card:: Data Layout
       :link: data_layout
       :link-type: doc
 
-      BIDS inputs · required TSV columns · derivatives structure.
+      BIDS inputs, required TSV columns, derivatives structure.
 
    .. grid-item-card:: Configuration
       :link: configuration
       :link-type: doc
 
-      YAML entry points and defaults · runtime overrides via ``--set``.
+      YAML entry points and defaults; runtime overrides via ``--set``.
 
    .. grid-item-card:: Outputs
       :link: output_formats
       :link-type: doc
 
-      Parquet tables · figures · derivatives · resting-state and
-      IAF workflow notes.
+      Parquet tables, figures, derivatives, resting-state and IAF
+      workflow notes.
 
 Operate the CLI and TUI
 -----------------------
 
 .. grid:: 2
-   :gutter: 2
+   :gutter: 3
+   :class-container: nav-cards
 
    .. grid-item-card:: Interactive TUI *(recommended)*
       :link: tui
       :link-type: doc
 
-      **Start here for interactive use.** Guided wizards — configuration,
-      subject selection, feature families, bands, modes. No flags required.
+      Guided wizards — configuration, subject selection, feature families,
+      bands, modes. No flags required.
 
    .. grid-item-card:: CLI Reference
       :link: cli/index
       :link-type: doc
 
-      Command families, modes, and flags.
-      Use when you need the exact option surface.
+      Command families, modes, and flags. Use when you need the exact
+      option surface.

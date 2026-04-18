@@ -3,7 +3,7 @@ Machine Learning
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Trial-level predictive modeling under nested LOSO cross-validation.
      Supports continuous regression and binary classification. The subject
      is the statistical unit — all primary metrics are subject-level

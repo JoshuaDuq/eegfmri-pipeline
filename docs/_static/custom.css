@@ -130,6 +130,15 @@ h1 {
   margin: 0 0 var(--space-6);
 }
 
+/* Landing page — drop the H1 border so the title flows into the
+   lede paragraph as a single visual block. */
+h1:has(+ .hero-lede) {
+  font-size: 2rem;
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: var(--space-4);
+}
+
 h2 {
   font-size: 1.15rem;
   font-weight: 600;
@@ -654,31 +663,278 @@ hr.docutils {
 }
 
 /* ---------------------------------------------------------
-   Hero intro paragraph
+   Landing page — hero, primary CTAs, stage grid, docs nav
+
+   Note: sphinx-design grid-item-card emits .sd-card-title inside
+   .sd-card-body (not a separate .sd-card-header). All landing-page
+   header styling targets .sd-card-title, not .sd-card-header.
    --------------------------------------------------------- */
-.hero-intro {
-  font-size: 1.025rem;
+.hero-lede {
+  font-size: 1.05rem;
   font-weight: 400;
   line-height: 1.7;
   color: var(--color-foreground-secondary);
-  max-width: 72ch;
+  max-width: 68ch;
   margin: 0 0 var(--space-6);
-  border-left: 2px solid var(--color-foreground-border);
-  padding-left: 1rem;
   letter-spacing: -0.005em;
 }
 
-.hero-intro strong {
+.hero-lede strong {
   color: var(--color-foreground-primary);
   font-weight: 600;
 }
 
-/* Pipeline stage arrows */
-.sd-text-center.sd-fs-3 {
-  font-size: 1rem !important;
-  color: var(--color-foreground-muted) !important;
+/* Disable the default sphinx-design hover lift on landing grids —
+   minimalist surfaces shouldn't move under the cursor. */
+.nav-cards .sd-card,
+.stage-grid .sd-card,
+.docs-nav .sd-card {
+  transform: none !important;
+  box-shadow: none !important;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.nav-cards .sd-card:hover,
+.stage-grid .sd-card:hover,
+.docs-nav .sd-card:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Primary navigation cards — aerated, hairline, with a chevron affordance.
+   Used on the landing page hero CTAs and on every section index page
+   (user_guide, methods, cli, etc.) to give navigation a consistent voice. */
+.nav-cards {
+  margin: 0 0 var(--space-6);
+}
+
+.nav-cards .sd-card {
+  background: transparent !important;
+  border: var(--hairline-quiet) !important;
+  border-radius: var(--radius-md) !important;
+  position: relative;
+}
+
+.nav-cards .sd-card:hover {
+  background: var(--color-background-secondary) !important;
+  border-color: var(--color-foreground-secondary) !important;
+}
+
+.nav-cards .sd-card-body {
+  padding: 1rem 1.1rem 1.1rem !important;
+}
+
+.nav-cards .sd-card-title {
+  font-size: 0.98rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em;
+  color: var(--color-foreground-primary) !important;
+  margin: 0 0 0.4rem !important;
+  padding-right: 1.1rem;
+}
+
+.nav-cards .sd-card-title::after {
+  content: "→";
+  position: absolute;
+  top: 1rem;
+  right: 1.1rem;
+  font-size: 0.95rem;
+  color: var(--color-foreground-muted);
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.nav-cards .sd-card:hover .sd-card-title::after {
+  color: var(--color-foreground-primary);
+  transform: translateX(2px);
+}
+
+.nav-cards .sd-card-text {
+  font-size: 0.83rem !important;
+  color: var(--color-foreground-secondary) !important;
+  line-height: 1.6;
+  margin: 0 0 0.35rem !important;
+}
+
+.nav-cards .sd-card-text:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Anchor cards (link-type: url) carry an external indicator instead. */
+.nav-cards .sd-card[href^="http"] .sd-card-title::after,
+.nav-cards .sd-card:has(a[href^="http"].sd-stretched-link) .sd-card-title::after {
+  content: "↗";
+}
+
+/* Hero screenshot — quiet framed image, no caption clutter */
+.hero-screenshot,
+a.hero-screenshot {
+  display: block;
+  margin: var(--space-7) auto !important;
+  max-width: 100%;
+}
+
+img.hero-screenshot {
+  display: block;
+  margin: 0 auto !important;
+  max-width: 100%;
+  height: auto;
+  border: var(--hairline-quiet);
+  border-radius: var(--radius-md);
+}
+
+/* Pipeline stage cards — eyebrow title, mono output footer */
+.stage-grid .sd-card {
+  background: var(--color-background-secondary) !important;
+  border: var(--hairline-quiet) !important;
+  border-radius: var(--radius-md) !important;
+}
+
+.stage-grid .sd-card:hover {
+  border-color: var(--color-foreground-secondary) !important;
+  background: var(--color-background-hover) !important;
+}
+
+.stage-grid .sd-card-body {
+  padding: 0.85rem 1rem 0.95rem !important;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.stage-grid .sd-card-title {
+  font-size: 0.7rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--color-foreground-secondary) !important;
   margin: 0 !important;
-  line-height: 1.2;
+  padding-bottom: 0.45rem;
+  border-bottom: var(--hairline-quiet);
+}
+
+.stage-grid .sd-card-text {
+  font-size: 0.83rem !important;
+  color: var(--color-foreground-primary) !important;
+  line-height: 1.6;
+  margin: 0 !important;
+}
+
+.stage-grid .sd-card-text:last-child {
+  font-family: var(--font-stack--monospace);
+  font-size: 0.74rem !important;
+  color: var(--color-foreground-muted) !important;
+  margin-top: auto !important;
+  letter-spacing: 0.005em;
+}
+
+.stage-grid .sd-card-text:last-child code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: inherit !important;
+  font-size: 1em !important;
+}
+
+/* Secondary docs navigation — borderless, top-rule emphasis */
+.docs-nav {
+  margin-top: var(--space-3);
+}
+
+.docs-nav .sd-card {
+  background: transparent !important;
+  border: none !important;
+  border-top: var(--hairline-quiet) !important;
+  border-radius: 0 !important;
+}
+
+.docs-nav .sd-card:hover {
+  background: transparent !important;
+  border-top-color: var(--color-foreground-primary) !important;
+}
+
+.docs-nav .sd-card-body {
+  padding: 0.7rem 0 0.85rem !important;
+}
+
+.docs-nav .sd-card-title {
+  font-size: 0.88rem !important;
+  font-weight: 600 !important;
+  color: var(--color-foreground-primary) !important;
+  margin: 0 0 0.25rem !important;
+}
+
+.docs-nav .sd-card-text {
+  font-size: 0.78rem !important;
+  color: var(--color-foreground-muted) !important;
+  line-height: 1.55;
+  margin: 0 !important;
+}
+
+/* Quiet status aside — replaces a heavy admonition on the landing page */
+.dev-status {
+  font-size: 0.82rem;
+  color: var(--color-foreground-muted);
+  border-left: 1px solid var(--color-foreground-border);
+  padding: 0.1rem 0.85rem;
+  margin: var(--space-6) 0 0;
+  max-width: 70ch;
+  line-height: 1.6;
+}
+
+.dev-status strong {
+  color: var(--color-foreground-secondary);
+  font-weight: 600;
+}
+
+/* Step-progress eyebrow — shows the n-step roadmap at the top of a
+   tutorial page (e.g. Quick Start). Renders as a single horizontal
+   strip of small uppercase tokens separated by hairline arrows. */
+.step-progress {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--color-foreground-muted);
+  margin: 0 0 var(--space-6);
+  padding: 0.55rem 0;
+  border-top: var(--hairline-quiet);
+  border-bottom: var(--hairline-quiet);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  line-height: 1.4;
+}
+
+.step-progress .step-count {
+  color: var(--color-foreground-secondary);
+  margin-right: 0.5rem;
+  padding-right: 0.65rem;
+  border-right: var(--hairline-quiet);
+}
+
+.step-progress a {
+  color: var(--color-foreground-muted);
+  text-decoration: none;
+  transition: color 0.12s ease;
+}
+
+.step-progress a:hover {
+  color: var(--color-foreground-primary);
+}
+
+.step-progress .sep {
+  color: var(--color-foreground-border);
+  user-select: none;
+}
+
+/* Landing-page responsive — collapse the 4-up docs nav before the
+   global 700px breakpoint so titles don't get cramped. */
+@media (max-width: 900px) {
+  .docs-nav .sd-row.sd-row-cols-4 > .sd-col {
+    width: 50% !important;
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+  }
 }
 
 /* ---------------------------------------------------------
@@ -866,31 +1122,6 @@ dl.glossary dd {
 }
 
 /* ---------------------------------------------------------
-   API / autodoc — function and class signatures
-   --------------------------------------------------------- */
-dl.py.function > dt,
-dl.py.method > dt,
-dl.py.class > dt,
-dl.py.attribute > dt,
-dl.py.exception > dt,
-dl.py.data > dt {
-  background: var(--color-background-secondary) !important;
-  border: none !important;
-  border-left: 2px solid var(--color-foreground-secondary) !important;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0 !important;
-  padding: 0.4rem 0.8rem !important;
-  font-family: var(--font-stack--monospace);
-  font-size: 0.83rem;
-  color: var(--color-foreground-primary);
-}
-
-dl.py em.property,
-dl.py em.sig-param {
-  color: var(--color-foreground-secondary);
-  font-style: normal;
-}
-
-/* ---------------------------------------------------------
    Mobile / narrow viewport
    --------------------------------------------------------- */
 @media (max-width: 700px) {
@@ -905,7 +1136,7 @@ dl.py em.sig-param {
 
   h1 { font-size: 1.45rem; }
   h2 { font-size: 1.05rem; }
-  .hero-intro { font-size: 0.93rem; }
+  .hero-lede { font-size: 0.95rem; }
 
   table.docutils {
     font-size: 0.78rem;
@@ -1068,8 +1299,13 @@ dl.py em.sig-param {
     content: "";
   }
 
-  .hero-intro {
+  .hero-lede {
     color: #444444 !important;
-    border-left-color: #aaaaaa !important;
+  }
+
+  .step-progress,
+  .dev-status {
+    color: #555555 !important;
+    border-color: #cccccc !important;
   }
 }

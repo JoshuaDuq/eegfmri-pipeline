@@ -3,7 +3,7 @@ Glossary
 
 .. raw:: html
 
-   <p class="hero-intro">
+   <p class="hero-lede">
      Domain-specific terms and acronyms used throughout the documentation.
      Terms are cross-referenced from methods pages via <code>:term:</code> roles.
    </p>
