@@ -54,7 +54,7 @@ jobs:
       - name: Run tests
         run: |
           python -m compileall -q eeg_pipeline fmri_pipeline scripts tests
-          python -m pytest -q
+          python -m pytest -q --cov=eeg_pipeline/pipelines --cov=fmri_pipeline/pipelines --cov-report=term-missing --cov-fail-under=75
 
   windows-compat:
     needs: lint
@@ -84,7 +84,7 @@ jobs:
 
       - name: Run targeted Windows compatibility tests
         run: |
-          python -m pytest -q tests/utils/test_tui_config_gap_audit.py tests/scripts/test_tui_pipeline_smoke_script.py tests/pipelines/test_fmri_preprocessing_helpers.py tests/pipelines/test_bem_generation_strict_failures.py
+          python -m pytest -q --no-cov tests/utils/test_tui_config_gap_audit.py tests/scripts/test_tui_pipeline_smoke_script.py tests/pipelines/test_fmri_preprocessing_helpers.py tests/pipelines/test_bem_generation_strict_failures.py
 
       - name: Run TUI tests
         working-directory: eeg_pipeline/cli/tui
