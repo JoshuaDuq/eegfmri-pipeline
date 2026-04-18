@@ -159,17 +159,10 @@ const (
 )
 
 const (
-	mainMenuWideThreshold     = 118
-	mainMenuTallNarrowWidth   = 92
-	mainMenuTallNarrowHeight  = 28
-	mainMenuSplitMinWidth     = 76
-	mainMenuSplitMinHeight    = 26
 	mainMenuColumnGap         = 2
-	mainMenuPreviewMinWidth   = 42
+	mainMenuMenuMinWidth      = 20
+	mainMenuPreviewMinWidth   = 24
 	mainMenuPreviewLabelWidth = 10
-	mainMenuCompactDetailMin  = 15
-	mainMenuCompactMenuMin    = 6
-	mainMenuCompactDetailRows = 6
 )
 
 type HomeConfigSummary struct {
@@ -179,14 +172,6 @@ type HomeConfigSummary struct {
 	DerivRoot          string
 	SourceRoot         string
 	PreprocessingNJobs int
-}
-
-type RecentRunSummary struct {
-	Pipeline string
-	Mode     string
-	Age      string
-	Duration string
-	Success  bool
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -208,7 +193,6 @@ type Model struct {
 	version string
 
 	configSummary HomeConfigSummary
-	recentRuns    []RecentRunSummary
 
 	// Toast notification
 	toast components.Toast
@@ -265,10 +249,6 @@ func (m *Model) SetConfigSummary(summary HomeConfigSummary) {
 	}
 }
 
-func (m *Model) SetRecentRuns(runs []RecentRunSummary) {
-	m.recentRuns = append([]RecentRunSummary(nil), runs...)
-}
-
 func (m *Model) SetVersion(v string) {
 	m.version = v
 }
@@ -300,6 +280,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toast.Tick()
 		return m, m.tick()
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
@@ -318,6 +301,90 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.handleUp()
+		return m, nil
+	case tea.MouseButtonWheelDown:
+		m.handleDown()
+		return m, nil
+	}
+
+	if msg.Action != tea.MouseActionMotion && (msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft) {
+		return m, nil
+	}
+
+	activate := msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft
+	contentWidth := max(m.width-4, 1)
+
+	leftWidth, _ := m.mainMenuColumnWidths(contentWidth)
+	if msg.X >= leftWidth {
+		return m, nil
+	}
+
+	line := m.viewLineAt(msg.Y)
+	if line == "" {
+		return m, nil
+	}
+
+	if idx := indexOfPipelineLine(line, preprocessingPipelines); idx >= 0 {
+		m.currentSection = SectionPreprocessing
+		m.prepCursor = idx
+		if activate {
+			return m.handleEnter()
+		}
+		return m, nil
+	}
+	if idx := indexOfPipelineLine(line, analysisPipelines); idx >= 0 {
+		m.currentSection = SectionAnalysis
+		m.analysisCursor = idx
+		if activate {
+			return m.handleEnter()
+		}
+		return m, nil
+	}
+	if idx := indexOfUtilityLine(line, utilities); idx >= 0 {
+		m.currentSection = SectionUtilities
+		m.utilityCursor = idx
+		if activate {
+			return m.handleEnter()
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m Model) viewLineAt(y int) string {
+	if y < 0 {
+		return ""
+	}
+	lines := strings.Split(m.View(), "\n")
+	if y >= len(lines) {
+		return ""
+	}
+	return lines[y]
+}
+
+func indexOfPipelineLine(line string, items []pipelineItem) int {
+	for i, item := range items {
+		if strings.Contains(line, item.name) {
+			return i
+		}
+	}
+	return -1
+}
+
+func indexOfUtilityLine(line string, items []utilityItem) int {
+	for i, item := range items {
+		if strings.Contains(line, item.name) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m Model) handleResumeLastSession() (tea.Model, tea.Cmd) {
@@ -439,8 +506,11 @@ func (m Model) renderHeader() string {
 		lineWidth = 0
 	}
 
-	// Quiet, single-line brand treatment. No glyph — the name + thin rule beneath
-	// is enough visual anchor for a research-app header.
+	// Quiet, single-line brand treatment. No glyph — the name + hairline rule
+	// beneath is enough visual anchor for a research-app header. The product
+	// mark uses a thin hyphen-separated lowercase wordmark, and the version
+	// is rendered as muted metadata, separated by a dim · to read as a
+	// structured "name · version" caption rather than two adjacent labels.
 	logo := styles.TitleAccentStyle.Render("eegfmri-pipeline")
 
 	v := m.version
@@ -453,9 +523,10 @@ func (m Model) renderHeader() string {
 	if len(v) > 0 && v[0] >= '0' && v[0] <= '9' {
 		versionLabel = "v" + v
 	}
-	versionText := styles.SubtitleStyle.Render(versionLabel)
+	versionSep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
+	versionText := styles.MutedTextStyle.Render(versionLabel)
 
-	left := "  " + logo + "  " + versionText
+	left := "  " + logo + versionSep + versionText
 
 	right := ""
 	if task := strings.TrimSpace(m.Task); task != "" {
@@ -500,48 +571,17 @@ func (m Model) renderSectionHeaderWithCount(title string, isActive bool, cursor,
 	return base + counter
 }
 
-type sectionRenderConfig struct {
-	width            int
-	showDescriptions bool
-}
-
-type menuPaneConfig struct {
-	width            int
-	showDescriptions bool
-	showTitle        bool
-	showSubtitle     bool
-	showDividers     bool
-}
-
-func (m Model) renderItem(name, description string, selected bool, config sectionRenderConfig) string {
-	// Selection is signaled with a steady left-edge accent bar (no blink),
-	// the item name in the primary accent color + bold, and a subtle dot
-	// separator before the description. Unselected rows are aligned to the
-	// same left column using a single space + gutter.
-	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
-
+func (m Model) renderItem(name string, selected bool, width int) string {
+	// Menu rows now read as a compact index: name only, with state encoded by
+	// a quiet left rail and weight. The detail pane carries the explanatory copy.
 	if selected {
-		bar := styles.RenderAccentBar(true)
-		nameStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-		descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-		var inner string
-		if config.showDescriptions {
-			inner = bar + " " + nameStyle.Render(name) + sep + descStyle.Render(description)
-		} else {
-			inner = bar + " " + nameStyle.Render(name)
-		}
-		return styles.TruncateLine(inner, config.width)
+		line := styles.RenderAccentBar(true) + " " +
+			lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(name)
+		return styles.TruncateLine(line, width)
 	}
 
-	nameStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	var rawLine string
-	if config.showDescriptions {
-		rawLine = "  " + nameStyle.Render(name) + sep + descStyle.Render(description)
-	} else {
-		rawLine = "  " + nameStyle.Render(name)
-	}
-	return styles.TruncateLine(rawLine, config.width)
+	line := "  " + lipgloss.NewStyle().Foreground(styles.TextDim).Render(name)
+	return styles.TruncateLine(line, width)
 }
 
 func (m Model) renderFooter() string {
@@ -552,14 +592,13 @@ func (m Model) renderFooter() string {
 		{Key: "Q", Label: "Quit", Compact: "Quit", Priority: 1},
 		{Key: "D", Label: "Dashboard", Compact: "Dash", Priority: 2},
 		{Key: "H", Label: "History", Compact: "Hist", Priority: 2},
-		{Key: "Ctrl+K", Label: "Quick Actions", Compact: "Quick", Priority: 2},
 	}
 
 	width := m.width - 4
 	if width < 20 {
 		width = 20
 	}
-	divider := styles.RenderDivider(width)
+	divider := styles.RenderFooterDivider(width)
 	bar := styles.RenderNoWrapBlock(styles.FooterStyle, styles.RenderFooterHints(width, hints), width)
 	return divider + "\n" + bar
 }
@@ -580,111 +619,11 @@ type selectionDetail struct {
 }
 
 func (m Model) renderContent(width, height int) string {
-	if m.useWideLayout(width, height) {
-		return m.renderWideContent(width, height)
-	}
-	return m.renderCompactContent(width, height)
-}
-
-func (m Model) useWideLayout(width, height int) bool {
-	if width >= mainMenuWideThreshold {
-		return true
-	}
-	return width >= mainMenuTallNarrowWidth && height >= mainMenuTallNarrowHeight
-}
-
-func (m Model) renderCompactContent(width, height int) string {
-	compactWidth := max(width, 1)
-	compactHeight := max(height, 1)
-	if m.useSplitCompactLayout(compactWidth, compactHeight) {
-		return m.renderSplitCompactContent(compactWidth, compactHeight)
-	}
-
-	innerWidth := max(compactWidth-4, 1)
-	innerHeight := max(compactHeight-2, 1)
-	style := styles.BoxStyle.Height(compactHeight)
-	return styles.RenderNoWrapBlock(style, m.renderCompactBody(innerWidth, innerHeight), compactWidth)
-}
-
-func (m Model) useSplitCompactLayout(width, height int) bool {
-	return width >= mainMenuSplitMinWidth && height >= mainMenuSplitMinHeight
-}
-
-func (m Model) renderSplitCompactContent(width, height int) string {
-	menuPaneHeight, detailPaneHeight := m.compactPanelHeights(height)
-	menuPaneStyle := styles.CardStyleFocused.Height(menuPaneHeight)
-	menuPane := styles.RenderNoWrapBlock(menuPaneStyle, m.renderCompactMenuPane(width-6, menuPaneHeight-4), width)
-	detailPaneStyle := styles.PanelStyle.Height(detailPaneHeight)
-	detailPane := styles.RenderNoWrapBlock(detailPaneStyle, m.renderCompactDetailPane(width-6, detailPaneHeight-4), width)
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		menuPane,
-		"",
-		detailPane,
-	)
-}
-
-func (m Model) compactPanelHeights(totalHeight int) (int, int) {
-	detailPaneHeight := min(16, totalHeight*40/100)
-	if detailPaneHeight < 12 {
-		detailPaneHeight = 12
-	}
-
-	menuPaneHeight := totalHeight - detailPaneHeight - 1
-	if menuPaneHeight < 13 {
-		menuPaneHeight = 13
-		detailPaneHeight = totalHeight - menuPaneHeight - 1
-	}
-
-	return menuPaneHeight, detailPaneHeight
-}
-
-func (m Model) renderCompactBody(innerWidth, innerHeight int) string {
-	if innerHeight < mainMenuCompactDetailMin {
-		return m.renderCompactMenuPane(innerWidth, innerHeight)
-	}
-
-	detailHeight := m.compactDetailHeight(innerHeight)
-	if detailHeight < 4 {
-		return m.renderCompactMenuPane(innerWidth, innerHeight)
-	}
-
-	menuHeight := innerHeight - detailHeight - 1
-	if menuHeight < mainMenuCompactMenuMin {
-		return m.renderCompactMenuPane(innerWidth, innerHeight)
-	}
-
-	menu := m.renderCompactMenuPane(innerWidth, menuHeight)
-	detail := m.renderCompactDetailPane(innerWidth, detailHeight)
-	return menu + "\n" + styles.RenderDivider(innerWidth) + "\n" + detail
-}
-
-func (m Model) compactDetailHeight(innerHeight int) int {
-	extraRows := max(innerHeight-mainMenuCompactDetailMin, 0)
-	detailHeight := mainMenuCompactDetailRows + extraRows/2
-	return min(detailHeight, innerHeight-mainMenuCompactMenuMin-1)
-}
-
-func compactFocusContentRows(availableRows, focusAreaCount int) int {
-	if focusAreaCount == 0 || availableRows <= 1 {
-		return 0
-	}
-
-	focusRows := min(focusAreaCount, availableRows-1)
-	return 1 + focusRows
+	return m.renderWideContent(width, height)
 }
 
 func (m Model) renderWideContent(width, height int) string {
-	leftWidth := width * 48 / 100
-	if leftWidth < 48 {
-		leftWidth = 48
-	}
-	rightWidth := width - leftWidth - mainMenuColumnGap
-	if rightWidth < mainMenuPreviewMinWidth {
-		rightWidth = mainMenuPreviewMinWidth
-		leftWidth = width - rightWidth - mainMenuColumnGap
-	}
+	leftWidth, rightWidth := m.mainMenuColumnWidths(width)
 
 	menuPaneStyle := styles.CardStyleFocused.Height(height)
 	menuPane := styles.RenderNoWrapBlock(menuPaneStyle, m.renderMenuPane(leftWidth-6, height-4), leftWidth)
@@ -699,44 +638,56 @@ func (m Model) renderWideContent(width, height int) string {
 	)
 }
 
+func (m Model) mainMenuColumnWidths(contentWidth int) (int, int) {
+	if contentWidth <= 0 {
+		return 1, 1
+	}
+
+	if contentWidth < mainMenuMenuMinWidth+mainMenuPreviewMinWidth+mainMenuColumnGap {
+		usable := max(contentWidth-mainMenuColumnGap, 2)
+		leftWidth := usable * 48 / 100
+		if leftWidth < 1 {
+			leftWidth = 1
+		}
+		rightWidth := usable - leftWidth
+		if rightWidth < 1 {
+			rightWidth = 1
+		}
+		return leftWidth, rightWidth
+	}
+
+	leftWidth := contentWidth * 48 / 100
+	if leftWidth < mainMenuMenuMinWidth {
+		leftWidth = mainMenuMenuMinWidth
+	}
+
+	rightWidth := contentWidth - leftWidth - mainMenuColumnGap
+	if rightWidth < mainMenuPreviewMinWidth {
+		rightWidth = mainMenuPreviewMinWidth
+		leftWidth = contentWidth - rightWidth - mainMenuColumnGap
+	}
+
+	if leftWidth < 1 {
+		leftWidth = 1
+	}
+	if rightWidth < 1 {
+		rightWidth = 1
+	}
+	return leftWidth, rightWidth
+}
+
 func (m Model) renderMenuPane(innerWidth, innerHeight int) string {
-	lines, selectedLine := m.buildMenuLines(menuPaneConfig{
-		width:            innerWidth,
-		showDescriptions: true,
-		showTitle:        true,
-		showSubtitle:     false,
-		showDividers:     true,
-	})
+	lines, selectedLine := m.buildMenuLines(innerWidth)
 	return m.renderMenuViewport(lines, innerHeight, selectedLine)
 }
 
-func (m Model) renderCompactMenuPane(innerWidth, innerHeight int) string {
-	lines, selectedLine := m.buildMenuLines(menuPaneConfig{
-		width:            innerWidth,
-		showDescriptions: innerWidth >= 44,
-		showTitle:        false,
-		showSubtitle:     false,
-		showDividers:     false,
-	})
-	return m.renderMenuViewport(lines, innerHeight, selectedLine)
-}
-
-func (m Model) buildMenuLines(config menuPaneConfig) ([]string, int) {
-	if config.width < 20 {
-		config.width = 20
+func (m Model) buildMenuLines(width int) ([]string, int) {
+	if width < 20 {
+		width = 20
 	}
 
 	lines := make([]string, 0, 24)
 	selectedLine := -1
-	subtitleStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	itemConfig := sectionRenderConfig{
-		width:            config.width,
-		showDescriptions: config.showDescriptions,
-	}
-
-	if config.showTitle && config.showSubtitle {
-		lines = append(lines, subtitleStyle.Render("Open a pipeline wizard or project utility."), "")
-	}
 
 	lines = m.appendPipelineSectionLines(
 		lines,
@@ -745,13 +696,9 @@ func (m Model) buildMenuLines(config menuPaneConfig) ([]string, int) {
 		SectionPreprocessing,
 		m.prepCursor,
 		preprocessingPipelines,
-		itemConfig,
+		width,
 	)
-	if config.showDividers {
-		lines = append(lines, styles.RenderDivider(config.width), "")
-	} else {
-		lines = append(lines, "")
-	}
+	lines = append(lines, "")
 
 	lines = m.appendPipelineSectionLines(
 		lines,
@@ -760,13 +707,9 @@ func (m Model) buildMenuLines(config menuPaneConfig) ([]string, int) {
 		SectionAnalysis,
 		m.analysisCursor,
 		analysisPipelines,
-		itemConfig,
+		width,
 	)
-	if config.showDividers {
-		lines = append(lines, styles.RenderDivider(config.width), "")
-	} else {
-		lines = append(lines, "")
-	}
+	lines = append(lines, "")
 
 	lines = m.appendUtilitySectionLines(
 		lines,
@@ -775,7 +718,7 @@ func (m Model) buildMenuLines(config menuPaneConfig) ([]string, int) {
 		SectionUtilities,
 		m.utilityCursor,
 		utilities,
-		itemConfig,
+		width,
 	)
 
 	return lines, selectedLine
@@ -788,7 +731,7 @@ func (m Model) appendPipelineSectionLines(
 	sectionID int,
 	cursor int,
 	items []pipelineItem,
-	config sectionRenderConfig,
+	width int,
 ) []string {
 	lines = append(lines, m.renderSectionHeaderWithCount(title, m.currentSection == sectionID, cursor, len(items)))
 	for idx, item := range items {
@@ -796,7 +739,7 @@ func (m Model) appendPipelineSectionLines(
 		if isSelected {
 			*selectedLine = len(lines)
 		}
-		lines = append(lines, m.renderItem(item.name, item.description, isSelected, config))
+		lines = append(lines, m.renderItem(item.name, isSelected, width))
 	}
 	return lines
 }
@@ -808,7 +751,7 @@ func (m Model) appendUtilitySectionLines(
 	sectionID int,
 	cursor int,
 	items []utilityItem,
-	config sectionRenderConfig,
+	width int,
 ) []string {
 	lines = append(lines, m.renderSectionHeaderWithCount(title, m.currentSection == sectionID, cursor, len(items)))
 	for idx, item := range items {
@@ -816,7 +759,7 @@ func (m Model) appendUtilitySectionLines(
 		if isSelected {
 			*selectedLine = len(lines)
 		}
-		lines = append(lines, m.renderItem(item.name, item.description, isSelected, config))
+		lines = append(lines, m.renderItem(item.name, isSelected, width))
 	}
 	return lines
 }
@@ -900,63 +843,6 @@ func (m Model) renderPreviewPane(innerWidth int) string {
 	}
 
 	return strings.TrimRight(b.String(), "\n")
-}
-
-func (m Model) renderCompactDetailPane(width, maxLines int) string {
-	detail := m.selectedDetail()
-	titleStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-	descriptionStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	focusStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	bulletStyle := lipgloss.NewStyle().Foreground(styles.Accent)
-
-	lines := []string{
-		styles.RenderPreviewSubHeaderWithRule("DETAILS", width),
-		styles.TruncateLine(titleStyle.Render(detail.title), width),
-		styles.TruncateLine(descriptionStyle.Render(detail.description), width),
-	}
-
-	remainingRows := maxLines - len(lines)
-	minimumRows := len(detail.rows) +
-		compactFocusContentRows(max(remainingRows-len(detail.rows), 0), len(detail.focusAreas))
-	if remainingRows > minimumRows+1 {
-		lines = append(lines, "")
-		remainingRows--
-	}
-
-	for _, row := range detail.rows {
-		if remainingRows <= 0 {
-			break
-		}
-
-		line := styles.RenderKeyValue(row.label, row.value, mainMenuPreviewLabelWidth)
-		if row.accent {
-			line = styles.RenderKeyValueAccent(row.label, row.value, mainMenuPreviewLabelWidth)
-		}
-
-		lines = append(lines, styles.TruncateLine(line, width))
-		remainingRows--
-	}
-
-	focusRows := min(len(detail.focusAreas), max(remainingRows-1, 0))
-	if focusRows > 0 && remainingRows > focusRows+1 {
-		lines = append(lines, "")
-		remainingRows--
-	}
-	if focusRows > 0 {
-		lines = append(lines, styles.RenderPreviewSubHeaderWithRule("FOCUS", width))
-		remainingRows--
-	}
-	for _, focus := range detail.focusAreas {
-		if remainingRows <= 0 {
-			break
-		}
-
-		line := bulletStyle.Render(styles.BulletMark) + " " + focusStyle.Render(focus)
-		lines = append(lines, styles.TruncateLine(line, width))
-		remainingRows--
-	}
-
-	return strings.Join(lines, "\n")
 }
 
 func (m Model) selectedDetail() selectionDetail {
@@ -1072,7 +958,7 @@ func (m Model) renderPreviewDetailsBlock(detail selectionDetail, width int) stri
 
 func (m Model) renderPreviewWorkspaceBlock(width int) string {
 	rows := m.previewWorkspaceRows()
-	if len(rows) == 0 && len(m.recentRuns) == 0 {
+	if len(rows) == 0 {
 		return ""
 	}
 
@@ -1086,16 +972,6 @@ func (m Model) renderPreviewWorkspaceBlock(width int) string {
 			line = styles.RenderKeyValueAccent(row.label, row.value, mainMenuPreviewLabelWidth)
 		}
 		b.WriteString(styles.TruncateLine(line, width))
-	}
-	recentLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(mainMenuPreviewLabelWidth).Render("Recent")
-	blankLabel := strings.Repeat(" ", mainMenuPreviewLabelWidth)
-	for i, run := range m.recentRuns {
-		b.WriteString("\n")
-		if i == 0 {
-			b.WriteString(styles.TruncateLine(recentLabel+m.renderRecentRunLine(run), width))
-		} else {
-			b.WriteString(styles.TruncateLine(blankLabel+m.renderRecentRunLine(run), width))
-		}
 	}
 	return b.String()
 }
@@ -1117,33 +993,6 @@ func (m Model) renderPreviewFocusBlock(detail selectionDetail, width int) string
 		b.WriteString(styles.TruncateLine(bullet+bodyStyle.Render(focus), width))
 	}
 	return b.String()
-}
-
-func (m Model) renderRecentRunLine(run RecentRunSummary) string {
-	var statusIcon string
-	if run.Success {
-		statusIcon = lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(styles.CheckMark)
-	} else {
-		statusIcon = lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render(styles.CrossMark)
-	}
-
-	pipelineStyle := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
-	parts := []string{
-		statusIcon,
-		pipelineStyle.Render(run.Pipeline),
-	}
-	if run.Mode != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(styles.TextDim).Render(run.Mode))
-	}
-	if run.Age != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Age))
-	}
-	if run.Duration != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(run.Duration))
-	}
-
-	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
-	return strings.Join(parts, sep)
 }
 
 func (m Model) shortPath(path string) string {

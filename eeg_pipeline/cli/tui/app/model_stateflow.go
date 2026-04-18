@@ -319,6 +319,14 @@ func (m Model) handleQuickAction(action quickactions.ActionType) (tea.Model, tea
 	return m, nil
 }
 
+func (m Model) handleQuickActions() (tea.Model, tea.Cmd) {
+	if m.state == StatePipelineWizard {
+		m.quickActions.Show()
+		return m, m.quickActions.Init()
+	}
+	return m, nil
+}
+
 // startExecution starts pipeline execution locally.
 func (m Model) startExecution(command string) (tea.Model, tea.Cmd) {
 	m.execution = execution.NewWithRoot(command, m.repoRoot)
@@ -365,7 +373,6 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 	case StateDashboard:
 		return m.popState()
 	case StateHistory:
-		m.refreshMainMenuRecentRuns()
 		return m.popState()
 	default:
 		return m.popState()
@@ -414,7 +421,6 @@ func (m *Model) recordExecutionToHistory() {
 		return
 	}
 	m.syncMainMenuSessionData()
-	m.refreshMainMenuRecentRuns()
 
 	// Clear command to prevent duplicate recording
 	m.execCommand = ""

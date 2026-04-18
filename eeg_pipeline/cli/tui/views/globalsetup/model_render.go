@@ -11,11 +11,11 @@ import (
 // Rendering helpers for the global setup view.
 
 func (m Model) View() string {
-	title := styles.RenderSectionLabel("Global Setup")
 	lineWidth := m.width - 8
 	if lineWidth < 20 {
 		lineWidth = 20
 	}
+	title := styles.RenderStepHeader("Global Setup", lineWidth)
 	tabs := m.renderSectionTabs()
 	header := title + "\n" + tabs + "\n" + styles.RenderHeaderSeparator(lineWidth)
 	headerHeight := strings.Count(header, "\n") + 2
@@ -77,7 +77,7 @@ func (m Model) renderFooter() string {
 	if width < 20 {
 		width = 20
 	}
-	divider := styles.RenderDivider(width)
+	divider := styles.RenderFooterDivider(width)
 	bar := styles.RenderNoWrapBlock(styles.FooterStyle, styles.RenderFooterHints(width, hints), width)
 	return divider + "\n" + bar
 }
@@ -89,11 +89,11 @@ func (m Model) renderSectionTabs() string {
 			parts = append(parts, lipgloss.NewStyle().
 				Foreground(styles.Primary).
 				Bold(true).Underline(true).
-				Render(sec.label))
+				Render(strings.ToUpper(sec.label)))
 		} else {
 			parts = append(parts, lipgloss.NewStyle().
 				Foreground(styles.TextDim).
-				Render(sec.label))
+				Render(strings.ToUpper(sec.label)))
 		}
 	}
 	sep := lipgloss.NewStyle().Foreground(styles.Border).Render("  ·  ")
@@ -124,20 +124,20 @@ func (m Model) renderFields(maxWidth int) string {
 		}
 
 		value := m.fieldValue(field.key)
-		if m.editingText && m.editingField == field.key {
-			value = m.textBuffer + "█"
-		}
-		isUnset := value == ""
-		if isUnset {
-			value = "not set"
-		}
+		isEditing := m.editingText && m.editingField == field.key
+		isUnset := !isEditing && value == ""
 
 		var valueRendered string
-		if isUnset {
+		switch {
+		case isEditing:
+			// Shared, restrained edit affordance (raised-surface field +
+			// underline + caret) rather than an inverted highlight.
+			valueRendered = styles.RenderEditingInput(m.textBuffer)
+		case isUnset:
 			valueRendered = lipgloss.NewStyle().
 				Foreground(styles.Muted).Italic(true).
 				Render("not set")
-		} else {
+		default:
 			valueRendered = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(value)
 		}
 		label := styles.FitLine(labelStyle.Render(field.label), 20)

@@ -12,7 +12,6 @@ import (
 
 func (m Model) renderFmriAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
@@ -201,11 +200,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 
 		// Group headers with chevron indicators
 		case optFmriGroupRuntime:
-			if m.fmriGroupRuntimeExpanded {
-				label = "▾ Runtime"
-			} else {
-				label = "▸ Runtime"
-			}
+			label = styles.RenderChevron(m.fmriGroupRuntimeExpanded) + " Runtime"
 			hint = "Container settings"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -214,11 +209,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupOutput:
-			if m.fmriGroupOutputExpanded {
-				label = "▾ Output"
-			} else {
-				label = "▸ Output"
-			}
+			label = styles.RenderChevron(m.fmriGroupOutputExpanded) + " Output"
 			hint = "Output spaces, formats"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -227,11 +218,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupPerformance:
-			if m.fmriGroupPerformanceExpanded {
-				label = "▾ Performance"
-			} else {
-				label = "▸ Performance"
-			}
+			label = styles.RenderChevron(m.fmriGroupPerformanceExpanded) + " Performance"
 			hint = "Threads, memory"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -240,11 +227,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupAnatomical:
-			if m.fmriGroupAnatomicalExpanded {
-				label = "▾ Anatomical"
-			} else {
-				label = "▸ Anatomical"
-			}
+			label = styles.RenderChevron(m.fmriGroupAnatomicalExpanded) + " Anatomical"
 			hint = "FreeSurfer, skull-strip"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -253,11 +236,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupBold:
-			if m.fmriGroupBoldExpanded {
-				label = "▾ BOLD Processing"
-			} else {
-				label = "▸ BOLD Processing"
-			}
+			label = styles.RenderChevron(m.fmriGroupBoldExpanded) + " BOLD Processing"
 			hint = "Registration, timing"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -266,11 +245,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupQc:
-			if m.fmriGroupQcExpanded {
-				label = "▾ Quality Control"
-			} else {
-				label = "▸ Quality Control"
-			}
+			label = styles.RenderChevron(m.fmriGroupQcExpanded) + " Quality Control"
 			hint = "Motion thresholds"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -279,11 +254,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupDenoising:
-			if m.fmriGroupDenoisingExpanded {
-				label = "▾ Denoising"
-			} else {
-				label = "▸ Denoising"
-			}
+			label = styles.RenderChevron(m.fmriGroupDenoisingExpanded) + " Denoising"
 			hint = "ICA-AROMA"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -292,11 +263,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupSurface:
-			if m.fmriGroupSurfaceExpanded {
-				label = "▾ Surface"
-			} else {
-				label = "▸ Surface"
-			}
+			label = styles.RenderChevron(m.fmriGroupSurfaceExpanded) + " Surface"
 			hint = "Cortical surface options"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -305,11 +272,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupMultiecho:
-			if m.fmriGroupMultiechoExpanded {
-				label = "▾ Multi-Echo"
-			} else {
-				label = "▸ Multi-Echo"
-			}
+			label = styles.RenderChevron(m.fmriGroupMultiechoExpanded) + " Multi-Echo"
 			hint = "Multi-echo BOLD"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -318,11 +281,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupRepro:
-			if m.fmriGroupReproExpanded {
-				label = "▾ Reproducibility"
-			} else {
-				label = "▸ Reproducibility"
-			}
+			label = styles.RenderChevron(m.fmriGroupReproExpanded) + " Reproducibility"
 			hint = "Random seeds"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -331,11 +290,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupValidation:
-			if m.fmriGroupValidationExpanded {
-				label = "▾ Validation"
-			} else {
-				label = "▸ Validation"
-			}
+			label = styles.RenderChevron(m.fmriGroupValidationExpanded) + " Validation"
 			hint = "BIDS validation, errors"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -344,11 +299,7 @@ func (m Model) renderFmriAdvancedConfig() string {
 			}
 
 		case optFmriGroupAdvanced:
-			if m.fmriGroupAdvancedExpanded {
-				label = "▾ Advanced"
-			} else {
-				label = "▸ Advanced"
-			}
+			label = styles.RenderChevron(m.fmriGroupAdvancedExpanded) + " Advanced"
 			hint = "Extra CLI arguments"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)

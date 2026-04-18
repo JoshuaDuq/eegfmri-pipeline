@@ -111,11 +111,11 @@ func TestHandleKeyMessageRoutesShortcuts(t *testing.T) {
 		m = base
 		m.state = StateMainMenu
 		next, cmd = m.handleKeyMessage(tea.KeyMsg{Type: tea.KeyCtrlK})
-		if cmd == nil {
-			t.Fatal("expected quick actions command")
+		if cmd != nil {
+			t.Fatalf("expected ctrl+k to be ignored on the main menu, got %T", cmd)
 		}
-		if !next.(Model).quickActions.Visible {
-			t.Fatal("expected quick actions overlay to become visible")
+		if next.(Model).quickActions.Visible {
+			t.Fatal("expected quick actions overlay to stay hidden on the main menu")
 		}
 	})
 }

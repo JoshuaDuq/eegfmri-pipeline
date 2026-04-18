@@ -12,7 +12,6 @@ import (
 
 func (m Model) renderFmriAnalysisAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
@@ -423,111 +422,67 @@ func (m Model) renderFmriAnalysisAdvancedConfig() string {
 
 		// Group headers
 		case optFmriAnalysisGroupInput:
-			if m.fmriAnalysisGroupInputExpanded {
-				label = "▾ Input"
-			} else {
-				label = "▸ Input"
-			}
+			label = styles.RenderChevron(m.fmriAnalysisGroupInputExpanded) + " Input"
 			hint = "BOLD source + runs"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupContrast:
-			if m.fmriAnalysisGroupContrastExpanded {
-				label = "▾ Contrast"
-			} else {
-				label = "▸ Contrast"
-			}
+			label = styles.RenderChevron(m.fmriAnalysisGroupContrastExpanded) + " Contrast"
 			hint = "Conditions + name"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupGLM:
-			if m.fmriAnalysisGroupGLMExpanded {
-				label = "▾ GLM"
-			} else {
-				label = "▸ GLM"
-			}
+			label = styles.RenderChevron(m.fmriAnalysisGroupGLMExpanded) + " GLM"
 			hint = "HRF, drift, filters"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupConfounds:
-			if m.fmriAnalysisGroupConfoundsExpanded {
-				label = "▾ Confounds/QC"
-			} else {
-				label = "▸ Confounds/QC"
-			}
+			label = styles.RenderChevron(m.fmriAnalysisGroupConfoundsExpanded) + " Confounds/QC"
 			hint = "Nuisance + QC outputs"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupOutput:
-			if m.fmriAnalysisGroupOutputExpanded {
-				label = "▾ Output"
-			} else {
-				label = "▸ Output"
-			}
+			label = styles.RenderChevron(m.fmriAnalysisGroupOutputExpanded) + " Output"
 			hint = "Map type + paths"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriAnalysisGroupPlotting:
-			if m.fmriAnalysisGroupPlottingExpanded {
-				label = "▾ Plotting"
-			} else {
-				label = "▸ Plotting"
-			}
+			label = styles.RenderChevron(m.fmriAnalysisGroupPlottingExpanded) + " Plotting"
 			hint = "Figures + HTML report"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriTrialSigGroup:
-			if m.fmriTrialSigGroupExpanded {
-				label = "▾ Trial Signatures"
-			} else {
-				label = "▸ Trial Signatures"
-			}
+			label = styles.RenderChevron(m.fmriTrialSigGroupExpanded) + " Trial Signatures"
 			hint = "Beta-series / LSS + signature readouts"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriSecondLevelGroupInput:
-			if m.fmriSecondLevelGroupInputExpanded {
-				label = "▾ Group Input"
-			} else {
-				label = "▸ Group Input"
-			}
+			label = styles.RenderChevron(m.fmriSecondLevelGroupInputExpanded) + " Group Input"
 			hint = "Existing first-level maps to analyze"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriSecondLevelGroupDesign:
-			if m.fmriSecondLevelGroupDesignExpanded {
-				label = "▾ Group Design"
-			} else {
-				label = "▸ Group Design"
-			}
+			label = styles.RenderChevron(m.fmriSecondLevelGroupDesignExpanded) + " Group Design"
 			hint = "Model type, covariates, and formula"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriSecondLevelGroupInference:
-			if m.fmriSecondLevelGroupInferExpanded {
-				label = "▾ Group Inference"
-			} else {
-				label = "▸ Group Inference"
-			}
+			label = styles.RenderChevron(m.fmriSecondLevelGroupInferExpanded) + " Group Inference"
 			hint = "Design-matrix export and permutations"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 			}
 		case optFmriSecondLevelGroupOutput:
-			if m.fmriSecondLevelGroupOutputExpanded {
-				label = "▾ Group Output"
-			} else {
-				label = "▸ Group Output"
-			}
+			label = styles.RenderChevron(m.fmriSecondLevelGroupOutputExpanded) + " Group Output"
 			hint = "Output label and directory"
 			if !isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)

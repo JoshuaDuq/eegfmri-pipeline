@@ -40,7 +40,7 @@ const (
 	// Scroll offset calculation
 	minVisibleLines         = 8
 	defaultTerminalHeight   = 40
-	advancedContentOverhead = 5 // RenderStepHeader (3 lines) + trailing newline (1) + info hint line (1)
+	advancedContentOverhead = 4 // RenderStepHeader (1 line) + info hint line (1) + padding allowance
 
 	// Minimum buffer length for single character input
 	singleCharLength = 1
@@ -2490,6 +2490,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		roiSelected:         make(map[int]bool),
 		editingROIIdx:       -1,
 		spatialSelected:     make(map[int]bool),
+		editingRangeIdx:     noRangeEditing,
 		helpOverlay:         help,
 		// Advanced config defaults (shared)
 		useDefaultAdvanced:                false,
@@ -3687,6 +3688,9 @@ func (m Model) CursorBlinkVisible() bool {
 // editing mode. When true, global keybindings like quitting should be
 // suppressed so that edit-specific handlers can consume the keys.
 func (m Model) IsEditing() bool {
+	if m.filteringSubject {
+		return true
+	}
 	if m.editingText || m.editingNumber {
 		return true
 	}
@@ -3721,6 +3725,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.TickToast()
 		return m, m.tick()
+
+	case tea.MouseMsg:
+		next, cmd := m.handleMouse(msg)
+		if cmd != nil {
+			return next, cmd
+		}
+		m = next.(Model)
 
 	case executor.PickFileMsg:
 		// Handle file picker result

@@ -30,10 +30,13 @@ func toStylesHints(hints []footerHint) []styles.FooterHint {
 const (
 	shortHeightThreshold  = 25
 	minMainContentHeight  = 10
+	// headerSpacingLines and footerSpacingLines are added to newline counts so
+	// mainContentHeight matches the real View() assembly (extra newlines between
+	// header ↔ main and main ↔ footer are budgeted here).
 	headerSpacingLines    = 5
 	footerSpacingLines    = 3
 	containerPadH         = 4
-	containerPadV         = 1
+	containerPadV         = 3
 	containerBorder       = 2
 	minContainerWidth     = 60
 	minContainerHeight    = 15
@@ -80,7 +83,10 @@ func (m Model) View() string {
 	mainContent = normalizeContentFrame(mainContent, innerW, mainH)
 
 	mainStyled := styles.RenderNoWrapBlock(lipgloss.NewStyle(), mainContent, innerW)
-	innerView := header + "\n\n" + mainStyled + "\n" + footer
+	// Two blank rows after the wizard chrome (after the stepper bar) so the
+	// step content does not crowd the header; one blank row before the footer
+	// so the hint row sits slightly below the main block.
+	innerView := header + "\n\n\n" + mainStyled + "\n\n" + footer
 
 	containerStyle := lipgloss.NewStyle().
 		Height(containerH).
@@ -189,26 +195,34 @@ func (m Model) renderStepContent() string {
 func (m Model) renderValidationErrors() string {
 	var b strings.Builder
 	errStyle := lipgloss.NewStyle().Foreground(styles.Error).Bold(true)
-	for _, err := range m.validationErrors {
-		b.WriteString(errStyle.Render(fmt.Sprintf("  %s %s", styles.WarningMark, err)) + "\n")
+	for i, err := range m.validationErrors {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(errStyle.Render(fmt.Sprintf("  %s %s", styles.WarningMark, err)))
 	}
 	return b.String()
 }
 
 func (m Model) renderHeader(width int) string {
+	// Title row → blank row → breadcrumb → blank row → stepper bar. The
+	// blank rows keep the pipeline title, step rail, and progress gauge
+	// from reading as one compressed band at the top of the panel.
 	titleRow := m.buildTitleRow(width)
 	breadcrumb := m.buildBreadcrumbRow(width)
 	progress := m.buildProgressBar(width)
-	divider := styles.RenderDivider(width)
-	return titleRow + "\n" + divider + "\n\n" + breadcrumb + "\n" + progress
+	return titleRow + "\n\n" + breadcrumb + "\n\n" + progress
 }
 
 func (m Model) buildTitleRow(width int) string {
-	bar := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(styles.SectionIcon)
+	// Whisper-thin accent bar (hairline, not bolded) so it reads as a left
+	// gutter marking focus, not as a heavy frame edge. The pipeline name
+	// carries the visual weight via Bold + uppercase + tracking.
+	bar := lipgloss.NewStyle().Foreground(styles.Primary).Render(styles.SectionIcon)
 	pipelineName := strings.ToUpper(m.Pipeline.String())
-	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render(" " + pipelineName)
+	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("  " + pipelineName)
 	stepPill := m.buildStepPill()
-	left := bar + title + "  " + stepPill
+	left := bar + title + "     " + stepPill
 
 	var badges []string
 	if badge := m.buildSubjectBadge(); badge != "" {
@@ -300,15 +314,15 @@ func (m Model) renderFooter(width int) string {
 		hints = m.getStepHints()
 	}
 
-	divider := styles.RenderDivider(width)
+	divider := styles.RenderFooterDivider(width)
 	status := m.renderFooterStatus(width)
 	barContent := m.renderFooterHints(width, hints)
-	footerStyle := styles.FooterStyle.Align(lipgloss.Center)
+	footerStyle := styles.FooterStyle
 	bar := styles.RenderNoWrapBlock(footerStyle, barContent, width)
 	if status == "" {
-		return "\n" + divider + "\n" + bar
+		return divider + "\n" + bar
 	}
-	return "\n" + divider + "\n" + status + "\n" + bar
+	return divider + "\n" + status + "\n" + bar
 }
 
 func (m Model) renderFooterHints(width int, hints []footerHint) string {
@@ -323,6 +337,27 @@ func (m Model) renderFooterStatus(width int) string {
 		return m.renderToast(width)
 	}
 	return ""
+}
+
+// renderLoadingBanner renders a confident, single-line indeterminate-loading
+// affordance: an uppercase title as typographic metadata, then the spinner
+// glyph paired with the supplied message on the next line. The spinner sits
+// in the gutter (aligned with other content) and the message is rendered in
+// the standard text tone — italic + dim made the message read as a sidebar
+// caption rather than the primary status, so we keep it upright and at full
+// strength. The caller passes the bare spinner glyph; the banner composes
+// the message text, so spinners don't double up on their own label.
+func (m Model) renderLoadingBanner(title, message, spinner string) string {
+	var b strings.Builder
+	b.WriteString(styles.RenderPreviewSubHeader(title) + "\n\n")
+
+	line := "  " + spinner
+	if msg := strings.TrimSpace(message); msg != "" {
+		line += "  " + lipgloss.NewStyle().Foreground(styles.Text).Render(msg)
+	}
+
+	b.WriteString(line + "\n")
+	return b.String()
 }
 
 func (m Model) renderValidationSummary(width int) string {

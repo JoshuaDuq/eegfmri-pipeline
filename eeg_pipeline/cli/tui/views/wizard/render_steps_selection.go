@@ -13,7 +13,6 @@ import (
 
 func (m Model) renderModeSelection() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	descStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	for i, opt := range m.modeOptions {
@@ -126,7 +125,6 @@ func (m Model) renderComputationSelection() string {
 
 func (m Model) renderCategorySelection() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	if m.CurrentStep == types.StepSelectPlotCategories {
 		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
@@ -244,7 +242,7 @@ func (m Model) renderBandSelection() string {
 
 		var nameDisplay string
 		if isEditing && m.editingBandField == 0 {
-			nameDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.bandEditBuffer + "\u258c")
+			nameDisplay = styles.RenderEditingInput(m.bandEditBuffer)
 		} else {
 			nameDisplay = nameStyle.Render(band.Name)
 		}
@@ -255,12 +253,12 @@ func (m Model) renderBandSelection() string {
 		}
 		var lowHzDisplay, highHzDisplay string
 		if isEditing && m.editingBandField == 1 {
-			lowHzDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.bandEditBuffer + "\u258c")
+			lowHzDisplay = styles.RenderEditingInput(m.bandEditBuffer)
 		} else {
 			lowHzDisplay = freqStyle.Render(fmt.Sprintf("%.1f", band.LowHz))
 		}
 		if isEditing && m.editingBandField == 2 {
-			highHzDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.bandEditBuffer + "\u258c")
+			highHzDisplay = styles.RenderEditingInput(m.bandEditBuffer)
 		} else {
 			highHzDisplay = freqStyle.Render(fmt.Sprintf("%.1f", band.HighHz))
 		}
@@ -298,7 +296,7 @@ func (m Model) renderROISelection() string {
 		}
 		var nameDisplay string
 		if isEditing && m.editingROIField == 0 {
-			nameDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditDisplayValue())
+			nameDisplay = styles.RenderEditingInput(m.roiEditDisplayValue())
 		} else {
 			nameDisplay = nameStyle.Render(roi.Name)
 		}
@@ -308,7 +306,7 @@ func (m Model) renderROISelection() string {
 		}
 		var channelsDisplay string
 		if isEditing && m.editingROIField == 1 {
-			channelsDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditDisplayValue())
+			channelsDisplay = styles.RenderEditingInput(m.roiEditDisplayValue())
 		} else {
 			channelsDisplay = m.renderChannelsWithUnavailable(roi.Channels, channelStyle, isFocused)
 		}
@@ -488,7 +486,6 @@ func (m Model) formatChannelList(channels []string, color lipgloss.Color) string
 
 func (m Model) renderSpatialSelection() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	count := 0
 	for _, sel := range m.spatialSelected {
@@ -521,7 +518,6 @@ func (m Model) renderSpatialSelection() string {
 
 func (m Model) renderFeatureFileSelection() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	applicableFeatures := m.GetApplicableFeatureFiles()
 	if len(applicableFeatures) < len(featureFileOptions) {
@@ -590,7 +586,6 @@ func (m Model) renderFeatureFileSelection() string {
 
 func (m Model) renderSubjectSelection() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	labelStyle := lipgloss.NewStyle().Foreground(styles.Text)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
@@ -622,12 +617,12 @@ func (m Model) renderSubjectSelection() string {
 			hintStyle.Render("[Tab]") + "\n")
 	}
 
-	if m.subjectsLoading && len(m.subjects) == 0 {
-		return b.String() + "  " + m.subjectLoadingSpinner.View()
-	}
-
 	if m.subjectsLoading && len(m.subjects) > 0 {
-		b.WriteString("  " + dimStyle.Render("Refreshing subject status... ") + m.subjectLoadingSpinner.View() + "\n")
+		b.WriteString(m.renderLoadingBanner("Loading", "Refreshing subject status", m.subjectLoadingSpinner.Glyph()))
+	}
+	if m.subjectsLoading && len(m.subjects) == 0 {
+		b.WriteString(m.renderLoadingBanner("Loading", "Discovering subjects and validating availability", m.subjectLoadingSpinner.Glyph()))
+		return b.String()
 	}
 
 	if m.filteringSubject {

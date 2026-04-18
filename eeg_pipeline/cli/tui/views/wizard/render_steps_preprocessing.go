@@ -12,7 +12,6 @@ import (
 
 func (m Model) renderPreprocessingStageSelection() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	selectedCount := 0
 	for i := range m.prepStages {
@@ -50,9 +49,8 @@ func (m Model) renderPreprocessingStageSelection() string {
 
 func (m Model) renderPreprocessingFiltering() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
-	b.WriteString(styles.RenderStepHeader("Filtering", m.contentWidth) + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Filtering", m.contentWidth) + "\n")
 
 	labelWidth := defaultLabelWidth
 
@@ -98,9 +96,8 @@ func (m Model) renderPreprocessingFiltering() string {
 
 func (m Model) renderPreprocessingICA() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
-	b.WriteString(styles.RenderStepHeader("ICA", m.contentWidth) + "\n\n")
+	b.WriteString(styles.RenderStepHeader("ICA", m.contentWidth) + "\n")
 
 	labelWidth := defaultLabelWidth
 
@@ -197,9 +194,8 @@ func (m Model) renderConfigRow(label, value, hint string, isFocused bool, labelW
 
 func (m Model) renderPreprocessingEpochs() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
-	b.WriteString(styles.RenderStepHeader("Epochs", m.contentWidth) + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Epochs", m.contentWidth) + "\n")
 
 	labelWidth := defaultLabelWidth
 

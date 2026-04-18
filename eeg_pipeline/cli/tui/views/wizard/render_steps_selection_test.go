@@ -8,6 +8,82 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
+func TestSelectionRenderers_DoNotStartWithLeadingBlankLine(t *testing.T) {
+	t.Run("mode", func(t *testing.T) {
+		m := New(types.PipelineBehavior, "/tmp")
+		m.contentWidth = 100
+
+		rendered := m.renderModeSelection()
+		if strings.HasPrefix(rendered, "\n") {
+			t.Fatalf("expected mode selection to start without a blank line, got %q", rendered)
+		}
+	})
+
+	t.Run("category", func(t *testing.T) {
+		m := New(types.PipelineBehavior, "/tmp")
+		m.contentWidth = 100
+
+		rendered := m.renderCategorySelection()
+		if strings.HasPrefix(rendered, "\n") {
+			t.Fatalf("expected category selection to start without a blank line, got %q", rendered)
+		}
+	})
+
+	t.Run("spatial", func(t *testing.T) {
+		m := Model{
+			contentWidth:    80,
+			spatialSelected: map[int]bool{0: true, 1: false, 2: true},
+		}
+
+		rendered := m.renderSpatialSelection()
+		if strings.HasPrefix(rendered, "\n") {
+			t.Fatalf("expected spatial selection to start without a blank line, got %q", rendered)
+		}
+	})
+
+	t.Run("feature files", func(t *testing.T) {
+		m := New(types.PipelineBehavior, "/tmp")
+		m.contentWidth = 100
+		for i := range m.computationSelected {
+			m.computationSelected[i] = false
+		}
+		for i, comp := range m.computations {
+			if comp.Key == "temporal" {
+				m.computationSelected[i] = true
+				break
+			}
+		}
+
+		rendered := m.renderFeatureFileSelection()
+		if strings.HasPrefix(rendered, "\n") {
+			t.Fatalf("expected feature file selection to start without a blank line, got %q", rendered)
+		}
+	})
+
+	t.Run("subjects", func(t *testing.T) {
+		m := New(types.PipelineFeatures, "/tmp")
+		m.contentWidth = 100
+
+		rendered := m.renderSubjectSelection()
+		if strings.HasPrefix(rendered, "\n") {
+			t.Fatalf("expected subject selection to start without a blank line, got %q", rendered)
+		}
+	})
+
+	t.Run("preprocessing stages", func(t *testing.T) {
+		m := Model{
+			contentWidth:      100,
+			prepStages:        preprocessingStages,
+			prepStageSelected: make(map[int]bool),
+		}
+
+		rendered := m.renderPreprocessingStageSelection()
+		if strings.HasPrefix(rendered, "\n") {
+			t.Fatalf("expected preprocessing stage selection to start without a blank line, got %q", rendered)
+		}
+	})
+}
+
 func TestRenderSubjectSelection_ShowsExistingSubjectsWhileRefreshing(t *testing.T) {
 	m := New(types.PipelineFeatures, "/tmp")
 	m.height = 40
@@ -24,6 +100,21 @@ func TestRenderSubjectSelection_ShowsExistingSubjectsWhileRefreshing(t *testing.
 	}
 	if !strings.Contains(rendered, "sub-0001") {
 		t.Fatalf("expected subject list to remain visible during refresh")
+	}
+}
+
+func TestRenderSubjectSelection_ShowsLoadingBannerWhenSubjectsMissing(t *testing.T) {
+	m := New(types.PipelineFeatures, "/tmp")
+	m.contentWidth = 100
+	m.SetSubjectsLoading()
+
+	rendered := m.renderSubjectSelection()
+
+	if !strings.Contains(rendered, "LOADING") {
+		t.Fatalf("expected loading banner in subject selection render, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Discovering subjects and validating availability") {
+		t.Fatalf("expected loading message in subject selection render, got:\n%s", rendered)
 	}
 }
 

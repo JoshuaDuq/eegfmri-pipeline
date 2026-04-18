@@ -125,7 +125,7 @@ func (m Model) renderPlotSelection() string {
 
 	lines, _, visibleCount, selectedCount := m.plotSelectionLines()
 	b.WriteString(styles.RenderStatusCount(selectedCount, visibleCount, "selected"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	startLine, endLine, showIndicators := calculateExactScrollWindow(
 		len(lines),
@@ -185,8 +185,7 @@ func (m Model) renderPlotSelection() string {
 
 func (m Model) renderPlotConfig() string {
 	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString(styles.RenderStepHeader("Plot output", m.contentWidth) + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Plot output", m.contentWidth) + "\n")
 
 	options := m.getPlotConfigOptions()
 	labelWidth := 16
@@ -236,7 +235,6 @@ func (m Model) renderPlotConfig() string {
 
 func (m Model) renderTimeRange() string {
 	var b strings.Builder
-	b.WriteString("\n")
 	b.WriteString(styles.RenderStepHeader("Time range", m.contentWidth) + "\n")
 
 	if m.timeRangeShowsRestToggle() {
@@ -401,8 +399,7 @@ func (m Model) renderTimeRange() string {
 
 func (m Model) renderFeaturePlotterSelection() string {
 	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString(styles.RenderStepHeader("Feature plots", m.contentWidth) + "\n\n")
+	b.WriteString(styles.RenderStepHeader("Feature plots", m.contentWidth) + "\n")
 
 	categories := m.selectedFeaturePlotterCategories()
 	if len(categories) == 0 {
@@ -414,7 +411,7 @@ func (m Model) renderFeaturePlotterSelection() string {
 			b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  Failed to load feature plots: " + m.featurePlotterError + "\n"))
 			b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render("  Proceeding will run all plots.\n"))
 		} else {
-			b.WriteString("  " + m.plotLoadingSpinner.View() + "\n")
+			b.WriteString(m.renderLoadingBanner("Loading", "Building available feature plots", m.plotLoadingSpinner.Glyph()))
 		}
 		return b.String()
 	}
@@ -432,7 +429,7 @@ func (m Model) renderFeaturePlotterSelection() string {
 		}
 	}
 	b.WriteString(styles.RenderStatusCount(selectedCount, len(items), "selected"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	type listLine struct {
 		isHeader bool

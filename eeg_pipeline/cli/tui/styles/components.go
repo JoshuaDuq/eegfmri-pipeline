@@ -36,9 +36,13 @@ var (
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(TextDim)
 
+	// Panel: unfocused sibling of a focused card. Uses the same subtle
+	// Border tone as CardStyle so the chrome recedes uniformly; focus is
+	// communicated by BorderBright on the active pane, not by darkening
+	// the inactive one.
 	PanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Secondary).
+			BorderForeground(Border).
 			Padding(1, 2)
 
 	HeaderLineStyle = lipgloss.NewStyle().Foreground(Secondary)
@@ -79,7 +83,12 @@ var (
 	// "B browse" hint in globalsetup, the selected shortcut in quickactions).
 	// New footer hints use the bracket-style key below, which is quieter and
 	// better suited to a research-app aesthetic.
-	FooterKeyPrimaryStyle     = lipgloss.NewStyle().Foreground(BgDark).Background(Primary).Bold(true).Padding(0, 1)
+	//
+	// The legacy chips have been toned down: instead of a fully-filled
+	// inverted block (Primary bg / BgDark fg) they now use a raised surface
+	// with a bright foreground. The effect is a subtle chip that reads as a
+	// key rather than a shouting badge.
+	FooterKeyPrimaryStyle     = lipgloss.NewStyle().Foreground(Primary).Background(SurfaceAlt).Bold(true).Padding(0, 1)
 	FooterKeySecondaryStyle   = lipgloss.NewStyle().Foreground(TextDim).Background(Surface).Padding(0, 1)
 	FooterLabelPrimaryStyle   = lipgloss.NewStyle().Foreground(Text)
 	FooterLabelSecondaryStyle = lipgloss.NewStyle().Foreground(Muted)

@@ -139,7 +139,6 @@ func New(version string) Model {
 		))
 	}
 	m.syncMainMenuSessionData()
-	m.refreshMainMenuRecentRuns()
 	m.syncMainMenuConfigSummary()
 
 	// Restore last selected pipeline cursor position
@@ -300,14 +299,6 @@ func (m Model) handleOpenHistory() (tea.Model, tea.Cmd) {
 		m.historyMdl.Init(),
 		func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 	)
-}
-
-func (m Model) handleQuickActions() (tea.Model, tea.Cmd) {
-	if m.state == StateMainMenu || m.state == StatePipelineWizard {
-		m.quickActions.Show()
-		return m, m.quickActions.Init()
-	}
-	return m, nil
 }
 
 func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) {

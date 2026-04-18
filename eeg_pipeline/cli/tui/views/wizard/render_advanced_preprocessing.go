@@ -12,7 +12,6 @@ import (
 
 func (m Model) renderPreprocessingAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
@@ -243,11 +242,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 
 		// Group headers with chevron indicators
 		case optPrepGroupStages:
-			if m.prepGroupStagesExpanded {
-				label = "▾ Stages"
-			} else {
-				label = "▸ Stages"
-			}
+			label = styles.RenderChevron(m.prepGroupStagesExpanded) + " Stages"
 			hint = "Choose preprocessing steps"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -256,11 +251,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 
 		case optPrepGroupGeneral:
-			if m.prepGroupGeneralExpanded {
-				label = "▾ General"
-			} else {
-				label = "▸ General"
-			}
+			label = styles.RenderChevron(m.prepGroupGeneralExpanded) + " General"
 			hint = "Montage, parallel jobs, random seed"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -269,11 +260,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 
 		case optPrepGroupFiltering:
-			if m.prepGroupFilteringExpanded {
-				label = "▾ Filtering"
-			} else {
-				label = "▸ Filtering"
-			}
+			label = styles.RenderChevron(m.prepGroupFilteringExpanded) + " Filtering"
 			hint = "Resampling, bandpass, notch filters"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -282,11 +269,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 
 		case optPrepGroupPyprep:
-			if m.prepGroupPyprepExpanded {
-				label = "▾ PyPREP"
-			} else {
-				label = "▸ PyPREP"
-			}
+			label = styles.RenderChevron(m.prepGroupPyprepExpanded) + " PyPREP"
 			hint = "Bad channel detection parameters"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -295,11 +278,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 
 		case optPrepGroupICA:
-			if m.prepGroupICAExpanded {
-				label = "▾ ICA"
-			} else {
-				label = "▸ ICA"
-			}
+			label = styles.RenderChevron(m.prepGroupICAExpanded) + " ICA"
 			hint = "ICA algorithm and parameters"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -308,11 +287,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			}
 
 		case optPrepGroupEpoching:
-			if m.prepGroupEpochingExpanded {
-				label = "▾ Epoching"
-			} else {
-				label = "▸ Epoching"
-			}
+			label = styles.RenderChevron(m.prepGroupEpochingExpanded) + " Epoching"
 			hint = "Epoch timing and rejection criteria"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)

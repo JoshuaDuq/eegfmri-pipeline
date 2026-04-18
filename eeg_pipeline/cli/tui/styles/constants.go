@@ -52,16 +52,22 @@ const (
 	CrossMark           = "✗"
 	PendingMark         = "○"
 	ActiveMark          = "●"
-	SelectedMark        = "▸"
+	SelectedMark        = "›"
 	BulletMark          = "·"
 	WarningMark         = "⚠"
-	FooterHintSeparator = "  │  "
+	// Spacing only; RenderFooterSeparator() applies Secondary + the same rhythm.
+	FooterHintSeparator = "    ·    "
 
-	HeaderSeparatorChar = "━"
+	// Header rule: thin/uniform ─ for a hairline feel. The header remains
+	// distinct from section dividers via color (brighter) rather than weight.
+	HeaderSeparatorChar = "─"
 	SectionDividerChar  = "─"
 
-	SectionIcon       = "│"
-	SectionIconActive = "┃"
+	// Thin vertical marker for section labels and accent bars. Kept as a
+	// hairline (▏) rather than the heavier │/┃ variants so the left rail
+	// reads as a whisper-thin indicator of focus, not a structural frame.
+	SectionIcon       = "▏"
+	SectionIconActive = "▏"
 )
 
 const (

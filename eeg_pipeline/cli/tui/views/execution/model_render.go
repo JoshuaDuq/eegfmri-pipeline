@@ -93,14 +93,18 @@ func (m Model) renderCompletionSummary() string {
 	pw := m.panelWidth()
 	iw := pw - 6
 
-	// Status banner — full-width colored bar
-	bannerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.BgDark).
-		Background(statusColor).
-		Padding(0, 2).
-		Width(iw)
-	b.WriteString(bannerStyle.Render(icon+"  "+statusText) + "\n\n")
+	// Status banner — a restrained heading flanked by a vertical accent bar
+	// in the status color. Avoids a full-width inverted fill (which reads
+	// as alarming or loud on a research terminal) while still marking the
+	// state unambiguously through glyph, color, and weight. A hairline rule
+	// beneath the banner separates it from the metric tiles.
+	bar := lipgloss.NewStyle().Foreground(statusColor).Render("▎")
+	iconStyled := lipgloss.NewStyle().Foreground(statusColor).Bold(true).Render(icon)
+	heading := lipgloss.NewStyle().Foreground(statusColor).Bold(true).
+		Render(strings.ToUpper(statusText))
+	b.WriteString(bar + " " + iconStyled + "  " + heading + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.Border).
+		Render(strings.Repeat(styles.SectionDividerChar, iw)) + "\n\n")
 
 	// Metric tiles row — compact key stats
 	duration := m.getDuration()
@@ -207,27 +211,35 @@ func (m Model) renderMetricTiles(tiles []metricTile, maxWidth int) string {
 		parts = append(parts, "  "+lbl+" "+val)
 	}
 
-	return strings.Join(parts, lipgloss.NewStyle().Foreground(styles.Border).Render("  │  "))
+	return strings.Join(parts, lipgloss.NewStyle().Foreground(styles.Border).Render("   ·   "))
 }
 
 // renderCompletionActions renders the action button bar for the completion card.
+// Uses the bracket-style key hint (`[Enter] Menu`) for consistency with the
+// app-wide footer hint aesthetic rather than background-filled chips.
 func (m Model) renderCompletionActions() string {
-	key := func(k string) string {
-		return lipgloss.NewStyle().
-			Foreground(styles.TextDim).Background(styles.Surface).
-			Bold(true).Padding(0, 1).Render(k)
+	bracket := styles.FooterKeyBracketStyle
+	keyColored := func(k string, color lipgloss.Color) string {
+		return bracket.Render("[") +
+			lipgloss.NewStyle().Foreground(color).Bold(true).Render(k) +
+			bracket.Render("]")
+	}
+	keyDim := func(k string) string {
+		return bracket.Render("[") +
+			lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render(k) +
+			bracket.Render("]")
 	}
 	action := func(label string, color lipgloss.Color) string {
-		return lipgloss.NewStyle().Foreground(color).Bold(true).Render(label)
+		return lipgloss.NewStyle().Foreground(color).Render(label)
 	}
 	dim := func(label string) string {
-		return lipgloss.NewStyle().Foreground(styles.TextDim).Render(label)
+		return lipgloss.NewStyle().Foreground(styles.Muted).Render(label)
 	}
 	hint := func(k, label string, color lipgloss.Color) string {
-		return key(k) + " " + action(label, color)
+		return keyColored(k, color) + " " + action(label, color)
 	}
 	dimHint := func(k, label string) string {
-		return key(k) + " " + dim(label)
+		return keyDim(k) + " " + dim(label)
 	}
 
 	var parts []string
@@ -251,7 +263,7 @@ func (m Model) renderCompletionActions() string {
 		)
 	}
 
-	sep := lipgloss.NewStyle().Foreground(styles.Border).Render("  │  ")
+	sep := lipgloss.NewStyle().Foreground(styles.Border).Render("   ·   ")
 	return "  " + strings.Join(parts, sep)
 }
 
@@ -514,15 +526,17 @@ func (m Model) renderLogSection() string {
 	var b strings.Builder
 	contentWidth := m.logViewport.Width
 
-	// Copy mode banner
+	// Copy mode banner — a restrained mode indicator (accent bar + bold
+	// label + muted hint) rather than a full-width inverted chip. Reads as
+	// a deliberate state switch without hijacking the visual hierarchy.
 	if m.copyMode {
-		copyBanner := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(styles.BgDark).
-			Background(styles.Accent).
-			Padding(0, 2).
-			Render("Copy mode: Select text with mouse, then Cmd+C. Press M or Esc to exit.")
-		b.WriteString(lipgloss.NewStyle().Width(contentWidth).Render(copyBanner) + "\n")
+		bar := lipgloss.NewStyle().Foreground(styles.Accent).Render("▎")
+		label := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).
+			Render("COPY MODE")
+		hint := lipgloss.NewStyle().Foreground(styles.Muted).
+			Render("  Select text with mouse, then Cmd+C  ·  M or Esc to exit")
+		banner := bar + " " + label + hint
+		b.WriteString(styles.TruncateLine(banner, contentWidth) + "\n")
 	}
 
 	logHeader := styles.RenderSectionLabel("Log")
@@ -694,7 +708,7 @@ func (m Model) renderFooter() string {
 	if width < 20 {
 		width = 20
 	}
-	divider := styles.RenderDivider(width)
+	divider := styles.RenderFooterDivider(width)
 	bar := styles.RenderNoWrapBlock(styles.FooterStyle, strings.Join(hints, styles.RenderFooterSeparator()), width)
 	return divider + "\n" + bar
 }

@@ -78,6 +78,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.animQueue.Tick()
 		return m, m.tick()
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
@@ -208,7 +210,7 @@ func (m Model) View() string {
 
 	headerLeft := styles.RenderSectionLabel("Pipeline Smoke Test")
 	b.WriteString(headerLeft + "  " + selText + selLabel + "\n")
-	b.WriteString(styles.RenderHeaderSeparator(70) + "\n\n")
+	b.WriteString(styles.RenderHeaderSeparator(70) + "\n")
 
 	task := m.task
 	if task == "" {
@@ -216,7 +218,7 @@ func (m Model) View() string {
 	}
 	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("task  ")
 	taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(task)
-	b.WriteString(taskLabel + taskValue + "\n\n")
+	b.WriteString(taskLabel + taskValue + "\n")
 
 	for i, item := range smokeItems {
 		focused := i == m.cursor
@@ -252,7 +254,7 @@ func (m Model) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styles.RenderDivider(70) + "\n")
+	b.WriteString(styles.RenderFooterDivider(70) + "\n")
 	hints := []string{
 		styles.RenderKeyHint("↑↓", "Navigate"),
 		styles.RenderKeyHint("Space", "Toggle"),

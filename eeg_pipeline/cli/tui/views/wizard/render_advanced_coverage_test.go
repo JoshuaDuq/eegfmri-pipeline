@@ -4,8 +4,49 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
 )
+
+func TestAdvancedRenderers_DoNotStartWithLeadingBlankLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		rendered string
+	}{
+		{
+			name:     "features",
+			rendered: func() string { m := New(types.PipelineFeatures, "."); m.contentWidth = 100; return m.renderFeaturesAdvancedConfig() }(),
+		},
+		{
+			name:     "behavior",
+			rendered: func() string { m := New(types.PipelineBehavior, "."); m.contentWidth = 100; return m.renderBehaviorAdvancedConfig() }(),
+		},
+		{
+			name:     "machine learning",
+			rendered: func() string { m := New(types.PipelineML, "."); m.contentWidth = 100; return m.renderMLAdvancedConfig() }(),
+		},
+		{
+			name:     "preprocessing",
+			rendered: func() string { m := New(types.PipelinePreprocessing, "."); m.contentWidth = 100; return m.renderPreprocessingAdvancedConfig() }(),
+		},
+		{
+			name:     "fMRI",
+			rendered: func() string { m := New(types.PipelineFmri, "."); m.contentWidth = 100; return m.renderFmriAdvancedConfig() }(),
+		},
+		{
+			name:     "fMRI analysis",
+			rendered: func() string { m := New(types.PipelineFmriAnalysis, "."); m.contentWidth = 100; return m.renderFmriAnalysisAdvancedConfig() }(),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if strings.HasPrefix(tc.rendered, "\n") {
+				t.Fatalf("expected %s advanced view to start without a blank line, got:\n%s", tc.name, tc.rendered)
+			}
+		})
+	}
+}
 
 func TestFeaturesAdvancedConfigRendersMaximalState(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
@@ -114,7 +155,7 @@ func TestBehaviorAdvancedConfigScrollsExpandedLists(t *testing.T) {
 	if !strings.Contains(rendered, "col6") {
 		t.Fatalf("expected scrolled behavior config to include focused expanded-list item:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "▸ □ col6") {
+	if !strings.Contains(rendered, styles.SelectedMark+" □ col6") {
 		t.Fatalf("expected focused expanded-list item to show a visible cursor:\n%s", rendered)
 	}
 }

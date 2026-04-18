@@ -93,8 +93,10 @@ func RenderScrollUpIndicator(count int) string {
 	if count <= 0 {
 		return ""
 	}
-	arrow := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  ▲")
-	text := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf(" %d more", count))
+	// Quieter scroll affordance: dim caret with a muted count. The indicator
+	// should be discoverable but never compete with list content for focus.
+	arrow := lipgloss.NewStyle().Foreground(TextDim).Render("  ▲")
+	text := lipgloss.NewStyle().Foreground(Muted).Render(fmt.Sprintf(" %d more", count))
 	return arrow + text
 }
 
@@ -102,8 +104,8 @@ func RenderScrollDownIndicator(count int) string {
 	if count <= 0 {
 		return ""
 	}
-	arrow := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  ▼")
-	text := lipgloss.NewStyle().Foreground(TextDim).Render(fmt.Sprintf(" %d more", count))
+	arrow := lipgloss.NewStyle().Foreground(TextDim).Render("  ▼")
+	text := lipgloss.NewStyle().Foreground(Muted).Render(fmt.Sprintf(" %d more", count))
 	return arrow + text
 }
 
@@ -176,9 +178,10 @@ func RenderCursorOptional(visible bool) string {
 	return "  "
 }
 
-// RenderFooterSeparator returns the styled footer hint separator (e.g. "  │  ").
+// RenderFooterSeparator returns the styled gap between footer hints (middot
+// with breathing room so bindings do not read as one continuous token).
 func RenderFooterSeparator() string {
-	return lipgloss.NewStyle().Foreground(Secondary).Render(FooterHintSeparator)
+	return lipgloss.NewStyle().Foreground(Secondary).Render("    ·    ")
 }
 
 // RenderKeyHint renders a footer key hint as "[Key] Label" with the key
@@ -255,25 +258,31 @@ func RenderDimSectionLabel(title string) string {
 	return bar + label
 }
 
-// RenderPreviewSubHeader renders a bold dim section label with a trailing rule.
+// RenderPreviewSubHeader renders a quiet uppercase section label with a
+// short trailing hairline rule. A middle-dot lead-in (` · `) matches the
+// app's metadata rhythm before a 4-cell hairline — reads as editorial
+// annotation, not a full-width divider.
 func RenderPreviewSubHeader(title string) string {
-	label := lipgloss.NewStyle().Foreground(TextDim).Bold(true).Render(title)
-	rule := lipgloss.NewStyle().Foreground(Border).Render(" " + strings.Repeat(SectionDividerChar, 6))
+	label := lipgloss.NewStyle().Foreground(Muted).Bold(true).Render(strings.ToUpper(title))
+	rule := lipgloss.NewStyle().Foreground(Border).Render("  · " + strings.Repeat(SectionDividerChar, 4))
 	return label + rule
 }
 
-// RenderPreviewSubHeaderWithRule renders a titled rule spanning the given width.
+// RenderPreviewSubHeaderWithRule renders a titled rule spanning the given
+// width. Title is uppercased and muted so it reads as typographic metadata;
+// the trailing hairline rule provides a quiet baseline without competing
+// with section content.
 func RenderPreviewSubHeaderWithRule(title string, width int) string {
 	if width <= 0 {
 		return RenderPreviewSubHeader(title)
 	}
-	label := lipgloss.NewStyle().Foreground(TextDim).Bold(true).Render(title)
+	label := lipgloss.NewStyle().Foreground(Muted).Bold(true).Render(strings.ToUpper(title))
 	ruleStyle := lipgloss.NewStyle().Foreground(Border)
-	trailing := width - lipgloss.Width(label) - 1
+	trailing := width - lipgloss.Width(label) - 2
 	if trailing < 1 {
 		trailing = 1
 	}
-	suffix := ruleStyle.Render(" " + strings.Repeat(SectionDividerChar, trailing))
+	suffix := ruleStyle.Render("  " + strings.Repeat(SectionDividerChar, trailing))
 	return label + suffix
 }
 
@@ -307,6 +316,18 @@ func RenderDivider(width int) string {
 		return ""
 	}
 	return lipgloss.NewStyle().Foreground(Secondary).Render(strings.Repeat(SectionDividerChar, width))
+}
+
+// RenderFooterDivider renders a hairline for the top edge of a footer band.
+// Uses Border (not Secondary) so the line recedes below main content and
+// reads as a floor for key hints rather than a competing section separator.
+// Call sites include the wizard, main menu, dashboard, execution log, history,
+// global setup, quick actions (above shortcuts), and pipeline smoke test.
+func RenderFooterDivider(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat(SectionDividerChar, width))
 }
 
 // TruncateLine truncates a string to maxWidth visible characters, appending
@@ -379,14 +400,56 @@ func RenderConfigLine(cursor, label, value, hint string, labelWidth, maxWidth in
 	return TruncateLine(line, maxWidth)
 }
 
-// RenderStepHeader renders a step section title with a primary accent bar and divider.
+// RenderStepHeader renders a step section title with a whisper-thin accent
+// bar and a trailing hairline rule that spans the remaining width. The accent
+// bar is rendered in Primary (not bold) so the left rail is visible but doesn't
+// thicken into a frame; the title carries the bold weight; the trailing rule
+// extends to the column edge to anchor the heading as a baseline divider.
 func RenderStepHeader(title string, width int) string {
-	bar := lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(SectionIcon)
+	bar := lipgloss.NewStyle().Foreground(Primary).Render(SectionIcon)
 	header := bar + " " + lipgloss.NewStyle().Bold(true).Foreground(Text).Render(title)
-	if width > 0 {
-		return header + "\n" + RenderDivider(width)
+	if width <= 0 {
+		return header
 	}
-	return header
+	ruleWidth := width - lipgloss.Width(header) - 2
+	if ruleWidth < 4 {
+		ruleWidth = 4
+	}
+	rule := lipgloss.NewStyle().Foreground(Border).Render("  " + strings.Repeat(SectionDividerChar, ruleWidth))
+	return header + rule
+}
+
+// RenderChevron returns the expand/collapse glyph used by wizard group
+// headers. `▾` when expanded, `▸` when collapsed. Centralized so all
+// advanced-config sections share the same affordance and so future theme
+// tweaks (e.g., switching to a lighter caret family) happen in one place.
+func RenderChevron(expanded bool) string {
+	if expanded {
+		return "▾"
+	}
+	return "▸"
+}
+
+// RenderEditingInput renders the text-input edit affordance used by wizards
+// when the user is typing into a field. Uses a raised SurfaceAlt background
+// with a bright bold Primary foreground and an underline — reads as a raised
+// input field rather than an inverted-fill highlight. The block-left cursor
+// is appended so the focus point is unambiguous.
+//
+// Pass the current buffer contents (not including the cursor) as `buffer`;
+// the caller is responsible for truncation.
+func RenderEditingInput(buffer string) string {
+	input := lipgloss.NewStyle().
+		Foreground(Primary).
+		Background(SurfaceAlt).
+		Bold(true).
+		Underline(true).
+		Render(buffer)
+	caret := lipgloss.NewStyle().
+		Foreground(Primary).
+		Background(SurfaceAlt).
+		Render("▌")
+	return input + caret
 }
 
 // RenderProgressBar renders a static filled/empty progress bar with a percentage label.
@@ -441,6 +504,9 @@ func RenderProgressBar(progress float64, width int) string {
 }
 
 // RenderStatusCount renders a count + noun summary line.
+// The "select at least 1" hint is appended as a separate clause divided by
+// the standard hairline middle-dot, matching the rest of the app's metadata
+// rhythm rather than being run on as a trailing italic.
 func RenderStatusCount(count, total int, noun string) string {
 	color := Success
 	if count == 0 {
@@ -451,7 +517,9 @@ func RenderStatusCount(count, total int, noun string) string {
 	nounText := lipgloss.NewStyle().Foreground(TextDim).Render(" " + noun)
 	result := countText + nounText
 	if count == 0 {
-		result += "  " + lipgloss.NewStyle().Foreground(Warning).Italic(true).Render("select at least 1")
+		sep := lipgloss.NewStyle().Foreground(Border).Render(" · ")
+		hint := lipgloss.NewStyle().Foreground(Warning).Render("select at least 1")
+		result += sep + hint
 	}
 	return result
 }

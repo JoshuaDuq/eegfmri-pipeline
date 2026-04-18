@@ -87,6 +87,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.animQueue.Tick()
 		return m, m.tick()
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 
@@ -128,14 +131,14 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	b.WriteString(styles.RenderSectionLabel("Quick Actions") + "\n")
-	b.WriteString(styles.RenderDivider(35) + "\n\n")
+	b.WriteString(styles.RenderDivider(35) + "\n")
 
 	for i, action := range quickActions {
 		b.WriteString(m.renderAction(action, i == m.cursor) + "\n")
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styles.RenderDivider(35) + "\n")
+	b.WriteString(styles.RenderFooterDivider(35) + "\n")
 	footer := lipgloss.NewStyle().Foreground(styles.Muted).Render("shortcuts or ") +
 		styles.RenderKeyHint("\u23ce", "select")
 	b.WriteString(footer)

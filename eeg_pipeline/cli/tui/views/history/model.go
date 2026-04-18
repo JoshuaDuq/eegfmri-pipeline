@@ -201,6 +201,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
@@ -240,7 +243,7 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	b.WriteString(m.renderHeader())
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	if m.loading {
 		b.WriteString(m.renderLoading())
@@ -277,12 +280,15 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderColumnHeaders() string {
-	colStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
+	// Uppercase muted column headings read as typographic metadata (like
+	// the "DETAILS / WORKSPACE / FOCUS" sub-headers elsewhere) rather than
+	// as bolded label text competing with row content.
+	colStyle := lipgloss.NewStyle().Foreground(styles.Muted).Bold(true)
 	return "    " +
-		colStyle.Width(16).Render("Pipeline") +
-		colStyle.Width(11).Render("Mode") +
-		colStyle.Width(11).Render("Duration") +
-		colStyle.Render("When")
+		colStyle.Width(16).Render("PIPELINE") +
+		colStyle.Width(11).Render("MODE") +
+		colStyle.Width(11).Render("DURATION") +
+		colStyle.Render("WHEN")
 }
 
 func (m Model) renderLoading() string {
@@ -326,8 +332,6 @@ func (m Model) renderHistory() string {
 		maxShow = len(m.records)
 	}
 
-	groupLabelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
-	groupDivStyle := lipgloss.NewStyle().Foreground(styles.Border)
 	groupNames := map[timeGroup]string{
 		groupToday:    "Today",
 		groupThisWeek: "This Week",
@@ -340,13 +344,10 @@ func (m Model) renderHistory() string {
 		grp := recordTimeGroup(record.StartTime)
 		if !renderedGroups[grp] {
 			renderedGroups[grp] = true
-			label := groupLabelStyle.Render(groupNames[grp])
-			ruleWidth := m.innerWidth() - lipgloss.Width(label) - 3
-			if ruleWidth < 1 {
-				ruleWidth = 1
-			}
-			rule := groupDivStyle.Render(" " + strings.Repeat("─", ruleWidth))
-			b.WriteString("\n" + label + rule + "\n")
+			// Route group labels through the shared sub-header helper so
+			// they render as consistent uppercase-muted title + hairline
+			// rule across the app.
+			b.WriteString("\n" + styles.RenderPreviewSubHeaderWithRule(groupNames[grp], m.innerWidth()) + "\n")
 		}
 		b.WriteString(m.renderRecord(record, i == m.cursor))
 		b.WriteString("\n")
@@ -432,7 +433,7 @@ func (m Model) renderFooter() string {
 	}
 
 	w := m.innerWidth()
-	divider := styles.RenderDivider(w)
+	divider := styles.RenderFooterDivider(w)
 	bar := styles.RenderNoWrapBlock(styles.FooterStyle, strings.Join(hints, styles.RenderFooterSeparator()), w)
 	return divider + "\n" + bar
 }

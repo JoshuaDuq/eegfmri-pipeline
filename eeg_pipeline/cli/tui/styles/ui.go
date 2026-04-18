@@ -143,12 +143,14 @@ func RenderLabelValueInline(label, value string) string {
 	return lbl + sep + val
 }
 
-// RenderAccentBar returns a thin vertical accent glyph rendered in the given
-// color. Used on selected list rows to signal focus with a quiet, left-edge
-// highlight instead of a full-width background.
+// RenderAccentBar returns a thin vertical accent glyph rendered in the
+// primary color when focused. Used on selected list rows to signal focus
+// with a quiet, left-edge highlight instead of a full-width background.
+// No Bold on block glyphs — doubling up creates a blur in some terminals
+// and the clarity comes from the character weight alone.
 func RenderAccentBar(focused bool) string {
 	if focused {
-		return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("▎")
+		return lipgloss.NewStyle().Foreground(Primary).Render("▎")
 	}
 	return " "
 }
@@ -167,10 +169,14 @@ func RenderKeyBadge(key string, focused bool) string {
 		FooterKeyBracketStyle.Render("]")
 }
 
-// RenderStepperBar renders a thin horizontal progress indicator that fills
-// proportionally to `filled / total`. Uses a single monochrome fill (bright
-// white on the progressed segment, subtle border color on the remainder) —
-// progress is communicated by width alone, never by shifting hue.
+// RenderStepperBar renders a single continuous hairline progress indicator
+// that fills proportionally to `filled / total`. Completed cells use a heavy
+// rule (━, Primary) and remaining cells use a light rule (─, Border): both
+// glyphs sit on the same vertical centreline, so the bar reads as one
+// uninterrupted line that thickens into the completed region. Progress is
+// communicated by stroke weight + tone, never by vertical offset, which
+// keeps the rule typographically calm and avoids the "stepped" look that
+// upper/lower-eighth glyphs produce.
 func RenderStepperBar(filled, total, width int) string {
 	if width <= 0 || total <= 0 {
 		return ""
@@ -187,7 +193,7 @@ func RenderStepperBar(filled, total, width int) string {
 
 	filledW := width * filled / total
 	emptyW := width - filledW
-	filledStr := lipgloss.NewStyle().Foreground(Text).Render(strings.Repeat("━", filledW))
+	filledStr := lipgloss.NewStyle().Foreground(Primary).Render(strings.Repeat("━", filledW))
 	emptyStr := lipgloss.NewStyle().Foreground(Border).Render(strings.Repeat("─", emptyW))
 	return filledStr + emptyStr
 }
@@ -199,7 +205,7 @@ type BreadcrumbStep struct {
 
 // RenderBreadcrumb renders a step rail like
 //
-//	✓ Mode  ·  ✓ Subjects  ·  Bands  ·  ROIs  ·  Time
+//	✓ Mode    ·    ✓ Subjects    ·    Bands    ·    ROIs
 //
 // with the current step bold+underlined, completed steps checked and muted,
 // and upcoming steps rendered in the subtle border color. When `compact` is
@@ -210,13 +216,17 @@ func RenderBreadcrumb(steps []BreadcrumbStep, currentIdx int, compact bool) stri
 		return ""
 	}
 
-	checkStyle := lipgloss.NewStyle().Foreground(Success)
+	checkStyle := lipgloss.NewStyle().Foreground(Muted)
 	doneStyle := lipgloss.NewStyle().Foreground(Muted)
-	currentStyle := lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	currentStyle := lipgloss.NewStyle().Foreground(Primary).Bold(true).Underline(true)
 	futureStyle := lipgloss.NewStyle().Foreground(Border)
-	// Chevron connector reads as a path/progression (Mode › Subjects › Bands),
-	// which fits the wizard metaphor better than a generic middle dot.
-	connector := lipgloss.NewStyle().Foreground(Border).Render("  ›  ")
+	// Hairline middle-dot connector. Direction is conveyed by the steps'
+	// own state styling (muted + check for done, bright bold+underline for current,
+	// border-tone for upcoming) rather than by a chevron glyph, which kept
+	// the rail typographically calm and consistent with the rest of the
+	// app's "·" rhythm.
+	// In wide layout, slightly looser middots so the rail does not feel dense.
+	connector := lipgloss.NewStyle().Foreground(Border).Render("  ·  ")
 	if compact {
 		connector = " "
 	}
@@ -229,7 +239,7 @@ func RenderBreadcrumb(steps []BreadcrumbStep, currentIdx int, compact bool) stri
 			if compact {
 				seg = checkStyle.Render(CheckMark)
 			} else {
-				seg = checkStyle.Render(CheckMark) + doneStyle.Render(" "+s.Name)
+				seg = checkStyle.Render(CheckMark+" ") + doneStyle.Render(s.Name)
 			}
 		case i == currentIdx:
 			seg = currentStyle.Render(s.Name)

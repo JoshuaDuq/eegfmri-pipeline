@@ -17,11 +17,46 @@ func TestRenderTimeRange_RestingStateShowsImplicitFullEpochGuidance(t *testing.T
 
 	rendered := m.renderTimeRange()
 
+	if strings.HasPrefix(rendered, "\n") {
+		t.Fatalf("expected time range view to start without a blank line, got:\n%s", rendered)
+	}
 	if !strings.Contains(rendered, "The pipeline defaults to a full-epoch analysis window when no explicit time range is provided.") {
 		t.Fatalf("expected resting-state full-epoch guidance in time range view, got:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "No explicit time ranges defined. Press [A] to add one.") {
 		t.Fatalf("expected resting-state empty-state copy in time range view, got:\n%s", rendered)
+	}
+}
+
+func TestRenderPlotConfig_DoesNotStartWithBlankLine(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.contentWidth = 100
+
+	rendered := m.renderPlotConfig()
+
+	if strings.HasPrefix(rendered, "\n") {
+		t.Fatalf("expected plot config view to start without a blank line, got:\n%s", rendered)
+	}
+}
+
+func TestRenderFeaturePlotterSelection_ShowsLoadingBanner(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.contentWidth = 100
+	m.steps = []types.WizardStep{
+		types.StepSelectSubjects,
+		types.StepSelectPlots,
+		types.StepSelectFeaturePlotters,
+	}
+	m.plotItems = []PlotItem{{ID: "features_power", Group: "features", Name: "Power Features"}}
+	m.plotSelected = map[int]bool{0: true}
+
+	rendered := m.renderFeaturePlotterSelection()
+
+	if !strings.Contains(rendered, "LOADING") {
+		t.Fatalf("expected loading banner in feature plotter selection render, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Building available feature plots") {
+		t.Fatalf("expected loading message in feature plotter selection render, got:\n%s", rendered)
 	}
 }
 

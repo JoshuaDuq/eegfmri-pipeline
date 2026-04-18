@@ -15,32 +15,35 @@ import (
 // Everything else — Primary/Accent/Success/Info — resolves to grayscale,
 // deliberately neutralizing the previous steel-blue accent.
 var (
-	// "Primary" is bright white; used with Bold to mark focus and active
-	// selection. The selection is recognized by its weight, not its hue.
-	Primary = lipgloss.Color("#E8EAED")
+	// "Primary" is the brightest foreground; used with Bold to mark focus
+	// and active selection. Selection is recognized by weight, not hue.
+	// Cooled slightly (neutral off-white with a hint of blue) for a more
+	// clinical, research-grade feel than the previous warm near-white.
+	Primary = lipgloss.Color("#F2F3F5")
 	// Used for subtle structural accents (thin bar indicators, small rules).
-	Secondary = lipgloss.Color("#3A3B3D")
-	// A slightly dimmer white used for secondary emphasis.
-	Accent = lipgloss.Color("#A5A8AC")
-	// Success resolves to the same bright white as Primary: meaning is
+	Secondary = lipgloss.Color("#34363A")
+	// A dimmer off-white used for secondary emphasis. Sits between Text
+	// and Muted so accented values feel deliberate without shouting.
+	Accent = lipgloss.Color("#BFC3C7")
+	// Success resolves to the same bright off-white as Primary: meaning is
 	// carried by the ✓ mark, not by color.
-	Success = lipgloss.Color("#E8EAED")
-	// Warning and Error are kept as desaturated tones so warning/error
-	// states remain distinguishable in monochrome contexts and for users
-	// with custom palettes.
-	Warning = lipgloss.Color("#C9974A")
-	Error   = lipgloss.Color("#C47070")
+	Success = lipgloss.Color("#F2F3F5")
+	// Warning and Error are desaturated so they remain distinguishable in
+	// monochrome contexts and for users with custom palettes — tuned to
+	// feel considered rather than alarming.
+	Warning = lipgloss.Color("#C49A5B")
+	Error   = lipgloss.Color("#C07878")
 	// Info is grayscale; informational highlights rely on Bold instead of
 	// a colored accent.
-	Info  = lipgloss.Color("#A5A8AC")
-	Muted = lipgloss.Color("#5F6163") // De-emphasized text.
-	Text  = lipgloss.Color("#E8EAED") // Primary text — warm near-white.
-	TextDim = lipgloss.Color("#9AA0A6") // Secondary text.
-	BgDark  = lipgloss.Color("#0D0E10") // App background — near-black.
-	Surface = lipgloss.Color("#161719") // Card/panel background.
-	SurfaceAlt = lipgloss.Color("#1D1E21") // Slightly-raised panel surface.
-	Border = lipgloss.Color("#2A2B2D")    // Subtle panel borders.
-	BorderBright = lipgloss.Color("#3A3B3D") // Focus-adjacent borders.
+	Info       = lipgloss.Color("#BFC3C7")
+	Muted      = lipgloss.Color("#6A6D72") // De-emphasized text.
+	Text       = lipgloss.Color("#E6E8EB") // Primary text — cool near-white.
+	TextDim    = lipgloss.Color("#A4A8AD") // Secondary text.
+	BgDark     = lipgloss.Color("#0A0B0D") // App background — inky black.
+	Surface    = lipgloss.Color("#131518") // Card/panel background.
+	SurfaceAlt = lipgloss.Color("#1A1C20") // Slightly-raised panel surface.
+	Border     = lipgloss.Color("#24262A") // Subtle panel borders.
+	BorderBright = lipgloss.Color("#3D4045") // Focus-adjacent borders.
 )
 
 var noColorOnce sync.Once

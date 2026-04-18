@@ -22,7 +22,6 @@ import (
 const (
 	defaultWidth    = 120
 	defaultHeight   = 32
-	boxFrameWidth   = 6
 	minSectionWidth = 28
 )
 
@@ -31,11 +30,8 @@ type sectionLayout struct {
 	countWidth        int
 	featureCountWidth int
 	subjectLabelWidth int
-	subjectBarWidth   int
 	featureLabelWidth int
-	featureBarWidth   int
 	showPercent       bool
-	showIndicators    bool
 }
 
 type StatsData struct {
@@ -213,13 +209,18 @@ func (m Model) boxWidth() int {
 	return width
 }
 
+// contentWidth is the inner text width inside BoxStyle — must match what
+// RenderNoWrapBlock uses when clamping lines. Previously this subtracted a
+// fixed constant from the terminal width while the box outer width was
+// terminal−2, so every line was ~2 cells too wide and ClampBlock appended
+// "..." on every row (a vertical run of ellipses on the right edge).
 func (m Model) contentWidth() int {
-	width, _ := m.effectiveDimensions()
-	width -= boxFrameWidth
-	if width < 1 {
+	outer := m.boxWidth()
+	inner := outer - styles.BoxStyle.GetHorizontalFrameSize()
+	if inner < 1 {
 		return 1
 	}
-	return width
+	return inner
 }
 
 func (m Model) usesTwoColumnLayout(contentWidth int) bool {
@@ -239,7 +240,27 @@ func (m Model) View() string {
 	b.WriteString(m.renderContent(contentWidth))
 	b.WriteString(m.renderFooter(contentWidth))
 
-	return styles.RenderNoWrapBlock(styles.BoxStyle, b.String(), m.boxWidth())
+	// Every physical row must be exactly `contentWidth` cells wide before the
+	// outer BoxStyle clamps — otherwise lipgloss join / footer can sit one
+	// cell over and ClampBlock turns the overrun into a trailing "..." on the right.
+	body := m.fitDashboardContentWidth(b.String(), contentWidth)
+	return styles.RenderNoWrapBlock(styles.BoxStyle, body, m.boxWidth())
+}
+
+// fitDashboardContentWidth pads or truncates each non-empty line to exactly w
+// cells so nested blocks (two-column join, rules) never exceed the box inner width.
+func (m Model) fitDashboardContentWidth(s string, w int) string {
+	if w <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		if lines[i] == "" {
+			continue
+		}
+		lines[i] = styles.FitLine(lines[i], w)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderContent(width int) string {
@@ -253,11 +274,16 @@ func (m Model) renderContent(width int) string {
 }
 
 func (m Model) renderHeader(width int) string {
-	glyph := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("◈")
-	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).Render("Project Dashboard")
-	headerLine := "  " + glyph + "  " + title
+	// Match the app-wide header pattern: hairline accent bar + uppercase
+	// title, anchored by the divider beneath. Drops the decorative "◈"
+	// ornament in favor of a consistent typographic rhythm.
+	bar := lipgloss.NewStyle().Foreground(styles.Primary).Render(styles.SectionIconActive)
+	title := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).
+		Render(strings.ToUpper("Project Dashboard"))
+	headerLine := "  " + bar + " " + title
 	sep := styles.RenderHeaderSeparator(width)
-	return headerLine + "\n" + sep + "\n"
+	// Blank row between title and full-width hairline so the chrome is not cramped.
+	return headerLine + "\n\n" + sep + "\n"
 }
 
 func (m Model) renderLoading(width int) string {
@@ -276,6 +302,9 @@ func (m Model) renderError(width int) string {
 
 func (m Model) renderStats(width int) string {
 	var b strings.Builder
+	// One quiet row below the title rule so the summary strip is not glued to
+	// the header hairline.
+	b.WriteString("\n")
 	b.WriteString(m.renderSummaryStrip(width))
 	b.WriteString("\n")
 	b.WriteString(m.renderStatsSections(width))
@@ -304,7 +333,9 @@ func (m Model) renderSummaryStrip(width int) string {
 	}
 
 	spacer := lipgloss.NewStyle().Width(max(width-lipgloss.Width(left)-lipgloss.Width(updatedAt), 0)).Render("")
-	return left + spacer + updatedAt + "\n" + styles.RenderDivider(width) + "\n"
+	line := left + spacer + updatedAt
+	line = styles.TruncateLine(line, width)
+	return line + "\n" + styles.RenderDivider(width) + "\n"
 }
 
 func (m Model) renderLastUpdate(_ int) string {
@@ -331,8 +362,11 @@ func (m Model) subjectRowColor(label string, count, total int) lipgloss.Color {
 const columnSepWidth = 3 // " │ "
 
 func (m Model) statsColumnWidths(width int) (int, int) {
-	leftWidth := (width - columnSepWidth) * 54 / 100
-	rightWidth := width - columnSepWidth - leftWidth
+	// Balanced 50/50 split so EEG vs fMRI blocks sit symmetrically; the old
+	// 54/46 split left a wide empty gutter and pushed fMRI content toward the edge.
+	usable := width - columnSepWidth
+	leftWidth := usable / 2
+	rightWidth := usable - leftWidth
 	return leftWidth, rightWidth
 }
 
@@ -348,7 +382,8 @@ func (m Model) renderStatsSections(width int) string {
 	right := lipgloss.NewStyle().Width(rightWidth).Render(strings.TrimRight(m.renderFmriSection(rightWidth), "\n"))
 	sep := lipgloss.NewStyle().Foreground(styles.Border).Render(strings.Repeat(styles.SectionDividerChar, 1))
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, " "+sep+" ", right)
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, left, " "+sep+" ", right)
+	return styles.ClampBlock(joined, width)
 }
 
 func (m Model) layoutForSection(width int) sectionLayout {
@@ -356,72 +391,43 @@ func (m Model) layoutForSection(width int) sectionLayout {
 	subjectLabelWidth := min(max(width/4, 12), 18)
 	featureLabelWidth := min(max(width/3, 20), 32)
 	showPercent := width >= 50
-	showIndicators := width >= 40
-
-	// percent column: " (100%)" = 7 chars; always reserved when shown
-	percentWidth := 0
-	if showPercent {
-		percentWidth = 7
-	}
-	// indicator: " —" = 2 chars, only on feature rows
-	indicatorWidth := 0
-	if showIndicators {
-		indicatorWidth = 2
-	}
-
-	// subject rows: label + sp + fraction + sp + bar + percent
-	subjectBarWidth := width - subjectLabelWidth - 1 - fractionWidth - 1 - percentWidth
-	if subjectBarWidth < 6 {
-		subjectBarWidth = 6
-	}
-
-	// feature rows: label + sp + fraction + sp + bar + indicator
-	featureBarWidth := width - featureLabelWidth - 1 - fractionWidth - 1 - indicatorWidth
-	if featureBarWidth < 6 {
-		featureBarWidth = 6
-	}
 
 	return sectionLayout{
 		width:             width,
 		countWidth:        fractionWidth,
 		featureCountWidth: fractionWidth,
 		subjectLabelWidth: subjectLabelWidth,
-		subjectBarWidth:   subjectBarWidth,
 		featureLabelWidth: featureLabelWidth,
-		featureBarWidth:   featureBarWidth,
 		showPercent:       showPercent,
-		showIndicators:    showIndicators,
 	}
 }
 
 func (m Model) pipelineSectionColor(title string) lipgloss.Color {
-	if strings.HasPrefix(strings.ToLower(title), "fmri") {
-		return styles.Success
-	}
+	// Keep all pipeline section headers on the same monochrome axis — the
+	// title ("EEG" / "fMRI") carries the semantic distinction, not color.
 	return styles.Primary
 }
 
 func (m Model) renderPipelineSectionHeader(title string, width int) string {
 	color := m.pipelineSectionColor(title)
-	icon := lipgloss.NewStyle().Foreground(color).Bold(true).Render(styles.SectionIconActive)
-	label := lipgloss.NewStyle().Bold(true).Foreground(color).Render(" " + title)
-	countText := lipgloss.NewStyle().Foreground(styles.TextDim).
-		Render(fmt.Sprintf("%d subjects", m.stats.TotalSubjects))
+	icon := lipgloss.NewStyle().Foreground(color).Render(styles.SectionIconActive)
+	label := lipgloss.NewStyle().Bold(true).Foreground(styles.Text).
+		Render(" " + strings.ToUpper(title))
+	countValue := lipgloss.NewStyle().Foreground(styles.Text).Bold(true).
+		Render(fmt.Sprintf("%d", m.stats.TotalSubjects))
+	countLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render(" subjects")
+	countText := countValue + countLabel
 	left := "  " + icon + label
-	spacer := lipgloss.NewStyle().Width(max(width-lipgloss.Width(left)-lipgloss.Width(countText)-1, 0)).Render("")
-	return left + spacer + countText + "\n" + "\n"
+	spacerW := max(width-lipgloss.Width(left)-lipgloss.Width(countText), 0)
+	spacer := lipgloss.NewStyle().Width(spacerW).Render("")
+	line := styles.TruncateLine(left+spacer+countText, width)
+	return line + "\n"
 }
 
 func (m Model) renderSubSectionHeader(title string, width int) string {
-	label := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render(title)
-	ruleStyle := lipgloss.NewStyle().Foreground(styles.Border)
-	visibleW := lipgloss.Width(label) + 5
-	trailing := width - visibleW
-	if trailing < 1 {
-		trailing = 1
-	}
-	suffix := ruleStyle.Render(" " + strings.Repeat(styles.SectionDividerChar, trailing))
-	return "  " + label + suffix + "\n" + "\n"
+	// Uppercase + muted title + trailing hairline rule, matching the
+	// "DETAILS / WORKSPACE / FOCUS" sub-header rhythm used elsewhere.
+	return "  " + styles.RenderPreviewSubHeaderWithRule(title, width-2) + "\n"
 }
 
 func (m Model) renderEegSection(width int) string {
@@ -491,10 +497,9 @@ func (m Model) renderSubjectItem(label string, count int, color lipgloss.Color, 
 		styles.PadRight(fractionStr, layout.countWidth),
 	)
 
-	progressBar := m.renderSmoothBar(percentage, layout.subjectBarWidth, color)
-	percentageText := m.formatPercentageText(percentage, false, layout.showPercent)
+	percentageText := m.formatMutedPercentSuffix(percentage, layout.showPercent)
 
-	line := labelText + " " + fractionText + " " + progressBar + percentageText
+	line := labelText + "  " + fractionText + percentageText
 	return styles.TruncateLine(line, layout.width) + "\n"
 }
 
@@ -508,63 +513,17 @@ func (m Model) calculatePercentage(count, total int, isTotal bool) float64 {
 	return float64(count) / float64(total)
 }
 
-func (m Model) formatPercentageText(percentage float64, isTotal, showPercent bool) string {
-	if isTotal || !showPercent {
+// formatMutedPercentSuffix appends a quiet " · 42%" after the fraction when
+// there is room — coverage is encoded typographically, not with block bars.
+func (m Model) formatMutedPercentSuffix(percentage float64, showPercent bool) string {
+	if !showPercent {
 		return ""
 	}
-	percentageValue := percentage * 100
-	color := styles.TextDim
-	if percentage >= 1.0 {
-		color = styles.Success
-	} else if percentage == 0 {
-		color = styles.Warning
-	}
-	return lipgloss.NewStyle().
-		Foreground(color).
-		Render(fmt.Sprintf(" (%3.0f%%)", percentageValue))
-}
-
-func (m Model) renderSmoothBar(percentage float64, width int, color lipgloss.Color) string {
-	if width <= 0 {
-		return ""
-	}
-	if percentage < 0 {
-		percentage = 0
-	}
-	if percentage > 1 {
-		percentage = 1
-	}
-
-	subBlocks := []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"}
-	exact := percentage * float64(width)
-	filled := int(exact)
-	remainder := exact - float64(filled)
-	subIdx := int(remainder * float64(len(subBlocks)-1))
-
-	if filled > width {
-		filled = width
-	}
-	emptyWidth := width - filled
-	hasPartial := subIdx > 0 && filled < width
-	if hasPartial {
-		emptyWidth--
-	}
-
-	filledStyle := lipgloss.NewStyle().Foreground(color)
-	emptyStyle := lipgloss.NewStyle().Foreground(styles.Border)
-
-	var sb strings.Builder
-	if filled > 0 {
-		sb.WriteString(filledStyle.Render(strings.Repeat("█", filled)))
-	}
-	if hasPartial {
-		sb.WriteString(filledStyle.Render(subBlocks[subIdx]))
-	}
-	if emptyWidth > 0 {
-		sb.WriteString(emptyStyle.Render(strings.Repeat("░", emptyWidth)))
-	}
-
-	return sb.String()
+	pct := percentage * 100
+	// Thin space before the percent keeps it attached to the row without a
+	// heavy parenthetical.
+	return lipgloss.NewStyle().Foreground(styles.Muted).
+		Render(fmt.Sprintf("  · %3.0f%%", pct))
 }
 
 func (m Model) featureCategoryRowColor(count, total int) lipgloss.Color {
@@ -654,24 +613,24 @@ func (m Model) renderFeatureCategory(category string, totalSubjects int, layout 
 		styles.PadRight(fractionStr, layout.featureCountWidth),
 	)
 
-	progressBar := m.renderSmoothBar(percentage, layout.featureBarWidth, color)
+	percentageText := m.formatMutedPercentSuffix(percentage, layout.showPercent)
 
-	zeroIndicator := ""
-	if layout.showIndicators && totalSubjects > 0 && count == 0 {
-		zeroIndicator = " " + lipgloss.NewStyle().Foreground(styles.Warning).Render("—")
-	}
-
-	line := label + " " + fractionText + " " + progressBar + zeroIndicator
+	// Zero coverage is visible via fraction styling (Warning); a trailing em
+	// dash was removed — it misaligned the right edge when only some rows had one.
+	line := label + "  " + fractionText + percentageText
 	return styles.TruncateLine(line, layout.width) + "\n"
 }
 
 func (m Model) renderFooter(width int) string {
-	hints := strings.Join([]string{
-		styles.RenderKeyHint("R", "Refresh"),
-		styles.RenderFooterSeparator(),
-		styles.RenderKeyHintSecondary("Esc", "Back"),
-	}, "")
-	divider := styles.RenderDivider(width)
-	bar := styles.RenderNoWrapBlock(styles.FooterStyle, hints, width)
-	return divider + "\n" + bar
+	// Two-hint footers look cramped when both hints cluster at the left edge
+	// (the standard "    ·    " separator is only 9 cells wide). Anchor the
+	// primary action on the left and the navigation hint on the right so the
+	// two read as distinct affordances, mirroring a conventional status bar.
+	left := styles.RenderKeyHint("R", "Refresh")
+	right := styles.RenderKeyHint("Esc", "Back")
+	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	bar := left + lipgloss.NewStyle().Width(gap).Render("") + right
+	bar = styles.TruncateLine(bar, width)
+	divider := styles.RenderFooterDivider(width)
+	return divider + "\n" + styles.FooterStyle.Render(bar)
 }

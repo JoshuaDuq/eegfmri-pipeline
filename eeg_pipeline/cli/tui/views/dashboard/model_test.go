@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eeg-pipeline/tui/styles"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -54,6 +56,20 @@ func TestUpdate_WindowSizeMsgStoresDimensions(t *testing.T) {
 
 	if got.width != 72 || got.height != 24 {
 		t.Fatalf("expected stored size 72x24, got %dx%d", got.width, got.height)
+	}
+}
+
+func TestContentWidthMatchesBoxStyleInnerWidth(t *testing.T) {
+	m := newTestModel()
+	m.width = 100
+	m.height = 28
+
+	want := m.boxWidth() - styles.BoxStyle.GetHorizontalFrameSize()
+	if want < 1 {
+		want = 1
+	}
+	if got := m.contentWidth(); got != want {
+		t.Fatalf("contentWidth() = %d, want %d (boxWidth minus BoxStyle horizontal frame)", got, want)
 	}
 }
 

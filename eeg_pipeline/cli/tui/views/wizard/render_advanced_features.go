@@ -12,7 +12,6 @@ import (
 
 func (m Model) renderFeaturesAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString("\n")
 
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
@@ -251,16 +250,10 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 		// Section headers - styled as distinct groups with chevron indicators
 		case optFeatGroupConnectivity:
-			label = "▸ Connectivity"
+			label = styles.RenderChevron(m.featGroupConnectivityExpanded) + " Connectivity"
 			hint = "Space to toggle"
-			if m.featGroupConnectivityExpanded {
-				label = "▾ Connectivity"
-				value = ""
-				expandIndicator = ""
-			} else {
-				value = ""
-				expandIndicator = ""
-			}
+			value = ""
+			expandIndicator = ""
 			// Use distinct styling for section headers
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -268,11 +261,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupDirectedConnectivity:
-			label = "▸ Directed Connectivity"
+			label = styles.RenderChevron(m.featGroupDirectedConnExpanded) + " Directed Connectivity"
 			hint = "Space to toggle"
-			if m.featGroupDirectedConnExpanded {
-				label = "▾ Directed Connectivity"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -280,11 +270,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupPAC:
-			label = "▸ PAC / CFC"
+			label = styles.RenderChevron(m.featGroupPACExpanded) + " PAC / CFC"
 			hint = "Space to toggle"
-			if m.featGroupPACExpanded {
-				label = "▾ PAC / CFC"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -292,11 +279,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupAperiodic:
-			label = "▸ Aperiodic"
+			label = styles.RenderChevron(m.featGroupAperiodicExpanded) + " Aperiodic"
 			hint = "Space to toggle"
-			if m.featGroupAperiodicExpanded {
-				label = "▾ Aperiodic"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -304,11 +288,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupComplexity:
-			label = "▸ Complexity"
+			label = styles.RenderChevron(m.featGroupComplexityExpanded) + " Complexity"
 			hint = "Space to toggle"
-			if m.featGroupComplexityExpanded {
-				label = "▾ Complexity"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -316,11 +297,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupBursts:
-			label = "▸ Bursts"
+			label = styles.RenderChevron(m.featGroupBurstsExpanded) + " Bursts"
 			hint = "Space to toggle"
-			if m.featGroupBurstsExpanded {
-				label = "▾ Bursts"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -328,11 +306,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupPower:
-			label = "▸ Power"
+			label = styles.RenderChevron(m.featGroupPowerExpanded) + " Power"
 			hint = "Space to toggle"
-			if m.featGroupPowerExpanded {
-				label = "▾ Power"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -340,11 +315,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupSpectral:
-			label = "▸ Spectral"
+			label = styles.RenderChevron(m.featGroupSpectralExpanded) + " Spectral"
 			hint = "Space to toggle"
-			if m.featGroupSpectralExpanded {
-				label = "▾ Spectral"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -352,11 +324,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupERP:
-			label = "▸ ERP"
+			label = styles.RenderChevron(m.featGroupERPExpanded) + " ERP"
 			hint = "Space to toggle"
-			if m.featGroupERPExpanded {
-				label = "▾ ERP"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -364,11 +333,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupRatios:
-			label = "▸ Ratios"
+			label = styles.RenderChevron(m.featGroupRatiosExpanded) + " Ratios"
 			hint = "Space to toggle"
-			if m.featGroupRatiosExpanded {
-				label = "▾ Ratios"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -376,11 +342,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupAsymmetry:
-			label = "▸ Asymmetry"
+			label = styles.RenderChevron(m.featGroupAsymmetryExpanded) + " Asymmetry"
 			hint = "Space to toggle"
-			if m.featGroupAsymmetryExpanded {
-				label = "▾ Asymmetry"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -388,11 +351,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupSpatialTransform:
-			label = "▸ Spatial Transform"
+			label = styles.RenderChevron(m.featGroupSpatialTransformExpanded) + " Spatial Transform"
 			hint = "Space to toggle"
-			if m.featGroupSpatialTransformExpanded {
-				label = "▾ Spatial Transform"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -419,11 +379,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			hint = "spline stiffness"
 		case optFeatGroupTFR:
-			label = "▸ Time-Frequency"
+			label = styles.RenderChevron(m.featGroupTFRExpanded) + " Time-Frequency"
 			hint = "Space to toggle"
-			if m.featGroupTFRExpanded {
-				label = "▾ Time-Frequency"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -571,11 +528,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = m.boolToOnOff(m.iafAllowAllChannelsFallback)
 			hint = "use all channels if ROIs missing"
 		case optFeatGroupStorage:
-			label = "▸ Storage"
+			label = styles.RenderChevron(m.featGroupStorageExpanded) + " Storage"
 			hint = "Space to toggle"
-			if m.featGroupStorageExpanded {
-				label = "▾ Storage"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -587,11 +541,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = m.boolToOnOff(m.featAlsoSaveCsv)
 			hint = "save feature tables as both parquet and CSV"
 		case optFeatGroupExecution:
-			label = "▸ Execution"
+			label = styles.RenderChevron(m.featGroupExecutionExpanded) + " Execution"
 			hint = "Space to toggle"
-			if m.featGroupExecutionExpanded {
-				label = "▾ Execution"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -599,11 +550,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
 			}
 		case optFeatGroupSourceLoc:
-			label = "▸ Source Localization"
+			label = styles.RenderChevron(m.featGroupSourceLocExpanded) + " Source Localization"
 			hint = "Space to toggle"
-			if m.featGroupSourceLocExpanded {
-				label = "▾ Source Localization"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -1558,11 +1506,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 		// ITPC options
 		case optFeatGroupITPC:
-			label = "▸ ITPC"
+			label = styles.RenderChevron(m.featGroupITPCExpanded) + " ITPC"
 			hint = "Space to toggle"
-			if m.featGroupITPCExpanded {
-				label = "▾ ITPC"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -2164,11 +2109,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 		// Quality group header
 		case optFeatGroupQuality:
-			label = "▸ Quality"
+			label = styles.RenderChevron(m.featGroupQualityExpanded) + " Quality"
 			hint = "Space to toggle"
-			if m.featGroupQualityExpanded {
-				label = "▾ Quality"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -2270,11 +2212,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			hint = "muscle artifact upper"
 		// Microstates group header
 		case optFeatGroupMicrostates:
-			label = "▸ Microstates"
+			label = styles.RenderChevron(m.featGroupMicrostatesExpanded) + " Microstates"
 			hint = "Space to toggle"
-			if m.featGroupMicrostatesExpanded {
-				label = "▾ Microstates"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
@@ -2337,11 +2276,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 		// ERDS group header
 		case optFeatGroupERDS:
-			label = "▸ ERDS"
+			label = styles.RenderChevron(m.featGroupERDSExpanded) + " ERDS"
 			hint = "Space to toggle"
-			if m.featGroupERDSExpanded {
-				label = "▾ ERDS"
-			}
 			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)

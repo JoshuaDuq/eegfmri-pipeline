@@ -253,6 +253,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			executor.LoadConfigSummary(m.repoRoot),
 			executor.LoadConfigKeys(m.repoRoot, DefaultConfigKeys()),
 		)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
 		if m.editingText {
 			return m.handleTextEdit(msg)

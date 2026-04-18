@@ -77,7 +77,7 @@ func TestIndicatorAndLayoutRenderers(t *testing.T) {
 }
 
 func TestFormattingRenderers(t *testing.T) {
-	if got := stripStylesANSI(RenderHeaderSeparator(4)); got != "━━━━" {
+	if got := stripStylesANSI(RenderHeaderSeparator(4)); got != "────" {
 		t.Fatalf("RenderHeaderSeparator(4) = %q", got)
 	}
 	if got := RenderHeaderSeparator(0); got != "" {
@@ -100,10 +100,10 @@ func TestFormattingRenderers(t *testing.T) {
 	if got := stripStylesANSI(RenderDimSectionLabel("Beta")); !strings.Contains(got, "Beta") {
 		t.Fatalf("RenderDimSectionLabel() = %q", got)
 	}
-	if got := stripStylesANSI(RenderPreviewSubHeader("Gamma")); !strings.Contains(got, "Gamma") {
+	if got := stripStylesANSI(RenderPreviewSubHeader("Gamma")); !strings.Contains(got, "GAMMA") {
 		t.Fatalf("RenderPreviewSubHeader() = %q", got)
 	}
-	if got := stripStylesANSI(RenderPreviewSubHeaderWithRule("Gamma", 10)); !strings.Contains(got, "Gamma") || !strings.Contains(got, "─") {
+	if got := stripStylesANSI(RenderPreviewSubHeaderWithRule("Gamma", 12)); !strings.Contains(got, "GAMMA") || !strings.Contains(got, "─") {
 		t.Fatalf("RenderPreviewSubHeaderWithRule() = %q", got)
 	}
 	if got := stripStylesANSI(RenderSectionBlock("Delta", 3)); !strings.Contains(got, "Delta") || !strings.Contains(got, "───") {
@@ -122,6 +122,12 @@ func TestFormattingRenderers(t *testing.T) {
 	}
 	if got := stripStylesANSI(RenderDivider(3)); got != "───" {
 		t.Fatalf("RenderDivider(3) = %q", got)
+	}
+	if got := stripStylesANSI(RenderFooterDivider(3)); got != "───" {
+		t.Fatalf("RenderFooterDivider(3) = %q", got)
+	}
+	if got := RenderFooterDivider(0); got != "" {
+		t.Fatalf("RenderFooterDivider(0) = %q", got)
 	}
 
 	if got := TruncateLine("abcdef", 3); got != "abc" {
@@ -154,6 +160,21 @@ func TestFormattingRenderers(t *testing.T) {
 	}
 	if got := stripStylesANSI(RenderStatusCount(2, 3, "subjects")); !strings.Contains(got, "2/3") {
 		t.Fatalf("RenderStatusCount(2, 3) = %q", got)
+	}
+}
+
+func TestRenderFooterHintsUsesDotSeparator(t *testing.T) {
+	hints := []FooterHint{
+		{Key: "A", Label: "Alpha", Priority: 0},
+		{Key: "B", Label: "Beta", Priority: 0},
+	}
+
+	rendered := stripStylesANSI(RenderFooterHints(80, hints))
+	if !strings.Contains(rendered, "·") {
+		t.Fatalf("expected footer hints to use a dot separator, got %q", rendered)
+	}
+	if strings.Contains(rendered, "│") {
+		t.Fatalf("expected footer hints to avoid the heavy separator bar, got %q", rendered)
 	}
 }
 
@@ -214,5 +235,36 @@ func TestRenderProgressBar(t *testing.T) {
 	}
 	if stripStylesANSI(RenderProgressBar(1.5, MinProgressBarWidth)) != stripStylesANSI(RenderProgressBar(1.0, MinProgressBarWidth)) {
 		t.Fatal("RenderProgressBar(1.5) should equal RenderProgressBar(1.0)")
+	}
+}
+
+func TestRenderStepAndPreviewHeadersUseQuieterChrome(t *testing.T) {
+	stepHeader := stripStylesANSI(RenderStepHeader("Step", 4))
+	if strings.Contains(stepHeader, "\n") {
+		t.Fatalf("expected RenderStepHeader() to stay on one line, got %q", stepHeader)
+	}
+	if !strings.Contains(stepHeader, "Step") {
+		t.Fatalf("expected RenderStepHeader() to include the title, got %q", stepHeader)
+	}
+
+	previewHeader := stripStylesANSI(RenderPreviewSubHeader("Gamma"))
+	if strings.Count(previewHeader, "─") != 4 {
+		t.Fatalf("expected RenderPreviewSubHeader() to use a shorter 4-char rule, got %q", previewHeader)
+	}
+	if !strings.Contains(previewHeader, "·") {
+		t.Fatalf("expected RenderPreviewSubHeader() to include a middle-dot lead-in, got %q", previewHeader)
+	}
+	if !strings.Contains(previewHeader, "GAMMA") {
+		t.Fatalf("expected RenderPreviewSubHeader() to uppercase the title, got %q", previewHeader)
+	}
+}
+
+func TestRenderSectionLabelUsesThinMarker(t *testing.T) {
+	label := stripStylesANSI(RenderSectionLabel("Alpha"))
+	if strings.Contains(label, "┃") || strings.Contains(label, "│") {
+		t.Fatalf("expected RenderSectionLabel() to use the hairline section marker, got %q", label)
+	}
+	if !strings.Contains(label, "▏") {
+		t.Fatalf("expected RenderSectionLabel() to use the ▏ hairline marker, got %q", label)
 	}
 }

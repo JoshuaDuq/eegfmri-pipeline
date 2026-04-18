@@ -117,14 +117,17 @@ func (h HelpOverlay) View() string {
 	content.WriteString(titleStyle.Render(h.Title) + "\n")
 	content.WriteString(styles.RenderHeaderSeparator(innerWidth) + "\n\n")
 
-	keyStyle := lipgloss.NewStyle().
-		Foreground(styles.Text).
-		Background(styles.Surface).
-		Bold(true).
-		Padding(0, 1)
+	// Bracket-style key glyphs (e.g. `[Enter]`) rather than background-filled
+	// chips — cleaner on a research terminal and consistent with the footer
+	// hint treatment used elsewhere.
+	renderKey := func(k string) string {
+		return styles.FooterKeyBracketStyle.Render("[") +
+			styles.FooterKeyTextPrimary.Render(k) +
+			styles.FooterKeyBracketStyle.Render("]")
+	}
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(styles.Primary).
+		Foreground(styles.Muted).
 		Bold(true)
 
 	sectionOrder := []string{"Navigation", "Selection", "Actions", "General"}
@@ -134,9 +137,9 @@ func (h HelpOverlay) View() string {
 		if !exists || len(items) == 0 {
 			continue
 		}
-		content.WriteString(sectionStyle.Render(sectionName) + "\n")
+		content.WriteString(sectionStyle.Render(strings.ToUpper(sectionName)) + "\n")
 		for _, item := range items {
-			keyText := styles.FitLine(keyStyle.Render(item.Key), helpKeyWidth)
+			keyText := styles.FitLine(renderKey(item.Key), helpKeyWidth)
 			line := keyText + " " + descStyle.Render(item.Description)
 			content.WriteString(styles.TruncateLine(line, innerWidth) + "\n")
 		}
@@ -152,9 +155,9 @@ func (h HelpOverlay) View() string {
 	}
 	sort.Strings(extra)
 	for _, sectionName := range extra {
-		content.WriteString(sectionStyle.Render(sectionName) + "\n")
+		content.WriteString(sectionStyle.Render(strings.ToUpper(sectionName)) + "\n")
 		for _, item := range h.Sections[sectionName] {
-			keyText := styles.FitLine(keyStyle.Render(item.Key), helpKeyWidth)
+			keyText := styles.FitLine(renderKey(item.Key), helpKeyWidth)
 			line := keyText + " " + descStyle.Render(item.Description)
 			content.WriteString(styles.TruncateLine(line, innerWidth) + "\n")
 		}
@@ -168,28 +171,52 @@ func (h HelpOverlay) View() string {
 	return styles.RenderNoWrapBlock(styles.PanelStyle, content.String(), h.Width)
 }
 
+// spinnerFrames is a single shared braille animation. Braille gives a smooth
+// indeterminate motion at low visual weight — the glyph never changes width
+// or height, so it sits cleanly inline with surrounding text.
+var spinnerFrames = []string{
+	"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+}
+
+// spinnerFrameTicks slows the animation cadence (frames advance every N ticks)
+// so the spinner reads as a calm pulse rather than a frantic strobe at the
+// 100 ms tick interval used app-wide.
+const spinnerFrameTicks = 2
+
 type Spinner struct {
-	Frames []string
-	Index  int
-	Label  string
+	Label string
+	tick  int
 }
 
 func NewSpinner(label string) Spinner {
-	return Spinner{
-		Frames: []string{"◐", "◓", "◑", "◒"},
-		Index:  0,
-		Label:  label,
-	}
+	return Spinner{Label: label}
 }
 
 func (s *Spinner) Tick() {
-	s.Index = (s.Index + 1) % len(s.Frames)
+	s.tick++
 }
 
+// Glyph returns just the rotating braille glyph, styled in Primary at bold
+// weight. Use this when composing the spinner with caller-owned label/message
+// text (e.g. wizard loading banners) to avoid duplicating the label. The
+// Primary tone (rather than Accent) gives the glyph enough contrast against
+// the dark surface for the motion to read as the focal status indicator
+// without becoming chromatic noise — colour is reserved for state, brightness
+// is the emphasis dial.
+func (s Spinner) Glyph() string {
+	frame := spinnerFrames[(s.tick/spinnerFrameTicks)%len(spinnerFrames)]
+	return lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(frame)
+}
+
+// View renders the spinner glyph followed by the label, both at low weight.
+// Used by stand-alone loading screens (history, dashboard, globalsetup) where
+// the spinner is its own self-contained line.
 func (s Spinner) View() string {
-	frameStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	return frameStyle.Render(s.Frames[s.Index]) + " " + labelStyle.Render(s.Label)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	if s.Label == "" {
+		return s.Glyph()
+	}
+	return s.Glyph() + "  " + labelStyle.Render(s.Label)
 }
 
 type ScrollIndicator struct {
@@ -286,6 +313,10 @@ type DotsLoader struct {
 	tick  int
 }
 
+const dotsLoaderFrameTicks = 3
+
+var dotsLoaderFrames = [4]string{"   ", "·  ", "·· ", "···"}
+
 func NewDotsLoader(label string) DotsLoader {
 	return DotsLoader{Label: label}
 }
@@ -295,11 +326,10 @@ func (d *DotsLoader) Advance() {
 }
 
 // View renders the current animation frame: label followed by 0–3 animated dots.
-// Each frame lasts 3 ticks (~300 ms at 100 ms/tick); the full cycle is ~1.2 s.
+// Frames advance every dotsLoaderFrameTicks ticks (~300 ms at 100 ms/tick).
 func (d DotsLoader) View() string {
-	frames := [4]string{"   ", "·  ", "·· ", "···"}
-	frame := frames[(d.tick/3)%4]
-	dotsStyle := lipgloss.NewStyle().Foreground(styles.Accent)
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	frame := dotsLoaderFrames[(d.tick/dotsLoaderFrameTicks)%len(dotsLoaderFrames)]
+	dotsStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	return labelStyle.Render(d.Label) + dotsStyle.Render(frame)
 }

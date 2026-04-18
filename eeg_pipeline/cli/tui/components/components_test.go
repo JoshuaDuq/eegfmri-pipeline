@@ -45,7 +45,7 @@ func TestHelpOverlayView(t *testing.T) {
 
 	help.Toggle()
 	view := stripComponentsANSI(help.View())
-	if !strings.Contains(view, "Wizard Shortcuts") || !strings.Contains(view, "Navigation") || !strings.Contains(view, "Selection") {
+	if !strings.Contains(view, "Wizard Shortcuts") || !strings.Contains(view, "NAVIGATION") || !strings.Contains(view, "SELECTION") {
 		t.Fatalf("unexpected help overlay view: %q", view)
 	}
 }
@@ -74,10 +74,24 @@ func TestSpinnerAndScrollIndicator(t *testing.T) {
 	if !strings.Contains(first, "Loading") {
 		t.Fatalf("unexpected spinner view: %q", first)
 	}
-	spinner.Tick()
+	if !containsAny(first, spinnerFrames) {
+		t.Fatalf("expected spinner to render a braille glyph, got %q", first)
+	}
+
+	for i := 0; i < spinnerFrameTicks; i++ {
+		spinner.Tick()
+	}
 	second := stripComponentsANSI(spinner.View())
 	if first == second {
-		t.Fatal("expected spinner frame to advance after Tick")
+		t.Fatal("expected spinner frame to advance after enough ticks")
+	}
+	if !containsAny(second, spinnerFrames) {
+		t.Fatalf("expected spinner to render a braille glyph after Tick, got %q", second)
+	}
+
+	bare := stripComponentsANSI(NewSpinner("").View())
+	if strings.ContainsRune(bare, ' ') && strings.TrimSpace(bare) == "" {
+		t.Fatalf("expected unlabeled spinner to render only the glyph, got %q", bare)
 	}
 
 	indicator := ScrollIndicator{Current: 2, Total: 10, ViewHeight: 5}
@@ -87,6 +101,15 @@ func TestSpinnerAndScrollIndicator(t *testing.T) {
 	if got := stripComponentsANSI(indicator.View()); !strings.Contains(got, "▲") || !strings.Contains(got, "▼") {
 		t.Fatalf("unexpected scroll indicator view: %q", got)
 	}
+}
+
+func containsAny(s string, options []string) bool {
+	for _, opt := range options {
+		if strings.Contains(s, opt) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestInfoPanelView(t *testing.T) {

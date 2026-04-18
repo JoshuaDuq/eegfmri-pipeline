@@ -564,11 +564,10 @@ func (m Model) renderValueLine(opt optionType, label string, value string, hint 
 	return renderLine{text: text}
 }
 
+// getExpansionArrow returns the expand/collapse glyph via the shared helper
+// so all wizard group headers stay consistent.
 func (m Model) getExpansionArrow(expanded bool) string {
-	if expanded {
-		return "▾"
-	}
-	return "▸"
+	return styles.RenderChevron(expanded)
 }
 
 func (m Model) buildGroupLabelStyle(focused bool, disabled bool) lipgloss.Style {

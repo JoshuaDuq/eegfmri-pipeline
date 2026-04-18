@@ -10,6 +10,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// renderMLGroupHeader renders one expand/collapse group row for the ML
+// advanced-config list. All four ML groups share this treatment so the
+// cursor, chevron, and focus weight stay in lockstep; the title text is the
+// only per-group variable.
+func (m Model) renderMLGroupHeader(title string, expanded, focused bool) string {
+	cursor := "  "
+	if focused {
+		cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
+	}
+	headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
+	if focused {
+		headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+	}
+	return cursor + headerStyle.Render(styles.RenderChevron(expanded)+" "+title)
+}
+
 // isMLRenderedOption returns true for every optionType that produces a visual
 // line in renderMLAdvancedConfig. Options not listed here fall through to
 // default:continue and must not be counted in totalLines.
@@ -60,7 +76,6 @@ func isMLRenderedOption(opt optionType) bool {
 
 func (m Model) renderMLAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString("\n")
 	b.WriteString(styles.RenderStepHeader("Advanced", m.contentWidth) + "\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
@@ -185,11 +200,7 @@ func (m Model) renderMLAdvancedConfig() string {
 			}
 			label, value = "Target", renderTextOrDefault(m.mlTarget, "(stage default)")
 		case optMLFmriSigGroup:
-			if m.mlFmriSigGroupExpanded {
-				label = "▾ fMRI Signature Target"
-			} else {
-				label = "▸ fMRI Signature Target"
-			}
+			label = styles.RenderChevron(m.mlFmriSigGroupExpanded) + " fMRI Signature Target"
 			value, hint = "", "Space to toggle"
 		case optMLFmriSigMethod:
 			methods := []string{"beta-series", "lss"}
@@ -283,11 +294,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optVarianceThresholdGrid:
 			label, value, hint = "Variance Threshold Grid", renderTextOrDefault(m.varianceThresholdGrid, "(default)"), "e.g. 0.0 or 0.0,0.01,0.1; use 0.0 only for small train folds"
 		case optMLGroupPreprocessing:
-			if m.mlGroupPreprocessingExpanded {
-				label = "▾ ML Preprocessing"
-			} else {
-				label = "▸ ML Preprocessing"
-			}
+			label = styles.RenderChevron(m.mlGroupPreprocessingExpanded) + " ML Preprocessing"
 			value, hint = "", "imputer, scaler, PCA"
 		case optMLImputer:
 			imputers := []string{"median", "mean", "most_frequent"}
@@ -357,11 +364,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optMLEnsembleCalibrate:
 			label, value, hint = "Ensemble Calibrate", m.boolToOnOff(m.mlEnsembleCalibrate), "calibrate SVM/RF probabilities (soft voting)"
 		case optMLGroupCNN:
-			if m.mlGroupCNNExpanded {
-				label = "▾ CNN Architecture"
-			} else {
-				label = "▸ CNN Architecture"
-			}
+			label = styles.RenderChevron(m.mlGroupCNNExpanded) + " CNN Architecture"
 			value, hint = "", "convolutional neural network params"
 		case optMLCnnFilters1:
 			label, value, hint = "Conv1 Filters", fmt.Sprintf("%d", m.mlCnnFilters1), "first conv layer"
@@ -426,73 +429,25 @@ func (m Model) renderMLAdvancedConfig() string {
 		// Section group headers
 		case optMLGroupData:
 			if lineIdx >= startLine && lineIdx < endLine {
-				chevron := "▾"
-				if !m.mlGroupDataExpanded {
-					chevron = "▸"
-				}
-				cursor := "  "
-				if isFocused {
-					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
-				}
-				headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
-				if isFocused {
-					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-				}
-				b.WriteString(cursor + headerStyle.Render(chevron+" Data & Features") + "\n")
+				b.WriteString(m.renderMLGroupHeader("Data & Features", m.mlGroupDataExpanded, isFocused) + "\n")
 			}
 			lineIdx++
 			continue
 		case optMLGroupModel:
 			if lineIdx >= startLine && lineIdx < endLine {
-				chevron := "▾"
-				if !m.mlGroupModelExpanded {
-					chevron = "▸"
-				}
-				cursor := "  "
-				if isFocused {
-					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
-				}
-				headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
-				if isFocused {
-					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-				}
-				b.WriteString(cursor + headerStyle.Render(chevron+" Model & Hyperparameters") + "\n")
+				b.WriteString(m.renderMLGroupHeader("Model & Hyperparameters", m.mlGroupModelExpanded, isFocused) + "\n")
 			}
 			lineIdx++
 			continue
 		case optMLGroupTraining:
 			if lineIdx >= startLine && lineIdx < endLine {
-				chevron := "▾"
-				if !m.mlGroupTrainingExpanded {
-					chevron = "▸"
-				}
-				cursor := "  "
-				if isFocused {
-					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
-				}
-				headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
-				if isFocused {
-					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-				}
-				b.WriteString(cursor + headerStyle.Render(chevron+" Training & CV") + "\n")
+				b.WriteString(m.renderMLGroupHeader("Training & CV", m.mlGroupTrainingExpanded, isFocused) + "\n")
 			}
 			lineIdx++
 			continue
 		case optMLGroupOutput:
 			if lineIdx >= startLine && lineIdx < endLine {
-				chevron := "▾"
-				if !m.mlGroupOutputExpanded {
-					chevron = "▸"
-				}
-				cursor := "  "
-				if isFocused {
-					cursor = styles.RenderCursorOptional(m.CursorBlinkVisible())
-				}
-				headerStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true)
-				if isFocused {
-					headerStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-				}
-				b.WriteString(cursor + headerStyle.Render(chevron+" Output & Plots") + "\n")
+				b.WriteString(m.renderMLGroupHeader("Output & Plots", m.mlGroupOutputExpanded, isFocused) + "\n")
 			}
 			lineIdx++
 			continue

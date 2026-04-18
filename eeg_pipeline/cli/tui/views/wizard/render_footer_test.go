@@ -14,12 +14,12 @@ func TestRenderFooterHintsFitsNarrowWidth(t *testing.T) {
 
 	footer := m.renderFooter(60)
 	lines := strings.Split(footer, "\n")
-	// lines: ["", divider, hint]
-	if len(lines) != 3 {
-		t.Fatalf("expected blank, divider, and hint line, got %d lines: %q", len(lines), footer)
+	// lines: [divider, hint]
+	if len(lines) != 2 {
+		t.Fatalf("expected divider and hint line, got %d lines: %q", len(lines), footer)
 	}
-	if got := lipgloss.Width(lines[2]); got > 60 {
-		t.Fatalf("expected footer hint line to fit width, got %d > 60: %q", got, lines[2])
+	if got := lipgloss.Width(lines[1]); got > 60 {
+		t.Fatalf("expected footer hint line to fit width, got %d > 60: %q", got, lines[1])
 	}
 }
 
@@ -33,15 +33,15 @@ func TestRenderFooterShowsValidationSummaryWithinWidth(t *testing.T) {
 
 	footer := m.renderFooter(60)
 	lines := strings.Split(footer, "\n")
-	// lines: ["", divider, status, hint]
-	if len(lines) != 4 {
-		t.Fatalf("expected blank, divider, status, and hint line, got %d lines: %q", len(lines), footer)
+	// lines: [divider, status, hint]
+	if len(lines) != 3 {
+		t.Fatalf("expected divider, status, and hint line, got %d lines: %q", len(lines), footer)
 	}
-	if !strings.Contains(lines[2], "Select at least one analysis") {
-		t.Fatalf("expected validation summary in footer status line, got %q", lines[2])
+	if !strings.Contains(lines[1], "Select at least one analysis") {
+		t.Fatalf("expected validation summary in footer status line, got %q", lines[1])
 	}
-	if got := lipgloss.Width(lines[2]); got > 60 {
-		t.Fatalf("expected validation line to fit width, got %d > 60: %q", got, lines[2])
+	if got := lipgloss.Width(lines[1]); got > 60 {
+		t.Fatalf("expected validation line to fit width, got %d > 60: %q", got, lines[1])
 	}
 }
 
@@ -55,5 +55,35 @@ func TestViewShowsValidationSummaryInShortTerminal(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "Select at least one analysis to run") {
 		t.Fatalf("expected short-terminal view to include validation summary, got: %q", view)
+	}
+}
+
+func TestRenderFooterOmitsLeadingBlankLine(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.CurrentStep = types.StepSelectComputations
+
+	footer := m.renderFooter(60)
+	lines := strings.Split(footer, "\n")
+
+	if len(lines) != 2 {
+		t.Fatalf("expected footer to render divider and hints only, got %d lines: %q", len(lines), footer)
+	}
+	if strings.TrimSpace(lines[0]) == "" {
+		t.Fatalf("expected footer to start with the divider, got blank line: %q", footer)
+	}
+}
+
+func TestRenderFooterLeftAlignsHintRow(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.CurrentStep = types.StepSelectComputations
+
+	footer := m.renderFooter(60)
+	lines := strings.Split(footer, "\n")
+
+	if len(lines) != 2 {
+		t.Fatalf("expected footer divider and hints only, got %d lines: %q", len(lines), footer)
+	}
+	if strings.HasPrefix(lines[1], " ") {
+		t.Fatalf("expected footer hints to start flush left, got %q", lines[1])
 	}
 }

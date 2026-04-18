@@ -234,7 +234,7 @@ Utilities
 .. dropdown:: Quick Actions
    :icon: terminal
 
-   Command-palette overlay activated with ``Ctrl+K`` from the main menu or wizard:
+   Command-palette overlay activated with ``Ctrl+K`` from the wizard:
 
    .. list-table::
       :header-rows: 1
@@ -276,9 +276,6 @@ Keyboard Shortcuts
            - Open Dashboard (from main menu)
          * - ``H``
            - Open History (from main menu)
-         * - ``Ctrl+K``
-           - Quick Actions overlay
-
    .. tab-item:: Wizard
 
       .. list-table::
@@ -303,6 +300,8 @@ Keyboard Shortcuts
            - Add new item
          * - ``D``
            - Delete selected item
+         * - ``Ctrl+K``
+           - Quick Actions overlay
 
    .. tab-item:: Execution
 
