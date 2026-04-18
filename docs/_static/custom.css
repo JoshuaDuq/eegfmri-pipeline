@@ -5,11 +5,32 @@
    amber (#C49A5B) and muted red (#C07878), reserved for
    Warning and Error states where typography alone would
    be unsafe. All other emphasis is carried by weight + value.
+
+   Layout philosophy: hairline borders, tight typographic
+   rhythm, generous inter-section whitespace, no decorative
+   ornament. The page should read like a research note —
+   high information density, low visual noise.
    ========================================================= */
 
 /* ---------------------------------------------------------
-   Root tokens — TUI palette mapped to Furo CSS variables
+   Tokens
    --------------------------------------------------------- */
+:root {
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --radius-sm: 3px;
+  --radius-md: 4px;
+
+  --hairline: 1px solid var(--color-foreground-border);
+  --hairline-quiet: 1px solid var(--color-background-border);
+}
+
 body[data-theme="dark"],
 body[data-theme="auto"] {
   --color-background-primary:    #0A0B0D;
@@ -28,12 +49,14 @@ body[data-theme="auto"] {
   --color-highlight-on-target:   rgba(242, 243, 245, 0.07);
   --color-admonition-background: #131518;
 
-  /* Semantic accents — used only for Warning/Error */
   --color-semantic-warning: #C49A5B;
   --color-semantic-error:   #C07878;
 
-  --font-stack:            "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-stack--monospace: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --color-selection-bg: rgba(242, 243, 245, 0.18);
+  --color-focus-ring:   rgba(242, 243, 245, 0.45);
+
+  --font-stack:            "Inter", "Inter Tight", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-stack--monospace: "JetBrains Mono", "SF Mono", "Fira Code", ui-monospace, Menlo, monospace;
 }
 
 body[data-theme="light"] {
@@ -47,117 +70,227 @@ body[data-theme="light"] {
   --color-foreground-muted:      #74777C;
   --color-foreground-border:     #C4C6C9;
 
-  --color-brand-primary:         #1A1C20;
+  --color-brand-primary:         #0E0F12;
   --color-brand-content:         #3D4045;
 
   --color-highlight-on-target:   rgba(26, 28, 32, 0.06);
-  --color-admonition-background: #F1F2F4;
+  --color-admonition-background: #F4F5F7;
 
   --color-semantic-warning: #8A6322;
   --color-semantic-error:   #8A3A3A;
 
-  --font-stack:            "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-stack--monospace: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --color-selection-bg: rgba(26, 28, 32, 0.12);
+  --color-focus-ring:   rgba(26, 28, 32, 0.45);
+}
+
+/* ---------------------------------------------------------
+   Base — typography + selection + focus
+   --------------------------------------------------------- */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
   font-family: var(--font-stack);
-  letter-spacing: 0.01em;
+  font-feature-settings: "cv11", "ss01", "ss03", "tnum";
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+  line-height: 1.65;
+}
+
+::selection {
+  background: var(--color-selection-bg);
+  color: var(--color-foreground-primary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 /* ---------------------------------------------------------
-   Typography hierarchy — emphasis by weight, not hue
+   Typography hierarchy — emphasis by weight + size, never hue
    --------------------------------------------------------- */
-h1 {
-  font-size: 1.85rem;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-  border-bottom: 1px solid var(--color-foreground-border);
-  padding-bottom: 0.55rem;
-  margin-bottom: 1.6rem;
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-stack);
+  font-feature-settings: "cv11", "ss01", "ss03";
   color: var(--color-foreground-primary);
+}
+
+h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  border-bottom: var(--hairline);
+  padding-bottom: var(--space-3);
+  margin: 0 0 var(--space-6);
 }
 
 h2 {
-  font-size: 1.2rem;
+  font-size: 1.15rem;
   font-weight: 600;
   letter-spacing: -0.005em;
-  color: var(--color-foreground-secondary);
-  border-bottom: 1px solid var(--color-background-border);
-  padding-bottom: 0.3rem;
-  margin-top: 2.4rem;
-  margin-bottom: 0.9rem;
+  line-height: 1.3;
+  color: var(--color-foreground-primary);
+  border-bottom: var(--hairline-quiet);
+  padding-bottom: var(--space-2);
+  margin: var(--space-7) 0 var(--space-4);
 }
 
 h3 {
-  font-size: 0.975rem;
+  font-size: 0.95rem;
   font-weight: 600;
+  letter-spacing: 0;
   color: var(--color-foreground-primary);
-  margin-top: 1.6rem;
+  margin: var(--space-5) 0 var(--space-3);
 }
 
 h4 {
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.085em;
   color: var(--color-foreground-secondary);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+h5, h6 {
+  font-size: 0.78rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  color: var(--color-foreground-muted);
+  margin: var(--space-3) 0 var(--space-2);
 }
 
 p {
-  line-height: 1.72;
+  line-height: 1.68;
+  color: var(--color-foreground-primary);
+  margin: 0 0 var(--space-4);
+}
+
+ul, ol {
+  margin: 0 0 var(--space-4);
+  padding-left: 1.4rem;
+}
+
+li {
+  line-height: 1.65;
+  margin-bottom: 0.2rem;
+}
+
+li::marker {
+  color: var(--color-foreground-muted);
+}
+
+strong, b {
+  font-weight: 600;
+  color: var(--color-foreground-primary);
+}
+
+em, i {
+  font-style: italic;
   color: var(--color-foreground-primary);
 }
 
 /* ---------------------------------------------------------
-   Sidebar — understated, recedes from content
+   Sidebar — quiet, recedes from content
    --------------------------------------------------------- */
+.sidebar-drawer {
+  border-right: var(--hairline-quiet);
+}
+
 .sidebar-brand {
-  padding: 1.1rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--color-foreground-border);
+  padding: 1.25rem 1rem 0.75rem;
+  border-bottom: var(--hairline-quiet);
   margin-bottom: 0.5rem;
 }
 
 .sidebar-brand-text {
   font-weight: 600;
-  font-size: 0.9rem;
-  letter-spacing: 0.015em;
+  font-size: 0.875rem;
+  letter-spacing: 0.005em;
   color: var(--color-foreground-primary);
 }
 
 .sidebar-tree .reference {
-  font-size: 0.84rem;
+  font-size: 0.825rem;
   color: var(--color-foreground-secondary);
+  letter-spacing: 0.005em;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  transition: color 0.12s ease, background 0.12s ease;
 }
 
 .sidebar-tree .reference:hover {
   color: var(--color-foreground-primary);
+  background: var(--color-background-hover);
 }
 
-.sidebar-tree .current > .reference {
+.sidebar-tree .current > .reference,
+.sidebar-tree .current-page > .reference {
   color: var(--color-foreground-primary);
   font-weight: 600;
+  position: relative;
+}
+
+.sidebar-tree .current-page > .reference::before {
+  content: "";
+  position: absolute;
+  left: -0.25rem;
+  top: 0.35rem;
+  bottom: 0.35rem;
+  width: 2px;
+  background: var(--color-foreground-primary);
+  border-radius: 1px;
 }
 
 .sidebar-tree .caption-text {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
   color: var(--color-foreground-muted);
-  margin-top: 1rem;
-  padding-bottom: 0.25rem;
+  margin-top: 1.25rem;
+  padding-bottom: 0.3rem;
 }
 
 /* ---------------------------------------------------------
-   sphinx-design cards — subtle border, monochrome hover
+   Right-side TOC — tighter, quieter
+   --------------------------------------------------------- */
+.toc-tree .reference {
+  font-size: 0.78rem;
+  color: var(--color-foreground-secondary);
+  padding: 0.15rem 0;
+  letter-spacing: 0.005em;
+  transition: color 0.12s ease;
+}
+
+.toc-tree .reference:hover {
+  color: var(--color-foreground-primary);
+}
+
+.toc-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-foreground-muted);
+}
+
+/* ---------------------------------------------------------
+   sphinx-design cards — hairline, monochrome hover
    --------------------------------------------------------- */
 .sd-card {
-  border: 1px solid var(--color-foreground-border) !important;
+  border: var(--hairline) !important;
   background: var(--color-background-secondary) !important;
-  border-radius: 6px !important;
+  border-radius: var(--radius-md) !important;
   box-shadow: none !important;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
 
 .sd-card:hover {
@@ -167,23 +300,27 @@ p {
 
 .sd-card-header {
   background: transparent !important;
-  border-bottom: 1px solid var(--color-foreground-border) !important;
-  padding: 0.6rem 1rem !important;
+  border-bottom: var(--hairline) !important;
+  padding: 0.55rem 0.9rem !important;
   font-weight: 600 !important;
-  font-size: 0.875rem !important;
+  font-size: 0.85rem !important;
   color: var(--color-foreground-primary) !important;
-  letter-spacing: 0.005em;
+  letter-spacing: -0.005em;
 }
 
 .sd-card-body {
-  padding: 0.7rem 1rem !important;
-  font-size: 0.835rem !important;
+  padding: 0.7rem 0.9rem !important;
+  font-size: 0.82rem !important;
   color: var(--color-foreground-secondary) !important;
-  line-height: 1.58;
+  line-height: 1.6;
 }
 
 .sd-card-body p {
   margin-bottom: 0.35rem;
+}
+
+.sd-card-body p:last-child {
+  margin-bottom: 0;
 }
 
 .sd-card-body strong {
@@ -192,21 +329,25 @@ p {
 }
 
 /* ---------------------------------------------------------
-   Tab set — line-style indicator, no chromatic accent
+   Tab set — line indicator, no chromatic accent
    --------------------------------------------------------- */
 .sd-tab-set {
-  margin: 1.2rem 0;
+  margin: var(--space-5) 0;
 }
 
 .sd-tab-set > input ~ label {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 500;
-  letter-spacing: 0.015em;
+  letter-spacing: 0.01em;
   padding: 0.4rem 0.85rem;
   border-bottom: 2px solid transparent;
   color: var(--color-foreground-secondary);
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.12s, border-color 0.12s;
   background: transparent;
+}
+
+.sd-tab-set > input ~ label:hover {
+  color: var(--color-foreground-primary);
 }
 
 .sd-tab-set > input:checked ~ label {
@@ -216,8 +357,8 @@ p {
 }
 
 .sd-tab-content {
-  border: 1px solid var(--color-foreground-border);
-  border-radius: 0 4px 4px 4px;
+  border: var(--hairline);
+  border-radius: 0 var(--radius-md) var(--radius-md) var(--radius-md);
   padding: 1rem 1.15rem;
   background: var(--color-background-secondary);
 }
@@ -228,20 +369,25 @@ p {
    --------------------------------------------------------- */
 .admonition {
   border: none !important;
-  border-left: 3px solid var(--color-foreground-secondary) !important;
-  border-radius: 0 4px 4px 0 !important;
+  border-left: 2px solid var(--color-foreground-secondary) !important;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0 !important;
   background: var(--color-admonition-background) !important;
-  padding: 0.65rem 1rem !important;
-  margin: 1.1rem 0 !important;
+  padding: 0.6rem 0.95rem !important;
+  margin: var(--space-4) 0 !important;
+  font-size: 0.875rem;
+  line-height: 1.6;
 }
 
 .admonition-title {
-  font-size: 0.77rem !important;
+  font-size: 0.7rem !important;
   font-weight: 700 !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.09em !important;
-  margin-bottom: 0.3rem !important;
+  letter-spacing: 0.12em !important;
+  margin: 0 0 0.3rem !important;
   color: var(--color-foreground-primary) !important;
+  background: transparent !important;
+  padding: 0 !important;
+  display: block;
 }
 
 .admonition-title::before {
@@ -252,7 +398,6 @@ p {
   margin-bottom: 0;
 }
 
-/* Note / tip / important / hint — all grayscale; meaning is in the title */
 .admonition.note,
 .admonition.tip,
 .admonition.important,
@@ -267,7 +412,6 @@ p {
   color: var(--color-foreground-primary) !important;
 }
 
-/* See-also — most de-emphasized */
 .admonition.seealso {
   border-left-color: var(--color-foreground-muted) !important;
 }
@@ -275,7 +419,6 @@ p {
   color: var(--color-foreground-muted) !important;
 }
 
-/* Warning / caution — amber, the only non-grayscale tone */
 .admonition.warning,
 .admonition.caution,
 .admonition.attention {
@@ -287,7 +430,6 @@ p {
   color: var(--color-semantic-warning) !important;
 }
 
-/* Danger / error — muted red, semantic only */
 .admonition.danger,
 .admonition.error {
   border-left-color: var(--color-semantic-error) !important;
@@ -301,18 +443,22 @@ p {
    Code blocks — monochrome syntax tokens, weight-based emphasis
    --------------------------------------------------------- */
 div.highlight {
-  border-radius: 5px !important;
-  border: 1px solid var(--color-foreground-border) !important;
+  border-radius: var(--radius-md) !important;
+  border: var(--hairline-quiet) !important;
   position: relative;
   background: var(--color-background-secondary) !important;
+  margin: var(--space-4) 0;
 }
 
 div.highlight pre {
-  font-size: 0.815rem;
-  line-height: 1.65;
-  padding: 0.9rem 1rem !important;
+  font-family: var(--font-stack--monospace);
+  font-size: 0.8rem;
+  font-feature-settings: "calt", "ss03";
+  line-height: 1.62;
+  padding: 0.85rem 1rem !important;
   background: transparent !important;
   color: var(--color-foreground-primary);
+  overflow-x: auto;
 }
 
 /* Pygments token overrides — neutralize all theme colors to grayscale.
@@ -378,16 +524,25 @@ div.highlight pre {
   background: transparent;
 }
 
-/* Copy button (sphinx-copybutton) */
+/* Shell/REPL prompts (>>>, $) — recede so the typed command stands out */
+.highlight .gp,
+.highlight .go {
+  color: var(--color-foreground-muted);
+  user-select: none;
+}
+
+/* Copy button (sphinx-copybutton) — hairline chip */
 button.copybtn {
   opacity: 0 !important;
-  transition: opacity 0.2s !important;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease !important;
   background: var(--color-background-hover) !important;
-  border: 1px solid var(--color-foreground-border) !important;
-  border-radius: 4px !important;
+  border: var(--hairline-quiet) !important;
+  border-radius: var(--radius-sm) !important;
   color: var(--color-foreground-secondary) !important;
   padding: 2px 6px !important;
-  font-size: 0.75rem !important;
+  font-size: 0.72rem !important;
+  top: 0.4rem !important;
+  right: 0.4rem !important;
 }
 
 div.highlight:hover button.copybtn {
@@ -399,28 +554,46 @@ button.copybtn:hover {
   border-color: var(--color-foreground-secondary) !important;
 }
 
-/* Inline code */
+button.copybtn.success {
+  color: var(--color-foreground-primary) !important;
+  border-color: var(--color-foreground-primary) !important;
+}
+
+/* Inline code — refined chip, not a heavy badge */
 code.literal,
 p code,
 li code,
-td code {
+td code,
+dd code {
   background: var(--color-background-hover) !important;
-  border: 1px solid var(--color-foreground-border) !important;
-  border-radius: 3px !important;
-  padding: 0.1em 0.38em !important;
+  border: var(--hairline-quiet) !important;
+  border-radius: var(--radius-sm) !important;
+  padding: 0.05em 0.35em !important;
   font-size: 0.83em !important;
   color: var(--color-foreground-primary) !important;
   font-family: var(--font-stack--monospace);
+  font-feature-settings: "calt", "ss03";
+}
+
+/* Code inside headings should stay quiet */
+h1 code, h2 code, h3 code, h4 code {
+  font-size: 0.92em !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: inherit !important;
 }
 
 /* ---------------------------------------------------------
-   Links — underline on hover, no chromatic emphasis
+   Links — hairline underline, brightens on hover
    --------------------------------------------------------- */
 a, a:visited {
   color: var(--color-foreground-primary);
   text-decoration: underline;
   text-decoration-color: var(--color-foreground-border);
-  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.15s ease;
 }
 
 a:hover {
@@ -429,32 +602,36 @@ a:hover {
 }
 
 /* ---------------------------------------------------------
-   Tables — clean rows, hairline borders
+   Tables — hairline rows, dense header
    --------------------------------------------------------- */
 table.docutils {
   border-collapse: collapse;
   width: 100%;
-  font-size: 0.845rem;
-  margin: 1rem 0;
+  font-size: 0.84rem;
+  margin: var(--space-4) 0;
+  border-top: var(--hairline);
+  border-bottom: var(--hairline);
 }
 
 table.docutils th {
-  background: var(--color-background-secondary) !important;
+  background: transparent !important;
   color: var(--color-foreground-secondary) !important;
-  font-weight: 600;
-  font-size: 0.775rem;
+  font-weight: 700;
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  border-bottom: 1px solid var(--color-foreground-border) !important;
-  border-top: 1px solid var(--color-foreground-border) !important;
-  padding: 0.5rem 0.75rem !important;
+  letter-spacing: 0.1em;
+  border-bottom: var(--hairline) !important;
+  border-top: none !important;
+  padding: 0.5rem 0.8rem !important;
+  text-align: left;
 }
 
 table.docutils td {
-  border-bottom: 1px solid var(--color-background-border) !important;
-  padding: 0.42rem 0.75rem !important;
+  border-bottom: var(--hairline-quiet) !important;
+  padding: 0.45rem 0.8rem !important;
   vertical-align: top;
   color: var(--color-foreground-primary);
+  line-height: 1.55;
 }
 
 table.docutils tr:last-child td {
@@ -466,13 +643,14 @@ table.docutils tr:hover td {
 }
 
 /* ---------------------------------------------------------
-   Horizontal rule
+   Horizontal rule — quiet section break
    --------------------------------------------------------- */
+hr,
 hr.docutils {
   border: none !important;
-  border-top: 1px solid var(--color-foreground-border) !important;
-  margin: 2.2rem 0 !important;
-  opacity: 0.4;
+  border-top: var(--hairline-quiet) !important;
+  margin: var(--space-7) 0 !important;
+  opacity: 1;
 }
 
 /* ---------------------------------------------------------
@@ -480,19 +658,24 @@ hr.docutils {
    --------------------------------------------------------- */
 .hero-intro {
   font-size: 1.025rem;
-  line-height: 1.75;
+  font-weight: 400;
+  line-height: 1.7;
   color: var(--color-foreground-secondary);
-  max-width: 74ch;
-  margin-bottom: 1.8rem;
-  border-left: 3px solid var(--color-foreground-border);
+  max-width: 72ch;
+  margin: 0 0 var(--space-6);
+  border-left: 2px solid var(--color-foreground-border);
   padding-left: 1rem;
+  letter-spacing: -0.005em;
 }
 
-/* ---------------------------------------------------------
-   Pipeline stage arrows
-   --------------------------------------------------------- */
+.hero-intro strong {
+  color: var(--color-foreground-primary);
+  font-weight: 600;
+}
+
+/* Pipeline stage arrows */
 .sd-text-center.sd-fs-3 {
-  font-size: 1.1rem !important;
+  font-size: 1rem !important;
   color: var(--color-foreground-muted) !important;
   margin: 0 !important;
   line-height: 1.2;
@@ -501,9 +684,16 @@ hr.docutils {
 /* ---------------------------------------------------------
    Breadcrumb / prev-next navigation
    --------------------------------------------------------- */
+.related-pages {
+  border-top: var(--hairline-quiet);
+  padding-top: var(--space-4);
+  margin-top: var(--space-6);
+}
+
 .related-pages a {
   font-size: 0.82rem;
   color: var(--color-foreground-secondary);
+  text-decoration: none;
 }
 
 .related-pages a:hover {
@@ -514,37 +704,49 @@ hr.docutils {
    Footer
    --------------------------------------------------------- */
 footer {
-  font-size: 0.775rem;
+  font-size: 0.75rem;
   color: var(--color-foreground-muted);
-  border-top: 1px solid var(--color-foreground-border);
-  padding-top: 1rem;
-  margin-top: 2rem;
+  border-top: var(--hairline-quiet);
+  padding-top: var(--space-4);
+  margin-top: var(--space-6);
+  letter-spacing: 0.01em;
 }
 
 /* ---------------------------------------------------------
    Search input
    --------------------------------------------------------- */
+.sidebar-search-container {
+  border-top: var(--hairline-quiet);
+  border-bottom: var(--hairline-quiet);
+}
+
 input[type="search"] {
-  border-radius: 4px !important;
-  border: 1px solid var(--color-foreground-border) !important;
+  border-radius: var(--radius-sm) !important;
+  border: var(--hairline-quiet) !important;
   background: var(--color-background-hover) !important;
-  font-size: 0.84rem !important;
+  font-size: 0.83rem !important;
   color: var(--color-foreground-primary) !important;
+  padding: 0.4rem 0.6rem !important;
+  font-family: var(--font-stack);
+}
+
+input[type="search"]::placeholder {
+  color: var(--color-foreground-muted);
 }
 
 /* ---------------------------------------------------------
-   Dropdown (sphinx-design) — FAQ collapsibles
+   Dropdown (sphinx-design) — collapsibles
    --------------------------------------------------------- */
 details.sd-dropdown {
-  border: 1px solid var(--color-foreground-border) !important;
-  border-radius: 5px !important;
+  border: var(--hairline-quiet) !important;
+  border-radius: var(--radius-md) !important;
   background: var(--color-background-secondary) !important;
-  margin: 0.5rem 0 !important;
+  margin: var(--space-2) 0 !important;
 }
 
 details.sd-dropdown summary {
-  padding: 0.6rem 1rem !important;
-  font-size: 0.875rem !important;
+  padding: 0.55rem 0.95rem !important;
+  font-size: 0.86rem !important;
   font-weight: 500 !important;
   color: var(--color-foreground-primary) !important;
   cursor: pointer;
@@ -552,22 +754,21 @@ details.sd-dropdown summary {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 details.sd-dropdown summary:hover {
   background: var(--color-background-hover) !important;
-  color: var(--color-foreground-primary) !important;
 }
 
 details.sd-dropdown[open] summary {
-  border-bottom: 1px solid var(--color-foreground-border);
-  color: var(--color-foreground-primary) !important;
+  border-bottom: var(--hairline-quiet);
   font-weight: 600 !important;
 }
 
 details.sd-dropdown .sd-summary-content {
-  padding: 0.75rem 1rem !important;
-  font-size: 0.855rem !important;
+  padding: 0.75rem 0.95rem !important;
+  font-size: 0.85rem !important;
   color: var(--color-foreground-secondary) !important;
   line-height: 1.62;
 }
@@ -580,7 +781,7 @@ details.sd-dropdown .sd-summary-content p:last-child {
    Search results
    --------------------------------------------------------- */
 .search-results .context {
-  font-size: 0.835rem;
+  font-size: 0.83rem;
   color: var(--color-foreground-secondary);
   line-height: 1.6;
   border-left: 2px solid var(--color-foreground-border);
@@ -589,7 +790,7 @@ details.sd-dropdown .sd-summary-content p:last-child {
 }
 
 .search-results li {
-  border-bottom: 1px solid var(--color-background-border);
+  border-bottom: var(--hairline-quiet);
   padding: 0.6rem 0;
   list-style: none;
 }
@@ -607,29 +808,90 @@ details.sd-dropdown .sd-summary-content p:last-child {
 
 .search-results a:hover {
   text-decoration: underline;
-  color: var(--color-foreground-primary);
 }
 
 .search-results .highlighted {
   background: var(--color-background-hover);
   color: var(--color-foreground-primary);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0 2px;
   font-weight: 600;
 }
 
 #search-results h2 {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   color: var(--color-foreground-muted);
   border-bottom: none;
-  margin-top: 1rem;
-  margin-bottom: 0.5rem;
+  margin: var(--space-4) 0 var(--space-2);
+  padding-bottom: 0;
 }
 
 /* ---------------------------------------------------------
-   Mobile / narrow viewport — card grid responsiveness
+   Glossary — definition list
+   --------------------------------------------------------- */
+dl.glossary dt {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-foreground-primary);
+  margin-top: 1.1rem;
+  padding-bottom: 0.2rem;
+  border-bottom: var(--hairline-quiet);
+}
+
+dl.glossary dd {
+  margin-left: 1rem;
+  font-size: 0.85rem;
+  color: var(--color-foreground-secondary);
+  line-height: 1.65;
+  margin-bottom: 0.2rem;
+}
+
+/* ---------------------------------------------------------
+   Step-header cards (quickstart numbered steps)
+   --------------------------------------------------------- */
+.sd-col-12 > .sd-card,
+.sd-col-xs-12 > .sd-card {
+  border-left: 2px solid var(--color-foreground-secondary) !important;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0 !important;
+  background: var(--color-background-secondary) !important;
+}
+
+.sd-col-12 > .sd-card .sd-card-body,
+.sd-col-xs-12 > .sd-card .sd-card-body {
+  padding: 0.55rem 0.95rem !important;
+  font-size: 0.85rem !important;
+  color: var(--color-foreground-secondary) !important;
+}
+
+/* ---------------------------------------------------------
+   API / autodoc — function and class signatures
+   --------------------------------------------------------- */
+dl.py.function > dt,
+dl.py.method > dt,
+dl.py.class > dt,
+dl.py.attribute > dt,
+dl.py.exception > dt,
+dl.py.data > dt {
+  background: var(--color-background-secondary) !important;
+  border: none !important;
+  border-left: 2px solid var(--color-foreground-secondary) !important;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0 !important;
+  padding: 0.4rem 0.8rem !important;
+  font-family: var(--font-stack--monospace);
+  font-size: 0.83rem;
+  color: var(--color-foreground-primary);
+}
+
+dl.py em.property,
+dl.py em.sig-param {
+  color: var(--color-foreground-secondary);
+  font-style: normal;
+}
+
+/* ---------------------------------------------------------
+   Mobile / narrow viewport
    --------------------------------------------------------- */
 @media (max-width: 700px) {
   .sd-row.sd-row-cols-3 > .sd-col,
@@ -643,7 +905,7 @@ details.sd-dropdown .sd-summary-content p:last-child {
 
   h1 { font-size: 1.45rem; }
   h2 { font-size: 1.05rem; }
-  .hero-intro { font-size: 0.925rem; }
+  .hero-intro { font-size: 0.93rem; }
 
   table.docutils {
     font-size: 0.78rem;
@@ -651,13 +913,13 @@ details.sd-dropdown .sd-summary-content p:last-child {
 
   table.docutils th,
   table.docutils td {
-    padding: 0.35rem 0.5rem !important;
+    padding: 0.35rem 0.55rem !important;
   }
 }
 
 @media (max-width: 480px) {
   div.highlight pre {
-    font-size: 0.75rem;
+    font-size: 0.74rem;
   }
 
   .sd-card-body {
@@ -669,70 +931,26 @@ details.sd-dropdown .sd-summary-content p:last-child {
    Scrollbar — thin, unobtrusive
    --------------------------------------------------------- */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-background-primary);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-foreground-muted);
+  background: var(--color-foreground-border);
   border-radius: 3px;
 }
 
-/* ---------------------------------------------------------
-   Glossary terms — tighter spacing
-   --------------------------------------------------------- */
-dl.glossary dt {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: var(--color-foreground-primary);
-  margin-top: 1.1rem;
-  padding-bottom: 0.15rem;
-  border-bottom: 1px solid var(--color-background-border);
-}
-
-dl.glossary dd {
-  margin-left: 1rem;
-  font-size: 0.855rem;
-  color: var(--color-foreground-secondary);
-  line-height: 1.65;
-  margin-bottom: 0.2rem;
-}
-
-/* ---------------------------------------------------------
-   Step-header cards (quickstart numbered steps)
-   --------------------------------------------------------- */
-.sd-col-12 > .sd-card,
-.sd-col-xs-12 > .sd-card {
-  border-left: 3px solid var(--color-foreground-secondary) !important;
-  border-radius: 0 4px 4px 0 !important;
-  background: var(--color-background-secondary) !important;
-}
-
-.sd-col-12 > .sd-card .sd-card-body,
-.sd-col-xs-12 > .sd-card .sd-card-body {
-  padding: 0.5rem 1rem !important;
-  font-size: 0.855rem !important;
-  color: var(--color-foreground-secondary) !important;
-}
-
-/* ---------------------------------------------------------
-   Method step headings (h3 inside methods pages)
-   Thin left bar — rendered in foreground-muted to stay quiet.
-   --------------------------------------------------------- */
-.rst-content h3::before {
-  content: "";
-  display: inline-block;
-  width: 3px;
-  height: 0.85em;
+::-webkit-scrollbar-thumb:hover {
   background: var(--color-foreground-muted);
-  margin-right: 0.45em;
-  vertical-align: middle;
-  border-radius: 2px;
-  opacity: 0.8;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-foreground-border) transparent;
 }
 
 /* ---------------------------------------------------------
