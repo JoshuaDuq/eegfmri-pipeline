@@ -378,6 +378,8 @@ def perm_pval_partial_freedman_lane(
     
     observed_correlation, _ = stats.pearsonr(x_residuals, y_residuals)
     exceed_count = 1
+    valid_permutations = 0
+    invalid_permutations = 0
     
     max_variance = max(np.var(x_values), np.var(y_values), 1.0)
     variance_tolerance = _RESIDUAL_VARIANCE_TOLERANCE_FACTOR * max_variance
@@ -400,22 +402,40 @@ def perm_pval_partial_freedman_lane(
                 design, y_permuted, rcond=None
             )[0]
         except np.linalg.LinAlgError:
+            invalid_permutations += 1
             continue
         
         y_permuted_residuals = y_permuted - design @ y_permuted_coefficients
         y_permuted_variance = np.var(y_permuted_residuals, ddof=1)
         
         if y_permuted_variance < variance_tolerance:
+            invalid_permutations += 1
             continue
         
         permuted_correlation, _ = stats.pearsonr(
             x_residuals, y_permuted_residuals
         )
+        if not np.isfinite(permuted_correlation):
+            invalid_permutations += 1
+            continue
+        valid_permutations += 1
         
         if np.abs(permuted_correlation) >= np.abs(observed_correlation):
             exceed_count += 1
-    
-    return exceed_count / (n_perm + 1)
+
+    if invalid_permutations > 0:
+        raise ValueError(
+            "Freedman-Lane permutation test produced invalid permutations "
+            f"({invalid_permutations}/{n_perm}). The permutation denominator "
+            "would be scientifically invalid."
+        )
+    if valid_permutations != n_perm:
+        raise ValueError(
+            "Freedman-Lane permutation test did not complete the requested "
+            f"number of valid permutations ({valid_permutations}/{n_perm})."
+        )
+
+    return exceed_count / (valid_permutations + 1)
 
 
 def compute_permutation_pvalues(
@@ -533,20 +553,17 @@ def _compute_combined_covariates_predictor_pvalue(
         groups_subset = _align_groups_to_dataframe(groups, x_aligned.index)
         groups_subset = groups_subset.reindex(combined_covariates.index)
 
-    try:
-        return perm_pval_partial_freedman_lane(
-            x_subset,
-            y_subset,
-            combined_covariates,
-            method,
-            n_perm,
-            rng,
-            groups=groups_subset,
-            config=config,
-            scheme=_get_permutation_scheme(config),
-        )
-    except (ValueError, np.linalg.LinAlgError):
-        return np.nan
+    return perm_pval_partial_freedman_lane(
+        x_subset,
+        y_subset,
+        combined_covariates,
+        method,
+        n_perm,
+        rng,
+        groups=groups_subset,
+        config=config,
+        scheme=_get_permutation_scheme(config),
+    )
 
 
 def perm_pval_mean_difference(

@@ -85,6 +85,44 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             },
         }
 
+    def test_robust_permutation_pvalues_reject_invalid_draws(self):
+        from eeg_pipeline.analysis.behavior.stages.correlate import _compute_single_pvalue
+
+        df_trials = pd.DataFrame(
+            {
+                "feature": [0.0, 1.0, 2.0, 3.0, 4.0],
+                "rating": [0.1, 1.1, 1.9, 3.1, 4.2],
+            }
+        )
+        rec = {
+            "feature": "feature",
+            "target": "rating",
+            "r_raw": 0.5,
+            "n": 5,
+        }
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.correlation.compute_robust_correlation",
+            side_effect=[(0.5, 0.1), (np.nan, np.nan), (0.7, 0.1)],
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid robust permutation"):
+                _compute_single_pvalue(
+                    rec=rec,
+                    df_trials=df_trials,
+                    df_index=df_trials.index,
+                    cov_df=None,
+                    predictor_series=None,
+                    predictor_column="predictor",
+                    groups_for_perm=None,
+                    method="pearson",
+                    robust_method="winsorized",
+                    n_perm=2,
+                    perm_scheme="shuffle",
+                    rng_seed=0,
+                    config=DotConfig({}),
+                    perm_ok_robust=True,
+                )
+
     def _behavior_config(self, overrides=None) -> DotConfig:
         base = self._base_behavior_config()
         if overrides:

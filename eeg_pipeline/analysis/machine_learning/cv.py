@@ -361,11 +361,36 @@ def grid_search_with_warning_logging(
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         grid.fit(X, y, **fit_params)
+        _raise_for_nonfinite_grid_search_scores(grid, fold_info)
         for warning in w:
             if isinstance(warning.message, (ConvergenceWarning, ConstantInputWarning)):
                 warning_type = type(warning.message).__name__
                 log.warning(f"Fold {fold_info}: {warning_type} during GridSearchCV - {warning.message}")
     return grid
+
+
+def _raise_for_nonfinite_grid_search_scores(grid: GridSearchCV, fold_info: str) -> None:
+    cv_results = getattr(grid, "cv_results_", None)
+    if not isinstance(cv_results, dict):
+        return
+
+    bad_score_keys: List[str] = []
+    for key, values in cv_results.items():
+        is_test_score = key.startswith("mean_test") or (
+            key.startswith("split") and "_test" in key
+        )
+        if not is_test_score:
+            continue
+        scores = np.ma.asarray(values, dtype=float).filled(np.nan)
+        if scores.size and not np.all(np.isfinite(scores)):
+            bad_score_keys.append(str(key))
+
+    if bad_score_keys:
+        raise RuntimeError(
+            "GridSearchCV produced non-finite GridSearchCV test scores "
+            f"for {fold_info or 'unknown fold'}: {', '.join(bad_score_keys)}. "
+            "Set error_score='raise' or fix the failing estimator/candidate."
+        )
 
 
 ###################################################################

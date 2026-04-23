@@ -1227,8 +1227,8 @@ def fit_first_level_glm_multi_run(
 
     This avoids the scientifically invalid approach of averaging per-run z/t maps.
 
-    Runs missing one or both requested conditions are excluded from the GLM
-    with a warning. The GLM only fails if NO runs contain both conditions.
+    Runs missing one or both requested conditions are rejected because changing
+    the run set changes the estimand.
 
     Returns MultiRunGLMResult with fitted model and run inclusion details.
     """
@@ -1240,13 +1240,11 @@ def fit_first_level_glm_multi_run(
 
     required_cols = {"onset", "duration", "trial_type"}
 
-    # Track which runs are valid for inclusion
     valid_bold_paths: List[Path] = []
     valid_events_list: List[pd.DataFrame] = []
     valid_events_paths: List[Path] = []
     valid_confounds_list: List[Optional[pd.DataFrame]] = []
     valid_confounds_paths: List[Optional[Path]] = []
-    skipped_runs: List[Tuple[int, str]] = []
 
     all_conditions: set[str] = set()
     synthetic_labels: List[str] = []
@@ -1294,12 +1292,10 @@ def fit_first_level_glm_multi_run(
                 skip_reason = remap_result.missing_cond_b_msg
 
         if not run_valid:
-            skipped_runs.append((run_idx, skip_reason))
-            logger.warning(
-                "Run %d excluded from GLM: %s",
-                run_idx, skip_reason
+            raise ValueError(
+                "Multi-run first-level GLM found a run missing requested condition values. "
+                f"Run {run_idx}: {skip_reason}"
             )
-            continue
 
         # Run is valid - include it
         total_cond_a_events += remap_result.cond_a_count
@@ -1324,22 +1320,6 @@ def fit_first_level_glm_multi_run(
                 logger.info("Run %d: using %d confound regressors", run_idx, confounds.shape[1])
         valid_confounds_list.append(confounds)
         valid_confounds_paths.append(confounds_path)
-
-    # Validate we have at least one run with both conditions
-    if not valid_bold_paths:
-        skip_summary = "; ".join(f"Run {r}: {msg}" for r, msg in skipped_runs)
-        raise ValueError(
-            f"No runs contain both requested condition values. "
-            f"Skipped all {len(bold_paths)} runs. Details: {skip_summary}"
-        )
-
-    if skipped_runs:
-        logger.warning(
-            "Excluded %d/%d runs due to missing conditions. "
-            "Proceeding with %d runs (cond_a: %d events, cond_b: %d events)",
-            len(skipped_runs), len(bold_paths), len(valid_bold_paths),
-            total_cond_a_events, total_cond_b_events
-        )
 
     tr = _validate_consistent_trs(valid_bold_paths)
     logger.info("Fitting multi-run GLM (%d runs, TR=%.2fs)", len(valid_bold_paths), tr)
@@ -1393,7 +1373,7 @@ def fit_first_level_glm_multi_run(
         included_bold_paths=valid_bold_paths,
         included_events_paths=valid_events_paths,
         included_confounds_paths=valid_confounds_paths,
-        skipped_runs=skipped_runs,
+        skipped_runs=[],
         total_cond_a_events=total_cond_a_events,
         total_cond_b_events=total_cond_b_events,
     )

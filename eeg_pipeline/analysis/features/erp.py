@@ -96,7 +96,11 @@ def _find_peak_in_signal(
     mode: str,
     prominence: Optional[float],
 ) -> Tuple[float, float]:
-    cleaned_signal = np.nan_to_num(signal, nan=np.nanmedian(signal))
+    signal = np.asarray(signal, dtype=float)
+    if signal.size == 0 or not np.isfinite(signal).all():
+        return np.nan, np.nan
+
+    cleaned_signal = signal
     
     if mode == "neg":
         search_signal = -cleaned_signal
@@ -205,7 +209,7 @@ def _compute_auc(
                 if run.size < 2:
                     continue
                 has_segment = True
-                total_auc += float(np.trapz(trace[run], times[run]))
+                total_auc += float(np.trapezoid(trace[run], times[run]))
 
             if has_segment:
                 auc_vals[epoch_idx, series_idx] = total_auc

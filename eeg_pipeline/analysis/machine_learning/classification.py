@@ -787,7 +787,7 @@ def nested_loso_classification(
             cv=inner_cv,
             n_jobs=-1,
             refit=True,
-            error_score=np.nan,
+            error_score="raise",
         )
         
         try:

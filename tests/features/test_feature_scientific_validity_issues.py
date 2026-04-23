@@ -8,6 +8,7 @@ import numpy as np
 from eeg_pipeline.analysis.features.aperiodic import _parse_line_noise_config
 from eeg_pipeline.analysis.features.erp import (
     _compute_auc,
+    _find_peak_in_signal,
     _compute_peak_pair_metrics,
 )
 from eeg_pipeline.analysis.features.precomputed.extras import _get_psd_config
@@ -16,6 +17,7 @@ from eeg_pipeline.analysis.features.quality import (
     _compute_muscle_ratio_from_psd,
     _compute_snr_from_psd,
 )
+from eeg_pipeline.analysis.features.phase import _sharpness_log_ratio
 from eeg_pipeline.analysis.features.spectral import (
     _resolve_line_noise_freqs,
     _robust_aperiodic_fit,
@@ -50,6 +52,30 @@ class TestScientificValidityIssues(unittest.TestCase):
         self.assertEqual(auc.shape, (1, 1))
         # Two finite contiguous segments: [0..1] and [3..4], each area=1.
         self.assertAlmostEqual(float(auc[0, 0]), 2.0, places=7)
+
+    def test_erp_peak_detection_rejects_nan_search_window(self):
+        times = np.array([0.0, 0.1, 0.2, 0.3], dtype=float)
+        signal = np.array([0.1, np.nan, 0.4, 0.2], dtype=float)
+
+        peak_value, peak_time = _find_peak_in_signal(
+            signal,
+            times,
+            mode="pos",
+            prominence=None,
+        )
+
+        self.assertTrue(np.isnan(peak_value))
+        self.assertTrue(np.isnan(peak_time))
+
+    def test_phase_sharpness_rejects_nan_waveform_samples(self):
+        signal = np.array(
+            [0.0, 1.0, 0.0, -1.0, np.nan, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0],
+            dtype=float,
+        )
+
+        ratio = _sharpness_log_ratio(signal, sfreq_hz=100.0, offset_ms=10.0, fmax_hz=30.0)
+
+        self.assertTrue(np.isnan(ratio))
 
     def test_quality_line_noise_defaults_to_preprocessing_line_freq(self):
         cfg = DotConfig(

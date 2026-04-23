@@ -88,12 +88,39 @@ def _ica_import_stubs() -> dict[str, types.ModuleType]:
 
 class TestIcaFailFast(unittest.TestCase):
     def setUp(self):
-        patcher = unittest.mock.patch.dict(sys.modules, _ica_import_stubs())
+        stubs = _ica_import_stubs()
+        patcher = unittest.mock.patch.dict(sys.modules, stubs)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self._patch_cached_pipeline_submodules(stubs)
         sys.modules.pop("eeg_pipeline.preprocessing.pipeline.ica", None)
         self.ica = importlib.import_module("eeg_pipeline.preprocessing.pipeline.ica")
         self.addCleanup(sys.modules.pop, "eeg_pipeline.preprocessing.pipeline.ica", None)
+
+    def _patch_cached_pipeline_submodules(self, stubs: dict[str, types.ModuleType]) -> None:
+        package = sys.modules.get("eeg_pipeline.preprocessing.pipeline")
+        if package is None:
+            return
+
+        names = ("utils", "io", "preprocess", "tfr", "stats")
+        previous = {
+            name: getattr(package, name)
+            for name in names
+            if hasattr(package, name)
+        }
+        missing = [name for name in names if not hasattr(package, name)]
+
+        for name in names:
+            setattr(package, name, stubs[f"eeg_pipeline.preprocessing.pipeline.{name}"])
+
+        def restore() -> None:
+            for name in names:
+                if name in previous:
+                    setattr(package, name, previous[name])
+                elif name in missing and hasattr(package, name):
+                    delattr(package, name)
+
+        self.addCleanup(restore)
 
     def test_run_ica_label_single_file_raises_when_component_write_fails(self):
         self.ica.io.write_components_tsv.side_effect = RuntimeError("write boom")

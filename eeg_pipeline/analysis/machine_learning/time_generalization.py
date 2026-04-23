@@ -334,6 +334,130 @@ def _extract_window_features(
     return features
 
 
+def _build_time_generalization_regressor(
+    alpha: float,
+    config: Dict[str, Any],
+) -> TransformedTargetRegressor:
+    transformer = PowerTransformer(
+        method=str(config.get("machine_learning.preprocessing.power_transformer_method", "yeo-johnson")),
+        standardize=bool(config.get("machine_learning.preprocessing.power_transformer_standardize", True)),
+    )
+    regressor = Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="mean")),
+            ("scale", StandardScaler()),
+            ("ridge", Ridge(alpha=float(alpha))),
+        ]
+    )
+    return TransformedTargetRegressor(regressor=regressor, transformer=transformer)
+
+
+def _fit_time_generalization_model(
+    train_features: np.ndarray,
+    y_train: np.ndarray,
+    groups_train: np.ndarray,
+    config: Dict[str, Any],
+    *,
+    fold: int,
+    train_window: int,
+) -> TransformedTargetRegressor:
+    use_ridgecv = bool(
+        require_config_value(config, "machine_learning.analysis.time_generalization.use_ridgecv")
+    )
+
+    if use_ridgecv:
+        if len(y_train) < 5:
+            raise RuntimeError(
+                f"Fold {int(fold)}, train window {int(train_window)}: "
+                "inner CV requires at least 5 finite training samples."
+            )
+        n_unique_groups = len(np.unique(groups_train))
+        if n_unique_groups < 2:
+            raise RuntimeError(
+                f"Fold {int(fold)}, train window {int(train_window)}: "
+                "inner CV requires at least 2 training groups."
+            )
+        try:
+            inner_cv = GroupKFold(n_splits=min(5, n_unique_groups))
+            grid = GridSearchCV(
+                estimator=_build_time_generalization_regressor(alpha=1.0, config=config),
+                param_grid={
+                    "regressor__ridge__alpha": require_config_value(
+                        config, "machine_learning.analysis.time_generalization.alpha_grid"
+                    )
+                },
+                scoring="r2",
+                cv=inner_cv,
+                n_jobs=1,
+                refit=True,
+                error_score="raise",
+            )
+            grid.fit(train_features, y_train, groups=groups_train)
+            return grid.best_estimator_
+        except Exception as exc:
+            raise RuntimeError(
+                f"Fold {int(fold)}, train window {int(train_window)}: inner CV failed."
+            ) from exc
+
+    default_alpha = float(
+        require_config_value(config, "machine_learning.analysis.time_generalization.default_alpha")
+    )
+    model = _build_time_generalization_regressor(alpha=default_alpha, config=config)
+    try:
+        model.fit(train_features, y_train)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Fold {int(fold)}, train window {int(train_window)}: model fit failed."
+        ) from exc
+    return model
+
+
+def _evaluate_time_generalization_cell(
+    *,
+    model: TransformedTargetRegressor,
+    test_features: np.ndarray,
+    col_mask: np.ndarray,
+    y_test: np.ndarray,
+    min_samples_per_window: int,
+    min_samples_for_corr: int,
+    fold: int,
+    train_window: int,
+    test_window: int,
+) -> Tuple[float, float, int]:
+    finite_mask_test = np.isfinite(test_features).any(axis=1)
+    if np.sum(finite_mask_test) < min_samples_per_window:
+        return np.nan, np.nan, 0
+
+    test_features_clean = test_features[finite_mask_test].copy()
+    test_features_clean = test_features_clean[:, col_mask]
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            y_pred = model.predict(test_features_clean)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Fold {int(fold)}, train window {int(train_window)}, "
+            f"test window {int(test_window)}: prediction failed."
+        ) from exc
+
+    finite_mask_pred = np.isfinite(y_pred) & np.isfinite(y_test[finite_mask_test])
+    if np.sum(finite_mask_pred) < min_samples_per_window:
+        return np.nan, np.nan, 0
+
+    y_test_finite = y_test[finite_mask_test][finite_mask_pred]
+    y_pred_finite = y_pred[finite_mask_pred]
+    n_valid = len(y_test_finite)
+    if n_valid < min_samples_for_corr:
+        return np.nan, np.nan, 0
+
+    r_val, _ = safe_pearsonr(y_test_finite, y_pred_finite)
+    r2_val = r2_score(y_test_finite, y_pred_finite) if n_valid > 1 else np.nan
+    if np.isfinite(r_val) and np.isfinite(r2_val):
+        return float(r_val), float(r2_val), int(n_valid)
+    return np.nan, np.nan, 0
+
+
 def time_generalization_regression(
     deriv_root: Path,
     subjects: Optional[List[str]] = None,
@@ -498,95 +622,39 @@ def time_generalization_regression(
                 groups_train_i = groups_arr[train_idx_f][finite_mask_train]
                 y_train_i = y_train[finite_mask_train]
 
-                use_ridgecv = bool(
+                model = _fit_time_generalization_model(
+                    train_feat_i_clean,
+                    y_train_i,
+                    groups_train_i,
+                    config,
+                    fold=fold,
+                    train_window=i,
+                )
+
+                min_samples_for_corr = int(
                     require_config_value(
-                        config, "machine_learning.analysis.time_generalization.use_ridgecv"
+                        config, "machine_learning.analysis.time_generalization.min_samples_for_corr"
                     )
                 )
-                alpha_grid = require_config_value(
-                    config, "machine_learning.analysis.time_generalization.alpha_grid"
-                )
-
-                model = None
-                if use_ridgecv and len(y_train_i) >= 5:
-                    n_unique_groups = len(np.unique(groups_train_i))
-                    if n_unique_groups >= 2:
-                        try:
-                            n_splits_inner = min(5, n_unique_groups)
-                            inner_cv = GroupKFold(n_splits=n_splits_inner)
-                            grid = GridSearchCV(
-                                estimator=TransformedTargetRegressor(
-                                    regressor=Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge())]),
-                                    transformer=PowerTransformer(
-                                        method=str(config.get("machine_learning.preprocessing.power_transformer_method", "yeo-johnson")),
-                                        standardize=bool(config.get("machine_learning.preprocessing.power_transformer_standardize", True))
-                                    )
-                                ),
-                                param_grid={"regressor__ridge__alpha": alpha_grid},
-                                scoring="r2",
-                                cv=inner_cv,
-                                n_jobs=1,
-                                refit=True,
-                                error_score="raise",
-                            )
-                            grid.fit(train_feat_i_clean, y_train_i, groups=groups_train_i)
-                            model = grid.best_estimator_
-                        except Exception:
-                            model = None
-
-                if model is None:
-                    default_alpha = float(
-                        require_config_value(
-                            config, "machine_learning.analysis.time_generalization.default_alpha"
-                        )
-                    )
-                    model = TransformedTargetRegressor(
-                        regressor=Pipeline([("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler()), ("ridge", Ridge(alpha=default_alpha))]),
-                        transformer=PowerTransformer(
-                            method=str(config.get("machine_learning.preprocessing.power_transformer_method", "yeo-johnson")),
-                            standardize=bool(config.get("machine_learning.preprocessing.power_transformer_standardize", True))
-                        )
-                    )
-                    try:
-                        model.fit(train_feat_i_clean, y_train_i)
-                    except Exception:
-                        continue
 
                 for j in range(n_windows):
                     test_feat_j = test_feats[:, j, :]
-                    finite_mask_test = np.isfinite(test_feat_j).any(axis=1)
-                    if np.sum(finite_mask_test) < min_samples_per_window:
+                    r_val, r2_val, n_valid = _evaluate_time_generalization_cell(
+                        model=model,
+                        test_features=test_feat_j,
+                        col_mask=col_mask,
+                        y_test=y_test,
+                        min_samples_per_window=min_samples_per_window,
+                        min_samples_for_corr=min_samples_for_corr,
+                        fold=fold,
+                        train_window=i,
+                        test_window=j,
+                    )
+                    if n_valid == 0:
                         continue
-                    
-                    test_feat_j_clean = test_feat_j[finite_mask_test].copy()
-                    test_feat_j_clean = test_feat_j_clean[:, col_mask]
-                    
-                    try:
-                        with warnings.catch_warnings():
-                            warnings.simplefilter("ignore", category=UserWarning)
-                            y_pred = model.predict(test_feat_j_clean)
-                        
-                        finite_mask_pred = np.isfinite(y_pred) & np.isfinite(y_test[finite_mask_test])
-                        if np.sum(finite_mask_pred) < min_samples_per_window:
-                            continue
-                        y_test_finite = y_test[finite_mask_test][finite_mask_pred]
-                        y_pred_finite = y_pred[finite_mask_pred]
-                        n_valid = len(y_test_finite)
-                        
-                        min_samples_for_corr = int(
-                            require_config_value(
-                                config, "machine_learning.analysis.time_generalization.min_samples_for_corr"
-                            )
-                        )
-                        if n_valid >= min_samples_for_corr:
-                            r_val, _ = safe_pearsonr(y_test_finite, y_pred_finite)
-                            r2_val = r2_score(y_test_finite, y_pred_finite) if n_valid > 1 else np.nan
-                            if np.isfinite(r_val) and np.isfinite(r2_val):
-                                r_mat[i, j] = r_val
-                                r2_mat[i, j] = r2_val
-                                count_mat[i, j] = n_valid
-                    except Exception:
-                        continue
+                    r_mat[i, j] = r_val
+                    r2_mat[i, j] = r2_val
+                    count_mat[i, j] = n_valid
             
             if not np.isfinite(r_mat).any() or not np.any(count_mat > 0):
                 logger.warning(

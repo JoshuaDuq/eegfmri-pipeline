@@ -43,6 +43,7 @@ from eeg_pipeline.analysis.features.source_localization import (
     _compute_eloreta_source_estimates,
     _compute_roi_envelope,
     _compute_roi_power,
+    _compute_roi_timecourses_from_row_indices,
     _extract_roi_timecourses,
     _extract_roi_timecourses_from_vertex_indices,
     _load_source_contrast_config,
@@ -116,6 +117,35 @@ class _StcStub:
 
 
 class TestScientificValidityGuards(unittest.TestCase):
+    def test_source_roi_sign_alignment_rejects_nonfinite_source_values(self):
+        stcs = [
+            SimpleNamespace(
+                data=np.array(
+                    [
+                        [1.0, np.nan, 2.0],
+                        [0.5, 0.2, 0.1],
+                    ],
+                    dtype=float,
+                )
+            ),
+            SimpleNamespace(
+                data=np.array(
+                    [
+                        [1.2, 1.3, 1.4],
+                        [0.4, 0.3, 0.2],
+                    ],
+                    dtype=float,
+                )
+            ),
+        ]
+
+        with self.assertRaisesRegex(ValueError, "non-finite source values"):
+            _compute_roi_timecourses_from_row_indices(
+                stcs=stcs,
+                roi_row_indices={"roi": [0, 1]},
+                roi_names=["roi"],
+            )
+
     def test_feature_context_rejects_cross_trial_features_without_train_mask_in_trial_safe_mode(self):
         with self.assertRaisesRegex(ValueError, "train_mask"):
             FeatureContext(

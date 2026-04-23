@@ -4255,6 +4255,90 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
 
         self.assertEqual(calls["harmonize"], 1)
 
+    def test_time_generalization_surfaces_inner_cv_failure(self):
+        from eeg_pipeline.analysis.machine_learning import time_generalization as tg
+
+        class FailingGridSearch:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def fit(self, *args, **kwargs):
+                raise RuntimeError("inner cv failure")
+
+        config = DotConfig(
+            {
+                "machine_learning": {
+                    "analysis": {
+                        "time_generalization": {
+                            "use_ridgecv": True,
+                            "alpha_grid": [0.1, 1.0],
+                            "default_alpha": 1.0,
+                        }
+                    },
+                    "preprocessing": {
+                        "power_transformer_method": "yeo-johnson",
+                        "power_transformer_standardize": True,
+                    },
+                }
+            }
+        )
+        X_train = np.arange(12, dtype=float).reshape(6, 2)
+        y_train = np.linspace(0.0, 1.0, 6)
+        groups_train = np.array(["s1", "s1", "s2", "s2", "s3", "s3"], dtype=object)
+
+        with patch.object(tg, "GridSearchCV", FailingGridSearch):
+            with self.assertRaisesRegex(RuntimeError, "inner CV failed"):
+                tg._fit_time_generalization_model(
+                    X_train,
+                    y_train,
+                    groups_train,
+                    config,
+                    fold=1,
+                    train_window=0,
+                )
+
+    def test_time_generalization_surfaces_cell_prediction_failure(self):
+        from eeg_pipeline.analysis.machine_learning import time_generalization as tg
+
+        class FailingModel:
+            def predict(self, X):
+                raise RuntimeError("prediction failure")
+
+        with self.assertRaisesRegex(RuntimeError, "prediction failed"):
+            tg._evaluate_time_generalization_cell(
+                model=FailingModel(),
+                test_features=np.ones((4, 2), dtype=float),
+                col_mask=np.array([True, True], dtype=bool),
+                y_test=np.linspace(0.0, 1.0, 4),
+                min_samples_per_window=2,
+                min_samples_for_corr=2,
+                fold=1,
+                train_window=0,
+                test_window=0,
+            )
+
+    def test_grid_search_wrapper_rejects_nonfinite_test_scores(self):
+        from eeg_pipeline.analysis.machine_learning.cv import grid_search_with_warning_logging
+
+        class FakeGrid:
+            cv_results_ = None
+
+            def fit(self, X, y, **fit_params):
+                self.cv_results_ = {
+                    "mean_test_score": np.array([np.nan, 0.2], dtype=float),
+                    "params": [{"alpha": 0.1}, {"alpha": 1.0}],
+                }
+                return self
+
+        with self.assertRaisesRegex(RuntimeError, "non-finite GridSearchCV test scores"):
+            grid_search_with_warning_logging(
+                FakeGrid(),
+                np.ones((4, 2), dtype=float),
+                np.arange(4, dtype=float),
+                fold_info="synthetic fold",
+                log=Mock(),
+            )
+
     def test_find_block_column_parses_run_prefixed_labels(self):
         from eeg_pipeline.utils.data.machine_learning import _find_block_column
 

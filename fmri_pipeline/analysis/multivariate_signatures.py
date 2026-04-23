@@ -272,10 +272,7 @@ def compute_signature_expression(
                                 mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=w_img, interpolation="nearest")
                         except Exception:
                             mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=w_img, interpolation="nearest")
-                    try:
-                        mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
-                    except Exception:
-                        mask_data = None
+                    mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
 
                 img_data = x_img.get_fdata()
                 w_data = w_img.get_fdata()
@@ -305,10 +302,7 @@ def compute_signature_expression(
                                 mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=img, interpolation="nearest")
                         except Exception:
                             mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=img, interpolation="nearest")
-                    try:
-                        mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
-                    except Exception:
-                        mask_data = None
+                    mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
 
                 img_data = img.get_fdata()
                 w_data = w_on_ref.get_fdata()

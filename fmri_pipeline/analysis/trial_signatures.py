@@ -430,6 +430,69 @@ def _discover_runs(
     return out
 
 
+def _get_bold_run_duration_seconds(bold_path: Path) -> float:
+    import nibabel as nib  # type: ignore
+
+    img = nib.load(str(bold_path))
+    if len(img.shape) != 4:
+        raise ValueError(f"Expected 4D BOLD image for {bold_path}, got shape={img.shape}.")
+
+    n_scans = int(img.shape[3])
+    if n_scans <= 0:
+        raise ValueError(f"BOLD image has no timepoints: {bold_path}")
+
+    tr = float(_get_tr_from_bold(bold_path))
+    return float(n_scans) * tr
+
+
+def _validate_events_against_bold_run(
+    events_df: Any,
+    *,
+    bold_path: Path,
+    context: str,
+) -> None:
+    import numpy as np  # type: ignore
+    import pandas as pd  # type: ignore
+
+    onset = pd.to_numeric(events_df["onset"], errors="coerce")
+    duration = pd.to_numeric(events_df["duration"], errors="coerce")
+
+    if onset.isna().any():
+        bad_rows = onset.index[onset.isna()].tolist()
+        raise ValueError(f"{context}: onset contains non-numeric or missing values at rows {bad_rows}.")
+    if duration.isna().any():
+        bad_rows = duration.index[duration.isna()].tolist()
+        raise ValueError(f"{context}: duration contains non-numeric or missing values at rows {bad_rows}.")
+    if not np.isfinite(onset.to_numpy(dtype=float)).all():
+        raise ValueError(f"{context}: onset contains non-finite values.")
+    if not np.isfinite(duration.to_numpy(dtype=float)).all():
+        raise ValueError(f"{context}: duration contains non-finite values.")
+    if (onset < 0).any():
+        bad_rows = onset.index[onset < 0].tolist()
+        raise ValueError(f"{context}: onset must be >= 0, found negative values at rows {bad_rows}.")
+    if (duration < 0).any():
+        bad_rows = duration.index[duration < 0].tolist()
+        raise ValueError(f"{context}: duration must be >= 0, found negative values at rows {bad_rows}.")
+
+    run_duration = _get_bold_run_duration_seconds(bold_path)
+    tr = float(_get_tr_from_bold(bold_path))
+    tolerance = max(tr * 0.5, 1e-6)
+
+    event_end = onset + duration
+    if (onset > (run_duration + tolerance)).any():
+        bad_rows = onset.index[onset > (run_duration + tolerance)].tolist()
+        raise ValueError(
+            f"{context}: onset exceeds run duration ({run_duration:.6f}s) beyond tolerance "
+            f"({tolerance:.6f}s) at rows {bad_rows}."
+        )
+    if (event_end > (run_duration + tolerance)).any():
+        bad_rows = event_end.index[event_end > (run_duration + tolerance)].tolist()
+        raise ValueError(
+            f"{context}: onset + duration exceeds run duration ({run_duration:.6f}s) beyond tolerance "
+            f"({tolerance:.6f}s) at rows {bad_rows}."
+        )
+
+
 def _make_trial_regressor(run_label: str, trial_index: int, condition: str) -> str:
     return f"trial_{_safe_slug(run_label)}_{trial_index:03d}_{_safe_slug(condition).lower()}"
 
@@ -679,6 +742,27 @@ def _contrast_vector_for_columns(columns: Sequence[str], cols: Sequence[str]) ->
     return vec
 
 
+def _compute_effect_variance(
+    flm: Any,
+    contrast: Any,
+    *,
+    cfg: TrialSignatureExtractionConfig,
+    context: str,
+) -> Optional[Any]:
+    needs_variance = (
+        str(cfg.fixed_effects_weighting or "variance").strip().lower() == "variance"
+        or bool(cfg.write_trial_variances)
+    )
+    try:
+        return flm.compute_contrast(contrast, output_type="effect_variance")
+    except Exception as exc:
+        if needs_variance:
+            raise RuntimeError(
+                f"{context}: effect variance is required but could not be computed."
+            ) from exc
+        return None
+
+
 def _combine_effect_images(
     *,
     effects: Sequence[Any],
@@ -702,9 +786,11 @@ def _combine_effect_images(
     eff = np.stack([np.asanyarray(img.dataobj) for img in eff_imgs], axis=0)
 
     method = (method or "variance").strip().lower()
-    if method == "mean" or not variances:
+    if method == "mean":
         out = np.nanmean(eff, axis=0)
         return nib.Nifti1Image(out, ref_img.affine, ref_img.header)
+    if not variances:
+        raise ValueError("Variance-weighted fixed effects requires effect variances.")
 
     var_imgs = [nib.load(str(v)) if isinstance(v, (str, Path)) else v for v in variances]
     var = np.stack([np.asanyarray(img.dataobj) for img in var_imgs], axis=0)
@@ -828,15 +914,20 @@ def run_trial_signature_extraction_for_subject(
 
         events_df = pd.read_csv(events_path, sep="\t")
 
-        mask_img = None
         mask_path = _discover_brain_mask_for_bold(bold_path)
-        if mask_path is not None and mask_path.exists():
-            try:
-                mask_img = nib.load(str(mask_path))
-            except Exception:
-                mask_img = None
-        if mask_img is not None:
-            run_brain_masks.append(mask_img)
+        if mask_path is None or not mask_path.exists():
+            raise FileNotFoundError(
+                "Trial-wise fMRI GLM requires a matching fMRIPrep brain mask for "
+                f"{bold_path.name}."
+            )
+        mask_img = nib.load(str(mask_path))
+        run_brain_masks.append(mask_img)
+
+        _validate_events_against_bold_run(
+            events_df,
+            bold_path=bold_path,
+            context=f"Trial-signature events validation ({events_path.name})",
+        )
 
         tr = _get_tr_from_bold(bold_path)
 
@@ -908,11 +999,12 @@ def run_trial_signature_extraction_for_subject(
 
                 con = _contrast_vector_for_column(dm_cols, t.regressor)
                 beta_img = flm.compute_contrast(con, output_type="effect_size")
-                var_img = None
-                try:
-                    var_img = flm.compute_contrast(con, output_type="effect_variance")
-                except Exception:
-                    var_img = None
+                var_img = _compute_effect_variance(
+                    flm,
+                    con,
+                    cfg=cfg,
+                    context=f"Trial-wise beta-series GLM ({bold_path.name}, {t.regressor})",
+                )
 
                 run_regressors_by_condition.setdefault(str(t.condition), []).append(str(t.regressor))
 
@@ -964,10 +1056,12 @@ def run_trial_signature_extraction_for_subject(
                 _append_group(group_effects, condition, run_effect_img)
                 _append_group_by_run(group_effects_by_run, run_num, condition, run_effect_img)
 
-                try:
-                    run_var_img = flm.compute_contrast(run_contrast, output_type="effect_variance")
-                except Exception:
-                    run_var_img = None
+                run_var_img = _compute_effect_variance(
+                    flm,
+                    run_contrast,
+                    cfg=cfg,
+                    context=f"Trial-wise beta-series condition GLM ({bold_path.name}, {condition})",
+                )
                 if run_var_img is not None:
                     _append_group(group_vars, condition, run_var_img)
                     _append_group_by_run(group_vars_by_run, run_num, condition, run_var_img)
@@ -1014,11 +1108,15 @@ def run_trial_signature_extraction_for_subject(
                 dm_cols = list(getattr(dm, "columns", []))
                 con = _contrast_vector_for_column(dm_cols, "target")
                 beta_img = flm.compute_contrast(con, output_type="effect_size")
-                var_img = None
-                try:
-                    var_img = flm.compute_contrast(con, output_type="effect_variance")
-                except Exception:
-                    var_img = None
+                var_img = _compute_effect_variance(
+                    flm,
+                    con,
+                    cfg=cfg,
+                    context=(
+                        f"Trial-wise LSS GLM ({bold_path.name}, {t.run_label}, "
+                        f"trial {t.trial_index:03d})"
+                    ),
+                )
 
                 _append_group(group_effects, t.condition, beta_img)
                 _append_group_by_run(group_effects_by_run, run_num, t.condition, beta_img)
@@ -1133,12 +1231,11 @@ def run_trial_signature_extraction_for_subject(
                 ]:
                     if img is None:
                         continue
-                    brain_union = None
-                    if run_brain_masks:
-                        try:
-                            brain_union = _union_masks_to_target(run_brain_masks, img)
-                        except Exception:
-                            brain_union = None
+                    if not run_brain_masks:
+                        raise ValueError(
+                            "Condition-level signature expression requires at least one brain mask."
+                        )
+                    brain_union = _union_masks_to_target(run_brain_masks, img)
                     sigs = compute_signature_expression(
                         stat_or_effect_img=img,
                         signature_root=signature_root,
@@ -1219,12 +1316,11 @@ def run_trial_signature_extraction_for_subject(
                 n_trials = _count_trials_for_group(run_label or None, group)
 
                 if signature_root is not None and signature_specs:
-                    brain_union = None
-                    if run_brain_masks:
-                        try:
-                            brain_union = _union_masks_to_target(run_brain_masks, img)
-                        except Exception:
-                            brain_union = None
+                    if not run_brain_masks:
+                        raise ValueError(
+                            "Grouped signature expression requires at least one brain mask."
+                        )
+                    brain_union = _union_masks_to_target(run_brain_masks, img)
                     sigs = compute_signature_expression(
                         stat_or_effect_img=img,
                         signature_root=signature_root,

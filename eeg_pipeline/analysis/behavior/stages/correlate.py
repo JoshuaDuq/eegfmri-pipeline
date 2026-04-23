@@ -996,6 +996,8 @@ def _compute_single_pvalue(
                 p_perm_raw = np.nan
             else:
                 extreme = 0
+                valid_permutations = 0
+                invalid_permutations = 0
                 for _ in range(int(n_perm)):
                     try:
                         perm_idx = permute_within_groups(
@@ -1005,15 +1007,27 @@ def _compute_single_pvalue(
                             scheme=perm_scheme,
                             strict=True,
                         )
-                    except ValueError:
-                        p_perm_raw = np.nan
-                        break
+                    except ValueError as exc:
+                        raise ValueError("invalid robust permutation draw") from exc
                     y_perm = y_v[perm_idx]
                     r_perm, _ = compute_robust_correlation(x_v, y_perm, method=str(robust_method).strip().lower())
-                    if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
+                    if not np.isfinite(r_perm):
+                        invalid_permutations += 1
+                        continue
+                    valid_permutations += 1
+                    if abs(r_perm) >= abs(r_obs):
                         extreme += 1
-                else:
-                    p_perm_raw = float((extreme + 1) / (int(n_perm) + 1))
+                if invalid_permutations > 0:
+                    raise ValueError(
+                        "invalid robust permutation draw: "
+                        f"{invalid_permutations}/{int(n_perm)} produced non-finite correlations"
+                    )
+                if valid_permutations != int(n_perm):
+                    raise ValueError(
+                        "invalid robust permutation denominator: "
+                        f"{valid_permutations}/{int(n_perm)} valid draws"
+                    )
+                p_perm_raw = float((extreme + 1) / (valid_permutations + 1))
 
         result.update(
             {

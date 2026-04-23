@@ -1232,8 +1232,14 @@ def _compute_roi_timecourses_from_row_indices(
             out[:, roi_idx, :] = block_stack[:, 0, :]
             continue
 
+        if not np.isfinite(block_stack).all():
+            raise ValueError(
+                f"ROI {roi_name!r} contains non-finite source values; "
+                "sign alignment cannot treat missing source samples as zero."
+            )
+
         # Flatten to (n_verts, n_epochs * n_times) to compute stable cross-epoch covariance
-        block_flat = np.nan_to_num(block_stack).transpose(1, 0, 2).reshape(block_stack.shape[1], -1)
+        block_flat = block_stack.transpose(1, 0, 2).reshape(block_stack.shape[1], -1)
         cov = block_flat @ block_flat.T
         u, _, _ = np.linalg.svd(cov, full_matrices=False)
         flip = np.sign(u[:, 0])

@@ -124,3 +124,27 @@ def test_resample_to_img_rejects_nonfinite_voxels_in_continuous_resampling() -> 
         "NaNs or infinite values are present in the data passed to resample" in msg
         for msg in warning_messages
     )
+
+
+def test_compute_signature_expression_raises_when_mask_data_cannot_be_read(tmp_path: Path) -> None:
+    root = tmp_path / "signatures"
+    root.mkdir(parents=True, exist_ok=True)
+    weight_path = root / "nps.nii.gz"
+    nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4)), weight_path)
+
+    effect_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
+
+    class BrokenMask:
+        shape = (2, 2, 2)
+        affine = np.eye(4)
+
+        def get_fdata(self):
+            raise RuntimeError("mask read failed")
+
+    with pytest.raises(ValueError, match="Failed to compute signature expression"):
+        compute_signature_expression(
+            stat_or_effect_img=effect_img,
+            signature_root=root,
+            signature_specs=[{"name": "NPS", "path": "nps.nii.gz"}],
+            mask_img=BrokenMask(),
+        )

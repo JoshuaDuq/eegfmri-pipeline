@@ -33,6 +33,7 @@ from fmri_pipeline.analysis.contrast_builder import (
     _remap_events_by_condition_columns,
 )
 from fmri_pipeline.analysis.constraint_masking import _align_mask_to_image
+from fmri_pipeline.analysis.multivariate_signatures import SignatureResult
 from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
 from fmri_pipeline.analysis.reporting import (
     _compute_threshold_for_cfg,
@@ -700,6 +701,18 @@ def test_combine_effect_images_preserves_missing_support_as_nan(tmp_path: Path) 
     assert np.isnan(no_support_data[0, 0, 0])
 
 
+def test_combine_effect_images_requires_variances_for_variance_weighting(tmp_path: Path) -> None:
+    nib = pytest.importorskip("nibabel")
+    effect = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
+
+    with pytest.raises(ValueError, match="requires effect variances"):
+        _combine_effect_images(
+            effects=[effect],
+            variances=None,
+            method="variance",
+        )
+
+
 def test_compute_contrast_map_accepts_zero_valued_condition_codes() -> None:
     flm = SimpleNamespace(compute_contrast=lambda *args, **kwargs: "contrast-map", design_matrices_=[object()])
     cfg = ContrastBuilderConfig(
@@ -975,6 +988,8 @@ def test_resolve_fmri_stats_artifact_prefers_matching_constraint_mask(tmp_path) 
 
 
 def test_trial_signature_extraction_requires_confounds_for_included_runs(tmp_path) -> None:
+    import nibabel as nib
+
     cfg = TrialSignatureExtractionConfig(
         input_source="fmriprep",
         fmriprep_space="MNI152NLin2009cAsym",
@@ -995,7 +1010,11 @@ def test_trial_signature_extraction_requires_confounds_for_included_runs(tmp_pat
         method="beta-series",
     )
     bold_path = tmp_path / "sub-0001_task-task_run-01_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
-    bold_path.write_bytes(b"")
+    mask_path = tmp_path / "sub-0001_task-task_run-01_space-MNI152NLin2009cAsym_desc-brain_mask.nii.gz"
+    bold_img = nib.Nifti1Image(np.zeros((2, 2, 2, 7), dtype=np.float32), np.eye(4))
+    nib.save(bold_img, bold_path)
+    mask_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4))
+    nib.save(mask_img, mask_path)
     events_path = tmp_path / "sub-0001_task-task_run-01_events.tsv"
     events_path.write_text(
         "onset\tduration\ttrial_type\n0\t1\tpain\n10\t1\trest\n",
@@ -1008,6 +1027,9 @@ def test_trial_signature_extraction_requires_confounds_for_included_runs(tmp_pat
     ), patch(
         "fmri_pipeline.analysis.trial_signatures._get_tr_from_bold",
         return_value=2.0,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_brain_mask_for_bold",
+        return_value=mask_path,
     ):
         with pytest.raises(ValueError, match="require confounds for every included run"):
             run_trial_signature_extraction_for_subject(
@@ -1341,6 +1363,318 @@ def test_fit_first_level_glm_multi_run_requires_intersection_brain_mask(tmp_path
                 events_paths=events_paths,
                 confounds_paths=[None, None],
                 cfg=cfg,
+            )
+
+
+def test_fit_first_level_glm_multi_run_rejects_condition_missing_runs(tmp_path: Path) -> None:
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        formula=None,
+        name="pain-vs-rest",
+        runs=[1, 2],
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+        write_design_matrix=False,
+        confounds_strategy="none",
+    )
+    bold_paths = [
+        tmp_path / "sub-0001_task-pain_run-01_space-T1w_desc-preproc_bold.nii.gz",
+        tmp_path / "sub-0001_task-pain_run-02_space-T1w_desc-preproc_bold.nii.gz",
+    ]
+    events_paths = [
+        tmp_path / "sub-0001_task-pain_run-01_events.tsv",
+        tmp_path / "sub-0001_task-pain_run-02_events.tsv",
+    ]
+    for bold_path in bold_paths:
+        bold_path.write_bytes(b"")
+    pd.DataFrame(
+        {
+            "onset": [0.0, 8.0],
+            "duration": [1.0, 1.0],
+            "trial_type": ["pain", "rest"],
+        }
+    ).to_csv(events_paths[0], sep="\t", index=False)
+    pd.DataFrame(
+        {
+            "onset": [0.0],
+            "duration": [1.0],
+            "trial_type": ["pain"],
+        }
+    ).to_csv(events_paths[1], sep="\t", index=False)
+
+    with patch(
+        "fmri_pipeline.analysis.contrast_builder._validate_events_against_bold_run",
+        return_value=None,
+    ), patch(
+        "fmri_pipeline.analysis.contrast_builder._build_intersection_brain_mask",
+        side_effect=AssertionError("GLM mask build should not be reached after run exclusion"),
+    ):
+        with pytest.raises(ValueError, match="missing requested condition"):
+            fit_first_level_glm_multi_run(
+                bold_paths=bold_paths,
+                events_paths=events_paths,
+                confounds_paths=[None, None],
+                cfg=cfg,
+            )
+
+
+def test_trial_signature_extraction_requires_matching_brain_mask(tmp_path: Path) -> None:
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="MNI152NLin2009cAsym",
+        require_fmriprep=True,
+        runs=[1],
+        task="pain",
+        name="pain",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="none",
+        method="beta-series",
+    )
+    bold_path = tmp_path / "sub-0001_task-pain_run-01_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+    events_path = tmp_path / "sub-0001_task-pain_run-01_events.tsv"
+    bold_path.write_bytes(b"")
+    pd.DataFrame(
+        {
+            "onset": [0.0, 8.0],
+            "duration": [1.0, 1.0],
+            "trial_type": ["pain", "rest"],
+        }
+    ).to_csv(events_path, sep="\t", index=False)
+    trials = [
+        TrialInfo(
+            run=1,
+            run_label="run-01",
+            trial_index=1,
+            condition="A",
+            regressor="trial_run_01_001_A",
+            onset=0.0,
+            duration=1.0,
+            original_trial_type="pain",
+            source_events_path=events_path,
+            source_row=0,
+            extra={},
+        )
+    ]
+
+    with patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_runs",
+        return_value=[(1, bold_path, events_path, None)],
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_brain_mask_for_bold",
+        return_value=None,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._get_tr_from_bold",
+        return_value=2.0,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._extract_trials_for_run",
+        return_value=(trials, pd.read_csv(events_path, sep="\t")),
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._build_first_level_model",
+        side_effect=AssertionError("GLM build should not be reached without a brain mask"),
+    ):
+        with pytest.raises(FileNotFoundError, match="requires a matching fMRIPrep brain mask"):
+            run_trial_signature_extraction_for_subject(
+                bids_fmri_root=tmp_path,
+                bids_derivatives=tmp_path,
+                deriv_root=tmp_path / "derivatives",
+                subject="0001",
+                cfg=cfg,
+                signature_root=None,
+                signature_specs=[],
+            )
+
+
+def test_trial_signature_extraction_validates_events_against_bold_run(tmp_path: Path) -> None:
+    nib = pytest.importorskip("nibabel")
+
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="MNI152NLin2009cAsym",
+        require_fmriprep=True,
+        runs=[1],
+        task="pain",
+        name="pain",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="none",
+        method="beta-series",
+    )
+    bold_path = tmp_path / "sub-0001_task-pain_run-01_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+    mask_path = tmp_path / "sub-0001_task-pain_run-01_space-MNI152NLin2009cAsym_desc-brain_mask.nii.gz"
+    events_path = tmp_path / "sub-0001_task-pain_run-01_events.tsv"
+    nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, 3), dtype=np.float32), np.eye(4)), bold_path)
+    nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4)), mask_path)
+    pd.DataFrame(
+        {
+            "onset": [5.0, 2.0],
+            "duration": [5.0, 1.0],
+            "trial_type": ["pain", "rest"],
+        }
+    ).to_csv(events_path, sep="\t", index=False)
+
+    with patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_runs",
+        return_value=[(1, bold_path, events_path, None)],
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_brain_mask_for_bold",
+        return_value=mask_path,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._get_tr_from_bold",
+        return_value=2.0,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._build_first_level_model",
+        side_effect=AssertionError("GLM build should not be reached with invalid events"),
+    ):
+        with pytest.raises(ValueError, match="onset \\+ duration exceeds run duration"):
+            run_trial_signature_extraction_for_subject(
+                bids_fmri_root=tmp_path,
+                bids_derivatives=tmp_path,
+                deriv_root=tmp_path / "derivatives",
+                subject="0001",
+                cfg=cfg,
+                signature_root=None,
+                signature_specs=[],
+            )
+
+
+def test_trial_signature_condition_signatures_require_union_mask(tmp_path: Path) -> None:
+    nib = pytest.importorskip("nibabel")
+
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="MNI152NLin2009cAsym",
+        require_fmriprep=True,
+        runs=[1],
+        task="pain",
+        name="pain",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="none",
+        method="beta-series",
+        write_condition_betas=False,
+        write_trial_betas=False,
+        write_trial_variances=False,
+    )
+    bold_path = tmp_path / "sub-0001_task-pain_run-01_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+    mask_path = tmp_path / "sub-0001_task-pain_run-01_space-MNI152NLin2009cAsym_desc-brain_mask.nii.gz"
+    events_path = tmp_path / "sub-0001_task-pain_run-01_events.tsv"
+    signature_root = tmp_path / "signatures"
+    signature_root.mkdir()
+    signature_path = signature_root / "sig.nii.gz"
+    effect_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
+    variance_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
+    nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, 4), dtype=np.float32), np.eye(4)), bold_path)
+    nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4)), mask_path)
+    nib.save(effect_img, signature_path)
+    pd.DataFrame(
+        {
+            "onset": [0.0, 8.0],
+            "duration": [1.0, 1.0],
+            "trial_type": ["pain", "rest"],
+        }
+    ).to_csv(events_path, sep="\t", index=False)
+
+    class FakeFirstLevelModel:
+        design_matrices_ = [
+            pd.DataFrame(
+                np.ones((4, 4), dtype=float),
+                columns=[
+                    "trial_run-01_001_a",
+                    "trial_run-01_002_b",
+                    "constant",
+                    "drift",
+                ],
+            )
+        ]
+
+        def fit(self, *_args, **_kwargs):
+            return self
+
+        def compute_contrast(self, _contrast, *, output_type):
+            if output_type == "effect_variance":
+                return variance_img
+            return effect_img
+
+    def fake_signature_expression(**kwargs):
+        assert kwargs["mask_img"] is not None
+        return [
+            SignatureResult(
+                name="SIG",
+                weight_path=signature_path,
+                n_voxels=8,
+                dot=1.0,
+                cosine=1.0,
+                pearson_r=1.0,
+            )
+        ]
+
+    with patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_runs",
+        return_value=[(1, bold_path, events_path, None)],
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_brain_mask_for_bold",
+        return_value=mask_path,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._get_tr_from_bold",
+        return_value=2.0,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._build_first_level_model",
+        return_value=FakeFirstLevelModel(),
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._validate_design_matrices",
+        return_value=None,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures.compute_signature_expression",
+        side_effect=fake_signature_expression,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._union_masks_to_target",
+        side_effect=RuntimeError("union failed"),
+    ):
+        with pytest.raises(RuntimeError, match="union failed"):
+            run_trial_signature_extraction_for_subject(
+                bids_fmri_root=tmp_path,
+                bids_derivatives=tmp_path,
+                deriv_root=tmp_path / "derivatives",
+                subject="0001",
+                cfg=cfg,
+                signature_root=signature_root,
+                signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
             )
 
 

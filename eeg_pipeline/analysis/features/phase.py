@@ -318,7 +318,7 @@ def _sharpness_log_ratio(
 ) -> float:
     """Cole/Voytek-style sharpness ratio proxy (log peak sharpness / trough sharpness)."""
     x = np.asarray(x, dtype=float)
-    if x.size < 10 or not np.isfinite(x).any() or not np.isfinite(sfreq_hz) or sfreq_hz <= 0:
+    if x.size < 10 or not np.all(np.isfinite(x)) or not np.isfinite(sfreq_hz) or sfreq_hz <= 0:
         return np.nan
 
     offset_samples = float(offset_ms) * float(sfreq_hz) / 1000.0
@@ -328,15 +328,14 @@ def _sharpness_log_ratio(
 
     peak_distance = _compute_peak_distance(sfreq_hz, fmax_hz)
 
-    cleaned_signal = np.nan_to_num(x, nan=np.nanmedian(x))
-    peaks, _ = find_peaks(cleaned_signal, distance=peak_distance)
-    troughs, _ = find_peaks(-cleaned_signal, distance=peak_distance)
+    peaks, _ = find_peaks(x, distance=peak_distance)
+    troughs, _ = find_peaks(-x, distance=peak_distance)
     
     if peaks.size < _MIN_PEAKS_FOR_SHARPNESS or troughs.size < _MIN_PEAKS_FOR_SHARPNESS:
         return np.nan
 
-    peak_sharpness = _compute_mean_sharpness(cleaned_signal, peaks, offset_samples)
-    trough_sharpness = _compute_mean_sharpness(cleaned_signal, troughs, offset_samples)
+    peak_sharpness = _compute_mean_sharpness(x, peaks, offset_samples)
+    trough_sharpness = _compute_mean_sharpness(x, troughs, offset_samples)
     
     if (np.isfinite(peak_sharpness) and np.isfinite(trough_sharpness) and 
         peak_sharpness > 0 and trough_sharpness > 0):

@@ -114,28 +114,19 @@ def run_bads_detection_single_file(
                 misc_chans = list(sorted(set(misc_chans + gsr_names)))
 
             if bids_path:
-                try:
-                    ents = get_entities_from_fname(file)
-                    bp = BIDSPath(
-                        root=bids_path,
-                        subject=ents.get("subject"),
-                        session=ents.get("session"),
-                        task=ents.get("task"),
-                        datatype="eeg",
-                        suffix="eeg",
-                        extension=file_extension,
-                        check=False,
-                    )
-                    raw = read_raw_bids(bp, verbose=False)
-                    raw.load_data()
-                except Exception:
-                    raw = mne.io.read_raw(
-                        file,
-                        preload=True,
-                        verbose=False,
-                        eog=eog_chans,
-                        misc=misc_chans + ecg_chans + emg_chans,
-                    )
+                ents = get_entities_from_fname(file)
+                bp = BIDSPath(
+                    root=bids_path,
+                    subject=ents.get("subject"),
+                    session=ents.get("session"),
+                    task=ents.get("task"),
+                    datatype="eeg",
+                    suffix="eeg",
+                    extension=file_extension,
+                    check=False,
+                )
+                raw = read_raw_bids(bp, verbose=False)
+                raw.load_data()
             else:
                 raw = mne.io.read_raw(
                     file,
@@ -288,6 +279,7 @@ def run_bads_detection_single_file(
                 emoji="❌",
             )
         )
+        raise
 
     bads_frame.loc[file, "ransac"] = ransac
     bads_frame.loc[file, "repeats"] = repeats
@@ -461,4 +453,3 @@ def synchronize_bad_channels_across_runs(bids_path, task, subjects="all"):
             logger.info(f"  ✅ Updated {run_id} with {len(unified_bad_channels)} bad channels")
     
     logger.info("✅ Bad channel synchronization completed")
-
