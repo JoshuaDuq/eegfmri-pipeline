@@ -52,7 +52,6 @@ from sklearn.model_selection import (
     LeaveOneGroupOut,
     StratifiedGroupKFold,
     StratifiedKFold,
-    GroupKFold,
 )
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.under_sampling import RandomUnderSampler

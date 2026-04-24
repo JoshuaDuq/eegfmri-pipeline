@@ -1166,14 +1166,11 @@ def _rebuild_window_masks(
     task_is_rest = is_resting_state_feature_mode(config)
     
     if target_name and windows is not None:
-        explicit_target_mask_defined = False
         mask = windows.get_mask(target_name)
         if mask is not None:
             mask = np.asarray(mask, dtype=bool)
             if len(mask) != len(times):
                 mask = None
-            else:
-                explicit_target_mask_defined = True
         if mask is None:
             window_range = windows.ranges.get(target_name) if hasattr(windows, "ranges") else None
             if window_range is not None and len(window_range) >= 2:
