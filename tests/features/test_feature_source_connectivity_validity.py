@@ -566,7 +566,7 @@ class TestSourceConnectivityValidity(unittest.TestCase):
 
         self.assertEqual(epochs.filter_calls, 0)
 
-    def test_source_connectivity_resting_state_uses_available_analysis_segment(self):
+    def test_source_connectivity_resting_state_rejects_empty_target_window(self):
         n_epochs = 4
         n_times = 80
         analysis_mask = np.zeros(n_times, dtype=bool)
@@ -650,17 +650,15 @@ class TestSourceConnectivityValidity(unittest.TestCase):
                 return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
             ),
         ):
-            df, cols = extract_source_connectivity_features(
-                ctx,
-                bands=["alpha"],
-                method="lcmv",
-                connectivity_method="wpli",
-            )
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+                extract_source_connectivity_features(
+                    ctx,
+                    bands=["alpha"],
+                    method="lcmv",
+                    connectivity_method="wpli",
+                )
 
-        self.assertTrue(cols)
-        self.assertFalse(df.empty)
-        self.assertEqual(captured["n_times"], 40)
-        self.assertEqual(df.attrs.get("segment_label"), "analysis")
+        self.assertIsNone(captured["n_times"])
 
     def test_aec_prefilters_before_envelope_connectivity(self):
         n_epochs = 4

@@ -356,10 +356,10 @@ def _compute_permutation_pvalues(
     rng = np.random.default_rng(rng_seed)
     exceed_feature = 1
     exceed_int = 1
-    denom = n_permutations + 1
+    valid_permutations = 0
     has_interaction = "feature_x_predictor" in names
 
-    for _ in range(n_permutations):
+    for perm_idx_number in range(n_permutations):
         try:
             perm_idx = permute_within_groups(
                 len(resid_f),
@@ -367,12 +367,19 @@ def _compute_permutation_pvalues(
                 groups_f,
                 scheme=scheme,
             )
-        except ValueError:
-            return np.nan, np.nan
+        except ValueError as exc:
+            raise ValueError(
+                "Trialwise regression permutation failed before a valid null "
+                f"draw could be generated at draw {perm_idx_number + 1}."
+            ) from exc
         y_perm_f = y_hat_f + resid_f[perm_idx]
         beta_p = _ols_fit(X, y_perm_f)
         if beta_p is None:
-            continue
+            raise ValueError(
+                "Trialwise regression permutation produced invalid permutation "
+                f"fits at draw {perm_idx_number + 1}."
+            )
+        valid_permutations += 1
 
         beta_perm_feature = float(beta_p[idx_feature])
         if np.abs(beta_perm_feature) >= np.abs(beta_feature):
@@ -384,6 +391,13 @@ def _compute_permutation_pvalues(
             if np.abs(beta_perm_int) >= np.abs(beta_int):
                 exceed_int += 1
 
+    if valid_permutations != n_permutations:
+        raise ValueError(
+            "Trialwise regression permutation produced fewer valid fits than "
+            f"requested ({valid_permutations}/{n_permutations})."
+        )
+
+    denom = valid_permutations + 1
     p_perm_feature = exceed_feature / denom
     p_perm_int = exceed_int / denom if has_interaction else np.nan
     return p_perm_feature, p_perm_int

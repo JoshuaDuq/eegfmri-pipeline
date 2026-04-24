@@ -106,7 +106,7 @@ class TestComplexityEntropyFeatures(unittest.TestCase):
             self.assertIn(col, df.columns)
             self.assertTrue(np.isfinite(np.asarray(df[col], dtype=float)).any(), msg=col)
 
-    def test_resting_state_uses_available_analysis_segment_when_target_window_empty(self):
+    def test_resting_state_rejects_empty_target_window(self):
         precomputed = self._build_precomputed()
         times = precomputed.times
         analysis_mask = (times >= 0.0) & (times <= 1.0)
@@ -138,16 +138,16 @@ class TestComplexityEntropyFeatures(unittest.TestCase):
             }
         )
 
-        df, cols = extract_complexity_from_precomputed(precomputed, n_jobs=1)
+        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            extract_complexity_from_precomputed(precomputed, n_jobs=1)
 
-        expected_col = NamingSchema.build("comp", "analysis", "alpha", "global", "sampen")
-        self.assertIn(expected_col, cols)
-        self.assertIn(expected_col, df.columns)
-        self.assertNotIn(
-            NamingSchema.build("comp", "active", "alpha", "global", "sampen"),
-            cols,
-        )
-        self.assertTrue(np.isfinite(np.asarray(df[expected_col], dtype=float)).any())
+    def test_complexity_global_features_reject_partial_channel_support(self):
+        precomputed = self._build_precomputed()
+        active_mask = precomputed.windows.masks["active"]
+        precomputed.band_data["alpha"].filtered[0, 0, active_mask] = np.nan
+
+        with self.assertRaisesRegex(ValueError, "non-finite complexity values"):
+            extract_complexity_from_precomputed(precomputed, n_jobs=1)
 
     def test_invalid_complexity_config_raises(self):
         precomputed = self._build_precomputed()

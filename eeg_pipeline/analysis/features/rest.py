@@ -137,19 +137,8 @@ def select_single_rest_analysis_segment(
     feature_name: str,
     target_name: str,
 ) -> Tuple[str, np.ndarray]:
-    """Resolve a single unambiguous analysis segment for a rest-mode fallback."""
-    valid_masks = valid_rest_analysis_segment_masks(masks)
-    if not valid_masks:
-        raise ValueError(
-            f"{feature_name}: resting-state mode requires exactly one valid non-baseline "
-            f"analysis segment when targeted window '{target_name}' is empty, but none were found."
-        )
-    if len(valid_masks) != 1:
-        available = ", ".join(sorted(str(name) for name in valid_masks))
-        raise ValueError(
-            f"{feature_name}: resting-state mode requires exactly one valid non-baseline "
-            f"analysis segment when targeted window '{target_name}' is empty; found {available}."
-        )
-
-    segment_name, segment_mask = next(iter(valid_masks.items()))
-    return str(segment_name), np.asarray(segment_mask, dtype=bool)
+    """Reject empty rest target windows instead of changing temporal support."""
+    raise ValueError(
+        f"{feature_name}: resting-state target window '{target_name}' does not contain "
+        "valid samples. Fix the requested window or run without a target window."
+    )

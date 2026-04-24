@@ -385,26 +385,35 @@ def compute_shap_for_cv_folds(
                 n_covariates=n_covs,
             )
 
-        if param_grid and groups_train is not None and len(np.unique(groups_train)) >= 2:
-            n_splits = min(int(inner_cv_splits), len(np.unique(groups_train)))
-            if n_splits >= 2:
-                try:
-                    inner_cv = GroupKFold(n_splits=n_splits)
-                    gs = GridSearchCV(
-                        estimator=model,
-                        param_grid=param_grid,
-                        scoring="r2",
-                        cv=inner_cv,
-                        n_jobs=1,
-                        refit=True,
-                        error_score="raise",
-                    )
-                    gs.fit(X_train, y_train, groups=groups_train)
-                    model = gs.best_estimator_
-                except Exception:
-                    model.fit(X_train, y_train)
-            else:
-                model.fit(X_train, y_train)
+        if param_grid:
+            if groups_train is None:
+                raise RuntimeError(
+                    f"SHAP fold {fold_idx + 1}: inner CV requires group labels."
+                )
+            n_unique_groups = len(np.unique(groups_train))
+            n_splits = min(int(inner_cv_splits), n_unique_groups)
+            if n_splits < 2:
+                raise RuntimeError(
+                    f"SHAP fold {fold_idx + 1}: inner CV requires at least "
+                    f"2 training groups, got {n_unique_groups}."
+                )
+            try:
+                inner_cv = GroupKFold(n_splits=n_splits)
+                gs = GridSearchCV(
+                    estimator=model,
+                    param_grid=param_grid,
+                    scoring="r2",
+                    cv=inner_cv,
+                    n_jobs=1,
+                    refit=True,
+                    error_score="raise",
+                )
+                gs.fit(X_train, y_train, groups=groups_train)
+                model = gs.best_estimator_
+            except Exception as exc:
+                raise RuntimeError(
+                    f"SHAP fold {fold_idx + 1}: inner CV failed."
+                ) from exc
         else:
             model.fit(X_train, y_train)
 
@@ -415,12 +424,19 @@ def compute_shap_for_cv_folds(
                 [f for f, keep in zip(feature_names or _generate_feature_names(X.shape[1]), keep_mask) if keep],
                 seed=seed + fold_idx,
             )
-            if result.importance_df is not None and not result.importance_df.empty:
-                df = result.importance_df[["feature", "shap_importance"]].copy()
-                df["fold"] = int(fold_idx)
-                fold_importances.append(df)
-        except (RuntimeError, ImportError):
-            continue
+        except Exception as exc:
+            raise RuntimeError(
+                f"SHAP fold {fold_idx + 1}: SHAP computation failed."
+            ) from exc
+
+        if result.importance_df is None or result.importance_df.empty:
+            raise RuntimeError(
+                f"SHAP fold {fold_idx + 1}: empty SHAP importance result."
+            )
+
+        df = result.importance_df[["feature", "shap_importance"]].copy()
+        df["fold"] = int(fold_idx)
+        fold_importances.append(df)
     
     if not fold_importances:
         return pd.DataFrame()

@@ -36,7 +36,6 @@ DEFAULT_MIN_EPOCHS = 20
 DEFAULT_MIN_CHANNELS = 10
 DEFAULT_SAMPLING_FREQ = 500
 DEFAULT_MAX_AMPLITUDE_UV = 500
-CRITICAL_NAN_FRACTION = 0.01
 WARNING_EXTREME_FRACTION = 0.1
 ZERO_VARIANCE_THRESHOLD = 1e-12
 SAMPLING_FREQ_TOLERANCE = 1.0
@@ -146,12 +145,9 @@ def _validate_epochs_data_quality(
 
         nan_count, nan_fraction = _check_nan_inf_in_data(data)
         if nan_count > 0:
-            if nan_fraction > CRITICAL_NAN_FRACTION:
-                issues.append(f"Data contains {nan_fraction:.1%} NaN/Inf values")
-            else:
-                warnings.append(
-                    f"Data contains {nan_count} NaN/Inf values ({nan_fraction:.2%})"
-                )
+            issues.append(
+                f"Data contains {nan_count} NaN/Inf values ({nan_fraction:.2%})"
+            )
 
         max_uv = get_config_value(
             config, "validation.max_amplitude_uv", DEFAULT_MAX_AMPLITUDE_UV
@@ -389,4 +385,3 @@ def require_epochs_tfr(
             logger.warning(f"{context_msg} requires EpochsTFR; skipping.")
         return False
     return True
-

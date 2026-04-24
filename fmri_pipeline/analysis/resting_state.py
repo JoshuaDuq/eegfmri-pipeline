@@ -133,12 +133,17 @@ def _prepare_confounds_and_sample_mask(
 
     sample_mask: Optional[np.ndarray] = None
     if scrub_columns:
-        scrub_values = (
+        scrub_numeric = (
             confounds_df[scrub_columns]
             .apply(pd.to_numeric, errors="coerce")
-            .fillna(0.0)
-            .to_numpy(dtype=float)
         )
+        if scrub_numeric.isna().any().any():
+            bad_columns = scrub_numeric.columns[scrub_numeric.isna().any(axis=0)].tolist()
+            raise ValueError(
+                "Resting-state scrub columns contain missing or non-numeric censor flags: "
+                f"{bad_columns}."
+            )
+        scrub_values = scrub_numeric.to_numpy(dtype=float)
         retained_mask = ~(scrub_values > 0).any(axis=1)
         retained_indices = np.flatnonzero(retained_mask)
         if retained_indices.size == 0:

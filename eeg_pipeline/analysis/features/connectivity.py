@@ -638,8 +638,35 @@ def _reduce_epochs_connectivity_to_pairs(
             f"(got {arr.shape}, expected first dim={expected_pairs})."
         )
     if arr.ndim == 1:
-        return arr
-    return np.nanmean(arr.reshape(expected_pairs, -1), axis=1)
+        return _require_finite_connectivity_values(
+            arr,
+            context="imcoh edge vector",
+        )
+    return _mean_finite_connectivity_values(
+        arr.reshape(expected_pairs, -1),
+        axis=1,
+        context="imcoh frequency/time collapse",
+    )
+
+
+def _require_finite_connectivity_values(values: np.ndarray, *, context: str) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(
+            f"Connectivity: non-finite connectivity values in {context}; "
+            "connectivity summaries require fixed finite edge support."
+        )
+    return arr
+
+
+def _mean_finite_connectivity_values(
+    values: np.ndarray,
+    *,
+    axis: int,
+    context: str,
+) -> np.ndarray:
+    arr = _require_finite_connectivity_values(values, context=context)
+    return np.mean(arr, axis=axis)
 
 
 def _compute_imcoh_via_epochs_api(
@@ -874,15 +901,27 @@ def _apply_across_epochs_phase_estimates_inplace(
                             con = _run(method, seg_data, freqs, fmin, fmax, use_n_cycles)
                             con_data = np.asarray(con.get_data())
                             if con_data.ndim == 3:
-                                con_mean = np.nanmean(con_data, axis=0)
+                                con_mean = _mean_finite_connectivity_values(
+                                    con_data,
+                                    axis=0,
+                                    context=f"{method_label}/{seg_name}/{band} epoch collapse",
+                                )
                                 con_pairs = (
-                                    np.nanmean(con_mean, axis=-1)
+                                    _mean_finite_connectivity_values(
+                                        con_mean,
+                                        axis=-1,
+                                        context=f"{method_label}/{seg_name}/{band} frequency collapse",
+                                    )
                                     if con_mean.shape[-1] > 1
                                     else con_mean[:, 0]
                                 )
                             elif con_data.ndim == 2:
                                 con_pairs = (
-                                    np.nanmean(con_data, axis=-1)
+                                    _mean_finite_connectivity_values(
+                                        con_data,
+                                        axis=-1,
+                                        context=f"{method_label}/{seg_name}/{band} frequency collapse",
+                                    )
                                     if con_data.shape[-1] > 1
                                     else con_data[:, 0]
                                 )
@@ -909,6 +948,10 @@ def _apply_across_epochs_phase_estimates_inplace(
                     con_pairs = np.asarray(con_pairs, dtype=float).reshape(-1)
                     if con_pairs.size != len(pair_names):
                         continue
+                    con_pairs = _require_finite_connectivity_values(
+                        con_pairs,
+                        context=f"{method_label}/{seg_name}/{band} edge vector",
+                    )
 
                     if output_level == "full":
                         prefix = f"conn_{seg_name}_{band}_chpair_"
@@ -919,7 +962,7 @@ def _apply_across_epochs_phase_estimates_inplace(
                                 df.loc[epoch_idx, c] = float(v)
                     glob_col = f"conn_{seg_name}_{band}_global_{method_label}_mean"
                     if glob_col in df.columns:
-                        df.loc[epoch_idx, glob_col] = float(np.nanmean(con_pairs))
+                        df.loc[epoch_idx, glob_col] = float(np.mean(con_pairs))
 
                     if enable_graph_metrics:
                         adj = np.zeros((n_channels, n_channels), dtype=float)
@@ -1075,13 +1118,21 @@ def _dense_from_envelope_output(
         ec_data = np.squeeze(ec_data, axis=-1)
 
     if ec_data.ndim == 4 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
-        dense = np.nanmean(ec_data, axis=-1)
+        dense = _mean_finite_connectivity_values(
+            ec_data,
+            axis=-1,
+            context="aec dense frequency collapse",
+        )
     elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
         dense = ec_data
     elif ec_data.ndim == 3 and ec_data.shape[0] == n_channels and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_epochs:
         dense = np.moveaxis(ec_data, -1, 0)
     elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
-        packed = np.nanmean(ec_data, axis=-1)
+        packed = _mean_finite_connectivity_values(
+            ec_data,
+            axis=-1,
+            context="aec packed frequency collapse",
+        )
         tril = np.tril_indices(n_channels, k=0)
         dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
         dense[:, tril[0], tril[1]] = packed
@@ -1230,17 +1281,23 @@ def _fit_dynamic_state_labels(
         return None
 
     n_epochs, n_windows, n_edges = window_vectors.shape
+    if n_edges == 0:
+        return None
+
     flat = window_vectors.reshape(n_epochs * n_windows, n_edges)
-    valid_rows = np.sum(np.isfinite(flat), axis=1) >= max(3, int(0.5 * n_edges))
+    finite_counts = np.sum(np.isfinite(flat), axis=1)
+    partial_rows = (finite_counts > 0) & (finite_counts < n_edges)
+    if np.any(partial_rows):
+        raise ValueError(
+            "Dynamic connectivity state clustering found non-finite "
+            "connectivity edges in partially observed windows."
+        )
+
+    valid_rows = finite_counts == n_edges
     if int(np.sum(valid_rows)) < max(2 * n_states, n_states + 1):
         return None
 
-    x = flat[valid_rows]
-    col_means = np.nanmean(x, axis=0)
-    col_means = np.where(np.isfinite(col_means), col_means, 0.0)
-    inds = np.where(~np.isfinite(x))
-    if inds[0].size:
-        x[inds] = np.take(col_means, inds[1])
+    x = flat[valid_rows].copy()
 
     scaler = StandardScaler(with_mean=True, with_std=True)
     x_scaled = scaler.fit_transform(x)
@@ -1920,7 +1977,14 @@ def extract_connectivity_from_precomputed(
             if con_data.ndim == 1:
                 con_vals = np.tile(con_data[None, :], (n_epochs, 1))
             elif con_data.ndim == 2:
-                con_vals = np.tile(np.nanmean(con_data, axis=-1)[None, :], (n_epochs, 1))
+                con_vals = np.tile(
+                    _mean_finite_connectivity_values(
+                        con_data,
+                        axis=-1,
+                        context=f"{method_label}/{seg_name}/{band} across-epochs frequency collapse",
+                    )[None, :],
+                    (n_epochs, 1),
+                )
             else:
                 raise ValueError(
                     f"Connectivity: unexpected across_epochs connectivity shape {con_data.shape} "
@@ -1939,7 +2003,11 @@ def extract_connectivity_from_precomputed(
                 if con_data.ndim == 2:
                     con_data = con_data[None, :, :]
                 if con_data.ndim == 3 and con_data.shape[-1] > 1:
-                    con_vals = np.nanmean(con_data, axis=-1)
+                    con_vals = _mean_finite_connectivity_values(
+                        con_data,
+                        axis=-1,
+                        context=f"{method_label}/{seg_name}/{band} within-epoch frequency collapse",
+                    )
                 elif con_data.ndim == 3:
                     con_vals = con_data[:, :, 0]
                 else:
@@ -1952,6 +2020,10 @@ def extract_connectivity_from_precomputed(
                     f"Connectivity: connectivity epochs mismatch for method='{method_label}', segment='{seg_name}', "
                     f"band='{band}' (got {con_vals.shape[0]} epochs, expected {n_epochs})."
                 )
+        con_vals = _require_finite_connectivity_values(
+            con_vals,
+            context=f"{method_label}/{seg_name}/{band} edge matrix",
+        )
 
         parts: List[pd.DataFrame] = []
         if output_level == "full":
@@ -1961,7 +2033,7 @@ def extract_connectivity_from_precomputed(
             parts.append(pd.DataFrame(con_vals, columns=cols))
 
         glob_col = f"conn_{seg_name}_{band}_global_{method_label}_mean"
-        parts.append(pd.DataFrame({glob_col: np.nanmean(con_vals, axis=1)}))
+        parts.append(pd.DataFrame({glob_col: np.mean(con_vals, axis=1)}))
 
         if conn_cfg.enable_graph_metrics:
             graph_df = _compute_graph_metrics_for_epochs(
@@ -1997,13 +2069,21 @@ def extract_connectivity_from_precomputed(
         dense: Optional[np.ndarray] = None
 
         if ec_data.ndim == 4 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
-            dense = np.nanmean(ec_data, axis=-1)
+            dense = _mean_finite_connectivity_values(
+                ec_data,
+                axis=-1,
+                context=f"aec/{seg_name}/{band} frequency collapse",
+            )
         elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
             dense = ec_data
         elif ec_data.ndim == 3 and ec_data.shape[0] == n_channels and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_epochs:
             dense = np.moveaxis(ec_data, -1, 0)
         elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
-            packed = np.nanmean(ec_data, axis=-1)
+            packed = _mean_finite_connectivity_values(
+                ec_data,
+                axis=-1,
+                context=f"aec/{seg_name}/{band} packed frequency collapse",
+            )
             tril = np.tril_indices(n_channels, k=0)
             dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
             dense[:, tril[0], tril[1]] = packed
@@ -2023,7 +2103,10 @@ def extract_connectivity_from_precomputed(
         if dense is None or dense.shape[0] != n_epochs:
             return pd.DataFrame()
 
-        aec_vals = dense[:, pair_i, pair_j]
+        aec_vals = _require_finite_connectivity_values(
+            dense[:, pair_i, pair_j],
+            context=f"aec/{seg_name}/{band} edge matrix",
+        )
         
         # Compute Fisher-z transform: z = atanh(r)
         # This is scientifically correct for averaging correlations across trials/subjects
@@ -2052,11 +2135,11 @@ def extract_connectivity_from_precomputed(
         # Global means
         if enable_aec_raw:
             glob_col = f"conn_{seg_name}_{band}_global_aec_mean"
-            parts.append(pd.DataFrame({glob_col: np.nanmean(aec_vals, axis=1)}))
+            parts.append(pd.DataFrame({glob_col: np.mean(aec_vals, axis=1)}))
         
         if enable_aec_z and aec_vals_z is not None:
             glob_col_z = f"conn_{seg_name}_{band}_global_aec_z_mean"
-            parts.append(pd.DataFrame({glob_col_z: np.nanmean(aec_vals_z, axis=1)}))
+            parts.append(pd.DataFrame({glob_col_z: np.mean(aec_vals_z, axis=1)}))
 
         if conn_cfg.enable_graph_metrics:
             graph_df = _compute_graph_metrics_for_epochs(

@@ -2335,6 +2335,27 @@ def _require_finite_source_feature_matrix(
     return matrix
 
 
+def _mean_finite_source_connectivity_edges(
+    edge_values: np.ndarray,
+    *,
+    band: str,
+    method: str,
+    connectivity_method: str,
+) -> float:
+    edges = np.asarray(edge_values, dtype=float).ravel()
+    if edges.size == 0:
+        raise ValueError(
+            f"No source connectivity edges available for band '{band}' "
+            f"({method}, {connectivity_method})."
+        )
+    if not np.isfinite(edges).all():
+        raise ValueError(
+            f"Found non-finite source connectivity edges for band '{band}' "
+            f"({method}, {connectivity_method})."
+        )
+    return float(np.mean(edges))
+
+
 def _append_source_band_family_features(
     *,
     records: List[Dict[str, float]],
@@ -3294,7 +3315,12 @@ def extract_source_connectivity_features(
                 feature_cols.append(col_name)
 
             for epoch_idx in range(n_epochs):
-                mean_conn = float(np.nanmean(con_tensor[epoch_idx][triu_idx]))
+                mean_conn = _mean_finite_source_connectivity_edges(
+                    con_tensor[epoch_idx][triu_idx],
+                    band=band,
+                    method=src_cfg.method,
+                    connectivity_method=connectivity_method_l,
+                )
                 records[epoch_idx][col_name] = mean_conn
                 
         elif connectivity_method_l in {"wpli", "plv"}:
@@ -3345,7 +3371,12 @@ def extract_source_connectivity_features(
                 edge_values = con_data
             else:
                 edge_values = np.ravel(con_data)
-            mean_conn = float(np.nanmean(edge_values)) if edge_values.size else np.nan
+            mean_conn = _mean_finite_source_connectivity_edges(
+                edge_values,
+                band=band,
+                method=src_cfg.method,
+                connectivity_method=connectivity_method_l,
+            )
 
             for epoch_idx in range(n_epochs):
                 col_name = f"src_{src_cfg.method}_{band}_{connectivity_method_l}_global"

@@ -28,8 +28,8 @@ func toStylesHints(hints []footerHint) []styles.FooterHint {
 }
 
 const (
-	shortHeightThreshold  = 25
-	minMainContentHeight  = 10
+	shortHeightThreshold = 25
+	minMainContentHeight = 10
 	// headerSpacingLines and footerSpacingLines are added to newline counts so
 	// mainContentHeight matches the real View() assembly (extra newlines between
 	// header ↔ main and main ↔ footer are budgeted here).
@@ -79,7 +79,7 @@ func (m Model) View() string {
 	header := m.renderHeader(innerW)
 	footer := m.renderFooter(innerW)
 	mainH := m.mainContentHeight(innerW, containerH, header, footer)
-	mainContent := m.renderMainContent(h < shortHeightThreshold)
+	mainContent := m.renderContent(innerW, mainH)
 	mainContent = normalizeContentFrame(mainContent, innerW, mainH)
 
 	mainStyled := styles.RenderNoWrapBlock(lipgloss.NewStyle(), mainContent, innerW)
@@ -182,6 +182,26 @@ func (m Model) renderMainContent(isShort bool) string {
 		content += "\n" + m.renderValidationErrors()
 	}
 	return content
+}
+
+func (m Model) renderContent(width, height int) string {
+	_, terminalHeight := m.effectiveDimensions()
+	isShort := terminalHeight < shortHeightThreshold
+	content := m.renderMainContent(isShort)
+	if !m.usesReviewPanel(width) {
+		return content
+	}
+
+	stepWidth, reviewWidth := m.reviewColumnWidths(width)
+	stepContent := normalizeContentFrame(content, stepWidth, height)
+	reviewPanel := m.renderReviewPanel(reviewWidth, height)
+
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		stepContent,
+		strings.Repeat(" ", reviewPanelGap),
+		reviewPanel,
+	)
 }
 
 func (m Model) renderStepContent() string {

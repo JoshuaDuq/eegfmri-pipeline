@@ -756,28 +756,20 @@ def nested_loso_classification(
         min_class_count = np.min(counts) if len(counts) > 0 else 0
         
         if effective_splits < 2:
-            log.warning(f"Fold {fold_number}: Not enough groups for inner CV. Skipping tuning.")
-            try:
-                pipe_clone = clone(pipe)
-                pipe_clone.fit(X_train, y_train)
-                y_pred[test_idx] = pipe_clone.predict(X_test)
-                fold_ids[test_idx] = fold_number
-                if hasattr(pipe_clone, "predict_proba"):
-                    y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
-            except Exception as e:
-                raise RuntimeError(f"Fold {fold_number} fallback fit failed: {e}") from e
-            continue
+            raise RuntimeError(
+                f"Fold {fold_number}: inner CV requires at least 2 training "
+                f"groups, got {n_unique_train_groups}."
+            )
             
         if min_class_count < effective_splits:
-            log.warning(
-                f"Fold {fold_number}: Minority class count ({min_class_count}) < effective_splits ({effective_splits}). "
-                "Falling back to GroupKFold to maintain subject isolation."
+            raise RuntimeError(
+                f"Fold {fold_number}: StratifiedGroupKFold requires each class "
+                f"to have at least {effective_splits} training samples, got "
+                f"minority class count {min_class_count}."
             )
-            inner_cv = GroupKFold(n_splits=effective_splits)
-            cv_groups = train_groups
-        else:
-            inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
-            cv_groups = train_groups
+
+        inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
+        cv_groups = train_groups
         
         # GridSearch with group-aware inner CV
         gs = GridSearchCV(

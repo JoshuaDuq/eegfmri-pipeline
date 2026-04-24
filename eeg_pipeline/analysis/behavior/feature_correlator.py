@@ -1146,7 +1146,7 @@ class FeatureBehaviorCorrelator:
                 if not roi_columns:
                     continue
                 
-                roi_values = band_matrix[roi_columns].mean(axis=1)
+                roi_values = band_matrix[roi_columns].mean(axis=1, skipna=False)
                 df_pair = pd.concat([roi_values.rename("x"), targets.rename("y")], axis=1).dropna()
                 if df_pair.empty:
                     continue
@@ -1240,7 +1240,7 @@ class FeatureBehaviorCorrelator:
 
                 records.append(record)
 
-            overall_values = band_matrix.mean(axis=1)
+            overall_values = band_matrix.mean(axis=1, skipna=False)
             df_pair = pd.concat([overall_values.rename("x"), targets.rename("y")], axis=1).dropna()
             if not df_pair.empty:
                 cov_aligned = None

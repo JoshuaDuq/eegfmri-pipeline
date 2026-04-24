@@ -319,9 +319,9 @@ def _conformal_cv_plus(
         upper_chunks.append(y_test_pred_fold[:, None] + residuals[None, :])
 
     if not lower_chunks or not upper_chunks:
-        # Safety fallback when fold-wise calibration is impossible.
-        rng = np.random.default_rng(seed)
-        return _conformal_split(model, X_train, y_train, X_test, alpha, rng, groups=groups)
+        raise RuntimeError(
+            "CV+ calibration failed: no valid fold calibration chunks were produced."
+        )
 
     lower_candidates = np.concatenate(lower_chunks, axis=1)
     upper_candidates = np.concatenate(upper_chunks, axis=1)

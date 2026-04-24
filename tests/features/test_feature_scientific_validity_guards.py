@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -197,6 +199,25 @@ class TestScientificValidityGuards(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ERP is not scientifically valid"):
             extract_erp_features(ctx)
 
+    def test_aperiodic_rest_target_window_must_match_requested_segment(self):
+        from eeg_pipeline.analysis.features.aperiodic import _rebuild_window_masks
+
+        times = np.array([0.0, 1.0, 2.0], dtype=float)
+        windows = TimeWindows(
+            masks={},
+            ranges={"target": (10.0, 11.0), "available": (0.0, 2.0)},
+            times=times,
+        )
+
+        with self.assertRaisesRegex(ValueError, "target window"):
+            _rebuild_window_masks(
+                windows=windows,
+                times=times,
+                target_name="target",
+                config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
+                logger=logging.getLogger("aperiodic-rest-target"),
+            )
+
     def test_itpc_extractors_reject_rest_mode(self):
         ctx = SimpleNamespace(
             config=DotConfig({"feature_engineering": {"task_is_rest": True}}),
@@ -258,6 +279,38 @@ class TestScientificValidityGuards(unittest.TestCase):
                 ),
                 logger=logging.getLogger("precomputed-rest-mismatch"),
                 feature_groups=["spectral"],
+            )
+
+    def test_epoch_validation_rejects_any_nonfinite_samples(self):
+        from eeg_pipeline.utils.validation import validate_epochs
+
+        data = np.ones((2, 2, 200), dtype=float)
+        data[0, 0, 0] = np.nan
+        info = mne.create_info(["C3", "C4"], sfreq=100.0, ch_types="eeg")
+        epochs = mne.EpochsArray(data, info, verbose=False)
+
+        result = validate_epochs(
+            epochs,
+            DotConfig({"validation": {"min_epochs": 1, "min_channels": 1}}),
+            logger=logging.getLogger("validate-nonfinite"),
+        )
+
+        self.assertFalse(result.valid)
+        self.assertTrue(any("NaN/Inf" in issue for issue in result.issues))
+
+    def test_rest_target_window_rejects_segment_substitution(self):
+        from eeg_pipeline.analysis.features.rest import select_single_rest_analysis_segment
+
+        masks = {
+            "analysis": np.ones(10, dtype=bool),
+            "active": np.zeros(10, dtype=bool),
+        }
+
+        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            select_single_rest_analysis_segment(
+                masks,
+                feature_name="Spectral",
+                target_name="active",
             )
 
     def test_extract_precomputed_features_defaults_to_spectral_only(self):
@@ -350,7 +403,7 @@ class TestScientificValidityGuards(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "subtract_evoked is not scientifically valid"):
             _compute_tfr_for_features(ctx, tmin=None, tmax=None)
 
-    def test_quality_resting_state_uses_available_analysis_segment(self):
+    def test_quality_resting_state_rejects_empty_target_window(self):
         n_epochs = 2
         n_channels = 2
         n_times = 50
@@ -382,13 +435,10 @@ class TestScientificValidityGuards(unittest.TestCase):
             "eeg_pipeline.analysis.features.quality._compute_signal_metrics",
             return_value={"variance": np.array([1.0, 2.0], dtype=float)},
         ):
-            df, cols = extract_quality_features(ctx)
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+                extract_quality_features(ctx)
 
-        self.assertFalse(df.empty)
-        self.assertIn("quality_analysis_broadband_global_variance", cols)
-        self.assertNotIn("quality_active_broadband_global_variance", cols)
-
-    def test_quality_resting_state_rejects_ambiguous_fallback_segments(self):
+    def test_quality_resting_state_rejects_empty_target_before_substitution(self):
         n_times = 50
         times = np.arange(n_times, dtype=float) / 100.0
         epochs = SimpleNamespace(
@@ -421,7 +471,7 @@ class TestScientificValidityGuards(unittest.TestCase):
             "eeg_pipeline.analysis.features.quality.pick_eeg_channels",
             return_value=(np.array([0, 1]), ["C3", "C4"]),
         ):
-            with self.assertRaisesRegex(ValueError, "requires exactly one valid non-baseline analysis segment"):
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
                 extract_quality_features(ctx)
 
     def test_power_without_baseline_emits_log10raw_for_resting_state(self):
@@ -537,7 +587,7 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertEqual(columns, ["power_analysis_alpha_global_log10raw_mean"])
         self.assertTrue(np.allclose(features_df.iloc[:, 0].to_numpy(dtype=float), 1.0))
 
-    def test_pac_api_path_resolves_single_rest_segment_window(self):
+    def test_pac_api_path_rejects_empty_rest_target_window(self):
         epochs = _EpochStub(n_epochs=2, sfreq=100.0, n_times=80)
         ctx = SimpleNamespace(
             epochs=epochs,
@@ -555,13 +605,11 @@ class TestScientificValidityGuards(unittest.TestCase):
             logger=logging.getLogger("pac-api-rest"),
         )
 
-        segment_name, segment_window = _resolve_pac_segment_window(ctx, epochs.times)
-
-        self.assertEqual(segment_name, "analysis")
-        self.assertEqual(segment_window, (0.0, 0.4))
+        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            _resolve_pac_segment_window(ctx, epochs.times)
 
 
-    def test_ratios_resting_state_uses_available_analysis_segments(self):
+    def test_ratios_resting_state_rejects_empty_target_window(self):
         sfreq = 100.0
         times = np.arange(200, dtype=float) / sfreq
         analysis_mask = np.ones(times.shape, dtype=bool)
@@ -613,16 +661,10 @@ class TestScientificValidityGuards(unittest.TestCase):
                 "beta": np.full((2, 1), 2.0, dtype=float),
             },
         ):
-            features_df, columns = extract_band_ratios_from_precomputed(precomputed, config)
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+                extract_band_ratios_from_precomputed(precomputed, config)
 
-        self.assertFalse(features_df.empty)
-        self.assertEqual(columns, ["ratios_analysis_theta_beta_global_power_ratio"])
-        np.testing.assert_allclose(
-            features_df["ratios_analysis_theta_beta_global_power_ratio"].to_numpy(dtype=float),
-            np.full((2,), 2.0, dtype=float),
-        )
-
-    def test_asymmetry_resting_state_uses_available_analysis_segments(self):
+    def test_asymmetry_resting_state_rejects_empty_target_window(self):
         sfreq = 100.0
         times = np.arange(200, dtype=float) / sfreq
         analysis_mask = np.ones(times.shape, dtype=bool)
@@ -657,26 +699,12 @@ class TestScientificValidityGuards(unittest.TestCase):
             config=config,
             logger=logging.getLogger("asymmetry-rest"),
         )
-        expected_index = (4.0 - 2.0) / (4.0 + 2.0)
-        expected_logdiff = np.log(4.0) - np.log(2.0)
-
         with patch(
             "eeg_pipeline.analysis.features.precomputed.extras._compute_psd_band_power_for_segment",
             return_value={"alpha": np.array([[2.0, 4.0], [2.0, 4.0]], dtype=float)},
         ):
-            features_df, columns = extract_asymmetry_from_precomputed(precomputed)
-
-        self.assertFalse(features_df.empty)
-        self.assertIn("asymmetry_analysis_alpha_chpair_F3-F4_index", columns)
-        self.assertIn("asymmetry_analysis_alpha_chpair_F3-F4_logdiff", columns)
-        np.testing.assert_allclose(
-            features_df["asymmetry_analysis_alpha_chpair_F3-F4_index"].to_numpy(dtype=float),
-            np.full((2,), expected_index, dtype=float),
-        )
-        np.testing.assert_allclose(
-            features_df["asymmetry_analysis_alpha_chpair_F3-F4_logdiff"].to_numpy(dtype=float),
-            np.full((2,), expected_logdiff, dtype=float),
-        )
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+                extract_asymmetry_from_precomputed(precomputed)
 
     def test_iaf_trial_ml_safe_requires_train_mask(self):
         data = np.random.default_rng(7).standard_normal((6, 2, 32))
@@ -844,7 +872,7 @@ class TestScientificValidityGuards(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "train_mask"):
             extract_burst_features(ctx, ["alpha"])
 
-    def test_bursts_resting_state_uses_analysis_segments_without_baseline(self):
+    def test_bursts_resting_state_rejects_empty_target_window(self):
         times = np.arange(200, dtype=float) / 100.0
         analysis_mask = np.ones(times.size, dtype=bool)
         empty_mask = np.zeros(times.size, dtype=bool)
@@ -900,17 +928,42 @@ class TestScientificValidityGuards(unittest.TestCase):
             spatial_modes=["global"],
         )
 
-        features_df, columns = extract_burst_features(ctx, ["alpha"])
+        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            extract_burst_features(ctx, ["alpha"])
 
-        self.assertFalse(features_df.empty)
-        self.assertIn("bursts_analysis_alpha_global_count", columns)
-        self.assertNotIn("bursts_active_alpha_global_count", columns)
-        self.assertTrue(
-            np.all(
-                features_df["bursts_analysis_alpha_global_count"].to_numpy(dtype=float)
-                >= 1.0
+    def test_condition_burst_thresholds_require_condition_support(self):
+        from eeg_pipeline.analysis.features.bursts import _compute_thresholds_condition
+
+        baseline = np.ones((4, 1, 8), dtype=float)
+        condition_labels = np.array(["a", "a", "b", "b"], dtype=object)
+
+        with self.assertRaisesRegex(ValueError, "condition-specific burst thresholds"):
+            _compute_thresholds_condition(
+                baseline,
+                condition_labels,
+                method="percentile",
+                threshold_z=2.0,
+                threshold_percentile=75.0,
+                min_trials_per_condition=3,
             )
-        )
+
+    def test_condition_burst_threshold_trainmask_requires_training_support(self):
+        from eeg_pipeline.analysis.features.bursts import _compute_thresholds_condition_trainmask
+
+        baseline = np.ones((4, 1, 8), dtype=float)
+        condition_labels = np.array(["a", "a", "b", "b"], dtype=object)
+        train_mask = np.zeros(4, dtype=bool)
+
+        with self.assertRaisesRegex(ValueError, "training mask"):
+            _compute_thresholds_condition_trainmask(
+                baseline,
+                condition_labels,
+                train_mask,
+                method="percentile",
+                threshold_z=2.0,
+                threshold_percentile=75.0,
+                min_trials_per_condition=2,
+            )
 
     def test_family_spatial_transform_resolution_surfaces_errors(self):
         with patch(
@@ -1077,7 +1130,7 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertEqual(cols, [])
         self.assertTrue(df.empty)
 
-    def test_source_localization_resting_state_uses_available_analysis_segment(self):
+    def test_source_localization_resting_state_rejects_empty_target_window(self):
         n_epochs = 4
         n_times = 80
         roi_data = np.random.default_rng(29).standard_normal((n_epochs, 2, n_times))
@@ -1162,17 +1215,17 @@ class TestScientificValidityGuards(unittest.TestCase):
             "mne.read_labels_from_annot",
             return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
         ):
-            df, cols = extract_source_localization_features(
-                ctx,
-                bands=["alpha"],
-                method="lcmv",
-            )
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+                extract_source_localization_features(
+                    ctx,
+                    bands=["alpha"],
+                    method="lcmv",
+                )
 
-        self.assertFalse(df.empty)
-        self.assertEqual(captured["n_times_power"], 40)
-        self.assertEqual(captured["n_times_env"], 40)
+        self.assertIsNone(captured["n_times_power"])
+        self.assertIsNone(captured["n_times_env"])
 
-    def test_source_localization_resting_state_save_stc_uses_segment_mask(self):
+    def test_source_localization_resting_state_save_stc_rejects_empty_target_window(self):
         n_epochs = 3
         n_times = 80
         analysis_mask = np.zeros(n_times, dtype=bool)
@@ -1263,13 +1316,10 @@ class TestScientificValidityGuards(unittest.TestCase):
             "mne.read_labels_from_annot",
             return_value=[SimpleNamespace(name="roi1"), SimpleNamespace(name="roi2")],
         ):
-            df, cols = extract_source_localization_features(ctx, bands=["alpha"], method="lcmv")
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+                extract_source_localization_features(ctx, bands=["alpha"], method="lcmv")
 
-        self.assertGreaterEqual(len(captured_lengths), 2)
-        self.assertEqual(captured_lengths[0], 40)
-        self.assertEqual(captured_lengths[1], 40)
-        self.assertIn("src_analysis_lcmv_alpha_roi1_power", cols)
-        self.assertNotIn("src_active_lcmv_alpha_roi1_power", cols)
+        self.assertFalse(captured_lengths)
 
     def test_source_localization_rejects_non_finite_roi_power_aggregates(self):
         n_epochs = 3
@@ -1828,6 +1878,77 @@ class TestScientificValidityGuards(unittest.TestCase):
             return_value=src_cfg,
         ):
             with self.assertRaisesRegex(ValueError, "same_dataset"):
+                extract_source_connectivity_features(
+                    ctx,
+                    bands=["alpha"],
+                    method="eloreta",
+                    connectivity_method="wpli",
+                )
+
+    def test_source_connectivity_rejects_nonfinite_global_edges(self):
+        fmri_cfg = SimpleNamespace(
+            enabled=False,
+            provenance="independent",
+            require_provenance=False,
+        )
+        src_cfg = SimpleNamespace(
+            method="eloreta",
+            fmri_cfg=fmri_cfg,
+            subjects_dir=None,
+            trans_path=None,
+            bem_path=None,
+            subject="fsaverage",
+            parcellation="aparc",
+            allow_template_fallback=True,
+            eloreta_loose=0.2,
+            eloreta_depth=0.8,
+            eloreta_snr=3.0,
+        )
+        ctx = SimpleNamespace(
+            epochs=_EpochStub(4, sfreq=100.0, n_times=120),
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "sourcelocalization": {"min_cycles_per_band": 1.0},
+                    }
+                }
+            ),
+            logger=logging.getLogger("src-conn-nonfinite-edges"),
+            analysis_mode="group_stats",
+            train_mask=None,
+            frequency_bands={"alpha": (8.0, 12.0)},
+            name="active",
+        )
+
+        class _Connectivity:
+            def get_data(self):
+                return np.array([0.2, np.nan, 0.4], dtype=float)
+
+        fake_connectivity = types.SimpleNamespace(
+            spectral_connectivity_epochs=lambda *_args, **_kwargs: _Connectivity(),
+            envelope_correlation=lambda *_args, **_kwargs: _Connectivity(),
+        )
+
+        with patch.dict(sys.modules, {"mne_connectivity": fake_connectivity}), patch(
+            "eeg_pipeline.analysis.features.source_localization._load_source_localization_config",
+            return_value=src_cfg,
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._setup_forward_model",
+            return_value=(object(), object(), None),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._compute_eloreta_source_estimates",
+            return_value=([_StcStub(np.ones((2, 120), dtype=float)) for _ in range(4)], object()),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._extract_roi_timecourses",
+            return_value=np.ones((4, 3, 120), dtype=float),
+        ), patch(
+            "eeg_pipeline.analysis.features.source_localization._validate_source_connectivity_duration",
+            return_value=True,
+        ), patch(
+            "mne.read_labels_from_annot",
+            return_value=[SimpleNamespace(name="roi_a"), SimpleNamespace(name="roi_b"), SimpleNamespace(name="roi_c")],
+        ):
+            with self.assertRaisesRegex(ValueError, "non-finite source connectivity"):
                 extract_source_connectivity_features(
                     ctx,
                     bands=["alpha"],
@@ -2432,7 +2553,7 @@ class TestScientificValidityGuards(unittest.TestCase):
         self.assertTrue(cols)
         self.assertIn("pac_active_theta_gamma_global_val", df.columns)
 
-    def test_pac_resting_state_uses_available_analysis_segment(self):
+    def test_pac_resting_state_rejects_empty_target_window(self):
         n_epochs, n_ch, n_times = 4, 2, 300
         sfreq = 100.0
         times = np.arange(n_times, dtype=float) / sfreq
@@ -2503,11 +2624,8 @@ class TestScientificValidityGuards(unittest.TestCase):
             frequency_bands={"theta": [4.0, 8.0], "gamma": [30.0, 80.0]},
         )
 
-        df, cols = extract_pac_from_precomputed(precomputed, cfg)
-
-        self.assertFalse(df.empty)
-        self.assertIn("pac_analysis_theta_gamma_global_val", cols)
-        self.assertNotIn("pac_active_theta_gamma_global_val", cols)
+        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            extract_pac_from_precomputed(precomputed, cfg)
 
     def test_pac_precomputed_without_normalization_is_not_divided_by_segment_length(self):
         n_epochs, n_ch, n_times = 2, 1, 100

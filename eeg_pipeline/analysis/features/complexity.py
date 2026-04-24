@@ -150,6 +150,18 @@ def _mse_stat_name(scale: int) -> str:
     return f"mse{int(scale):02d}"
 
 
+def _mean_finite_complexity_values(values: np.ndarray, *, label: str) -> float:
+    arr = np.asarray(values, dtype=float)
+    if arr.size == 0:
+        raise ValueError(f"Complexity: {label} has no contributing channels.")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(
+            f"Complexity: non-finite complexity values for {label}; "
+            "ROI/global summaries require fixed finite channel support."
+        )
+    return float(np.mean(arr))
+
+
 def _valid_analysis_segments(
     segments: Dict[str, np.ndarray],
 ) -> Dict[str, np.ndarray]:
@@ -301,13 +313,22 @@ def _compute_epoch_complexity(
                 if not idxs:
                     continue
                 record[NamingSchema.build("comp", segment_name, band, "roi", "lzc", channel=roi_name)] = float(
-                    np.nanmean(lzc_per_channel[idxs])
+                    _mean_finite_complexity_values(
+                        lzc_per_channel[idxs],
+                        label=f"segment={segment_name}, band={band}, roi={roi_name}, metric=lzc",
+                    )
                 )
                 record[NamingSchema.build("comp", segment_name, band, "roi", "pe", channel=roi_name)] = float(
-                    np.nanmean(pe_per_channel[idxs])
+                    _mean_finite_complexity_values(
+                        pe_per_channel[idxs],
+                        label=f"segment={segment_name}, band={band}, roi={roi_name}, metric=pe",
+                    )
                 )
                 record[NamingSchema.build("comp", segment_name, band, "roi", "sampen", channel=roi_name)] = float(
-                    np.nanmean(sampen_per_channel[idxs])
+                    _mean_finite_complexity_values(
+                        sampen_per_channel[idxs],
+                        label=f"segment={segment_name}, band={band}, roi={roi_name}, metric=sampen",
+                    )
                 )
                 for scale_idx, scale in enumerate(mse_scales):
                     record[
@@ -319,17 +340,42 @@ def _compute_epoch_complexity(
                             _mse_stat_name(scale),
                             channel=roi_name,
                         )
-                    ] = float(np.nanmean(mse_per_channel[idxs, scale_idx]))
+                    ] = _mean_finite_complexity_values(
+                        mse_per_channel[idxs, scale_idx],
+                        label=(
+                            f"segment={segment_name}, band={band}, roi={roi_name}, "
+                            f"metric={_mse_stat_name(scale)}"
+                        ),
+                    )
 
         if "global" in spatial_modes:
-            record[NamingSchema.build("comp", segment_name, band, "global", "lzc")] = float(np.nanmean(lzc_per_channel))
-            record[NamingSchema.build("comp", segment_name, band, "global", "pe")] = float(np.nanmean(pe_per_channel))
+            record[NamingSchema.build("comp", segment_name, band, "global", "lzc")] = (
+                _mean_finite_complexity_values(
+                    lzc_per_channel,
+                    label=f"segment={segment_name}, band={band}, global metric=lzc",
+                )
+            )
+            record[NamingSchema.build("comp", segment_name, band, "global", "pe")] = (
+                _mean_finite_complexity_values(
+                    pe_per_channel,
+                    label=f"segment={segment_name}, band={band}, global metric=pe",
+                )
+            )
             record[NamingSchema.build("comp", segment_name, band, "global", "sampen")] = float(
-                np.nanmean(sampen_per_channel)
+                _mean_finite_complexity_values(
+                    sampen_per_channel,
+                    label=f"segment={segment_name}, band={band}, global metric=sampen",
+                )
             )
             for scale_idx, scale in enumerate(mse_scales):
                 record[NamingSchema.build("comp", segment_name, band, "global", _mse_stat_name(scale))] = float(
-                    np.nanmean(mse_per_channel[:, scale_idx])
+                    _mean_finite_complexity_values(
+                        mse_per_channel[:, scale_idx],
+                        label=(
+                            f"segment={segment_name}, band={band}, "
+                            f"global metric={_mse_stat_name(scale)}"
+                        ),
+                    )
                 )
 
     return record

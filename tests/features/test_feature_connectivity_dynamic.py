@@ -39,6 +39,26 @@ def _fake_spectral_connectivity_time(
     return _DummyConnectivity(data)
 
 
+def _fake_spectral_connectivity_time_with_nan(
+    seg_data: np.ndarray,
+    *,
+    indices,
+    average: bool,
+    **_kwargs,
+):
+    result = _fake_spectral_connectivity_time(
+        seg_data,
+        indices=indices,
+        average=average,
+        **_kwargs,
+    ).get_data()
+    if average:
+        result[0, 0] = np.nan
+    else:
+        result[0, 0, 0] = np.nan
+    return _DummyConnectivity(result)
+
+
 def _fake_envelope_correlation(
     analytic_seg: np.ndarray,
     **_kwargs,
@@ -62,6 +82,19 @@ def _fake_state_labels(window_vectors: np.ndarray, *, n_states: int, random_stat
 
 
 class TestDynamicConnectivityFeatures(unittest.TestCase):
+    def test_dynamic_state_labels_reject_partial_nonfinite_edges(self):
+        from eeg_pipeline.analysis.features.connectivity import _fit_dynamic_state_labels
+
+        window_vectors = np.ones((3, 3, 4), dtype=float)
+        window_vectors[0, 0, 1] = np.nan
+
+        with self.assertRaisesRegex(ValueError, "non-finite connectivity edges"):
+            _fit_dynamic_state_labels(
+                window_vectors,
+                n_states=2,
+                random_state=7,
+            )
+
     def _build_precomputed(self) -> PrecomputedData:
         rng = np.random.default_rng(23)
         sfreq = 100.0
@@ -232,6 +265,24 @@ class TestDynamicConnectivityFeatures(unittest.TestCase):
 
         self.assertTrue(backends_seen)
         self.assertIn("threading", backends_seen)
+
+    def test_static_connectivity_rejects_nonfinite_edges(self):
+        precomputed = self._build_precomputed()
+        precomputed.config["feature_engineering"]["connectivity"]["dynamic_enabled"] = False
+        precomputed.config["feature_engineering"]["connectivity"]["measures"] = ["wpli"]
+
+        with patch(
+            "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_time",
+            new=_fake_spectral_connectivity_time_with_nan,
+        ):
+            with self.assertRaisesRegex(ValueError, "non-finite connectivity values"):
+                extract_connectivity_from_precomputed(
+                    precomputed,
+                    bands=["alpha"],
+                    segments=["full"],
+                    config=precomputed.config,
+                    logger=precomputed.logger,
+                )
 
     def test_trial_ml_safe_disables_dynamic_state_metrics(self):
         precomputed = self._build_precomputed()

@@ -301,8 +301,9 @@ def perm_pval_simple(
         return np.nan
 
     observed_abs = np.abs(observed_correlation)
-    n_extreme = 0
-    for _ in range(n_perm):
+    n_extreme = 1
+    valid_permutations = 0
+    for perm_idx in range(int(n_perm)):
         try:
             perm_indices = permute_within_groups(
                 n_valid,
@@ -311,17 +312,31 @@ def perm_pval_simple(
                 scheme=scheme,
                 strict=True,
             )
-        except ValueError:
-            return np.nan
+        except ValueError as exc:
+            raise ValueError(
+                "Simple permutation test failed before a valid null draw "
+                f"could be generated at draw {perm_idx + 1}."
+            ) from exc
         perm_correlation, _ = compute_correlation(
             x_valid[perm_indices], y_valid, method
         )
-        if np.isfinite(perm_correlation):
-            perm_abs = np.abs(perm_correlation)
-            if perm_abs >= observed_abs:
-                n_extreme += 1
+        if not np.isfinite(perm_correlation):
+            raise ValueError(
+                "invalid simple permutation draw: non-finite permuted "
+                f"correlation at draw {perm_idx + 1}."
+            )
+        valid_permutations += 1
+        perm_abs = np.abs(perm_correlation)
+        if perm_abs >= observed_abs:
+            n_extreme += 1
 
-    return (n_extreme + 1) / (n_perm + 1)
+    if valid_permutations != int(n_perm):
+        raise ValueError(
+            "Simple permutation test did not complete the requested "
+            f"number of valid permutations ({valid_permutations}/{int(n_perm)})."
+        )
+
+    return n_extreme / (valid_permutations + 1)
 
 
 def perm_pval_partial_freedman_lane(

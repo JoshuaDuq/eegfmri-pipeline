@@ -311,6 +311,27 @@ def test_discover_available_conditions_requires_condition_column() -> None:
         )
 
 
+def test_discover_available_conditions_surfaces_unreadable_events(tmp_path: Path) -> None:
+    from fmri_pipeline.analysis.contrast_builder import discover_available_conditions
+
+    func_dir = tmp_path / "sub-0001" / "func"
+    func_dir.mkdir(parents=True)
+    events_path = func_dir / "sub-0001_task-pain_run-01_events.tsv"
+    events_path.write_text("trial_type\npain\n", encoding="utf-8")
+
+    with patch(
+        "fmri_pipeline.analysis.contrast_builder.pd.read_csv",
+        side_effect=pd.errors.ParserError("bad events"),
+    ):
+        with pytest.raises(RuntimeError, match="Failed to read events file"):
+            discover_available_conditions(
+                tmp_path,
+                subject="0001",
+                task="pain",
+                condition_column="trial_type",
+            )
+
+
 def test_first_level_condition_overlap_raises() -> None:
     cfg = ContrastBuilderConfig(
         enabled=True,

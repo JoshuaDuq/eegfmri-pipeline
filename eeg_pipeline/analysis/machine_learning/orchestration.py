@@ -464,9 +464,9 @@ def _fit_tuned_regression_estimator(
 ) -> Pipeline:
     n_unique = len(np.unique(groups_train))
     if n_unique < 2:
-        est = clone(base_pipe)
-        est.fit(X_train, y_train)
-        return est
+        raise RuntimeError(
+            f"{fold_info}: inner CV requires at least 2 training groups, got {n_unique}."
+        )
 
     inner_cv = create_inner_cv(groups_train, inner_splits)
     scoring = create_scoring_dict()

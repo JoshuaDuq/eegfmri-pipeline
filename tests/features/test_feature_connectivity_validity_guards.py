@@ -170,7 +170,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
         self.assertFalse(df.empty)
         self.assertTrue(any("global_imcoh_mean" in col for col in cols))
 
-    def test_connectivity_resting_state_uses_available_analysis_segment(self):
+    def test_connectivity_resting_state_rejects_empty_target_window(self):
         config = DotConfig(
             {
                 "feature_engineering": {
@@ -212,16 +212,13 @@ class TestConnectivityValidityGuards(unittest.TestCase):
             "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_epochs",
             side_effect=_fake_spectral_connectivity_epochs,
         ):
-            df, cols = extract_connectivity_from_precomputed(
-                precomputed,
-                bands=["alpha"],
-                config=config,
-                logger=logging.getLogger("test-connectivity-rest"),
-            )
-
-        self.assertFalse(df.empty)
-        self.assertTrue(any(col.startswith("conn_analysis_alpha_") for col in cols))
-        self.assertFalse(any(col.startswith("conn_active_alpha_") for col in cols))
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+                extract_connectivity_from_precomputed(
+                    precomputed,
+                    bands=["alpha"],
+                    config=config,
+                    logger=logging.getLogger("test-connectivity-rest"),
+                )
 
     def test_psi_is_zero_for_constant_phase_lag(self):
         """PSI should be ~0 when coherency phase is constant across frequency."""
@@ -499,7 +496,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
         self.assertAlmostEqual(float(df[col_bwd_mean].iloc[0]), expected_bwd, places=8)
         self.assertAlmostEqual(float(df[col_asym].iloc[0]), expected_asym, places=8)
 
-    def test_directed_connectivity_resting_state_uses_available_analysis_segment(self):
+    def test_directed_connectivity_resting_state_rejects_empty_target_window(self):
         precomputed = _make_precomputed(transform="none", family="directedconnectivity")
         precomputed.ch_names = ["A", "B", "C"]
         precomputed.data = np.zeros((1, 3, 60), dtype=float)
@@ -544,20 +541,13 @@ class TestConnectivityValidityGuards(unittest.TestCase):
             "eeg_pipeline.analysis.features.connectivity._compute_directed_connectivity_epoch",
             return_value={"dtf": dtf_matrix},
         ):
-            df, cols = extract_directed_connectivity_from_precomputed(
-                precomputed,
-                bands=["alpha"],
-                config=config,
-                logger=logging.getLogger("test-directed-connectivity-rest"),
-            )
-
-        col_ab_fwd = NamingSchema.build("dconn", "analysis", "alpha", "chpair", "dtf_fwd", channel_pair="A-B")
-        self.assertIn(col_ab_fwd, cols)
-        self.assertIn(col_ab_fwd, df.columns)
-        self.assertNotIn(
-            NamingSchema.build("dconn", "active", "alpha", "chpair", "dtf_fwd", channel_pair="A-B"),
-            cols,
-        )
+            with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+                extract_directed_connectivity_from_precomputed(
+                    precomputed,
+                    bands=["alpha"],
+                    config=config,
+                    logger=logging.getLogger("test-directed-connectivity-rest"),
+                )
 
 
 if __name__ == "__main__":

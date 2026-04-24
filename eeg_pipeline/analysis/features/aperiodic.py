@@ -25,7 +25,6 @@ from joblib import Parallel, delayed
 from eeg_pipeline.analysis.features.rest import (
     is_resting_state_feature_mode,
     raise_if_rest_evoked_subtraction,
-    select_single_rest_analysis_segment,
     validate_rest_configuration,
     valid_rest_analysis_segment_masks,
 )
@@ -1185,21 +1184,10 @@ def _rebuild_window_masks(
             segments = {target_name: mask}
         else:
             if task_is_rest:
-                fallback_masks = _build_window_masks_from_ranges(windows, times)
-                if explicit_target_mask_defined:
-                    fallback_masks.pop(str(target_name), None)
-                segment_name, segment_mask = select_single_rest_analysis_segment(
-                    fallback_masks,
-                    feature_name="Aperiodic",
-                    target_name=str(target_name),
+                raise ValueError(
+                    "Aperiodic: requested resting-state target window "
+                    f"'{target_name}' has no valid mask on the current time axis."
                 )
-                logger.info(
-                    "Aperiodic: resting-state mode found no valid target window '%s'; "
-                    "using available analysis segment '%s' instead.",
-                    target_name,
-                    segment_name,
-                )
-                return {segment_name: segment_mask}, None
 
             logger.error(
                 "Aperiodic: targeted window '%s' has no valid mask; skipping.",

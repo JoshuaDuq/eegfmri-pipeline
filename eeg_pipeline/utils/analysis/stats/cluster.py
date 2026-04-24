@@ -1644,7 +1644,10 @@ def compute_permutation_max_masses(
 
     scheme = str(scheme or "shuffle").strip().lower()
     if scheme not in {"shuffle", "circular_shift"}:
-        scheme = "shuffle"
+        raise ValueError(
+            "Invalid cluster permutation scheme "
+            f"{scheme!r}; expected 'shuffle' or 'circular_shift'."
+        )
     
     residual_cache: Dict[Tuple[int, int], Tuple[np.ndarray, np.ndarray, Dict[int, int]]] = {}
     covariate_count = 0

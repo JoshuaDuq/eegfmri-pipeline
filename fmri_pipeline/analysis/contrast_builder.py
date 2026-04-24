@@ -647,9 +647,8 @@ def discover_available_conditions(
             if selected_column in events_df.columns:
                 conditions = events_df[selected_column].dropna().unique().tolist()
                 all_conditions.update(str(c) for c in conditions)
-        except Exception as e:
-            logger.warning("Failed to read events file %s: %s", events_file, e)
-            continue
+        except Exception as exc:
+            raise RuntimeError(f"Failed to read events file {events_file}: {exc}") from exc
 
     return sorted(all_conditions)
 

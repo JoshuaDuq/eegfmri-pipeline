@@ -321,7 +321,11 @@ def _compute_thresholds_condition(
         mask = condition_labels == cond
         n = int(np.sum(mask))
         if n < int(min_trials_per_condition):
-            continue
+            raise ValueError(
+                "condition-specific burst thresholds require at least "
+                f"{int(min_trials_per_condition)} trials per condition; "
+                f"condition {cond!r} has {n}."
+            )
         out[mask] = _compute_thresholds(
             baseline_envelope[mask],
             method=method,
@@ -331,24 +335,15 @@ def _compute_thresholds_condition(
         )
 
     if not np.isfinite(out).any():
-        return _compute_thresholds(
-            baseline_envelope,
-            method=method,
-            threshold_z=threshold_z,
-            threshold_percentile=threshold_percentile,
-            per_epoch=False,
+        raise ValueError(
+            "condition-specific burst thresholds produced no finite thresholds."
         )
 
     missing = ~np.isfinite(out).any(axis=1)
     if np.any(missing):
-        subj = _compute_thresholds(
-            baseline_envelope,
-            method=method,
-            threshold_z=threshold_z,
-            threshold_percentile=threshold_percentile,
-            per_epoch=False,
+        raise ValueError(
+            "condition-specific burst thresholds are missing for one or more epochs."
         )
-        out[missing] = subj[missing]
 
     return out
 
@@ -367,30 +362,22 @@ def _compute_thresholds_condition_trainmask(
     n_epochs, n_channels, _ = baseline_envelope.shape
     train_mask = np.asarray(train_mask, dtype=bool).ravel()
     if train_mask.size != n_epochs or not np.any(train_mask):
-        return _compute_thresholds(
-            baseline_envelope,
-            method=method,
-            threshold_z=threshold_z,
-            threshold_percentile=threshold_percentile,
-            per_epoch=False,
+        raise ValueError(
+            "condition-specific burst thresholds require a non-empty training mask "
+            "aligned to epochs."
         )
 
-    subj_train = _compute_thresholds(
-        baseline_envelope[train_mask],
-        method=method,
-        threshold_z=threshold_z,
-        threshold_percentile=threshold_percentile,
-        per_epoch=False,
-    )
-    subj_thr = subj_train[0] if subj_train.shape[0] else np.full((n_channels,), np.nan)
-
-    out = np.broadcast_to(subj_thr[None, :], (n_epochs, n_channels)).copy()
+    out = np.full((n_epochs, n_channels), np.nan, dtype=float)
     for cond in np.unique(condition_labels):
         cond_all = condition_labels == cond
         cond_train = cond_all & train_mask
         n_train = int(np.sum(cond_train))
         if n_train < int(min_trials_per_condition):
-            continue
+            raise ValueError(
+                "condition-specific burst thresholds require at least "
+                f"{int(min_trials_per_condition)} training trials per condition; "
+                f"condition {cond!r} has {n_train}."
+            )
         thr_train = _compute_thresholds(
             baseline_envelope[cond_train],
             method=method,
@@ -398,8 +385,18 @@ def _compute_thresholds_condition_trainmask(
             threshold_percentile=threshold_percentile,
             per_epoch=False,
         )
-        thr_vec = thr_train[0] if thr_train.shape[0] else subj_thr
+        if thr_train.shape[0] == 0 or not np.isfinite(thr_train[0]).any():
+            raise ValueError(
+                "condition-specific burst thresholds produced no finite "
+                f"training thresholds for condition {cond!r}."
+            )
+        thr_vec = thr_train[0]
         out[cond_all] = np.broadcast_to(thr_vec[None, :], (int(np.sum(cond_all)), n_channels))
+
+    if not np.isfinite(out).any():
+        raise ValueError(
+            "condition-specific burst thresholds produced no finite thresholds."
+        )
 
     return out
 

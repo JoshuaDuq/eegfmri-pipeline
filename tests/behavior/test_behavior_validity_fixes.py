@@ -250,6 +250,58 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "underidentified"):
                 _build_predictor_covariates(predictor, config=cfg)
 
+    def test_power_roi_correlations_require_complete_roi_channel_support(self):
+        from eeg_pipeline.analysis.behavior.feature_correlator import (
+            CorrelationConfig,
+            FeatureBehaviorCorrelator,
+        )
+
+        correlator = object.__new__(FeatureBehaviorCorrelator)
+        correlator.subject = "0001"
+        correlator.deriv_root = Path(tempfile.mkdtemp())
+        correlator.config = DotConfig(
+            {
+                "power": {"bands_to_use": ["alpha"]},
+                "behavior_analysis": {
+                    "statistics": {"base_seed": 11},
+                    "correlations": {"power_segment_preference": "active"},
+                },
+            }
+        )
+        correlator.logger = Mock()
+        correlator.stats_dir = Path(tempfile.mkdtemp())
+
+        power_df = pd.DataFrame(
+            {
+                "power_active_alpha_ch_Fp1_mean": [1.0, 2.0, 3.0, 4.0],
+                "power_active_alpha_ch_Fp2_mean": [1.0, np.nan, 3.0, 5.0],
+            }
+        )
+        targets = pd.Series([1.0, 2.0, 3.0, 4.0], name="rating")
+        corr_config = CorrelationConfig(
+            method="pearson",
+            min_samples=4,
+            apply_fdr=False,
+            control_predictor=False,
+            control_trial_order=False,
+        )
+
+        with patch(
+            "eeg_pipeline.utils.analysis.tfr.get_rois",
+            return_value={"frontal": ["^Fp"]},
+        ), patch(
+            "eeg_pipeline.analysis.behavior.feature_correlator.write_tsv",
+        ):
+            out = correlator.compute_roi_correlations(
+                power_df,
+                targets,
+                "rating",
+                corr_config,
+            )
+
+        if out is not None:
+            self.assertNotIn("frontal", set(out["roi"].astype(str)))
+
     def test_permutation_scheme_rejects_invalid_value(self):
         from eeg_pipeline.utils.analysis.stats.permutation import _get_permutation_scheme
 
@@ -4286,6 +4338,38 @@ class TestBehaviorValidityFixes(unittest.TestCase):
 
         self.assertEqual(str(captured.get("scheme")), "circular_shift")
 
+    def test_regression_permutation_rejects_failed_permutation_fits(self):
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import _compute_permutation_pvalues
+
+        X = np.array([[1.0, 0.2], [1.0, -0.2]], dtype=float)
+        y_f = np.array([0.1, -0.1], dtype=float)
+        beta = np.array([0.0, 0.5], dtype=float)
+        y_hat_z = np.array([0.0, 0.0], dtype=float)
+        resid_z = np.array([0.2, -0.1], dtype=float)
+        valid_feat = np.array([True, True], dtype=bool)
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.trialwise_regression._ols_fit",
+            return_value=None,
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid permutation fits"):
+                _compute_permutation_pvalues(
+                    X=X,
+                    y_f=y_f,
+                    beta=beta,
+                    y_hat_z=y_hat_z,
+                    resid_z=resid_z,
+                    valid_feat=valid_feat,
+                    groups_v=None,
+                    names=["intercept", "feature"],
+                    idx_feature=1,
+                    beta_feature=0.5,
+                    beta_int=np.nan,
+                    n_permutations=2,
+                    rng_seed=1,
+                    scheme="shuffle",
+                )
+
     def test_regression_strict_non_iid_marks_missing_when_permutation_unavailable(self):
         from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
 
@@ -4864,7 +4948,7 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertNotIn("ci_lower_2_5", out.columns)
         self.assertNotIn("ci_upper_97_5", out.columns)
 
-    def test_group_correlations_block_permutation_failure_sets_nan_instead_of_fallback(self):
+    def test_group_correlations_block_permutation_failure_surfaces(self):
         from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
 
         df_a = pd.DataFrame(
@@ -4898,21 +4982,19 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             "eeg_pipeline.utils.analysis.stats.fdr.hierarchical_fdr",
             side_effect=lambda df, **_kwargs: df,
         ):
-            out = run_group_level_correlations(
-                subjects=["0001", "0002"],
-                deriv_root=Path("/tmp"),
-                config=self._behavior_config(),
-                logger=Mock(),
-                use_block_permutation=True,
-                n_perm=20,
-                target_col="rating",
-            )
-
-        self.assertFalse(out.empty)
-        self.assertTrue(np.isnan(float(out.iloc[0]["p_perm"])))
-        self.assertTrue(np.isnan(float(out.iloc[0]["p_primary"])))
-        self.assertEqual(str(out.iloc[0]["p_primary_kind"]), "perm_missing_required")
-        self.assertIn("failed", str(out.iloc[0]["permutation_method"]))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Group-level permutation inference failed",
+            ):
+                run_group_level_correlations(
+                    subjects=["0001", "0002"],
+                    deriv_root=Path("/tmp"),
+                    config=self._behavior_config(),
+                    logger=Mock(),
+                    use_block_permutation=True,
+                    n_perm=20,
+                    target_col="rating",
+                )
 
     def test_condition_stage_requires_positive_trialwise_permutation_count_in_non_iid_mode(self):
         from eeg_pipeline.analysis.behavior.orchestration import stage_condition_column
@@ -5187,6 +5269,68 @@ class TestBehaviorValidityFixes(unittest.TestCase):
             all(set(np.unique(group_values)) == {10, 20, 30} for group_values in captured_groups)
         )
 
+    def test_simple_permutation_rejects_nonfinite_null_draws(self):
+        from eeg_pipeline.utils.analysis.stats.permutation import perm_pval_simple
+
+        values = np.arange(5, dtype=float)
+        target = np.array([0.0, 0.2, 0.4, 0.8, 1.0], dtype=float)
+
+        with patch(
+            "eeg_pipeline.utils.analysis.stats.correlation.compute_correlation",
+            side_effect=[(0.4, 0.1), (np.nan, np.nan)],
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid simple permutation"):
+                perm_pval_simple(
+                    values,
+                    target,
+                    method="pearson",
+                    n_perm=1,
+                    rng=np.random.default_rng(42),
+                )
+
+    def test_group_level_permutation_requires_full_null_coverage(self):
+        from eeg_pipeline.analysis.behavior.orchestration import run_group_level_correlations
+
+        df_a = pd.DataFrame(
+            {
+                "rating": np.linspace(10, 70, 12),
+                "power_alpha": np.linspace(0.1, 1.2, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+        df_b = pd.DataFrame(
+            {
+                "rating": np.linspace(12, 72, 12),
+                "power_alpha": np.linspace(0.2, 1.3, 12),
+                "run_id": np.repeat([1, 2, 3], 4),
+            }
+        )
+        correlation_results = [(0.5, 0.1), (0.4, 0.1)] + [(np.nan, np.nan)] * 8
+
+        with patch(
+            "eeg_pipeline.analysis.behavior.orchestration._find_trial_table_path",
+            return_value=Path("/tmp/trials.tsv"),
+        ), patch(
+            "eeg_pipeline.infra.paths.deriv_stats_path",
+            side_effect=lambda _root, sub: Path(f"/tmp/{sub}"),
+        ), patch(
+            "eeg_pipeline.infra.tsv.read_table",
+            side_effect=[df_a, df_b],
+        ), patch(
+            "eeg_pipeline.analysis.behavior.group_level.compute_correlation",
+            side_effect=correlation_results,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Insufficient valid group-level permutations"):
+                run_group_level_correlations(
+                    subjects=["0001", "0002"],
+                    deriv_root=Path("/tmp"),
+                    config=self._behavior_config(),
+                    logger=Mock(),
+                    use_block_permutation=False,
+                    n_perm=4,
+                    target_col="rating",
+                )
+
     def test_group_level_partial_permutation_state_matches_partial_correlation(self):
         from eeg_pipeline.analysis.behavior.group_level import (
             _build_subject_partial_permutation_state,
@@ -5364,6 +5508,26 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertEqual(records, [])
         self.assertEqual(perm_max, [1.5, 2.0, 2.5])
         self.assertAlmostEqual(float(threshold), 2.0, places=12)
+
+    def test_cluster_permutation_rejects_invalid_scheme(self):
+        from eeg_pipeline.utils.analysis.stats.cluster import compute_permutation_max_masses
+
+        bin_data = np.ones((1, 1, 4), dtype=float)
+        y_array = np.array([0.1, 0.2, 0.3, 0.4], dtype=float)
+
+        with self.assertRaisesRegex(ValueError, "Invalid cluster permutation scheme"):
+            compute_permutation_max_masses(
+                bin_data=bin_data,
+                informative_bins=[(0, 0)],
+                y_array=y_array,
+                correlations_shape=(1, 1),
+                cluster_alpha=0.05,
+                min_valid_points=3,
+                use_spearman=False,
+                n_cluster_perm=1,
+                cluster_rng=np.random.default_rng(42),
+                scheme="circualr_shift",
+            )
 
     def test_cluster_core_requires_explicit_condition_column_to_exist(self):
         from eeg_pipeline.utils.analysis.stats.cluster import _run_cluster_test_core

@@ -578,10 +578,17 @@ def run_group_level_correlations_impl(
                         null_rs.append(float(r_perm))
 
         if permutation_failed:
-            null_rs = []
-            perm_method = "subject_block_restricted_failed" if block_permutation_requested else "subject_restricted_failed"
+            raise RuntimeError(
+                "Group-level permutation inference failed before completing "
+                f"the requested null draws for feature {feat!r}."
+            )
 
         n_perm_effective = int(len(null_rs))
+        if int(n_perm) > 0 and n_perm_effective != int(n_perm):
+            raise RuntimeError(
+                "Insufficient valid group-level permutations for feature "
+                f"{feat!r}: valid={n_perm_effective}/{int(n_perm)}."
+            )
         if null_rs:
             p_perm = (np.sum(np.abs(null_rs) >= np.abs(r_obs)) + 1) / (n_perm_effective + 1)
             null_rs_sorted = np.sort(null_rs)

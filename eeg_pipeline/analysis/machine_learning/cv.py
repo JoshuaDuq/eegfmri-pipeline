@@ -502,6 +502,7 @@ def compute_subject_level_r(
         95% confidence interval bounds
     """
     per_subject: List[Tuple[str, float, int]] = []
+    invalid_subjects: List[str] = []
 
     for subj, df_sub in pred_df.groupby("subject_id"):
         yt = pd.to_numeric(df_sub["y_true"], errors="coerce").to_numpy()
@@ -510,17 +511,25 @@ def compute_subject_level_r(
         n_trials = finite.sum()
 
         if n_trials < 2:
+            invalid_subjects.append(f"{subj}: fewer than 2 finite predictions")
             continue
         if np.std(yt[finite]) <= 0 or np.std(yp[finite]) <= 0:
+            invalid_subjects.append(f"{subj}: zero variance")
             continue
 
         try:
             r_subj, _ = pearsonr(yt[finite], yp[finite])
-        except Exception:
-            continue
+        except (ValueError, FloatingPointError) as exc:
+            raise RuntimeError(f"Invalid subject-level correlation for {subj}: {exc}") from exc
 
         if np.isfinite(r_subj):
             per_subject.append((str(subj), float(r_subj), int(n_trials)))
+        else:
+            invalid_subjects.append(f"{subj}: non-finite Pearson r")
+
+    if invalid_subjects:
+        details = "; ".join(invalid_subjects)
+        raise RuntimeError(f"Invalid subject-level correlation inputs: {details}")
 
     if not per_subject:
         return np.nan, [], np.nan, np.nan
@@ -594,6 +603,7 @@ def compute_subject_level_errors(
     Returns unweighted mean across subjects plus optional bootstrap CI.
     """
     per_subject: List[Dict[str, Any]] = []
+    invalid_subjects: List[str] = []
 
     for subj, df_sub in pred_df.groupby("subject_id"):
         yt = pd.to_numeric(df_sub["y_true"], errors="coerce").to_numpy(dtype=float)
@@ -601,6 +611,7 @@ def compute_subject_level_errors(
         finite = np.isfinite(yt) & np.isfinite(yp)
         n_trials = int(finite.sum())
         if n_trials < 1:
+            invalid_subjects.append(f"{subj}: no finite predictions")
             continue
         err = yp[finite] - yt[finite]
         mae = float(np.mean(np.abs(err)))
@@ -613,6 +624,10 @@ def compute_subject_level_errors(
                 "rmse": rmse,
             }
         )
+
+    if invalid_subjects:
+        details = "; ".join(invalid_subjects)
+        raise RuntimeError(f"Invalid subject-level error inputs: {details}")
 
     if not per_subject:
         return {
@@ -729,6 +744,14 @@ def create_within_subject_folds(
     folds: List[Tuple[int, np.ndarray, np.ndarray, str, Optional[Any]]] = []
     fold_counter = 0
     unique_subs = [str(s) for s in np.unique(groups)]
+    if blocks_all is None:
+        raise ValueError("Within-subject CV requires run_id/block labels for every subject.")
+
+    blocks_arr = np.asarray(blocks_all)
+    if blocks_arr.shape[0] != np.asarray(groups).shape[0]:
+        raise ValueError(
+            "Within-subject CV run_id/block labels must be aligned to the sample axis."
+        )
 
     for subject in unique_subs:
         subject_indices = np.where(groups == subject)[0]
@@ -737,11 +760,17 @@ def create_within_subject_folds(
         requested_outer_splits = int(outer_cv_splits) if outer_cv_splits is not None else int(inner_cv_splits)
         n_splits = min(max(2, requested_outer_splits), n_samples)
 
-        if blocks_all is None:
-            logger.warning(f"Subject {subject}: missing run_id, skipping")
-            continue
+        subject_blocks = blocks_arr[subject_indices]
+        if np.any(pd.isna(subject_blocks)):
+            raise ValueError(f"Subject {subject}: missing run_id/block labels.")
 
-        subject_blocks = blocks_all[subject_indices]
+        n_unique_subject_blocks = len(np.unique(subject_blocks[~pd.isna(subject_blocks)]))
+        if n_unique_subject_blocks < 2:
+            raise ValueError(
+                f"Subject {subject}: insufficient blocks for within-subject CV "
+                f"({n_unique_subject_blocks}); at least 2 are required."
+            )
+
         ordered_blocks = bool(
             get_config_value(config, "machine_learning.cv.within_subject_ordered_blocks", False)
         )
@@ -792,8 +821,7 @@ def create_within_subject_folds(
         block_cv, _ = create_block_aware_cv(subject_blocks, n_splits)
 
         if block_cv is None:
-            logger.warning(f"Subject {subject}: insufficient blocks, skipping")
-            continue
+            raise ValueError(f"Subject {subject}: insufficient blocks for within-subject CV.")
 
         for train_local, test_local in block_cv.split(subject_indices, groups=subject_blocks):
             fold_counter += 1
@@ -1199,7 +1227,15 @@ def run_permutation_test(
         )
 
         pred_df = pd.DataFrame({"y_true": y_true_p, "y_pred": y_pred_p, "subject_id": groups_p})
-        r_subj, _, _, _ = compute_subject_level_r(pred_df, config)
+        try:
+            r_subj, _, _, _ = compute_subject_level_r(pred_df, config)
+        except RuntimeError as exc:
+            logger.warning(
+                "Perm %d: invalid subject-level correlation (%s)",
+                int(perm + 1),
+                exc,
+            )
+            r_subj = np.nan
         r2 = np.nan
         if len(y_true_p) > 1:
             y_true_arr = np.asarray(y_true_p, dtype=float)

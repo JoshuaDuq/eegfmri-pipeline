@@ -141,7 +141,7 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
         self.assertIn("segments", qc)
         self.assertIn("active", qc["segments"])
 
-    def test_resting_state_uses_available_analysis_segment_when_target_window_empty(self):
+    def test_resting_state_rejects_empty_target_window(self):
         precomputed = self._build_precomputed()
         times = precomputed.times
         analysis_mask = np.ones(times.shape, dtype=bool)
@@ -155,16 +155,8 @@ class TestAperiodicPeriodicPeaks(unittest.TestCase):
         precomputed.config.setdefault("preprocessing", {})["task_is_rest"] = True
         precomputed.config.setdefault("feature_engineering", {})["task_is_rest"] = True
 
-        df, cols, qc = extract_aperiodic_from_precomputed(precomputed, ["alpha"])
-
-        expected_col = NamingSchema.build("aperiodic", "analysis", "broadband", "global", "slope")
-        self.assertFalse(df.empty)
-        self.assertIn(expected_col, cols)
-        self.assertNotIn(
-            NamingSchema.build("aperiodic", "active", "broadband", "global", "slope"),
-            cols,
-        )
-        self.assertIn("analysis", qc.get("segments", {}))
+        with self.assertRaisesRegex(ValueError, "target window 'active' has no valid mask"):
+            extract_aperiodic_from_precomputed(precomputed, ["alpha"])
 
     def test_trial_ml_safe_requires_train_mask_for_subtract_evoked(self):
         precomputed = self._build_precomputed()

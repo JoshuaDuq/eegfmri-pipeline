@@ -58,6 +58,18 @@ def test_prepare_confounds_and_sample_mask_returns_none_when_only_scrub_columns_
     np.testing.assert_array_equal(sample_mask, np.array([0, 2], dtype=int))
 
 
+def test_prepare_confounds_and_sample_mask_rejects_nan_scrub_flags() -> None:
+    confounds_df = pd.DataFrame(
+        {
+            "trans_x": [0.1, 0.2, 0.3],
+            "motion_outlier00": [0, np.nan, 0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="scrub"):
+        _prepare_confounds_and_sample_mask(confounds_df)
+
+
 def test_validate_filter_settings_rejects_frequencies_at_or_above_nyquist() -> None:
     cfg = RestingStateAnalysisConfig(
         atlas_labels_img="/tmp/atlas.nii.gz",

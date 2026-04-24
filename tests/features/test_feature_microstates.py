@@ -125,7 +125,7 @@ class TestMicrostateFeatures(unittest.TestCase):
         )
         self.assertTrue(bool(df.attrs.get("microstate_labels_canonical")))
 
-    def test_resting_state_uses_available_analysis_segment_when_target_window_empty(self):
+    def test_resting_state_rejects_empty_target_window(self):
         from eeg_pipeline.analysis.features.microstates import extract_microstate_features
 
         epochs, templates, ch_names = self._build_epochs()
@@ -154,12 +154,8 @@ class TestMicrostateFeatures(unittest.TestCase):
             fixed_template_labels=["a", "b", "c", "d"],
         )
 
-        df, cols = extract_microstate_features(ctx)
-
-        self.assertFalse(df.empty)
-        self.assertIn("microstates_analysis_broadband_global_coverage_a", cols)
-        self.assertIn("microstates_analysis_broadband_global_trans_a_to_b_prob", cols)
-        self.assertNotIn("microstates_active_broadband_global_coverage_a", cols)
+        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+            extract_microstate_features(ctx)
 
     def test_microstates_category_registered(self):
         from eeg_pipeline.pipelines import constants

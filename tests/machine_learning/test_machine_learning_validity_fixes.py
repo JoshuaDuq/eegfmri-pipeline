@@ -296,6 +296,41 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
         self.assertEqual(len(folds), 2)
 
+    def test_create_within_subject_folds_requires_run_blocks(self):
+        from eeg_pipeline.analysis.machine_learning.cv import create_within_subject_folds
+
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+
+        with self.assertRaisesRegex(ValueError, "run_id"):
+            create_within_subject_folds(
+                groups=groups,
+                blocks_all=None,
+                inner_cv_splits=2,
+                outer_cv_splits=2,
+                seed=42,
+                config=DotConfig({}),
+                epochs=None,
+                apply_hygiene=False,
+            )
+
+    def test_create_within_subject_folds_rejects_insufficient_subject_blocks(self):
+        from eeg_pipeline.analysis.machine_learning.cv import create_within_subject_folds
+
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+        blocks = np.array([1, 1, 1, 2], dtype=int)
+
+        with self.assertRaisesRegex(ValueError, "insufficient blocks"):
+            create_within_subject_folds(
+                groups=groups,
+                blocks_all=blocks,
+                inner_cv_splits=2,
+                outer_cv_splits=2,
+                seed=42,
+                config=DotConfig({}),
+                epochs=None,
+                apply_hygiene=False,
+            )
+
     def test_split_conformal_handles_small_training_sets(self):
         from sklearn.dummy import DummyRegressor
 
@@ -363,7 +398,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertAlmostEqual(float(result.lower[0]), -10.0, places=8)
         self.assertAlmostEqual(float(result.upper[0]), 20.0, places=8)
 
-    def test_cv_plus_grouped_fallback_requires_multiple_groups(self):
+    def test_cv_plus_raises_when_no_calibration_chunks_survive(self):
         from sklearn.base import BaseEstimator, RegressorMixin
 
         from eeg_pipeline.analysis.machine_learning.uncertainty import _conformal_cv_plus
@@ -386,7 +421,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             "eeg_pipeline.analysis.machine_learning.uncertainty._get_cv_splitter",
             return_value=iter([]),
         ):
-            with self.assertRaisesRegex(ValueError, "at least 2 unique groups"):
+            with self.assertRaisesRegex(RuntimeError, "CV\\+ calibration failed"):
                 _conformal_cv_plus(
                     model=_MeanRegressor(),
                     X_train=X_train,
@@ -1433,6 +1468,34 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertEqual(len(per_subject), 2)
         self.assertLess(abs(float(agg_r)), 0.2)
 
+    def test_subject_level_r_rejects_invalid_subjects(self):
+        from eeg_pipeline.analysis.machine_learning.cv import compute_subject_level_r
+
+        pred_df = pd.DataFrame(
+            {
+                "subject_id": ["sub-0001"] * 4 + ["sub-0002"] * 4,
+                "y_true": [0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0],
+                "y_pred": [0.0, 1.0, 2.0, 3.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Invalid subject-level correlation"):
+            compute_subject_level_r(pred_df, config=DotConfig({}), ci_method="fixed_effects")
+
+    def test_subject_level_errors_reject_invalid_subjects(self):
+        from eeg_pipeline.analysis.machine_learning.cv import compute_subject_level_errors
+
+        pred_df = pd.DataFrame(
+            {
+                "subject_id": ["sub-0001"] * 3 + ["sub-0002"] * 3,
+                "y_true": [0.0, 1.0, 2.0, 0.0, 1.0, 2.0],
+                "y_pred": [0.1, 1.1, 2.1, np.nan, np.nan, np.nan],
+            }
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Invalid subject-level error inputs"):
+            compute_subject_level_errors(pred_df, config=DotConfig({}), ci_method="fixed_effects")
+
     def test_shap_kernel_uses_estimator_predict_fn_for_transformed_features(self):
         from eeg_pipeline.analysis.machine_learning import shap_importance as si
 
@@ -1471,6 +1534,78 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 background_samples=2,
             )
         self.assertIs(captured["predict_arg"], estimator)
+
+    def test_cv_shap_raises_when_inner_grid_search_fails(self):
+        from eeg_pipeline.analysis.machine_learning import shap_importance as si
+
+        class _Model:
+            def fit(self, X, y):
+                _ = (X, y)
+                return self
+
+            def predict(self, X):
+                return np.zeros(len(X), dtype=float)
+
+        class _FailingGridSearch:
+            def __init__(self, *args, **kwargs):
+                _ = (args, kwargs)
+
+            def fit(self, *args, **kwargs):
+                _ = (args, kwargs)
+                raise RuntimeError("inner cv failure")
+
+        X = np.arange(12, dtype=float).reshape(6, 2)
+        y = np.linspace(0.0, 1.0, 6)
+        groups = np.array(["s1", "s1", "s2", "s2", "s3", "s3"], dtype=object)
+        splits = [(np.array([0, 1, 2, 3], dtype=int), np.array([4, 5], dtype=int))]
+        shap_result = si.SHAPResult(
+            shap_values=np.ones((2, 2), dtype=float),
+            expected_value=0.0,
+            feature_names=["f1", "f2"],
+            X=X[4:6],
+        )
+
+        with patch.object(si, "_check_shap_available", return_value=True), patch.object(
+            si, "GridSearchCV", _FailingGridSearch
+        ), patch.object(si, "compute_shap_values", return_value=shap_result):
+            with self.assertRaisesRegex(RuntimeError, "inner CV failed"):
+                si.compute_shap_for_cv_folds(
+                    model_factory=_Model,
+                    X=X,
+                    y=y,
+                    cv_splits=splits,
+                    feature_names=["f1", "f2"],
+                    groups=groups,
+                    param_grid={"alpha": [1.0]},
+                    inner_cv_splits=2,
+                )
+
+    def test_cv_shap_raises_when_fold_explanation_fails(self):
+        from eeg_pipeline.analysis.machine_learning import shap_importance as si
+
+        class _Model:
+            def fit(self, X, y):
+                _ = (X, y)
+                return self
+
+            def predict(self, X):
+                return np.zeros(len(X), dtype=float)
+
+        X = np.arange(8, dtype=float).reshape(4, 2)
+        y = np.linspace(0.0, 1.0, 4)
+        splits = [(np.array([0, 1], dtype=int), np.array([2, 3], dtype=int))]
+
+        with patch.object(si, "_check_shap_available", return_value=True), patch.object(
+            si, "compute_shap_values", side_effect=RuntimeError("shap failure")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "SHAP computation failed"):
+                si.compute_shap_for_cv_folds(
+                    model_factory=_Model,
+                    X=X,
+                    y=y,
+                    cv_splits=splits,
+                    feature_names=["f1", "f2"],
+                )
 
     def test_classification_calibration_uses_finite_probabilities_only(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
@@ -2571,6 +2706,30 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertIsInstance(captured.get("param_grid"), dict)
         self.assertIn("rf__max_depth", captured.get("param_grid", {}))
 
+    def test_tuned_loso_regression_requires_inner_cv_groups(self):
+        from sklearn.dummy import DummyRegressor
+        from sklearn.pipeline import Pipeline
+
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        pipe = Pipeline([("reg", DummyRegressor(strategy="mean"))])
+        X_train = np.array([[0.0], [1.0], [2.0], [3.0]], dtype=float)
+        y_train = np.array([1.0, 1.5, 2.0, 2.5], dtype=float)
+        groups_train = np.array(["sub-0001"] * 4, dtype=object)
+
+        with self.assertRaisesRegex(RuntimeError, "inner CV requires at least 2 training groups"):
+            orch._fit_tuned_regression_estimator(
+                base_pipe=pipe,
+                param_grid={"reg__strategy": ["mean"]},
+                X_train=X_train,
+                y_train=y_train,
+                groups_train=groups_train,
+                inner_splits=3,
+                seed=42,
+                logger=Mock(),
+                fold_info="fold 1",
+            )
+
     def test_within_subject_regression_applies_fold_feature_harmonization(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
@@ -3587,6 +3746,66 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             clf, "build_svm_param_grid", return_value={}
         ):
             with self.assertRaisesRegex(RuntimeError, "only one class in training"):
+                clf.nested_loso_classification(
+                    X=X,
+                    y=y,
+                    groups=groups,
+                    model="svm",
+                    inner_splits=2,
+                    seed=42,
+                    config=cfg,
+                    logger=Mock(),
+                )
+
+    def test_nested_loso_classification_requires_inner_cv_groups_for_tuning(self):
+        from sklearn.dummy import DummyClassifier
+        from sklearn.pipeline import Pipeline
+
+        from eeg_pipeline.analysis.machine_learning import classification as clf
+
+        X = np.array([[0.0], [0.1], [1.0], [1.1]], dtype=float)
+        y = np.array([0, 1, 0, 1], dtype=int)
+        groups = np.array(
+            ["sub-0001", "sub-0001", "sub-0002", "sub-0002"],
+            dtype=object,
+        )
+        pipe = Pipeline([("clf", DummyClassifier(strategy="most_frequent"))])
+        cfg = DotConfig({"machine_learning": {"classification": {"scoring": "accuracy"}}})
+
+        with patch.object(clf, "create_svm_pipeline", return_value=pipe), patch.object(
+            clf, "build_svm_param_grid", return_value={"clf__strategy": ["most_frequent"]}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "inner CV requires at least 2 training groups"):
+                clf.nested_loso_classification(
+                    X=X,
+                    y=y,
+                    groups=groups,
+                    model="svm",
+                    inner_splits=2,
+                    seed=42,
+                    config=cfg,
+                    logger=Mock(),
+                )
+
+    def test_nested_loso_classification_requires_stratified_inner_cv_support(self):
+        from sklearn.dummy import DummyClassifier
+        from sklearn.pipeline import Pipeline
+
+        from eeg_pipeline.analysis.machine_learning import classification as clf
+
+        X = np.arange(6, dtype=float).reshape(-1, 1)
+        y = np.array([0, 1, 0, 1, 0, 0], dtype=int)
+        groups = np.array(
+            ["sub-0001", "sub-0001", "sub-0002", "sub-0002", "sub-0003", "sub-0003"],
+            dtype=object,
+        )
+        pipe = Pipeline([("clf", DummyClassifier(strategy="most_frequent"))])
+        cfg = DotConfig({"machine_learning": {"classification": {"scoring": "accuracy"}}})
+
+        with patch.object(clf, "create_svm_pipeline", return_value=pipe), patch.object(
+            clf, "build_svm_param_grid", return_value={"clf__strategy": ["most_frequent"]}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "StratifiedGroupKFold"):
                 clf.nested_loso_classification(
                     X=X,
                     y=y,
