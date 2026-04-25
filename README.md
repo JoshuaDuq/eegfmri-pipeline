@@ -1,235 +1,89 @@
 # EEG–fMRI Analysis Pipeline
 
-[![Python ≥ 3.11](https://img.shields.io/badge/python-≥3.11-blue.svg)](https://www.python.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![BIDS](https://img.shields.io/badge/data-BIDS-orange.svg)](https://bids-specification.readthedocs.io/)
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://joshuaduq.github.io/eegfmri-pipeline/)
+[Python ≥ 3.11](https://www.python.org)
+[License: MIT](LICENSE)
+[BIDS](https://bids-specification.readthedocs.io/)
+[Docs](https://joshuaduq.github.io/eegfmri-pipeline/)
 
-A modular neuroimaging analysis suite for EEG, fMRI, and multimodal
-EEG–fMRI research. The pipeline runs from BIDS-formatted raw data through
-preprocessing, feature extraction, behavioral statistics, machine learning,
-source localization, and fMRI analysis from a single CLI or interactive TUI.
+A research pipeline for reproducible EEG, fMRI, and multimodal EEG–fMRI
+analysis on BIDS-organized data.
 
-The project is organized around explicit data contracts, documented derivatives,
-and method-specific reference pages so that analysis steps can be inspected and
-reproduced rather than reconstructed from ad hoc scripts.
+The project brings common neuroimaging workflows into one documented command
+surface: preprocessing, feature extraction, behavioral statistics, machine
+learning, source localization, and fMRI analysis. It is built for research code
+that needs to remain inspectable: methods are explicit, configuration is
+centralized, and derivatives are organized around reproducible analysis stages.
 
-It began as an effort to reduce the amount of one-off glue code required for
-day-to-day EEG and fMRI work. That motivation is still visible in the emphasis
-on a single command surface, BIDS-aligned inputs, and a TUI that exposes the
-same workflows without requiring users to memorize flags.
+The [Sphinx documentation](https://joshuaduq.github.io/eegfmri-pipeline/) is the
+canonical guide for installation, configuration, methods, command references,
+and output formats.
 
-The Sphinx documentation is the canonical source for all detailed methods,
-configuration, output formats, and command references.
 
-<p align="center">
-  <img src="docs/screenshots/tui_main_menu.png" width="800" alt="Interactive TUI"/>
-</p>
 
-## What It Does
+## Why This Project Exists
 
-- EEG preprocessing with artifact detection, ICA, epoching, and cleaned derivative generation
-- Trial-level and **resting-state** EEG feature extraction across 16 documented feature families
-- Behavioral statistics with robust inference and multiple-comparison control
-- Nested machine-learning workflows for regression and classification
-- EEG source localization workflows with template and subject-specific paths
-- fMRI preprocessing plus GLM-based first-level, second-level, and trial-wise analysis
-- Interactive TUI and CLI interfaces for configuration, inspection, and batch execution
+EEG and fMRI projects often accumulate one-off scripts, implicit assumptions,
+and fragile handoffs between preprocessing, statistics, and modeling. This
+pipeline aims to make those handoffs visible. The same workflows can be run from
+a Python CLI or explored through an optional terminal UI, with detailed methods
+and output contracts maintained in the documentation.
 
-## Documentation
+The implementation follows the scientific Python ecosystem, including
+MNE-Python, Nilearn, NumPy, SciPy, pandas, and scikit-learn.
 
-The Sphinx documentation is the source of truth for operational guidance,
-methods, configuration keys, and output schemas.
+## Workflows
 
-- [Documentation home](https://joshuaduq.github.io/eegfmri-pipeline/)
-- [Installation guide](https://joshuaduq.github.io/eegfmri-pipeline/install.html)
-- [Quick start](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html)
-- [User guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/index.html)
-- [Methods reference](https://joshuaduq.github.io/eegfmri-pipeline/methods/index.html)
-- [FAQ](https://joshuaduq.github.io/eegfmri-pipeline/faq.html)
-- [Contributing](https://joshuaduq.github.io/eegfmri-pipeline/contributing.html)
+- EEG preprocessing with artifact handling, ICA, epoching, and cleaned derivatives
+- EEG feature extraction for task-based and resting-state analyses
+- Behavioral statistics and machine-learning workflows
+- EEG source localization with template and subject-specific paths
+- fMRI preprocessing, GLM analysis, and EEG–fMRI integration workflows
+- Scriptable CLI commands and guided terminal UI workflows
 
-## Requirements
+## Explore the Documentation
 
-- Python 3.11 or later
-- Git for cloning the repository
-- Go 1.21+ only if you want to build the optional TUI
-- Docker or Apptainer for fMRI preprocessing workflows
-- A FreeSurfer license for fMRI preprocessing and source-localization workflows
+The Sphinx site is where the project opens up:
 
-See the [installation guide](https://joshuaduq.github.io/eegfmri-pipeline/install.html)
-for environment variables, optional components, and the Docker image used by
-the source-localization path.
+- [Documentation home](https://joshuaduq.github.io/eegfmri-pipeline/) for the full map
+- [Installation](https://joshuaduq.github.io/eegfmri-pipeline/install.html) for environment setup
+- [Quick start](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html) for a first workflow
+- [User guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/index.html) for data layout, configuration, CLI, and TUI usage
+- [Methods reference](https://joshuaduq.github.io/eegfmri-pipeline/methods/index.html) for algorithms, assumptions, and output schemas
+- [FAQ](https://joshuaduq.github.io/eegfmri-pipeline/faq.html) for common setup and workflow questions
 
-## Platform Support
+If you are new to the project, start with the quick start. If you are reviewing
+the scientific assumptions behind a workflow, start with the methods reference.
 
-| Platform | Native support | Notes |
-| --- | --- | --- |
-| macOS | Yes | Full CLI/TUI support. |
-| Windows | Yes, for install + CLI + TUI + validation + smoke checks | Use native Windows for the repo-owned interface layer. |
-| Windows heavy imaging workflows | No native guarantee | Use WSL2 or containers for container-backed fMRI preprocessing and Docker-based BEM/source-localization helpers. |
+## Minimal Install
 
-## Install
-
-### macOS / Linux
+Requires Python 3.11 or later. Some workflows also require external neuroimaging
+tools, containers, or a FreeSurfer license; see the installation guide for the
+complete setup.
 
 ```bash
 git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
 cd eegfmri-pipeline
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev,ml]"
+python -m venv .venv
+# Activate .venv using the command for your shell, then:
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev,ml]"
+eeg-pipeline --help
 ```
 
-### Windows PowerShell
+The `ml` extra installs PyTorch-backed models. If you do not need those models,
+install `".[dev]"` instead.
 
-```powershell
-git clone https://github.com/JoshuaDuq/eegfmri-pipeline.git
-cd eegfmri-pipeline
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
-.\.venv\Scripts\python.exe -m pip install -e ".[dev,ml]"
-.\.venv\Scripts\eeg-pipeline.exe --help
-```
+## Scope and Status
 
-Windows setup is different from macOS/Linux:
-- use `PowerShell` or `cmd`, not `source`
-- create the env with any `Python 3.11+` interpreter
-- prefer calling `.\.venv\Scripts\python.exe` and `.\.venv\Scripts\eeg-pipeline.exe` directly
-- treat activation with `.venv\Scripts\Activate.ps1` as optional convenience, not required
-- use `python.exe` from `Scripts\`, not `bin/python`
-
-If you have multiple Python versions installed, make sure the selected
-interpreter is `3.11+`. For example, use `python3.12 -m venv .venv` or
-`py -3.12 -m venv .venv`.
-
-If PowerShell blocks activation scripts, either skip activation entirely or
-allow scripts for the current shell only:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-```
-
-If `venv` or `pip` reports `Permission denied` in the default Windows `%TEMP%`
-directory, redirect temp files into the repository for the current session:
-
-```powershell
-New-Item -ItemType Directory -Force .tmp | Out-Null
-$env:TEMP = (Resolve-Path .tmp).Path
-$env:TMP = $env:TEMP
-```
-
-The `ml` extra installs PyTorch and is only required for the CNN classifier.
-If you do not need that model, `pip install -e ".[dev]"` is sufficient.
-
-## Quick Start
-
-Before running any workflow, verify the dataset roots, derivatives directory,
-task label, and analysis configuration. For EEG feature extraction, this also
-includes the active feature families, frequency bands, and analysis mode.
-**The recommended entry point is the TUI**, which writes the same settings the
-CLI consumes.
-
-### Using the TUI (recommended)
-
-Build and launch the TUI once after installation. Go is required only for this
-optional interface; the Python CLI works without Go.
-
-macOS / Linux:
-
-```bash
-cd eeg_pipeline/cli/tui && go build -o eeg-tui . && cd -
-./eeg_pipeline/cli/tui/eeg-tui
-```
-
-Windows PowerShell:
-
-```powershell
-cd eeg_pipeline/cli/tui
-go build -o eeg-tui.exe .
-.\eeg-tui.exe
-```
-
-On Windows, do not use the macOS/Linux launch pattern (`./eeg-tui` or
-`source .../bin/activate`). The native path is `.\eeg-tui.exe` from
-PowerShell and the Python environment lives under `Scripts\`.
-
-Before running a workflow from the TUI, open **Global Setup** and verify:
-
-- `project.task` matches the `task-<name>` label in your BIDS filenames
-- `paths.bids_root` points to the EEG BIDS folder containing `sub-*/`
-- `paths.deriv_root` points to the derivatives root you want to reuse/write
-
-If subjects appear but the TUI reports missing epochs, the most common cause is
-that `project.task` does not match the task label used in your epoch filenames.
-
-The TUI walks you through every configuration step interactively—pipeline
-selection, subject selection, feature families, frequency bands, spatial
-options, time ranges, preprocessing stages, and advanced options—before
-assembling and running the underlying CLI command. No flags to memorize; the
-wizard validates your choices at each step and shows a live summary on the
-home screen.
-
-### Using the CLI directly
-
-If you prefer scripting or headless execution, configure
-`eeg_pipeline/utils/config/` first, then:
-
-```bash
-eeg-pipeline validate quick
-eeg-pipeline info subjects
-eeg-pipeline info subjects --status
-eeg-pipeline preprocessing full --subject 0001
-eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
-eeg-pipeline ml regression --all-subjects
-```
-
-CLI flags for feature extraction (`--categories`, `--bands`, `--rois`, etc.) map
-directly to the wizard steps in the TUI. See the
-[Quick start guide](https://joshuaduq.github.io/eegfmri-pipeline/user_guide/quickstart.html)
-for the full walkthrough.
-
-Run `eeg-pipeline validate quick` before any batch job so dataset and
-configuration errors surface early.
-
-For native Windows users, keep the lightweight repo-owned workflows native
-(install, TUI, CLI, validation, smoke checks). Use WSL2 or container-backed
-execution for fMRI preprocessing and Docker-based BEM/source-localization
-helpers.
-
-## Feature Extraction
-
-Feature extraction supports both **task-based** (event-related, trial-level)
-and **resting-state** paradigms. The `--analysis-mode` flag controls
-cross-trial leakage behavior:
-
-- `group_stats` — descriptive/group analysis mode
-- `trial_ml_safe` — per-trial features suitable for ML pipelines
-
-For resting-state extraction, set `task_is_rest: true` (config) or pass
-`--task-is-rest` on the CLI.
-
-Feature families (power spectra, connectivity, complexity, etc.) and frequency
-bands are selected per-run via the TUI wizard or the corresponding CLI flags.
-
-For method details, formulas, and output contracts, use the
-[Methods reference](https://joshuaduq.github.io/eegfmri-pipeline/methods/index.html)
-rather than the README.
-
-## Current Scope
-
-The EEG pipeline, feature extraction, behavioral statistics, machine learning,
-and source-localization workflows are documented and maintained. The fMRI
-pipeline and plotting commands are still evolving, so validate critical
-workflows after upgrading and confirm derivative paths before using them in
-downstream analyses.
+The EEG, feature extraction, behavioral statistics, machine learning, and source
+localization workflows are documented and maintained. fMRI and plotting
+workflows are active areas of development, so validate critical analyses after
+upgrades and confirm derivative paths before downstream use.
 
 ## Contributing
 
-Use short imperative commit subjects and keep changes focused. See the
-[contributing guide](https://joshuaduq.github.io/eegfmri-pipeline/contributing.html)
-for branch naming, testing, and pull-request expectations.
+Development guidance, testing expectations, and branch conventions are covered
+in the [contributing guide](https://joshuaduq.github.io/eegfmri-pipeline/contributing.html).
 
 ## License
 
