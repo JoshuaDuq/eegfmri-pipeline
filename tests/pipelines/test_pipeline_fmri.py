@@ -782,7 +782,7 @@ class TestFmriCompletion(unittest.TestCase):
             ext = p.deriv_root.parent / "external"
             ext.mkdir(parents=True, exist_ok=True)
             sig_root, _sig_specs = p._discover_signature_root_and_specs()
-            self.assertEqual(sig_root.resolve(), ext.resolve())  # type: ignore[union-attr]
+            self.assertIsNone(sig_root)
             self.assertIsNone(p.run_group_level(["0001"], task="t"))
 
             p.config = DotConfig({"paths": {"signature_dir": "/path/does/not/exist"}})
@@ -804,13 +804,10 @@ class TestFmriCompletion(unittest.TestCase):
             with patch("fmri_pipeline.pipelines.fmri_analysis.PipelineBase.__init__", lambda self, name, config=None: (setattr(self, "config", config or cfg), setattr(self, "deriv_root", Path(tempfile.mkdtemp())), setattr(self, "logger", Mock()))):
                 p = FmriAnalysisPipeline(config=cfg)
 
-            # discover signature fallback
             ext = p.deriv_root.parent / "external"
             ext.mkdir(parents=True, exist_ok=True)
             sig_root, _sig_specs = p._discover_signature_root_and_specs()
-            self.assertEqual(
-                sig_root.resolve(), ext.resolve()  # type: ignore[union-attr]
-            )
+            self.assertIsNone(sig_root)
 
             @dataclass
             class Cfg:

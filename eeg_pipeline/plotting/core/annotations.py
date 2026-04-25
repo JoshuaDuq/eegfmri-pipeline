@@ -364,21 +364,15 @@ def get_sig_marker_text(config=None) -> str:
         Significance marker text string, or empty string if diff_annotation_enabled is False
     """
     from eeg_pipeline.plotting.io.figures import get_viz_params
-    from eeg_pipeline.utils.config.loader import ensure_config, get_config_value, require_config_value
+    from eeg_pipeline.utils.config.loader import ensure_config, require_config_value
+    from eeg_pipeline.utils.analysis.stats import get_fdr_alpha
     
     viz_params = get_viz_params(config)
     if not viz_params["diff_annotation_enabled"]:
         return ""
     
     config = ensure_config(config)
-    plot_cfg = get_plot_config(config)
-    
-    tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
-    default_sig_alpha = tfr_config.get(
-        "default_significance_alpha",
-        get_config_value(config, "statistics.sig_alpha", 0.05)
-    )
-    alpha = get_config_value(config, "statistics.sig_alpha", default_sig_alpha)
+    alpha = get_fdr_alpha(config)
     n_perm = int(require_config_value(config, "statistics.cluster_n_perm"))
     method = f"cluster permutation (n={n_perm})"
     return f" | Green markers: p < {alpha:.2f} ({method})"

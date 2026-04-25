@@ -883,11 +883,21 @@ def _fit_default_pipeline(
     """Fit pipeline without hyperparameter tuning."""
     pipe_clone = clone(pipe)
     if random_state is not None:
-        if hasattr(pipe_clone, "set_params"):
-            try:
-                pipe_clone.set_params(regressor__regressor__random_state=random_state)
-            except ValueError:
-                pass
+        if not hasattr(pipe_clone, "get_params") or not hasattr(pipe_clone, "set_params"):
+            raise TypeError(
+                f"Fold {fold}: estimator does not expose sklearn parameters for random_state assignment."
+            )
+        random_state_keys = [
+            key
+            for key in pipe_clone.get_params(deep=True)
+            if key == "random_state" or key.endswith("__random_state")
+        ]
+        if not random_state_keys:
+            raise ValueError(
+                f"Fold {fold}: random_state={random_state} was requested, but the estimator "
+                "does not expose any random_state parameter."
+            )
+        pipe_clone.set_params(**{key: random_state for key in random_state_keys})
     pipe_clone.fit(X_train, y_train)
     return pipe_clone
 
@@ -1143,12 +1153,9 @@ def run_permutation_test(
 
     perm_scheme = "within_subject"
     if config is not None:
-        try:
-            perm_scheme = str(
-                get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)
-            ).strip().lower()
-        except Exception:
-            perm_scheme = "within_subject"
+        perm_scheme = str(
+            get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)
+        ).strip().lower()
     if perm_scheme not in {"within_subject", "within_subject_within_block"}:
         raise ValueError(
             "Invalid machine_learning.cv.permutation_scheme: "

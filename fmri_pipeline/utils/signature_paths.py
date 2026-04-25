@@ -33,8 +33,12 @@ def discover_signature_root(config: Any, deriv_root: Any) -> Optional[Path]:
             raise FileNotFoundError(f"Configured paths.signature_dir does not exist: {candidate}")
         return candidate
 
-    candidate = Path(deriv_root).expanduser().resolve().parent / "external"
-    return candidate if candidate.exists() else None
+    specs = _get_config_value(config, "paths.signature_maps")
+    if isinstance(specs, list) and specs:
+        raise ValueError(
+            "paths.signature_dir must be set when paths.signature_maps is configured."
+        )
+    return None
 
 
 def get_signature_specs(config: Any) -> List[Dict[str, str]]:

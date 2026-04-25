@@ -39,24 +39,30 @@ def test_discover_signature_root_rejects_missing_configured_path(tmp_path: Path)
         discover_signature_root(config, tmp_path / "derivatives")
 
 
-def test_discover_signature_root_falls_back_to_external_sibling(tmp_path: Path) -> None:
+def test_discover_signature_root_returns_none_when_no_signatures_are_configured(tmp_path: Path) -> None:
     deriv_root = tmp_path / "derivatives"
     deriv_root.mkdir(parents=True, exist_ok=True)
     external = tmp_path / "external"
     external.mkdir(parents=True, exist_ok=True)
 
     discovered = discover_signature_root({}, deriv_root)
-    assert discovered == external
+    assert discovered is None
+
+
+def test_discover_signature_root_requires_configured_root_for_signature_maps(tmp_path: Path) -> None:
+    deriv_root = tmp_path / "derivatives"
+    deriv_root.mkdir(parents=True, exist_ok=True)
+    external = tmp_path / "external"
+    external.mkdir(parents=True, exist_ok=True)
+    config = {"paths": {"signature_maps": [{"name": "NPS", "path": "nps.nii.gz"}]}}
+
+    with pytest.raises(ValueError, match="paths.signature_dir must be set"):
+        discover_signature_root(config, deriv_root)
 
 
 def test_discover_signature_root_surfaces_invalid_config_getter() -> None:
     with pytest.raises(RuntimeError, match="bad config"):
         discover_signature_root(_BadConfig(), Path("/tmp/derivatives"))
-
-
-def test_discover_signature_root_surfaces_invalid_derivative_root_type() -> None:
-    with pytest.raises(TypeError):
-        discover_signature_root({}, object())
 
 
 def test_get_signature_specs_rejects_duplicate_names() -> None:

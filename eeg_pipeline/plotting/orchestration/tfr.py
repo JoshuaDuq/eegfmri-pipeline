@@ -374,7 +374,7 @@ def _visualize_single_subject(
     tfr_topomaps_only: bool,
     plots: Optional[List[str]],
     deriv_root: Path,
-) -> Optional[str]:
+) -> str:
     """Worker function for parallel TFR visualization."""
     from eeg_pipeline.plotting.io.figures import setup_matplotlib
     from eeg_pipeline.infra.logging import get_logger
@@ -382,24 +382,17 @@ def _visualize_single_subject(
     setup_matplotlib(config)
     logger = get_logger(__name__)
 
-    try:
-        visualize_subject_tfr(
-            subject,
-            task,
-            config,
-            logger,
-            tfr_roi_only=tfr_roi_only,
-            tfr_topomaps_only=tfr_topomaps_only,
-            plots=plots,
-            deriv_root=deriv_root,
-        )
-        return subject
-    except (ValueError, FileNotFoundError, OSError) as e:
-        logger.error(f"Failed to visualize sub-{subject}: {e}")
-        return None
-    except Exception as e:
-        logger.exception(f"Unexpected error visualizing sub-{subject}: {e}")
-        return None
+    visualize_subject_tfr(
+        subject,
+        task,
+        config,
+        logger,
+        tfr_roi_only=tfr_roi_only,
+        tfr_topomaps_only=tfr_topomaps_only,
+        plots=plots,
+        deriv_root=deriv_root,
+    )
+    return subject
 
 
 def _get_visualization_mode(tfr_roi_only: bool, tfr_topomaps_only: bool) -> str:
@@ -469,8 +462,7 @@ def _process_subjects_parallel(
         )
         for subject in subjects
     )
-    successful = [r for r in results if r is not None]
-    logger.info(f"Completed {len(successful)}/{len(subjects)} subjects")
+    logger.info(f"Completed {len(results)}/{len(subjects)} subjects")
 
 
 def visualize_tfr_for_subjects(

@@ -237,7 +237,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--pac-source", choices=["precomputed", "tfr"], default=None, help="PAC source: precomputed (Hilbert) or tfr (wavelet)")
     parser.add_argument("--pac-normalize", action="store_true", default=None, help="Normalize PAC values")
     parser.add_argument("--no-pac-normalize", action="store_false", dest="pac_normalize")
-    parser.add_argument("--pac-n-surrogates", type=int, default=None, help="Number of surrogates for PAC (0=none)")
+    parser.add_argument("--pac-n-surrogates", type=int, default=None, help="Number of PAC surrogates for the null model (0 emits raw MVL only)")
     parser.add_argument("--pac-allow-harmonic-overlap", action="store_true", default=None, help="Allow harmonic overlap in PAC")
     parser.add_argument("--no-pac-allow-harmonic-overlap", action="store_false", dest="pac_allow_harmonic_overlap")
     parser.add_argument("--pac-max-harmonic", type=int, default=None, help="Max harmonic to check for overlap")

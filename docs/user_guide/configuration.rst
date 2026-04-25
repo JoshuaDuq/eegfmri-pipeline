@@ -147,7 +147,7 @@ Project & Paths
      - Path to FreeSurfer ``license.txt``; falls back to ``EEG_PIPELINE_FREESURFER_LICENSE`` env var, then ``~/license.txt``
    * - ``paths.signature_dir``
      - ``null``
-     - Root directory for multivariate signature weight maps
+     - Root directory for multivariate signature weight maps; required when ``paths.signature_maps`` is non-empty
    * - ``paths.signature_maps``
      - ``[]``
      - List of ``{name, path}`` entries relative to ``signature_dir``
@@ -460,12 +460,12 @@ First-Level GLM
    * - Key
      - Default
      - Description
-  * - ``fmri_contrast.enabled``
-    - ``false``
-    - Configuration gate for config-driven first-level analysis paths; explicit CLI ``fmri-analysis first-level`` runs regardless of this toggle
-  * - ``fmri_contrast.input_source``
-    - ``"fmriprep"``
-    - BOLD source for inferential fMRI analysis (currently ``"fmriprep"`` only)
+   * - ``fmri_contrast.enabled``
+     - ``false``
+     - Configuration gate for config-driven first-level analysis paths; explicit CLI ``fmri-analysis first-level`` runs regardless of this toggle
+   * - ``fmri_contrast.input_source``
+     - ``"fmriprep"``
+     - BOLD source for inferential fMRI analysis (currently ``"fmriprep"`` only)
    * - ``fmri_contrast.fmriprep_space``
      - ``"T1w"``
      - fMRIPrep output space to use

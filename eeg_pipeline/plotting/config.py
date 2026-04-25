@@ -13,9 +13,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_FALLBACK_COLOR = "#666666"
-DEFAULT_FIGURE_SIZE = (10.0, 8.0)
-
 
 @dataclass
 class FontConfig:
@@ -437,10 +434,14 @@ class PlotConfig:
         override = self._get_plot_type_override(plot_type, "figure_size")
         if override:
             size_name = override
-        
-        return self.figure_sizes.get(
-            size_name, self.figure_sizes.get("standard", DEFAULT_FIGURE_SIZE)
-        )
+
+        if size_name not in self.figure_sizes:
+            available = ", ".join(sorted(self.figure_sizes))
+            raise ValueError(
+                f"Unknown figure size '{size_name}'. Available sizes: {available}"
+            )
+
+        return self.figure_sizes[size_name]
     
     def get_scatter_marker_size(self, plot_type: Optional[str] = None) -> int:
         override = self._get_plot_type_override(plot_type, "scatter_marker_size")
@@ -491,9 +492,6 @@ class PlotConfig:
             return None
         
         color_value = colors[color_name]
-        if color_value is None:
-            return DEFAULT_FALLBACK_COLOR
-        
         return self._convert_to_hex(color_value, mcolors)
     
     def _get_color_from_defaults(self, color_name: str) -> str:
@@ -510,23 +508,26 @@ class PlotConfig:
             "condition_2": self.style.colors.condition_2,
             "network_node": self.style.colors.network_node,
         }
-        return color_map.get(color_name, self.style.colors.gray)
+        if color_name not in color_map:
+            available = ", ".join(sorted(color_map))
+            raise ValueError(
+                f"Unknown color '{color_name}'. Available colors: {available}"
+            )
+
+        return color_map[color_name]
     
     @staticmethod
     def _convert_to_hex(color_value: Any, mcolors: Any) -> str:
         """Convert color value to hex string."""
         if color_value is None:
-            return DEFAULT_FALLBACK_COLOR
+            raise ValueError("Invalid color value: None")
         
         color_str = str(color_value)
-        if color_str.startswith("#"):
-            return color_str
-        
         try:
             rgba = mcolors.to_rgba(color_str)
             return mcolors.to_hex(rgba)
-        except (ValueError, TypeError):
-            return DEFAULT_FALLBACK_COLOR
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid color value '{color_value}'") from exc
     
     def get_histogram_bins(self, plot_type: Optional[str] = None) -> int:
         """Get histogram bins based on plot type.

@@ -10,8 +10,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from eeg_pipeline.plotting.core.annotations import get_sig_marker_text
 from eeg_pipeline.plotting.core.statistics import build_statistical_title, compute_cluster_significance
 from eeg_pipeline.plotting.io.figures import logratio_to_pct
+from eeg_pipeline.plotting.orchestration import tfr as tfr_orchestration
 from eeg_pipeline.plotting.tfr import band_evolution, topomaps
 from eeg_pipeline.utils.analysis.stats.cluster import cluster_test_two_sample
 
@@ -57,6 +59,19 @@ def test_build_statistical_title_uses_cluster_alpha_source() -> None:
     )
 
     assert "alpha=0.050" in title
+
+
+def test_sig_marker_text_uses_cluster_alpha_source() -> None:
+    config = {
+        "plotting.plots.topomap": {"diff_annotation_enabled": True},
+        "statistics": {"sig_alpha": 0.01, "fdr_alpha": 0.05, "cluster_n_perm": 2048},
+        "plotting": {"plots": {"topomap": {"diff_annotation_enabled": True}}},
+    }
+
+    marker_text = get_sig_marker_text(config)
+
+    assert "p < 0.05" in marker_text
+    assert "p < 0.01" not in marker_text
 
 
 def test_build_statistical_title_describes_cluster_statistic_not_threshold() -> None:
@@ -124,6 +139,30 @@ def test_cluster_test_two_sample_rejects_mismatched_paired_inputs() -> None:
             info=info,
             paired=True,
             config=config,
+        )
+
+
+def test_parallel_tfr_worker_propagates_subject_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_visualize_subject_tfr(*args, **kwargs) -> None:
+        raise ValueError("baseline window missing")
+
+    monkeypatch.setattr(
+        tfr_orchestration,
+        "visualize_subject_tfr",
+        fake_visualize_subject_tfr,
+    )
+
+    with pytest.raises(ValueError, match="baseline window missing"):
+        tfr_orchestration._visualize_single_subject(
+            subject="0001",
+            task="thermal",
+            config={},
+            tfr_roi_only=False,
+            tfr_topomaps_only=False,
+            plots=None,
+            deriv_root=Path("."),
         )
 
 

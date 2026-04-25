@@ -55,9 +55,8 @@ class FmriAnalysisPipeline(PipelineBase):
         """
         Resolve signature weight-map root directory and spec list from config.
 
-        Preference for root:
-        1) config: paths.signature_dir (explicit override)
-        2) sibling directory of derivatives: <deriv_root>/../external
+        The root is config: paths.signature_dir. It is required when
+        paths.signature_maps is non-empty.
         Specs are read from config: paths.signature_maps (list of {name, path} dicts).
         """
         return discover_signature_root_and_specs(self.config, self.deriv_root)

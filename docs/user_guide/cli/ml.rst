@@ -32,7 +32,7 @@ Modes
    * - ``shap``
      - SHAP-based feature importance (fold-aggregated TreeExplainer / LinearExplainer)
    * - ``permutation``
-    - Permutation-based feature importance (drop-in-score under shuffled feature columns)
+     - Permutation-based feature importance (drop-in-score under shuffled feature columns)
 
 For CV schemes, metrics, and the full configuration surface, see
 :doc:`../../methods/eeg/machine_learning`.

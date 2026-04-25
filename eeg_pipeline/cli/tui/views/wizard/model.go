@@ -1884,7 +1884,7 @@ type Model struct {
 	// PAC advanced options
 	pacSource              int     // 0: precomputed
 	pacNormalize           bool    // Normalize PAC values
-	pacNSurrogates         int     // Number of surrogates (0=none)
+	pacNSurrogates         int     // Number of surrogates for PAC null model
 	pacAllowHarmonicOvrlap bool    // Allow harmonic overlap
 	pacMaxHarmonic         int     // Maximum harmonic to check
 	pacHarmonicToleranceHz float64 // Harmonic tolerance in Hz
@@ -2749,7 +2749,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// PAC advanced defaults
 		pacSource:              0, // 0: precomputed
 		pacNormalize:           true,
-		pacNSurrogates:         0,
+		pacNSurrogates:         200,
 		pacAllowHarmonicOvrlap: false,
 		pacMaxHarmonic:         6,
 		pacHarmonicToleranceHz: 1.0,

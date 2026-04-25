@@ -54,8 +54,11 @@ def collect_preprocessing_stats(bids_path, pipeline_path, task):
                     all_bad_channels.update(run_bads['name'].tolist())
                 chan_file = pd.DataFrame({'name': list(all_bad_channels)})
             else:
-                logger.warning(f"No bads file found for {sub_num}, assuming no bad channels")
-                chan_file = pd.DataFrame({'name': []})
+                raise FileNotFoundError(
+                    "Missing bad-channel provenance for "
+                    f"{sub_num}, session {sess_num}: expected {chan_filename} "
+                    f"or run-level files matching {run_pattern}."
+                )
         else:
             chan_file = io.read_channels_tsv(chan_filename)
         
@@ -94,4 +97,3 @@ def collect_preprocessing_stats(bids_path, pipeline_path, task):
     
     desc_path = os.path.join(pipeline_path, f"task_{task}_preprocessing_stats_desc.tsv")
     preprocessing_stats.describe().to_csv(desc_path, sep="\t", index=False)
-

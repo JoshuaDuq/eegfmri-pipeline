@@ -513,7 +513,7 @@ def _save_figure_with_fallback(
     dpi: int,
     bbox_inches: str,
     pad_inches: float,
-) -> bool:
+) -> None:
     """Save figure with fallback to Agg backend if needed.
     
     Args:
@@ -523,29 +523,18 @@ def _save_figure_with_fallback(
         bbox_inches: Bounding box setting.
         pad_inches: Padding in inches.
         
-    Returns:
-        True if successful, False otherwise.
+    Raises:
+        Exception: Propagates the original save error unless the known
+        Matplotlib copy_from_bbox issue is resolved by the Agg canvas.
     """
     try:
         fig.savefig(output_path, dpi=dpi, bbox_inches=bbox_inches, pad_inches=pad_inches)
-        return True
     except AttributeError as error:
         error_message = str(error)
         if "copy_from_bbox" not in error_message:
             raise
-        
-        try:
-            return _save_figure_with_agg_backend(fig, output_path, dpi, bbox_inches, pad_inches)
-        except Exception as fallback_error:
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                f"Failed to save figure {output_path} with fallback backend: {fallback_error}"
-            )
-            return False
-    except Exception as error:
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Failed to save figure {output_path}: {error}")
-        return False
+
+        _save_figure_with_agg_backend(fig, output_path, dpi, bbox_inches, pad_inches)
 
 
 def _save_figure_with_agg_backend(
@@ -554,7 +543,7 @@ def _save_figure_with_agg_backend(
     dpi: int,
     bbox_inches: str,
     pad_inches: float,
-) -> bool:
+) -> None:
     """Save figure using Agg backend.
     
     Args:
@@ -564,8 +553,8 @@ def _save_figure_with_agg_backend(
         bbox_inches: Bounding box setting.
         pad_inches: Padding in inches.
         
-    Returns:
-        True if successful, False otherwise.
+    Raises:
+        Exception: Propagates save failures from the Agg canvas.
     """
     from matplotlib.backends.backend_agg import FigureCanvasAgg
 
@@ -574,7 +563,6 @@ def _save_figure_with_agg_backend(
     try:
         fig.canvas = FigureCanvasAgg(fig)
         fig.savefig(output_path, dpi=dpi, bbox_inches=bbox_inches, pad_inches=pad_inches)
-        return True
     finally:
         fig.canvas = original_canvas
 
@@ -606,8 +594,8 @@ def _save_figure_to_formats(
         warnings.simplefilter("ignore")
         for extension in formats:
             output_path = base_path.with_suffix(f".{extension}")
-            if _save_figure_with_fallback(fig, output_path, dpi, bbox_inches, pad_inches):
-                saved_paths.append(output_path)
+            _save_figure_with_fallback(fig, output_path, dpi, bbox_inches, pad_inches)
+            saved_paths.append(output_path)
 
     return saved_paths
 

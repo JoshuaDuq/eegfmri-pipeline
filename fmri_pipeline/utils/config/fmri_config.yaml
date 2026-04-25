@@ -14,8 +14,7 @@ paths:
   freesurfer_dir: null
 
   # Root directory for multivariate signature weight maps.
-  # If null, falls back to <deriv_root>/../external (if it exists).
-  # If set explicitly, the directory must exist.
+  # Required when signature_maps is non-empty; the directory must exist.
   signature_dir: null
 
   # Multivariate signature weight maps to compute at each contrast/beta map.
@@ -280,45 +279,3 @@ fmri_group_level:
     enabled: false
     n_permutations: 5000
     two_sided: true
-
-
-###################################################################
-# fMRI Constraint Settings (for EEG source localization)
-###################################################################
-
-# These settings control how fMRI maps constrain EEG source localization
-
-fmri_constraint:
-  enabled: false
-  
-  # Path to pre-computed fMRI stats map (optional, overrides contrast builder)
-  stats_map_path: null         # NIfTI path in FreeSurfer MRI space
-  
-  # Thresholding
-  threshold: 2.0               # Lowered from 3.1; sub-0000 max z=2.498
-  tail: "pos"                  # "pos" or "abs"
-  thresholding:
-    mode: "z"                  # "z" (hard threshold) or "fdr" (Benjamini–Hochberg)
-    fdr_q: 0.05
-    stat_type: "z"
-  
-  # Cluster filtering
-  cluster_min_voxels: 10       # Minimum cluster size in voxels
-  # Preferred: stable across voxel sizes/resampling. When set, overrides cluster_min_voxels.
-  cluster_min_volume_mm3: null
-  max_clusters: 20             # Keep top-N clusters by peak/size
-  max_voxels_per_cluster: 2000 # Subsample voxels per cluster (0 = no limit)
-  max_total_voxels: 20000      # Subsample total voxels (0 = no limit)
-  random_seed: 0               # 0 = nondeterministic
-  
-  # fMRI-specific time windows (independent of EEG feature extraction windows)
-  # When enabled, source localization uses these windows instead of main pipeline windows
-  time_windows:
-    window_a:
-      name: "window_a"
-      tmin: 3.0
-      tmax: 10.45
-    window_b:
-      name: "window_b"
-      tmin: 3.0
-      tmax: 10.45

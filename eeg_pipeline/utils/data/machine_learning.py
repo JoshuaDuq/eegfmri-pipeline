@@ -1044,7 +1044,7 @@ def load_active_matrix(
         missing = [c for c in cov_cfg if c not in meta.columns]
         if missing:
             msg = f"Requested covariates missing from meta: {missing}. Available meta columns={list(meta.columns)}"
-            strict = bool(get_config_value(config, "machine_learning.data.covariates_strict", False))
+            strict = bool(get_config_value(config, "machine_learning.data.covariates_strict", True))
             if strict:
                 raise ValueError(msg)
             log.warning("%s (dropping missing covariates)", msg)

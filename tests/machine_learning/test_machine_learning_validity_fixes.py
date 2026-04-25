@@ -797,6 +797,35 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     covariates=["age"],
                 )
 
+    def test_load_active_matrix_raises_when_requested_covariates_are_missing_by_default(self):
+        ml_data = self._import_ml_data()
+
+        cfg = DotConfig({"feature_engineering": {"analysis_mode": "trial_ml_safe"}})
+
+        def _fake_load_subject(*_args, **_kwargs):
+            return (
+                pd.DataFrame({"power_alpha_global_mean": [1.0, 2.0]}),
+                np.array([10.0, 20.0], dtype=float),
+                "rating",
+                pd.DataFrame(
+                    {
+                        "subject_id": ["sub-0001", "sub-0001"],
+                        "trial_id": [1, 2],
+                    }
+                ),
+            )
+
+        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+            with self.assertRaisesRegex(ValueError, "Requested covariates missing from meta"):
+                ml_data.load_active_matrix(
+                    subjects=["0001"],
+                    task="task",
+                    deriv_root=Path("/tmp/deriv"),
+                    config=cfg,
+                    feature_families=["power"],
+                    covariates=["age"],
+                )
+
     def test_load_active_matrix_drops_missing_covariates_when_not_strict(self):
         ml_data = self._import_ml_data()
 
@@ -3670,6 +3699,52 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     null_output_path=Path(td) / "null.npz",
                     config=cfg,
                 )
+
+    def test_run_permutation_test_surfaces_permutation_scheme_config_errors(self):
+        from sklearn.dummy import DummyRegressor
+        from sklearn.pipeline import Pipeline
+
+        from eeg_pipeline.analysis.machine_learning import cv
+
+        class BadConfig:
+            def get(self, key, default=None):
+                if key == "machine_learning.cv.permutation_scheme":
+                    raise RuntimeError("bad permutation config")
+                return default
+
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(RuntimeError, "bad permutation config"):
+                cv.run_permutation_test(
+                    X=np.array([[0.0], [1.0], [2.0], [3.0]], dtype=float),
+                    y=np.array([0.0, 1.0, 2.0, 3.0], dtype=float),
+                    groups=np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object),
+                    blocks=None,
+                    pipe=Pipeline([("regressor", DummyRegressor(strategy="mean"))]),
+                    param_grid={},
+                    inner_cv_splits=2,
+                    inner_n_jobs=1,
+                    seed=42,
+                    model_name="elasticnet",
+                    null_n_perm=2,
+                    null_output_path=Path(td) / "null.npz",
+                    config=BadConfig(),
+                )
+
+    def test_fit_default_pipeline_sets_available_random_state_parameter(self):
+        from sklearn.ensemble import RandomForestRegressor
+        from sklearn.pipeline import Pipeline
+
+        from eeg_pipeline.analysis.machine_learning.cv import _fit_default_pipeline
+
+        fitted = _fit_default_pipeline(
+            Pipeline([("rf", RandomForestRegressor(n_estimators=1))]),
+            np.array([[0.0], [1.0], [2.0]], dtype=float),
+            np.array([0.0, 1.0, 2.0], dtype=float),
+            fold=1,
+            random_state=17,
+        )
+
+        self.assertEqual(fitted.named_steps["rf"].random_state, 17)
 
     def test_resolve_permutation_scheme_rejects_invalid_value(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch

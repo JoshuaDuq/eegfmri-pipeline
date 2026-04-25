@@ -231,9 +231,12 @@ def run_bads_detection_single_file(
             initial_bads = sorted(set(raw.info["bads"]))
             repeated_bads = []
 
-            for _ in range(repeat_count):
+            for repeat_index in range(repeat_count):
                 raw.info["bads"] = list(initial_bads)
-                nc = pyprep.NoisyChannels(raw=raw, random_state=random_state)
+                repeat_random_state = (
+                    None if random_state is None else int(random_state) + repeat_index
+                )
+                nc = pyprep.NoisyChannels(raw=raw, random_state=repeat_random_state)
                 nc.find_bad_by_deviation()
                 nc.find_bad_by_correlation()
                 if ransac:
@@ -383,6 +386,13 @@ def run_bads_detection(
 
     logger.title(f"Custom step - Find bad channels in {len(eeg_files)} files.")
 
+    if len(eeg_files) == 0:
+        raise ValueError(
+            "No EEG files found for bad-channel detection "
+            f"(bids_path={bids_path}, task={task}, session={session}, "
+            f"subjects={subjects}, extension={file_extension})."
+        )
+
     if n_jobs != 1:
         bads_frame_list = Parallel(n_jobs=n_jobs)(
             delayed(run_bads_detection_single_file)(
@@ -431,10 +441,6 @@ def run_bads_detection(
             )
             bads_frame_list.append(bframe)
 
-    if len(bads_frame_list) == 0:
-        logger.warning(f"No EEG files processed for task {task}")
-        return
-    
     if len(bads_frame_list) > 1:
         bads_frame = pd.concat(bads_frame_list, ignore_index=False)
     else:

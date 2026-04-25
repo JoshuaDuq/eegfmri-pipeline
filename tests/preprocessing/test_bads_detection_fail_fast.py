@@ -6,7 +6,10 @@ from unittest.mock import Mock, patch
 import pandas as pd
 import pytest
 
-from eeg_pipeline.preprocessing.pipeline.preprocess import run_bads_detection_single_file
+from eeg_pipeline.preprocessing.pipeline.preprocess import (
+    run_bads_detection,
+    run_bads_detection_single_file,
+)
 
 
 def test_bads_detection_surfaces_bids_read_errors(tmp_path: Path) -> None:
@@ -118,7 +121,7 @@ def test_bads_detection_uses_independent_pyprep_repeats_with_majority_vote(tmp_p
         outputs = iter([["Cz"], [], []])
 
         def __init__(self, raw, random_state=None) -> None:
-            _ = random_state
+            random_states.append(random_state)
             raw_bad_snapshots.append(list(raw.info["bads"]))
 
         def find_bad_by_deviation(self) -> None:
@@ -131,6 +134,7 @@ def test_bads_detection_uses_independent_pyprep_repeats_with_majority_vote(tmp_p
             return next(self.outputs)
 
     raw_bad_snapshots: list[list[str]] = []
+    random_states: list[int | None] = []
     written: dict[str, pd.DataFrame] = {}
     eeg_path = tmp_path / "sub-0001_ses-01_task-pain_eeg.vhdr"
     eeg_path.write_text("", encoding="utf-8")
@@ -179,8 +183,75 @@ def test_bads_detection_uses_independent_pyprep_repeats_with_majority_vote(tmp_p
             bids_path=tmp_path,
             l_pass=None,
             repeats=3,
+            random_state=42,
         )
 
     assert raw_bad_snapshots == [[], [], []]
+    assert random_states == [42, 43, 44]
     assert result.loc[str(eeg_path), "n_bads"] == 0
     assert written[str(channels_path)].loc[0, "status"] == "good"
+
+
+def test_bads_detection_raises_when_no_eeg_files_match(tmp_path: Path) -> None:
+    with patch(
+        "eeg_pipeline.preprocessing.pipeline.preprocess.utils.find_bids_files",
+        return_value=[],
+    ):
+        with pytest.raises(ValueError, match="No EEG files found for bad-channel detection"):
+            run_bads_detection(
+                bids_path=tmp_path,
+                pipeline_path=tmp_path / "derivatives",
+                task="pain",
+                session="01",
+                subjects=["0001"],
+            )
+
+
+def test_preprocessing_stats_rejects_missing_bad_channel_provenance(tmp_path: Path) -> None:
+    from eeg_pipeline.preprocessing.pipeline import stats
+
+    epo_path = tmp_path / "sub-0001_ses-01_task-pain_proc-clean_epo.fif"
+
+    class FakeBIDSPath:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def match(self) -> list[Path]:
+            return [epo_path]
+
+    class FakeEpochs:
+        event_id = {"pain": 1}
+        drop_log: list[tuple[str, ...]] = []
+
+        def __len__(self) -> int:
+            return 0
+
+        def __getitem__(self, _key: str) -> "FakeEpochs":
+            return self
+
+    with patch.object(stats, "BIDSPath", FakeBIDSPath), patch.object(
+        stats,
+        "get_entities_from_fname",
+        return_value={"subject": "0001", "session": "01"},
+    ), patch.object(
+        stats.utils,
+        "get_derived_path",
+        return_value=str(tmp_path / "missing_bads.tsv"),
+    ), patch(
+        "glob.glob",
+        return_value=[],
+    ), patch.object(
+        stats.io,
+        "read_components_tsv",
+        return_value=None,
+    ), patch.object(
+        stats.io,
+        "load_epochs",
+        return_value=FakeEpochs(),
+    ):
+        with pytest.raises(FileNotFoundError, match="Missing bad-channel provenance"):
+            stats.collect_preprocessing_stats(
+                bids_path=tmp_path,
+                pipeline_path=tmp_path,
+                task="pain",
+            )
