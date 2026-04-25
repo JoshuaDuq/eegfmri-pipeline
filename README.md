@@ -1,9 +1,9 @@
 # EEG–fMRI Analysis Pipeline
 
-[Python ≥ 3.11](https://www.python.org)
-[License: MIT](LICENSE)
-[BIDS](https://bids-specification.readthedocs.io/)
-[Docs](https://joshuaduq.github.io/eegfmri-pipeline/)
+[![Python ≥ 3.11](https://img.shields.io/badge/python-≥3.11-blue.svg)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![BIDS](https://img.shields.io/badge/data-BIDS-orange.svg)](https://bids-specification.readthedocs.io/)
+[![Docs](https://img.shields.io/badge/docs-Sphinx-blue.svg)](https://joshuaduq.github.io/eegfmri-pipeline/)
 
 A research pipeline for reproducible EEG, fMRI, and multimodal EEG–fMRI
 analysis on BIDS-organized data.
@@ -18,7 +18,12 @@ The [Sphinx documentation](https://joshuaduq.github.io/eegfmri-pipeline/) is the
 canonical guide for installation, configuration, methods, command references,
 and output formats.
 
+<p align="center">
+  <img src="docs/screenshots/tui_main_menu.png" width="800" alt="Interactive TUI"/>
+</p>
 
+<p align="center"><em>Guided terminal workflows expose the same analysis stages
+available through the CLI.</em></p>
 
 ## Why This Project Exists
 
