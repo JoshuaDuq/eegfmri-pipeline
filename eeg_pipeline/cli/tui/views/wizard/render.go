@@ -332,6 +332,12 @@ func (m Model) renderFooter(width int) string {
 		}
 	default:
 		hints = m.getStepHints()
+		if m.usesReviewPanel(m.contentWidth) {
+			hints = append(hints,
+				footerHint{key: "C", label: "Copy cmd", compact: "Copy", priority: 1},
+				footerHint{key: "[ ]", label: "Scroll cmd", compact: "Scroll", priority: 2},
+			)
+		}
 	}
 
 	divider := styles.RenderFooterDivider(width)
@@ -354,9 +360,23 @@ func (m Model) renderFooterStatus(width int) string {
 		return m.renderValidationSummary(width)
 	}
 	if m.toastMessage != "" {
+		// Clipboard feedback is rendered inline in the review panel header
+		// when that panel is visible, so we suppress the duplicate footer
+		// toast in that case. When the panel is not on screen (narrow
+		// terminal) the footer remains the canonical surface.
+		if m.isClipboardToast() && m.usesReviewPanel(m.contentWidth) {
+			return ""
+		}
 		return m.renderToast(width)
 	}
 	return ""
+}
+
+// isClipboardToast reports whether the active toast belongs to the
+// clipboard copy flow and should therefore be routed to the review panel
+// instead of the global footer status row.
+func (m Model) isClipboardToast() bool {
+	return m.toastType == "clipboard" || m.toastType == "clipboard-error"
 }
 
 // renderLoadingBanner renders a confident, single-line indeterminate-loading

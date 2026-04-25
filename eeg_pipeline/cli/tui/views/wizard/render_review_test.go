@@ -1,12 +1,107 @@
 package wizard
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/types"
 )
+
+func TestClipboardResultMsgShowsSuccessToast(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	updated, _ := m.Update(executor.ClipboardResultMsg{Error: nil})
+	got := updated.(Model)
+	if got.toastMessage == "" {
+		t.Fatal("expected success toast after clipboard copy, got empty toast")
+	}
+	if !strings.Contains(strings.ToLower(got.toastMessage), "copied") {
+		t.Fatalf("expected toast to mention copy success, got %q", got.toastMessage)
+	}
+	if got.toastType != "clipboard" {
+		t.Fatalf("expected toast type 'clipboard', got %q", got.toastType)
+	}
+}
+
+func TestClipboardResultMsgShowsErrorToast(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	updated, _ := m.Update(executor.ClipboardResultMsg{Error: errors.New("xclip missing")})
+	got := updated.(Model)
+	if !strings.Contains(got.toastMessage, "xclip missing") {
+		t.Fatalf("expected toast to surface clipboard error, got %q", got.toastMessage)
+	}
+	if got.toastType != "clipboard-error" {
+		t.Fatalf("expected toast type 'clipboard-error', got %q", got.toastType)
+	}
+}
+
+func TestScrollCommandPreviewClampsToMaxOffsetSoUpScrollsImmediately(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.width = 160
+	m.height = 40
+	m.contentWidth = 140
+	m.task = "thermalactive"
+	m.bidsRoot = "C:/study/bids"
+	m.derivRoot = "C:/study/derivatives"
+
+	maxOffset := m.commandPreviewMaxOffset()
+	if maxOffset == 0 {
+		t.Fatal("expected the features command preview to be longer than the visible budget for this test")
+	}
+
+	// Hammer the down-scroll well past the end.
+	for i := 0; i < maxOffset+50; i++ {
+		m.scrollCommandPreview(1)
+	}
+	if m.cmdScrollOffset != maxOffset {
+		t.Fatalf("expected stored offset to be clamped at %d after over-scrolling, got %d", maxOffset, m.cmdScrollOffset)
+	}
+
+	// A single up-scroll must move the viewport, not just decrement a stale
+	// stash of unreachable offsets.
+	m.scrollCommandPreview(-1)
+	if m.cmdScrollOffset != maxOffset-1 {
+		t.Fatalf("expected one [ press to land at offset %d, got %d", maxOffset-1, m.cmdScrollOffset)
+	}
+}
+
+func TestReviewPanelSurfacesClipboardSuccessInCommandHeader(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.task = "thermalactive"
+	m.bidsRoot = "C:/study/bids"
+	m.derivRoot = "C:/study/derivatives"
+	m.toastMessage = "Command copied to clipboard"
+	m.toastType = "clipboard"
+
+	panel := stripWizardHeaderANSI(m.renderReviewPanel(48, 20))
+	if !strings.Contains(panel, "COPIED") {
+		t.Fatalf("expected review panel to surface clipboard success in COMMAND header, got %q", panel)
+	}
+	if strings.Contains(panel, "COMMAND  \u2500") || strings.Contains(strings.ToUpper(panel), "COMMAND  ─") {
+		// During the toast the label should NOT read as the standard
+		// "COMMAND" rule; we want the transient COPIED variant in its
+		// place.
+		t.Fatalf("expected COMMAND label to be replaced while clipboard toast is active, got %q", panel)
+	}
+}
+
+func TestReviewPanelSuppressesFooterClipboardToastWhenPanelVisible(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.contentWidth = 130
+	m.toastMessage = "Command copied to clipboard"
+	m.toastType = "clipboard"
+
+	if status := m.renderFooterStatus(120); status != "" {
+		t.Fatalf("expected footer to suppress clipboard toast while review panel is visible, got %q", status)
+	}
+
+	m.contentWidth = 60
+	if status := m.renderFooterStatus(60); status == "" {
+		t.Fatal("expected footer to surface clipboard toast when review panel is hidden")
+	}
+}
 
 func TestRenderContentUsesReviewPanelOnlyWhenWide(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
@@ -159,14 +254,17 @@ func TestReviewPanelCommandPreviewUsesContinuationMarkerWhenClipped(t *testing.T
 	}
 }
 
-func TestReviewPanelShowsNextActionFromValidationState(t *testing.T) {
+func TestReviewPanelOmitsRedundantNextRowWhenBlocked(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
 	m.validationErrors = []string{"Select at least one analysis to run"}
 
 	blocked := stripWizardHeaderANSI(m.renderReviewPanel(48, 18))
-	if !strings.Contains(blocked, "NEXT") ||
-		!strings.Contains(blocked, "Fix: Select at least one analysis to run") {
-		t.Fatalf("expected blocked review panel to show concrete next action, got %q", blocked)
+	if !strings.Contains(blocked, "VALIDATION") ||
+		!strings.Contains(blocked, "Select at least one analysis to run") {
+		t.Fatalf("expected blocked review panel to surface the validation error, got %q", blocked)
+	}
+	if strings.Contains(blocked, "NEXT") || strings.Contains(blocked, "Fix:") {
+		t.Fatalf("expected blocked review panel to omit redundant NEXT/Fix row, got %q", blocked)
 	}
 
 	m.validationErrors = nil
@@ -180,5 +278,35 @@ func TestReviewPanelShowsNextActionFromValidationState(t *testing.T) {
 	ready := stripWizardHeaderANSI(m.renderReviewPanel(48, 18))
 	if !strings.Contains(ready, "NEXT") || !strings.Contains(ready, "Enter to run") {
 		t.Fatalf("expected final-step review panel to show run action, got %q", ready)
+	}
+}
+
+func TestReviewPanelShowsSecondErrorInsteadOfPlusOneCounter(t *testing.T) {
+	m := New(types.PipelineBehavior, ".")
+	m.validationErrors = []string{
+		"Select at least one analysis to run",
+		"Select at least one valid subject",
+	}
+
+	rendered := stripWizardHeaderANSI(m.renderReviewPanel(48, 20))
+	if !strings.Contains(rendered, "Select at least one analysis to run") ||
+		!strings.Contains(rendered, "Select at least one valid subject") {
+		t.Fatalf("expected both validation errors inline, got %q", rendered)
+	}
+	if strings.Contains(rendered, "+1 more issue") {
+		t.Fatalf("expected the second error inline rather than a +1 counter, got %q", rendered)
+	}
+}
+
+func TestReviewPanelSubjectsRowSilentWhileLoading(t *testing.T) {
+	m := New(types.PipelineFeatures, ".")
+	m.SetSubjectsLoading()
+
+	rendered := stripWizardHeaderANSI(m.renderReviewPanel(48, 20))
+	if !strings.Contains(rendered, "loading") {
+		t.Fatalf("expected subjects row to surface loading state, got %q", rendered)
+	}
+	if strings.Contains(rendered, "none selected") {
+		t.Fatalf("expected subjects row to suppress 'none selected' while loading, got %q", rendered)
 	}
 }

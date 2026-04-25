@@ -22,9 +22,17 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
+		if m.isMouseOverReviewPanel(msg.X) {
+			m.scrollCommandPreview(-1)
+			return m, nil
+		}
 		m.handleUp()
 		return m, nil
 	case tea.MouseButtonWheelDown:
+		if m.isMouseOverReviewPanel(msg.X) {
+			m.scrollCommandPreview(1)
+			return m, nil
+		}
 		m.handleDown()
 		return m, nil
 	}

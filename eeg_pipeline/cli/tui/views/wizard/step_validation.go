@@ -48,6 +48,11 @@ func (m *Model) validateSubjectSelectionStep() []string {
 	}
 	if selectedCount < minRequired {
 		errors = append(errors, fmt.Sprintf("Select at least %d subject(s)", minRequired))
+		// When the count is below threshold the user already sees a clear
+		// instruction. Emitting the "valid" variant on top reads as a
+		// duplicate; only surface it when they have selected enough but
+		// the selections fail validation.
+		return errors
 	}
 	if validCount < minRequired {
 		errors = append(errors, fmt.Sprintf("Select at least %d valid subject(s)", minRequired))

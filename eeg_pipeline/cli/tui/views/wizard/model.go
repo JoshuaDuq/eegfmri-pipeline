@@ -1555,6 +1555,9 @@ type Model struct {
 	advancedCursor     int  // Which config option is focused
 	advancedOffset     int  // Scroll offset for advanced config lists
 
+	// Review panel command preview scroll offset (first visible wrapped line)
+	cmdScrollOffset int
+
 	// Multi-select expansion state for advanced config
 	expandedOption int // expandedNone = none expanded
 	subCursor      int // Cursor within the expanded list
@@ -2469,6 +2472,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		{Key: "Space", Description: "Toggle selection"},
 		{Key: "A", Description: "Select all"},
 		{Key: "N", Description: "Select none"},
+	})
+	help.AddSection("Review panel", []components.HelpItem{
+		{Key: "C", Description: "Copy command to clipboard"},
+		{Key: "[ / ]", Description: "Scroll command preview"},
+		{Key: "Wheel", Description: "Scroll command preview (over panel)"},
 	})
 	help.AddSection("Actions", []components.HelpItem{
 		{Key: "Enter", Description: "Proceed to next step"},
@@ -3733,6 +3741,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m = next.(Model)
 
+	case executor.ClipboardResultMsg:
+		if msg.Error != nil {
+			m.ShowToast("Copy failed: "+msg.Error.Error(), "clipboard-error")
+		} else {
+			m.ShowToast("Command copied to clipboard", "clipboard")
+		}
+		return m, nil
+
 	case executor.PickFileMsg:
 		// Handle file picker result
 		if msg.Error == nil && msg.Path != "" {
@@ -3994,6 +4010,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleUp()
 		case "down", "j":
 			m.handleDown()
+		case "[":
+			if m.usesReviewPanel(m.contentWidth) {
+				m.scrollCommandPreview(-1)
+				return m, nil
+			}
+		case "]":
+			if m.usesReviewPanel(m.contentWidth) {
+				m.scrollCommandPreview(1)
+				return m, nil
+			}
 		case " ":
 			// Space to toggle selections
 			m.handleSpace()
@@ -4070,6 +4096,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.subjectLoadError = ""
 				return m, executor.LoadSubjectsRefresh(m.repoRoot, m.task, m.Pipeline)
 			}
+
+		case "c", "C":
+			// Copy the live command preview to the system clipboard.
+			cmd := strings.TrimSpace(m.BuildCommand())
+			if cmd == "" {
+				m.ShowToast("No command to copy yet", "warning")
+				return m, nil
+			}
+			return m, executor.CopyToClipboardCmd(cmd)
 
 		case "g", "G":
 			// Toggle global styling panel in plot categories page

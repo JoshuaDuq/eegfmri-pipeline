@@ -52,6 +52,7 @@ func (m *Model) resetCursorsForStep() {
 	m.featureFileCursor = 0
 	m.advancedCursor = 0
 	m.advancedOffset = 0
+	m.cmdScrollOffset = 0
 	m.subCursor = 0
 	m.expandedOption = expandedNone
 	m.plotCursor = 0
