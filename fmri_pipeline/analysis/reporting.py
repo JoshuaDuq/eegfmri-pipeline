@@ -432,59 +432,55 @@ def generate_signature_tables(
     """
     Compute multivariate signature expression on the unthresholded MNI effect-size map.
 
-    Returns report tables (best-effort; returns empty list on any failure).
+    Returns report tables for configured signatures.
     Signatures are read from ``signature_specs`` (config-driven list of {name, path} dicts).
     """
     cfg = cfg.normalized()
     if not cfg.enabled or not bool(getattr(cfg, "include_signatures", True)):
         return []
     if mni_effect_img is None:
-        return []
+        raise ValueError(
+            "Signature report generation requires an MNI effect-size map."
+        )
     if signature_root is None or not signature_specs:
-        return []
+        raise ValueError(
+            "Signature report generation requires signature_root and signature_specs."
+        )
 
     sig_files = discover_signature_files(signature_root, signature_specs)
     if not sig_files:
-        return []
+        raise ValueError("No configured signature weight maps were discovered.")
 
-    results: List[SignatureResult] = []
-    try:
-        results = compute_signature_expression(
-            stat_or_effect_img=mni_effect_img,
-            signature_root=signature_root,
-            signature_specs=signature_specs,
-            mask_img=mni_mask_img,
-            signatures=sorted(sig_files.keys()),
-        )
-    except Exception as exc:
-        logger.warning("Failed to compute signatures (%s)", exc)
-        return []
+    results: List[SignatureResult] = compute_signature_expression(
+        stat_or_effect_img=mni_effect_img,
+        signature_root=signature_root,
+        signature_specs=signature_specs,
+        mask_img=mni_mask_img,
+        signatures=sorted(sig_files.keys()),
+    )
 
     if not results:
-        return []
+        raise ValueError("Signature expression returned no results.")
 
     qc_dir = contrast_dir / "plots" / "qc"
     qc_dir.mkdir(parents=True, exist_ok=True)
     tsv_path = qc_dir / "signature_expression.tsv"
-    try:
-        header = ["signature", "dot", "cosine", "pearson_r", "n_voxels", "weight_path"]
-        lines = ["\t".join(header)]
-        for r in results:
-            lines.append(
-                "\t".join(
-                    [
-                        r.name,
-                        f"{r.dot:.6g}",
-                        "" if r.cosine is None else f"{r.cosine:.6g}",
-                        "" if r.pearson_r is None else f"{r.pearson_r:.6g}",
-                        str(int(r.n_voxels)),
-                        str(r.weight_path),
-                    ]
-                )
+    header = ["signature", "dot", "cosine", "pearson_r", "n_voxels", "weight_path"]
+    lines = ["\t".join(header)]
+    for r in results:
+        lines.append(
+            "\t".join(
+                [
+                    r.name,
+                    f"{r.dot:.6g}",
+                    "" if r.cosine is None else f"{r.cosine:.6g}",
+                    "" if r.pearson_r is None else f"{r.pearson_r:.6g}",
+                    str(int(r.n_voxels)),
+                    str(r.weight_path),
+                ]
             )
-        tsv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    except Exception:
-        tsv_path = None
+        )
+    tsv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def _fmt(x: Any) -> str:
         if x is None:
@@ -944,8 +940,9 @@ def generate_fmri_space_section(
     reporting = _maybe_import_nilearn_reporting()
     nib = _maybe_import_nibabel()
     if plotting is None or nib is None:
-        logger.warning("nilearn/nibabel not available; skipping fMRI plotting outputs")
-        return ReportSpaceSection(space=space, images=(), tables=(), summary={"plots": "skipped (missing nilearn/nibabel)"})
+        raise RuntimeError(
+            "fMRI plotting requires nilearn plotting and nibabel."
+        )
 
     if stat_img is None:
         if stat_img_path is None:
@@ -1019,6 +1016,7 @@ def generate_fmri_space_section(
                 _add_image("Stat map (slices) · thresholded", disp, "stat_slices_thresholded", caption=thr_label)
         except Exception as exc:
             logger.warning("Failed to generate stat-map slices (%s)", exc)
+            raise
 
     # Glass brain: Z-stat
     if "glass" in plot_types:
@@ -1046,6 +1044,7 @@ def generate_fmri_space_section(
                 _add_image("Glass brain · thresholded", disp, "glass_thresholded", caption=thr_label)
         except Exception as exc:
             logger.warning("Failed to generate glass brain (%s)", exc)
+            raise
 
     # Histogram
     if "hist" in plot_types:
@@ -1090,6 +1089,7 @@ def generate_fmri_space_section(
                 plt.close(fig)
         except Exception as exc:
             logger.warning("Failed to generate z histogram (%s)", exc)
+            raise
 
     # Cluster/peak table
     if "clusters" in plot_types and reporting is not None:
@@ -1122,6 +1122,7 @@ def generate_fmri_space_section(
             )
         except Exception as exc:
             logger.warning("Failed to generate clusters table (%s)", exc)
+            raise
 
     summary = _stat_summary_from_img(stat_img, mask_img=mask_img)
     if summary:
@@ -1165,6 +1166,7 @@ def generate_fmri_space_section(
                 _add_image("Effect size (glass)", disp, "effect_glass")
     except Exception as exc:
         logger.warning("Failed to generate effect size panels (%s)", exc)
+        raise
 
     try:
         if bool(getattr(cfg_obj, "include_standard_error", True)) and variance_img is not None:
@@ -1193,6 +1195,7 @@ def generate_fmri_space_section(
                 _add_image("Std. error (slices)", disp, "se_slices")
     except Exception as exc:
         logger.warning("Failed to generate standard error panels (%s)", exc)
+        raise
 
     return ReportSpaceSection(space=space, images=tuple(images), tables=tuple(tables), summary=summary)
 
@@ -1544,6 +1547,7 @@ def run_fmri_plotting_and_report(
             meta["signatures"] = {"enabled": True, "root": str(signature_root) if signature_root else None}
     except Exception as exc:
         logger.warning("Failed to generate signatures section (%s)", exc)
+        raise
 
     if cfg.html_report:
         methods_payload: Dict[str, Any] = {

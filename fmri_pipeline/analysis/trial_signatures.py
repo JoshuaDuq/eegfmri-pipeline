@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from fmri_pipeline.analysis.contrast_builder import discover_runless_confounds
 from fmri_pipeline.analysis.multivariate_signatures import compute_signature_expression
 from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
 from fmri_pipeline.utils.bold_discovery import (
@@ -15,6 +16,8 @@ from fmri_pipeline.utils.bold_discovery import (
     coerce_condition_value as _coerce_condition_value,
     discover_brain_mask_for_bold as _discover_brain_mask_for_bold,
     discover_fmriprep_preproc_bold as _discover_fmriprep_preproc_bold,
+    discover_runless_fmriprep_preproc_bold as _discover_runless_fmriprep_preproc_bold,
+    discover_single_runless_bids_pair,
     get_tr_from_bold as _get_tr_from_bold,
     select_confounds as _select_confounds,
     select_consistent_run_source,
@@ -332,6 +335,8 @@ def _discover_runs(
     if not func_dir.exists():
         raise FileNotFoundError(f"fMRI func directory not found: {func_dir}")
 
+    runless_pair: Optional[Tuple[Path, Path]] = None
+
     # Discover run numbers from events files first.
     events_glob = [
         p for p in sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_events.tsv")) if not p.name.endswith("_bold_events.tsv")
@@ -345,6 +350,15 @@ def _discover_runs(
             run_nums.append(int(run_str))
         except Exception:
             continue
+
+    if not run_nums and runs is None:
+        runless_pair = discover_single_runless_bids_pair(
+            func_dir=func_dir,
+            sub_label=sub_label,
+            task=task,
+        )
+        if runless_pair is not None:
+            run_nums = [1]
 
     if runs is not None:
         want = {int(r) for r in runs}
@@ -363,29 +377,47 @@ def _discover_runs(
     selected_input_source = _normalize_input_source(input_source)
     preproc_by_run: Dict[int, Optional[Path]] = {}
     if selected_input_source == "fmriprep" and bids_derivatives is not None:
-        selected_input_source, preproc_by_run = select_consistent_run_source(
-            run_numbers=run_nums,
-            discover_preproc_bold=lambda run_num: _discover_fmriprep_preproc_bold(
+        if runless_pair is not None:
+            runless_preproc = _discover_runless_fmriprep_preproc_bold(
                 bids_derivatives=bids_derivatives,
                 subject=sub_label,
                 task=task,
-                run_num=run_num,
                 space=fmriprep_space,
-            ),
-            require_fmriprep=require_fmriprep,
-        )
+            )
+            preproc_by_run = {1: runless_preproc}
+            if runless_preproc is None:
+                if require_fmriprep:
+                    raise FileNotFoundError(
+                        "Requested fMRIPrep input, but no runless preprocessed BOLD file was found."
+                    )
+                selected_input_source = "bids_raw"
+        else:
+            selected_input_source, preproc_by_run = select_consistent_run_source(
+                run_numbers=run_nums,
+                discover_preproc_bold=lambda run_num: _discover_fmriprep_preproc_bold(
+                    bids_derivatives=bids_derivatives,
+                    subject=sub_label,
+                    task=task,
+                    run_num=run_num,
+                    space=fmriprep_space,
+                ),
+                require_fmriprep=require_fmriprep,
+            )
 
     out: List[Tuple[int, Path, Path, Optional[Path]]] = []
     for run_num in run_nums:
-        events_patterns = [
-            f"{sub_label}_task-{task}_run-{run_num:02d}_events.tsv",
-            f"{sub_label}_task-{task}_run-{run_num}_events.tsv",
-            f"{sub_label}_task-{task}_run-0{run_num}_events.tsv",
-            f"{sub_label}_task-{task}_run-{run_num:02d}_bold_events.tsv",
-            f"{sub_label}_task-{task}_run-{run_num}_bold_events.tsv",
-            f"{sub_label}_task-{task}_run-0{run_num}_bold_events.tsv",
-        ]
-        events_path = next((func_dir / n for n in events_patterns if (func_dir / n).exists()), None)
+        if runless_pair is not None and int(run_num) == 1:
+            events_path = runless_pair[0]
+        else:
+            events_patterns = [
+                f"{sub_label}_task-{task}_run-{run_num:02d}_events.tsv",
+                f"{sub_label}_task-{task}_run-{run_num}_events.tsv",
+                f"{sub_label}_task-{task}_run-0{run_num}_events.tsv",
+                f"{sub_label}_task-{task}_run-{run_num:02d}_bold_events.tsv",
+                f"{sub_label}_task-{task}_run-{run_num}_bold_events.tsv",
+                f"{sub_label}_task-{task}_run-0{run_num}_bold_events.tsv",
+            ]
+            events_path = next((func_dir / n for n in events_patterns if (func_dir / n).exists()), None)
         if events_path is None:
             continue
 
@@ -394,21 +426,34 @@ def _discover_runs(
 
         if selected_input_source == "fmriprep":
             bold_path = preproc_by_run.get(int(run_num))
-            confounds_path = _discover_confounds(
-                bids_derivatives=bids_derivatives,
-                sub_label=sub_label,
-                task=task,
-                run_num=run_num,
-            )
+            if runless_pair is not None and int(run_num) == 1:
+                confounds_path = discover_runless_confounds(
+                    bids_derivatives=bids_derivatives,
+                    subject=sub_label,
+                    task=task,
+                )
+            else:
+                confounds_path = _discover_confounds(
+                    bids_derivatives=bids_derivatives,
+                    sub_label=sub_label,
+                    task=task,
+                    run_num=run_num,
+                )
         else:
-            raw_patterns = [
-                f"{sub_label}_task-{task}_run-{run_num:02d}_bold.nii.gz",
-                f"{sub_label}_task-{task}_run-{run_num}_bold.nii.gz",
-            ]
-            bold_path = next((func_dir / n for n in raw_patterns if (func_dir / n).exists()), None)
+            if runless_pair is not None and int(run_num) == 1:
+                bold_path = runless_pair[1]
+            else:
+                raw_patterns = [
+                    f"{sub_label}_task-{task}_run-{run_num:02d}_bold.nii.gz",
+                    f"{sub_label}_task-{task}_run-{run_num}_bold.nii.gz",
+                ]
+                bold_path = next((func_dir / n for n in raw_patterns if (func_dir / n).exists()), None)
 
         if bold_path is None:
-            continue
+            raise FileNotFoundError(
+                f"No BOLD image found for subject {sub_label}, task {task}, "
+                f"run {int(run_num):02d} with events file {events_path}."
+            )
 
         out.append((int(run_num), bold_path, events_path, confounds_path))
 
@@ -763,6 +808,43 @@ def _compute_effect_variance(
         return None
 
 
+def _load_nifti_image(image_or_path: Any) -> Any:
+    import nibabel as nib  # type: ignore
+
+    return nib.load(str(image_or_path)) if isinstance(image_or_path, (str, Path)) else image_or_path
+
+
+def _validate_same_image_grid(images: Sequence[Any]) -> None:
+    import numpy as np  # type: ignore
+
+    if not images:
+        return
+
+    ref = images[0]
+    ref_shape = tuple(getattr(ref, "shape", ()))
+    ref_affine = np.asarray(ref.affine, dtype=float)
+    for img in images[1:]:
+        shape = tuple(getattr(img, "shape", ()))
+        affine = np.asarray(img.affine, dtype=float)
+        if shape != ref_shape or not np.allclose(affine, ref_affine):
+            raise ValueError(
+                "Fixed-effects image combination requires all images to share "
+                "the same image grid."
+            )
+
+
+def _validate_variance_images(
+    *,
+    effects: Sequence[Any],
+    variances: Sequence[Any],
+) -> None:
+    if len(variances) != len(effects):
+        raise ValueError(
+            "Variance-weighted fixed effects requires one variance image per effect image."
+        )
+    _validate_same_image_grid([effects[0], *variances])
+
+
 def _combine_effect_images(
     *,
     effects: Sequence[Any],
@@ -780,9 +862,9 @@ def _combine_effect_images(
     if not effects:
         raise ValueError("No effect images provided.")
 
-    ref = effects[0]
-    ref_img = nib.load(str(ref)) if isinstance(ref, (str, Path)) else ref
-    eff_imgs = [nib.load(str(e)) if isinstance(e, (str, Path)) else e for e in effects]
+    eff_imgs = [_load_nifti_image(e) for e in effects]
+    _validate_same_image_grid(eff_imgs)
+    ref_img = eff_imgs[0]
     eff = np.stack([np.asanyarray(img.dataobj) for img in eff_imgs], axis=0)
 
     method = (method or "variance").strip().lower()
@@ -792,7 +874,8 @@ def _combine_effect_images(
     if not variances:
         raise ValueError("Variance-weighted fixed effects requires effect variances.")
 
-    var_imgs = [nib.load(str(v)) if isinstance(v, (str, Path)) else v for v in variances]
+    var_imgs = [_load_nifti_image(v) for v in variances]
+    _validate_variance_images(effects=eff_imgs, variances=var_imgs)
     var = np.stack([np.asanyarray(img.dataobj) for img in var_imgs], axis=0)
 
     with np.errstate(divide="ignore", invalid="ignore"):

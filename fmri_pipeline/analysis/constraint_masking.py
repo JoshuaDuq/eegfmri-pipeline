@@ -113,6 +113,11 @@ def build_thresholded_constraint_mask(
         voxel_vol_mm3 = float(abs(float(zooms[0]) * float(zooms[1]) * float(zooms[2])))
         if not np.isfinite(voxel_vol_mm3) or voxel_vol_mm3 <= 0:
             voxel_vol_mm3 = None
+    if min_cluster_volume_mm3 is not None and voxel_vol_mm3 is None:
+        raise ValueError(
+            "Volume-based cluster filtering requires a valid voxel volume "
+            "from the z-map header."
+        )
 
     structure = generate_binary_structure(3, 1)
     labeled, n_clusters = cc_label(seed.astype(np.uint8), structure=structure)

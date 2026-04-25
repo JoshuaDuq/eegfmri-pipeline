@@ -30,6 +30,8 @@ from fmri_pipeline.utils.bold_discovery import (
     coerce_condition_value as _coerce_condition_value,
     discover_brain_mask_for_bold as _discover_brain_mask_for_bold,
     discover_fmriprep_preproc_bold as _discover_fmriprep_preproc_bold,
+    discover_runless_fmriprep_preproc_bold as _discover_runless_fmriprep_preproc_bold,
+    discover_single_runless_bids_pair,
     get_tr_from_bold as _get_tr_from_bold,
     select_consistent_run_source,
     select_confound_columns as _select_confound_columns,
@@ -674,6 +676,7 @@ def discover_bold_runs(
         raise FileNotFoundError(f"fMRI func directory not found: {func_dir}")
 
     discovered: List[Tuple[Path, Path, int]] = []
+    runless_pair: Optional[Tuple[Path, Path]] = None
 
     # Discover run numbers from events first (most robust).
     run_nums: List[int] = []
@@ -701,6 +704,15 @@ def discover_bold_runs(
             except Exception:
                 continue
 
+    if not run_nums and runs is None:
+        runless_pair = discover_single_runless_bids_pair(
+            func_dir=func_dir,
+            sub_label=sub_label,
+            task=task,
+        )
+        if runless_pair is not None:
+            run_nums = [1]
+
     run_nums = sorted(set(run_nums))
     if runs is not None:
         run_nums = [r for r in run_nums if r in {int(x) for x in runs}]
@@ -718,42 +730,62 @@ def discover_bold_runs(
     selected_input_source = _normalize_input_source(getattr(cfg, "input_source", "bids_raw"))
     preproc_by_run: Dict[int, Optional[Path]] = {}
     if bids_derivatives is not None and cfg is not None and selected_input_source == "fmriprep":
-        selected_input_source, preproc_by_run = select_consistent_run_source(
-            run_numbers=run_nums,
-            discover_preproc_bold=lambda run_num: _discover_fmriprep_preproc_bold(
+        if runless_pair is not None:
+            runless_preproc = _discover_runless_fmriprep_preproc_bold(
                 bids_derivatives=bids_derivatives,
                 subject=subject,
                 task=task,
-                run_num=run_num,
                 space=cfg.fmriprep_space,
-            ),
-            require_fmriprep=bool(getattr(cfg, "require_fmriprep", False)),
-        )
+            )
+            preproc_by_run = {1: runless_preproc}
+            if runless_preproc is None:
+                if bool(getattr(cfg, "require_fmriprep", False)):
+                    raise FileNotFoundError(
+                        "Requested fMRIPrep input, but no runless preprocessed BOLD file was found."
+                    )
+                selected_input_source = "bids_raw"
+        else:
+            selected_input_source, preproc_by_run = select_consistent_run_source(
+                run_numbers=run_nums,
+                discover_preproc_bold=lambda run_num: _discover_fmriprep_preproc_bold(
+                    bids_derivatives=bids_derivatives,
+                    subject=subject,
+                    task=task,
+                    run_num=run_num,
+                    space=cfg.fmriprep_space,
+                ),
+                require_fmriprep=bool(getattr(cfg, "require_fmriprep", False)),
+            )
 
     missing_run_inputs: List[Tuple[int, Tuple[str, ...]]] = []
 
     # Resolve events + BOLD for each run.
     for run_num in run_nums:
-        events_patterns = [
-            f"{sub_label}_task-{task}_run-{run_num:02d}_events.tsv",
-            f"{sub_label}_task-{task}_run-{run_num}_events.tsv",
-            f"{sub_label}_task-{task}_run-0{run_num}_events.tsv",
-            # Backward-compat: legacy non-BIDS naming
-            f"{sub_label}_task-{task}_run-{run_num:02d}_bold_events.tsv",
-            f"{sub_label}_task-{task}_run-{run_num}_bold_events.tsv",
-            f"{sub_label}_task-{task}_run-0{run_num}_bold_events.tsv",
-        ]
-        events_file = None
-        for pattern in events_patterns:
-            candidate = func_dir / pattern
-            if candidate.exists():
-                events_file = candidate
-                break
+        if runless_pair is not None and int(run_num) == 1:
+            events_file = runless_pair[0]
+        else:
+            events_patterns = [
+                f"{sub_label}_task-{task}_run-{run_num:02d}_events.tsv",
+                f"{sub_label}_task-{task}_run-{run_num}_events.tsv",
+                f"{sub_label}_task-{task}_run-0{run_num}_events.tsv",
+                # Backward-compat: legacy non-BIDS naming
+                f"{sub_label}_task-{task}_run-{run_num:02d}_bold_events.tsv",
+                f"{sub_label}_task-{task}_run-{run_num}_bold_events.tsv",
+                f"{sub_label}_task-{task}_run-0{run_num}_bold_events.tsv",
+            ]
+            events_file = None
+            for pattern in events_patterns:
+                candidate = func_dir / pattern
+                if candidate.exists():
+                    events_file = candidate
+                    break
 
         bold_path = None
         if selected_input_source == "fmriprep":
             bold_path = preproc_by_run.get(int(run_num))
         else:
+            if runless_pair is not None and int(run_num) == 1:
+                bold_path = runless_pair[1]
             raw_patterns = [
                 f"{sub_label}_task-{task}_run-{run_num:02d}_bold.nii.gz",
                 f"{sub_label}_task-{task}_run-{run_num}_bold.nii.gz",
@@ -857,6 +889,33 @@ def discover_confounds(
     return None
 
 
+def discover_runless_confounds(
+    bids_derivatives: Path,
+    subject: str,
+    task: str,
+) -> Optional[Path]:
+    sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"
+    search_dirs = [
+        bids_derivatives / "preprocessed" / "fmri" / sub_label / "func",
+        bids_derivatives / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
+        bids_derivatives / "fmriprep" / sub_label / "func",
+        bids_derivatives / sub_label / "func",
+    ]
+    patterns = [
+        f"{sub_label}_task-{task}_desc-confounds_timeseries.tsv",
+        f"{sub_label}_task-{task}_desc-confounds_regressors.tsv",
+    ]
+
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for pattern in patterns:
+            candidate = search_dir / pattern
+            if candidate.exists():
+                return candidate
+    return None
+
+
 ###################################################################
 # GLM Fitting
 ###################################################################
@@ -900,30 +959,23 @@ def _write_design_matrices(
         )
 
         tsv_path = qc_dir / f"{prefix}_{run_label}_design_matrix.tsv"
-        try:
-            dm.to_csv(tsv_path, sep="\t", index=True, index_label="frame", encoding="utf-8")
-            tsv_paths.append(str(tsv_path))
-        except Exception as exc:
-            logger.warning("Failed to write design matrix TSV for %s (%s)", run_label, exc)
+        dm.to_csv(tsv_path, sep="\t", index=True, index_label="frame", encoding="utf-8")
+        tsv_paths.append(str(tsv_path))
 
-        # Optional PNG output (best-effort).
-        try:
-            from nilearn.plotting import plot_design_matrix
+        from nilearn.plotting import plot_design_matrix
 
-            ax = plot_design_matrix(dm)
-            fig = getattr(ax, "figure", None) or getattr(ax, "get_figure", lambda: None)()
-            if fig is not None:
-                png_path = qc_dir / f"{prefix}_{run_label}_design_matrix.png"
-                fig.savefig(png_path, dpi=150, bbox_inches="tight")
-                png_paths.append(str(png_path))
-                try:
-                    import matplotlib.pyplot as plt
+        ax = plot_design_matrix(dm)
+        fig = getattr(ax, "figure", None) or getattr(ax, "get_figure", lambda: None)()
+        if fig is not None:
+            png_path = qc_dir / f"{prefix}_{run_label}_design_matrix.png"
+            fig.savefig(png_path, dpi=150, bbox_inches="tight")
+            png_paths.append(str(png_path))
+            try:
+                import matplotlib.pyplot as plt
 
-                    plt.close(fig)
-                except Exception as exc:
-                    logger.debug("Failed to close design matrix figure for %s: %s", run_label, exc)
-        except Exception as exc:
-            logger.warning("Failed to render design matrix PNG for %s: %s", run_label, exc)
+                plt.close(fig)
+            except Exception as exc:
+                logger.debug("Failed to close design matrix figure for %s: %s", run_label, exc)
 
     out: Dict[str, Any] = {}
     if tsv_paths:
@@ -1504,7 +1556,10 @@ def build_contrast_from_runs_detailed(
     for bold_path, events_path, run_num in runs_data:
         bold_paths.append(bold_path)
         events_paths.append(events_path)
-        confounds_paths.append(discover_confounds(bids_derivatives, subject, task, run_num))
+        if "_run-" in bold_path.name:
+            confounds_paths.append(discover_confounds(bids_derivatives, subject, task, run_num))
+        else:
+            confounds_paths.append(discover_runless_confounds(bids_derivatives, subject, task))
 
     glm_result = fit_first_level_glm_multi_run(
         bold_paths=bold_paths,
@@ -1847,7 +1902,11 @@ def build_fmri_contrast(
                 "Adjust feature_engineering.sourcelocalization.fmri threshold settings."
             )
 
-    if cfg.resample_to_freesurfer and fs_subject_dir.exists():
+    if cfg.resample_to_freesurfer:
+        if not fs_subject_dir.exists():
+            raise FileNotFoundError(
+                f"FreeSurfer subject directory not found: {fs_subject_dir}"
+            )
         contrast_map = resample_to_freesurfer(contrast_map, fs_subject_dir)
         if constraint_mask_img is not None:
             constraint_mask_img = resample_to_freesurfer(
@@ -1867,7 +1926,7 @@ def build_fmri_contrast(
     if constraint_mask_img is not None and constraint_spec is not None:
         constraint_hash = _get_constraint_mask_hash(
             constraint_spec,
-            resample_to_freesurfer=bool(cfg.resample_to_freesurfer and fs_subject_dir.exists()),
+            resample_to_freesurfer=bool(cfg.resample_to_freesurfer),
         )
         constraint_mask_path = _constraint_mask_output_path(
             output_dir=output_dir,
@@ -1888,7 +1947,7 @@ def build_fmri_contrast(
             "tail": str(constraint_spec["tail"]),
             "cluster_min_voxels": int(constraint_spec["cluster_min_voxels"]),
             "cluster_min_volume_mm3": constraint_spec["cluster_min_volume_mm3"],
-            "resample_to_freesurfer": bool(cfg.resample_to_freesurfer and fs_subject_dir.exists()),
+            "resample_to_freesurfer": bool(cfg.resample_to_freesurfer),
         }
         _write_json_dict(_contrast_sidecar_path(constraint_mask_path), constraint_mask_meta)
         run_meta["constraint_mask_path"] = str(constraint_mask_path)
@@ -1952,11 +2011,10 @@ def ensure_fmri_stats_map(
         return None
 
     if bids_fmri_root is None:
-        logger.warning(
+        raise ValueError(
             "Contrast builder enabled but no BIDS fMRI root provided. "
             "Set paths.bids_fmri_root in config."
         )
-        return None
 
     # Check if the contrast map already exists at the expected output path
     sub_label = subject if subject.startswith("sub-") else f"sub-{subject}"

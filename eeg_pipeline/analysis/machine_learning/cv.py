@@ -76,22 +76,17 @@ def apply_fold_specific_hygiene(
     FoldSpecificParams or None
         Fold-specific parameters, or None if hygiene is disabled
     """
-    try:
-        from eeg_pipeline.analysis.features.cv_hygiene import (
-            FoldSpecificParams,
-            create_fold_specific_context,
-        )
-    except ImportError:
-        if log:
-            log.debug("CV hygiene module not available")
-        return None
-    
     if config is None:
         return None
     
     cv_hygiene_enabled = bool(get_config_value(config, "machine_learning.cv.hygiene_enabled", True))
     if not cv_hygiene_enabled:
         return None
+
+    from eeg_pipeline.analysis.features.cv_hygiene import (
+        FoldSpecificParams,
+        create_fold_specific_context,
+    )
     
     if epochs is None:
         if log:
@@ -102,20 +97,14 @@ def apply_fold_specific_hygiene(
             test_indices=test_indices,
         )
     
-    try:
-        params = create_fold_specific_context(
-            epochs=epochs,
-            train_indices=train_indices,
-            test_indices=test_indices,
-            fold_idx=fold_idx,
-            config=config,
-            logger=log,
-        )
-        return params
-    except Exception as exc:
-        if log:
-            log.warning("CV hygiene: failed to create fold context (%s)", exc)
-        return None
+    return create_fold_specific_context(
+        epochs=epochs,
+        train_indices=train_indices,
+        test_indices=test_indices,
+        fold_idx=fold_idx,
+        config=config,
+        logger=log,
+    )
 
 
 ###################################################################
@@ -170,9 +159,8 @@ def compute_train_group_intersection_mask(
         grp_has = np.any(np.isfinite(X_arr[grp_mask]), axis=0)
         keep_mask &= grp_has
 
-    # If strict per-group intersection is empty, fall back to any-finite in train.
     if not np.any(keep_mask):
-        keep_mask = np.any(np.isfinite(X_arr), axis=0)
+        raise ValueError("No features are finite for every training group.")
     return keep_mask
 
 

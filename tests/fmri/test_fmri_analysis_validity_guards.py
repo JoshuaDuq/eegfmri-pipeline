@@ -22,21 +22,30 @@ from fmri_pipeline.analysis.contrast_builder import (
     _resolve_fmri_stats_artifact,
     _validate_consistent_trs,
     _validate_events_against_bold_run,
+    _write_design_matrices,
+    build_fmri_contrast,
     build_contrast_from_runs_detailed,
     compute_contrast_map,
     discover_bold_runs,
     discover_confounds,
+    ensure_fmri_stats_map,
     fit_first_level_glm,
     fit_first_level_glm_multi_run,
     load_contrast_config,
     load_contrast_config_section,
     _remap_events_by_condition_columns,
 )
-from fmri_pipeline.analysis.constraint_masking import _align_mask_to_image
+from fmri_pipeline.analysis.confounds_selection import select_fmriprep_confounds_columns
+from fmri_pipeline.analysis.constraint_masking import (
+    _align_mask_to_image,
+    build_thresholded_constraint_mask,
+)
 from fmri_pipeline.analysis.multivariate_signatures import SignatureResult
 from fmri_pipeline.analysis.plotting_config import FmriPlottingConfig
 from fmri_pipeline.analysis.reporting import (
     _compute_threshold_for_cfg,
+    generate_fmri_space_section,
+    generate_signature_tables,
     run_fmri_plotting_and_report,
 )
 from fmri_pipeline.analysis.trial_signatures import (
@@ -734,6 +743,35 @@ def test_combine_effect_images_requires_variances_for_variance_weighting(tmp_pat
         )
 
 
+def test_combine_effect_images_requires_one_variance_per_effect(tmp_path: Path) -> None:
+    nib = pytest.importorskip("nibabel")
+    effect_a = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
+    effect_b = nib.Nifti1Image(np.array([[[3.0]]], dtype=np.float32), np.eye(4))
+    variance = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
+
+    with pytest.raises(ValueError, match="one variance image per effect image"):
+        _combine_effect_images(
+            effects=[effect_a, effect_b],
+            variances=[variance],
+            method="variance",
+        )
+
+
+def test_combine_effect_images_requires_matching_grids(tmp_path: Path) -> None:
+    nib = pytest.importorskip("nibabel")
+    effect_a = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
+    shifted_affine = np.eye(4)
+    shifted_affine[0, 3] = 10.0
+    effect_b = nib.Nifti1Image(np.array([[[3.0]]], dtype=np.float32), shifted_affine)
+
+    with pytest.raises(ValueError, match="same image grid"):
+        _combine_effect_images(
+            effects=[effect_a, effect_b],
+            variances=None,
+            method="mean",
+        )
+
+
 def test_compute_contrast_map_accepts_zero_valued_condition_codes() -> None:
     flm = SimpleNamespace(compute_contrast=lambda *args, **kwargs: "contrast-map", design_matrices_=[object()])
     cfg = ContrastBuilderConfig(
@@ -915,6 +953,104 @@ def test_discover_bold_runs_rejects_raw_bids_input_source_for_auto_discovery(tmp
         )
 
 
+def test_discover_bold_runs_accepts_single_runless_fmriprep_input(tmp_path: Path) -> None:
+    bids_root = tmp_path / "bids"
+    func_dir = bids_root / "sub-0001" / "func"
+    func_dir.mkdir(parents=True, exist_ok=True)
+    deriv_root = tmp_path / "derivatives"
+    deriv_func = deriv_root / "fmriprep" / "sub-0001" / "func"
+    deriv_func.mkdir(parents=True, exist_ok=True)
+
+    events_path = func_dir / "sub-0001_task-task_events.tsv"
+    events_path.write_text(
+        "onset\tduration\ttrial_type\n0\t1\tpain\n",
+        encoding="utf-8",
+    )
+    (func_dir / "sub-0001_task-task_bold.nii.gz").write_bytes(b"")
+    preproc_path = deriv_func / "sub-0001_task-task_space-T1w_desc-preproc_bold.nii.gz"
+    preproc_path.write_bytes(b"")
+
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column=None,
+        condition_b_value=None,
+        formula=None,
+        name="pain",
+        runs=None,
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+    )
+
+    discovered = discover_bold_runs(
+        bids_fmri_root=bids_root,
+        bids_derivatives=deriv_root,
+        subject="0001",
+        task="task",
+        runs=None,
+        cfg=cfg,
+    )
+
+    assert discovered == [(preproc_path, events_path, 1)]
+
+
+def test_discover_bold_runs_rejects_multiple_runless_task_inputs(tmp_path: Path) -> None:
+    bids_root = tmp_path / "bids"
+    func_dir = bids_root / "sub-0001" / "func"
+    func_dir.mkdir(parents=True, exist_ok=True)
+
+    for acq in ("a", "b"):
+        (func_dir / f"sub-0001_task-task_acq-{acq}_events.tsv").write_text(
+            "onset\tduration\ttrial_type\n0\t1\tpain\n",
+            encoding="utf-8",
+        )
+        (func_dir / f"sub-0001_task-task_acq-{acq}_bold.nii.gz").write_bytes(b"")
+
+    cfg = ContrastBuilderConfig(
+        enabled=True,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+        contrast_type="t-test",
+        condition1=None,
+        condition2=None,
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column=None,
+        condition_b_value=None,
+        formula=None,
+        name="pain",
+        runs=None,
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        output_type="z-score",
+        resample_to_freesurfer=False,
+    )
+
+    with pytest.raises(FileNotFoundError, match="without explicit run entities"):
+        discover_bold_runs(
+            bids_fmri_root=bids_root,
+            bids_derivatives=tmp_path / "derivatives",
+            subject="0001",
+            task="task",
+            runs=None,
+            cfg=cfg,
+        )
+
+
 def test_discover_confounds_accepts_zero_padded_legacy_regressors_path(tmp_path) -> None:
     deriv_root = tmp_path / "derivatives"
     func_dir = deriv_root / "fmriprep" / "sub-0001" / "func"
@@ -932,6 +1068,23 @@ def test_discover_confounds_accepts_zero_padded_legacy_regressors_path(tmp_path)
     )
 
     assert discovered == confounds_path
+
+
+def test_explicit_confounds_strategy_requires_all_requested_columns() -> None:
+    available_columns = [
+        "trans_x",
+        "trans_y",
+        "trans_z",
+        "rot_x",
+        "rot_y",
+        "rot_z",
+    ]
+
+    with pytest.raises(ValueError, match="missing required confound columns"):
+        select_fmriprep_confounds_columns(
+            available_columns,
+            strategy="motion24+wmcsf+fd",
+        )
 
 
 def test_validate_consistent_trs_rejects_mixed_values(tmp_path) -> None:
@@ -1006,6 +1159,47 @@ def test_resolve_fmri_stats_artifact_prefers_matching_constraint_mask(tmp_path) 
     resolved = _resolve_fmri_stats_artifact(contrast_path, config)
 
     assert resolved == constraint_path
+
+
+def test_build_fmri_contrast_requires_freesurfer_subject_when_resampling(tmp_path: Path) -> None:
+    cfg = {
+        "fmri_contrast": {
+            "enabled": True,
+            "input_source": "fmriprep",
+            "fmriprep_space": "T1w",
+            "require_fmriprep": True,
+            "type": "t-test",
+            "condition_a": {"column": "trial_type", "value": "pain"},
+            "condition_b": {"column": "trial_type", "value": "rest"},
+            "name": "pain",
+            "hrf_model": "spm",
+            "drift_model": "cosine",
+            "high_pass_hz": 0.008,
+            "output_type": "z-score",
+            "resample_to_freesurfer": True,
+        }
+    }
+
+    with patch(
+        "fmri_pipeline.analysis.contrast_builder.build_contrast_from_runs_detailed",
+        return_value=(
+            "contrast-map",
+            {"output_type": "z_score"},
+            SimpleNamespace(mask_img=None),
+            "cond_a_pain - cond_b_pain",
+            "z_score",
+        ),
+    ), patch.dict(sys.modules, {"nibabel": SimpleNamespace(save=lambda *_args, **_kwargs: None)}):
+        with pytest.raises(FileNotFoundError, match="FreeSurfer subject directory not found"):
+            build_fmri_contrast(
+                bids_fmri_root=tmp_path / "bids",
+                bids_derivatives=tmp_path / "derivatives",
+                freesurfer_subjects_dir=tmp_path / "freesurfer",
+                subject="0001",
+                config=cfg,
+                task="pain",
+                output_dir=tmp_path / "out",
+            )
 
 
 def test_trial_signature_extraction_requires_confounds_for_included_runs(tmp_path) -> None:
@@ -1453,6 +1647,37 @@ def test_fit_first_level_glm_multi_run_rejects_condition_missing_runs(tmp_path: 
             )
 
 
+def test_trial_signature_discovery_accepts_single_runless_fmriprep_input(tmp_path: Path) -> None:
+    bids_root = tmp_path / "bids"
+    func_dir = bids_root / "sub-0001" / "func"
+    func_dir.mkdir(parents=True, exist_ok=True)
+    deriv_root = tmp_path / "derivatives"
+    deriv_func = deriv_root / "fmriprep" / "sub-0001" / "func"
+    deriv_func.mkdir(parents=True, exist_ok=True)
+
+    events_path = func_dir / "sub-0001_task-pain_events.tsv"
+    events_path.write_text(
+        "onset\tduration\ttrial_type\n0\t1\tpain\n",
+        encoding="utf-8",
+    )
+    (func_dir / "sub-0001_task-pain_bold.nii.gz").write_bytes(b"")
+    preproc_path = deriv_func / "sub-0001_task-pain_space-T1w_desc-preproc_bold.nii.gz"
+    preproc_path.write_bytes(b"")
+
+    discovered = _discover_runs(
+        bids_fmri_root=bids_root,
+        bids_derivatives=deriv_root,
+        subject="0001",
+        task="pain",
+        runs=None,
+        input_source="fmriprep",
+        fmriprep_space="T1w",
+        require_fmriprep=True,
+    )
+
+    assert discovered == [(1, preproc_path, events_path, None)]
+
+
 def test_trial_signature_extraction_requires_matching_brain_mask(tmp_path: Path) -> None:
     cfg = TrialSignatureExtractionConfig(
         input_source="fmriprep",
@@ -1730,6 +1955,166 @@ def test_run_fmri_plotting_and_report_raises_when_provenance_write_fails(tmp_pat
             )
 
 
+def test_generate_signature_tables_surfaces_signature_failures(tmp_path: Path) -> None:
+    cfg = FmriPlottingConfig(enabled=True, include_signatures=True)
+    signature_root = tmp_path / "signatures"
+    signature_root.mkdir()
+    (signature_root / "sig.nii.gz").write_bytes(b"not-used")
+
+    with patch(
+        "fmri_pipeline.analysis.reporting.compute_signature_expression",
+        side_effect=RuntimeError("signature failed"),
+    ):
+        with pytest.raises(RuntimeError, match="signature failed"):
+            generate_signature_tables(
+                contrast_dir=tmp_path,
+                cfg=cfg,
+                mni_effect_img=object(),
+                mni_mask_img=None,
+                signature_root=signature_root,
+                signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
+            )
+
+
+def test_run_fmri_plotting_and_report_surfaces_signature_failures(tmp_path: Path) -> None:
+    cfg = FmriPlottingConfig(
+        enabled=True,
+        html_report=False,
+        space="native",
+        include_motion_qc=False,
+        include_carpet_qc=False,
+        include_tsnr_qc=False,
+        include_design_qc=False,
+        include_signatures=True,
+    )
+
+    with patch(
+        "fmri_pipeline.analysis.reporting.generate_signature_tables",
+        side_effect=RuntimeError("signature section failed"),
+    ):
+        with pytest.raises(RuntimeError, match="signature section failed"):
+            run_fmri_plotting_and_report(
+                contrast_dir=tmp_path,
+                subject="0001",
+                task="pain",
+                contrast_name="pain-vs-rest",
+                cfg=cfg,
+                stat_map_type="z_score",
+            )
+
+
+def test_generate_signature_tables_requires_mni_effect_when_enabled(tmp_path: Path) -> None:
+    cfg = FmriPlottingConfig(enabled=True, include_signatures=True)
+    signature_root = tmp_path / "signatures"
+    signature_root.mkdir()
+    (signature_root / "sig.nii.gz").write_bytes(b"not-used")
+
+    with pytest.raises(ValueError, match="MNI effect-size map"):
+        generate_signature_tables(
+            contrast_dir=tmp_path,
+            cfg=cfg,
+            mni_effect_img=None,
+            mni_mask_img=None,
+            signature_root=signature_root,
+            signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
+        )
+
+
+def test_generate_signature_tables_requires_signature_resources_when_enabled(tmp_path: Path) -> None:
+    cfg = FmriPlottingConfig(enabled=True, include_signatures=True)
+
+    with pytest.raises(ValueError, match="signature_root and signature_specs"):
+        generate_signature_tables(
+            contrast_dir=tmp_path,
+            cfg=cfg,
+            mni_effect_img=object(),
+            mni_mask_img=None,
+            signature_root=None,
+            signature_specs=None,
+        )
+
+
+def test_generate_signature_tables_surfaces_tsv_write_failures(tmp_path: Path) -> None:
+    cfg = FmriPlottingConfig(enabled=True, include_signatures=True)
+    signature_root = tmp_path / "signatures"
+    signature_root.mkdir()
+    signature_path = signature_root / "sig.nii.gz"
+    signature_path.write_bytes(b"not-used")
+
+    result = SignatureResult(
+        name="SIG",
+        weight_path=signature_path,
+        n_voxels=10,
+        dot=1.0,
+        cosine=0.5,
+        pearson_r=0.25,
+    )
+
+    with patch(
+        "fmri_pipeline.analysis.reporting.compute_signature_expression",
+        return_value=[result],
+    ), patch(
+        "pathlib.Path.write_text",
+        side_effect=OSError("signature tsv failed"),
+    ):
+        with pytest.raises(OSError, match="signature tsv failed"):
+            generate_signature_tables(
+                contrast_dir=tmp_path,
+                cfg=cfg,
+                mni_effect_img=object(),
+                mni_mask_img=None,
+                signature_root=signature_root,
+                signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
+            )
+
+
+def test_generate_fmri_space_section_requires_plotting_dependencies(tmp_path: Path) -> None:
+    with patch(
+        "fmri_pipeline.analysis.reporting._maybe_import_nilearn_plotting",
+        return_value=None,
+    ):
+        with pytest.raises(RuntimeError, match="requires nilearn plotting and nibabel"):
+            generate_fmri_space_section(
+                space="native",
+                stat_img=object(),
+                out_base_dir=tmp_path,
+                formats=("png",),
+                z_threshold=2.3,
+                include_unthresholded=True,
+                plot_types=("slices",),
+                cfg=FmriPlottingConfig(enabled=True, threshold_mode="none"),
+            )
+
+
+def test_generate_fmri_space_section_surfaces_slice_plot_failures(tmp_path: Path) -> None:
+    stat_img = SimpleNamespace(
+        get_fdata=lambda: np.ones((2, 2, 2), dtype=np.float32),
+        affine=np.eye(4),
+        header=None,
+    )
+
+    def fail_plot(*_args, **_kwargs):
+        raise RuntimeError("slice plot failed")
+
+    plotting = SimpleNamespace(plot_stat_map=fail_plot)
+
+    with patch(
+        "fmri_pipeline.analysis.reporting._maybe_import_nilearn_plotting",
+        return_value=plotting,
+    ):
+        with pytest.raises(RuntimeError, match="slice plot failed"):
+            generate_fmri_space_section(
+                space="native",
+                stat_img=stat_img,
+                out_base_dir=tmp_path,
+                formats=("png",),
+                z_threshold=2.3,
+                include_unthresholded=True,
+                plot_types=("slices",),
+                cfg=FmriPlottingConfig(enabled=True, threshold_mode="none"),
+            )
+
+
 def test_run_fmri_plotting_and_report_rejects_non_z_stat_maps(tmp_path: Path) -> None:
     cfg = FmriPlottingConfig(
         enabled=True,
@@ -1767,3 +2152,88 @@ def test_compute_threshold_for_cfg_raises_when_fdr_thresholding_fails() -> None:
     ):
         with pytest.raises(RuntimeError, match="fdr unavailable"):
             _compute_threshold_for_cfg(stat_img=object(), cfg=cfg)
+
+
+def test_volume_cluster_threshold_requires_valid_voxel_volume() -> None:
+    nib = pytest.importorskip("nibabel")
+    z_img = nib.Nifti1Image(
+        np.ones((2, 2, 2), dtype=np.float32),
+        np.eye(4),
+    )
+    z_img.header.set_zooms((0.0, 2.0, 2.0))
+
+    with pytest.raises(ValueError, match="valid voxel volume"):
+        build_thresholded_constraint_mask(
+            z_img,
+            threshold_mode="z",
+            z_threshold=0.5,
+            fdr_q=0.05,
+            tail="pos",
+            analysis_mask_img=None,
+            min_cluster_voxels=1,
+            min_cluster_volume_mm3=10.0,
+        )
+
+
+def test_write_design_matrices_surfaces_tsv_write_failures(tmp_path: Path) -> None:
+    class BadDesignMatrix:
+        def to_csv(self, *_args, **_kwargs):
+            raise OSError("tsv failed")
+
+    flm = SimpleNamespace(design_matrices_=[BadDesignMatrix()])
+    bold_path = tmp_path / "sub-0001_task-pain_run-01_desc-preproc_bold.nii.gz"
+
+    with pytest.raises(OSError, match="tsv failed"):
+        _write_design_matrices(
+            flm,
+            [bold_path],
+            tmp_path,
+            prefix="sub-0001_task-pain_contrast-pain",
+        )
+
+
+def test_ensure_fmri_stats_map_requires_fmri_root_when_contrast_enabled(tmp_path: Path) -> None:
+    config = {
+        "fmri_contrast": {
+            "enabled": True,
+            "condition_a": {"column": "trial_type", "value": "pain"},
+            "condition_b": {"column": "trial_type", "value": "rest"},
+        }
+    }
+
+    with pytest.raises(ValueError, match="bids_fmri_root"):
+        ensure_fmri_stats_map(
+            config=config,
+            subject="0001",
+            bids_fmri_root=None,
+            bids_derivatives=tmp_path,
+            freesurfer_subjects_dir=None,
+            task="pain",
+        )
+
+
+def test_trial_signature_discovery_requires_bold_for_each_discovered_events_run(
+    tmp_path: Path,
+) -> None:
+    bids_root = tmp_path / "bids"
+    func_dir = bids_root / "sub-0001" / "func"
+    func_dir.mkdir(parents=True, exist_ok=True)
+    for run_num in (1, 2):
+        events_path = func_dir / f"sub-0001_task-pain_run-{run_num:02d}_events.tsv"
+        events_path.write_text("onset\tduration\ttrial_type\n0\t1\tpain\n", encoding="utf-8")
+    bold_path = func_dir / "sub-0001_task-pain_run-01_bold.nii.gz"
+    bold_path.write_bytes(b"")
+    deriv_root = tmp_path / "derivatives"
+    deriv_root.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="No BOLD image found"):
+        _discover_runs(
+            bids_fmri_root=bids_root,
+            bids_derivatives=deriv_root,
+            subject="0001",
+            task="pain",
+            runs=None,
+            input_source="fmriprep",
+            fmriprep_space=None,
+            require_fmriprep=False,
+        )

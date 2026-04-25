@@ -181,7 +181,7 @@ def compute_iaf_for_fold(
     train_mask: np.ndarray,
     config: Any,
     logger: Any = None,
-) -> Tuple[Optional[float], Optional[Dict[str, Tuple[float, float]]]]:
+) -> Tuple[float, Dict[str, Tuple[float, float]]]:
     """
     Compute Individual Alpha Frequency (IAF) using ONLY training fold trials.
 
@@ -202,19 +202,16 @@ def compute_iaf_for_fold(
 
     Returns
     -------
-    iaf_hz : float or None
-        Estimated IAF in Hz (None if estimation failed)
-    frequency_bands : dict or None
-        IAF-adjusted frequency band definitions
+    iaf_hz : float
+        Estimated IAF in Hz.
+    frequency_bands : dict
+        IAF-adjusted frequency band definitions.
     """
     if not _validate_train_mask(train_mask):
         n_trials = int(np.sum(train_mask)) if np.any(train_mask) else 0
-        _log_warning(
-            logger,
-            "CV hygiene: Too few training trials (%d) for reliable IAF estimation",
-            n_trials,
+        raise ValueError(
+            f"CV hygiene: Too few training trials ({n_trials}) for reliable IAF estimation."
         )
-        return None, None
 
     train_data = epochs_data[train_mask]
     iaf_config = _extract_iaf_config(config)
@@ -227,21 +224,24 @@ def compute_iaf_for_fold(
 
     psds, freqs = _compute_power_spectral_density(train_data, sfreq, alpha_fmin, logger)
     if psds is None or freqs is None:
-        return None, None
+        raise ValueError("CV hygiene: Failed to compute PSD for IAF estimation.")
 
     if psds.ndim != 3 or freqs.size == 0:
-        return None, None
+        raise ValueError(
+            f"CV hygiene: Invalid PSD output for IAF estimation: "
+            f"psds shape={psds.shape}, n_freqs={freqs.size}."
+        )
 
     mean_psd = np.nanmean(psds, axis=(0, 1))
     residual = _compute_aperiodic_residual(freqs, mean_psd)
     if residual is None:
-        return None, None
+        raise ValueError("CV hygiene: Failed to estimate aperiodic residual for IAF.")
 
     iaf_hz = _estimate_iaf_from_residual(
         freqs, residual, alpha_fmin, alpha_fmax, prominence
     )
     if iaf_hz is None:
-        return None, None
+        raise ValueError("CV hygiene: Failed to estimate IAF from the alpha residual.")
 
     frequency_bands = _build_frequency_bands_from_iaf(iaf_hz, config, alpha_width_hz)
 

@@ -74,6 +74,33 @@ def discover_fmriprep_preproc_bold(
                 f"{sub_label}_task-{task}_{run_tok}_space-{space}_desc-preproc_bold.nii.gz"
             )
         patterns.append(f"{sub_label}_task-{task}_{run_tok}_desc-preproc_bold.nii.gz")
+
+    for func_dir in search_dirs:
+        if not func_dir.exists():
+            continue
+        for pattern in patterns:
+            candidate = func_dir / pattern
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def discover_runless_fmriprep_preproc_bold(
+    bids_derivatives: Path,
+    subject: str,
+    task: str,
+    *,
+    space: Optional[str] = "T1w",
+) -> Optional[Path]:
+    """Discover an explicitly runless fMRIPrep preprocessed BOLD file."""
+    sub_label = _subject_label(subject)
+    search_dirs = [
+        bids_derivatives / "preprocessed" / "fmri" / sub_label / "func",
+        bids_derivatives / "preprocessed" / "fmri" / "fmriprep" / sub_label / "func",
+        bids_derivatives / "fmriprep" / sub_label / "func",
+    ]
+
+    patterns: List[str] = []
     if space:
         patterns.append(
             f"{sub_label}_task-{task}_space-{space}_desc-preproc_bold.nii.gz"
@@ -88,6 +115,34 @@ def discover_fmriprep_preproc_bold(
             if candidate.exists():
                 return candidate
     return None
+
+
+def discover_single_runless_bids_pair(
+    *,
+    func_dir: Path,
+    sub_label: str,
+    task: str,
+) -> Optional[Tuple[Path, Path]]:
+    """Return the only runless BIDS events/BOLD pair, or fail if ambiguous."""
+    events_candidates = [
+        path
+        for path in sorted(func_dir.glob(f"{sub_label}_task-{task}*_events.tsv"))
+        if "_run-" not in path.name and not path.name.endswith("_bold_events.tsv")
+    ]
+    if len(events_candidates) > 1:
+        raise FileNotFoundError(
+            "Multiple BOLD/events files were found without explicit run entities. "
+            f"Add BIDS run labels or request specific runs explicitly: {[path.name for path in events_candidates]}."
+        )
+    if not events_candidates:
+        return None
+
+    events_path = events_candidates[0]
+    bold_name = events_path.name.replace("_events.tsv", "_bold.nii.gz")
+    bold_path = events_path.with_name(bold_name)
+    if not bold_path.exists():
+        return None
+    return events_path, bold_path
 
 
 def select_consistent_run_source(
@@ -112,6 +167,7 @@ def select_consistent_run_source(
     missing_runs = [run_num for run_num, path in preproc_by_run.items() if path is None]
 
     if not missing_runs:
+        _validate_unique_preprocessed_paths(preproc_by_run)
         return "fmriprep", preproc_by_run
 
     if found_runs:
@@ -128,6 +184,32 @@ def select_consistent_run_source(
         )
 
     return "bids_raw", preproc_by_run
+
+
+def _validate_unique_preprocessed_paths(
+    preproc_by_run: Dict[int, Optional[Path]],
+) -> None:
+    resolved_by_run = {
+        run_num: path.resolve()
+        for run_num, path in preproc_by_run.items()
+        if path is not None
+    }
+    unique_paths = set(resolved_by_run.values())
+    if len(unique_paths) == len(resolved_by_run):
+        return
+
+    path_to_runs: Dict[Path, List[int]] = {}
+    for run_num, path in resolved_by_run.items():
+        path_to_runs.setdefault(path, []).append(run_num)
+    duplicates = {
+        str(path): sorted(runs)
+        for path, runs in path_to_runs.items()
+        if len(runs) > 1
+    }
+    raise FileNotFoundError(
+        "The same fMRIPrep preprocessed BOLD file resolved for multiple runs: "
+        f"{duplicates}."
+    )
 
 
 def discover_brain_mask_for_bold(bold_path: Path) -> Optional[Path]:
@@ -191,6 +273,11 @@ def build_first_level_model(
     sig = inspect.signature(FirstLevelModel)
     if "low_pass" in sig.parameters:
         kwargs["low_pass"] = low_pass
+    elif low_pass is not None:
+        raise ValueError(
+            "fmri_contrast.low_pass_hz is set, but the installed "
+            "nilearn.glm.first_level.FirstLevelModel does not support low_pass."
+        )
     if mask_img is not None and "mask_img" in sig.parameters:
         kwargs["mask_img"] = mask_img
 

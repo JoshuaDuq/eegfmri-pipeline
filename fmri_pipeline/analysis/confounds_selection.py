@@ -113,6 +113,14 @@ def select_fmriprep_confounds_columns(
             "Use one of: none, motion6, motion12, motion24, motion24+wmcsf, motion24+wmcsf+fd, auto."
         )
 
+    if strategy != "auto":
+        missing = [c for c in base_cols if c not in avail]
+        if missing:
+            raise ValueError(
+                f"confounds_strategy '{strategy}' is missing required confound columns: "
+                f"{missing}"
+            )
+
     outlier_cols = [
         c
         for c in available_columns
@@ -122,4 +130,3 @@ def select_fmriprep_confounds_columns(
     cols = [c for c in base_cols if c in avail]
     cols += [c for c in outlier_cols if c in avail and c not in cols]
     return _unique_preserve_order(cols)
-

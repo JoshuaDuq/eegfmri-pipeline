@@ -39,6 +39,24 @@ def test_discover_fmriprep_preproc_bold_accepts_zero_padded_and_non_padded_runs(
     assert discovered == bold_path
 
 
+def test_discover_fmriprep_preproc_bold_does_not_match_runless_file_for_run(tmp_path: Path) -> None:
+    func_dir = tmp_path / "fmriprep" / "sub-0001" / "func"
+    func_dir.mkdir(parents=True, exist_ok=True)
+
+    runless_path = func_dir / "sub-0001_task-task_space-T1w_desc-preproc_bold.nii.gz"
+    runless_path.write_bytes(b"")
+
+    discovered = discover_fmriprep_preproc_bold(
+        bids_derivatives=tmp_path,
+        subject="0001",
+        task="task",
+        run_num=2,
+        space="T1w",
+    )
+
+    assert discovered is None
+
+
 def test_get_tr_from_bold_prefers_sidecar_repetition_time(tmp_path: Path) -> None:
     bold_path = tmp_path / "sub-0001_task-task_run-01_desc-preproc_bold.nii.gz"
     bold_path.write_bytes(b"")
@@ -133,6 +151,49 @@ def test_build_first_level_model_coerces_and_filters_optional_float_settings() -
     assert model.params["mask_img"] == "brain-mask"
     assert model.params["standardize"] is False
     assert model.params["signal_scaling"] == 0
+
+
+def test_build_first_level_model_rejects_unsupported_low_pass_setting() -> None:
+    class FakeFirstLevelModel:
+        def __init__(
+            self,
+            *,
+            t_r: float,
+            hrf_model: str,
+            drift_model: str | None,
+            high_pass: float | None,
+            noise_model: str,
+            standardize: bool,
+            signal_scaling: int,
+            minimize_memory: bool,
+        ) -> None:
+            self.params = {"t_r": t_r}
+
+    fake_first_level = types.ModuleType("nilearn.glm.first_level")
+    fake_first_level.FirstLevelModel = FakeFirstLevelModel
+    fake_glm = types.ModuleType("nilearn.glm")
+    fake_glm.first_level = fake_first_level
+    fake_nilearn = types.ModuleType("nilearn")
+    fake_nilearn.glm = fake_glm
+
+    cfg = SimpleNamespace(
+        low_pass_hz=0.12,
+        high_pass_hz=0.008,
+        hrf_model="spm",
+        drift_model="cosine",
+        smoothing_fwhm=None,
+    )
+
+    with patch.dict(
+        sys.modules,
+        {
+            "nilearn": fake_nilearn,
+            "nilearn.glm": fake_glm,
+            "nilearn.glm.first_level": fake_first_level,
+        },
+    ):
+        with pytest.raises(ValueError, match="low_pass_hz"):
+            build_first_level_model(tr=2.0, cfg=cfg)
 
 
 def test_parse_optional_positive_float_attr_surfaces_config_accessor_failures() -> None:

@@ -11,6 +11,7 @@ from fmri_pipeline.analysis.second_level import (
     FirstLevelMapRecord,
     SecondLevelConfig,
     SecondLevelPermutationConfig,
+    _write_design_matrix_files,
     prepare_second_level_input,
 )
 
@@ -46,6 +47,20 @@ def _make_record(
         contrast_cfg=contrast_cfg or {"fmriprep_space": "MNI152NLin2009cAsym"},
         run_meta=run_meta or default_run_meta,
     )
+
+
+def test_write_design_matrix_files_surfaces_plot_failures(tmp_path: Path) -> None:
+    design_matrix = pd.DataFrame({"intercept": [1.0, 1.0]})
+
+    with patch(
+        "nilearn.plotting.plot_design_matrix",
+        side_effect=RuntimeError("plot failed"),
+    ):
+        with pytest.raises(RuntimeError, match="plot failed"):
+            _write_design_matrix_files(
+                output_dir=tmp_path,
+                design_matrix=design_matrix,
+            )
 
 
 def test_prepare_second_level_one_sample_builds_intercept_design(tmp_path: Path) -> None:

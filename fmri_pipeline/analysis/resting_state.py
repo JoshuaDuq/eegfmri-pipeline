@@ -9,11 +9,15 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from fmri_pipeline.analysis.contrast_builder import discover_confounds
+from fmri_pipeline.analysis.contrast_builder import (
+    discover_confounds,
+    discover_runless_confounds,
+)
 from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
 from fmri_pipeline.utils.bold_discovery import (
     discover_brain_mask_for_bold,
     discover_fmriprep_preproc_bold,
+    discover_runless_fmriprep_preproc_bold,
     get_tr_from_bold,
     select_confounds,
     select_consistent_run_source,
@@ -278,6 +282,7 @@ def run_resting_state_analysis_for_subject(
             subject=subject,
             task=task,
             run_num=run_num,
+            runless="_run-" not in bold_path.name,
             input_source=normalized_cfg.input_source,
             strategy=normalized_cfg.confounds_strategy,
         )
@@ -483,17 +488,32 @@ def _discover_rest_runs(
     selected_input_source = str(cfg.input_source or "bids_raw").strip().lower()
     preproc_by_run: dict[int, Optional[Path]] = {}
     if bids_derivatives is not None and selected_input_source == "fmriprep":
-        selected_input_source, preproc_by_run = select_consistent_run_source(
-            run_numbers=run_nums,
-            discover_preproc_bold=lambda run_num: discover_fmriprep_preproc_bold(
+        if runless_bold_path is not None:
+            runless_preproc = discover_runless_fmriprep_preproc_bold(
                 bids_derivatives=bids_derivatives,
                 subject=subject,
                 task=task,
-                run_num=run_num,
                 space=cfg.fmriprep_space,
-            ),
-            require_fmriprep=bool(cfg.require_fmriprep),
-        )
+            )
+            preproc_by_run = {1: runless_preproc}
+            if runless_preproc is None:
+                if bool(cfg.require_fmriprep):
+                    raise FileNotFoundError(
+                        "Requested fMRIPrep input, but no runless preprocessed BOLD file was found."
+                    )
+                selected_input_source = "bids_raw"
+        else:
+            selected_input_source, preproc_by_run = select_consistent_run_source(
+                run_numbers=run_nums,
+                discover_preproc_bold=lambda run_num: discover_fmriprep_preproc_bold(
+                    bids_derivatives=bids_derivatives,
+                    subject=subject,
+                    task=task,
+                    run_num=run_num,
+                    space=cfg.fmriprep_space,
+                ),
+                require_fmriprep=bool(cfg.require_fmriprep),
+            )
 
     discovered: list[tuple[Path, int]] = []
     for run_num in run_nums:
@@ -561,6 +581,7 @@ def _load_rest_confounds(
     run_num: int,
     input_source: str,
     strategy: str,
+    runless: bool = False,
 ) -> tuple[Optional[pd.DataFrame], list[str]]:
     if strategy == "none":
         return None, []
@@ -568,12 +589,19 @@ def _load_rest_confounds(
         raise ValueError(
             "Resting-state confound regression requires derivatives inputs or confounds_strategy='none'."
         )
-    confounds_path = discover_confounds(
-        bids_derivatives=bids_derivatives,
-        subject=subject,
-        task=task,
-        run_num=run_num,
-    )
+    if runless:
+        confounds_path = discover_runless_confounds(
+            bids_derivatives=bids_derivatives,
+            subject=subject,
+            task=task,
+        )
+    else:
+        confounds_path = discover_confounds(
+            bids_derivatives=bids_derivatives,
+            subject=subject,
+            task=task,
+            run_num=run_num,
+        )
     if confounds_path is None:
         if input_source == "fmriprep":
             raise FileNotFoundError(

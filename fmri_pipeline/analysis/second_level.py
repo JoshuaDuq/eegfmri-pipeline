@@ -810,18 +810,15 @@ def _write_design_matrix_files(
     design_matrix.to_csv(tsv_path, sep="\t", index=False)
     out["design_matrix_tsv"] = str(tsv_path)
 
-    try:
-        import matplotlib.pyplot as plt
-        from nilearn.plotting import plot_design_matrix
+    import matplotlib.pyplot as plt
+    from nilearn.plotting import plot_design_matrix
 
-        ax = plot_design_matrix(design_matrix)
-        figure = ax.figure
-        png_path = qc_dir / "second_level_design_matrix.png"
-        figure.savefig(png_path, dpi=200, bbox_inches="tight")
-        plt.close(figure)
-        out["design_matrix_png"] = str(png_path)
-    except Exception as exc:
-        logger.warning("Failed writing second-level design matrix figure: %s", exc)
+    ax = plot_design_matrix(design_matrix)
+    figure = ax.figure
+    png_path = qc_dir / "second_level_design_matrix.png"
+    figure.savefig(png_path, dpi=200, bbox_inches="tight")
+    plt.close(figure)
+    out["design_matrix_png"] = str(png_path)
 
     return out
 

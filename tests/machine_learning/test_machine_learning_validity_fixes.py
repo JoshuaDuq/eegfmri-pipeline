@@ -4566,3 +4566,53 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertIsNotNone(block)
         vals = pd.to_numeric(block, errors="coerce").to_numpy(dtype=float)
         np.testing.assert_allclose(vals, np.array([1.0, 1.0, 2.0, 2.0], dtype=float), atol=1e-12)
+
+    def test_cv_hygiene_surfaces_fold_context_failures(self):
+        from eeg_pipeline.analysis.machine_learning.cv import apply_fold_specific_hygiene
+
+        cfg = DotConfig({"machine_learning": {"cv": {"hygiene_enabled": True}}})
+        with patch(
+            "eeg_pipeline.analysis.features.cv_hygiene.create_fold_specific_context",
+            side_effect=RuntimeError("fold context failed"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "fold context failed"):
+                apply_fold_specific_hygiene(
+                    fold_idx=1,
+                    train_indices=np.array([0, 1, 2], dtype=int),
+                    test_indices=np.array([3], dtype=int),
+                    epochs=object(),
+                    config=cfg,
+                    log=Mock(),
+                )
+
+    def test_iaf_hygiene_requires_enough_training_trials(self):
+        from eeg_pipeline.analysis.features.cv_hygiene import compute_iaf_for_fold
+
+        train_mask = np.array([True, True, True, True, False], dtype=bool)
+        epochs_data = np.ones((5, 2, 64), dtype=float)
+
+        with self.assertRaisesRegex(ValueError, "Too few training trials"):
+            compute_iaf_for_fold(
+                epochs_data=epochs_data,
+                sfreq=128.0,
+                train_mask=train_mask,
+                config=DotConfig({}),
+                logger=Mock(),
+            )
+
+    def test_group_intersection_harmonization_rejects_empty_strict_intersection(self):
+        from eeg_pipeline.analysis.machine_learning.cv import compute_train_group_intersection_mask
+
+        X_train = np.array(
+            [
+                [1.0, np.nan],
+                [2.0, np.nan],
+                [np.nan, 3.0],
+                [np.nan, 4.0],
+            ],
+            dtype=float,
+        )
+        groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
+
+        with self.assertRaisesRegex(ValueError, "No features are finite for every training group"):
+            compute_train_group_intersection_mask(X_train, groups)
