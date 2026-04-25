@@ -51,7 +51,6 @@ from sklearn.model_selection import (
     GridSearchCV,
     LeaveOneGroupOut,
     StratifiedGroupKFold,
-    StratifiedKFold,
 )
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.under_sampling import RandomUnderSampler

@@ -152,8 +152,6 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         return p
 
     def test_bad_channel_policy_per_run_skips_subject_union_sync(self):
-        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
-
         calls = {"detect": 0, "sync": 0}
 
         def fake_run_bads_detection(**_kwargs):
