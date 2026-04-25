@@ -87,8 +87,9 @@ Behavior and ML workflows read trial-level predictors from ``*_events.tsv``.
      - Event onset in seconds from the start of the recording
    * - ``duration``
      - Event duration in seconds
-   * - ``trial_type``
-     - Condition label; used by the GLM and behavioral condition contrasts
+   * - ``trial_type`` *(recommended)*
+     - Canonical BIDS condition label. If absent, condition labels can be
+       resolved from configured aliases in ``event_columns.condition``.
 
 Add any study-specific predictor or outcome columns alongside these.
 Column name aliases (e.g. ``intensity``, ``rating``) are resolved via
@@ -149,9 +150,8 @@ Full BIDS-fMRI layout for ``fmri preprocess`` + ``fmri-analysis``:
    * - ``SliceTiming``
      - Required when ``slice_time_ref`` correction is enabled
 
-For fMRI-only analysis (no fMRIPrep), only the NIfTI + events files are
-required. Set ``fmri_contrast.input_source: "bids_raw"`` to bypass fMRIPrep
-output discovery.
+For inferential fMRI analysis (``fmri-analysis first-level``, ``second-level``,
+``beta-series``, ``lss``), fMRIPrep derivatives are required.
 
 Default Directory Layout
 --------------------------

@@ -358,7 +358,7 @@ Output Structure
 
 .. code-block:: text
 
-   derivatives/ml/
+   derivatives/machine_learning/
    ├── regression/
    │   ├── results_summary.tsv          # Subject-level r, R², MAE, RMSE
    │   ├── predictions_all_subjects.tsv # Trial-level predictions and targets

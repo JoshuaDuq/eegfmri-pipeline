@@ -75,7 +75,7 @@ the canonical join key aligning EEG features, fMRI betas, and behavioral targets
       Nested LOSO CV (outer LOGO · inner GroupKFold) · ElasticNet / Ridge / RF
       regression · SVM / LR / RF / EEGNet classification · temporal
       generalization · conformal intervals · SHAP importance (fold-aggregated)
-      · permutation test on shuffled labels.
+      · permutation feature importance.
 
       **Out:** ``ml/`` (summaries, predictions, SHAP, figures)
 
@@ -84,8 +84,8 @@ the canonical join key aligning EEG features, fMRI betas, and behavioral targets
 
    .. grid-item-card:: 04 — fMRI Pipeline *(optional)*
 
-      **In:** BIDS fMRI (fMRIPrep derivatives by default;
-      ``--input-source bids_raw`` for raw BOLD)
+      **In:** BIDS fMRI with fMRIPrep derivatives (required for inferential
+      fMRI analysis modes)
 
       Containerized fMRIPrep (``nipreps/fmriprep:25.2.4``) · Nilearn
       ``FirstLevelModel`` (HRF ``spm``, drift ``cosine``, HP 0.008 Hz) ·
@@ -486,13 +486,13 @@ Use the tabs below for the full command matrix and focused examples.
 
       Reads feature Parquet tables and behavioral targets, runs nested
       cross-validation, and writes predictions and metrics to
-      ``derivatives/ml/``.
+      ``derivatives/machine_learning/``.
 
       **Output:** ``results_summary.tsv``, ``predictions_all_subjects.tsv``,
       permutation p-values, SHAP importance tables, and figures.
 
       Outer CV is Leave-One-Subject-Out (LOSO); inner CV is GroupKFold
-      (5 splits). All preprocessing statistics are estimated on the training
+      (default 3 splits unless overridden). All preprocessing statistics are estimated on the training
       fold only. The primary regression metric is subject-level Fisher-z
       aggregated Pearson correlation :math:`\bar{r}`.
 
@@ -521,7 +521,7 @@ Use the tabs below for the full command matrix and focused examples.
          * - ``shap``
            - SHAP-based feature importance (TreeExplainer / LinearExplainer)
          * - ``permutation``
-           - Permutation test: re-run full nested CV on shuffled labels
+           - Permutation feature importance (drop-in-score under shuffled feature columns)
 
       .. code-block:: bash
 

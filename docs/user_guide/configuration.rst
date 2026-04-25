@@ -37,8 +37,10 @@ Configuration
 
 .. note::
 
-   All relative ``paths`` are resolved from ``eeg_pipeline/utils/config/``.
-   Use absolute paths or ``../../../`` to reach ``data/`` from that location.
+   Relative paths are resolved from the directory of the config file that
+   defines them (for example ``eeg_config.yaml``, ``behavior_config.yaml``,
+   or ``fmri_config.yaml``). Use absolute paths when you need location-independent
+   configuration.
 
 .. _configuration-quick-nav:
 
@@ -111,7 +113,7 @@ Project & Paths
      - Default
      - Description
    * - ``project.task``
-     - ``"task"``
+     - ``"thermalactive"``
      - Task name used in BIDS paths and file naming
    * - ``project.random_state``
      - ``42``
@@ -443,7 +445,7 @@ fMRI Preprocessing (fMRIPrep)
      - ``0``
      - CPU threads (0 = auto)
    * - ``fmri_preprocessing.fmriprep.extra_args``
-     - ``""``
+     - ``null``
      - Additional CLI arguments appended verbatim to fMRIPrep
 
 .. _configuration-first-level-glm:
@@ -458,12 +460,12 @@ First-Level GLM
    * - Key
      - Default
      - Description
-   * - ``fmri_contrast.enabled``
-     - ``false``
-     - Must be set ``true`` to run first-level analysis
-   * - ``fmri_contrast.input_source``
-     - ``"fmriprep"``
-     - BOLD source: ``"fmriprep"`` or ``"bids_raw"``
+  * - ``fmri_contrast.enabled``
+    - ``false``
+    - Configuration gate for config-driven first-level analysis paths; explicit CLI ``fmri-analysis first-level`` runs regardless of this toggle
+  * - ``fmri_contrast.input_source``
+    - ``"fmriprep"``
+    - BOLD source for inferential fMRI analysis (currently ``"fmriprep"`` only)
    * - ``fmri_contrast.fmriprep_space``
      - ``"T1w"``
      - fMRIPrep output space to use
@@ -506,7 +508,7 @@ Second-Level (Group) Inference
      - Description
    * - ``fmri_group_level.enabled``
      - ``false``
-     - Must be set ``true`` to run second-level analysis
+     - Configuration default; explicit CLI ``fmri-analysis second-level`` runs regardless of this toggle
    * - ``fmri_group_level.model``
      - ``"one-sample"``
      - Design: ``"one-sample"``, ``"two-sample"``, ``"paired"``, ``"repeated-measures"``
@@ -529,21 +531,17 @@ Behavioral Statistics
    * - Key
      - Description
    * - ``behavior_analysis.predictor_type``
-     - Column alias group used as the primary predictor (``"predictor"`` or ``"outcome"``)
-   * - ``behavior_analysis.correlations.method``
+     - Predictor variable type: ``"continuous"`` (default), ``"binary"``, or ``"categorical"``
+   * - ``behavior_analysis.statistics.correlation_method``
      - Correlation method: ``"spearman"`` (default), ``"pearson"``, ``"kendall"``
-   * - ``behavior_analysis.correlations.partial_targets``
-     - List of covariate column names for partial correlation
    * - ``behavior_analysis.correlations.loso_stability``
      - ``true`` — compute LOSO stability of feature–behavior correlations
    * - ``behavior_analysis.statistics.fdr_alpha``
      - FDR :math:`q`-value for multiple comparison correction (default ``0.05``)
    * - ``behavior_analysis.statistics.n_permutations``
      - Permutation count for non-parametric tests (default ``1000``)
-   * - ``behavior_analysis.regression.model``
-     - Linear model variant: ``"ols"``, ``"robust"``
    * - ``behavior_analysis.predictor_residual.method``
-     - Residualization method: ``"spline"``, ``"polynomial"``
+     - Residualization method: ``"spline"``, ``"poly"``
 
 .. _configuration-runtime-overrides:
 
