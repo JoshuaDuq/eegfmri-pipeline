@@ -30,10 +30,28 @@ EEG Preprocessing
 
       ``pyprep``, ``ica``, ``epochs`` sections of ``eeg_config.yaml``
 
+.. seealso::
+
+   :doc:`features`
+      Feature extraction begins from the clean epochs produced here.
+
+   :doc:`../../user_guide/data_layout`
+      Input BIDS layout and events.tsv column requirements.
+
+   :doc:`../../user_guide/configuration`
+      Full ``preprocessing``, ``pyprep``, ``ica``, and ``epochs`` key reference.
+
+   :doc:`../../user_guide/cli/preprocessing`
+      CLI flags for all preprocessing modes.
+
 .. note::
 
    Set ``preprocessing.task_is_rest: true`` to create fixed-length segments
    without requiring ``events.tsv`` condition labels.
+
+.. contents:: On this page
+   :local:
+   :depth: 2
 
 Notation
 --------
@@ -516,17 +534,3 @@ Output Structure
    ├── icalabel_task_<task>_log.csv
    ├── task_<task>_preprocessing_stats.tsv
    └── task_<task>_preprocessing_stats_desc.tsv
-
-.. seealso::
-
-   :doc:`features`
-      Feature extraction begins from the clean epochs produced here.
-
-   :doc:`../../user_guide/data_layout`
-      Input BIDS layout and events.tsv column requirements.
-
-   :doc:`../../user_guide/configuration`
-      Full ``preprocessing``, ``pyprep``, ``ica``, and ``epochs`` key reference.
-
-   :doc:`../../user_guide/cli/preprocessing`
-      CLI flags for all preprocessing modes.

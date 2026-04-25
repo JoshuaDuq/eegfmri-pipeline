@@ -1,25 +1,56 @@
 fMRI Raw-to-BIDS Contract
 =========================
 
+.. raw:: html
+
+   <p class="hero-lede">
+     Input contract for fMRI datasets before preprocessing and modeling.
+     Conversion from DICOM and event-log harmonization are dataset-specific,
+     but downstream analysis expects a valid BIDS layout.
+   </p>
+
+.. grid:: 2
+   :gutter: 2
+
+   .. grid-item-card:: Inputs
+
+      ``*_bold.nii.gz`` · ``*_bold.json`` · ``*_events.tsv``
+
+   .. grid-item-card:: Outputs
+
+      Validated BIDS fMRI structure ready for ``fmri preprocess``
+
+   .. grid-item-card:: CLI
+
+      ``eeg-pipeline validate bids`` · ``bids-validator /path/to/bids_root``
+
+   .. grid-item-card:: Requires
+
+      ``dcm2niix`` on ``PATH`` · optional BIDS Validator
+
+.. seealso::
+
+   :doc:`pipeline`
+      Full fMRI analysis pipeline starting from this BIDS layout.
+
+   :doc:`../../user_guide/data_layout`
+      EEG and fMRI BIDS layout requirements, events.tsv columns, and
+      bold.json sidecar field reference.
+
+   :doc:`../../user_guide/cli/validation`
+      CLI commands for BIDS and derivatives validation.
+
+.. contents:: On this page
+   :local:
+   :depth: 2
+
+Overview
+--------
+
 This pipeline starts from BIDS-formatted fMRI inputs. Raw DICOM-to-BIDS
 conversion and event-log harmonization are expected to run in an external,
 dataset-specific step before ``eeg-pipeline fmri preprocess`` /
 ``eeg-pipeline fmri-analysis ...``.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-   :stub-columns: 1
-
-   * - Inputs
-     - BIDS fMRI layout: ``*_bold.nii.gz``, ``*_bold.json``, ``*_events.tsv``
-   * - Outputs
-     - Validated BIDS structure ready for ``fmri preprocess``
-   * - CLI
-     - ``eeg-pipeline validate bids`` (quick internal checks) and
-       ``bids-validator /path/to/bids_root`` (full BIDS-spec validation)
-   * - Requires
-     - ``dcm2niix`` on ``PATH`` (for DICOM conversion); BIDS Validator (optional)
 
 Expected Input Contract
 -----------------------
@@ -82,15 +113,3 @@ Before running the fMRI pipeline, validate your BIDS layout:
 
    eeg-pipeline validate bids
    bids-validator /path/to/bids_root
-
-.. seealso::
-
-   :doc:`pipeline`
-      Full fMRI analysis pipeline starting from the BIDS layout created here.
-
-   :doc:`../../user_guide/data_layout`
-      EEG and fMRI BIDS layout requirements, events.tsv columns, and
-      bold.json sidecar field reference.
-
-   :doc:`../../user_guide/cli/validation`
-      CLI commands for BIDS and derivatives validation.

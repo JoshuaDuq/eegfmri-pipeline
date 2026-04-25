@@ -1,23 +1,57 @@
 EEG Source Localization
 =======================
 
-Two source localization paths are available. Both use :term:`MNE-Python` as
-the forward/inverse backend and write results to the :term:`Parquet` feature
-table format.
+.. raw:: html
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-   :stub-columns: 1
+   <p class="hero-lede">
+     EEG source reconstruction for source-band power, source envelopes, and
+     optional fMRI-constrained feature extraction. Supports an EEG-only
+     template path and a subject-specific fMRI-informed path.
+   </p>
 
-   * - Inputs
-     - ``*_proc-clean_epo.fif``; optionally FreeSurfer subject + BEM + fMRI contrast map
-   * - Outputs
-     - Source-band power and envelope features per trial/window (Parquet)
-   * - CLI
-     - ``eeg-pipeline features compute --categories sourcelocalization``
-   * - Config
-     - ``feature_engineering.sourcelocalization`` section of ``eeg_config.yaml``
+.. grid:: 2
+   :gutter: 2
+
+   .. grid-item-card:: Inputs
+
+      ``*_proc-clean_epo.fif`` · optional FreeSurfer subject, BEM, and
+      fMRI contrast map
+
+   .. grid-item-card:: Outputs
+
+      Source-band power · source envelopes · optional source contrast tables
+
+   .. grid-item-card:: CLI
+
+      ``eeg-pipeline features compute --categories sourcelocalization``
+
+   .. grid-item-card:: Config
+
+      ``feature_engineering.sourcelocalization`` section of ``eeg_config.yaml``
+
+.. seealso::
+
+   :doc:`preprocessing`
+      Produces the clean epochs and electrode montage consumed here.
+
+   :doc:`../fmri/pipeline`
+      First-level GLM contrast maps used to constrain the fMRI-informed path.
+
+   :doc:`../../user_guide/configuration`
+      Full ``feature_engineering.sourcelocalization`` key reference.
+
+   :doc:`../../install`
+      Docker image build instructions for FreeSurfer + MNE.
+
+.. contents:: On this page
+   :local:
+   :depth: 2
+
+Overview
+--------
+
+Both source localization paths use :term:`MNE-Python` as the forward/inverse
+backend and write results to the :term:`Parquet` feature table format.
 
 .. list-table::
    :header-rows: 1
@@ -32,6 +66,35 @@ table format.
    * - **fMRI-constrained**
      - FreeSurfer subject, :term:`BEM`, trans, fMRI stats map
      - Research-grade, subject-specific, fMRI-guided
+
+Method Map
+----------
+
+Source localization is organized by the model assets required before inversion,
+then by the output space used for downstream statistics.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 36 40
+
+   * - Layer
+     - Purpose
+     - Main artifact
+   * - Template path
+     - Run source features without subject MRI/fMRI assets
+     - ``fsaverage`` forward model and source features
+   * - fMRI-informed path
+     - Restrict or label source estimates using subject-specific activation maps
+     - FreeSurfer subject, BEM, trans, fMRI stats map
+   * - Inverse method
+     - Estimate source activity from clean epochs
+     - LCMV beamformer or eLORETA
+   * - Output space
+     - Choose the cross-subject summary unit
+     - ``cluster``, ``atlas``, or ``dual`` feature families
+   * - Source contrast
+     - Compare source features between condition A and B
+     - Optional ``sourcecontrast`` tables
 
 What Is Computed
 ----------------
@@ -58,7 +121,8 @@ Path 1: EEG-Only (Template-Based)
 ----------------------------------
 
 Uses the ``fsaverage`` template head model. No subject MRI or fMRI required.
-Template fallback is **opt-in** via ``feature_engineering.sourcelocalization.allow_template_fallback: true``.
+Template fallback is **opt-in** via
+``feature_engineering.sourcelocalization.allow_template_fallback: true``.
 
 .. code-block:: bash
 
@@ -319,17 +383,3 @@ References
 
 - `MNE-Python source localization <https://mne.tools/stable/auto_tutorials/source-modeling/30_source_localization.html>`_
 - `FreeSurfer recon-all <https://surfer.nmr.mgh.harvard.edu/fswiki/recon-all>`_
-
-.. seealso::
-
-   :doc:`preprocessing`
-      Produces the clean epochs and electrode montage consumed here.
-
-   :doc:`../../methods/fmri/pipeline`
-      First-level GLM contrast maps used to constrain the fMRI-informed path.
-
-   :doc:`../../user_guide/configuration`
-      Full ``feature_engineering.sourcelocalization`` key reference.
-
-   :doc:`../../install`
-      Docker image build instructions for FreeSurfer + MNE.

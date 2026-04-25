@@ -30,6 +30,24 @@ Behavioral Statistics
 
       ``behavior_config.yaml`` · ``feature_engineering.analysis_mode``
 
+.. seealso::
+
+   :doc:`features`
+      EEG feature tables consumed as inputs to behavioral correlations.
+
+   :doc:`machine_learning`
+      Trial-level predictive modeling using the same behavioral targets.
+
+   :doc:`../../user_guide/data_layout`
+      ``events.tsv`` column requirements for predictor and outcome aliases.
+
+   :doc:`../../user_guide/cli/behavior`
+      CLI flags for behavioral analysis modes.
+
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 Notation
 --------
 
@@ -60,6 +78,44 @@ Notation
 
 Trials are **not i.i.d.**: they are clustered within runs/blocks and subjects.
 All permutation-based inference respects this structure via grouped label shuffling.
+
+Formula Map
+-----------
+
+Use this map to jump from an analysis question to the corresponding estimand or
+test statistic.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 36 40
+
+   * - Analysis
+     - Question
+     - Primary quantity
+   * - Predictor residual
+     - What behavioral variance remains after the predictor?
+     - :math:`y_i - \hat{y}_i`
+   * - Correlations
+     - Which EEG features track behavioral targets?
+     - Pearson/Spearman :math:`r`, partial :math:`r`, permutation :math:`p`
+   * - Regression
+     - Does a feature explain outcome variance beyond covariates?
+     - :math:`\Delta R^2`, HC3 standard errors, Freedman-Lane permutation
+   * - Reliability
+     - Are features stable across repeated measurements?
+     - ICC(3,1)
+   * - Condition comparison
+     - Do feature values differ between conditions?
+     - Welch :math:`t`, Hedges :math:`g`, paired :math:`d_z`
+   * - Temporal statistics
+     - When in time-frequency space does the feature-behavior link appear?
+     - Correlation-to-:math:`t`, cluster mass
+   * - Group-level correlation
+     - What is the equal-subject aggregate association?
+     - Fisher-:math:`z` averaged :math:`r_\text{group}`
+   * - Multiple comparisons
+     - Which discoveries survive family control?
+     - BH and hierarchical FDR
 
 Pipeline DAG
 ------------
@@ -241,7 +297,8 @@ column must exist and contribute numeric data; if
 ``behavior_analysis.correlations.targets`` is explicitly listed, every entry
 must resolve to a valid numeric trial-table column.
 
-**Correlation types:**
+Correlation Types
+^^^^^^^^^^^^^^^^^
 
 .. list-table::
    :header-rows: 1
@@ -260,18 +317,27 @@ must resolve to a valid numeric trial-table column.
    * - ``run_mean``
      - Correlations on run-aggregated means
 
-**Partial correlation** test statistic with :math:`k` covariates:
+Partial Correlation
+^^^^^^^^^^^^^^^^^^^
+
+Test statistic with :math:`k` covariates:
 
 .. math::
 
    t = r\sqrt{\frac{n - k - 2}{1 - r^2}}, \qquad
    p = 2\, P\!\left(|T_{n-k-2}| \ge |t|\right).
 
-**Permutation p-value** (Phipson–Smyth):
+Permutation P-Value
+^^^^^^^^^^^^^^^^^^^
+
+Phipson-Smyth correction:
 
 .. math::
 
    p_\text{perm} = \frac{N_{\text{extreme}} + 1}{n_\text{perm} + 1}.
+
+Stability and Bayes Factors
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 **LOSO stability** (``--loso-stability``): recompute correlations on :math:`N-1`
 subjects; report mean LOSO :math:`r` and SD across folds.
@@ -287,13 +353,17 @@ Per-feature OLS with optional predictor interaction:
 
    y = Z\gamma + \beta_f x_f + \beta_\text{int}(x_f \cdot P) + \varepsilon \quad \text{(full)}.
 
-**Incremental explained variance:**
+Incremental Explained Variance
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    \Delta R^2 = R^2_\text{full} - R^2_\text{reduced}.
 
-**HC3 heteroskedasticity-consistent standard errors:**
+HC3 Standard Errors
+^^^^^^^^^^^^^^^^^^^
+
+Heteroskedasticity-consistent covariance:
 
 .. math::
 
@@ -317,13 +387,15 @@ Intra-class correlation ICC(3,1) for test–retest reliability:
 Stage 7 — Condition Comparisons
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Two-group — Welch t-test:**
+Two-Group Welch Test
+^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    t = \frac{\bar{x}_1 - \bar{x}_2}{\sqrt{s_1^2/n_1 + s_2^2/n_2}}.
 
-**Effect sizes:**
+Effect Sizes
+^^^^^^^^^^^^
 
 .. math::
 
@@ -331,7 +403,10 @@ Stage 7 — Condition Comparisons
    g = d\!\left(1 - \frac{3}{4\,df - 1}\right), \qquad
    d_z = \frac{\bar{d}}{s_d} \text{ (paired)}.
 
-**Multi-group (3+ levels):** pairwise Mann–Whitney U (unpaired) or Wilcoxon
+Multi-Group Comparisons
+^^^^^^^^^^^^^^^^^^^^^^^
+
+For 3+ levels, the pipeline uses pairwise Mann-Whitney U (unpaired) or Wilcoxon
 signed-rank (paired). Omnibus tests are not performed.
 
 When ``primary_unit = run_mean``, the pipeline first aggregates to run×condition
@@ -380,7 +455,8 @@ If temporal ``selected_bands`` is set, every requested band name must match an
 available configured band; mismatches now raise instead of widening the
 analysis to every band.
 
-**ERDS trial metrics:**
+ERDS Trial Metrics
+^^^^^^^^^^^^^^^^^^
 
 .. math::
 
@@ -431,31 +507,21 @@ subject-restricted or block-restricted trial permutations when configured:
 Multiple Comparison Correction
 -------------------------------
 
-**Benjamini–Hochberg (BH):**
+Benjamini-Hochberg (BH)
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. math::
 
    q_{(i)} = \min_{j \ge i} \frac{m}{j}\, p_{(j)}.
 
-**Hierarchical FDR (family-gated):** families of hypotheses are gated by a Simes
-family-level test before within-family corrections are applied:
+Hierarchical FDR
+~~~~~~~~~~~~~~~~
+
+Families of hypotheses are gated by a Simes family-level test before
+within-family corrections are applied:
 
 .. math::
 
    p_\text{Simes} = \min_i \frac{m_f}{i}\, p_{(i,\text{family})}.
 
 Within-family rejections are retained only when the family gate rejects at :math:`\alpha`.
-
-.. seealso::
-
-   :doc:`features`
-      EEG feature tables consumed as inputs to behavioral correlations.
-
-   :doc:`machine_learning`
-      Trial-level predictive modeling using the same behavioral targets.
-
-   :doc:`../../user_guide/data_layout`
-      ``events.tsv`` column requirements for predictor and outcome aliases.
-
-   :doc:`../../user_guide/cli/behavior`
-      CLI flags for behavioral analysis modes.

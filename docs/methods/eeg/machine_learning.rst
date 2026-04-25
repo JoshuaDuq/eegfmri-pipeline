@@ -46,6 +46,10 @@ Machine Learning
    :doc:`../../user_guide/cli/ml`
       CLI flags for all ML modes.
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 Notation
 --------
 
@@ -77,6 +81,41 @@ Notation
      - Fisher :math:`z`-transformed correlation
    * - :math:`\bar{r}`
      - Subject-level Fisher-:math:`z`-aggregated Pearson correlation (primary metric)
+
+Modeling Map
+------------
+
+The modeling methods are organized by where leakage could occur: design-matrix
+preprocessing, estimator fitting, cross-validation, inference, and interpretation.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 36 40
+
+   * - Section
+     - Role
+     - Key quantities
+   * - Preprocessing pipeline
+     - Build a fold-safe design matrix from heterogeneous feature tables
+     - Imputation, variance thresholding, scaling, PCA, deconfounding
+   * - Regression models
+     - Predict continuous outcomes under regularized or nonlinear estimators
+     - Yeo-Johnson transform, ElasticNet, Ridge, Random Forest
+   * - Classification models
+     - Predict binary labels under class imbalance
+     - SVM objective, logistic probability, EEGNet logits
+   * - Cross-validation schemes
+     - Estimate generalization with subject/block isolation
+     - Nested LOSO, block-aware within-subject CV
+   * - Evaluation metrics
+     - Aggregate trial predictions at the scientific unit
+     - Subject-level :math:`r`, :math:`R^2`, AUC, calibration metrics
+   * - Permutation testing
+     - Build the empirical null with full-pipeline refits
+     - Grouped label permutations and two-tailed :math:`p`
+   * - Interpretation and uncertainty
+     - Summarize feature importance and predictive intervals
+     - SHAP values, temporal generalization, conformal intervals
 
 Preprocessing Pipeline
 ----------------------
@@ -116,15 +155,19 @@ the training fold only, applied to both train and test.
      - ``PCA`` *(optional)*
      - Dimensionality reduction; ``n_components`` as variance fraction or integer
 
-**Deconfounding** (``preprocessing.deconfound = true``): residualize EEG features on
-covariate matrix :math:`Z` using training-fold regression coefficients:
+Deconfounding
+~~~~~~~~~~~~~
+
+When ``preprocessing.deconfound = true``, residualize EEG features on covariate
+matrix :math:`Z` using training-fold regression coefficients:
 
 .. math::
 
    \hat{B} = (Z_\text{train}^\top Z_\text{train})^{-1} Z_\text{train}^\top X_\text{EEG,train}, \qquad
    \tilde{X}_\text{EEG} = X_\text{EEG} - Z\hat{B}.
 
-**Feature harmonization across subjects:**
+Feature Harmonization Across Subjects
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
    :header-rows: 1
@@ -274,7 +317,10 @@ Evaluation Metrics
 Regression
 ~~~~~~~~~~
 
-**Primary metric — Subject-level Fisher-:math:`z`-aggregated Pearson correlation:**
+Primary Metric
+^^^^^^^^^^^^^^
+
+Subject-level Fisher-:math:`z`-aggregated Pearson correlation:
 
 .. math::
 
@@ -287,15 +333,15 @@ Aggregation across :math:`S` subjects: clip → arctanh → weighted mean → ta
 Weighting modes: ``equal`` (default, :math:`w_i=1`) or ``trial_count``
 (:math:`w_i = \max(n_i - 3, 1)`).
 
-**Confidence intervals for :math:`\bar{r}`:** bootstrap (resample subjects, :math:`B` times)
+Confidence intervals for :math:`\bar{r}`: bootstrap (resample subjects, :math:`B` times)
 or fixed-effects (:math:`\mathrm{SE} = 1/\sqrt{\sum_i w_i}`).
 
-**Secondary:** subject-level mean :math:`R^2`, MAE, RMSE.
+Secondary: subject-level mean :math:`R^2`, MAE, RMSE.
 
 Classification
 ~~~~~~~~~~~~~~
 
-**Primary metric:** subject-level mean AUC (unweighted mean of per-subject ROC-AUC).
+Primary metric: subject-level mean AUC (unweighted mean of per-subject ROC-AUC).
 
 Additional metrics: accuracy, balanced accuracy, average precision, F1, sensitivity,
 specificity, Brier score, and ECE (Expected Calibration Error over 10 uniform bins).
@@ -306,12 +352,16 @@ Permutation Testing
 Constructs an empirical null distribution by re-running the full nested CV pipeline
 with permuted labels. All hyperparameter tuning is repeated on each permuted dataset.
 
-**Permutation schemes:**
+Permutation Schemes
+~~~~~~~~~~~~~~~~~~~
 
 - ``within_subject_within_block`` *(default)*: permute labels within each subject × block.
 - ``within_subject``: permute within each subject (fallback when block labels unavailable).
 
-**P-value (two-tailed, regression):**
+P-Value
+~~~~~~~
+
+Two-tailed regression statistic:
 
 .. math::
 

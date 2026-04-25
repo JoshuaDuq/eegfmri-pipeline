@@ -45,6 +45,10 @@ EEG Feature Extraction
    :doc:`../../user_guide/cli/features`
       CLI flags for feature category selection, spatial transforms, and IAF mode.
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 Notation
 --------
 
@@ -188,22 +192,57 @@ Applied before band filtering. Configured globally via
 
 A failed transform raises a ``RuntimeError``; it is never silently skipped.
 
+Formula Organization
+--------------------
+
+Feature formulas are grouped by the signal object they operate on: power/PSD,
+time-domain waveforms, connectivity matrices, source estimates, or quality
+summaries. This keeps derived quantities close to their assumptions.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 34 42
+
+   * - Family
+     - Signal object
+     - Main quantities
+   * - Power, ERDS, ratios, asymmetry
+     - Band power and active/baseline windows
+     - Log-ratio, dB, ERDS%, band ratios, hemispheric indices
+   * - Spectral, aperiodic
+     - PSD over configured frequency bands
+     - Center frequency, bandwidth, entropy, 1/f slope/offset/knee
+   * - ERP, ITPC, PAC
+     - Event-locked waveforms and phase estimates
+     - Component amplitude/latency, phase clustering, phase-amplitude coupling
+   * - Connectivity, directed connectivity
+     - Cross-spectra, amplitudes, phases, MVAR transfer functions
+     - wPLI, imaginary coherence, PLV, AEC, PSI, DTF, PDC
+   * - Source localization
+     - Forward/inverse source estimates
+     - LCMV, eLORETA, fMRI-constrained cluster/atlas summaries
+   * - Complexity, bursts, microstates, quality
+     - Symbolic sequences, envelopes, scalp maps, segment diagnostics
+     - LZC, entropy, burst rate/duration, GFP, coverage, SNR
+
 Feature Definitions
 -------------------
 
-8.1 Power (Oscillatory Power)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Power (Oscillatory Power)
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Starting from :term:`TFR` power :math:`P_{e,c}(f,t)`:
 
-**Band-integrated power:**
+Band-Integrated Power
+^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    P_{e,c}^{B,\text{seg}} =
    \frac{\sum_{f \in B} \bar{P}_{e,c}^{B,\text{seg}}(f)\,\Delta f}{\sum_{f \in B} \Delta f}.
 
-**Baseline-normalized log-ratio:**
+Baseline-Normalized Log-Ratio
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
@@ -213,12 +252,16 @@ Starting from :term:`TFR` power :math:`P_{e,c}(f,t)`:
           {\max(P_{e,c}^{B,\text{baseline}},\, \varepsilon)}
    \right), \quad \varepsilon = 10^{-20}.
 
-**dB scaling:** :math:`\mathrm{dB}_{e,c}^B = 10 \cdot \text{logratio}_{e,c}^B`.
+dB Scaling
+^^^^^^^^^^
 
-8.2 Spectral Descriptors
-~~~~~~~~~~~~~~~~~~~~~~~~~
+:math:`\mathrm{dB}_{e,c}^B = 10 \cdot \text{logratio}_{e,c}^B`.
 
-**Center frequency (spectral CoG):**
+Spectral Descriptors
+~~~~~~~~~~~~~~~~~~~~
+
+Center Frequency
+^^^^^^^^^^^^^^^^
 
 .. math::
 
@@ -226,7 +269,10 @@ Starting from :term:`TFR` power :math:`P_{e,c}(f,t)`:
    \frac{\sum_{f \in B} f\,\mathrm{PSD}(f)\,\Delta f}
         {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}.
 
-**Bandwidth (power-weighted standard deviation):**
+Bandwidth
+^^^^^^^^^
+
+Power-weighted standard deviation:
 
 .. math::
 
@@ -236,62 +282,76 @@ Starting from :term:`TFR` power :math:`P_{e,c}(f,t)`:
           {\sum_{f \in B} \mathrm{PSD}(f)\,\Delta f}
    }.
 
-**Normalized spectral entropy** (with :math:`p(f) = \mathrm{PSD}(f)\,\Delta f \,/\, \sum_{f \in B} \mathrm{PSD}(f)\,\Delta f`):
+Normalized Spectral Entropy
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+With :math:`p(f) = \mathrm{PSD}(f)\,\Delta f \,/\, \sum_{f \in B} \mathrm{PSD}(f)\,\Delta f`:
 
 .. math::
 
    H_B = -\frac{\sum_{f \in B} p(f)\ln p(f)}{\ln N_B}.
 
-**Broadband spectral edge** :math:`f_\text{edge,95}` is the smallest :math:`f` such that cumulative PSD reaches 95%.
+Broadband Spectral Edge
+^^^^^^^^^^^^^^^^^^^^^^^
 
-8.3 Aperiodic (1/f) Components
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:math:`f_\text{edge,95}` is the smallest :math:`f` such that cumulative PSD reaches 95%.
 
-**Iterative aperiodic fit** in :math:`[f_\text{min}, f_\text{max}]` (e.g. 2–40 Hz):
+Aperiodic (1/f) Components
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Iterative Aperiodic Fit
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Fit in :math:`[f_\text{min}, f_\text{max}]` (e.g. 2-40 Hz):
 fit model → compute residuals → remove large-positive-residual bins (oscillatory peaks) → repeat.
 
-*Fixed-slope (linear):*
+Fixed-Slope Model
+^^^^^^^^^^^^^^^^^
 
 .. math::
 
    y(f) = \text{offset} + \text{slope} \cdot \log_{10} f.
 
-*Knee model:*
+Knee Model
+^^^^^^^^^^
 
 .. math::
 
    y(f) = \text{offset} - \log_{10}\!\bigl(\text{knee} + f^\text{exponent}\bigr).
 
-**Outputs per segment:** ``slope``, ``offset``, ``exponent``, ``knee``, ``r2``, ``rms``;
+Outputs per segment: ``slope``, ``offset``, ``exponent``, ``knee``, ``r2``, ``rms``;
 aperiodic-corrected band powers and theta/beta ratio.
 
-8.4 ERP (Evoked Potentials)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ERP (Evoked Potentials)
+~~~~~~~~~~~~~~~~~~~~~~~
 
 For each ERP component window :math:`T_\text{comp}` and channel/ROI:
 
-**Component mean:**
+Component Mean
+^^^^^^^^^^^^^^
 
 .. math::
 
    \text{mean}_{e,c}^\text{comp} =
    \frac{1}{|T_\text{comp}|} \sum_{t \in T_\text{comp}} \tilde{x}_{e,c}(t).
 
-**Peak amplitude and latency:**
+Peak Amplitude and Latency
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    t^* = \arg\max_{t \in T_\text{comp}} s\bigl(\tilde{x}_{e,c}(t)\bigr), \qquad
    \text{peak}_{e,c}^\text{comp} = \tilde{x}_{e,c}(t^*).
 
-**Area under the curve:** trapezoidal sum over contiguous valid intervals.
+Area under the curve: trapezoidal sum over contiguous valid intervals.
 
-8.5 ERDS (Event-Related Desynchronization / Synchronization)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ERDS (Event-Related Desynchronization / Synchronization)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Using precomputed band envelopes :math:`|\mathcal{H}(x_{e,c}^B(t))|`:
 
-**ERDS percentage:**
+ERDS Percentage
+^^^^^^^^^^^^^^^
 
 .. math::
 
@@ -300,19 +360,20 @@ Using precomputed band envelopes :math:`|\mathcal{H}(x_{e,c}^B(t))|`:
    \frac{P^{B,\text{active}}_{e,c} - P^{B,\text{baseline}}_{e,c}}
         {P^{B,\text{baseline}}_{e,c}}.
 
-**ERDS in dB:**
+ERDS in dB
+^^^^^^^^^^
 
 .. math::
 
    \text{ERDS}_\text{dB} =
    10 \log_{10}\!\left(\frac{P^{B,\text{active}}_{e,c}}{P^{B,\text{baseline}}_{e,c}}\right).
 
-**Laterality-aware pain markers:** when ``feature_engineering.erds.laterality_columns``
+Laterality-aware pain markers: when ``feature_engineering.erds.laterality_columns``
 is configured and the events table contains a stimulus-side column, contralateral-hemisphere
 somatosensory ERD features and onset/rebound latencies are computed.
 
-8.6 Ratios (Band Power Ratios)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Ratios (Band Power Ratios)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For numerator band :math:`B_\text{num}` and denominator band :math:`B_\text{den}`:
 
@@ -324,8 +385,8 @@ For numerator band :math:`B_\text{num}` and denominator band :math:`B_\text{den}
    \ln\!\bigl(P^{B_\text{num}}_e + \varepsilon\bigr) -
    \ln\!\bigl(P^{B_\text{den}}_e + \varepsilon\bigr).
 
-8.7 Asymmetry (Hemispheric Indices)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Asymmetry (Hemispheric Indices)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For a left–right electrode pair :math:`(L, R)` and band :math:`B`:
 
@@ -335,12 +396,13 @@ For a left–right electrode pair :math:`(L, R)` and band :math:`B`:
    \frac{P^B_R - P^B_L}{P^B_R + P^B_L}, \qquad
    \text{logdiff} = \ln P^B_R - \ln P^B_L.
 
-8.8 Connectivity (Undirected)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Connectivity (Undirected)
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Let :math:`S_{ij}(f)` be the cross-spectrum and :math:`S_{ii}(f)`, :math:`S_{jj}(f)` auto-spectra.
 
-**Weighted PLI (wPLI):**
+Weighted PLI (wPLI)
+^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
@@ -348,18 +410,25 @@ Let :math:`S_{ij}(f)` be the cross-spectrum and :math:`S_{ii}(f)`, :math:`S_{jj}
    \frac{\bigl|\mathbb{E}[\mathrm{Im}(X_i X_j^*)]\bigr|}
         {\mathbb{E}[|\mathrm{Im}(X_i X_j^*)|]}.
 
-**Imaginary Coherence:**
+Imaginary Coherence
+^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    \text{imCoh}_{ij} =
    \mathrm{Im}\!\left(\frac{S_{ij}}{\sqrt{S_{ii}\, S_{jj}}}\right).
 
-**PLV:** :math:`\text{PLV}_{ij} = \bigl|\mathbb{E}[e^{i\Delta\varphi_{ij}}]\bigr|`.
+PLV
+^^^
 
-**AEC:** :math:`z_{ij} = \mathrm{atanh}\!\bigl(\mathrm{clip}(\mathrm{corr}(A_i, A_j), -0.9999, 0.9999)\bigr)`.
+:math:`\text{PLV}_{ij} = \bigl|\mathbb{E}[e^{i\Delta\varphi_{ij}}]\bigr|`.
 
-**Dynamic connectivity:** sliding-window wPLI/AEC with optional K-means state clustering.
+AEC
+^^^
+
+:math:`z_{ij} = \mathrm{atanh}\!\bigl(\mathrm{clip}(\mathrm{corr}(A_i, A_j), -0.9999, 0.9999)\bigr)`.
+
+Dynamic connectivity: sliding-window wPLI/AEC with optional K-means state clustering.
 In ``trial_ml_safe`` mode, clustering is restricted to training-fold windows.
 
 **Connectivity granularity:**
@@ -381,24 +450,26 @@ In ``trial_ml_safe`` mode, clustering is restricted to training-fold windows.
      - Pool all epochs
      - Cross-trial
 
-8.9 Directed Connectivity
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Directed Connectivity
+~~~~~~~~~~~~~~~~~~~~~
 
-**Phase Slope Index (PSI):**
+Phase Slope Index (PSI)
+^^^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    \text{PSI}_{ij} =
    \mathrm{Im}\!\left(\sum_f C_{ij}^*(f)\, C_{ij}(f + \Delta f)\right).
 
-**DTF** and **PDC** from MVAR transfer and coefficient matrices.
+DTF and PDC are computed from MVAR transfer and coefficient matrices.
 
-8.10 ITPC and Phase Metrics
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ITPC and Phase Metrics
+~~~~~~~~~~~~~~~~~~~~~~
 
 Unit phasor: :math:`u_e(f,t) = Z_e(f,t) / (|Z_e(f,t)| + \varepsilon)`.
 
-**ITPC:**
+ITPC
+^^^^
 
 .. math::
 
@@ -407,40 +478,44 @@ Unit phasor: :math:`u_e(f,t) = Z_e(f,t) / (|Z_e(f,t)| + \varepsilon)`.
 
 Averaging modes: ``global``, ``fold_global`` (default; CV-safe), ``loo``, ``condition``.
 
-8.11 PAC (Phase–Amplitude Coupling)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+PAC (Phase–Amplitude Coupling)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Mean vector length (MVL):**
+Mean Vector Length (MVL)
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    \text{MVL} = \frac{\left|\sum_t A(t)\,u(t)\right|}{\sum_t A(t)}.
 
-**Surrogate-based z-score** from trial-shuffled and/or circularly time-shifted surrogates.
+Surrogate-based z-score from trial-shuffled and/or circularly time-shifted surrogates.
 Harmonic overlap guards reject invalid band combinations.
 
-8.12 Source Localization
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Source Localization
+~~~~~~~~~~~~~~~~~~~
 
-**LCMV Beamformer:**
+LCMV Beamformer
+^^^^^^^^^^^^^^^
 
 .. math::
 
    w_v = \bigl(C + \text{reg}\cdot\mathrm{tr}(C)\,I\bigr)^{-1} l_v \bigl(l_v^\top \bigl(C + \text{reg}\cdot\mathrm{tr}(C)\,I\bigr)^{-1} l_v\bigr)^{-1}.
 
-**eLORETA:**
+eLORETA
+^^^^^^^
 
 .. math::
 
    \lambda^2 = \frac{1}{\mathrm{SNR}^2}, \qquad \hat{J}(t) = (A^\top A + \lambda^2 R)^{-1} A^\top x(t).
 
-**fMRI constraint system:** when enabled, source space is restricted to suprathreshold
+fMRI constraint system: when enabled, source space is restricted to suprathreshold
 fMRI activation voxels. Voxels are thresholded (z-score or FDR), clustered
 (minimum ``cluster_min_voxels`` = 50 voxels by default; override with
 ``cluster_min_volume_mm3`` for a volume-based threshold), and mapped to
 ``aparc+aseg`` labels for cross-subject harmonization.
 
-**Output spaces:**
+Output Spaces
+^^^^^^^^^^^^^
 
 .. list-table::
    :header-rows: 1
@@ -459,48 +534,52 @@ fMRI activation voxels. Voxels are thresholded (z-score or FDR), clustered
      - both
      - Emit cluster and atlas families together (default)
 
-**Source condition contrasts:** difference of mean ROI band power between condition A and B.
+Source condition contrasts: difference of mean ROI band power between condition A and B.
 
 .. note::
 
    ``feature_engineering.sourcelocalization.fmri.time_windows`` is explicitly unsupported
    and will raise ``ValueError`` if set.
 
-8.13 Complexity
-~~~~~~~~~~~~~~~~
+Complexity
+~~~~~~~~~~
 
-**Lempel–Ziv Complexity (LZC):**
+Lempel-Ziv Complexity (LZC)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    \text{LZC} = \frac{c}{n / \log_2 n}, \quad n = \text{sequence length}.
 
-**Permutation Entropy (PE):**
+Permutation Entropy (PE)
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    \text{PE} = -\frac{\sum_\pi p(\pi)\log_2 p(\pi)}{\log_2(m!)}.
 
-**Sample Entropy (SampEn):**
+Sample Entropy (SampEn)
+^^^^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
    \text{SampEn}(m, r) = -\log\frac{A}{B}.
 
-**Multiscale Entropy (MSE):** coarse-grain by averaging non-overlapping blocks
+Multiscale Entropy (MSE): coarse-grain by averaging non-overlapping blocks
 of length :math:`s`, then compute SampEn at each scale :math:`s`.
 
-8.14 Bursts (Transient Oscillations)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Bursts (Transient Oscillations)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Threshold-based burst detection on band envelopes using percentile, z-score, or MAD
 thresholds estimated from baseline. Outputs per segment/band: burst count, rate, mean
 duration, mean amplitude, occupancy fraction.
 
-8.15 Microstates
-~~~~~~~~~~~~~~~~~
+Microstates
+~~~~~~~~~~~
 
-**Global Field Power:**
+Global Field Power
+^^^^^^^^^^^^^^^^^^
 
 .. math::
 
@@ -508,7 +587,9 @@ duration, mean amplitude, occupancy fraction.
    \sqrt{\frac{1}{N_\text{ch}} \sum_c \bigl(x_{e,c}(t) - \bar{x}_e(t)\bigr)^2}.
 
 Scalp maps at GFP peaks are normalized and clustered into :math:`K` microstate templates.
-**Per-state statistics:**
+
+Per-State Statistics
+^^^^^^^^^^^^^^^^^^^^
 
 .. math::
 
@@ -516,8 +597,8 @@ Scalp maps at GFP peaks are normalized and clustered into :math:`K` microstate t
 
 In ``trial_ml_safe`` mode, template clustering is restricted to training trials.
 
-8.16 Quality Metrics
-~~~~~~~~~~~~~~~~~~~~~
+Quality Metrics
+~~~~~~~~~~~~~~~
 
 Per segment and channel: variance, peak-to-peak, finite fraction, SNR (dB),
 muscle artifact index (high-frequency power fraction).
@@ -541,13 +622,15 @@ Normalization
 All schemes estimate parameters from a reference set that **must** be the training
 subset in cross-validation contexts.
 
-**Z-score:**
+Z-Score
+~~~~~~~
 
 .. math::
 
    z_i = \frac{x_i - \mu^\text{ref}}{\max(\sigma^\text{ref},\, \varepsilon)}.
 
-**Robust (median/MAD):**
+Robust Median/MAD
+~~~~~~~~~~~~~~~~~
 
 .. math::
 
@@ -555,8 +638,8 @@ subset in cross-validation contexts.
    \frac{x_i - m^\text{ref}}
         {\max\!\bigl(\mathrm{MAD}(x^\text{ref})_\text{normal},\, \varepsilon\bigr)}.
 
-**Min–max** to :math:`[a, b]`; **rank-based** (0–1 normalized ranks);
-**log** (:math:`\ln` or :math:`\log_{10}`).
+Min-max to :math:`[a, b]`; rank-based (0-1 normalized ranks);
+log (:math:`\ln` or :math:`\log_{10}`).
 
 Reference modes: ``all`` (default), ``condition``, ``run``.
 

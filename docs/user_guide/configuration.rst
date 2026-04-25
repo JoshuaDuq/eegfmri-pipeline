@@ -445,7 +445,7 @@ fMRI Preprocessing (fMRIPrep)
      - ``0``
      - CPU threads (0 = auto)
    * - ``fmri_preprocessing.fmriprep.extra_args``
-     - ``null``
+     - ``""``
      - Additional CLI arguments appended verbatim to fMRIPrep
 
 .. _configuration-first-level-glm:
@@ -539,7 +539,7 @@ Behavioral Statistics
    * - ``behavior_analysis.statistics.fdr_alpha``
      - FDR :math:`q`-value for multiple comparison correction (default ``0.05``)
    * - ``behavior_analysis.statistics.n_permutations``
-     - Permutation count for non-parametric tests (default ``1000``)
+     - Global/default permutation count (default ``1000``). Some stages use dedicated keys (for example ``behavior_analysis.regression.n_permutations`` and ``behavior_analysis.cluster.n_permutations``).
    * - ``behavior_analysis.predictor_residual.method``
      - Residualization method: ``"spline"``, ``"poly"``
 

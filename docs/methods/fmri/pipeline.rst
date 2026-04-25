@@ -38,6 +38,25 @@ fMRI Analysis Pipeline
       ``fmri_preprocessing`` · ``fmri_contrast`` ·
       ``fmri_group_level`` · ``fmri_resting_state``
 
+.. seealso::
+
+   :doc:`raw_to_bids`
+      BIDS input contract, events.tsv requirements, and DICOM conversion.
+
+   :doc:`../eeg/source_localization`
+      fMRI contrast maps from this pipeline constrain the EEG source prior.
+
+   :doc:`../../user_guide/configuration`
+      Full ``fmri_contrast``, ``fmri_group_level``, ``fmri_resting_state``,
+      and ``fmri_preprocessing`` key reference.
+
+   :doc:`../../user_guide/cli/fmri_analysis`
+      CLI flags for first-level, second-level, beta-series, and resting-state.
+
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 Notation
 --------
 
@@ -65,6 +84,39 @@ Notation
      - Framewise displacement (mm); threshold set by ``fmri_preprocessing.fmriprep.fd_spike_threshold``
    * - :term:`HRF`
      - Hemodynamic response function
+
+Method Map
+----------
+
+The fMRI page is organized by analysis product: first-level statistical maps,
+group-level inference, trial-wise betas, reports, resting-state connectivity,
+and multivariate signature readouts.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 36 40
+
+   * - Product
+     - Model or transform
+     - Primary output
+   * - First-level contrast
+     - Multi-run nilearn GLM with configured HRF, drift, and confounds
+     - Z, t, and effect-size maps with provenance sidecars
+   * - Second-level inference
+     - One-sample, two-sample, paired, or repeated-measures design matrix
+     - Group statistical maps and optional max-T permutation results
+   * - Trial-wise betas
+     - LSA or LSS trial models
+     - Per-trial beta maps, condition summaries, signature expression
+   * - Reporting and QC
+     - Thresholded statistical visualization and design diagnostics
+     - HTML report, cluster table, motion and design QC
+   * - Resting-state connectivity
+     - Atlas ROI time series with fMRIPrep confound regression
+     - Run-level and subject-level Fisher-z connectivity matrices
+   * - Signature readouts
+     - Dot product, cosine similarity, Pearson :math:`r`
+     - Per-trial or condition-level multivariate expression scores
 
 Pipeline Overview
 -----------------
@@ -545,18 +597,3 @@ Output Layout
        └── fmri/second_level/<task>/<contrast>/
            ├── group_<contrast>_z_score.nii.gz
            └── provenance.json
-
-.. seealso::
-
-   :doc:`raw_to_bids`
-      BIDS input contract, events.tsv requirements, and DICOM conversion.
-
-   :doc:`../../methods/eeg/source_localization`
-      fMRI contrast maps from this pipeline constrain the EEG source prior.
-
-   :doc:`../../user_guide/configuration`
-      Full ``fmri_contrast``, ``fmri_group_level``, ``fmri_resting_state``,
-      and ``fmri_preprocessing`` key reference.
-
-   :doc:`../../user_guide/cli/fmri_analysis`
-      CLI flags for first-level, second-level, beta-series, and resting-state.
