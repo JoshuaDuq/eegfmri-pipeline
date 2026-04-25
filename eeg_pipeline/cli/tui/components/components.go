@@ -209,8 +209,8 @@ func (s Spinner) Glyph() string {
 }
 
 // View renders the spinner glyph followed by the label, both at low weight.
-// Used by stand-alone loading screens (history, dashboard, globalsetup) where
-// the spinner is its own self-contained line.
+// Used by stand-alone loading screens where the spinner is its own
+// self-contained line.
 func (s Spinner) View() string {
 	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	if s.Label == "" {

@@ -5,11 +5,11 @@ import (
 	"time"
 
 	"github.com/eeg-pipeline/tui/messages"
+	"github.com/eeg-pipeline/tui/storage/history"
 	"github.com/eeg-pipeline/tui/types"
 	"github.com/eeg-pipeline/tui/views/dashboard"
 	"github.com/eeg-pipeline/tui/views/execution"
 	"github.com/eeg-pipeline/tui/views/globalsetup"
-	"github.com/eeg-pipeline/tui/views/history"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
 	"github.com/eeg-pipeline/tui/views/pipelinesmoke"
 	"github.com/eeg-pipeline/tui/views/quickactions"
