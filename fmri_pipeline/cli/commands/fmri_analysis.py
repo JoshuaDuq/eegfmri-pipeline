@@ -970,6 +970,7 @@ def run_fmri_analysis(args: argparse.Namespace, _subjects: List[str], config: An
                     "auto",
                 )
             ).strip(),
+            auto_compcor_n=int(_coalesce(_rest_cfg_value("auto_compcor_n"), 5)),
             high_pass_hz=_coalesce(args.high_pass_hz, _rest_cfg_value("high_pass_hz"), 0.008),
             low_pass_hz=low_pass_hz,
             smoothing_fwhm=args.smoothing_fwhm

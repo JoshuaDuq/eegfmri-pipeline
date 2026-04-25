@@ -346,11 +346,14 @@ def coerce_condition_value(value: Any, series: Any) -> Any:
 def select_confound_columns(
     confounds_df: pd.DataFrame,
     strategy: str,
+    *,
+    auto_compcor_n: int = 5,
 ) -> Optional[pd.DataFrame]:
     """Select and sanitize confound columns for nilearn GLM fitting."""
     cols = select_fmriprep_confounds_columns(
         list(confounds_df.columns),
         strategy=str(strategy or "auto"),
+        auto_compcor_n=int(auto_compcor_n),
     )
     if not cols:
         return None
@@ -382,6 +385,7 @@ def select_confounds(
     confounds_path: Optional[Path],
     strategy: str,
     *,
+    auto_compcor_n: int = 5,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[Optional[pd.DataFrame], List[str]]:
     """Read/select confounds from TSV path."""
@@ -389,7 +393,11 @@ def select_confounds(
         return None, []
 
     confounds_df = pd.read_csv(confounds_path, sep="\t")
-    selected = select_confound_columns(confounds_df, strategy)
+    selected = select_confound_columns(
+        confounds_df,
+        strategy,
+        auto_compcor_n=auto_compcor_n,
+    )
     if selected is None:
         return None, []
     return selected, list(selected.columns)

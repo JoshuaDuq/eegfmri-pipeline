@@ -77,6 +77,7 @@ class ContrastBuilderConfig:
     condition_scope_column: str = ""
     # Confounds / QC (optional)
     confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|auto
+    auto_compcor_n: int = 5
     write_design_matrix: bool = False
     smoothing_fwhm: Optional[float] = None
     # Optional: restrict which trial_type rows are passed to nilearn for GLM.
@@ -203,6 +204,7 @@ def _get_contrast_hash(contrast_cfg: ContrastBuilderConfig) -> str:
         str(contrast_cfg.drift_model or ""),
         str(contrast_cfg.hrf_model),
         str(getattr(contrast_cfg, "confounds_strategy", "auto")),
+        str(int(getattr(contrast_cfg, "auto_compcor_n", 5))),
         str(bool(getattr(contrast_cfg, "write_design_matrix", False))),
         str(getattr(contrast_cfg, "smoothing_fwhm", None) or ""),
         str(getattr(contrast_cfg, "condition_scope_trial_types", None) or ""),
@@ -287,6 +289,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
     confounds_strategy = str(contrast_cfg.get("confounds_strategy", "auto")).strip().lower()
     if confounds_strategy == "":
         confounds_strategy = "auto"
+    auto_compcor_n = int(contrast_cfg.get("auto_compcor_n", 5))
     write_design_matrix = bool(contrast_cfg.get("write_design_matrix", False))
     from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
 
@@ -347,6 +350,7 @@ def load_contrast_config(config: Any) -> ContrastBuilderConfig:
         output_type=_normalize_requested_output_type(contrast_cfg.get("output_type", "z-score")),
         resample_to_freesurfer=bool(contrast_cfg.get("resample_to_freesurfer", True)),
         confounds_strategy=confounds_strategy,
+        auto_compcor_n=auto_compcor_n,
         write_design_matrix=write_design_matrix,
         smoothing_fwhm=smoothing_fwhm,
         events_to_model=events_to_model,
@@ -1208,7 +1212,11 @@ def fit_first_level_glm(
                 f"Missing confounds for {bold_path.name}."
             )
         confounds_df = pd.read_csv(confounds_path, sep="\t")
-        confounds = _select_confound_columns(confounds_df, confounds_strategy)
+        confounds = _select_confound_columns(
+            confounds_df,
+            confounds_strategy,
+            auto_compcor_n=int(getattr(cfg, "auto_compcor_n", 5)),
+        )
         if confounds is None:
             raise ValueError(
                 "No confound regressors were selected for the single-run first-level GLM. "
@@ -1365,7 +1373,11 @@ def fit_first_level_glm_multi_run(
         confounds = None
         if confounds_path is not None and confounds_path.exists():
             confounds_df = pd.read_csv(confounds_path, sep="\t")
-            confounds = _select_confound_columns(confounds_df, getattr(cfg, "confounds_strategy", "auto"))
+            confounds = _select_confound_columns(
+                confounds_df,
+                getattr(cfg, "confounds_strategy", "auto"),
+                auto_compcor_n=int(getattr(cfg, "auto_compcor_n", 5)),
+            )
             if confounds is not None:
                 confound_columns.update(list(confounds.columns))
                 logger.info("Run %d: using %d confound regressors", run_idx, confounds.shape[1])

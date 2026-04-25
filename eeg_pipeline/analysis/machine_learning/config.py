@@ -94,6 +94,7 @@ def get_ml_config(config: Any = None) -> Dict[str, Any]:
         "cnn_weight_decay": float(cnn_config.get("weight_decay", 1e-3)),
         "cnn_val_fraction": float(cnn_config.get("val_fraction", 0.2)),
         "cnn_gradient_clip_norm": float(cnn_config.get("gradient_clip_norm", 1.0)),
+        "cnn_standardization_std_floor": float(cnn_config.get("standardization_std_floor", 1e-6)),
         "cnn_use_cuda": bool(cnn_config.get("use_cuda", False)),
     }
 

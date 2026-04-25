@@ -240,6 +240,31 @@ def test_select_confounds_returns_empty_when_input_missing(tmp_path: Path) -> No
     assert columns == []
 
 
+def test_select_confound_columns_uses_configured_compcor_count() -> None:
+    confounds = pd.DataFrame(
+        {
+            "trans_x": [0.0, 0.1],
+            "trans_y": [0.0, 0.1],
+            "trans_z": [0.0, 0.1],
+            "rot_x": [0.0, 0.1],
+            "rot_y": [0.0, 0.1],
+            "rot_z": [0.0, 0.1],
+            "a_comp_cor_00": [0.0, 0.1],
+            "a_comp_cor_01": [0.0, 0.1],
+        }
+    )
+
+    selected = select_confound_columns(
+        confounds,
+        strategy="auto",
+        auto_compcor_n=1,
+    )
+
+    assert selected is not None
+    assert "a_comp_cor_00" in selected.columns
+    assert "a_comp_cor_01" not in selected.columns
+
+
 def test_select_confound_columns_rejects_missing_values_in_selected_confounds() -> None:
     confounds = pd.DataFrame(
         {

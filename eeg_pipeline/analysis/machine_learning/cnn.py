@@ -72,10 +72,12 @@ def _split_train_val_indices(
 def _channelwise_standardize(
     X_train: np.ndarray,
     X_other: np.ndarray,
+    *,
+    std_floor: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
     mean = np.mean(X_train, axis=(0, 2), keepdims=True)
     std = np.std(X_train, axis=(0, 2), keepdims=True)
-    std = np.where(std < 1e-6, 1.0, std)
+    std = np.where(std < float(std_floor), 1.0, std)
     return (X_train - mean) / std, (X_other - mean) / std
 
 
@@ -122,8 +124,17 @@ def fit_predict_cnn_binary_classifier(
     y_val = y_train[val_idx]
     use_validation = len(val_idx) > 0
 
-    X_fit_n, X_val_n = _channelwise_standardize(X_fit, X_val)
-    _, X_test_n = _channelwise_standardize(X_fit, X_test)
+    std_floor = float(cfg.get("cnn_standardization_std_floor", 1e-6))
+    X_fit_n, X_val_n = _channelwise_standardize(
+        X_fit,
+        X_val,
+        std_floor=std_floor,
+    )
+    _, X_test_n = _channelwise_standardize(
+        X_fit,
+        X_test,
+        std_floor=std_floor,
+    )
 
     X_fit_t = torch.tensor(X_fit_n[:, None, :, :], dtype=torch.float32)
     y_fit_t = torch.tensor(y_fit, dtype=torch.float32)

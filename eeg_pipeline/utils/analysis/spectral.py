@@ -294,7 +294,8 @@ def _parse_psd_config(config: Any, n_times: int, sfreq: float) -> dict[str, Any]
     default_n_fft = min(n_times, int(DEFAULT_PSD_FFT_MULTIPLIER * sfreq))
     default_n_overlap = max(0, default_n_fft // 2)
     
-    n_fft = int(psd_cfg.get("n_fft", default_n_fft))
+    n_fft_raw = psd_cfg.get("n_fft", None)
+    n_fft = default_n_fft if n_fft_raw is None else int(n_fft_raw)
     n_fft = max(2, min(n_fft, n_times))
     
     n_overlap_raw = psd_cfg.get("n_overlap", None)

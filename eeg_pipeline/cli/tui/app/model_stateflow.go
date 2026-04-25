@@ -92,15 +92,22 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 		"paths",
 		"eeg",
 		"epochs",
+		"pyprep",
+		"ica",
 		"alignment",
 		"event_columns",
 		"preprocessing",
 		"behavior_analysis",
 		"feature_engineering",
 		"machine_learning",
+		"statistics",
 		"validation",
 		"io",
+		"plotting",
 		"fmri_preprocessing",
+		"fmri_resting_state",
+		"fmri_contrast",
+		"fmri_group_level",
 	}
 
 	cacheKey := fmt.Sprintf("%s|%s", m.task, m.selectedPipeline.GetDataSource())

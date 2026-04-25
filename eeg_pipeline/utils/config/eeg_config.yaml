@@ -18,10 +18,6 @@ paths:
   signature_dir: null  # Root directory for multivariate signature weight maps
   signature_maps: []  # List of {name, path} entries relative to signature_dir
 
-analysis:
-  strict_mode: true
-  min_subjects_for_group: 2
-
 ###################################################################
 # 1a. ENVIRONMENT
 ###################################################################
@@ -78,6 +74,7 @@ fmri_resting_state:
   require_fmriprep: true
   runs: null
   confounds_strategy: "auto"
+  auto_compcor_n: 5
   high_pass_hz: 0.008
   low_pass_hz: 0.1
   smoothing_fwhm: null
@@ -122,6 +119,7 @@ fmri_contrast:
   low_pass_hz: null
   smoothing_fwhm: null
   confounds_strategy: "auto"
+  auto_compcor_n: 5
   write_design_matrix: false
   output_type: "z-score"
   resample_to_freesurfer: true
@@ -432,8 +430,15 @@ feature_engineering:
     min_baseline_power: 1.0e-12      # Clamp baseline power to avoid division instability
     min_valid_band_fraction: 0.0     # 0 disables trial dropping based on valid-band coverage
 
-  # Optional PSD settings for shared PSD helpers. If empty, feature_engineering.spectral is used.
-  psd: {}
+  # Welch PSD settings for shared PSD helpers.
+  # null n_fft/n_overlap uses data-length-aware defaults.
+  psd:
+    fmin: 1.0
+    fmax: 80.0
+    n_fft: null
+    n_overlap: null
+    window: "hann"
+    n_jobs: 1
 
   spectral:
     ratio_pairs:
@@ -941,6 +946,7 @@ machine_learning:
       weight_decay: 0.001
       val_fraction: 0.2
       gradient_clip_norm: 1.0
+      standardization_std_floor: 1.0e-6
       use_cuda: false
 
 ###################################################################

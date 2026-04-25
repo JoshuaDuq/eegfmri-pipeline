@@ -67,6 +67,7 @@ KNOWN_CONFIG_ROOTS: Set[str] = {
     "fmri_contrast",
     "fmri_preprocessing",
     "fmri_group_level",
+    "fmri_resting_state",
     "frequency_bands",
     "ica",
     "icalabel",
@@ -175,10 +176,12 @@ class CoverageData:
     backend_runtime_key_count: int
     backend_union_key_count: int
     tui_hydration_key_count: int
+    tui_loaded_root_count: int
     set_support: SetSupportStatus
     backend_keys_covered_directly: List[str]
     backend_keys_covered_via_set: List[str]
     backend_keys_missing_in_tui: List[str]
+    direct_hydration_roots_not_loaded: List[str]
 
     def as_dict(self) -> Dict[str, object]:
         return {
@@ -188,9 +191,11 @@ class CoverageData:
                 "backend_runtime_key_count": self.backend_runtime_key_count,
                 "backend_union_key_count": self.backend_union_key_count,
                 "tui_hydration_key_count": self.tui_hydration_key_count,
+                "tui_loaded_root_count": self.tui_loaded_root_count,
                 "backend_keys_covered_directly": len(self.backend_keys_covered_directly),
                 "backend_keys_covered_via_set": len(self.backend_keys_covered_via_set),
                 "backend_keys_missing_in_tui": len(self.backend_keys_missing_in_tui),
+                "direct_hydration_roots_not_loaded": len(self.direct_hydration_roots_not_loaded),
             },
             "set_support": {
                 "enabled": self.set_support.enabled,
@@ -203,6 +208,7 @@ class CoverageData:
                 "backend_keys_covered_directly": self.backend_keys_covered_directly,
                 "backend_keys_covered_via_set": self.backend_keys_covered_via_set,
                 "backend_keys_missing_in_tui": self.backend_keys_missing_in_tui,
+                "direct_hydration_roots_not_loaded": self.direct_hydration_roots_not_loaded,
             },
             "sources": {
                 "backend_override_sources": list(BACKEND_OVERRIDE_SOURCES),
@@ -339,6 +345,18 @@ def _extract_tui_hydration_keys(path: Path) -> Set[str]:
     return {_canonical_key(key) for key in KEY_RE_TUI_HYDRATION.findall(text)}
 
 
+def _extract_tui_loaded_roots(path: Path) -> Set[str]:
+    text = _read_text(path)
+    match = re.search(r"configKeys\s*:=\s*\[\]string\s*\{(?P<body>.*?)\}", text, re.DOTALL)
+    if not match:
+        return set()
+    return {
+        _canonical_key(value.split(".", 1)[0])
+        for value in re.findall(r'"([A-Za-z_][A-Za-z0-9_\.]*)"', match.group("body"))
+        if _looks_like_config_key(_canonical_key(value))
+    }
+
+
 def _check_cli_set_parser_support(repo_root: Path) -> Tuple[bool, List[str]]:
     failures: List[str] = []
     for rel in CLI_SET_PARSER_SOURCES:
@@ -421,9 +439,14 @@ def compute_coverage(repo_root: Path) -> CoverageData:
     backend_keys = backend_override_keys | backend_runtime_keys
 
     tui_hydration_keys = _extract_tui_hydration_keys(repo_root / TUI_HYDRATION_SOURCE)
+    tui_loaded_roots = _extract_tui_loaded_roots(
+        repo_root / "eeg_pipeline/cli/tui/app/model_stateflow.go"
+    )
     set_support = _detect_set_support(repo_root)
 
     covered_directly = sorted(backend_keys & tui_hydration_keys)
+    direct_hydration_roots = {key.split(".", 1)[0] for key in tui_hydration_keys}
+    unloaded_direct_roots = sorted(direct_hydration_roots - tui_loaded_roots)
     if set_support.enabled:
         covered_via_set = sorted(backend_keys - tui_hydration_keys)
         missing = []
@@ -436,10 +459,12 @@ def compute_coverage(repo_root: Path) -> CoverageData:
         backend_runtime_key_count=len(backend_runtime_keys),
         backend_union_key_count=len(backend_keys),
         tui_hydration_key_count=len(tui_hydration_keys),
+        tui_loaded_root_count=len(tui_loaded_roots),
         set_support=set_support,
         backend_keys_covered_directly=covered_directly,
         backend_keys_covered_via_set=covered_via_set,
         backend_keys_missing_in_tui=missing,
+        direct_hydration_roots_not_loaded=unloaded_direct_roots,
     )
 
 
@@ -462,6 +487,7 @@ def render_markdown(data: CoverageData) -> str:
         f"- Directly hydrated in TUI: `{counts['backend_keys_covered_directly']}`",
         f"- Covered via `--set` fallback: `{counts['backend_keys_covered_via_set']}`",
         f"- Missing from TUI coverage: `{counts['backend_keys_missing_in_tui']}`",
+        f"- Direct hydration roots not loaded by wizard: `{counts['direct_hydration_roots_not_loaded']}`",
         "",
     ]
 
@@ -479,6 +505,10 @@ def render_markdown(data: CoverageData) -> str:
     _render_list_section(
         "Backend Keys Missing In TUI Coverage",
         data.backend_keys_missing_in_tui,
+    )
+    _render_list_section(
+        "Direct Hydration Roots Not Loaded By Wizard",
+        data.direct_hydration_roots_not_loaded,
     )
     _render_list_section(
         "Backend Keys Covered Via Generic --set",
@@ -535,6 +565,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.strict and (
         coverage.backend_keys_missing_in_tui
+        or coverage.direct_hydration_roots_not_loaded
         or not coverage.set_support.enabled
     ):
         return 1

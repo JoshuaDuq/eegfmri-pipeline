@@ -39,6 +39,7 @@ class RestingStateAnalysisConfig:
     require_fmriprep: bool = True
     runs: Optional[list[int]] = None
     confounds_strategy: str = "auto"
+    auto_compcor_n: int = 5
     high_pass_hz: Optional[float] = 0.008
     low_pass_hz: Optional[float] = 0.1
     smoothing_fwhm: Optional[float] = None
@@ -91,6 +92,7 @@ class RestingStateAnalysisConfig:
             require_fmriprep=bool(self.require_fmriprep),
             runs=runs,
             confounds_strategy=confounds_strategy,
+            auto_compcor_n=max(0, int(self.auto_compcor_n)),
             high_pass_hz=high_pass_hz,
             low_pass_hz=low_pass_hz,
             smoothing_fwhm=normalize_smoothing_fwhm(self.smoothing_fwhm),
@@ -285,6 +287,7 @@ def run_resting_state_analysis_for_subject(
             runless="_run-" not in bold_path.name,
             input_source=normalized_cfg.input_source,
             strategy=normalized_cfg.confounds_strategy,
+            auto_compcor_n=normalized_cfg.auto_compcor_n,
         )
         repetition_time = get_tr_from_bold(bold_path)
         brain_mask_path = _require_rest_brain_mask_path(bold_path)
@@ -581,6 +584,7 @@ def _load_rest_confounds(
     run_num: int,
     input_source: str,
     strategy: str,
+    auto_compcor_n: int,
     runless: bool = False,
 ) -> tuple[Optional[pd.DataFrame], list[str]]:
     if strategy == "none":
@@ -610,7 +614,11 @@ def _load_rest_confounds(
         raise ValueError(
             "Resting-state confound regression requires fMRIPrep confounds. Use confounds_strategy='none' when working from raw BIDS inputs."
         )
-    confounds_df, columns = select_confounds(confounds_path, strategy)
+    confounds_df, columns = select_confounds(
+        confounds_path,
+        strategy,
+        auto_compcor_n=auto_compcor_n,
+    )
     return confounds_df, columns
 
 
