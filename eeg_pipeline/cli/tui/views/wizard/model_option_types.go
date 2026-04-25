@@ -521,6 +521,7 @@ const (
 	optPrepRepeats
 	optPrepAverageReref
 	optPrepFileExtension
+	optPrepBadChannelSyncPolicy
 	optPrepConsiderPreviousBads
 	optPrepOverwriteChansTsv
 	optPrepDeleteBreaks

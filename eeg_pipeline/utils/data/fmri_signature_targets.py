@@ -111,6 +111,36 @@ def _first_finite_numeric(
     return None
 
 
+def _raise_on_conflicting_duplicate_keys(
+    frame: pd.DataFrame,
+    key_col: str,
+    metric: str,
+    label: str,
+) -> None:
+    keyed = frame.loc[frame[key_col].notna(), [key_col, metric]]
+    if keyed.empty:
+        return
+    value_counts = keyed.groupby(key_col, dropna=True)[metric].nunique(dropna=False)
+    conflicting = value_counts[value_counts > 1]
+    if not conflicting.empty:
+        examples = ", ".join(str(key) for key in conflicting.index[:5])
+        raise ValueError(
+            f"ambiguous fMRI signature alignment: duplicate {label} keys "
+            f"map to different {metric} values ({examples})."
+        )
+
+
+def _values_for_keys(keys: List[Optional[str]], values: pd.Series) -> pd.Series:
+    return pd.Series(
+        [
+            float(values.get(key))
+            if key is not None and key in values.index
+            else np.nan
+            for key in keys
+        ]
+    )
+
+
 def load_fmri_signature_target_for_subject(
     *,
     subject_raw: str,
@@ -301,6 +331,9 @@ def load_fmri_signature_target_for_subject(
             )
         ]
 
+    _raise_on_conflicting_duplicate_keys(sig_df, "__key__", metric, "(run,onset,duration)")
+    _raise_on_conflicting_duplicate_keys(sig_df, "__trial_key__", metric, "(run,trial)")
+
     agg_onset = sig_df.loc[sig_df["__key__"].notna()].groupby("__key__", dropna=True)[metric].mean()
     agg_trial = sig_df.loc[sig_df["__trial_key__"].notna()].groupby("__trial_key__", dropna=True)[metric].mean()
     onset_matches = sum(1 for key in eeg_keys if key is not None and key in agg_onset.index)
@@ -311,18 +344,32 @@ def load_fmri_signature_target_for_subject(
             "or (run,trial_number/trial_index)."
         )
 
+    onset_y = _values_for_keys(eeg_keys, agg_onset)
+    trial_y = _values_for_keys(eeg_trial_keys, agg_trial)
+    if onset_matches > 0 and trial_matches > 0:
+        onset_matched = np.isfinite(onset_y.to_numpy(dtype=float))
+        trial_matched = np.isfinite(trial_y.to_numpy(dtype=float))
+        if not np.array_equal(onset_matched, trial_matched):
+            raise ValueError(
+                "ambiguous fMRI signature alignment: trial-number and "
+                "onset/duration keys match different event rows."
+            )
+        both_matched = onset_matched & trial_matched
+        if np.any(both_matched) and not np.allclose(
+            onset_y.to_numpy(dtype=float)[both_matched],
+            trial_y.to_numpy(dtype=float)[both_matched],
+            equal_nan=True,
+        ):
+            raise ValueError(
+                "ambiguous fMRI signature alignment: trial-number and "
+                "onset/duration keys match different target values."
+            )
+
     use_trial_keys = trial_matches >= onset_matches and trial_matches > 0
     active_keys = eeg_trial_keys if use_trial_keys else eeg_keys
     active_agg = agg_trial if use_trial_keys else agg_onset
     active_sig_key_col = "__trial_key__" if use_trial_keys else "__key__"
-    y = pd.Series(
-        [
-            float(active_agg.get(key))
-            if key is not None and key in active_agg.index
-            else np.nan
-            for key in active_keys
-        ]
-    )
+    y = _values_for_keys(active_keys, active_agg)
 
     norm = str(cfg["normalization"]).strip().lower()
     if norm != "none":

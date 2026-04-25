@@ -60,6 +60,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepRepeats,
 				optPrepAverageReref,
 				optPrepFileExtension,
+				optPrepBadChannelSyncPolicy,
 				optPrepConsiderPreviousBads,
 				optPrepOverwriteChansTsv,
 				optPrepDeleteBreaks,

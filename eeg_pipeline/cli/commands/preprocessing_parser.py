@@ -129,6 +129,12 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="Disable RANSAC for bad channel detection",
     )
     prep_group.add_argument("--repeats", type=int, default=3, help="Number of bad channel detection iterations")
+    prep_group.add_argument(
+        "--bad-channel-sync-policy",
+        choices=["per_run", "subject_union"],
+        default=None,
+        help="Bad-channel policy across runs: per_run keeps run-specific bads; subject_union applies the subject-level union",
+    )
     prep_group.add_argument("--average-reref", action="store_true", default=False, help="Average re-reference before bad channel detection")
     prep_group.add_argument("--file-extension", type=str, default=".vhdr", help="File extension for EEG data")
     prep_group.add_argument("--rename-anot-dict", type=str, default=None, help="JSON dict for annotation renaming, e.g. '{\"BAD boundary\":\"BAD_boundary\"}'")
@@ -147,7 +153,12 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="Ignore/clear previously marked bad channels",
     )
     prep_group.add_argument("--no-overwrite-channels-tsv", dest="overwrite_channels_tsv", action="store_false", help="Do not overwrite channels.tsv file")
-    prep_group.add_argument("--delete-breaks", action="store_true", default=False, help="Delete breaks in data during bad channel detection")
+    prep_group.add_argument(
+        "--delete-breaks",
+        action="store_true",
+        default=False,
+        help="Mark detected breaks as BAD_break annotations during bad channel detection",
+    )
     prep_group.add_argument("--breaks-min-length", type=int, default=20, help="Minimum break duration in seconds")
 
     # Event timing

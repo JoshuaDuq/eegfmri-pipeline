@@ -4,6 +4,8 @@ import argparse
 import sys
 import types
 
+import pytest
+
 from eeg_pipeline.utils.config.loader import ConfigDict
 from fmri_pipeline.cli.commands.fmri import run_fmri, setup_fmri
 from fmri_pipeline.cli.commands.fmri_analysis import run_fmri_analysis, setup_fmri_analysis
@@ -111,6 +113,41 @@ def _build_args_for_fmri_analysis(argv: list[str]) -> argparse.Namespace:
 
 def _yaml_path(path) -> str:
     return path.as_posix()
+
+
+def test_load_fmri_config_raises_for_missing_env_path(tmp_path, monkeypatch) -> None:
+    from eeg_pipeline.utils.config.loader import ConfigError
+    from fmri_pipeline.utils.config.loader import load_fmri_config
+
+    missing = tmp_path / "missing_fmri_config.yaml"
+    monkeypatch.setenv("EEG_PIPELINE_FMRI_CONFIG", str(missing))
+
+    with pytest.raises(ConfigError, match="fMRI config file not found"):
+        load_fmri_config()
+
+
+def test_load_fmri_config_raises_for_non_mapping_yaml(tmp_path, monkeypatch) -> None:
+    from eeg_pipeline.utils.config.loader import ConfigError
+    from fmri_pipeline.utils.config.loader import load_fmri_config
+
+    config_path = tmp_path / "fmri_config.yaml"
+    config_path.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+    monkeypatch.setenv("EEG_PIPELINE_FMRI_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
+        load_fmri_config()
+
+
+def test_load_fmri_config_raises_for_empty_yaml(tmp_path, monkeypatch) -> None:
+    from eeg_pipeline.utils.config.loader import ConfigError
+    from fmri_pipeline.utils.config.loader import load_fmri_config
+
+    config_path = tmp_path / "fmri_config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("EEG_PIPELINE_FMRI_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
+        load_fmri_config()
 
 
 def test_run_fmri_uses_fmri_yaml_as_runtime_source(tmp_path, monkeypatch) -> None:

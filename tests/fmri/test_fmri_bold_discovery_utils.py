@@ -64,15 +64,58 @@ def test_get_tr_from_bold_prefers_sidecar_repetition_time(tmp_path: Path) -> Non
     sidecar = bold_path.with_suffix("").with_suffix(".json")
     sidecar.write_text(json.dumps({"RepetitionTime": "1.75"}), encoding="utf-8")
 
-    tr = get_tr_from_bold(bold_path)
+    class FakeHeader:
+        @staticmethod
+        def get_zooms() -> tuple[float, float, float, float]:
+            return (2.0, 2.0, 2.0, 1.75)
+
+    class FakeImage:
+        header = FakeHeader()
+
+    fake_nib = types.ModuleType("nibabel")
+    fake_nib.load = lambda *_args, **_kwargs: FakeImage()
+
+    with patch.dict(sys.modules, {"nibabel": fake_nib}):
+        tr = get_tr_from_bold(bold_path)
+
     assert tr == 1.75
 
 
-def test_get_tr_from_bold_falls_back_to_nifti_when_sidecar_is_invalid(tmp_path: Path) -> None:
+def test_get_tr_from_bold_raises_when_sidecar_is_not_mapping(tmp_path: Path) -> None:
+    bold_path = tmp_path / "sub-0001_task-task_run-01_desc-preproc_bold.nii.gz"
+    bold_path.write_bytes(b"")
+    sidecar = bold_path.with_suffix("").with_suffix(".json")
+    sidecar.write_text("[1.75]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must contain a JSON object"):
+        get_tr_from_bold(bold_path)
+
+
+def test_get_tr_from_bold_raises_when_sidecar_json_is_invalid(tmp_path: Path) -> None:
     bold_path = tmp_path / "sub-0001_task-task_run-01_desc-preproc_bold.nii.gz"
     bold_path.write_bytes(b"")
     sidecar = bold_path.with_suffix("").with_suffix(".json")
     sidecar.write_text("{", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid BOLD sidecar JSON"):
+        get_tr_from_bold(bold_path)
+
+
+def test_get_tr_from_bold_raises_when_header_cannot_be_validated(tmp_path: Path) -> None:
+    bold_path = tmp_path / "sub-0001_task-task_run-01_desc-preproc_bold.nii.gz"
+    bold_path.write_bytes(b"")
+    sidecar = bold_path.with_suffix("").with_suffix(".json")
+    sidecar.write_text(json.dumps({"RepetitionTime": 1.75}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Could not validate TR"):
+        get_tr_from_bold(bold_path)
+
+
+def test_get_tr_from_bold_raises_when_sidecar_and_header_disagree(tmp_path: Path) -> None:
+    bold_path = tmp_path / "sub-0001_task-task_run-01_desc-preproc_bold.nii.gz"
+    bold_path.write_bytes(b"")
+    sidecar = bold_path.with_suffix("").with_suffix(".json")
+    sidecar.write_text(json.dumps({"RepetitionTime": 1.75}), encoding="utf-8")
 
     class FakeHeader:
         @staticmethod
@@ -86,9 +129,8 @@ def test_get_tr_from_bold_falls_back_to_nifti_when_sidecar_is_invalid(tmp_path: 
     fake_nib.load = lambda *_args, **_kwargs: FakeImage()
 
     with patch.dict(sys.modules, {"nibabel": fake_nib}):
-        tr = get_tr_from_bold(bold_path)
-
-    assert tr == 2.5
+        with pytest.raises(ValueError, match="TR mismatch"):
+            get_tr_from_bold(bold_path)
 
 
 def test_build_first_level_model_coerces_and_filters_optional_float_settings() -> None:

@@ -401,6 +401,10 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			label = "File Ext"
 			value = fileExtVal
 			hint = "Raw data file extension (e.g., .vhdr)"
+		case optPrepBadChannelSyncPolicy:
+			label = "Bad Sync"
+			value = m.prepBadChannelSyncPolicy
+			hint = "Bad-channel policy across runs"
 		case optPrepConsiderPreviousBads:
 			label = "Keep Bads"
 			value = m.boolToOnOff(m.prepConsiderPreviousBads)
@@ -410,9 +414,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			value = m.boolToOnOff(m.prepOverwriteChansTsv)
 			hint = "Update channels.tsv with detected bads"
 		case optPrepDeleteBreaks:
-			label = "Del Breaks"
+			label = "Mark Breaks"
 			value = m.boolToOnOff(m.prepDeleteBreaks)
-			hint = "Remove break periods from data"
+			hint = "Mark detected breaks as BAD_break annotations"
 		case optPrepBreaksMinLength:
 			label = "Break Len"
 			value = breaksMinLenVal

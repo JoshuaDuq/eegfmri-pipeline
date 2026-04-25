@@ -108,6 +108,14 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 				}
 			}
 		}},
+		{key: "pyprep.bad_channel_sync_policy", apply: func(v interface{}) {
+			if s, ok := asString(v); ok {
+				switch strings.ToLower(strings.TrimSpace(s)) {
+				case "per_run", "subject_union":
+					m.prepBadChannelSyncPolicy = strings.ToLower(strings.TrimSpace(s))
+				}
+			}
+		}},
 		{key: "fmri_preprocessing.fmriprep.fs_subjects_dir", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
 				m.fmriFreesurferSubjectsDir = s

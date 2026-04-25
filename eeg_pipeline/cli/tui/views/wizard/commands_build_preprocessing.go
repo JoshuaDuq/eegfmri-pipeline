@@ -104,6 +104,9 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if strings.TrimSpace(m.prepFileExtension) != "" && m.prepFileExtension != ".vhdr" {
 		args = append(args, "--file-extension", m.prepFileExtension)
 	}
+	if m.prepBadChannelSyncPolicy != "" && m.prepBadChannelSyncPolicy != "per_run" {
+		appendSetOverride("pyprep.bad_channel_sync_policy", m.prepBadChannelSyncPolicy)
+	}
 	if m.prepConsiderPreviousBads {
 		args = append(args, "--consider-previous-bads")
 	} else {

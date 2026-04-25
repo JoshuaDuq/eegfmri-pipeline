@@ -134,6 +134,106 @@ class _TrackingProgress:
 
 
 class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
+    def _make_bad_channel_pipeline(self, pyprep_config):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.bids_root = Path("/tmp/bids")
+        p.deriv_root = Path("/tmp/deriv")
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "project": {"random_state": 42},
+                "eeg": {"montage": "easycap-M1"},
+                "preprocessing": {"h_freq": 100, "notch_freq": None},
+                "pyprep": pyprep_config,
+            }
+        )
+        return p
+
+    def test_bad_channel_policy_per_run_skips_subject_union_sync(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        calls = {"detect": 0, "sync": 0}
+
+        def fake_run_bads_detection(**_kwargs):
+            calls["detect"] += 1
+
+        def fake_sync(**_kwargs):
+            calls["sync"] += 1
+
+        preprocess_module = _make_module(
+            "eeg_pipeline.preprocessing.pipeline.preprocess",
+            run_bads_detection=fake_run_bads_detection,
+            synchronize_bad_channels_across_runs=fake_sync,
+        )
+
+        with patch.dict(
+            sys.modules,
+            {"eeg_pipeline.preprocessing.pipeline.preprocess": preprocess_module},
+        ):
+            pipeline = self._make_bad_channel_pipeline(
+                {"bad_channel_sync_policy": "per_run"}
+            )
+            pipeline._run_bad_channel_detection(
+                subjects=["0001"],
+                task="task",
+                n_jobs=1,
+            )
+
+        self.assertEqual(calls["detect"], 1)
+        self.assertEqual(calls["sync"], 0)
+
+    def test_bad_channel_policy_subject_union_runs_sync(self):
+        calls = {"detect": 0, "sync": 0}
+
+        def fake_run_bads_detection(**_kwargs):
+            calls["detect"] += 1
+
+        def fake_sync(**_kwargs):
+            calls["sync"] += 1
+
+        preprocess_module = _make_module(
+            "eeg_pipeline.preprocessing.pipeline.preprocess",
+            run_bads_detection=fake_run_bads_detection,
+            synchronize_bad_channels_across_runs=fake_sync,
+        )
+
+        with patch.dict(
+            sys.modules,
+            {"eeg_pipeline.preprocessing.pipeline.preprocess": preprocess_module},
+        ):
+            pipeline = self._make_bad_channel_pipeline(
+                {"bad_channel_sync_policy": "subject_union"}
+            )
+            pipeline._run_bad_channel_detection(
+                subjects=["0001"],
+                task="task",
+                n_jobs=1,
+            )
+
+        self.assertEqual(calls["detect"], 1)
+        self.assertEqual(calls["sync"], 1)
+
+    def test_bad_channel_policy_missing_fails_fast(self):
+        preprocess_module = _make_module(
+            "eeg_pipeline.preprocessing.pipeline.preprocess",
+            run_bads_detection=lambda **_kwargs: None,
+            synchronize_bad_channels_across_runs=lambda **_kwargs: None,
+        )
+
+        with patch.dict(
+            sys.modules,
+            {"eeg_pipeline.preprocessing.pipeline.preprocess": preprocess_module},
+        ):
+            pipeline = self._make_bad_channel_pipeline({})
+            with self.assertRaisesRegex(ValueError, "bad_channel_sync_policy"):
+                pipeline._run_bad_channel_detection(
+                    subjects=["0001"],
+                    task="task",
+                    n_jobs=1,
+                )
+
     def test_preprocessing_helper_defaults_and_validation_edges(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -485,7 +585,13 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         p.bids_root = tmp / "bids"
         p.deriv_root = tmp / "deriv"
         p.logger = Mock()
-        p.config = DotConfig({"pyprep": {}, "icalabel": {}, "eeg": {"montage": "easycap-M1"}})
+        p.config = DotConfig(
+            {
+                "pyprep": {"bad_channel_sync_policy": "per_run"},
+                "icalabel": {},
+                "eeg": {"montage": "easycap-M1"},
+            }
+        )
 
         mock_preproc = types.SimpleNamespace(
             run_bads_detection=Mock(),
@@ -815,7 +921,10 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         p.config = DotConfig(
             {
                 "project": {"random_state": 42},
-                "pyprep": {"random_state": 0},
+                "pyprep": {
+                    "bad_channel_sync_policy": "per_run",
+                    "random_state": 0,
+                },
             }
         )
         p.bids_root = Path(tempfile.mkdtemp())

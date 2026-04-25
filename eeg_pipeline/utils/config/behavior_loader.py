@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from eeg_pipeline.utils.config.loader import ConfigDict, resolve_config_paths
+from eeg_pipeline.utils.config.loader import ConfigDict, ConfigError, resolve_config_paths
 
 BEHAVIOR_CONFIG_ENV_VAR = "EEG_PIPELINE_BEHAVIOR_CONFIG"
 
@@ -33,13 +33,25 @@ def load_behavior_config(
     """Load the behavior YAML config as a resolved dictionary."""
     resolved_path = _resolve_behavior_config_path(config_path)
     if not resolved_path.exists():
-        return {}
+        raise ConfigError(f"Behavior config file not found: {resolved_path}")
 
-    with open(resolved_path, "r", encoding="utf-8") as handle:
-        parsed = yaml.safe_load(handle) or {}
+    try:
+        with open(resolved_path, "r", encoding="utf-8") as handle:
+            parsed = yaml.safe_load(handle)
+    except yaml.YAMLError as exc:
+        raise ConfigError(
+            f"Failed to parse behavior config at {resolved_path}: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise ConfigError(
+            f"Failed to load behavior config at {resolved_path}: {exc}"
+        ) from exc
 
     if not isinstance(parsed, dict):
-        return {}
+        raise ConfigError(
+            f"Behavior config file {resolved_path} must contain a YAML mapping, "
+            f"got {type(parsed).__name__}."
+        )
 
     return resolve_config_paths(parsed, resolved_path)
 

@@ -237,6 +237,33 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     param_grid={"regressor__alpha": [0.1, 1.0]},
                 )
 
+    def test_decode_binary_outcome_requires_groups_for_numeric_cv(self):
+        from eeg_pipeline.analysis.machine_learning import classification as clf
+
+        X = np.array(
+            [
+                [0.0, 1.0],
+                [0.1, 1.1],
+                [0.2, 1.2],
+                [0.3, 1.3],
+                [0.4, 1.4],
+                [0.5, 1.5],
+            ],
+            dtype=float,
+        )
+        y = np.array([0, 1, 0, 1, 0, 1], dtype=int)
+
+        with self.assertRaisesRegex(ValueError, "groups.*required"):
+            clf.decode_binary_outcome(
+                X=X,
+                y=y,
+                cv=3,
+                groups=None,
+                model="lr",
+                seed=42,
+                config=DotConfig({}),
+            )
+
     def test_decode_binary_outcome_uses_stratified_group_kfold_for_grouped_numeric_cv(self):
         from eeg_pipeline.analysis.machine_learning import classification as clf
 

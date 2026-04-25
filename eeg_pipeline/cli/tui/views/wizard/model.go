@@ -211,7 +211,7 @@ type PreprocessingAdvancedOptions struct {
 	AverageReref         *bool // average re-reference before detection
 	ConsiderPreviousBads *bool // keep previously marked bad channels
 	OverwriteChannelsTSV *bool // overwrite channels.tsv file
-	DeleteBreaks         *bool // delete breaks in data
+	DeleteBreaks         *bool // mark breaks as bad spans
 	BreaksMinLength      *int  // minimum break duration (s)
 	TStartAfterPrevious  *int  // time after previous event (s)
 	TStopBeforeNext      *int  // time before next event (s)
@@ -2390,9 +2390,10 @@ type Model struct {
 	prepRepeats              int    // Number of detection iterations
 	prepAverageReref         bool   // Average re-reference before detection
 	prepFileExtension        string // File extension (e.g., .vhdr)
+	prepBadChannelSyncPolicy string // per_run or subject_union
 	prepConsiderPreviousBads bool   // Keep previously marked bad channels
 	prepOverwriteChansTsv    bool   // Overwrite channels.tsv file
-	prepDeleteBreaks         bool   // Delete breaks in data
+	prepDeleteBreaks         bool   // Mark breaks as bad spans
 	prepBreaksMinLength      int    // Minimum break duration (seconds)
 	prepTStartAfterPrevious  int    // Time after previous event (seconds)
 	prepTStopBeforeNext      int    // Time before next event (seconds)
@@ -3214,6 +3215,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		prepRepeats:              3,
 		prepAverageReref:         false,
 		prepFileExtension:        ".vhdr",
+		prepBadChannelSyncPolicy: "per_run",
 		prepConsiderPreviousBads: true,
 		prepOverwriteChansTsv:    true,
 		prepDeleteBreaks:         false,

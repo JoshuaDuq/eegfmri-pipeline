@@ -524,6 +524,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["prepRepeats"] = m.prepRepeats
 	cfg["prepAverageReref"] = m.prepAverageReref
 	cfg["prepFileExtension"] = m.prepFileExtension
+	cfg["prepBadChannelSyncPolicy"] = m.prepBadChannelSyncPolicy
 	cfg["prepConsiderPreviousBads"] = m.prepConsiderPreviousBads
 	cfg["prepOverwriteChansTsv"] = m.prepOverwriteChansTsv
 	cfg["prepDeleteBreaks"] = m.prepDeleteBreaks
@@ -1704,6 +1705,7 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.prepRepeats = getInt("prepRepeats", m.prepRepeats)
 	m.prepAverageReref = getBool("prepAverageReref", m.prepAverageReref)
 	m.prepFileExtension = getString("prepFileExtension", m.prepFileExtension)
+	m.prepBadChannelSyncPolicy = getString("prepBadChannelSyncPolicy", m.prepBadChannelSyncPolicy)
 	m.prepConsiderPreviousBads = getBool("prepConsiderPreviousBads", m.prepConsiderPreviousBads)
 	m.prepOverwriteChansTsv = getBool("prepOverwriteChansTsv", m.prepOverwriteChansTsv)
 	m.prepDeleteBreaks = getBool("prepDeleteBreaks", m.prepDeleteBreaks)

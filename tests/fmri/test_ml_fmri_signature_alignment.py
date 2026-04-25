@@ -238,3 +238,125 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
         arr = np.asarray(y, dtype=float)
         self.assertTrue(np.all(np.isfinite(arr)))
         self.assertTrue(np.allclose(arr, np.array([3.0, 4.0], dtype=float)))
+
+    def test_raises_when_trial_and_onset_alignment_disagree(self):
+        from eeg_pipeline.utils.data.machine_learning import _load_fmri_signature_target_for_subject
+
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "fmri_signature": {
+                        "method": "lss",
+                        "contrast_name": "contrast",
+                        "signature_name": "NPS",
+                        "metric": "dot",
+                        "normalization": "none",
+                        "round_decimals": 3,
+                    }
+                }
+            }
+        )
+
+        events_df = pd.DataFrame(
+            {
+                "run_id": [1, 1],
+                "trial_number": [1, 2],
+                "onset": [10.0, 20.0],
+                "duration": [7.5, 7.5],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sig_dir = (
+                root
+                / "sub-0001"
+                / "fmri"
+                / "lss"
+                / "task-task"
+                / "contrast-contrast"
+                / "signatures"
+            )
+            sig_dir.mkdir(parents=True, exist_ok=True)
+
+            pd.DataFrame(
+                {
+                    "run_num": [1, 1],
+                    "trial_index": [1, 2],
+                    "onset": [20.0, 10.0],
+                    "duration": [7.5, 7.5],
+                    "signature": ["NPS", "NPS"],
+                    "dot": [2.0, 1.0],
+                }
+            ).to_csv(sig_dir / "trial_signature_expression.tsv", sep="\t", index=False)
+
+            with self.assertRaisesRegex(ValueError, "ambiguous.*alignment"):
+                _load_fmri_signature_target_for_subject(
+                    subject_raw="0001",
+                    task="task",
+                    deriv_root=root,
+                    config=cfg,
+                    events_df=events_df,
+                    logger=logging.getLogger(__name__),
+                )
+
+    def test_raises_when_trial_and_onset_alignment_match_different_rows(self):
+        from eeg_pipeline.utils.data.machine_learning import _load_fmri_signature_target_for_subject
+
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "fmri_signature": {
+                        "method": "lss",
+                        "contrast_name": "contrast",
+                        "signature_name": "NPS",
+                        "metric": "dot",
+                        "normalization": "none",
+                        "round_decimals": 3,
+                    }
+                }
+            }
+        )
+
+        events_df = pd.DataFrame(
+            {
+                "run_id": [1, 1],
+                "trial_number": [1, 2],
+                "onset": [10.0, 20.0],
+                "duration": [7.5, 7.5],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sig_dir = (
+                root
+                / "sub-0001"
+                / "fmri"
+                / "lss"
+                / "task-task"
+                / "contrast-contrast"
+                / "signatures"
+            )
+            sig_dir.mkdir(parents=True, exist_ok=True)
+
+            pd.DataFrame(
+                {
+                    "run_num": [1, 1],
+                    "trial_index": [1, 99],
+                    "onset": [99.0, 20.0],
+                    "duration": [7.5, 7.5],
+                    "signature": ["NPS", "NPS"],
+                    "dot": [1.0, 2.0],
+                }
+            ).to_csv(sig_dir / "trial_signature_expression.tsv", sep="\t", index=False)
+
+            with self.assertRaisesRegex(ValueError, "ambiguous.*alignment"):
+                _load_fmri_signature_target_for_subject(
+                    subject_raw="0001",
+                    task="task",
+                    deriv_root=root,
+                    config=cfg,
+                    events_df=events_df,
+                    logger=logging.getLogger(__name__),
+                )

@@ -597,8 +597,10 @@ def decode_binary_outcome(
             cv_obj = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
             cv_splits = list(cv_obj.split(X, y, groups_arr))
         else:
-            cv_obj = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-            cv_splits = list(cv_obj.split(X, y))
+            raise ValueError(
+                "groups are required for numeric classification CV to avoid "
+                "subject/session leakage. Use cv='loso' or pass group labels."
+            )
     
     # Cross-validation predictions
     y_pred = np.zeros(len(y), dtype=int)

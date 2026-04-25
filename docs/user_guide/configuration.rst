@@ -221,6 +221,9 @@ Bad Channels (PyPREP)
    * - ``pyprep.repeats``
      - ``3``
      - Number of PREP iterations
+   * - ``pyprep.bad_channel_sync_policy``
+     - ``per_run``
+     - Bad-channel policy across runs: ``per_run`` keeps run-specific bads; ``subject_union`` applies the subject-level union
    * - ``pyprep.average_reref``
      - ``false``
      - Apply average re-reference inside PyPREP
@@ -232,7 +235,7 @@ Bad Channels (PyPREP)
      - Overwrite BIDS ``*_channels.tsv`` with updated bad-channel status
    * - ``pyprep.delete_breaks``
      - ``false``
-     - Remove break annotations before bad-channel detection
+     - Mark detected breaks as ``BAD_break`` annotations before bad-channel detection; sample timing is not cropped
 
 .. _configuration-ica:
 

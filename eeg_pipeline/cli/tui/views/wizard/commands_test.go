@@ -138,6 +138,17 @@ func TestBuildPreprocessingAdvancedArgs_EmitsCleanEventsQCSetOverrides(t *testin
 	}
 }
 
+func TestBuildPreprocessingAdvancedArgs_EmitsBadChannelPolicyOverride(t *testing.T) {
+	m := New(types.PipelinePreprocessing, ".")
+	m.prepBadChannelSyncPolicy = "subject_union"
+
+	args := m.buildPreprocessingAdvancedArgs()
+
+	if !containsSubsequence(args, []string{"--set", "pyprep.bad_channel_sync_policy=subject_union"}) {
+		t.Fatalf("expected bad-channel policy override in preprocessing args: %#v", args)
+	}
+}
+
 func TestBuildCommand_FeaturesRestModeIncludesRestSafePowerFlags(t *testing.T) {
 	m := New(types.PipelineFeatures, ".")
 	for i := range m.selected {

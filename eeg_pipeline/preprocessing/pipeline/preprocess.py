@@ -32,6 +32,36 @@ def _majority_bad_channels(repeated_bads):
     return sorted(channel for channel, count in counts.items() if count >= threshold)
 
 
+def _mark_breaks_bad(
+    raw,
+    breaks_min_length,
+    t_start_after_previous,
+    t_stop_before_next,
+):
+    """Annotate break periods as bad spans without changing sample timing."""
+    annot_breaks = mne.preprocessing.annotate_break(
+        raw=raw,
+        min_break_duration=breaks_min_length,
+        t_start_after_previous=t_start_after_previous,
+        t_stop_before_next=t_stop_before_next,
+        ignore=(
+            "bad",
+            "edge",
+            "New Segment",
+        ),
+    )
+    removed_dur = float(np.sum(annot_breaks.duration)) if len(annot_breaks) else 0.0
+    if len(annot_breaks):
+        bad_breaks = mne.Annotations(
+            onset=annot_breaks.onset,
+            duration=annot_breaks.duration,
+            description=["BAD_break"] * len(annot_breaks),
+            orig_time=annot_breaks.orig_time,
+        )
+        raw.set_annotations(raw.annotations + bad_breaks)
+    return annot_breaks, removed_dur
+
+
 def run_bads_detection_single_file(
     file,
     bids_path=None,
@@ -167,19 +197,16 @@ def run_bads_detection_single_file(
                 raw.info["bads"] = list(set(raw.info["bads"] + previous_bads))
 
             if delete_breaks:
-                annot_breaks = mne.preprocessing.annotate_break(
+                annot_breaks, removed_dur = _mark_breaks_bad(
                     raw=raw,
-                    min_break_duration=breaks_min_length,
+                    breaks_min_length=breaks_min_length,
                     t_start_after_previous=t_start_after_previous,
                     t_stop_before_next=t_stop_before_next,
-                    ignore=(
-                        "bad",
-                        "edge",
-                        "New Segment",
-                    ),
                 )
-                removed_dur = float(np.sum(annot_breaks.duration)) if len(annot_breaks) else 0.0
-                msg = f"Found {len(annot_breaks)} breaks in the data; not cropping prior to PyPREP."
+                msg = (
+                    f"Found {len(annot_breaks)} breaks in the data; "
+                    "marked as BAD_break annotations before PyPREP."
+                )
                 logger.info(
                     **gen_log_kwargs(
                         message=msg,

@@ -4,6 +4,8 @@ import argparse
 import sys
 import types
 
+import pytest
+
 from eeg_pipeline.utils.config.loader import ConfigDict
 from eeg_pipeline.cli.commands.behavior import run_behavior, setup_behavior
 
@@ -86,3 +88,38 @@ behavior_analysis:
     run_behavior(args, ["0001"], config)
 
     assert _CaptureBehaviorPipeline.last_config.get("behavior_analysis.statistics.predictor_control") == "none"
+
+
+def test_load_behavior_config_raises_for_missing_env_path(tmp_path, monkeypatch) -> None:
+    from eeg_pipeline.utils.config.behavior_loader import load_behavior_config
+    from eeg_pipeline.utils.config.loader import ConfigError
+
+    missing = tmp_path / "missing_behavior_config.yaml"
+    monkeypatch.setenv("EEG_PIPELINE_BEHAVIOR_CONFIG", str(missing))
+
+    with pytest.raises(ConfigError, match="Behavior config file not found"):
+        load_behavior_config()
+
+
+def test_load_behavior_config_raises_for_non_mapping_yaml(tmp_path, monkeypatch) -> None:
+    from eeg_pipeline.utils.config.behavior_loader import load_behavior_config
+    from eeg_pipeline.utils.config.loader import ConfigError
+
+    config_path = tmp_path / "behavior_config.yaml"
+    config_path.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+    monkeypatch.setenv("EEG_PIPELINE_BEHAVIOR_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
+        load_behavior_config()
+
+
+def test_load_behavior_config_raises_for_empty_yaml(tmp_path, monkeypatch) -> None:
+    from eeg_pipeline.utils.config.behavior_loader import load_behavior_config
+    from eeg_pipeline.utils.config.loader import ConfigError
+
+    config_path = tmp_path / "behavior_config.yaml"
+    config_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("EEG_PIPELINE_BEHAVIOR_CONFIG", str(config_path))
+
+    with pytest.raises(ConfigError, match="must contain a YAML mapping"):
+        load_behavior_config()

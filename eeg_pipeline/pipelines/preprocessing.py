@@ -363,6 +363,12 @@ class PreprocessingPipeline(PipelineBase):
         self.logger.info("Running PyPREP bad channel detection for %s subject(s)", subject_count)
         
         pyprep_cfg = self.config.get("pyprep", {})
+        bad_channel_sync_policy = pyprep_cfg.get("bad_channel_sync_policy")
+        if bad_channel_sync_policy not in {"per_run", "subject_union"}:
+            raise ValueError(
+                "pyprep.bad_channel_sync_policy must be explicitly set to "
+                "'per_run' or 'subject_union'."
+            )
         random_state = pyprep_cfg.get("random_state")
         if random_state is None:
             random_state = self.config.get("project.random_state", 42)
@@ -390,11 +396,17 @@ class PreprocessingPipeline(PipelineBase):
             random_state=random_state,
         )
         
-        synchronize_bad_channels_across_runs(
-            bids_path=str(self.bids_root),
-            task=task,
-            subjects=normalized_subjects,
-        )
+        if bad_channel_sync_policy == "subject_union":
+            synchronize_bad_channels_across_runs(
+                bids_path=str(self.bids_root),
+                task=task,
+                subjects=normalized_subjects,
+            )
+        else:
+            self.logger.info(
+                "Keeping PyPREP bad-channel markings per run "
+                "(pyprep.bad_channel_sync_policy='per_run')"
+            )
         
         self.logger.info("Bad channel detection complete")
     

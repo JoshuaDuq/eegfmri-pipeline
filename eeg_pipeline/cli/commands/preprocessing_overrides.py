@@ -177,6 +177,8 @@ def _update_pyprep_config(args: argparse.Namespace, config: Any) -> None:
         pyprep_config["ransac"] = bool(args.ransac)
     if args.repeats != 3:
         pyprep_config["repeats"] = args.repeats
+    if args.bad_channel_sync_policy is not None:
+        pyprep_config["bad_channel_sync_policy"] = args.bad_channel_sync_policy
     if args.average_reref:
         pyprep_config["average_reref"] = True
     if args.file_extension != ".vhdr":

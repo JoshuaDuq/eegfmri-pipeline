@@ -43,11 +43,23 @@ def _parse_optional_positive_float_attr(cfg: Any, attr_name: str, default: Any =
 def _read_repetition_time(sidecar: Path) -> Optional[float]:
     try:
         meta = json.loads(sidecar.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid BOLD sidecar JSON at {sidecar}: {exc}") from exc
+    except OSError as exc:
+        raise ValueError(f"Failed to read BOLD sidecar JSON at {sidecar}: {exc}") from exc
     if not isinstance(meta, dict):
-        return None
+        raise ValueError(f"BOLD sidecar {sidecar} must contain a JSON object.")
     return _coerce_float(meta.get("RepetitionTime"))
+
+
+def _read_header_tr(bold_path: Path) -> Optional[float]:
+    import nibabel as nib  # type: ignore
+
+    img = nib.load(str(bold_path))
+    zooms = img.header.get_zooms()
+    if len(zooms) >= 4:
+        return float(zooms[3])
+    return None
 
 
 def discover_fmriprep_preproc_bold(
@@ -229,14 +241,25 @@ def get_tr_from_bold(bold_path: Path) -> float:
     if sidecar.exists():
         repetition_time = _read_repetition_time(sidecar)
         if repetition_time is not None:
+            try:
+                header_tr = _read_header_tr(bold_path)
+            except Exception as exc:
+                raise ValueError(f"Could not validate TR from NIfTI header for {bold_path}: {exc}") from exc
+            if (
+                header_tr is not None
+                and math.isfinite(header_tr)
+                and not math.isclose(repetition_time, header_tr, rel_tol=0.0, abs_tol=1e-6)
+            ):
+                raise ValueError(
+                    f"TR mismatch for {bold_path}: sidecar RepetitionTime={repetition_time}, "
+                    f"NIfTI header zooms[3]={header_tr}."
+                )
             return repetition_time
+        raise ValueError(f"BOLD sidecar {sidecar} is missing a valid RepetitionTime.")
 
-    import nibabel as nib  # type: ignore
-
-    img = nib.load(str(bold_path))
-    zooms = img.header.get_zooms()
-    if len(zooms) >= 4:
-        return float(zooms[3])
+    header_tr = _read_header_tr(bold_path)
+    if header_tr is not None:
+        return header_tr
     raise ValueError(f"Could not determine TR for {bold_path}")
 
 

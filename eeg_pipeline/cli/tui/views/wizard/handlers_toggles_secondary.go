@@ -349,6 +349,13 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optPrepFileExtension:
 		m.startTextEdit(textFieldPrepFileExtension)
 		m.useDefaultAdvanced = false
+	case optPrepBadChannelSyncPolicy:
+		if m.prepBadChannelSyncPolicy == "per_run" {
+			m.prepBadChannelSyncPolicy = "subject_union"
+		} else {
+			m.prepBadChannelSyncPolicy = "per_run"
+		}
+		m.useDefaultAdvanced = false
 	case optPrepConsiderPreviousBads:
 		m.prepConsiderPreviousBads = !m.prepConsiderPreviousBads
 		m.useDefaultAdvanced = false

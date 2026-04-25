@@ -119,6 +119,11 @@ class TestTuiConfigGapAudit(unittest.TestCase):
         for key in ("fmin", "fmax", "n_fft", "n_overlap", "window", "n_jobs"):
             self.assertIn(key, psd_config)
 
+        pyprep_config = eeg_config["pyprep"]
+        self.assertEqual("per_run", pyprep_config["bad_channel_sync_policy"])
+
+        self.assertEqual(["brain", "other"], eeg_config["ica"]["labels_to_keep"])
+
         cnn_config = eeg_config["machine_learning"]["models"]["cnn"]
         self.assertIn("standardization_std_floor", cnn_config)
 

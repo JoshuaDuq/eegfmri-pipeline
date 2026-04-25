@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from eeg_pipeline.utils.config.loader import resolve_config_paths
+from eeg_pipeline.utils.config.loader import ConfigError, resolve_config_paths
 
 FMRI_CONFIG_ENV_VAR = "EEG_PIPELINE_FMRI_CONFIG"
 
@@ -29,13 +29,25 @@ def load_fmri_config(config_path: Optional[str | Path] = None) -> Dict[str, Any]
     """Load the fMRI YAML config as a resolved dictionary."""
     resolved_path = _resolve_fmri_config_path(config_path)
     if not resolved_path.exists():
-        return {}
+        raise ConfigError(f"fMRI config file not found: {resolved_path}")
 
-    with open(resolved_path, "r", encoding="utf-8") as handle:
-        parsed = yaml.safe_load(handle) or {}
+    try:
+        with open(resolved_path, "r", encoding="utf-8") as handle:
+            parsed = yaml.safe_load(handle)
+    except yaml.YAMLError as exc:
+        raise ConfigError(
+            f"Failed to parse fMRI config at {resolved_path}: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise ConfigError(
+            f"Failed to load fMRI config at {resolved_path}: {exc}"
+        ) from exc
 
     if not isinstance(parsed, dict):
-        return {}
+        raise ConfigError(
+            f"fMRI config file {resolved_path} must contain a YAML mapping, "
+            f"got {type(parsed).__name__}."
+        )
 
     return resolve_config_paths(parsed, resolved_path)
 
