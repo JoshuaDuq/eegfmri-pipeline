@@ -11,6 +11,7 @@ EEG Source Localization
 
 .. grid:: 2
    :gutter: 2
+   :class-container: meta-cards
 
    .. grid-item-card:: Inputs
 
@@ -42,10 +43,6 @@ EEG Source Localization
 
    :doc:`../../install`
       Docker image build instructions for FreeSurfer + MNE.
-
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 Overview
 --------
@@ -179,91 +176,93 @@ Manual Docker Workflow
    Native Windows is supported for the repo-owned interface layer, not for
    these direct container-based helper steps.
 
-**Step 1: Build FreeSurfer + MNE Docker image**
+.. dropdown:: Six-step manual workflow (click to expand)
+   :icon: terminal
 
-.. code-block:: bash
+   **Step 1 — Build FreeSurfer + MNE Docker image**
 
-   docker build --platform linux/amd64 -t freesurfer-mne:7.4.1 \
-     -f eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne .
+   .. code-block:: bash
 
-**Step 2: Run FreeSurfer recon-all (1–3 hours)**
+      docker build --platform linux/amd64 -t freesurfer-mne:7.4.1 \
+        -f eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne .
 
-.. code-block:: bash
+   **Step 2 — Run FreeSurfer recon-all (1–3 hours)**
 
-   docker run --rm \
-     -v /path/to/project:/data \
-     -v $SUBJECTS_DIR:/subjects \
-     -v $FS_LICENSE:/usr/local/freesurfer/.license \
-     --platform linux/amd64 freesurfer-mne:7.4.1 \
-     recon-all \
-       -subjid sub-0001 \
-       -i /data/anat/sub-0001_T1w.nii.gz \
-       -all -sd /subjects
+   .. code-block:: bash
 
-**Step 3: Generate BEM model and solution**
+      docker run --rm \
+        -v /path/to/project:/data \
+        -v $SUBJECTS_DIR:/subjects \
+        -v $FS_LICENSE:/usr/local/freesurfer/.license \
+        --platform linux/amd64 freesurfer-mne:7.4.1 \
+        recon-all \
+          -subjid sub-0001 \
+          -i /data/anat/sub-0001_T1w.nii.gz \
+          -all -sd /subjects
 
-.. code-block:: bash
+   **Step 3 — Generate BEM model and solution**
 
-   docker run --rm \
-     -v $SUBJECTS_DIR:/subjects \
-     -v $FS_LICENSE:/usr/local/freesurfer/.license \
-     --platform linux/amd64 freesurfer-mne:7.4.1 \
-     bash -lc "
-       source \$FREESURFER_HOME/SetUpFreeSurfer.sh
-       mne watershed_bem --subject sub-0001 --overwrite
-       python -c 'import mne; bem_model = mne.make_bem_model(\"sub-0001\", ico=4, subjects_dir=\"/subjects\"); \
-         bem_sol = mne.make_bem_solution(bem_model); \
-         mne.write_bem_solution(\"/subjects/sub-0001/bem/sub-0001-bem-sol.fif\", bem_sol, overwrite=True)'
-     "
+   .. code-block:: bash
 
-**Step 4: Create coregistration transform**
+      docker run --rm \
+        -v $SUBJECTS_DIR:/subjects \
+        -v $FS_LICENSE:/usr/local/freesurfer/.license \
+        --platform linux/amd64 freesurfer-mne:7.4.1 \
+        bash -lc "
+          source \$FREESURFER_HOME/SetUpFreeSurfer.sh
+          mne watershed_bem --subject sub-0001 --overwrite
+          python -c 'import mne; bem_model = mne.make_bem_model(\"sub-0001\", ico=4, subjects_dir=\"/subjects\"); \
+            bem_sol = mne.make_bem_solution(bem_model); \
+            mne.write_bem_solution(\"/subjects/sub-0001/bem/sub-0001-bem-sol.fif\", bem_sol, overwrite=True)'
+        "
 
-.. code-block:: python
+   **Step 4 — Create coregistration transform**
 
-   import mne
-   mne.gui.coregistration(
-       subject="sub-0001",
-       subjects_dir="/path/to/freesurfer",
-       inst=raw,
-   )
+   .. code-block:: python
 
-Save the transform as ``sub-0001-trans.fif``.
+      import mne
+      mne.gui.coregistration(
+          subject="sub-0001",
+          subjects_dir="/path/to/freesurfer",
+          inst=raw,
+      )
 
-**Step 5: Generate fMRI statistical map**
+   Save the transform as ``sub-0001-trans.fif``.
 
-*Option A — Automated contrast builder:*
+   **Step 5 — Generate fMRI statistical map**
 
-.. code-block:: bash
+   *Option A — Automated contrast builder:*
 
-   eeg-pipeline features compute \
-     --subject 0001 --categories sourcelocalization \
-     --source-fmri --source-fmri-contrast-enabled \
-     --source-fmri-cond-a-column trial_type --source-fmri-cond-a-value stimulation \
-     --source-fmri-cond-b-column trial_type --source-fmri-cond-b-value fixation_rest \
-     --source-fmri-contrast-name stim_vs_rest \
-     --source-fmri-resample-to-fs
+   .. code-block:: bash
 
-*Option B — Pre-computed stats map:*
+      eeg-pipeline features compute \
+        --subject 0001 --categories sourcelocalization \
+        --source-fmri --source-fmri-contrast-enabled \
+        --source-fmri-cond-a-column trial_type --source-fmri-cond-a-value stimulation \
+        --source-fmri-cond-b-column trial_type --source-fmri-cond-b-value fixation_rest \
+        --source-fmri-contrast-name stim_vs_rest \
+        --source-fmri-resample-to-fs
 
-Provide a 3D NIfTI aligned to the FreeSurfer subject space via
-``--source-fmri-stats-map /path/to/zmap.nii.gz``.
+   *Option B — Pre-computed stats map:* provide a 3D NIfTI aligned to the
+   FreeSurfer subject space via
+   ``--source-fmri-stats-map /path/to/zmap.nii.gz``.
 
-**Step 6: Run fMRI-constrained source localization**
+   **Step 6 — Run fMRI-constrained source localization**
 
-.. code-block:: bash
+   .. code-block:: bash
 
-   eeg-pipeline features compute \
-     --subject 0001 --categories sourcelocalization \
-     --source-fmri \
-     --source-fmri-stats-map /path/to/sub-0001_zmap.nii.gz \
-     --source-fmri-threshold 3.1 \
-     --source-fmri-tail pos \
-     --source-subject sub-0001 \
-     --source-subjects-dir /path/to/freesurfer \
-     --source-trans /path/to/sub-0001-trans.fif \
-     --source-bem /path/to/sub-0001-bem-sol.fif \
-     --source-method lcmv \
-     --spatial global
+      eeg-pipeline features compute \
+        --subject 0001 --categories sourcelocalization \
+        --source-fmri \
+        --source-fmri-stats-map /path/to/sub-0001_zmap.nii.gz \
+        --source-fmri-threshold 3.1 \
+        --source-fmri-tail pos \
+        --source-subject sub-0001 \
+        --source-subjects-dir /path/to/freesurfer \
+        --source-trans /path/to/sub-0001-trans.fif \
+        --source-bem /path/to/sub-0001-bem-sol.fif \
+        --source-method lcmv \
+        --spatial global
 
 CLI Flags Reference
 --------------------

@@ -13,6 +13,7 @@ EEG Feature Extraction
 
 .. grid:: 2
    :gutter: 2
+   :class-container: meta-cards
 
    .. grid-item-card:: Inputs
 
@@ -44,10 +45,6 @@ EEG Feature Extraction
 
    :doc:`../../user_guide/cli/features`
       CLI flags for feature category selection, spatial transforms, and IAF mode.
-
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 Notation
 --------

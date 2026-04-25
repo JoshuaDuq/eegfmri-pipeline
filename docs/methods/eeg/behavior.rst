@@ -11,6 +11,7 @@ Behavioral Statistics
 
 .. grid:: 2
    :gutter: 2
+   :class-container: meta-cards
 
    .. grid-item-card:: Inputs
 
@@ -43,10 +44,6 @@ Behavioral Statistics
 
    :doc:`../../user_guide/cli/behavior`
       CLI flags for behavioral analysis modes.
-
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 Notation
 --------
@@ -178,11 +175,14 @@ Non-i.i.d. Trial Structure
 Trials within a subject are clustered within runs/blocks and are not exchangeable.
 The following stages enforce grouped permutation unless ``allow_iid_trials = true``
 is explicitly set: ``correlate_*``, ``regression``, ``condition_column``.
-Grouped permutation labels must be complete and non-missing for every analyzed
-trial; partially missing run/block labels now raise instead of being silently
-excluded from the permutation sample.
-Permutation scheme values are validated strictly; unsupported values raise instead
-of silently falling back to ``shuffle``.
+
+.. note::
+
+   Grouped permutation labels must be complete and non-missing for every
+   analyzed trial — partially missing run/block labels raise instead of being
+   silently excluded from the permutation sample. Permutation scheme values
+   are validated strictly; unsupported values raise instead of falling back
+   to ``shuffle``.
 
 Group-Level Permutation Outputs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -197,9 +197,19 @@ Predictor Type Validation
 
 The ``behavior_analysis.predictor_type`` key declares the nature of the predictor:
 
-- **``continuous``** — ordered numeric scale with ≥ 5 distinct levels. Enables ``predictor_residual`` and spline/outcome_hat control.
-- **``binary``** — two-level factor. Disables curve-fitting analyses.
-- **``categorical``** — unordered multi-level factor. Same restrictions as binary.
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Type
+     - Definition
+   * - ``continuous``
+     - Ordered numeric scale with ≥ 5 distinct levels. Enables
+       ``predictor_residual`` and spline/outcome_hat control.
+   * - ``binary``
+     - Two-level factor. Disables curve-fitting analyses.
+   * - ``categorical``
+     - Unordered multi-level factor. Same restrictions as binary.
 
 Predictor Control Strategies
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -221,12 +231,14 @@ Predictor Control Strategies
      - Restricted cubic spline of predictor as covariate
      - ``continuous`` only
 
-Requested controlled estimands are now strict: spline predictor control requires
-``behavior_analysis.predictor_type = continuous`` and a successfully
-identified nonlinear spline basis, while ``outcome_hat`` regression control
-requires the precomputed ``outcome_hat_from_predictor`` column. These analyses
-fail fast when the requested control cannot actually be applied instead of
-degrading to linear adjustment or no adjustment.
+.. note::
+
+   Requested controlled estimands fail fast when the requested control
+   cannot actually be applied. ``spline`` requires
+   ``behavior_analysis.predictor_type = continuous`` and a successfully
+   identified nonlinear spline basis; ``outcome_hat`` requires the
+   precomputed ``outcome_hat_from_predictor`` column. The pipeline does not
+   silently degrade to linear or no adjustment.
 
 Stage Definitions
 -----------------
@@ -262,12 +274,11 @@ one column per behavioral or EEG-feature variable.
    alignment is restored.
 
 Stage 3 — Predictor Residual
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-**Requires:** ``predictor_type = continuous`` (≥ 5 unique predictor values).
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Residualizes the outcome on the predictor to isolate variance not explained by
-stimulus intensity:
+stimulus intensity. Requires ``predictor_type = continuous`` (≥ 5 unique
+predictor values).
 
 .. math::
 
@@ -276,26 +287,29 @@ stimulus intensity:
 Model selection: spline OLS candidates ``outcome ~ bs(predictor, df=d, degree=3)``
 for configurable degrees of freedom, lowest-AIC selection; fallback to polynomial.
 Optional cross-fit residuals (``GroupKFold``) via ``--predictor-residual-crossfit``.
-Correlation target selection only promotes ``predictor_residual_cv`` when that
-column contains finite residual values; if crossfitting is skipped and the
-cross-fit residual column is all missing, the standard ``predictor_residual``
-target remains primary. Predictor-residual construction itself is strict:
-fit failures now surface as errors instead of silently dropping the residual
-columns and allowing downstream analyses to revert to the raw outcome target.
+
+.. note::
+
+   Correlation target selection only promotes ``predictor_residual_cv`` when
+   that column contains finite residual values; if cross-fitting is skipped
+   and the column is all missing, the standard ``predictor_residual`` target
+   remains primary. Predictor-residual construction itself is strict: fit
+   failures surface as errors instead of silently dropping the residual
+   columns and reverting to the raw outcome target.
 
 Stage 4 — Correlations
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Canonical behavior-column overrides are strict: if
-``behavior_analysis.outcome_column`` or
-``behavior_analysis.predictor_column`` is set, that named column must exist and
-be numeric. The pipeline no longer silently falls back to ``event_columns.*``
-aliases when an explicit canonical override is invalid.
-Explicit correlation targets are also strict: if
-``behavior_analysis.correlations.target_column`` is set, that exact target
-column must exist and contribute numeric data; if
-``behavior_analysis.correlations.targets`` is explicitly listed, every entry
-must resolve to a valid numeric trial-table column.
+.. note::
+
+   Canonical behavior-column overrides are strict. If
+   ``behavior_analysis.outcome_column`` or
+   ``behavior_analysis.predictor_column`` is set, that named column must
+   exist and be numeric — the pipeline does not fall back to
+   ``event_columns.*`` aliases. Likewise, an explicit
+   ``correlations.target_column`` must resolve to a valid numeric trial-table
+   column, and every entry in an explicit ``correlations.targets`` list must
+   resolve to one.
 
 Correlation Types
 ^^^^^^^^^^^^^^^^^
@@ -339,10 +353,18 @@ Phipson-Smyth correction:
 Stability and Bayes Factors
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-**LOSO stability** (``--loso-stability``): recompute correlations on :math:`N-1`
-subjects; report mean LOSO :math:`r` and SD across folds.
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
 
-**Bayes factors** (``--compute-bayes-factors``): JZS :math:`\mathrm{BF}_{10}` approximation alongside classical p-values.
+   * - Flag
+     - Effect
+   * - ``--loso-stability``
+     - Recompute correlations on :math:`N-1` subjects; report mean LOSO
+       :math:`r` and SD across folds.
+   * - ``--compute-bayes-factors``
+     - JZS :math:`\mathrm{BF}_{10}` approximation alongside classical
+       p-values.
 
 Stage 5 — Regression
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -412,20 +434,23 @@ signed-rank (paired). Omnibus tests are not performed.
 When ``primary_unit = run_mean``, the pipeline first aggregates to run×condition
 cells and drops cells below ``behavior_analysis.condition.min_trials_per_condition``
 before running paired condition statistics.
-Run-level condition inference is strict about aggregation keys: the configured
-run column must exist, and both the run column and condition column must be
-fully labeled before run×condition aggregation begins.
-If ``behavior_analysis.condition.compare_column`` is explicitly set, that exact
-trial-table column must exist; the stage no longer substitutes a fallback
-condition column on configuration errors.
 
-For ROI power correlations, an explicit
-``behavior_analysis.correlations.power_segment_preference`` must match actual
-segment columns for the analyzed band; the pipeline no longer widens back to
-all segments when the requested segment is absent.
-When permutation testing is enabled for ROI power correlations, grouped
-trial-label structure is now propagated into ROI permutation p-values instead
-of defaulting to an i.i.d. shuffle null.
+.. note::
+
+   Run-level condition inference is strict about aggregation keys: the
+   configured run column must exist, and both the run column and condition
+   column must be fully labeled before run×condition aggregation begins. An
+   explicit ``condition.compare_column`` must resolve to an existing
+   trial-table column — the stage does not substitute a fallback.
+
+.. note::
+
+   For ROI power correlations, an explicit
+   ``correlations.power_segment_preference`` must match actual segment
+   columns for the analyzed band; the pipeline does not widen back to all
+   segments when the requested segment is absent. Permutation testing for
+   ROI power correlations propagates grouped trial-label structure into the
+   ROI permutation p-values instead of defaulting to an i.i.d. shuffle null.
 
 Stage 8 — Temporal Statistics
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -443,17 +468,17 @@ Correlation-to-:math:`t` transform for cluster forming:
    t = r\sqrt{\frac{\mathrm{dof}}{1 - r^2}}.
 
 Temporal multiple-comparison correction: ``fdr``, ``bonferroni``, ``cluster``, or ``none``.
-When no explicit ``behavior_analysis.temporal.target_column`` is set, temporal
-target resolution follows the canonical outcome resolver, so
-``behavior_analysis.outcome_column`` takes precedence over ``event_columns.outcome``.
-Under ``correction_method = cluster``, cluster-correction failures now surface
-as errors instead of degrading silently to uncorrected output.
-If ``split_by_condition = true``, temporal analyses require a valid condition
-column; missing condition columns now raise instead of silently reverting to
-pooled all-trials correlations.
-If temporal ``selected_bands`` is set, every requested band name must match an
-available configured band; mismatches now raise instead of widening the
-analysis to every band.
+
+.. note::
+
+   When no explicit ``temporal.target_column`` is set, temporal target
+   resolution follows the canonical outcome resolver, so
+   ``behavior_analysis.outcome_column`` takes precedence over
+   ``event_columns.outcome``. Under ``correction_method = cluster``,
+   cluster-correction failures surface as errors instead of degrading to
+   uncorrected output. With ``split_by_condition = true`` a valid condition
+   column is required, and any explicit ``selected_bands`` entry must match
+   a configured band name — both raise on mismatch.
 
 ERDS Trial Metrics
 ^^^^^^^^^^^^^^^^^^
@@ -475,26 +500,25 @@ Cluster-mass permutation test over time–frequency maps:
    M_c = \sum_{i \in c} |t_i|, \qquad
    p_c = \frac{\#\{M_\text{max}^\text{perm} \ge M_c\} + 1}{n_\text{perm} + 1}.
 
-If ``behavior_analysis.cluster.condition_column`` is set, that exact
-aligned-events column must exist. The cluster stage no longer falls back to
-``event_columns.condition`` or ``event_columns.binary_outcome`` when an
-explicit split column is invalid.
-If ``behavior_analysis.cluster.condition_values`` is set, it must contain
-exactly two values; otherwise the cluster contrast now fails instead of being
-silently reinterpreted. When ``behavior_analysis.cluster.condition_values`` is
-left empty, the cluster stage now infers the observed binary contrast from the
-resolved condition column instead of assuming ``0`` vs ``1``. Cluster tests
-also require complete condition labels in the selected condition column and no
-longer drop unlabeled trials silently.
+.. note::
+
+   Cluster-stage configuration is strict. An explicit
+   ``cluster.condition_column`` must exist as an aligned-events column — no
+   fallback to ``event_columns.condition`` or ``event_columns.binary_outcome``.
+   ``cluster.condition_values``, when set, must contain exactly two values;
+   when empty, the observed binary contrast is inferred from the resolved
+   condition column instead of being assumed as ``0`` vs ``1``. Cluster
+   tests require complete condition labels and do not silently drop
+   unlabeled trials.
 
 Group-Level Analysis
 --------------------
 
 Group-level computations run outside the per-subject DAG via
-``BehaviorPipeline.run_group_level(...)``.
+``BehaviorPipeline.run_group_level(...)``. The current implementation exposes
+**multilevel correlations only** — the repository does not ship a separate
+behavioral ``MixedLM`` stage.
 
-The current implementation exposes **multilevel correlations only**. The
-repository does not currently ship a separate behavioral ``MixedLM`` stage.
 For each feature, the pipeline computes a within-subject correlation estimate
 :math:`r_s` (optionally after within-subject covariate adjustment), aggregates
 subjects with equal weight via Fisher :math:`z`-averaging, and uses

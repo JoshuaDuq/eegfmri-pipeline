@@ -12,6 +12,7 @@ EEG Preprocessing
 
 .. grid:: 2
    :gutter: 2
+   :class-container: meta-cards
 
    .. grid-item-card:: Inputs
 
@@ -48,10 +49,6 @@ EEG Preprocessing
 
    Set ``preprocessing.task_is_rest: true`` to create fixed-length segments
    without requiring ``events.tsv`` condition labels.
-
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 Notation
 --------
@@ -152,7 +149,9 @@ The pipeline expects BIDS-formatted EEG data:
 Step 1 — Bad Channel Detection
 --------------------------------
 
-**Module:** ``preprocessing/pipeline/preprocess.py`` → ``run_bads_detection()``
+.. container:: module-ref
+
+   Module: ``preprocessing/pipeline/preprocess.py`` → ``run_bads_detection()``
 
 Automated detection of noisy channels using PyPREP's ``NoisyChannels`` class,
 operating on continuous raw data before ICA or epoching.
@@ -216,7 +215,9 @@ Configuration
 Step 2 — Bad Channel Synchronization
 --------------------------------------
 
-**Module:** ``preprocessing/pipeline/preprocess.py`` → ``synchronize_bad_channels_across_runs()``
+.. container:: module-ref
+
+   Module: ``preprocessing/pipeline/preprocess.py`` → ``synchronize_bad_channels_across_runs()``
 
 For multi-run paradigms, bad channels detected in any run are propagated to all
 runs of the same subject. This ensures a consistent channel set before ICA fitting.
@@ -232,7 +233,9 @@ incompatible ICA decompositions.
 Step 3 — ICA Fitting
 ---------------------
 
-**Module:** ``preprocessing/pipeline/preprocess.py`` + ``pipelines/preprocessing.py`` → ``_run_ica_fitting()``
+.. container:: module-ref
+
+   Module: ``preprocessing/pipeline/preprocess.py`` + ``pipelines/preprocessing.py`` → ``_run_ica_fitting()``
 
 ICA fitting is delegated to MNE-BIDS-Pipeline via subprocess. A temporary Python
 config file is generated from the YAML configuration and passed to the pipeline runner.
@@ -299,7 +302,9 @@ Configuration
 Step 4 — ICA Component Labeling
 ---------------------------------
 
-**Module:** ``preprocessing/pipeline/ica.py`` → ``run_ica_label()``
+.. container:: module-ref
+
+   Module: ``preprocessing/pipeline/ica.py`` → ``run_ica_label()``
 
 Automated classification of :term:`ICA` components using MNE-ICAlabel, which wraps the
 :term:`ICLabel` deep learning classifier.
@@ -351,7 +356,9 @@ ICLabel Classes
 Step 5 — Epoch Creation and Artifact Rejection
 -----------------------------------------------
 
-**Module:** ``preprocessing/pipeline/preprocess.py`` + ``pipelines/preprocessing.py`` → ``_run_epoch_creation()``
+.. container:: module-ref
+
+   Module: ``preprocessing/pipeline/preprocess.py`` + ``pipelines/preprocessing.py`` → ``_run_epoch_creation()``
 
 MNE-BIDS-Pipeline Steps
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -440,7 +447,9 @@ is the only supported alignment contract for downstream trialwise artifacts.
 Step 7 — Preprocessing Statistics
 -----------------------------------
 
-**Module:** ``preprocessing/pipeline/stats.py`` → ``collect_preprocessing_stats()``
+.. container:: module-ref
+
+   Module: ``preprocessing/pipeline/stats.py`` → ``collect_preprocessing_stats()``
 
 .. list-table::
    :header-rows: 1
@@ -464,7 +473,9 @@ Step 7 — Preprocessing Statistics
 Step 8 — Time-Frequency Representation (Optional)
 --------------------------------------------------
 
-**Module:** ``preprocessing/pipeline/tfr.py`` → ``custom_tfr()``
+.. container:: module-ref
+
+   Module: ``preprocessing/pipeline/tfr.py`` → ``custom_tfr()``
 
 Morlet wavelet :term:`TFR` decomposition on clean epochs.
 

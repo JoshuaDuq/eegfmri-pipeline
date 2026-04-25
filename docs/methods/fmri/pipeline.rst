@@ -17,6 +17,7 @@ fMRI Analysis Pipeline
 
 .. grid:: 2
    :gutter: 2
+   :class-container: meta-cards
 
    .. grid-item-card:: Inputs
 
@@ -52,10 +53,6 @@ fMRI Analysis Pipeline
 
    :doc:`../../user_guide/cli/fmri_analysis`
       CLI flags for first-level, second-level, beta-series, and resting-state.
-
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 Notation
 --------
@@ -167,10 +164,10 @@ See :doc:`raw_to_bids` for the input contract and ``events.tsv`` requirements.
 
 Events undergo three filtering stages before GLM fitting:
 
-1. **``events_to_model``** — Restricts which ``trial_type`` rows enter the GLM.
-2. **``stim_phases_to_model``** — Restricts stimulation events to specified sub-phases.
-3. **Condition remapping** — Rows matching condition A → ``cond_a_<name>``; rows
-   matching condition B → ``cond_b_<name>``.
+1. ``events_to_model`` — restricts which ``trial_type`` rows enter the GLM.
+2. ``stim_phases_to_model`` — restricts stimulation events to specified sub-phases.
+3. **Condition remapping** — rows matching condition A become ``cond_a_<name>``;
+   rows matching condition B become ``cond_b_<name>``.
 
 Stage 2 — fMRIPrep Preprocessing
 ----------------------------------
@@ -301,20 +298,22 @@ Contrast Computation
 
 Output types: ``z-score`` (default), ``t-stat`` (t-statistic), and ``cope`` (contrast of parameter estimates).
 
-Current implementation note:
-``beta`` is not a distinct raw-beta export. It is currently an alias of nilearn's
-``effect_size`` output, the same quantity used for ``cope``.
+.. note::
 
-Current plotting/reporting note:
-the HTML report and plotting utilities now require z-statistic maps. If you
-request plotting/report generation for a first-level contrast, use
-``output_type=z-score``. ``t-stat`` maps can still be written as analysis
-outputs, but they are rejected by the report/plotting path because its
-threshold calibration and labels are defined only for z-statistics.
+   ``beta`` is not a distinct raw-beta export. It is currently an alias of
+   nilearn's ``effect_size`` output, the same quantity used for ``cope``.
 
-Caching: contrast maps are named with an MD5 hash of key configuration parameters.
-A JSON sidecar records full provenance (subject, task, contrast definition, run inputs,
-confound columns, skipped runs, event counts).
+.. note::
+
+   The HTML report and plotting utilities require z-statistic maps. Use
+   ``output_type=z-score`` when requesting plotting/report generation for a
+   first-level contrast. ``t-stat`` maps can still be written as analysis
+   outputs but are rejected by the report/plotting path, whose threshold
+   calibration and labels are defined only for z-statistics.
+
+Contrast maps are named with an MD5 hash of key configuration parameters. A
+JSON sidecar records full provenance (subject, task, contrast definition, run
+inputs, confound columns, skipped runs, event counts).
 
 Stage 3b — Second-Level Group Inference
 -----------------------------------------
@@ -324,10 +323,20 @@ generated first-level effect-size maps in ``MNI152NLin2009cAsym`` space.
 
 Supported designs:
 
-- **``one-sample``** — Group mean/random-effects inference for one first-level contrast.
-- **``two-sample``** — Between-group comparison using a subject-level TSV/CSV.
-- **``paired``** — Within-subject comparison via subject-wise difference maps.
-- **``repeated-measures``** — Within-subject multi-condition model across two or more contrasts.
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Design
+     - Description
+   * - ``one-sample``
+     - Group mean / random-effects inference for one first-level contrast.
+   * - ``two-sample``
+     - Between-group comparison using a subject-level TSV/CSV.
+   * - ``paired``
+     - Within-subject comparison via subject-wise difference maps.
+   * - ``repeated-measures``
+     - Within-subject multi-condition model across two or more contrasts.
 
 Optional permutation inference (``--group-permutation-inference``) adds max-T
 permutation inference for second-level t-contrasts.
@@ -379,11 +388,13 @@ Condition-Level Averaging
    * - ``mean``
      - Simple arithmetic mean
 
-Current implementation note:
-for ``beta-series``, condition summary maps are built from run-level averaged contrasts
-and then combined across runs. For ``lss``, condition summary maps are built by combining
-all trial-level beta images directly, so the default inverse-variance weighting is a
-descriptive heuristic rather than a valid fixed-effects estimator.
+.. note::
+
+   For ``beta-series``, condition summary maps are built from run-level
+   averaged contrasts and then combined across runs. For ``lss``, condition
+   summary maps are built by combining all trial-level beta images directly,
+   so the default inverse-variance weighting is a descriptive heuristic
+   rather than a valid fixed-effects estimator.
 
 Trial-Wise Outputs
 ~~~~~~~~~~~~~~~~~~~
@@ -455,8 +466,7 @@ Atlas-based ROI connectivity analysis from fMRIPrep resting-state BOLD data.
 4. Compute per-run Pearson correlation connectivity matrices.
 5. Aggregate multi-run matrices via Fisher-z averaging.
 
-Current implementation detail:
-the run weights are the number of retained frames per run, i.e.
+Run weights are the number of retained frames per run:
 
 .. math::
 
@@ -464,15 +474,19 @@ the run weights are the number of retained frames per run, i.e.
    \qquad
    \hat{r}_{ij} = \tanh(\bar{Z}_{ij}).
 
-This should be treated as a validity limitation rather than a target method:
-for Fisher-z averaging the variance-stabilizing weight is proportional to
-:math:`n_r - 3`, not :math:`n_r`, so short runs are currently misweighted.
+.. caution::
 
-Current implementation limitation:
-the masker is built from the atlas alone and does not yet intersect each run with
-the corresponding fMRIPrep brain mask. ROIs near susceptibility dropout or partial
-coverage can therefore contribute non-brain voxels without necessarily becoming
-degenerate enough to trigger the existing guards.
+   This is a validity limitation rather than a target method: for Fisher-z
+   averaging the variance-stabilizing weight is proportional to
+   :math:`n_r - 3`, not :math:`n_r`, so short runs are currently misweighted.
+
+.. caution::
+
+   The masker is built from the atlas alone and does not yet intersect each
+   run with the corresponding fMRIPrep brain mask. ROIs near susceptibility
+   dropout or partial coverage can therefore contribute non-brain voxels
+   without necessarily becoming degenerate enough to trigger the existing
+   guards.
 
 Key configuration (``RestingStateAnalysisConfig``):
 
@@ -511,7 +525,9 @@ Resting-state outputs written to:
 BEM and Coregistration
 -----------------------
 
-**Module:** ``analysis/bem_generation.py``
+.. container:: module-ref
+
+   Module: ``analysis/bem_generation.py``
 
 Docker-based BEM model, BEM solution, and EEG↔MRI coregistration via FreeSurfer
 and MNE-Python.
@@ -564,12 +580,13 @@ For each image :math:`\mathbf{x}` and signature weight map :math:`\mathbf{w}`:
 
 Spatial constraint: trial-wise signature extraction requires MNI-space images.
 
-Current implementation note:
-signature expression rejects continuous resampling whenever the moving image
-contains non-finite voxels. This avoids mixing unsupported NaN-coded voxels into
-neighboring weights or effect estimates during interpolation. In practice,
-signature maps and target images should already share a compatible finite-valued
-grid whenever possible.
+.. note::
+
+   Signature expression rejects continuous resampling whenever the moving
+   image contains non-finite voxels. This avoids mixing unsupported NaN-coded
+   voxels into neighboring weights or effect estimates during interpolation.
+   In practice, signature maps and target images should already share a
+   compatible finite-valued grid whenever possible.
 
 Output Layout
 -------------

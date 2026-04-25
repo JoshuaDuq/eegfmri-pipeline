@@ -1085,6 +1085,194 @@ details.sd-dropdown .sd-summary-content p:last-child {
 }
 
 /* ---------------------------------------------------------
+   Math — block equations rendered in a subtle bordered panel
+   matching the code-block aesthetic. Inline math stays
+   transparent so it flows with prose.
+
+   Sphinx emits block math as:
+     <div class="math-wrapper docutils container">
+       <div class="math notranslate nohighlight">\[ ... \]</div>
+     </div>
+   MathJax then injects an <mjx-container display="true"> inside the
+   inner div. Style the inner div as the visible panel, and zero out
+   the wrapper so we don't get double padding.
+   --------------------------------------------------------- */
+.math-wrapper.docutils.container {
+  padding: 0 !important;
+  margin: var(--space-4) 0;
+  background: transparent !important;
+  border: none !important;
+}
+
+div.math.notranslate.nohighlight,
+div.math {
+  background: var(--color-background-secondary) !important;
+  border: var(--hairline-quiet) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 0.9rem 1.15rem !important;
+  margin: var(--space-4) 0 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  color: var(--color-foreground-primary);
+  position: relative;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+/* MathJax-rendered block container inside our div.math should sit flat */
+div.math mjx-container[display="true"] {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: inherit;
+}
+
+/* Equation number — quiet right-aligned tag */
+div.math span.eqno,
+.math .eqno {
+  color: var(--color-foreground-muted) !important;
+  font-size: 0.78rem !important;
+  font-family: var(--font-stack--monospace);
+  letter-spacing: 0.01em;
+  float: right;
+  padding-left: 0.75rem;
+}
+
+/* Inline math — no panel, inherits flow */
+mjx-container:not([display="true"]),
+span.math.notranslate.nohighlight {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: inherit;
+}
+
+/* MathJax glyph color tracks the foreground primary */
+mjx-container,
+mjx-container * {
+  color: var(--color-foreground-primary);
+}
+
+/* Math inside admonitions and tables — drop the panel so the
+   surrounding container provides the framing */
+.admonition div.math,
+.admonition mjx-container[display="true"],
+table.docutils div.math,
+table.docutils mjx-container[display="true"] {
+  background: transparent !important;
+  border: none !important;
+  padding: 0.25rem 0 !important;
+  margin: 0.25rem 0 !important;
+}
+
+/* ---------------------------------------------------------
+   Meta-cards strip — Inputs / Outputs / CLI / Config eyebrow
+   strip at the top of every methods page. Compact, eyebrow
+   uppercase title, transparent surface so it reads as page
+   metadata rather than as a major visual element.
+   --------------------------------------------------------- */
+.meta-cards {
+  margin: 0 0 var(--space-5);
+}
+
+.meta-cards .sd-card {
+  background: transparent !important;
+  border: none !important;
+  border-top: var(--hairline-quiet) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  transition: border-top-color 0.15s ease;
+}
+
+.meta-cards .sd-card:hover {
+  background: transparent !important;
+  border-top-color: var(--color-foreground-secondary) !important;
+}
+
+.meta-cards .sd-card-body {
+  padding: 0.55rem 0 0.7rem !important;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.meta-cards .sd-card-title {
+  font-size: 0.66rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  color: var(--color-foreground-muted) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+.meta-cards .sd-card-text {
+  font-size: 0.82rem !important;
+  color: var(--color-foreground-primary) !important;
+  line-height: 1.55;
+  margin: 0 !important;
+}
+
+/* ---------------------------------------------------------
+   Stage / Step section headers — long methods pages have many
+   sequential "Stage N — Foo" sections. A subtle horizontal
+   pre-rule above each h3 starting with "Stage" or "Step"
+   improves vertical rhythm. Pure CSS, no markup change needed.
+   --------------------------------------------------------- */
+section[id^="stage-"] > h3,
+section[id^="step-"] > h3 {
+  border-top: var(--hairline-quiet);
+  padding-top: var(--space-4);
+  margin-top: var(--space-6);
+}
+
+/* ---------------------------------------------------------
+   Module-ref caption — small uppercase eyebrow line that
+   identifies the source module implementing a stage. Rendered
+   directly under the section heading. The literal "Module:"
+   prefix becomes a small letter-spaced label; the code path
+   keeps its monospace styling.
+   --------------------------------------------------------- */
+.module-ref {
+  margin: -0.4rem 0 var(--space-4);
+  padding: 0;
+  font-size: 0.78rem;
+  color: var(--color-foreground-muted);
+  border-left: 2px solid var(--color-foreground-border);
+  padding-left: 0.7rem;
+}
+
+.module-ref p {
+  margin: 0 !important;
+  line-height: 1.5;
+}
+
+.module-ref code,
+.module-ref .docutils.literal {
+  font-size: 0.78rem !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: var(--color-foreground-secondary) !important;
+}
+
+/* ---------------------------------------------------------
+   Dropdown directive — slightly tighter chevron + monospace
+   summary for the "click to expand" affordance. Used on
+   source_localization Manual Docker Workflow.
+   --------------------------------------------------------- */
+details.sd-dropdown summary svg.octicon {
+  color: var(--color-foreground-muted);
+}
+
+details.sd-dropdown[open] summary svg.octicon {
+  color: var(--color-foreground-primary);
+}
+
+/* ---------------------------------------------------------
    Glossary — definition list
    --------------------------------------------------------- */
 dl.glossary dt {

@@ -12,6 +12,7 @@ Machine Learning
 
 .. grid:: 2
    :gutter: 2
+   :class-container: meta-cards
 
    .. grid-item-card:: Inputs
 
@@ -45,10 +46,6 @@ Machine Learning
 
    :doc:`../../user_guide/cli/ml`
       CLI flags for all ML modes.
-
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 Notation
 --------
@@ -370,7 +367,9 @@ Two-tailed regression statistic:
 Time Generalization
 -------------------
 
-**Module:** ``time_generalization.py``
+.. container:: module-ref
+
+   Module: ``time_generalization.py``
 
 Trains a regression model at one time window and evaluates it at all other windows.
 Output: a time × time generalization matrix of Pearson correlations.
@@ -378,7 +377,9 @@ Output: a time × time generalization matrix of Pearson correlations.
 SHAP Feature Importance
 -----------------------
 
-**Module:** ``shap_importance.py``
+.. container:: module-ref
+
+   Module: ``shap_importance.py``
 
 Per-fold SHAP values aggregated across folds:
 
@@ -391,7 +392,9 @@ and ranked importance tables.
 Uncertainty Quantification
 --------------------------
 
-**Module:** ``uncertainty.py``
+.. container:: module-ref
+
+   Module: ``uncertainty.py``
 
 Conformal prediction intervals providing coverage guarantees:
 

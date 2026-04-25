@@ -11,6 +11,7 @@ fMRI Raw-to-BIDS Contract
 
 .. grid:: 2
    :gutter: 2
+   :class-container: meta-cards
 
    .. grid-item-card:: Inputs
 
@@ -39,10 +40,6 @@ fMRI Raw-to-BIDS Contract
 
    :doc:`../../user_guide/cli/validation`
       CLI commands for BIDS and derivatives validation.
-
-.. contents:: On this page
-   :local:
-   :depth: 2
 
 Overview
 --------
