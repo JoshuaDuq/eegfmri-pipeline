@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from scipy.integrate import trapezoid
 from scipy.signal import savgol_filter, find_peaks
 
 from eeg_pipeline.domain.features.naming import NamingSchema
@@ -209,7 +210,7 @@ def _compute_auc(
                 if run.size < 2:
                     continue
                 has_segment = True
-                total_auc += float(np.trapezoid(trace[run], times[run]))
+                total_auc += float(trapezoid(trace[run], times[run]))
 
             if has_segment:
                 auc_vals[epoch_idx, series_idx] = total_auc

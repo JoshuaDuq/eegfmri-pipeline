@@ -109,6 +109,10 @@ def _build_args_for_fmri_analysis(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _yaml_path(path) -> str:
+    return path.as_posix()
+
+
 def test_run_fmri_uses_fmri_yaml_as_runtime_source(tmp_path, monkeypatch) -> None:
     bids_root = tmp_path / "bids"
     (bids_root / "sub-0001").mkdir(parents=True, exist_ok=True)
@@ -119,11 +123,11 @@ def test_run_fmri_uses_fmri_yaml_as_runtime_source(tmp_path, monkeypatch) -> Non
     fmri_cfg.write_text(
         f"""
 paths:
-  bids_fmri_root: "{bids_root}"
+  bids_fmri_root: "{_yaml_path(bids_root)}"
 fmri_preprocessing:
   engine: "apptainer"
   fmriprep:
-    fs_license_file: "{fs_license}"
+    fs_license_file: "{_yaml_path(fs_license)}"
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -140,7 +144,7 @@ fmri_preprocessing:
     config = ConfigDict({"project": {"task": "task"}})
     run_fmri(args, [], config)
 
-    assert _CapturePreprocessingPipeline.last_config.get("paths.bids_fmri_root") == str(bids_root)
+    assert _CapturePreprocessingPipeline.last_config.get("paths.bids_fmri_root") == _yaml_path(bids_root)
     assert _CapturePreprocessingPipeline.last_config.get("fmri_preprocessing.engine") == "apptainer"
     assert _CapturePreprocessingPipeline.last_kwargs["subjects"] == ["0001"]
 
@@ -155,11 +159,11 @@ def test_run_fmri_precedence_is_yaml_then_cli_then_set(tmp_path, monkeypatch) ->
     fmri_cfg.write_text(
         f"""
 paths:
-  bids_fmri_root: "{bids_root}"
+  bids_fmri_root: "{_yaml_path(bids_root)}"
 fmri_preprocessing:
   engine: "docker"
   fmriprep:
-    fs_license_file: "{fs_license}"
+    fs_license_file: "{_yaml_path(fs_license)}"
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -230,7 +234,7 @@ def test_run_fmri_analysis_loads_fmri_yaml_into_runtime_config(tmp_path, monkeyp
     fmri_cfg.write_text(
         f"""
 paths:
-  bids_fmri_root: "{bids_root}"
+  bids_fmri_root: "{_yaml_path(bids_root)}"
 fmri_contrast:
   name: "from_yaml"
   condition_a:
@@ -300,8 +304,8 @@ def test_run_fmri_analysis_uses_yaml_defaults_for_first_level_cfg(tmp_path, monk
     fmri_cfg.write_text(
         f"""
 paths:
-  bids_fmri_root: "{bids_root}"
-  freesurfer_dir: "{tmp_path / 'fs'}"
+  bids_fmri_root: "{_yaml_path(bids_root)}"
+  freesurfer_dir: "{_yaml_path(tmp_path / 'fs')}"
 fmri_contrast:
   name: "yaml-defaults"
   condition_a:

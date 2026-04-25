@@ -320,7 +320,9 @@ class TestFmriPreprocessingGapfill(unittest.TestCase):
             step=lambda *args, **kwargs: None,
         )
 
-        with patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"), patch(
+        with patch("fmri_pipeline.pipelines.fmri_preprocessing._require_supported_container_host"), patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing._require_executable"
+        ), patch(
             "fmri_pipeline.pipelines.fmri_preprocessing._stream_subprocess"
         ) as mock_stream:
             p.process_subject("sub-0001", task="", progress=progress, dry_run=False)
@@ -508,6 +510,9 @@ class TestFmriPreprocessingGapfill(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {"HOME": str(home_dir), "EEG_PIPELINE_FREESURFER_LICENSE": ""},
+        ), patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing.FS_LICENSE_DEFAULT_PATH",
+            str(default_license),
         ), patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"):
             p.process_subject("0001", task="", dry_run=True)
 
@@ -548,7 +553,18 @@ class TestFmriPreprocessingGapfill(unittest.TestCase):
             }
         )
 
-        with patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"):
+        class _Tmp:
+            def cleanup(self):
+                return None
+
+        def _resolve_sanitized_mount(_bids_dir, logger):
+            logger.warning("using sanitized BIDS mount")
+            return tmp / "sanitized_bids", _Tmp()
+
+        with patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing._resolve_bids_mount_root",
+            side_effect=_resolve_sanitized_mount,
+        ), patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"):
             p.process_subject("0001", task="", dry_run=True)
 
         cmd_str = p.logger.info.call_args[0][1]
@@ -718,7 +734,9 @@ class TestFmriDeep(unittest.TestCase):
             p.logger = Mock()
             p.get_subject_logger = lambda subject: Mock()
 
-            with patch("fmri_pipeline.pipelines.fmri_preprocessing._require_executable"), patch(
+            with patch("fmri_pipeline.pipelines.fmri_preprocessing._require_supported_container_host"), patch(
+                "fmri_pipeline.pipelines.fmri_preprocessing._require_executable"
+            ), patch(
                 "fmri_pipeline.pipelines.fmri_preprocessing._stream_subprocess"
             ) as mock_stream:
                 p.process_subject("0001", task="", progress=SimpleNamespace(subject_start=lambda *a, **k: None, subject_done=lambda *a, **k: None, step=lambda *a, **k: None), dry_run=False)

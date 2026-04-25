@@ -51,17 +51,18 @@ class TestFmriPreprocessingHelpers(unittest.TestCase):
             (bids_dir / "._sub-01").write_text("", encoding="utf-8")
             (bids_dir / ".DS_Store").write_text("", encoding="utf-8")
 
-            sanitized_root, temp_dir, skipped_files = module._create_sanitized_bids_view(
-                bids_dir,
-                "/mount/bids",
-            )
+            with patch.object(module.os, "symlink") as mock_symlink:
+                sanitized_root, temp_dir, skipped_files = module._create_sanitized_bids_view(
+                    bids_dir,
+                    "/mount/bids",
+                )
 
             self.assertEqual(skipped_files, 2)
             self.assertTrue((sanitized_root / "sub-01" / "func").is_dir())
-            self.assertTrue((sanitized_root / "sub-01" / "func" / "sub-01_bold.nii.gz").is_symlink())
-            self.assertEqual(
-                (sanitized_root / "sub-01" / "func" / "sub-01_bold.nii.gz").readlink(),
-                Path("/mount/bids/sub-01/func/sub-01_bold.nii.gz"),
+            expected_target = sanitized_root / "sub-01" / "func" / "sub-01_bold.nii.gz"
+            mock_symlink.assert_called_once_with(
+                str(Path("/mount/bids/sub-01/func/sub-01_bold.nii.gz")),
+                str(expected_target),
             )
             temp_dir.cleanup()
 

@@ -191,7 +191,6 @@ class FmriPreprocessingPipeline(PipelineBase):
                 raise ValueError(
                     "fmri_preprocessing.engine must be 'docker' or 'apptainer'"
                 )
-            _require_supported_container_host("fMRI preprocessing")
 
             fmriprep_cfg = self.config.get("fmri_preprocessing.fmriprep", {}) or {}
             image = fmriprep_cfg.get("image", "nipreps/fmriprep:25.2.4")
@@ -341,7 +340,7 @@ class FmriPreprocessingPipeline(PipelineBase):
                 participant_args += extra_tokens
 
             if engine == "docker":
-                _require_executable("docker")
+                executable_name = "docker"
                 user_args: List[str] = []
                 if hasattr(os, "getuid") and hasattr(os, "getgid"):
                     user_args = ["--user", f"{os.getuid()}:{os.getgid()}"]
@@ -369,7 +368,7 @@ class FmriPreprocessingPipeline(PipelineBase):
                 cmd += [image]
                 cmd += participant_args
             else:
-                _require_executable("apptainer")
+                executable_name = "apptainer"
                 cmd = [
                     "apptainer",
                     "run",
@@ -399,6 +398,9 @@ class FmriPreprocessingPipeline(PipelineBase):
             if dry_run:
                 success = True
                 return
+
+            _require_supported_container_host("fMRI preprocessing")
+            _require_executable(executable_name)
 
             if progress is not None and hasattr(progress, "step"):
                 progress.step("Run fMRIPrep")

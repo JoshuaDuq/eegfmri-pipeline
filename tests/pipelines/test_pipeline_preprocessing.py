@@ -513,7 +513,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         cfg = DotConfig({"bids_root": "/tmp/bids"})
         with patch("eeg_pipeline.pipelines.preprocessing.PipelineBase.__init__", lambda self, name, config=None: setattr(self, "config", config or cfg)):
             p = PreprocessingPipeline(config=cfg)
-        self.assertEqual(str(p.bids_root), "/tmp/bids")
+        self.assertEqual(p.bids_root.as_posix(), "/tmp/bids")
         self.assertIn("preprocessing/_06a2_find_ica_artifacts", p._get_ica_fitting_steps(use_icalabel=False))
 
         p.logger = Mock()
@@ -538,8 +538,8 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         with patch("eeg_pipeline.pipelines.preprocessing.PipelineBase.__init__", lambda self, name, config=None: setattr(self, "config", config or cfg)):
             p = PreprocessingPipeline(config=cfg)
 
-        self.assertEqual(str(p.bids_root), "/tmp/bids-rest")
-        self.assertEqual(str(p.deriv_root), "/tmp/derivatives-rest")
+        self.assertEqual(p.bids_root.as_posix(), "/tmp/bids-rest")
+        self.assertEqual(p.deriv_root.as_posix(), "/tmp/derivatives-rest")
 
     def test_run_batch_updates_roots_for_runtime_rest_override(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -564,8 +564,8 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         with patch("eeg_pipeline.pipelines.preprocessing.PipelineBase.__init__", _fake_init):
             p = PreprocessingPipeline(config=cfg)
 
-        self.assertEqual(str(p.bids_root), "/tmp/bids-task")
-        self.assertEqual(str(p.deriv_root), "/tmp/derivatives-task")
+        self.assertEqual(p.bids_root.as_posix(), "/tmp/bids-task")
+        self.assertEqual(p.deriv_root.as_posix(), "/tmp/derivatives-task")
 
         with patch.object(PreprocessingPipeline, "_execute_steps"):
             p.run_batch(
@@ -576,8 +576,8 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 progress=_NoopProgress(),
             )
 
-        self.assertEqual(str(p.bids_root), "/tmp/bids-rest")
-        self.assertEqual(str(p.deriv_root), "/tmp/derivatives-rest")
+        self.assertEqual(p.bids_root.as_posix(), "/tmp/bids-rest")
+        self.assertEqual(p.deriv_root.as_posix(), "/tmp/derivatives-rest")
 
     def test_run_batch_writes_reproducibility_metadata(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline

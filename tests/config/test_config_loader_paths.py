@@ -181,8 +181,8 @@ def test_resolve_single_path_uses_project_root_for_known_prefixes(tmp_path) -> N
     resolved_data = loader._resolve_single_path("data/derivatives", config_dir, project_root)
     resolved_pkg = loader._resolve_single_path("eeg_pipeline/data", config_dir, project_root)
 
-    assert resolved_data == str((project_root / "data/derivatives").resolve())
-    assert resolved_pkg == str((project_root / "eeg_pipeline/data").resolve())
+    assert resolved_data == (project_root / "data/derivatives").resolve().as_posix()
+    assert resolved_pkg == (project_root / "eeg_pipeline/data").resolve().as_posix()
 
 
 def test_get_condition_column_candidates_uses_config_only() -> None:

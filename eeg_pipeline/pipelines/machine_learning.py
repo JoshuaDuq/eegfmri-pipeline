@@ -690,7 +690,7 @@ class MLPipeline(PipelineBase):
                     "subjects": subjects,
                     "status": "success",
                     "mode": mode,
-                    "results_dir": str(d),
+                    "results_dir": d.as_posix(),
                 }
                 for d in results_dirs
             ]
@@ -713,7 +713,7 @@ class MLPipeline(PipelineBase):
                 status=run_status,
                 error=run_error,
                 outputs={
-                    "results_dir": str(results_dir) if results_dir is not None else None,
+                    "results_dir": results_dir.as_posix() if results_dir is not None else None,
                 },
                 summary={
                     "n_subjects": len(subjects),

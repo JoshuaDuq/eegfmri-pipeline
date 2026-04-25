@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import warnings
 import unittest
+from unittest import mock
 
 import numpy as np
 
+import eeg_pipeline.analysis.features.erp as erp_features
 from eeg_pipeline.analysis.features.aperiodic import _parse_line_noise_config
 from eeg_pipeline.analysis.features.erp import (
     _compute_auc,
@@ -51,6 +53,20 @@ class TestScientificValidityIssues(unittest.TestCase):
         auc = _compute_auc(data, times)
         self.assertEqual(auc.shape, (1, 1))
         # Two finite contiguous segments: [0..1] and [3..4], each area=1.
+        self.assertAlmostEqual(float(auc[0, 0]), 2.0, places=7)
+
+    def test_erp_auc_does_not_depend_on_numpy_trapezoid(self):
+        times = np.array([0.0, 1.0, 2.0], dtype=float)
+        data = np.array([[[1.0, 1.0, 1.0]]], dtype=float)
+
+        with mock.patch.object(
+            erp_features.np,
+            "trapezoid",
+            side_effect=AttributeError("module 'numpy' has no attribute 'trapezoid'"),
+            create=True,
+        ):
+            auc = _compute_auc(data, times)
+
         self.assertAlmostEqual(float(auc[0, 0]), 2.0, places=7)
 
     def test_erp_peak_detection_rejects_nan_search_window(self):

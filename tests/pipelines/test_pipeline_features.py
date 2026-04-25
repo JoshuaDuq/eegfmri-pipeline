@@ -2466,7 +2466,7 @@ class TestFeatureGapfill(_FeatureImportMixin, unittest.TestCase):
         with patch("eeg_pipeline.pipelines.features.PipelineBase.__init__", _fake_init):
             p = FeaturePipeline(config=cfg)
 
-        self.assertEqual(str(p.deriv_root), "/tmp/derivatives-rest")
+        self.assertEqual(p.deriv_root.as_posix(), "/tmp/derivatives-rest")
 
     def test_precompute_complex_spatial_transform_branch(self):
         from eeg_pipeline.pipelines.features import _precompute_complex_tfr_if_needed

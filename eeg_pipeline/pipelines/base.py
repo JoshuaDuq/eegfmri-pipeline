@@ -113,7 +113,7 @@ class PipelineBase(ABC):
             return value
 
         if isinstance(value, Path):
-            return str(value)
+            return value.as_posix()
 
         if is_dataclass(value):
             try:

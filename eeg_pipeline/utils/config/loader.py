@@ -86,15 +86,15 @@ def _resolve_single_path(value: str, config_dir: Path, project_root: Path) -> st
 
     if _is_windows_drive_absolute_path(value):
         if os.name == "nt":
-            return str(Path(value).expanduser().resolve())
+            return Path(value).expanduser().resolve().as_posix()
         return value
 
     path_obj = Path(value).expanduser()
     if path_obj.is_absolute():
-        return str(path_obj.resolve())
+        return path_obj.resolve().as_posix()
     if value.startswith(_PROJECT_ROOT_PREFIXES):
-        return str((project_root / value).resolve())
-    return str((config_dir / value).resolve())
+        return (project_root / value).resolve().as_posix()
+    return (config_dir / value).resolve().as_posix()
 
 
 def resolve_config_paths(config: Dict[str, Any], config_path: Path) -> Dict[str, Any]:
