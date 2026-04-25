@@ -214,16 +214,6 @@ Utilities
    - Feature categories: per-category completion bars
    - Refreshable with ``R``
 
-.. dropdown:: History
-   :icon: history
-
-   Browsable list of past pipeline executions (persisted in
-   ``eeg_pipeline/cli/tui/.cache/history.json``):
-
-   - Pipeline name, mode, duration, relative timestamp, success/failure icon
-   - Delete individual records (``D``) or clear all (``C``)
-   - Up to 50 entries retained
-
 .. dropdown:: Pipeline Smoke Test
    :icon: checklist
 
@@ -244,8 +234,6 @@ Utilities
         - Action
       * - ``S``
         - Project Stats (opens Dashboard)
-      * - ``H``
-        - History
       * - ``V``
         - Validate data integrity
       * - ``X``
@@ -274,8 +262,6 @@ Keyboard Shortcuts
            - Go back / pop navigation stack
          * - ``D``
            - Open Dashboard (from main menu)
-         * - ``H``
-           - Open History (from main menu)
    .. tab-item:: Wizard
 
       .. list-table::
@@ -358,8 +344,6 @@ The TUI persists state across sessions in three locations:
      - Last selected pipeline, time ranges, band/ROI/spatial selections, per-pipeline advanced configuration
    * - ``data/derivatives/.tui_overrides.json``
      - Global setup overrides (task, paths)
-   * - ``eeg_pipeline/cli/tui/.cache/history.json``
-     - Execution history (up to 50 records)
 
 Python Environment Discovery
 ----------------------------

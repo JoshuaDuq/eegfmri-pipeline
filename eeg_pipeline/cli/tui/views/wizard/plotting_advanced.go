@@ -639,7 +639,7 @@ func (m Model) renderRow(row plottingAdvancedRow, plotByID map[string]PlotItem, 
 	case plottingRowOption:
 		return m.renderOption(row.opt, labelWidth, focused)
 	default:
-		panic(fmt.Sprintf("unhandled plotting row kind: %d", row.kind))
+		return []renderLine{{text: fmt.Sprintf("Unknown plotting row: %d", row.kind)}}
 	}
 }
 
@@ -1116,7 +1116,7 @@ func (m Model) renderPlotField(row plottingAdvancedRow, labelWidth int, focused 
 		}
 		return lines
 	default:
-		panic(fmt.Sprintf("unhandled plotting field: %d", row.plotField))
+		return []renderLine{{text: fmt.Sprintf("Unknown plotting field: %d", row.plotField)}}
 	}
 }
 
@@ -1755,7 +1755,7 @@ func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []rend
 		return []renderLine{m.renderValueLine(opt, "overwrite", val, "overwrite existing plot files", focused, labelWidth)}
 
 	default:
-		panic(fmt.Sprintf("unhandled plotting option: %d", opt))
+		return []renderLine{{text: fmt.Sprintf("Unknown plotting option: %d", opt)}}
 	}
 }
 

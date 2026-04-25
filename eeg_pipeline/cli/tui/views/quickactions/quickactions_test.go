@@ -84,13 +84,13 @@ func TestUpdateShortcutsAndEsc(t *testing.T) {
 	m := New()
 	m.Visible = true
 
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 	m = model.(Model)
 	if !m.Done {
 		t.Fatalf("expected shortcut to mark Done")
 	}
-	if m.SelectedAction != ActionHistory {
-		t.Fatalf("expected shortcut to select history, got %v", m.SelectedAction)
+	if m.SelectedAction != ActionValidate {
+		t.Fatalf("expected shortcut to select validate, got %v", m.SelectedAction)
 	}
 
 	m.Visible = true

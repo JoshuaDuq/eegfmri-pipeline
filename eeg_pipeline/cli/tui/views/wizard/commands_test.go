@@ -46,6 +46,22 @@ func containsSubsequence(items []string, subseq []string) bool {
 	return false
 }
 
+func normalizePathSeparators(value string) string {
+	return strings.ReplaceAll(value, "\\", "/")
+}
+
+func commandContainsFragment(cmd string, fragment string) bool {
+	return strings.Contains(normalizePathSeparators(cmd), normalizePathSeparators(fragment))
+}
+
+func argPathEquals(args []string, key string, want string) bool {
+	got, ok := argValue(args, key)
+	if !ok {
+		return false
+	}
+	return normalizePathSeparators(got) == normalizePathSeparators(want)
+}
+
 func TestParseConfigSetOverrides_ParsesAndFiltersEntries(t *testing.T) {
 	got := parseConfigSetOverrides("project.task=rest; analysis.min_subjects_for_group=4\n--set ml.n_perm=100;invalid")
 	want := []string{
@@ -160,10 +176,10 @@ func TestBuildCommand_IncludesBidsRestRootForFeatures(t *testing.T) {
 	m.derivRestRoot = "/data/derivatives/rest"
 
 	cmd := m.BuildCommand()
-	if !strings.Contains(cmd, "--bids-rest-root /data/bids/rest") {
+	if !commandContainsFragment(cmd, "--bids-rest-root /data/bids/rest") {
 		t.Fatalf("expected --bids-rest-root in command, got: %s", cmd)
 	}
-	if !strings.Contains(cmd, "--deriv-rest-root /data/derivatives/rest") {
+	if !commandContainsFragment(cmd, "--deriv-rest-root /data/derivatives/rest") {
 		t.Fatalf("expected --deriv-rest-root in command, got: %s", cmd)
 	}
 }
@@ -182,7 +198,7 @@ func TestBuildCommand_FmriPreprocessingRestModeIncludesRestRootsAndFlag(t *testi
 		"--deriv-rest-root /data/derivatives/rest",
 		"--task-is-rest",
 	} {
-		if !strings.Contains(cmd, fragment) {
+		if !commandContainsFragment(cmd, fragment) {
 			t.Fatalf("expected %q in command, got: %s", fragment, cmd)
 		}
 	}
@@ -201,14 +217,20 @@ func TestBuildFmriAnalysisAdvancedArgs_RestEmitsAtlasAndRestFlags(t *testing.T) 
 
 	for _, subseq := range [][]string{
 		{"--task-is-rest"},
-		{"--atlas-labels-img", "/tmp/atlas_labels.nii.gz"},
-		{"--atlas-labels-tsv", "/tmp/atlas_labels.tsv"},
 		{"--connectivity-kind", "correlation"},
-		{"--output-dir", "/tmp/rest-out"},
 	} {
 		if !containsSubsequence(args, subseq) {
 			t.Fatalf("expected %#v in args: %#v", subseq, args)
 		}
+	}
+	if !argPathEquals(args, "--atlas-labels-img", "/tmp/atlas_labels.nii.gz") {
+		t.Fatalf("expected --atlas-labels-img /tmp/atlas_labels.nii.gz in args: %#v", args)
+	}
+	if !argPathEquals(args, "--atlas-labels-tsv", "/tmp/atlas_labels.tsv") {
+		t.Fatalf("expected --atlas-labels-tsv /tmp/atlas_labels.tsv in args: %#v", args)
+	}
+	if !argPathEquals(args, "--output-dir", "/tmp/rest-out") {
+		t.Fatalf("expected --output-dir /tmp/rest-out in args: %#v", args)
 	}
 	if !containsString(args, "--standardize") {
 		t.Fatalf("expected --standardize in args: %#v", args)
@@ -242,7 +264,7 @@ func TestBuildCommand_FmriAnalysisRestIncludesRestRoots(t *testing.T) {
 		"--atlas-labels-img /tmp/atlas_labels.nii.gz",
 		"--task-is-rest",
 	} {
-		if !strings.Contains(cmd, fragment) {
+		if !commandContainsFragment(cmd, fragment) {
 			t.Fatalf("expected %q in command, got: %s", fragment, cmd)
 		}
 	}
@@ -273,10 +295,10 @@ func TestBuildCommand_IncludesBidsRestRootForPreprocessing(t *testing.T) {
 	m.derivRestRoot = "/data/derivatives/rest"
 
 	cmd := m.BuildCommand()
-	if !strings.Contains(cmd, "--bids-rest-root /data/bids/rest") {
+	if !commandContainsFragment(cmd, "--bids-rest-root /data/bids/rest") {
 		t.Fatalf("expected --bids-rest-root in command, got: %s", cmd)
 	}
-	if !strings.Contains(cmd, "--deriv-rest-root /data/derivatives/rest") {
+	if !commandContainsFragment(cmd, "--deriv-rest-root /data/derivatives/rest") {
 		t.Fatalf("expected --deriv-rest-root in command, got: %s", cmd)
 	}
 }
@@ -707,7 +729,7 @@ func TestBuildFmriAnalysisAdvancedArgs_SignatureDirEmittedWhenEnabled(t *testing
 	if !ok {
 		t.Fatalf("expected --signature-dir in args, got: %#v", args)
 	}
-	if v != "/tmp/signatures" {
+	if normalizePathSeparators(v) != "/tmp/signatures" {
 		t.Fatalf("unexpected --signature-dir value %q", v)
 	}
 }
@@ -871,13 +893,13 @@ func TestBuildFmriAnalysisAdvancedArgs_SecondLevelEmitsGroupFlags(t *testing.T) 
 	if !containsSubsequence(args, []string{"--group-model", "two-sample"}) {
 		t.Fatalf("expected --group-model two-sample, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--group-input-root", "/tmp/first-level"}) {
+	if !argPathEquals(args, "--group-input-root", "/tmp/first-level") {
 		t.Fatalf("expected --group-input-root, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--group-contrast-names", "pain"}) {
 		t.Fatalf("expected --group-contrast-names pain, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--group-covariates-file", "/tmp/groups.tsv"}) {
+	if !argPathEquals(args, "--group-covariates-file", "/tmp/groups.tsv") {
 		t.Fatalf("expected --group-covariates-file, got: %#v", args)
 	}
 	if !containsSubsequence(args, []string{"--group-subject-column", "participant_id"}) {
@@ -901,7 +923,7 @@ func TestBuildFmriAnalysisAdvancedArgs_SecondLevelEmitsGroupFlags(t *testing.T) 
 	if !containsSubsequence(args, []string{"--contrast-name", "patient_minus_control"}) {
 		t.Fatalf("expected second-level --contrast-name, got: %#v", args)
 	}
-	if !containsSubsequence(args, []string{"--output-dir", "/tmp/group-out"}) {
+	if !argPathEquals(args, "--output-dir", "/tmp/group-out") {
 		t.Fatalf("expected second-level --output-dir, got: %#v", args)
 	}
 	if !containsString(args, "--no-write-design-matrix") {
@@ -1421,7 +1443,7 @@ func TestBuildFeaturesAdvancedArgs_IncludesSourceSubjectsDirFlag(t *testing.T) {
 	m.sourceLocSubjectsDir = "/tmp/freesurfer_subjects"
 
 	args := m.buildFeaturesAdvancedArgs()
-	if !containsSubsequence(args, []string{"--source-subjects-dir", "/tmp/freesurfer_subjects"}) {
+	if !argPathEquals(args, "--source-subjects-dir", "/tmp/freesurfer_subjects") {
 		t.Fatalf("expected --source-subjects-dir /tmp/freesurfer_subjects in args, got: %#v", args)
 	}
 }

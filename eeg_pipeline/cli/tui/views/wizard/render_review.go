@@ -166,10 +166,43 @@ func formatBannerLines(label, value string, labelStyle, valueStyle lipgloss.Styl
 	if lipgloss.Width(inline) <= width {
 		return []string{inline}
 	}
-	return []string{
-		styles.TruncateLine("  "+labelStyle.Render(label), width),
-		styles.TruncateLine(renderedValue, width),
+	valueIndent := strings.Repeat(" ", 2+reviewLabelWidth)
+	lines := []string{styles.TruncateLine("  " + labelStyle.Render(label), width)}
+	lines = append(lines, wrapBannerValueLines(valueIndent, renderedValue, width)...)
+	return lines
+}
+
+func wrapBannerValueLines(indent, renderedValue string, width int) []string {
+	available := width - lipgloss.Width(indent)
+	if available < 1 {
+		return []string{styles.TruncateLine(indent+renderedValue, width)}
 	}
+	words := strings.Fields(renderedValue)
+	if len(words) == 0 {
+		return []string{styles.TruncateLine(indent, width)}
+	}
+	lines := make([]string, 0, 2)
+	current := ""
+	for _, word := range words {
+		candidate := word
+		if current != "" {
+			candidate = current + " " + word
+		}
+		if lipgloss.Width(candidate) <= available {
+			current = candidate
+			continue
+		}
+		if current == "" {
+			lines = append(lines, styles.TruncateLine(indent+word, width))
+			continue
+		}
+		lines = append(lines, styles.TruncateLine(indent+current, width))
+		current = word
+	}
+	if current != "" {
+		lines = append(lines, styles.TruncateLine(indent+current, width))
+	}
+	return lines
 }
 
 func (m Model) renderReviewRows(rows []reviewRow, width int) string {

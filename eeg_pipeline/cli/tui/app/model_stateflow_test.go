@@ -289,17 +289,6 @@ func TestHandleQuickAction_StateTransitions(t *testing.T) {
 		}
 	})
 
-	t.Run("opens-history", func(t *testing.T) {
-		next, cmd := base.handleQuickAction(quickactions.ActionHistory)
-		if cmd == nil {
-			t.Fatal("expected non-nil cmd")
-		}
-		updated := next.(Model)
-		if updated.state != StateHistory {
-			t.Fatalf("expected state=%v, got %v", StateHistory, updated.state)
-		}
-	})
-
 	t.Run("opens-global-setup", func(t *testing.T) {
 		next, cmd := base.handleQuickAction(quickactions.ActionConfig)
 		if cmd == nil {
@@ -314,6 +303,7 @@ func TestHandleQuickAction_StateTransitions(t *testing.T) {
 	t.Run("refresh-only-in-wizard", func(t *testing.T) {
 		m := base
 		m.state = StatePipelineWizard
+		m.task = "task"
 		m.selectedPipeline = types.PipelineBehavior
 		m.wizard = wizard.New(types.PipelineBehavior, ".")
 
@@ -324,6 +314,10 @@ func TestHandleQuickAction_StateTransitions(t *testing.T) {
 		updated := next.(Model)
 		if updated.state != StatePipelineWizard {
 			t.Fatalf("expected state=%v, got %v", StatePipelineWizard, updated.state)
+		}
+		expectedCacheKey := fmt.Sprintf("%s|%s", updated.task, updated.selectedPipeline.GetDataSource())
+		if updated.pendingSubjectsCacheKey != expectedCacheKey {
+			t.Fatalf("expected pendingSubjectsCacheKey=%q, got %q", expectedCacheKey, updated.pendingSubjectsCacheKey)
 		}
 	})
 
@@ -398,8 +392,9 @@ func TestHandleGlobalMessages_RefreshSubjectsOnlyInWizard(t *testing.T) {
 		t.Fatal("expected non-nil cmd")
 	}
 	updated := next.(Model)
-	if updated.pendingSubjectsCacheKey != "" {
-		t.Fatalf("expected pendingSubjectsCacheKey to remain empty (value-receiver), got %q", updated.pendingSubjectsCacheKey)
+	expectedCacheKey := fmt.Sprintf("%s|%s", updated.task, updated.selectedPipeline.GetDataSource())
+	if updated.pendingSubjectsCacheKey != expectedCacheKey {
+		t.Fatalf("expected pendingSubjectsCacheKey=%q, got %q", expectedCacheKey, updated.pendingSubjectsCacheKey)
 	}
 }
 

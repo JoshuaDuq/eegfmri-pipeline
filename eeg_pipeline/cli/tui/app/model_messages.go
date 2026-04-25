@@ -209,7 +209,7 @@ func (m *Model) handleMultigroupStatsDiscovered(msg messages.MultigroupStatsDisc
 	m.wizard.SetMultigroupStats(msg.Available, msg.Groups, msg.NFeatures, msg.NSignificant, msg.File)
 }
 
-func (m Model) handleRefreshSubjects() tea.Cmd {
+func (m *Model) handleRefreshSubjects() tea.Cmd {
 	if m.state != StatePipelineWizard {
 		return nil
 	}

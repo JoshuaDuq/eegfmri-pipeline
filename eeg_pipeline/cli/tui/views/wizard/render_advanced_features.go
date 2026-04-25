@@ -2558,7 +2558,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = val
 
 		default:
-			panic(fmt.Sprintf("unhandled features advanced option: %d", opt))
+			label = fmt.Sprintf("Unknown features option (%d)", opt)
+			value = "(unavailable)"
+			hint = "unsupported advanced option"
 		}
 
 		if lineIdx >= startLine && lineIdx < endLine {

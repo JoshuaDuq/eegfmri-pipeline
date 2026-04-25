@@ -128,7 +128,8 @@ func TestRenderContentUsesReviewPanelOnlyWhenWide(t *testing.T) {
 		t.Fatalf("expected review panel to show task and path readiness, got %q", wide)
 	}
 	if !strings.Contains(wide, "VALIDATION") ||
-		!strings.Contains(wide, "Select at least one analysis to run") {
+		!strings.Contains(wide, "Select at least one") ||
+		!strings.Contains(wide, "analysis to run") {
 		t.Fatalf("expected review panel to expose validation errors, got %q", wide)
 	}
 	if !strings.Contains(wide, "COMMAND") || !strings.Contains(wide, "eeg-pipeline behavior") {
@@ -260,7 +261,8 @@ func TestReviewPanelOmitsRedundantNextRowWhenBlocked(t *testing.T) {
 
 	blocked := stripWizardHeaderANSI(m.renderReviewPanel(48, 18))
 	if !strings.Contains(blocked, "VALIDATION") ||
-		!strings.Contains(blocked, "Select at least one analysis to run") {
+		!strings.Contains(blocked, "Select at least one") ||
+		!strings.Contains(blocked, "analysis to run") {
 		t.Fatalf("expected blocked review panel to surface the validation error, got %q", blocked)
 	}
 	if strings.Contains(blocked, "NEXT") || strings.Contains(blocked, "Fix:") {
@@ -289,7 +291,8 @@ func TestReviewPanelShowsSecondErrorInsteadOfPlusOneCounter(t *testing.T) {
 	}
 
 	rendered := stripWizardHeaderANSI(m.renderReviewPanel(48, 20))
-	if !strings.Contains(rendered, "Select at least one analysis to run") ||
+	if !strings.Contains(rendered, "Select at least one") ||
+		!strings.Contains(rendered, "analysis to run") ||
 		!strings.Contains(rendered, "Select at least one valid subject") {
 		t.Fatalf("expected both validation errors inline, got %q", rendered)
 	}
@@ -308,5 +311,28 @@ func TestReviewPanelSubjectsRowSilentWhileLoading(t *testing.T) {
 	}
 	if strings.Contains(rendered, "none selected") {
 		t.Fatalf("expected subjects row to suppress 'none selected' while loading, got %q", rendered)
+	}
+}
+
+func TestFormatBannerLinesIndentWrappedValidationMessage(t *testing.T) {
+	labelStyle := lipgloss.NewStyle()
+	valueStyle := lipgloss.NewStyle()
+
+	lines := formatBannerLines(
+		"VALIDATION",
+		"Select at least 1 subject(s)",
+		labelStyle,
+		valueStyle,
+		24, // force wrapped layout
+	)
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapped banner to render multiple lines, got %d: %q", len(lines), lines)
+	}
+
+	expectedPrefix := strings.Repeat(" ", 2+reviewLabelWidth)
+	for i, line := range lines[1:] {
+		if !strings.HasPrefix(line, expectedPrefix) {
+			t.Fatalf("expected wrapped value line %d to use %d-space indent, got %q", i+1, len(expectedPrefix), line)
+		}
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"github.com/eeg-pipeline/tui/views/dashboard"
 	"github.com/eeg-pipeline/tui/views/execution"
 	"github.com/eeg-pipeline/tui/views/globalsetup"
-	"github.com/eeg-pipeline/tui/views/history"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
 	"github.com/eeg-pipeline/tui/views/pipelinesmoke"
 	"github.com/eeg-pipeline/tui/views/quickactions"
@@ -29,7 +28,6 @@ func TestHandleKeyMessageRoutesShortcuts(t *testing.T) {
 		execution:     execution.New("eeg-pipeline behavior compute"),
 		global:        globalsetup.New(repoRoot),
 		dashboard:     dashboard.New(repoRoot),
-		historyMdl:    history.New(repoRoot),
 		quickActions:  quickactions.New(),
 	}
 
@@ -100,12 +98,12 @@ func TestHandleKeyMessageRoutesShortcuts(t *testing.T) {
 
 		m = base
 		m.state = StateMainMenu
-		next, cmd = m.handleKeyMessage(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+		next, cmd = m.handleKeyMessage(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
 		if cmd == nil {
-			t.Fatal("expected history command")
+			t.Fatal("expected config command")
 		}
-		if next.(Model).state != StateHistory {
-			t.Fatalf("expected history state, got %v", next.(Model).state)
+		if next.(Model).state != StateGlobalSetup {
+			t.Fatalf("expected global setup state, got %v", next.(Model).state)
 		}
 
 		m = base
@@ -133,7 +131,6 @@ func TestHandleGlobalMessagesRoutesDiscoveryAndConfigUpdates(t *testing.T) {
 		execution:        execution.New("echo test"),
 		global:           globalsetup.New(repoRoot),
 		dashboard:        dashboard.New(repoRoot),
-		historyMdl:       history.New(repoRoot),
 		quickActions:     quickactions.New(),
 	}
 
@@ -214,5 +211,39 @@ func TestHandleGlobalMessagesRoutesDiscoveryAndConfigUpdates(t *testing.T) {
 	})
 	if cmd != nil {
 		t.Fatalf("expected config error to short-circuit with nil cmd, got %T", cmd)
+	}
+}
+
+func TestUpdate_QuickActionsOverlayConsumesEscapeBeforeGlobalHandling(t *testing.T) {
+	repoRoot := t.TempDir()
+	m := Model{
+		state:            StatePipelineWizard,
+		navStack:         []AppState{StateMainMenu},
+		repoRoot:         repoRoot,
+		subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
+		wizard:           wizard.New(types.PipelineBehavior, repoRoot),
+		pipelineSmoke:    pipelinesmoke.New("task"),
+		execution:        execution.New("echo test"),
+		global:           globalsetup.New(repoRoot),
+		dashboard:        dashboard.New(repoRoot),
+		quickActions:     quickactions.New(),
+		selectedPipeline: types.PipelineBehavior,
+	}
+	m.quickActions.Show()
+
+	nextModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		t.Fatalf("expected nil cmd, got %T", cmd)
+	}
+
+	updated := nextModel.(Model)
+	if updated.state != StatePipelineWizard {
+		t.Fatalf("expected state to remain wizard while closing overlay, got %v", updated.state)
+	}
+	if len(updated.navStack) != 1 || updated.navStack[0] != StateMainMenu {
+		t.Fatalf("expected nav stack to remain unchanged, got %+v", updated.navStack)
+	}
+	if updated.quickActions.Visible {
+		t.Fatal("expected quick actions overlay to be hidden after escape")
 	}
 }

@@ -591,7 +591,6 @@ func (m Model) renderFooter() string {
 		{Key: "R", Label: "Resume", Compact: "Resume", Priority: 1},
 		{Key: "Q", Label: "Quit", Compact: "Quit", Priority: 1},
 		{Key: "D", Label: "Dashboard", Compact: "Dash", Priority: 2},
-		{Key: "H", Label: "History", Compact: "Hist", Priority: 2},
 	}
 
 	width := m.width - 4

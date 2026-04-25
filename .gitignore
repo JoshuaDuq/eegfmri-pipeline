@@ -52,6 +52,7 @@ pytest-cache-files-*/
 .gocache_local/
 eeg_pipeline/cli/tui/tui
 eeg_pipeline/cli/tui/eeg-tui
+eeg_pipeline/cli/tui/eeg-tui.exe
 eeg_pipeline/cli/tui/eeg-pipeline-tui
 eeg_pipeline/cli/tui/.cache/
 eeg_pipeline/cli/tui/.gomodcache/

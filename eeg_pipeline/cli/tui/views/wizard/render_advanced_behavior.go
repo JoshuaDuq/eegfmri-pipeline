@@ -1022,7 +1022,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Registry Classifiers JSON", jsonDisplay(m.behaviorFeatureRegistryClassifiersJSON, textFieldBehaviorFeatureRegistryClassifiersJSON), "JSON array for feature_classifiers"
 
 		default:
-			panic(fmt.Sprintf("unhandled behavior advanced option: %d", opt))
+			return fmt.Sprintf("Unknown behavior option (%d)", opt), "(unavailable)", "unsupported advanced option"
 		}
 	}
 

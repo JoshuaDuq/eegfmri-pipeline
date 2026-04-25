@@ -11,7 +11,6 @@ import (
 	"github.com/eeg-pipeline/tui/views/dashboard"
 	"github.com/eeg-pipeline/tui/views/execution"
 	"github.com/eeg-pipeline/tui/views/globalsetup"
-	"github.com/eeg-pipeline/tui/views/history"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
 	"github.com/eeg-pipeline/tui/views/pipelinesmoke"
 	"github.com/eeg-pipeline/tui/views/quickactions"
@@ -37,7 +36,6 @@ const (
 	StateExecution
 	StateGlobalSetup
 	StateDashboard
-	StateHistory
 )
 
 const (
@@ -94,7 +92,6 @@ type Model struct {
 	execution     execution.Model
 	global        globalsetup.Model
 	dashboard     dashboard.Model
-	historyMdl    history.Model
 	quickActions  quickactions.Model
 
 	// Execution tracking for history
@@ -179,6 +176,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Overlay-visible key events must be handled by the overlay first to avoid
+		// state transitions (e.g. esc pop) before the overlay can consume them.
+		if m.quickActions.Visible {
+			return m, nil
+		}
 		return m.handleKeyMessage(msg)
 	case tea.WindowSizeMsg:
 		m.handleWindowSize(msg)
@@ -242,8 +244,8 @@ func (m Model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleRestart()
 	case "d", "D":
 		return m.handleOpenDashboard()
-	case "h", "H":
-		return m.handleOpenHistory()
+	case "c", "C":
+		return m.handleOpenGlobalSetup()
 	case "ctrl+k":
 		return m.handleQuickActions()
 	}
@@ -289,15 +291,16 @@ func (m Model) handleOpenDashboard() (tea.Model, tea.Cmd) {
 	)
 }
 
-func (m Model) handleOpenHistory() (tea.Model, tea.Cmd) {
+func (m Model) handleOpenGlobalSetup() (tea.Model, tea.Cmd) {
 	if m.state != StateMainMenu {
 		return m, nil
 	}
-	m.historyMdl = history.New(m.repoRoot)
-	m.pushState(StateHistory)
+	m.global = globalsetup.New(m.repoRoot)
+	m.global.SetSize(m.width, m.height)
+	m.pushState(StateGlobalSetup)
 	return m, tea.Batch(
-		m.historyMdl.Init(),
-		func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+		m.global.Init(),
+		executor.LoadConfigKeys(m.repoRoot, globalsetup.DefaultConfigKeys()),
 	)
 }
 
@@ -323,9 +326,6 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) {
 
 	newDash, _ := m.dashboard.Update(msg)
 	m.dashboard = newDash.(dashboard.Model)
-
-	newHist, _ := m.historyMdl.Update(msg)
-	m.historyMdl = newHist.(history.Model)
 
 	newQA, _ := m.quickActions.Update(msg)
 	m.quickActions = newQA.(quickactions.Model)
@@ -360,8 +360,6 @@ func (m Model) View() string {
 		content = m.execution.View()
 	case StateDashboard:
 		content = m.dashboard.View()
-	case StateHistory:
-		content = m.historyMdl.View()
 	default:
 		content = "Unknown state"
 	}

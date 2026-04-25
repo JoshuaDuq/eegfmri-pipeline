@@ -32,7 +32,6 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 			global:           globalsetup.New(repoRoot),
 			execution:        execution.New("echo test"),
 			dashboard:        dashboard.New(repoRoot),
-			historyMdl:       history.New(repoRoot),
 			quickActions:     quickactions.New(),
 		}
 
@@ -80,7 +79,6 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 			global:           globalsetup.New(repoRoot),
 			execution:        execution.New("echo test"),
 			dashboard:        dashboard.New(repoRoot),
-			historyMdl:       history.New(repoRoot),
 			quickActions:     quickactions.New(),
 		}
 
@@ -104,7 +102,6 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 			global:           globalsetup.New(repoRoot),
 			execution:        execution.New("echo test"),
 			dashboard:        dashboard.New(repoRoot),
-			historyMdl:       history.New(repoRoot),
 			quickActions:     quickactions.New(),
 		}
 
@@ -128,7 +125,6 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 			global:           globalsetup.New(repoRoot),
 			execution:        execution.New("echo test"),
 			dashboard:        dashboard.New(repoRoot),
-			historyMdl:       history.New(repoRoot),
 			quickActions:     quickactions.New(),
 		}
 
@@ -152,7 +148,6 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 			global:           globalsetup.New(repoRoot),
 			execution:        execution.New("echo test"),
 			dashboard:        dashboard.New(repoRoot),
-			historyMdl:       history.New(repoRoot),
 			quickActions:     quickactions.New(),
 		}
 
@@ -165,29 +160,6 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 		}
 	})
 
-	t.Run("history", func(t *testing.T) {
-		m := Model{
-			state:            StateHistory,
-			navStack:         []AppState{StateMainMenu},
-			repoRoot:         repoRoot,
-			subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
-			pipelineSmoke:    pipelinesmoke.New("task"),
-			wizard:           wizard.New(types.PipelineBehavior, repoRoot),
-			global:           globalsetup.New(repoRoot),
-			execution:        execution.New("echo test"),
-			dashboard:        dashboard.New(repoRoot),
-			historyMdl:       history.New(repoRoot),
-			quickActions:     quickactions.New(),
-		}
-
-		next, cmd := m.delegateToCurrentView(tea.WindowSizeMsg{Width: 100, Height: 30})
-		if cmd != nil {
-			t.Fatalf("expected nil cmd, got %T", cmd)
-		}
-		if next.(Model).state != StateHistory {
-			t.Fatalf("expected history state to remain active")
-		}
-	})
 }
 
 func TestHandlePipelineSmokeUpdate_CompletesOrCancels(t *testing.T) {
@@ -204,7 +176,6 @@ func TestHandlePipelineSmokeUpdate_CompletesOrCancels(t *testing.T) {
 			global:           globalsetup.New(repoRoot),
 			execution:        execution.New("echo test"),
 			dashboard:        dashboard.New(repoRoot),
-			historyMdl:       history.New(repoRoot),
 			quickActions:     quickactions.New(),
 		}
 		m.pipelineSmoke.Done = true
@@ -232,7 +203,6 @@ func TestHandlePipelineSmokeUpdate_CompletesOrCancels(t *testing.T) {
 			global:           globalsetup.New(repoRoot),
 			execution:        execution.New("echo test"),
 			dashboard:        dashboard.New(repoRoot),
-			historyMdl:       history.New(repoRoot),
 			quickActions:     quickactions.New(),
 		}
 		m.pipelineSmoke.Done = true
@@ -263,7 +233,6 @@ func TestHandleWizardUpdate_ReadinessStartsExecution(t *testing.T) {
 		global:        globalsetup.New(repoRoot),
 		execution:     execution.New("echo test"),
 		dashboard:     dashboard.New(repoRoot),
-		historyMdl:    history.New(repoRoot),
 		quickActions:  quickactions.New(),
 	}
 	m.wizard.ReadyToExecute = true
@@ -292,7 +261,6 @@ func TestHandleGlobalSetupUpdate_DoneReturnsToMainMenu(t *testing.T) {
 		wizard:        wizard.New(types.PipelineBehavior, repoRoot),
 		execution:     execution.New("echo test"),
 		dashboard:     dashboard.New(repoRoot),
-		historyMdl:    history.New(repoRoot),
 		quickActions:  quickactions.New(),
 	}
 	m.global.Done = true
@@ -318,7 +286,6 @@ func TestHandleExecutionUpdate_RecordsHistoryOnCompletion(t *testing.T) {
 		wizard:        wizard.New(types.PipelineBehavior, repoRoot),
 		global:        globalsetup.New(repoRoot),
 		dashboard:     dashboard.New(repoRoot),
-		historyMdl:    history.New(repoRoot),
 		quickActions:  quickactions.New(),
 	}
 	m.execCommand = "eeg-pipeline behavior compute"

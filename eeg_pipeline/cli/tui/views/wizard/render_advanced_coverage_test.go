@@ -8,6 +8,43 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
+func TestPlottingAdvancedUnknownEntriesDoNotPanic(t *testing.T) {
+	m := New(types.PipelinePlotting, ".")
+	m.contentWidth = 100
+
+	t.Run("unknown-row-kind", func(t *testing.T) {
+		lines := m.renderRow(plottingAdvancedRow{kind: plottingAdvancedRowKind(-1)}, map[string]PlotItem{}, 24, false)
+		rendered := flattenRenderLines(lines)
+		if !strings.Contains(rendered, "Unknown plotting row") {
+			t.Fatalf("expected unknown row fallback text, got %q", rendered)
+		}
+	})
+
+	t.Run("unknown-plot-field", func(t *testing.T) {
+		lines := m.renderPlotField(
+			plottingAdvancedRow{
+				kind:      plottingRowPlotField,
+				plotID:    "missing",
+				plotField: plotItemConfigField(-1),
+			},
+			24,
+			false,
+		)
+		rendered := flattenRenderLines(lines)
+		if !strings.Contains(rendered, "Unknown plotting field") {
+			t.Fatalf("expected unknown field fallback text, got %q", rendered)
+		}
+	})
+
+	t.Run("unknown-option", func(t *testing.T) {
+		lines := m.renderOption(optionType(-1), 24, false)
+		rendered := flattenRenderLines(lines)
+		if !strings.Contains(rendered, "Unknown plotting option") {
+			t.Fatalf("expected unknown option fallback text, got %q", rendered)
+		}
+	})
+}
+
 func TestAdvancedRenderers_DoNotStartWithLeadingBlankLine(t *testing.T) {
 	tests := []struct {
 		name     string

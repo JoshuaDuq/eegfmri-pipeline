@@ -40,8 +40,6 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleExecutionUpdate(msg)
 	case StateDashboard:
 		return m.handleDashboardUpdate(msg)
-	case StateHistory:
-		return m.handleHistoryUpdate(msg)
 	}
 
 	return m, nil
@@ -245,14 +243,6 @@ func (m Model) handleDashboardUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) handleHistoryUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var newHist tea.Model
-	var cmd tea.Cmd
-	newHist, cmd = m.historyMdl.Update(msg)
-	m.historyMdl = newHist.(history.Model)
-	return m, cmd
-}
-
 func (m Model) handleQuickActionsOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var newQA tea.Model
 	var cmd tea.Cmd
@@ -280,14 +270,6 @@ func (m Model) handleQuickAction(action quickactions.ActionType) (tea.Model, tea
 			m.dashboard.Init(),
 			func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 		)
-	case quickactions.ActionHistory:
-		// Open History
-		m.historyMdl = history.New(m.repoRoot)
-		m.pushState(StateHistory)
-		return m, tea.Batch(
-			m.historyMdl.Init(),
-			func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
-		)
 	case quickactions.ActionConfig:
 		// Open Global Setup
 		m.global = globalsetup.New(m.repoRoot)
@@ -300,8 +282,7 @@ func (m Model) handleQuickAction(action quickactions.ActionType) (tea.Model, tea
 	case quickactions.ActionRefresh:
 		// Refresh subjects
 		if m.state == StatePipelineWizard {
-			m.wizard.SetSubjectsLoading()
-			return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+			return m, m.handleRefreshSubjects()
 		}
 	case quickactions.ActionValidate:
 		cmd := "eeg-pipeline validate --all-subjects"
@@ -371,8 +352,6 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 	case StatePipelineSmoke:
 		return m.popState()
 	case StateDashboard:
-		return m.popState()
-	case StateHistory:
 		return m.popState()
 	default:
 		return m.popState()

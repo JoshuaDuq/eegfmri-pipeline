@@ -15,7 +15,6 @@ type ActionType int
 
 const (
 	ActionStats ActionType = iota
-	ActionHistory
 	ActionValidate
 	ActionExport
 	ActionConfig
@@ -33,7 +32,6 @@ type Action struct {
 var (
 	quickActions = []Action{
 		{Type: ActionStats, Name: "Project Stats", Description: "Subject & feature analytics", Icon: "◈", Shortcut: "S"},
-		{Type: ActionHistory, Name: "History", Description: "Recent pipeline executions", Icon: "○", Shortcut: "H"},
 		{Type: ActionValidate, Name: "Validate", Description: "Check data integrity", Icon: "✦", Shortcut: "V"},
 		{Type: ActionExport, Name: "Export", Description: "Export features to CSV", Icon: "⇥", Shortcut: "X"},
 		{Type: ActionConfig, Name: "Config", Description: "View configuration", Icon: "⚙", Shortcut: "C"},
@@ -41,7 +39,6 @@ var (
 	}
 	shortcutMap = map[string]ActionType{
 		"s": ActionStats,
-		"h": ActionHistory,
 		"v": ActionValidate,
 		"x": ActionExport,
 		"c": ActionConfig,
