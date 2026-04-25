@@ -17,6 +17,7 @@ from fmri_pipeline.utils.bold_discovery import (
     discover_fmriprep_preproc_bold,
     get_tr_from_bold,
     select_consistent_run_source,
+    select_confound_columns,
     select_confounds,
     validate_design_matrices,
 )
@@ -237,6 +238,22 @@ def test_select_confounds_returns_empty_when_input_missing(tmp_path: Path) -> No
     confounds_df, columns = select_confounds(missing, strategy="auto")
     assert confounds_df is None
     assert columns == []
+
+
+def test_select_confound_columns_rejects_missing_values_in_selected_confounds() -> None:
+    confounds = pd.DataFrame(
+        {
+            "trans_x": [0.0, None],
+            "trans_y": [0.0, 0.1],
+            "trans_z": [0.0, 0.1],
+            "rot_x": [0.0, 0.1],
+            "rot_y": [0.0, 0.1],
+            "rot_z": [0.0, 0.1],
+        }
+    )
+
+    with pytest.raises(ValueError, match="missing values.*trans_x"):
+        select_confound_columns(confounds, strategy="auto")
 
 
 def test_validate_design_matrices_rejects_rank_deficient_designs() -> None:

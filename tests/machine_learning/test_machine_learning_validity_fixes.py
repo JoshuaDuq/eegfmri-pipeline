@@ -180,16 +180,62 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         groups = np.array(["sub-0001", "sub-0001", "sub-0001", "sub-0001"], dtype=object)
         y = np.array([0, 1, 0, 1], dtype=int)
 
-        train_idx, val_idx = cnn._split_train_val_indices(
-            groups_train=groups,
-            y_train=y,
-            seed=13,
-            val_fraction=0.25,
-        )
+        with self.assertRaisesRegex(ValueError, "at least 2 validation groups"):
+            cnn._split_train_val_indices(
+                groups_train=groups,
+                y_train=y,
+                seed=13,
+                val_fraction=0.25,
+            )
 
-        self.assertGreater(len(train_idx), 0)
-        self.assertGreater(len(val_idx), 0)
-        self.assertEqual(len(np.intersect1d(train_idx, val_idx)), 0)
+    def test_within_subject_inner_cv_failure_raises_instead_of_default_fit(self):
+        from sklearn.linear_model import Ridge
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        from eeg_pipeline.analysis.machine_learning import orchestration as orch
+
+        class FailingGridSearch:
+            def __init__(self, *args, **kwargs):
+                _ = (args, kwargs)
+
+            def fit(self, *args, **kwargs):
+                _ = (args, kwargs)
+                raise RuntimeError("synthetic inner cv failure")
+
+        pipe = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("regressor", Ridge()),
+            ]
+        )
+        X_train = np.arange(12, dtype=float).reshape(6, 2)
+        y_train = np.linspace(0.0, 1.0, 6)
+        blocks_train = np.array(["b1", "b1", "b2", "b2", "b3", "b3"], dtype=object)
+        inner_splits = [
+            (np.array([0, 1, 2, 3], dtype=int), np.array([4, 5], dtype=int)),
+            (np.array([0, 1, 4, 5], dtype=int), np.array([2, 3], dtype=int)),
+        ]
+
+        with patch.object(
+            orch,
+            "create_block_aware_inner_cv",
+            return_value=inner_splits,
+        ), patch.object(orch, "GridSearchCV", FailingGridSearch):
+            with self.assertRaisesRegex(RuntimeError, "inner CV failed"):
+                orch._fit_within_subject_fold(
+                    pipe=pipe,
+                    X_train=X_train,
+                    y_train=y_train,
+                    blocks_train=blocks_train,
+                    fold=1,
+                    subject_id="sub-0001",
+                    random_state=42,
+                    n_jobs=1,
+                    logger=Mock(),
+                    inner_splits=3,
+                    param_grid={"regressor__alpha": [0.1, 1.0]},
+                )
 
     def test_decode_binary_outcome_uses_stratified_group_kfold_for_grouped_numeric_cv(self):
         from eeg_pipeline.analysis.machine_learning import classification as clf

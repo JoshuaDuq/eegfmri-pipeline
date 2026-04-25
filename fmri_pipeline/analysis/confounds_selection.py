@@ -90,23 +90,26 @@ def select_fmriprep_confounds_columns(
         ]
     elif strategy in {"auto"}:
         # Prefer a widely used "24p + WM/CSF + FD" if present, otherwise fall back.
-        if all(c in avail for c in motion6):
-            base_cols = motion6 + motion_derivs
-            if all(c in avail for c in motion_power2 + motion_derivs_power2):
-                base_cols += motion_power2 + motion_derivs_power2
-            if "white_matter" in avail:
-                base_cols.append("white_matter")
-            if "csf" in avail:
-                base_cols.append("csf")
-            if "framewise_displacement" in avail:
-                base_cols.append("framewise_displacement")
+        missing_motion = [c for c in motion6 if c not in avail]
+        if missing_motion:
+            raise ValueError(
+                "confounds_strategy 'auto' is missing required fMRIPrep motion columns: "
+                f"{missing_motion}. Use an explicit strategy only after verifying the nuisance model."
+            )
 
-            # Upgrade: include CompCor components by default (if present).
-            if int(auto_compcor_n) > 0:
-                base_cols += _pick_compcor_components(available_columns, n=int(auto_compcor_n))
-        else:
-            # Non-fMRIPrep-like: conservative fallback.
-            base_cols = [c for c in ["csf", "white_matter", "framewise_displacement"] if c in avail]
+        base_cols = motion6 + motion_derivs
+        if all(c in avail for c in motion_power2 + motion_derivs_power2):
+            base_cols += motion_power2 + motion_derivs_power2
+        if "white_matter" in avail:
+            base_cols.append("white_matter")
+        if "csf" in avail:
+            base_cols.append("csf")
+        if "framewise_displacement" in avail:
+            base_cols.append("framewise_displacement")
+
+        # Upgrade: include CompCor components by default (if present).
+        if int(auto_compcor_n) > 0:
+            base_cols += _pick_compcor_components(available_columns, n=int(auto_compcor_n))
     else:
         raise ValueError(
             f"Unsupported confounds_strategy '{strategy}'. "

@@ -1,4 +1,6 @@
 import os
+from collections import Counter
+
 import mne
 import pyprep
 import pandas as pd
@@ -14,6 +16,21 @@ from . import io
 ###################################################################
 # Bad Channel Detection
 ###################################################################
+
+
+def _majority_bad_channels(repeated_bads):
+    """Return channels marked bad in a strict majority of independent PyPREP runs."""
+    if not repeated_bads:
+        return []
+
+    threshold = (len(repeated_bads) // 2) + 1
+    counts = Counter(
+        channel
+        for bads in repeated_bads
+        for channel in set(bads)
+    )
+    return sorted(channel for channel, count in counts.items() if count >= threshold)
+
 
 def run_bads_detection_single_file(
     file,
@@ -180,18 +197,25 @@ def run_bads_detection_single_file(
             if average_reref:
                 raw.set_eeg_reference("average")
 
-            all_bads = []
+            repeat_count = int(repeats)
+            if repeat_count < 1:
+                raise ValueError(f"pyprep repeats must be >= 1, got {repeats!r}.")
 
-            for _ in range(repeats):
+            initial_bads = sorted(set(raw.info["bads"]))
+            repeated_bads = []
+
+            for _ in range(repeat_count):
+                raw.info["bads"] = list(initial_bads)
                 nc = pyprep.NoisyChannels(raw=raw, random_state=random_state)
                 nc.find_bad_by_deviation()
                 nc.find_bad_by_correlation()
                 if ransac:
                     nc.find_bad_by_ransac()
-                bads = nc.get_bads()
-                all_bads.extend(bads)
-                all_bads = sorted(all_bads)
-                raw.info["bads"] = all_bads
+                repeated_bads.append(nc.get_bads())
+
+            pyprep_bads = _majority_bad_channels(repeated_bads)
+            all_bads = sorted(set(initial_bads + pyprep_bads))
+            raw.info["bads"] = list(all_bads)
 
             if custom_bad_dict is not None:
                 task = get_entities_from_fname(file)["task"]
@@ -213,6 +237,7 @@ def run_bads_detection_single_file(
                             ch for ch in custom_bad_dict[task][sub]
                             if ch not in raw.info["bads"] 
                         ]
+                        raw.info["bads"] = list(all_bads)
                     else:
                         removed_custom_bads = []
                 else:

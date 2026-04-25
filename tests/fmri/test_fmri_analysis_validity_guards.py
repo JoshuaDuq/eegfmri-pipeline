@@ -1087,6 +1087,16 @@ def test_explicit_confounds_strategy_requires_all_requested_columns() -> None:
         )
 
 
+def test_auto_confounds_strategy_requires_core_fmriprep_motion_columns() -> None:
+    available_columns = ["csf", "white_matter", "framewise_displacement"]
+
+    with pytest.raises(ValueError, match="auto.*missing required fMRIPrep motion columns"):
+        select_fmriprep_confounds_columns(
+            available_columns,
+            strategy="auto",
+        )
+
+
 def test_validate_consistent_trs_rejects_mixed_values(tmp_path) -> None:
     run_1 = tmp_path / "run-01_bold.nii.gz"
     run_2 = tmp_path / "run-02_bold.nii.gz"

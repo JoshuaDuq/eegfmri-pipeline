@@ -354,7 +354,28 @@ def select_confound_columns(
     )
     if not cols:
         return None
-    return confounds_df[cols].copy().fillna(0)
+
+    selected = confounds_df[cols].copy()
+    missing_cols = [col for col in selected.columns if selected[col].isna().any()]
+    if missing_cols:
+        raise ValueError(
+            "Selected fMRIPrep confounds contain missing values in columns "
+            f"{missing_cols}. Do not replace missing nuisance regressors with zero; "
+            "fix the confounds file or use an explicit censoring policy."
+        )
+
+    numeric = selected.apply(pd.to_numeric, errors="coerce")
+    non_numeric_cols = [
+        col for col in numeric.columns
+        if numeric[col].isna().any() or not np.isfinite(numeric[col].to_numpy(dtype=float)).all()
+    ]
+    if non_numeric_cols:
+        raise ValueError(
+            "Selected fMRIPrep confounds must be finite numeric values in columns "
+            f"{non_numeric_cols}."
+        )
+
+    return numeric
 
 
 def select_confounds(

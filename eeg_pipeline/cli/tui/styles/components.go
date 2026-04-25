@@ -70,8 +70,8 @@ var (
 )
 
 var (
-	FocusedInputStyle     = lipgloss.NewStyle().Foreground(Primary).Bold(true).Underline(true)
-	InputPlaceholderStyle = lipgloss.NewStyle().Foreground(Muted).Italic(true)
+	FocusedInputStyle     = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	InputPlaceholderStyle = lipgloss.NewStyle().Foreground(Muted)
 	PanelFocusedStyle     = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(BorderBright).
@@ -109,7 +109,7 @@ var (
 	LabelStyle       = lipgloss.NewStyle().Foreground(TextDim)
 	ValueStyle       = lipgloss.NewStyle().Foreground(Text)
 	ValueAccentStyle = lipgloss.NewStyle().Foreground(Accent).Bold(true)
-	HintStyle        = lipgloss.NewStyle().Foreground(Muted).Italic(true)
+	HintStyle        = lipgloss.NewStyle().Foreground(Muted)
 	MutedTextStyle   = lipgloss.NewStyle().Foreground(Muted)
 )
 

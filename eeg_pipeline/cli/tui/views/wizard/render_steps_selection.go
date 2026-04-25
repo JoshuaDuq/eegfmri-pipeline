@@ -618,9 +618,11 @@ func (m Model) renderSubjectSelection() string {
 	}
 
 	if m.subjectsLoading && len(m.subjects) > 0 {
+		b.WriteString("\n")
 		b.WriteString(m.renderLoadingBanner("Loading", "Refreshing subject status", m.subjectLoadingSpinner.Glyph()))
 	}
 	if m.subjectsLoading && len(m.subjects) == 0 {
+		b.WriteString("\n")
 		b.WriteString(m.renderLoadingBanner("Loading", "Discovering subjects and validating availability", m.subjectLoadingSpinner.Glyph()))
 		return b.String()
 	}

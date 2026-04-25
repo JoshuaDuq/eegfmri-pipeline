@@ -118,6 +118,23 @@ func TestRenderSubjectSelection_ShowsLoadingBannerWhenSubjectsMissing(t *testing
 	}
 }
 
+func TestRenderSubjectSelection_AddsBreathingRoomBetweenScopeAndLoading(t *testing.T) {
+	m := New(types.PipelineML, "/tmp")
+	m.contentWidth = 100
+	m.SetSubjectsLoading()
+
+	rendered := m.renderSubjectSelection()
+	if !strings.Contains(rendered, "Scope:") {
+		t.Fatalf("expected scope row in ML subject selection, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "LOADING") {
+		t.Fatalf("expected loading banner in ML subject selection, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "\n\nLOADING") {
+		t.Fatalf("expected a blank line between scope row and loading banner, got:\n%s", rendered)
+	}
+}
+
 func TestSetSubjectLoadError_ClearsStaleSubjectState(t *testing.T) {
 	m := New(types.PipelineBehavior, "/tmp")
 	m.height = 40

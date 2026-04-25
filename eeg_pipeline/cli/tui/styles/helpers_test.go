@@ -268,3 +268,20 @@ func TestRenderSectionLabelUsesThinMarker(t *testing.T) {
 		t.Fatalf("expected RenderSectionLabel() to use the ▏ hairline marker, got %q", label)
 	}
 }
+
+func TestReusableTypographyAvoidsSoftTerminalEffects(t *testing.T) {
+	styles := map[string]lipgloss.Style{
+		"HintStyle":             HintStyle,
+		"InputPlaceholderStyle": InputPlaceholderStyle,
+		"FocusedInputStyle":     FocusedInputStyle,
+	}
+
+	for name, style := range styles {
+		if style.GetItalic() {
+			t.Fatalf("%s should avoid italic text for crisp terminal rendering", name)
+		}
+		if style.GetUnderline() {
+			t.Fatalf("%s should avoid underlined text for crisp terminal rendering", name)
+		}
+	}
+}

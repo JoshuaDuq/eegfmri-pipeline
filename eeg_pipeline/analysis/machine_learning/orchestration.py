@@ -591,13 +591,15 @@ def _fit_within_subject_fold(
                 )
                 return gs.best_estimator_
             except Exception as exc:
-                logger.warning(
-                    "Within-subject fold %s (%s): inner CV failed (%s); fitting default pipeline.",
+                logger.error(
+                    "Within-subject fold %s (%s): inner CV failed (%s).",
                     int(fold),
                     str(subject_id),
                     exc,
                 )
-                return _fit_default_pipeline(pipe, X_train, y_train, fold, random_state)
+                raise RuntimeError(
+                    f"Within-subject fold {int(fold)} ({subject_id}): inner CV failed."
+                ) from exc
     
     return _fit_default_pipeline(pipe, X_train, y_train, fold, random_state)
 

@@ -177,7 +177,7 @@ def compute_band_data(
     pad_sec: Optional[float] = None,
     pad_cycles: Optional[float] = None,
     config: Any = None,
-) -> Optional[BandData]:
+) -> BandData:
     """
     Compute all band-related quantities once.
     
@@ -206,35 +206,25 @@ def compute_band_data(
     
     Returns
     -------
-    Optional[BandData]
-        Band data container or None on failure
+    BandData
+        Band data container.
     """
     if data.ndim != 3:
-        if logger:
-            logger.error(f"Expected 3D data, got {data.ndim}D")
-        return None
+        raise ValueError(f"Expected 3D data, got {data.ndim}D")
     
     if sfreq <= 0:
-        if logger:
-            logger.error(f"Invalid sampling frequency: {sfreq}")
-        return None
+        raise ValueError(f"Invalid sampling frequency: {sfreq}")
     
     if fmin >= fmax or fmin < 0:
-        if logger:
-            logger.error(f"Invalid frequency range: [{fmin}, {fmax}]")
-        return None
+        raise ValueError(f"Invalid frequency range: [{fmin}, {fmax}]")
     
     if fmax > sfreq / 2:
-        if logger:
-            logger.error(f"fmax {fmax} exceeds Nyquist frequency {sfreq / 2}")
-        return None
+        raise ValueError(f"fmax {fmax} exceeds Nyquist frequency {sfreq / 2}")
     
     n_epochs, n_channels, n_times = data.shape
     
     if n_times < 1:
-        if logger:
-            logger.error("Data has no time samples")
-        return None
+        raise ValueError("Data has no time samples")
     
     try:
         flat_data = data.reshape(-1, n_times)
@@ -288,7 +278,7 @@ def compute_band_data(
     except (ValueError, IndexError, RuntimeError) as exc:
         if logger:
             logger.error(f"Failed to compute band data for {band}: {exc}")
-        return None
+        raise RuntimeError(f"Failed to compute band data for {band}: {exc}") from exc
 
 
 def _parse_psd_config(config: Any, n_times: int, sfreq: float) -> dict[str, Any]:
@@ -331,7 +321,7 @@ def compute_psd(
     config: Any = None,
     logger: Optional[logging.Logger] = None,
     min_samples: int = MIN_SAMPLES_FOR_PSD,
-) -> Optional[PSDData]:
+) -> PSDData:
     """
     Compute power spectral density using Welch's method.
     
@@ -350,45 +340,33 @@ def compute_psd(
     
     Returns
     -------
-    Optional[PSDData]
-        PSD data container or None on failure
+    PSDData
+        PSD data container.
     """
     if data.ndim != 3:
-        if logger:
-            logger.error(f"Expected 3D data, got {data.ndim}D")
-        return None
+        raise ValueError(f"Expected 3D data, got {data.ndim}D")
     
     if sfreq <= 0:
-        if logger:
-            logger.error(f"Invalid sampling frequency: {sfreq}")
-        return None
+        raise ValueError(f"Invalid sampling frequency: {sfreq}")
     
     n_epochs, n_channels, n_times = data.shape
     
     if n_times < min_samples:
-        if logger:
-            logger.warning(
-                "PSD skipped: only %d samples (< MIN_SAMPLES=%d).",
-                n_times,
-                min_samples,
-            )
-        return None
+        raise ValueError(
+            f"PSD requires at least {int(min_samples)} samples, got {int(n_times)}."
+        )
     
     psd_params = _parse_psd_config(config, n_times, sfreq)
     
     if psd_params["fmin"] >= psd_params["fmax"]:
-        if logger:
-            logger.error(
-                f"Invalid frequency range: [{psd_params['fmin']}, {psd_params['fmax']}]"
-            )
-        return None
+        raise ValueError(
+            f"Invalid frequency range: [{psd_params['fmin']}, {psd_params['fmax']}]"
+        )
     
     if psd_params["fmax"] > sfreq / 2.0:
-        if logger:
-            logger.error(
-                f"fmax {psd_params['fmax']} exceeds Nyquist frequency {sfreq / 2.0}"
-            )
-        return None
+        raise ValueError(
+            f"fmax {psd_params['fmax']} exceeds Nyquist frequency {sfreq / 2.0}"
+        )
     
     try:
         psd_all, freqs = psd_array_welch(
@@ -405,7 +383,7 @@ def compute_psd(
     except (ValueError, IndexError, RuntimeError) as exc:
         if logger:
             logger.error("PSD computation failed: %s", exc)
-        return None
+        raise RuntimeError(f"PSD computation failed: {exc}") from exc
     
     return PSDData(freqs=freqs, psd=psd_all)
 
@@ -426,7 +404,7 @@ def compute_psd_bandpower(
     line_width: Optional[float] = None,
     n_harmonics: Optional[int] = None,
     logger: Optional[logging.Logger] = None,
-) -> Optional[dict[str, np.ndarray]]:
+) -> dict[str, np.ndarray]:
     """
     Compute PSD-integrated band power (scientifically valid for ratios/asymmetry).
     
@@ -470,29 +448,21 @@ def compute_psd_bandpower(
     
     Returns
     -------
-    Optional[dict[str, np.ndarray]]
+    dict[str, np.ndarray]
         Dictionary mapping band names to power arrays (n_epochs, n_channels).
-        Returns None on failure.
     """
     if data.ndim != 3:
-        if logger:
-            logger.error(f"Expected 3D data, got {data.ndim}D")
-        return None
+        raise ValueError(f"Expected 3D data, got {data.ndim}D")
     
     if sfreq <= 0:
-        if logger:
-            logger.error(f"Invalid sampling frequency: {sfreq}")
-        return None
+        raise ValueError(f"Invalid sampling frequency: {sfreq}")
     
     n_epochs, n_channels, n_times = data.shape
     
     if n_times < 64:
-        if logger:
-            logger.warning(
-                "PSD bandpower skipped: only %d samples (< 64 minimum).",
-                n_times,
-            )
-        return None
+        raise ValueError(
+            f"PSD bandpower requires at least 64 samples, got {int(n_times)}."
+        )
     
     nyquist = sfreq / 2.0
     fmax = min(fmax, nyquist - 0.5)
@@ -525,7 +495,7 @@ def compute_psd_bandpower(
     except Exception as exc:
         if logger:
             logger.error("PSD computation failed: %s", exc)
-        return None
+        raise RuntimeError(f"PSD computation failed: {exc}") from exc
     
     freqs = np.asarray(freqs, dtype=float)
     psds = np.asarray(psds, dtype=float)
@@ -701,7 +671,7 @@ def bandpass_filter_epochs(
     fmin: float,
     fmax: float,
     n_jobs: int = 1,
-) -> Optional[np.ndarray]:
+) -> np.ndarray:
     """
     Bandpass filter data (2D or 3D).
     
@@ -720,20 +690,20 @@ def bandpass_filter_epochs(
     
     Returns
     -------
-    Optional[np.ndarray]
-        Filtered data with same shape as input, or None on error
+    np.ndarray
+        Filtered data with same shape as input.
     """
     if data.ndim not in (2, 3):
-        return None
+        raise ValueError(f"Expected 2D or 3D data, got {data.ndim}D")
     
     if sfreq <= 0:
-        return None
+        raise ValueError(f"Invalid sampling frequency: {sfreq}")
     
     if fmin >= fmax or fmin < 0:
-        return None
+        raise ValueError(f"Invalid frequency range: [{fmin}, {fmax}]")
     
     if fmax > sfreq / 2:
-        return None
+        raise ValueError(f"fmax {fmax} exceeds Nyquist frequency {sfreq / 2}")
     
     try:
         original_shape = data.shape
@@ -759,5 +729,5 @@ def bandpass_filter_epochs(
         
         return filtered.reshape(original_shape)
         
-    except (ValueError, IndexError, RuntimeError):
-        return None
+    except (ValueError, IndexError, RuntimeError) as exc:
+        raise RuntimeError(f"Bandpass filtering failed: {exc}") from exc

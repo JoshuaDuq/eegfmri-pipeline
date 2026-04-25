@@ -11,7 +11,7 @@ from typing import Any, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import GroupShuffleSplit, LeaveOneGroupOut, train_test_split
+from sklearn.model_selection import GroupShuffleSplit, LeaveOneGroupOut
 
 from eeg_pipeline.analysis.machine_learning.classification import ClassificationResult
 from eeg_pipeline.analysis.machine_learning.config import get_ml_config
@@ -39,68 +39,34 @@ def _split_train_val_indices(
     seed: int,
     val_fraction: float,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    def _disjoint_random_split(n_samples: int) -> Tuple[np.ndarray, np.ndarray]:
-        if n_samples <= 1:
-            idx = np.arange(n_samples, dtype=int)
-            return idx, np.asarray([], dtype=int)
-        n_val = int(round(float(val_fraction) * n_samples))
-        n_val = max(1, min(n_samples - 1, n_val))
-        rng = np.random.default_rng(int(seed))
-        perm = rng.permutation(n_samples)
-        val_idx_local = np.asarray(perm[:n_val], dtype=int)
-        train_idx_local = np.asarray(perm[n_val:], dtype=int)
-        return train_idx_local, val_idx_local
-
     n = len(y_train)
-    if n < 6:
-        return _disjoint_random_split(n)
-
     unique_groups = np.unique(groups_train.astype(str))
-    if len(unique_groups) >= 2:
-        try:
-            gss = GroupShuffleSplit(n_splits=1, test_size=float(val_fraction), random_state=seed)
-            train_idx, val_idx = next(gss.split(np.zeros((n, 1)), y_train, groups=groups_train))
-            if len(train_idx) > 0 and len(val_idx) > 0:
-                return np.asarray(train_idx, dtype=int), np.asarray(val_idx, dtype=int)
-        except Exception as exc:
-            logger.debug("GroupShuffleSplit failed; falling back to deterministic group split: %s", exc)
 
-        # Keep validation group-disjoint to avoid leakage during early stopping.
-        # If grouped splitting is unavailable, split on group labels directly.
-        try:
-            rng = np.random.default_rng(int(seed))
-            shuffled_groups = np.asarray(unique_groups, dtype=object)[rng.permutation(len(unique_groups))]
-            n_val_groups = int(round(float(val_fraction) * len(shuffled_groups)))
-            n_val_groups = max(1, min(len(shuffled_groups) - 1, n_val_groups))
-            val_groups = set(str(g) for g in shuffled_groups[:n_val_groups].tolist())
-            val_mask = np.array([str(g) in val_groups for g in groups_train], dtype=bool)
-            train_mask = ~val_mask
-            if np.any(train_mask) and np.any(val_mask):
-                return np.flatnonzero(train_mask).astype(int), np.flatnonzero(val_mask).astype(int)
-        except Exception as exc:
-            logger.warning(
-                "Deterministic group split failed for CNN validation; using disjoint random split: %s",
-                exc,
-            )
-            return _disjoint_random_split(n)
+    if len(unique_groups) < 2:
+        raise ValueError(
+            "CNN validation requires at least 2 validation groups to avoid trial-level leakage."
+        )
 
-    idx_all = np.arange(n)
-    stratify = y_train if len(np.unique(y_train)) > 1 else None
     try:
-        train_idx, val_idx = train_test_split(
-            idx_all,
-            test_size=float(val_fraction),
-            random_state=seed,
-            shuffle=True,
-            stratify=stratify,
-        )
+        gss = GroupShuffleSplit(n_splits=1, test_size=float(val_fraction), random_state=seed)
+        train_idx, val_idx = next(gss.split(np.zeros((n, 1)), y_train, groups=groups_train))
+        if len(train_idx) > 0 and len(val_idx) > 0:
+            return np.asarray(train_idx, dtype=int), np.asarray(val_idx, dtype=int)
     except Exception as exc:
-        logger.warning(
-            "train_test_split failed for CNN validation split; using disjoint random split: %s",
-            exc,
-        )
-        train_idx, val_idx = _disjoint_random_split(n)
-    return np.asarray(train_idx, dtype=int), np.asarray(val_idx, dtype=int)
+        logger.debug("GroupShuffleSplit failed; falling back to deterministic group split: %s", exc)
+
+    # Keep validation group-disjoint to avoid leakage during early stopping.
+    rng = np.random.default_rng(int(seed))
+    shuffled_groups = np.asarray(unique_groups, dtype=object)[rng.permutation(len(unique_groups))]
+    n_val_groups = int(round(float(val_fraction) * len(shuffled_groups)))
+    n_val_groups = max(1, min(len(shuffled_groups) - 1, n_val_groups))
+    val_groups = set(str(g) for g in shuffled_groups[:n_val_groups].tolist())
+    val_mask = np.array([str(g) in val_groups for g in groups_train], dtype=bool)
+    train_mask = ~val_mask
+    if np.any(train_mask) and np.any(val_mask):
+        return np.flatnonzero(train_mask).astype(int), np.flatnonzero(val_mask).astype(int)
+
+    raise ValueError("Could not construct a group-disjoint CNN validation split.")
 
 
 def _channelwise_standardize(

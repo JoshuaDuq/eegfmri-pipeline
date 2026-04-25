@@ -51,7 +51,7 @@ fmri_preprocessing:
     low_mem: false
     longitudinal: false
     skull_strip_template: "OASIS30ANTs"
-    skull_strip_fixed_seed: false
+    skull_strip_fixed_seed: true
     bold2t1w_init: "register"  # "register" or "header"
     bold2t1w_dof: 6
     slice_time_ref: 0.5
@@ -67,7 +67,7 @@ fmri_preprocessing:
     medial_surface_nan: false
     no_msm: false
     me_output_echos: false
-    random_seed: 0
+    random_seed: 42
     extra_args: ""  # Parsed with shlex and appended verbatim to fMRIPrep CLI
 
 fmri_resting_state:
@@ -267,7 +267,7 @@ ica:
   n_components: 0.99
   l_freq: 1.0
   probability_threshold: 0.8
-  labels_to_keep: ["brain", "other"]
+  labels_to_keep: ["brain"]
 
 epochs:
   # IMPORTANT: Keep epochs.tmin earlier than the earliest baseline time window.

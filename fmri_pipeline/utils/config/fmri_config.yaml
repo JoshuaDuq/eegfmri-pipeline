@@ -74,7 +74,7 @@ fmri_preprocessing:
     fs_no_reconall: false       # Disable FreeSurfer recon-all
     longitudinal: false         # Unbiased structural template (increases runtime)
     skull_strip_template: "OASIS30ANTs"  # Template for brain extraction
-    skull_strip_fixed_seed: false  # Fixed seed for reproducibility
+    skull_strip_fixed_seed: true   # Fixed seed for reproducibility
     
     # BOLD processing options
     bold2t1w_init: "register"   # "register" or "header"
@@ -97,7 +97,7 @@ fmri_preprocessing:
     me_output_echos: false      # Output each echo separately
     
     # Reproducibility
-    random_seed: 0              # Run-to-run replicability (0 = non-deterministic)
+    random_seed: 42             # Run-to-run replicability
     
     # Validation options
     skip_bids_validation: false
