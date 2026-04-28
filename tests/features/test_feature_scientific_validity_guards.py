@@ -2396,6 +2396,7 @@ class TestScientificValidityGuards(unittest.TestCase):
             config=cfg,
             logger=logging.getLogger("itpc-precomputed-short"),
             frequency_bands={"alpha": [8.0, 12.0]},
+            spatial_modes=["global"],
         )
 
         with self.assertRaisesRegex(ValueError, "ITPC .*too short"):

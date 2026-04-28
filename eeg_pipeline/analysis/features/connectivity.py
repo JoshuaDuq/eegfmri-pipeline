@@ -2180,50 +2180,70 @@ def extract_connectivity_from_precomputed(
         else:
             seg_data = _slice_epochs(precomputed.data, seg_mask)
         if seg_data is None:
-            continue
+            raise ValueError(
+                f"Connectivity: requested segment '{seg_name}' has no valid samples."
+            )
 
         seg_n_times = int(seg_data.shape[-1])
         if seg_n_times < min_segment_samples:
-            continue
+            raise ValueError(
+                f"Connectivity: requested segment '{seg_name}' is too short "
+                f"({seg_n_times} samples < {min_segment_samples} required)."
+            )
         seg_duration = float(seg_n_times) / sfreq
         if min_segment_sec > 0 and seg_duration < min_segment_sec:
-            continue
+            raise ValueError(
+                f"Connectivity: requested segment '{seg_name}' is too short "
+                f"({seg_duration:.3f}s < {min_segment_sec:.3f}s)."
+            )
         req_cycles = max(float(min_cycles_per_band), 1.0) if np.isfinite(min_cycles_per_band) else 1.0
         min_viable_freq = (req_cycles / seg_duration) if seg_duration > 0 else np.inf
 
         for band in bands_use:
-            if band not in freq_bands:
-                continue
             if band in precomputed.band_data and getattr(precomputed.band_data[band], "fmin", None) is not None:
                 fmin = float(precomputed.band_data[band].fmin)
                 fmax = float(precomputed.band_data[band].fmax)
-            else:
+            elif band in freq_bands:
                 fmin, fmax = freq_bands[band]
+            else:
+                raise ValueError(
+                    f"Connectivity: requested band '{band}' has no frequency definition."
+                )
             try:
                 fmin = float(fmin)
                 fmax = float(fmax)
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Connectivity: invalid frequency definition for band '{band}'."
+                ) from exc
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
-                continue
+                raise ValueError(
+                    f"Connectivity: invalid frequency definition for band '{band}'."
+                )
 
-            # Skip band if segment is too short for required cycles in this band
             if fmax < min_viable_freq:
-                if logger is not None:
-                    logger.debug(f"Connectivity: skipping band {band} for segment {seg_name} (fmax {fmax} < min_viable {min_viable_freq:.2f}Hz)")
-                continue
+                raise ValueError(
+                    f"Connectivity: requested segment '{seg_name}' is too short for "
+                    f"band '{band}' (fmax {fmax:.2f}Hz < minimum viable "
+                    f"{min_viable_freq:.2f}Hz)."
+                )
             
             if not _validate_segment_duration_for_connectivity(seg_duration, fmin, min_cycles_per_band, band, logger):
-                continue
+                required_sec = min_cycles_per_band / fmin if fmin > 0 else np.inf
+                raise ValueError(
+                    f"Connectivity: requested segment '{seg_name}' is too short for "
+                    f"band '{band}' ({seg_duration:.3f}s < {required_sec:.3f}s)."
+                )
 
             freqs = np.linspace(fmin, fmax, max(n_freqs_per_band, 2))
             
             # Filter freqs to those that actually fit
             freqs = freqs[np.asarray(freqs) >= min_viable_freq]
             if freqs.size < 2:
-                if logger is not None:
-                    logger.debug(f"Connectivity: skipping band {band} for segment {seg_name} (not enough valid frequencies after filtering)")
-                continue
+                raise ValueError(
+                    f"Connectivity: requested segment '{seg_name}' leaves fewer than "
+                    f"2 viable frequencies for band '{band}'."
+                )
 
             use_n_cycles = n_cycles
             if conn_mode == "cwt_morlet":
@@ -2279,7 +2299,11 @@ def extract_connectivity_from_precomputed(
         nonlocal dynamic_state_skip_warned
         n_windows = int(len(windows_slices))
         if n_windows < int(conn_cfg.dynamic_min_windows):
-            return pd.DataFrame()
+            raise ValueError(
+                "Connectivity: dynamic connectivity requested but only "
+                f"{n_windows} windows are available; "
+                f"{int(conn_cfg.dynamic_min_windows)} required."
+            )
 
         if method == "wpli":
             window_vals = _compute_windowed_wpli(analytic_seg, pair_i, pair_j, windows_slices)
@@ -2291,7 +2315,9 @@ def extract_connectivity_from_precomputed(
             return pd.DataFrame()
 
         if window_vals.ndim != 3 or window_vals.shape[0] != n_epochs:
-            return pd.DataFrame()
+            raise ValueError(
+                "Connectivity: dynamic connectivity produced an invalid window matrix."
+            )
 
         mean_stat = f"{method}swmean"
         std_stat = f"{method}swstd"
@@ -2442,13 +2468,21 @@ def extract_connectivity_from_precomputed(
             else:
                 seg_data = _slice_epochs(precomputed.data, seg_mask)
             if seg_data is None:
-                continue
+                raise ValueError(
+                    f"Connectivity: requested dynamic segment '{seg_name}' has no valid samples."
+                )
             seg_n_times = int(seg_data.shape[-1])
             if seg_n_times < min_segment_samples:
-                continue
+                raise ValueError(
+                    f"Connectivity: requested dynamic segment '{seg_name}' is too short "
+                    f"({seg_n_times} samples < {min_segment_samples} required)."
+                )
             seg_duration = float(seg_n_times) / sfreq
             if min_segment_sec > 0 and seg_duration < min_segment_sec:
-                continue
+                raise ValueError(
+                    f"Connectivity: requested dynamic segment '{seg_name}' is too short "
+                    f"({seg_duration:.3f}s < {min_segment_sec:.3f}s)."
+                )
 
             windows_slices = _build_sliding_window_slices(
                 seg_n_times,
@@ -2458,7 +2492,11 @@ def extract_connectivity_from_precomputed(
                 min_segment_samples,
             )
             if len(windows_slices) < int(conn_cfg.dynamic_min_windows):
-                continue
+                raise ValueError(
+                    "Connectivity: dynamic connectivity requested but only "
+                    f"{len(windows_slices)} windows are available for segment "
+                    f"'{seg_name}'; {int(conn_cfg.dynamic_min_windows)} required."
+                )
 
             for band in bands_use:
                 if band not in precomputed.band_data:
@@ -2469,7 +2507,10 @@ def extract_connectivity_from_precomputed(
                 else:
                     analytic_seg = _slice_epochs(analytic_full, seg_mask)
                 if analytic_seg is None or analytic_seg.shape[-1] != seg_n_times:
-                    continue
+                    raise ValueError(
+                        f"Connectivity: dynamic analytic data for segment '{seg_name}' "
+                        f"and band '{band}' is missing or misaligned."
+                    )
                 for method in conn_cfg.dynamic_measures:
                     dynamic_tasks.append(
                         ("dynamic", (seg_name, band, method, analytic_seg, windows_slices))

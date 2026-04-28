@@ -534,10 +534,11 @@ def _parse_line_noise_config(config: Any) -> LineNoiseConfig:
         try:
             line_freq_cfg = config.get("preprocessing.line_freq", _DEFAULT_LINE_FREQ)
             line_freq_val = float(line_freq_cfg)
-            if np.isfinite(line_freq_val) and line_freq_val > 0:
-                default_line_freq = line_freq_val
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as exc:
+            raise ValueError("preprocessing.line_freq must be a finite positive number.") from exc
+        if not np.isfinite(line_freq_val) or line_freq_val <= 0:
+            raise ValueError("preprocessing.line_freq must be a finite positive number.")
+        default_line_freq = line_freq_val
 
     line_freqs_raw = aperiodic_cfg.get("line_noise_freqs", [default_line_freq])
     if line_freqs_raw is None:
@@ -547,10 +548,26 @@ def _parse_line_noise_config(config: Any) -> LineNoiseConfig:
             "feature_engineering.aperiodic.line_noise_freqs must be a list/tuple of numbers "
             f"(got {type(line_freqs_raw).__name__})."
         )
-    line_freqs = [float(f) for f in line_freqs_raw]
+    line_freqs = []
+    for freq_raw in line_freqs_raw:
+        try:
+            freq = float(freq_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "feature_engineering.aperiodic.line_noise_freqs must contain finite positive numbers."
+            ) from exc
+        if not np.isfinite(freq) or freq <= 0:
+            raise ValueError(
+                "feature_engineering.aperiodic.line_noise_freqs must contain finite positive numbers."
+            )
+        line_freqs.append(freq)
     
     line_width = float(aperiodic_cfg.get("line_noise_width_hz", _DEFAULT_LINE_WIDTH))
     n_harm = int(aperiodic_cfg.get("line_noise_harmonics", _DEFAULT_LINE_HARMONICS))
+    if not np.isfinite(line_width) or line_width <= 0:
+        raise ValueError("feature_engineering.aperiodic.line_noise_width_hz must be finite and > 0.")
+    if n_harm < 1:
+        raise ValueError("feature_engineering.aperiodic.line_noise_harmonics must be >= 1.")
     
     return LineNoiseConfig(exclude, line_freqs, line_width, n_harm)
 
@@ -1367,18 +1384,10 @@ def _extract_aperiodic_for_segment(
 
     max_freq_resolution_hz = float(aperiodic_cfg.get("max_freq_resolution_hz", 1.0))
     if freqs.size < 2:
-        if logger:
-            logger.warning(
-                "Aperiodic: segment '%s' has fewer than 2 frequency bins after preprocessing; skipping.",
-                segment_name,
-            )
-        return {
-            "__qc__": {
-                "segment": segment_name,
-                "skipped_reason": "insufficient_frequency_bins",
-                "n_freqs": int(freqs.size),
-            }
-        }
+        raise ValueError(
+            f"Aperiodic: requested segment '{segment_name}' has fewer than 2 "
+            "frequency bins after preprocessing."
+        )
     freq_steps = np.diff(freqs.astype(float))
     freq_steps = freq_steps[np.isfinite(freq_steps) & (freq_steps > 0)]
     median_df_hz = float(np.nanmedian(freq_steps)) if freq_steps.size else np.nan
@@ -1387,22 +1396,11 @@ def _extract_aperiodic_for_segment(
         and max_freq_resolution_hz > 0
         and (not np.isfinite(median_df_hz) or median_df_hz > max_freq_resolution_hz)
     ):
-        if logger:
-            logger.warning(
-                "Aperiodic: segment '%s' frequency resolution too coarse (median df=%.3f Hz > %.3f Hz); skipping.",
-                segment_name,
-                median_df_hz,
-                max_freq_resolution_hz,
-            )
-        return {
-            "__qc__": {
-                "segment": segment_name,
-                "skipped_reason": "coarse_frequency_resolution",
-                "median_df_hz": median_df_hz,
-                "max_freq_resolution_hz": float(max_freq_resolution_hz),
-                "n_freqs": int(freqs.size),
-            }
-        }
+        raise ValueError(
+            f"Aperiodic: requested segment '{segment_name}' frequency resolution "
+            f"is too coarse (median df={median_df_hz:.3f} Hz > "
+            f"{max_freq_resolution_hz:.3f} Hz)."
+        )
     
     # Transform to log space
     log_freqs = np.log10(freqs)
@@ -1710,20 +1708,25 @@ def extract_aperiodic_features(
         return pd.DataFrame(), [], qc_payload
     
     for seg_name, mask in segments.items():
-        if mask is None or np.sum(mask) < min_samples:
-            continue
+        if mask is None or not np.any(mask):
+            raise ValueError(
+                f"Aperiodic: requested segment '{seg_name}' has no valid samples."
+            )
+        if np.sum(mask) < min_samples:
+            raise ValueError(
+                f"Aperiodic: requested segment '{seg_name}' is too short "
+                f"({int(np.sum(mask))} samples < {min_samples} required)."
+            )
         
         t_seg = times[mask]
         seg_duration_sec = float(t_seg[-1] - t_seg[0]) if len(t_seg) > 1 else 0.0
         
         # Validate segment duration for stable aperiodic fits
         if seg_duration_sec < min_segment_sec:
-            logger.warning(
-                "Aperiodic: segment '%s' duration (%.2fs) is shorter than min_segment_sec (%.2fs); "
-                "skipping to avoid unstable slope/offset estimates.",
-                seg_name, seg_duration_sec, min_segment_sec
+            raise ValueError(
+                f"Aperiodic: requested segment '{seg_name}' is too short "
+                f"({seg_duration_sec:.2f}s < {min_segment_sec:.2f}s)."
             )
-            continue
         
         spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
         seg_data = _extract_aperiodic_for_segment(
@@ -1926,16 +1929,16 @@ def extract_aperiodic_from_precomputed(
     
     for seg_name, seg_mask in segments.items():
         if seg_mask is None or not np.any(seg_mask):
-            continue
+            raise ValueError(
+                f"Aperiodic: requested segment '{seg_name}' has no valid samples."
+            )
         
         seg_duration_sec = np.sum(seg_mask) / sfreq
         if seg_duration_sec < min_segment_sec:
-            if logger:
-                logger.info(
-                    "Aperiodic: segment '%s' too short (%.2fs < %.2fs); skipping.",
-                    seg_name, seg_duration_sec, min_segment_sec,
-                )
-            continue
+            raise ValueError(
+                f"Aperiodic: requested segment '{seg_name}' is too short "
+                f"({seg_duration_sec:.2f}s < {min_segment_sec:.2f}s)."
+            )
 
         seg_data = data_all[:, :, seg_mask]
         if subtract_evoked:
@@ -2004,12 +2007,10 @@ def extract_aperiodic_from_precomputed(
 
         max_freq_resolution_hz = float(aperiodic_cfg.get("max_freq_resolution_hz", 1.0))
         if freqs.size < 2:
-            qc_payload["segments"][seg_name] = {
-                "segment": seg_name,
-                "skipped_reason": "insufficient_frequency_bins",
-                "n_freqs": int(freqs.size),
-            }
-            continue
+            raise ValueError(
+                f"Aperiodic: requested segment '{seg_name}' has fewer than 2 "
+                "frequency bins after preprocessing."
+            )
         freq_steps = np.diff(freqs.astype(float))
         freq_steps = freq_steps[np.isfinite(freq_steps) & (freq_steps > 0)]
         median_df_hz = float(np.nanmedian(freq_steps)) if freq_steps.size else np.nan
@@ -2018,21 +2019,11 @@ def extract_aperiodic_from_precomputed(
             and max_freq_resolution_hz > 0
             and (not np.isfinite(median_df_hz) or median_df_hz > max_freq_resolution_hz)
         ):
-            if logger:
-                logger.warning(
-                    "Aperiodic: segment '%s' frequency resolution too coarse (median df=%.3f Hz > %.3f Hz); skipping.",
-                    seg_name,
-                    median_df_hz,
-                    max_freq_resolution_hz,
-                )
-            qc_payload["segments"][seg_name] = {
-                "segment": seg_name,
-                "skipped_reason": "coarse_frequency_resolution",
-                "median_df_hz": median_df_hz,
-                "max_freq_resolution_hz": float(max_freq_resolution_hz),
-                "n_freqs": int(freqs.size),
-            }
-            continue
+            raise ValueError(
+                f"Aperiodic: requested segment '{seg_name}' frequency resolution "
+                f"is too coarse (median df={median_df_hz:.3f} Hz > "
+                f"{max_freq_resolution_hz:.3f} Hz)."
+            )
 
         log_freqs = np.log10(np.maximum(freqs, 1e-10))
         log_psd = np.log10(np.maximum(psds, _MIN_POWER_LOG10))

@@ -299,8 +299,6 @@ def extract_band_ratios_from_precomputed(
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
 
     min_segment_samples = max(0, int(round(min_segment_sec * sfreq)))
-    warned_short: set[str] = set()
-    warned_cycles: set[tuple[str, str]] = set()
     
     for seg_label, seg_mask in segment_masks.items():
         if seg_mask is None or not np.any(seg_mask):
@@ -578,8 +576,6 @@ def extract_asymmetry_from_precomputed(
         )
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
     min_segment_samples = max(0, int(round(min_segment_sec * sfreq)))
-    warned_short: set[str] = set()
-    warned_cycles: set[tuple[str, str]] = set()
 
     emit_activation_convention = bool(
         get_config_value(config, "feature_engineering.asymmetry.emit_activation_convention", False)

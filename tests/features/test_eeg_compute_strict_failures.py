@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from eeg_pipeline.analysis.features.api import (
+    _compute_tfr_for_features,
     _extract_feature_with_error_handling,
     extract_precomputed_features,
 )
@@ -17,6 +18,7 @@ from eeg_pipeline.analysis.features.bursts import (
     extract_burst_features,
 )
 from eeg_pipeline.analysis.features.aperiodic import (
+    _parse_line_noise_config,
     extract_aperiodic_features,
     extract_aperiodic_from_precomputed,
 )
@@ -52,6 +54,7 @@ from eeg_pipeline.analysis.features.spectral import (
     extract_spectral_features,
 )
 from eeg_pipeline.types import BandData, PrecomputedData, TimeWindows
+from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
 from eeg_pipeline.utils.analysis.spectral import subtract_evoked
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_safe,
@@ -974,3 +977,249 @@ def test_complexity_fails_when_requested_segment_is_too_short() -> None:
 
     with pytest.raises(ValueError, match="Complexity.*too short"):
         extract_complexity_from_precomputed(precomputed, n_jobs=1)
+
+
+class _DummyTFR:
+    def __init__(self) -> None:
+        self.times = np.array([0.0, 0.5, 1.0], dtype=float)
+        self.data = np.ones((2, 1, 1, 3), dtype=float)
+        self.comment = "dummy"
+
+    def copy(self) -> "_DummyTFR":
+        new = _DummyTFR()
+        new.times = self.times.copy()
+        new.data = self.data.copy()
+        new.comment = self.comment
+        return new
+
+    def crop(self, tmin: float, tmax: float) -> "_DummyTFR":
+        self.times = self.times[(self.times >= tmin) & (self.times <= tmax)]
+        return self
+
+    def save(self, *_args, **_kwargs) -> None:
+        return None
+
+
+def test_tfr_feature_crop_rejects_out_of_range_request(monkeypatch, tmp_path) -> None:
+    info = mne.create_info(["Cz"], sfreq=100.0, ch_types="eeg")
+    epochs = mne.EpochsArray(np.ones((2, 1, 64), dtype=float), info, verbose=False)
+
+    def fake_compute_tfr_for_subject(*_args, **_kwargs):
+        return _DummyTFR(), None, [], None, None
+
+    monkeypatch.setattr(
+        "eeg_pipeline.analysis.features.api.compute_tfr_for_subject",
+        fake_compute_tfr_for_subject,
+    )
+    ctx = SimpleNamespace(
+        _original_epochs=epochs,
+        epochs=epochs,
+        aligned_events=pd.DataFrame(index=range(2)),
+        subject="sub-01",
+        task="task",
+        config=DotConfig({"feature_engineering": {"save_tfr_with_sidecar": False}}),
+        deriv_root=tmp_path,
+        logger=logging.getLogger("strict-tfr-feature-crop"),
+        windows=None,
+        feature_categories=[],
+        frequency_bands=None,
+        tfr=None,
+    )
+
+    with pytest.raises(ValueError, match="outside available TFR range"):
+        _compute_tfr_for_features(ctx, tmin=-0.5, tmax=0.5)
+
+
+def test_aperiodic_line_noise_rejects_invalid_preprocessing_fallback() -> None:
+    with pytest.raises(ValueError, match="preprocessing.line_freq"):
+        _parse_line_noise_config(
+            DotConfig(
+                {
+                    "preprocessing": {"line_freq": "bad"},
+                    "feature_engineering": {"aperiodic": {"exclude_line_noise": True}},
+                }
+            )
+        )
+
+
+def test_aperiodic_line_noise_rejects_invalid_explicit_frequencies() -> None:
+    with pytest.raises(ValueError, match="line_noise_freqs"):
+        _parse_line_noise_config(
+            DotConfig(
+                {
+                    "preprocessing": {"line_freq": 60.0},
+                    "feature_engineering": {
+                        "aperiodic": {
+                            "exclude_line_noise": True,
+                            "line_noise_freqs": [60.0, np.nan],
+                        }
+                    },
+                }
+            )
+        )
+
+
+def test_raw_aperiodic_fails_when_requested_segment_is_too_short(monkeypatch) -> None:
+    info = mne.create_info(["Cz"], sfreq=100.0, ch_types="eeg")
+    data = np.sin(2.0 * np.pi * 10.0 * np.arange(260) / 100.0)
+    epochs = mne.EpochsArray(data[None, None, :].repeat(2, axis=0), info, verbose=False)
+    short_mask = np.zeros(260, dtype=bool)
+    short_mask[:50] = True
+    long_mask = np.zeros(260, dtype=bool)
+    long_mask[50:] = True
+    windows = TimeWindows(
+        masks={"short": short_mask, "long": long_mask},
+        ranges={"short": (0.0, 0.49), "long": (0.5, 2.59)},
+        times=epochs.times,
+    )
+
+    def fake_segment(*_args, **_kwargs):
+        return {"fake": np.ones(2, dtype=float), "__qc__": {}}
+
+    monkeypatch.setattr(
+        "eeg_pipeline.analysis.features.aperiodic._extract_aperiodic_for_segment",
+        fake_segment,
+    )
+    ctx = SimpleNamespace(
+        config=DotConfig(
+            {
+                "preprocessing": {"line_freq": 60.0},
+                "feature_engineering": {
+                    "aperiodic": {"min_segment_sec": 1.0},
+                    "spatial_modes": ["global"],
+                },
+                "time_frequency_analysis": {"bands": {"alpha": [8.0, 12.0]}},
+            }
+        ),
+        epochs=epochs,
+        logger=logging.getLogger("strict-raw-aperiodic-short"),
+        windows=windows,
+        name=None,
+        spatial_modes=["global"],
+        frequency_bands={"alpha": [8.0, 12.0]},
+        train_mask=None,
+        analysis_mode="group_stats",
+    )
+
+    with pytest.raises(ValueError, match="Aperiodic.*too short"):
+        extract_aperiodic_features(ctx, ["alpha"])
+
+
+def _precomputed_for_partial_strict_segments() -> PrecomputedData:
+    n_epochs = 2
+    n_times = 320
+    times = np.arange(n_times, dtype=float) / 100.0
+    short_mask = np.zeros(n_times, dtype=bool)
+    short_mask[:50] = True
+    long_mask = np.zeros(n_times, dtype=bool)
+    long_mask[50:] = True
+    analytic_epoch = np.stack(
+        [
+            (1.0 + 0.2 * np.sin(2.0 * np.pi * times)) * np.exp(1j * 2.0 * np.pi * 10.0 * times),
+            (1.0 + 0.2 * np.cos(2.0 * np.pi * times)) * np.exp(1j * (2.0 * np.pi * 10.0 * times + 0.5)),
+        ],
+        axis=0,
+    )
+    analytic = np.repeat(analytic_epoch[None, :, :], n_epochs, axis=0)
+    return PrecomputedData(
+        data=np.real(analytic),
+        times=times,
+        sfreq=100.0,
+        ch_names=["C3", "C4"],
+        picks=np.array([0, 1], dtype=int),
+        windows=TimeWindows(
+            masks={"short": short_mask, "long": long_mask},
+            ranges={"short": (0.0, 0.49), "long": (0.5, 3.19)},
+            times=times,
+        ),
+        band_data={
+            "alpha": BandData(
+                band="alpha",
+                fmin=8.0,
+                fmax=12.0,
+                filtered=np.real(analytic),
+                analytic=analytic,
+                envelope=np.abs(analytic),
+                phase=np.angle(analytic),
+                power=np.abs(analytic) ** 2,
+            )
+        },
+        config=DotConfig(
+            {
+                "preprocessing": {"line_freq": 60.0},
+                "feature_engineering": {
+                    "aperiodic": {
+                        "min_segment_sec": 1.0,
+                        "psd_method": "welch",
+                        "fmin": 1.0,
+                        "fmax": 40.0,
+                    },
+                    "connectivity": {
+                        "measures": ["aec"],
+                        "dynamic_enabled": False,
+                        "min_segment_sec": 1.0,
+                        "min_segment_samples": 20,
+                    },
+                    "spatial_modes": ["global"],
+                },
+                "time_frequency_analysis": {"bands": {"alpha": [8.0, 12.0]}},
+            }
+        ),
+        logger=logging.getLogger("strict-partial-segments"),
+        spatial_modes=["global"],
+        frequency_bands={"alpha": [8.0, 12.0]},
+    )
+
+
+def test_precomputed_aperiodic_fails_when_requested_segment_is_too_short() -> None:
+    precomputed = _precomputed_for_partial_strict_segments()
+
+    with pytest.raises(ValueError, match="Aperiodic.*too short"):
+        extract_aperiodic_from_precomputed(precomputed, ["alpha"])
+
+
+def test_precomputed_connectivity_fails_when_requested_segment_is_too_short() -> None:
+    precomputed = _precomputed_for_partial_strict_segments()
+
+    with pytest.raises(ValueError, match="Connectivity.*too short"):
+        extract_connectivity_from_precomputed(precomputed, bands=["alpha"])
+
+
+def test_dynamic_connectivity_fails_when_requested_windows_are_insufficient() -> None:
+    precomputed = _precomputed_for_partial_strict_segments()
+    mask = np.ones(precomputed.data.shape[-1], dtype=bool)
+    precomputed.windows = TimeWindows(
+        masks={"active": mask},
+        ranges={"active": (0.0, float(precomputed.times[-1]))},
+        times=precomputed.times,
+    )
+    precomputed.config = DotConfig(
+        {
+            "feature_engineering": {
+                "connectivity": {
+                    "measures": ["aec"],
+                    "dynamic_enabled": True,
+                    "dynamic_measures": ["aec"],
+                    "dynamic_min_windows": 3,
+                    "sliding_window_len": 2.0,
+                    "sliding_window_step": 2.0,
+                    "min_segment_sec": 0.5,
+                    "min_segment_samples": 20,
+                },
+                "spatial_modes": ["global"],
+            },
+            "time_frequency_analysis": {"bands": {"alpha": [8.0, 12.0]}},
+        }
+    )
+
+    with pytest.raises(ValueError, match="dynamic.*windows"):
+        extract_connectivity_from_precomputed(precomputed, bands=["alpha"])
+
+
+def test_requested_roi_aggregation_requires_roi_definitions() -> None:
+    with pytest.raises(ValueError, match="ROI.*definitions"):
+        build_roi_map_if_needed(
+            ["roi", "global"],
+            ["Cz", "Pz"],
+            DotConfig({}),
+        )

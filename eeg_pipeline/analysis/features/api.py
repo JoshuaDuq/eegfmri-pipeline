@@ -549,19 +549,25 @@ def _compute_tfr_for_features(
         crop_max = tmax if tmax is not None else tfr.times[-1]
 
         if crop_min is not None and crop_max is not None and crop_min > crop_max:
-            crop_min, crop_max = crop_max, crop_min
-
-        crop_min = max(crop_min, tfr.times[0]) if crop_min is not None else tfr.times[0]
-        crop_max = min(crop_max, tfr.times[-1]) if crop_max is not None else tfr.times[-1]
-
-        if crop_min < crop_max:
-            ctx.logger.info(f"Cropping TFR to range [{crop_min:.3f}, {crop_max:.3f}]")
-            tfr = tfr.copy().crop(crop_min, crop_max)
-        else:
-            ctx.logger.warning(
-                f"Requested TFR range [{tmin}, {tmax}] is invalid or outside available data; "
-                "skipping crop."
+            raise ValueError(
+                f"Requested TFR crop start ({crop_min}) must be <= end ({crop_max})."
             )
+
+        tfr_min = float(tfr.times[0])
+        tfr_max = float(tfr.times[-1])
+        if crop_min < tfr_min or crop_max > tfr_max:
+            raise ValueError(
+                f"Requested TFR crop [{crop_min}, {crop_max}] is outside available "
+                f"TFR range [{tfr_min}, {tfr_max}]."
+            )
+
+        if crop_min >= crop_max:
+            raise ValueError(
+                f"Requested TFR crop [{crop_min}, {crop_max}] must span a non-empty interval."
+            )
+
+        ctx.logger.info(f"Cropping TFR to range [{crop_min:.3f}, {crop_max:.3f}]")
+        tfr = tfr.copy().crop(crop_min, crop_max)
 
     if ctx.config.get("feature_engineering.save_tfr_with_sidecar", False):
         # In multi-range extraction, the per-range TFR is cropped to the current window.

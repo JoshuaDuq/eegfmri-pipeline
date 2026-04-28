@@ -58,9 +58,17 @@ def build_roi_map_if_needed(
 
     roi_definitions = get_roi_definitions(config)
     if not roi_definitions:
-        return {}
+        raise ValueError(
+            "ROI spatial aggregation was requested, but no ROI definitions are configured."
+        )
 
-    return build_roi_map(channel_names, roi_definitions)
+    roi_map = build_roi_map(channel_names, roi_definitions)
+    if not roi_map:
+        raise ValueError(
+            "ROI spatial aggregation was requested, but no ROI definitions match "
+            "the available channels."
+        )
+    return roi_map
 
 
 def _get_aggregation_function(method: str) -> Callable:
@@ -152,14 +160,22 @@ def aggregate_by_spatial_modes(
     
     if _SPATIAL_MODE_ROI in spatial_modes:
         roi_definitions = get_roi_definitions(config)
-        if roi_definitions:
-            roi_map = build_roi_map(ch_names, roi_definitions)
-            for roi_name, channel_indices in roi_map.items():
-                roi_data = _aggregate_channels(
-                    data, np.array(channel_indices), aggregation_func, has_time_dimension
-                )
-                feature_name = _build_feature_name(feature_prefix, roi_name)
-                results[feature_name] = roi_data
+        if not roi_definitions:
+            raise ValueError(
+                "ROI spatial aggregation was requested, but no ROI definitions are configured."
+            )
+        roi_map = build_roi_map(ch_names, roi_definitions)
+        if not roi_map:
+            raise ValueError(
+                "ROI spatial aggregation was requested, but no ROI definitions match "
+                "the available channels."
+            )
+        for roi_name, channel_indices in roi_map.items():
+            roi_data = _aggregate_channels(
+                data, np.array(channel_indices), aggregation_func, has_time_dimension
+            )
+            feature_name = _build_feature_name(feature_prefix, roi_name)
+            results[feature_name] = roi_data
     
     if _SPATIAL_MODE_CHANNELS in spatial_modes:
         for channel_idx, channel_name in enumerate(ch_names):
