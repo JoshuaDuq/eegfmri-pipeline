@@ -39,9 +39,11 @@ For CV schemes, metrics, and the full configuration surface, see
 
 .. note::
 
-   Features must be extracted with ``--analysis-mode trial_ml_safe`` before
-   running any ML mode. Use ``eeg-pipeline info ml-feature-space`` to inspect
-   the resulting design matrix dimensions and check for missing families.
+   ML command execution enforces ``feature_engineering.analysis_mode=trial_ml_safe``
+   to prevent cross-trial leakage in CV workflows. The
+   ``--require-trial-ml-safe`` flag is retained for CLI compatibility. Use
+   ``eeg-pipeline info ml-feature-space`` to inspect design-matrix dimensions
+   and check for missing families.
 
 .. seealso::
 
@@ -105,7 +107,7 @@ Examples
          eeg-pipeline ml regression --subject 0001 --subject 0002 \
            --covariates predictor trial_index
 
-         # Enforce ML-safe mode (prevents CV leakage from cross-trial features)
+         # Optional compatibility flag; ML already enforces trial_ml_safe
          eeg-pipeline ml regression --subject 0001 --subject 0002 \
            --require-trial-ml-safe
 

@@ -203,9 +203,11 @@ Subject-level statistical contrasts between experimental conditions via nilearn'
 
 .. warning::
 
-   First-level GLM and trial-wise beta estimation now require ``input_source=fmriprep``.
-   Raw BIDS inputs are rejected because they bypass fMRIPrep preprocessing, spatial
-   normalization, and the standard confounds outputs that the downstream models assume.
+   ``input_source`` is fixed to ``fmriprep`` at the CLI level. By default
+   (``require_fmriprep=true``), missing preprocessed BOLD is a hard error.
+   If ``require_fmriprep=false`` is set, missing runs may fall back to raw BIDS
+   BOLD, which can bypass fMRIPrep confounds/normalization and reduce inferential
+   validity.
 
 Confound Regression
 ~~~~~~~~~~~~~~~~~~~~
@@ -454,9 +456,11 @@ Atlas-based ROI connectivity analysis from fMRIPrep resting-state BOLD data.
 
 .. warning::
 
-   Resting-state connectivity now requires ``input_source=fmriprep``. Raw BIDS inputs are
-   rejected because, without fMRIPrep preprocessing and confounds, motion and spatial
-   misalignment can dominate the ROI correlation structure.
+   ``input_source`` is fixed to ``fmriprep``. With default
+   ``require_fmriprep=true``, missing preprocessed BOLD raises a hard error.
+   If ``require_fmriprep=false`` is used, missing runs may fall back to raw BIDS
+   BOLD, which can materially change motion/confound control and ROI connectivity
+   estimates.
 
 **Per-subject workflow:**
 

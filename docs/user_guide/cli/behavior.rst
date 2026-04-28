@@ -3,7 +3,8 @@ Behavioral Analysis
 
 Statistical analyses linking EEG features to behavioral outcomes at the
 trial level. All joins between features and behavioral targets use the
-canonical ``trial_id`` from ``proc-clean_events.tsv``.
+canonical ``trial_id`` from aligned events (typically ``proc-clean_events.tsv``
+when available).
 
 .. code-block:: bash
 
@@ -36,7 +37,8 @@ order regardless of the order you specify them.
    * - Computation
      - What it produces
    * - ``trial_table``
-     - Merges ``proc-clean_events.tsv`` with feature Parquet tables on
+     - Merges aligned events (typically ``proc-clean_events.tsv`` when available)
+       with feature Parquet tables on
        ``trial_id``. Required by all subsequent stages.
    * - ``predictor_residual``
      - Residualizes the behavioral outcome on a continuous predictor using

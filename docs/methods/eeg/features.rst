@@ -4,7 +4,8 @@ EEG Feature Extraction
 .. raw:: html
 
    <p class="hero-lede">
-     Sixteen trial-level feature families extracted from clean epochs.
+    Sixteen trial-level feature families are available; fourteen are enabled
+    by default in ``eeg_config.yaml``.
      Supports task-based (event-locked, one row per trial) and resting-state
      (segment-averaged) paradigms. All families are config-driven and
      composable. See the <a href="../../glossary.html">Glossary</a> for
@@ -21,8 +22,9 @@ EEG Feature Extraction
 
    .. grid-item-card:: Outputs
 
-      ``features/<family>/features_<family>.parquet`` +
-      ``features/<family>/metadata/features_<family>.json``
+      Canonical ``features/<family>/features_<family>.parquet`` +
+      ``features/<family>/metadata/features_<family>.json`` outputs
+      (some families also emit auxiliary tables)
 
    .. grid-item-card:: CLI
 
@@ -142,7 +144,7 @@ Controlled by ``feature_engineering.spatial_modes``:
    * - ``global``
      - ``*_global_*``, columns ending with ``_global``
 
-Default when not set: ``["roi", "global"]``.
+Default in ``eeg_config.yaml``: ``["roi", "channels", "global"]``.
 
 Time Windows
 ------------
@@ -694,7 +696,7 @@ Output Files
 
 .. code-block:: text
 
-   derivatives/<study>/sub-<id>/<task>/eeg/features/<family>/
+   derivatives/<study>/sub-<id>/eeg/features/<family>/
    ├── features_<family>.parquet
    └── metadata/
        └── features_<family>.json

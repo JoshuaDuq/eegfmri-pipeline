@@ -117,7 +117,7 @@ Key Options
      - Description
      - Default
    * - ``--input-source``
-     - ``fmriprep`` only; raw BIDS inputs are rejected for inferential analyses
+     - ``fmriprep`` only (CLI choice); with ``--no-require-fmriprep``, missing fMRIPrep BOLD can fall back to raw BIDS BOLD
      - ``fmriprep``
    * - ``--hrf-model``
      - ``spm``, ``flobs``, ``fir``
@@ -143,6 +143,9 @@ Key Options
    * - ``--group-permutation-inference``
      - Add max-T permutation inference to second-level mode; avoid this for repeated-measures designs until restricted permutations are implemented
      - disabled
+   * - ``--no-require-fmriprep``
+     - Permit fallback to raw BIDS BOLD when matching fMRIPrep preprocessed BOLD is missing
+     - disabled (strict fMRIPrep required by default)
    * - ``--plots``
      - Generate per-subject figures
      - disabled

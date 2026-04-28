@@ -15,8 +15,8 @@ Behavioral Statistics
 
    .. grid-item-card:: Inputs
 
-      ``*_proc-clean_events.tsv`` · feature Parquet tables ·
-      ``behavior_config.yaml``
+      Aligned events (typically ``*_proc-clean_events.tsv`` when available) ·
+      feature Parquet tables · ``behavior_config.yaml``
 
    .. grid-item-card:: Outputs
 

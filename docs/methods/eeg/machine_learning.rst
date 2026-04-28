@@ -4,10 +4,11 @@ Machine Learning
 .. raw:: html
 
    <p class="hero-lede">
-     Trial-level predictive modeling under nested LOSO cross-validation.
-     Supports continuous regression and binary classification. The subject
-     is the statistical unit — all primary metrics are subject-level
-     aggregates.
+    Trial-level predictive modeling with LOSO as the primary cross-validation
+    scheme (and optional within-subject CV for eligible modes). Supports
+    continuous regression, binary classification, model comparison, and
+    interpretability/uncertainty analyses. The subject is the statistical
+    unit — all primary metrics are subject-level aggregates.
    </p>
 
 .. grid:: 2
@@ -16,8 +17,8 @@ Machine Learning
 
    .. grid-item-card:: Inputs
 
-      Feature Parquet tables · behavioral target column from
-      ``*_proc-clean_events.tsv``
+      Feature Parquet tables · behavioral target column from events
+      (typically ``*_proc-clean_events.tsv`` when available)
 
    .. grid-item-card:: Outputs
 
@@ -205,8 +206,8 @@ Combined L1 + L2 penalized regression:
    \frac{1}{2n}\|y - X\beta\|_2^2
    + \alpha\!\left[\rho\|\beta\|_1 + \frac{1-\rho}{2}\|\beta\|_2^2\right].
 
-Default hyperparameter grid: :math:`\alpha \in \{0.01, 0.1, 1, 10\}`,
-:math:`\rho \in \{0.1, 0.5, 0.9\}`, :math:`\theta \in \{0, 0.01, 0.1\}`.
+Default hyperparameter grid: :math:`\alpha \in \{0.001, 0.01, 0.1, 1, 10\}`,
+:math:`\rho \in \{0.2, 0.5, 0.8\}`, :math:`\theta \in \{0, 0.01, 0.1\}`.
 
 Ridge
 ~~~~~
@@ -411,25 +412,41 @@ subject-level coverage summaries.
 Output Structure
 ----------------
 
+Each ML mode writes to its own subdirectory under
+``derivatives/machine_learning/``.
+
 .. code-block:: text
 
    derivatives/machine_learning/
    ├── regression/
-   │   ├── results_summary.tsv          # Subject-level r, R², MAE, RMSE
-   │   ├── predictions_all_subjects.tsv # Trial-level predictions and targets
-   │   ├── permutation_pvalues.tsv      # Permutation test p-values
-   │   ├── shap_importance.tsv          # Per-feature SHAP values
-   │   ├── model_comparison.tsv         # ElasticNet vs Ridge vs RF
-   │   └── figures/
-   │       ├── scatter_predicted_vs_actual.png
-   │       ├── feature_importance_shap.png
-   │       └── permutation_distribution.png
-   └── classification/
-       ├── results_summary.tsv
-       ├── predictions_all_subjects.tsv
-       └── figures/
-           ├── roc_curve.png
-           └── confusion_matrix.png
+   │   ├── data/loso_predictions.tsv
+   │   ├── metrics/metrics_summary.json
+   │   ├── metrics/per_subject_correlations.tsv
+   │   └── ...
+   ├── classification/
+   │   ├── data/loso_predictions.tsv
+   │   ├── metrics/metrics_summary.json
+   │   ├── metrics/per_subject_metrics.tsv
+   │   └── ...
+   ├── time_generalization/
+   │   └── time_generalization_regression.npz
+   ├── model_comparison/
+   │   ├── model_comparison.tsv
+   │   └── metrics/model_comparison_summary.json
+   ├── incremental_validity/
+   │   ├── incremental_validity.tsv
+   │   └── metrics/incremental_validity_summary.json
+   ├── shap/
+   │   └── importance/
+   │       ├── shap_importance.tsv
+   │       └── shap_importance_by_group_band.tsv
+   ├── uncertainty/
+   │   ├── prediction_intervals.tsv
+   │   └── metrics/per_subject_uncertainty.tsv
+   └── permutation_importance/
+       └── importance/
+           ├── permutation_importance.tsv
+           └── permutation_importance_by_group_band.tsv
 
 .. seealso::
 

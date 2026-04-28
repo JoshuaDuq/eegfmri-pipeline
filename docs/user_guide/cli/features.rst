@@ -97,15 +97,15 @@ Key Options
        disables cross-trial leakage paths)
      - ``group_stats``
    * - ``--spatial-transform``
-     - Apply ``csd`` (surface Laplacian) or ``none`` before phase-based
-       families; per-family overrides via config
+     - Global spatial transform override (``csd``, ``laplacian``, or ``none``)
+       applied to all families for this run; per-family defaults remain configurable
      - per-family config default
    * - ``--spatial``
      - Spatial aggregation scopes: ``roi``, ``channels``, ``global``
      - all scopes
    * - ``--frequency-bands``
      - Custom band definitions as ``name:f_min:f_max`` (space-separated);
-       appends to or replaces config bands
+       replaces config bands for this run
      - config ``frequency_bands``
    * - ``--rois``
      - Custom ROI definitions as ``name:ch1,ch2,...``
@@ -119,11 +119,11 @@ Key Options
      - disabled
    * - ``--compute-change-scores``
      - Append change-score columns (``difference``, ``percent``,
-       ``log_ratio``) for baseline/active pairs
+       ``log_ratio``; ``ratio`` accepted as an alias of ``percent``) for baseline/active pairs
      - config-dependent (enabled in the default config)
    * - ``--change-scores-transform``
      - Change-score transform for derived columns
-     - ``difference``
+     - ``difference`` (``ratio`` accepted as alias of ``percent``)
    * - ``--change-scores-window-pairs``
      - Explicit window pairs for change scores (e.g., ``baseline:active``)
      - ``baseline:active``

@@ -69,6 +69,8 @@ Select groups with ``--groups``. Use ``--all-plots`` to render everything.
      - Burst rate, duration, and amplitude summaries
    * - ``erp``
      - ERP component amplitude and latency summaries
+   * - ``sourcelocalization``
+     - Source-estimate visualizations and source-space summaries
    * - ``tfr``
      - Time-frequency power maps
    * - ``behavior``
@@ -92,7 +94,7 @@ Key Options
      - all configured groups
    * - ``--formats``
      - Output file formats: ``png``, ``svg``, ``pdf`` (space-separated)
-     - ``png``
+     - from config ``plotting.defaults.formats``
    * - ``--analysis-scope``
      - ``subject`` (per-subject plots) or ``group`` (cross-subject aggregates)
      - ``subject``

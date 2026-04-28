@@ -14,12 +14,14 @@ Outputs & Advanced Workflows
 
    .. grid-item-card:: Feature Tables
 
-      Parquet by default · optional CSV export · one table per family with
-      a metadata JSON sidecar.
+      Parquet by default · optional CSV export · canonical family tables plus
+      optional auxiliary tables (for example PAC trial/time tables), each with
+      metadata sidecars.
 
    .. grid-item-card:: Plot Exports
 
-      PNG by default · SVG and PDF via ``--formats png svg pdf``.
+      Format set comes from ``plotting.defaults.formats`` (default config:
+      PNG + SVG) · override with ``--formats``.
 
    .. grid-item-card:: EEG–fMRI Fusion
 
@@ -70,7 +72,8 @@ Outputs & Advanced Workflows
 
       .. rubric:: Plot Exports
 
-      Plots are saved as PNG by default. Use ``--formats`` to add more:
+      Plot formats come from ``plotting.defaults.formats``. Use ``--formats``
+      to override per run:
 
       .. code-block:: bash
 
@@ -110,8 +113,9 @@ Outputs & Advanced Workflows
 
       .. rubric:: Spatial Transforms
 
-      Phase-based families (connectivity, ITPC, PAC) have CSD applied by default to
-      reduce volume conduction. Override globally or per-family:
+      Phase-based families (connectivity, directed connectivity, ITPC, PAC) have
+      CSD applied by default to reduce volume conduction. Override globally or
+      per-family:
 
       .. code-block:: bash
 
@@ -134,7 +138,7 @@ Outputs & Advanced Workflows
          * - Mode
            - Intended use
          * - ``group_stats`` *(default)*
-           - Cross-trial estimators permitted; one row per subject or condition.
+           - Cross-trial estimators permitted; output granularity is family-dependent (often trial-level rows with optional condition/global summaries).
          * - ``trial_ml_safe``
            - Leakage-prone paths disabled. Use when outputs feed cross-validated models.
 

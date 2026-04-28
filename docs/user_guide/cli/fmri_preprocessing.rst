@@ -174,7 +174,7 @@ Key Options
      - disabled
    * - ``--mem-mb``
      - Memory limit in MB
-     - fMRIPrep default
+     - ``0`` (auto)
    * - ``--fmriprep-extra-args``
      - Raw extra fMRIPrep CLI arguments (parsed with ``shlex``)
      - none

@@ -32,25 +32,26 @@ Quick Start
 Pipeline Overview
 -----------------
 
-Four derivative-producing stages; ``trial_id`` in ``proc-clean_events.tsv`` is
-the canonical join key aligning EEG features, fMRI betas, and behavioral targets.
+Four derivative-producing stages. For event-related workflows, canonical
+``trial_id`` alignment (typically from ``proc-clean_events.tsv``) is used to
+join EEG features, fMRI betas, and behavioral targets.
 
 .. grid:: 2
    :gutter: 2
 
    .. grid-item-card:: 01 — EEG Preprocessing
 
-      **In:** BIDS EEG (``.vhdr`` · ``.edf`` · ``.fif``) + ``events.tsv``
+      **In:** BIDS EEG (``.vhdr`` · ``.edf`` · ``.fif``) + ``events.tsv`` (event-related mode)
 
       PyPREP bad-channel detection (3 iterations, optional RANSAC) ·
       extended Infomax ICA (99% variance, 1 Hz HP) · ICLabel (p > 0.8) ·
       epoching ``[−7, 15] s``, baseline ``[−0.2, 0] s``, autoreject.
 
-      **Out:** ``proc-clean_epo.fif`` · ``proc-clean_events.tsv`` · ICA logs
+      **Out:** ``proc-clean_epo.fif`` · ``proc-clean_events.tsv`` (event-related mode) · ICA logs
 
    .. grid-item-card:: 02 — Feature Extraction
 
-      **In:** ``proc-clean_epo.fif`` · ``proc-clean_events.tsv``
+      **In:** ``proc-clean_epo.fif`` (plus ``proc-clean_events.tsv`` when trial/event alignment is required)
 
       16 families — ``power`` · ``spectral`` · ``aperiodic`` · ``erp`` ·
       ``erds`` · ``ratios`` · ``asymmetry`` · ``microstates`` ·
@@ -77,7 +78,9 @@ the canonical join key aligning EEG features, fMRI betas, and behavioral targets
       generalization · conformal intervals · SHAP importance (fold-aggregated)
       · permutation feature importance.
 
-      **Out:** ``ml/`` (summaries, predictions, SHAP, figures)
+      **Out:** ``derivatives/machine_learning/`` (mode-specific folders:
+      regression, classification, time generalization, model comparison,
+      incremental validity, uncertainty, SHAP, permutation importance)
 
 .. grid:: 1
    :gutter: 0
@@ -296,7 +299,7 @@ Use the tabs below for the full command matrix and focused examples.
       Operates on BIDS EEG data and writes clean epochs and ICA logs
       to ``derivatives/preprocessed/eeg/``.
 
-      **Output:** ``*_proc-clean_epo.fif``, ``*_proc-clean_events.tsv``,
+      **Output:** ``*_proc-clean_epo.fif``, ``*_proc-clean_events.tsv`` (event-related mode),
       ``icalabel_task_*_log.csv``, ``pyprep_task_*_log.csv``.
 
       Modes:
@@ -312,7 +315,8 @@ Use the tabs below for the full command matrix and focused examples.
              creation in sequence. Use this for a fresh subject.
          * - ``bad-channels``
            - PyPREP bad-channel detection only (deviation + correlation, optional
-             RANSAC). Updates ``channels.tsv`` and synchronizes bads across runs.
+             RANSAC). Updates ``channels.tsv``. Cross-run synchronization is
+             optional via ``pyprep.bad_channel_sync_policy=subject_union``.
          * - ``ica``
            - Fits ICA (extended Infomax, 99% variance, 1 Hz high-pass) via
              MNE-BIDS-Pipeline, then labels components with ICLabel
@@ -425,7 +429,8 @@ Use the tabs below for the full command matrix and focused examples.
 
    .. tab-item:: Behavioral Analysis
 
-      Reads ``proc-clean_events.tsv`` (behavioral targets/predictors) and the
+      Reads aligned events (typically ``proc-clean_events.tsv`` when available)
+      for behavioral targets/predictors and the
       feature Parquet tables, and writes results to
       ``derivatives/sub-<id>/eeg/stats/``.
 
@@ -489,11 +494,15 @@ Use the tabs below for the full command matrix and focused examples.
       cross-validation, and writes predictions and metrics to
       ``derivatives/machine_learning/``.
 
-      **Output:** ``results_summary.tsv``, ``predictions_all_subjects.tsv``,
-      permutation p-values, SHAP importance tables, and figures.
+      **Output:** mode-specific outputs under ``derivatives/machine_learning/``
+      (for example ``regression/data/loso_predictions.tsv``,
+      ``regression/metrics/metrics_summary.json``,
+      ``classification/metrics/metrics_summary.json``,
+      ``shap/importance/shap_importance.tsv``,
+      ``uncertainty/prediction_intervals.tsv``).
 
       Outer CV is Leave-One-Subject-Out (LOSO); inner CV is GroupKFold
-      (default 5 splits unless overridden). All preprocessing statistics are estimated on the training
+      (default 3 splits unless overridden). All preprocessing statistics are estimated on the training
       fold only. The primary regression metric is subject-level Fisher-z
       aggregated Pearson correlation :math:`\bar{r}`.
 
@@ -589,6 +598,7 @@ Use the tabs below for the full command matrix and focused examples.
          eeg-pipeline fmri preprocess --subject 0001 --engine apptainer
 
          eeg-pipeline fmri-analysis first-level --subject 0001 \
+           --contrast-name stimulation_vs_rest \
            --cond-a-value stimulation --cond-b-value fixation_rest
          eeg-pipeline fmri-analysis second-level \
            --subject 0001 --subject 0002 \
@@ -619,7 +629,8 @@ Use the tabs below for the full command matrix and focused examples.
 
       Renders visualization suites from computed features and statistical results.
 
-      **Output:** PNG by default; add ``--formats svg pdf`` for additional formats.
+      **Output:** formats from ``plotting.defaults.formats`` (default config:
+      PNG + SVG). Add ``--formats`` to override per run.
 
       Modes:
 
@@ -680,6 +691,7 @@ For fMRI integration, run preprocessing and first-level GLM after step 1:
 
    eeg-pipeline fmri preprocess --all-subjects
    eeg-pipeline fmri-analysis first-level --all-subjects \
+     --contrast-name stimulation_vs_rest \
      --cond-a-value stimulation --cond-b-value fixation_rest
    eeg-pipeline fmri-analysis beta-series --all-subjects \
      --cond-a-value stimulation --cond-b-value fixation_rest

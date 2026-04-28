@@ -97,10 +97,11 @@ Column name aliases (e.g. ``intensity``, ``rating``) are resolved via
 
 **The** ``trial_id`` **alignment contract**
 
-After preprocessing, the pipeline writes ``*_proc-clean_events.tsv`` to
-``derivatives/preprocessed/eeg/``. This file contains only the rows
-corresponding to kept epochs, with a canonical integer ``trial_id`` column
-added by the pipeline.
+For event-related preprocessing (``task_is_rest: false``), the pipeline writes
+``*_proc-clean_events.tsv`` to ``derivatives/preprocessed/eeg/``. This file
+contains only the rows corresponding to kept epochs, with a canonical integer
+``trial_id`` column added by the pipeline. Resting-state preprocessing skips
+clean-events export.
 
 ``trial_id`` is the **only** accepted join key between:
 

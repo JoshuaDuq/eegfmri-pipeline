@@ -16,11 +16,12 @@ EEG Preprocessing
 
    .. grid-item-card:: Inputs
 
-      BIDS EEG (``.vhdr`` / ``.edf``) · ``channels.tsv`` · ``events.tsv``
+      BIDS EEG (``.vhdr`` / ``.edf``) · ``channels.tsv`` ·
+      ``events.tsv`` (event-related mode)
 
    .. grid-item-card:: Outputs
 
-      ``*_proc-clean_epo.fif`` · ``*_proc-clean_events.tsv`` ·
+      ``*_proc-clean_epo.fif`` · ``*_proc-clean_events.tsv`` (event-related mode) ·
       ICA files · preprocessing stats TSV
 
    .. grid-item-card:: CLI
@@ -106,13 +107,13 @@ clean epochs and derivatives are written.
      - ``_07`` → ``_08a`` → ``_09`` — make epochs, apply ICA, PTP / autoreject
    * - 6
      - Clean events export
-     - Epoch-aligned ``*_proc-clean_events.tsv``; rejected epochs excluded; written to derivatives
+     - Event-related mode: epoch-aligned ``*_proc-clean_events.tsv`` with rejected epochs excluded; resting-state mode skips clean-events export
    * - 7
      - ``collect_preprocessing_stats``
      - Per-subject summary TSV: bad channels, ICA exclusions, epoch rejection counts, per-condition tallies
    * - 8
-     - ``custom_tfr`` *(optional)*
-     - Morlet wavelets on clean epochs; power / ITC per condition; configurable frequency range and decimation
+     - ``custom_tfr`` utility *(optional)*
+     - Optional post-preprocessing helper for Morlet wavelets on clean epochs; not part of the default ``preprocessing`` CLI stage sequence
 
 Input Data Requirements
 -----------------------
@@ -203,8 +204,10 @@ Configuration
      - ``true``
      - Retain previously marked bads from ``channels.tsv``
    * - ``pyprep.custom_bad_dict``
-     - ``null``
-     - Manual bad channels: ``{task: {subject: [channels]}}``
+     - *(not set in YAML defaults)*
+     - Optional manual bad-channel map: ``{task: {subject: [channels]}}``.
+       Typically provided via runtime overrides (for example
+       ``--set pyprep.custom_bad_dict=...``)
    * - ``preprocessing.h_freq``
      - ``100``
      - Low-pass cutoff applied before detection (Hz)
@@ -239,7 +242,7 @@ When ``"subject_union"`` is selected, the runtime sequence is:
 
 1. For each subject, glob all ``channels.tsv`` files matching the task.
 2. Compute the union of all channels marked ``status == "bad"`` across runs.
-3. Reset all EEG channels to ``status = "good"`` and re-mark only the unified union as ``"bad"`` in every run's ``channels.tsv``.
+3. Reset all channels to ``status = "good"`` and re-mark only the unified union as ``"bad"`` in every run's ``channels.tsv``.
 
 MNE-BIDS-Pipeline reads ``channels.tsv`` to determine which channels to exclude
 from ICA fitting and interpolation. Inconsistent bad sets across runs can
@@ -439,9 +442,10 @@ Rejection Methods
 Step 6 — Clean Events Export
 ------------------------------
 
-After epoch rejection, a clean events table is written to derivatives containing
-only events for kept (non-rejected) epochs. The canonical ``trial_id`` column
-is the only supported alignment contract for downstream trialwise artifacts.
+In event-related mode, after epoch rejection, a clean events table is written
+to derivatives containing only events for kept (non-rejected) epochs.
+The canonical ``trial_id`` column is the only supported alignment contract for
+downstream trialwise artifacts.
 
 .. list-table::
    :header-rows: 1
@@ -486,14 +490,16 @@ Step 7 — Preprocessing Statistics
    * - ``<condition>_total_clean_epochs``
      - Per-condition epoch counts
 
-Step 8 — Time-Frequency Representation (Optional)
---------------------------------------------------
+Step 8 — Time-Frequency Representation Utility (Optional)
+----------------------------------------------------------
 
 .. container:: module-ref
 
    Module: ``preprocessing/pipeline/tfr.py`` → ``custom_tfr()``
 
 Morlet wavelet :term:`TFR` decomposition on clean epochs.
+This is a utility in ``preprocessing/pipeline/tfr.py`` and is not executed by
+default in the ``preprocessing`` CLI modes.
 
 Frequencies are configurable (default 1–99 Hz). Cycles adapt as
 :math:`n_\text{cycles}(f) = f / 3` by default (higher frequency → better
@@ -553,12 +559,14 @@ Output Structure
    │       ├── sub-XXXX_task-<task>_proc-ica_ica.fif
    │       ├── sub-XXXX_task-<task>_proc-ica_components.tsv
    │       ├── sub-XXXX_task-<task>_proc-clean_epo.fif
-   │       ├── sub-XXXX_task-<task>_proc-clean_events.tsv
+   │       ├── sub-XXXX_task-<task>_proc-clean_events.tsv     # event-related mode
    │       ├── sub-XXXX_task-<task>_bads.tsv
    │       ├── sub-XXXX_task-<task>_power_epo-tfr.h5            # (optional, single-trial; average=False)
    │       ├── sub-XXXX_task-<task>_itc_epo-tfr.h5              # (optional, single-trial; average=False)
-   │       ├── sub-XXXX_task-<task>_power+<cond>_avg-tfr.h5     # (optional, per-condition average; average=True or return_average=True)
-   │       └── sub-XXXX_task-<task>_itc+<cond>_avg-tfr.h5       # (optional, per-condition ITC; average=True or return_average=True)
+   │       ├── sub-XXXX_task-<task>_power_<cond>_avg-tfr.h5     # (optional, per-condition average when average=False and return_average=True)
+   │       ├── sub-XXXX_task-<task>_itc_<cond>_avg-tfr.h5       # (optional, per-condition ITC when average=False and return_average=True)
+   │       ├── sub-XXXX_task-<task>_power+<cond>_avg-tfr.h5     # (optional, per-condition average when average=True)
+   │       └── sub-XXXX_task-<task>_itc+<cond>_avg-tfr.h5       # (optional, per-condition ITC when average=True)
    ├── pyprep_task_<task>_log.csv
    ├── icalabel_task_<task>_log.csv
    ├── task_<task>_preprocessing_stats.tsv

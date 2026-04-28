@@ -15,7 +15,8 @@ Configuration
    screen (main menu → *Utilities → Global Setup*, or press ``C``). It edits
    the same values without touching any YAML file. See :doc:`tui`.
 
-**Override precedence** (highest wins): ``--set`` overrides → CLI flags → YAML defaults.
+**Override precedence** (highest wins): ``--set`` overrides → CLI flags →
+persisted TUI overrides → YAML defaults.
 
 .. grid:: 3
    :gutter: 2
@@ -37,9 +38,11 @@ Configuration
 
 .. note::
 
-   Relative paths are resolved from the directory of the config file that
-   defines them (for example ``eeg_config.yaml``, ``behavior_config.yaml``,
-   or ``fmri_config.yaml``). Use absolute paths when you need location-independent
+   Relative paths are generally resolved from the directory of the config file
+   that defines them (for example ``eeg_config.yaml``,
+   ``behavior_config.yaml``, or ``fmri_config.yaml``).
+   Paths beginning with ``data/`` or ``eeg_pipeline/`` are resolved from the
+   project root. Use absolute paths when you need location-independent
    configuration.
 
 .. _configuration-quick-nav:
@@ -203,7 +206,7 @@ EEG & Preprocessing
      - Detect and annotate recording breaks
    * - ``preprocessing.write_clean_events``
      - ``true``
-     - Write post-rejection ``*_proc-clean_events.tsv`` to derivatives
+     - Write post-rejection ``*_proc-clean_events.tsv`` for event-related preprocessing (rest mode skips this export)
 
 .. _configuration-pyprep:
 
@@ -447,8 +450,9 @@ fMRI Preprocessing (fMRIPrep)
      - ``0``
      - CPU threads (0 = auto)
    * - ``fmri_preprocessing.fmriprep.extra_args``
-     - ``""``
-     - Additional CLI arguments appended verbatim to fMRIPrep
+     - ``""`` *(effective runtime default)*
+     - Additional CLI arguments appended verbatim to fMRIPrep.
+       ``null`` and empty string are both treated as no extra arguments.
 
 .. _configuration-first-level-glm:
 
@@ -467,7 +471,10 @@ First-Level GLM
      - Configuration gate for config-driven first-level analysis paths; explicit CLI ``fmri-analysis first-level`` runs regardless of this toggle
    * - ``fmri_contrast.input_source``
      - ``"fmriprep"``
-     - BOLD source for inferential fMRI analysis (currently ``"fmriprep"`` only)
+     - CLI/config selector is ``"fmriprep"``; when paired with ``fmri_contrast.require_fmriprep=false``, missing runs may fall back to raw BIDS BOLD
+   * - ``fmri_contrast.require_fmriprep``
+     - ``true``
+     - Strict mode for first-level inputs; when ``true``, missing fMRIPrep BOLD/masks raise a hard error
    * - ``fmri_contrast.fmriprep_space``
      - ``"T1w"``
      - fMRIPrep output space to use

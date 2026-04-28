@@ -136,11 +136,12 @@ Glossary
       variance before averaging connectivity values across runs or subjects.
 
    trial_id
-      A canonical integer column written by the preprocessing stage into
-      ``*_proc-clean_events.tsv``. Each value identifies a single kept epoch
-      after artifact rejection. All downstream tables (feature Parquet files,
-      fMRI beta volumes, behavioral targets) must be joined on ``trial_id``.
-      Row-order alignment across files is not a valid substitute.
+      A canonical integer column used for trial/event alignment. In
+      event-related workflows it is written by preprocessing into
+      ``*_proc-clean_events.tsv``; in resting-state workflows aligned events may
+      be synthesized from epoch order. All downstream trialwise tables (feature
+      Parquet files, fMRI beta volumes, behavioral targets) must be joined on
+      ``trial_id``. Row-order alignment across files is not a valid substitute.
 
    task_is_rest
       A boolean config key (``preprocessing.task_is_rest`` and
@@ -148,7 +149,7 @@ Glossary
       resting-state mode. When ``true``, preprocessing creates fixed-length
       overlapping segments instead of event-locked epochs, no ``events.tsv``
       conditions are required, and event-locked feature families (``erp``,
-      ``erds``, ``itpc``, ``pac``) are rejected as invalid.
+      ``erds``, ``itpc``) are rejected as invalid.
 
    Parquet
       A columnar binary file format (Apache Parquet) used for storing feature

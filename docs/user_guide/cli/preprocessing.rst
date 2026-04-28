@@ -21,7 +21,8 @@ Modes
        in sequence. Use for a fresh subject.
    * - ``bad-channels``
      - PyPREP bad-channel detection only (deviation + correlation, optional RANSAC).
-       Updates ``channels.tsv`` and synchronizes bads across runs.
+      Updates ``channels.tsv``. Cross-run synchronization is optional via
+      ``pyprep.bad_channel_sync_policy=subject_union``.
    * - ``ica``
      - Fits ICA (extended Infomax, 99% variance, 1 Hz high-pass) via
        MNE-BIDS-Pipeline, then labels components with ICLabel
@@ -83,8 +84,8 @@ Key Options
        ``preprocessing.rest_epochs_duration``; no event conditions required
      - disabled
    * - ``--write-clean-events``
-     - Write ``proc-clean_events.tsv`` aligned to kept epochs (required by
-       feature extraction and ML)
+     - Write ``proc-clean_events.tsv`` aligned to kept epochs for event-related
+       workflows (used by trial/event alignment in downstream analyses)
      - from config (default: enabled)
    * - ``--trim-to-first-volume``
      - Trim EEG onset to the first fMRI volume timestamp (simultaneous EEG–fMRI)

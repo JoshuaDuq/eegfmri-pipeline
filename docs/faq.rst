@@ -137,16 +137,19 @@ Data
 .. dropdown:: Do I need one events.tsv per run?
    :animate: fade-in
 
-   Yes — name each file ``sub-XXXX_task-<task>_run-0N_events.tsv``.
-   The pipeline concatenates them automatically with run-offset alignment.
-   Required columns: ``onset``, ``duration``, ``trial_type``.
+   For event-related workflows, yes — name each file
+   ``sub-XXXX_task-<task>_run-0N_events.tsv``. The pipeline concatenates them
+   automatically with run-offset alignment. Required columns: ``onset``,
+   ``duration``, ``trial_type``.
    Any additional predictor or outcome columns are read alongside these.
 
 .. dropdown:: What is trial_id and why does it matter?
    :animate: fade-in
 
-   After preprocessing, ``proc-clean_events.tsv`` is written to derivatives
-   containing only kept epochs, each assigned a canonical ``trial_id`` integer.
+   For event-related preprocessing (``task_is_rest: false``), ``proc-clean_events.tsv``
+   is written to derivatives containing only kept epochs, each assigned a
+   canonical ``trial_id`` integer. Resting-state preprocessing does not export
+   this file.
    Every downstream stage (feature tables, fMRI betas, behavioral targets) must
    join on ``trial_id`` — it is the only valid alignment key across modalities.
    Row-order alignment is not accepted.
