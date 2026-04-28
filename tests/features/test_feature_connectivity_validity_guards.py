@@ -303,7 +303,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
         self.assertIn("broadcast_warning", df.attrs)
         self.assertEqual(df.attrs.get("phase_estimator"), "across_epochs")
 
-    def test_condition_granularity_auto_promotes_phase_estimator_without_train_mask(self):
+    def test_condition_granularity_requires_explicit_across_epoch_estimator_without_train_mask(self):
         config = DotConfig(
             {
                 "feature_engineering": {
@@ -323,20 +323,8 @@ class TestConnectivityValidityGuards(unittest.TestCase):
         ctx._by_family["connectivity"] = precomputed
         ctx.aligned_events = pd.DataFrame({"condition": ["a", "a", "b", "b"]})
 
-        out_df = pd.DataFrame({"conn_demo": [1.0, 2.0, 3.0, 4.0]})
-        with (
-            patch(
-                "eeg_pipeline.analysis.features.connectivity.extract_connectivity_from_precomputed",
-                return_value=(out_df, list(out_df.columns)),
-            ),
-            patch(
-                "eeg_pipeline.analysis.features.connectivity._apply_across_epochs_phase_estimates_inplace",
-            ) as mock_apply,
-        ):
-            df, _cols = extract_connectivity_features(ctx, ["alpha"])
-
-        mock_apply.assert_called_once()
-        self.assertEqual(df.attrs.get("phase_estimator"), "across_epochs")
+        with self.assertRaisesRegex(ValueError, "phase_estimator='across_epochs'"):
+            extract_connectivity_features(ctx, ["alpha"])
 
     def test_condition_granularity_keeps_within_epoch_with_train_mask(self):
         config = DotConfig(

@@ -774,6 +774,16 @@ def _extract_feature_with_error_handling(
     else:
         df, cols, qc = extraction_result, [], None
 
+    if (df is None or df.empty) and not _is_optional_feature_output(
+        ctx.config,
+        feature_name,
+    ):
+        raise ValueError(
+            f"Requested feature '{feature_name}' produced no features. "
+            "Fix the input data/configuration or add the feature name to "
+            "feature_engineering.optional_feature_categories if absence is intentional."
+        )
+
     if df is not None and not df.empty:
         if expect_trial_aligned and len(df) != expected_trials:
             raise ValueError(f"{feature_name} length mismatch: {len(df)} vs {expected_trials}")
@@ -785,6 +795,20 @@ def _extract_feature_with_error_handling(
         ctx.logger.info("  – %s: no features produced (%.1fs)", feature_name, elapsed)
 
     return df, cols, qc
+
+
+def _is_optional_feature_output(config: Any, feature_name: str) -> bool:
+    """Return whether an explicitly requested feature family may produce no columns."""
+    if config is None or not hasattr(config, "get"):
+        return False
+
+    raw = config.get("feature_engineering.optional_feature_categories", []) or []
+    if isinstance(raw, str):
+        optional = {raw.strip().lower()}
+    else:
+        optional = {str(item).strip().lower() for item in raw}
+
+    return str(feature_name).strip().lower() in optional
 
 
 def _feature_progress_total(feature_categories: List[str]) -> int:
@@ -1187,6 +1211,12 @@ def extract_all_features(
                 n_pac_cols, len(pac_trials_df), time_info, pac_elapsed,
             )
         else:
+            if not _is_optional_feature_output(ctx.config, "pac"):
+                raise ValueError(
+                    "Requested feature 'pac' produced no features. "
+                    "Fix the input data/configuration or add 'pac' to "
+                    "feature_engineering.optional_feature_categories if absence is intentional."
+                )
             ctx.logger.info("  \u2013 PAC: no features produced (%.1fs)", pac_elapsed)
 
     if "erds" in ctx.feature_categories and precomputed_data is not None:
@@ -1382,15 +1412,24 @@ def _extract_precomputed_feature_group(
     else:
         df, cols = extraction_result, []
 
-    if not df.empty:
+    if df is not None and not df.empty:
         result.features[feature_name] = FeatureSet(df, cols, feature_name)
         logger.info(
             "  \u2713 %s: %d columns \u00d7 %d trials (%.1fs)",
             feature_name, df.shape[1], len(df), elapsed,
         )
-    else:
+        return
+
+    if _is_optional_feature_output(getattr(precomputed, "config", None), feature_name):
         result.qc[feature_name] = {"skipped_reason": "empty_result"}
         logger.info("  \u2013 %s: no features produced (%.1fs)", feature_name, elapsed)
+        return
+
+    raise ValueError(
+        f"Requested precomputed feature '{feature_name}' produced no features. "
+        "Fix the input data/configuration or add the feature name to "
+        "feature_engineering.optional_feature_categories if absence is intentional."
+    )
 
 
 def extract_precomputed_features(
@@ -1432,6 +1471,7 @@ def extract_precomputed_features(
         )
     else:
         logger.info("Using provided precomputed intermediates")
+        precomputed.config = config
 
     result = ExtractionResult(precomputed=precomputed)
 
@@ -1521,8 +1561,14 @@ def extract_precomputed_features(
         qual_cols = list(qual_df.columns)
         if not qual_df.empty:
             result.features["quality"] = FeatureSet(qual_df, qual_cols, "quality")
-        else:
+        elif _is_optional_feature_output(config, "quality"):
             result.qc["quality"] = {"skipped_reason": "empty_result"}
+        else:
+            raise ValueError(
+                "Requested precomputed feature 'quality' produced no features. "
+                "Fix the input data/configuration or add the feature name to "
+                "feature_engineering.optional_feature_categories if absence is intentional."
+            )
 
     if "microstates" in feature_groups:
         from types import SimpleNamespace
@@ -1545,8 +1591,14 @@ def extract_precomputed_features(
         )
         if micro_df is not None and not micro_df.empty:
             result.features["microstates"] = FeatureSet(micro_df, micro_cols, "microstates")
-        else:
+        elif _is_optional_feature_output(config, "microstates"):
             result.qc["microstates"] = {"skipped_reason": "empty_result"}
+        else:
+            raise ValueError(
+                "Requested precomputed feature 'microstates' produced no features. "
+                "Fix the input data/configuration or add the feature name to "
+                "feature_engineering.optional_feature_categories if absence is intentional."
+            )
 
     return result
 

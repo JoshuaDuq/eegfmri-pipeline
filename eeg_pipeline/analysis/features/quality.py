@@ -104,8 +104,14 @@ def _extract_quality_config(config: Any) -> Dict[str, Any]:
             line_freq = float(line_freq)
             if np.isfinite(line_freq) and line_freq > 0:
                 quality_cfg["line_noise_freqs"] = [line_freq]
-        except (TypeError, ValueError):
-            pass
+            else:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "preprocessing.line_freq must be a positive finite number when "
+                "feature_engineering.quality.line_noise_freqs is not set "
+                f"(got {line_freq!r})."
+            ) from exc
     return quality_cfg
 
 

@@ -1452,7 +1452,10 @@ def _extract_aperiodic_for_segment(
     # Apply quality filters
     min_r2 = float(aperiodic_cfg.get("min_r2", 0.0))
     if not np.isfinite(min_r2):
-        min_r2 = 0.0
+        raise ValueError(
+            "feature_engineering.aperiodic.min_r2 must be finite "
+            f"(got {min_r2})."
+        )
     
     max_rms = aperiodic_cfg.get("max_rms", None)
     if max_rms is not None:
@@ -1677,7 +1680,10 @@ def extract_aperiodic_features(
     aperiodic_cfg = get_config_value(config, "feature_engineering.aperiodic", {})
     min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", _DEFAULT_MIN_SEGMENT_SEC))
     if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
-        min_segment_sec = _DEFAULT_MIN_SEGMENT_SEC
+        raise ValueError(
+            "feature_engineering.aperiodic.min_segment_sec must be finite and >= 0 "
+            f"(got {min_segment_sec})."
+        )
     if bool(aperiodic_cfg.get("subtract_evoked", False)):
         raise_if_rest_evoked_subtraction(
             config,
@@ -1815,6 +1821,11 @@ def extract_aperiodic_from_precomputed(
     
     aperiodic_cfg = get_config_value(config, "feature_engineering.aperiodic", {})
     min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", _DEFAULT_MIN_SEGMENT_SEC))
+    if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
+        raise ValueError(
+            "feature_engineering.aperiodic.min_segment_sec must be finite and >= 0 "
+            f"(got {min_segment_sec})."
+        )
     peak_rejection_z = float(aperiodic_cfg.get("peak_rejection_z", _DEFAULT_PEAK_REJECTION_Z))
     min_fit_points = int(aperiodic_cfg.get("min_fit_points", _DEFAULT_MIN_FIT_POINTS))
     model = str(aperiodic_cfg.get("model", "fixed")).strip().lower()
@@ -1842,7 +1853,11 @@ def extract_aperiodic_from_precomputed(
     min_trials_per_condition = int(
         get_config_value(config, "feature_engineering.power.min_trials_per_condition", 2)
     )
-    min_trials_per_condition = max(1, min_trials_per_condition)
+    if min_trials_per_condition < 1:
+        raise ValueError(
+            "feature_engineering.power.min_trials_per_condition must be >= 1 "
+            f"(got {min_trials_per_condition})."
+        )
     if subtract_evoked and mode == "trial_ml_safe" and train_mask_use is None:
         raise ValueError(
             "Aperiodic subtract_evoked=True in trial_ml_safe mode without train_mask. "
@@ -1855,7 +1870,10 @@ def extract_aperiodic_from_precomputed(
     line_noise_cfg = _parse_line_noise_config(config)
     min_r2 = float(aperiodic_cfg.get("min_r2", 0.0))
     if not np.isfinite(min_r2):
-        min_r2 = 0.0
+        raise ValueError(
+            "feature_engineering.aperiodic.min_r2 must be finite "
+            f"(got {min_r2})."
+        )
     max_rms = aperiodic_cfg.get("max_rms", None)
     if max_rms is not None:
         try:

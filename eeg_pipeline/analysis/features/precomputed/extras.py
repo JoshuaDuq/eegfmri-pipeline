@@ -81,7 +81,10 @@ def _get_psd_config(config: Any, sfreq: float) -> Dict[str, Any]:
     psd_method = get_config_value(config, "feature_engineering.spectral.psd_method", "multitaper")
     psd_method = str(psd_method).strip().lower()
     if psd_method not in {"welch", "multitaper"}:
-        psd_method = "multitaper"
+        raise ValueError(
+            "feature_engineering.spectral.psd_method must be 'welch' or "
+            f"'multitaper' (got '{psd_method}')."
+        )
     
     fmin_psd = float(get_config_value(config, "feature_engineering.spectral.fmin", 1.0))
     fmax_psd = float(get_config_value(config, "feature_engineering.spectral.fmax", min(80.0, sfreq / 2.0 - 0.5)))
@@ -96,10 +99,10 @@ def _get_psd_config(config: Any, sfreq: float) -> Dict[str, Any]:
     default_line_freq = get_config_value(config, "preprocessing.line_freq", 50.0)
     try:
         default_line_freq = float(default_line_freq)
-        if not (np.isfinite(default_line_freq) and default_line_freq > 0):
-            default_line_freq = 50.0
-    except (TypeError, ValueError):
-        default_line_freq = 50.0
+    except (TypeError, ValueError) as exc:
+        raise ValueError("preprocessing.line_freq must be a finite positive number.") from exc
+    if not (np.isfinite(default_line_freq) and default_line_freq > 0):
+        raise ValueError("preprocessing.line_freq must be a finite positive number.")
 
     line_freqs_raw = get_config_value(
         config,
@@ -110,9 +113,15 @@ def _get_psd_config(config: Any, sfreq: float) -> Dict[str, Any]:
         if isinstance(line_freqs_raw, (list, tuple)):
             line_freqs = [float(f) for f in line_freqs_raw]
         else:
-            line_freqs = [default_line_freq]
-    except (ValueError, TypeError):
-        line_freqs = [default_line_freq]
+            line_freqs = [float(line_freqs_raw)]
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            "feature_engineering.spectral.line_noise_freqs must contain finite positive numbers."
+        ) from exc
+    if any((not np.isfinite(freq) or freq <= 0) for freq in line_freqs):
+        raise ValueError(
+            "feature_engineering.spectral.line_noise_freqs must contain finite positive numbers."
+        )
     
     line_width = float(get_config_value(config, "feature_engineering.spectral.line_noise_width_hz", 1.0))
     n_harm = int(get_config_value(config, "feature_engineering.spectral.line_noise_harmonics", 3))
@@ -270,7 +279,16 @@ def extract_band_ratios_from_precomputed(
     include_log = bool(get_config_value(config, "feature_engineering.spectral.include_log_ratios", True))
     min_segment_sec = float(get_config_value(config, "feature_engineering.ratios.min_segment_sec", 1.0))
     min_cycles = float(get_config_value(config, "feature_engineering.ratios.min_cycles_at_fmin", 3.0))
-    skip_invalid = bool(get_config_value(config, "feature_engineering.ratios.skip_invalid_segments", True))
+    if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
+        raise ValueError(
+            "feature_engineering.ratios.min_segment_sec must be finite and >= 0 "
+            f"(got {min_segment_sec})."
+        )
+    if not np.isfinite(min_cycles) or min_cycles <= 0:
+        raise ValueError(
+            "feature_engineering.ratios.min_cycles_at_fmin must be finite and > 0 "
+            f"(got {min_cycles})."
+        )
     
     freq_bands = get_frequency_bands(config)
     needed_bands = {band for pair in pairs for band in pair}
@@ -290,17 +308,11 @@ def extract_band_ratios_from_precomputed(
 
         seg_n = int(np.sum(seg_mask))
         if min_segment_samples > 0 and seg_n < min_segment_samples:
-            if logger and seg_label not in warned_short:
-                logger.warning(
-                    "Band ratios: segment '%s' is too short for PSD ratios (%.3fs, %d samples < %d); skipping.",
-                    seg_label,
-                    seg_n / sfreq,
-                    seg_n,
-                    min_segment_samples,
-                )
-                warned_short.add(seg_label)
-            if skip_invalid:
-                continue
+            raise ValueError(
+                "Band ratios: segment "
+                f"'{seg_label}' is too short for PSD ratios "
+                f"({seg_n / sfreq:.3f}s, {seg_n} samples < {min_segment_samples})."
+            )
         
         seg_data_all = precomputed.data[:, :, seg_mask]  # (epochs, ch, time)
         band_power = _compute_psd_band_power_for_segment(
@@ -326,20 +338,13 @@ def extract_band_ratios_from_precomputed(
             fmin_pair = np.nanmin([fmin_num, fmin_den])
             req_sec = max(float(min_segment_sec), (float(min_cycles) / float(fmin_pair)) if np.isfinite(fmin_pair) and fmin_pair > 0 else np.inf)
             if seg_sec < req_sec:
-                if logger and (seg_label, f"{num}/{den}") not in warned_cycles:
-                    logger.warning(
-                        "Band ratios: segment '%s' too short for '%s/%s' (%.3fs < %.3fs; min_cycles=%s at fmin=%.2f).",
-                        seg_label,
-                        num,
-                        den,
-                        seg_sec,
-                        req_sec,
-                        min_cycles,
-                        float(fmin_pair) if np.isfinite(fmin_pair) else np.nan,
-                    )
-                    warned_cycles.add((seg_label, f"{num}/{den}"))
-                if skip_invalid:
-                    continue
+                raise ValueError(
+                    "Band ratios: segment "
+                    f"'{seg_label}' too short for '{num}/{den}' "
+                    f"({seg_sec:.3f}s < {req_sec:.3f}s; "
+                    f"min_cycles={min_cycles} at fmin="
+                    f"{float(fmin_pair) if np.isfinite(fmin_pair) else np.nan:.2f})."
+                )
 
             p_num = band_power[num]  # (epochs, ch)
             p_den = band_power[den]  # (epochs, ch)
@@ -561,7 +566,16 @@ def extract_asymmetry_from_precomputed(
 
     min_segment_sec = float(get_config_value(config, "feature_engineering.asymmetry.min_segment_sec", 1.0))
     min_cycles = float(get_config_value(config, "feature_engineering.asymmetry.min_cycles_at_fmin", 3.0))
-    skip_invalid = bool(get_config_value(config, "feature_engineering.asymmetry.skip_invalid_segments", True))
+    if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
+        raise ValueError(
+            "feature_engineering.asymmetry.min_segment_sec must be finite and >= 0 "
+            f"(got {min_segment_sec})."
+        )
+    if not np.isfinite(min_cycles) or min_cycles <= 0:
+        raise ValueError(
+            "feature_engineering.asymmetry.min_cycles_at_fmin must be finite and > 0 "
+            f"(got {min_cycles})."
+        )
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
     min_segment_samples = max(0, int(round(min_segment_sec * sfreq)))
     warned_short: set[str] = set()
@@ -585,17 +599,11 @@ def extract_asymmetry_from_precomputed(
 
         seg_n = int(np.sum(seg_mask))
         if min_segment_samples > 0 and seg_n < min_segment_samples:
-            if logger and seg_label not in warned_short:
-                logger.warning(
-                    "Asymmetry: segment '%s' is too short for PSD asymmetry (%.3fs, %d samples < %d); skipping.",
-                    seg_label,
-                    seg_n / sfreq,
-                    seg_n,
-                    min_segment_samples,
-                )
-                warned_short.add(seg_label)
-            if skip_invalid:
-                continue
+            raise ValueError(
+                "Asymmetry: segment "
+                f"'{seg_label}' is too short for PSD asymmetry "
+                f"({seg_n / sfreq:.3f}s, {seg_n} samples < {min_segment_samples})."
+            )
         
         seg_data_all = precomputed.data[:, :, seg_mask]
 
@@ -610,20 +618,17 @@ def extract_asymmetry_from_precomputed(
             if seg_sec >= req_sec:
                 eligible_bands[band] = (fmin, fmax)
             else:
-                if logger and (seg_label, str(band)) not in warned_cycles:
-                    logger.warning(
-                        "Asymmetry: segment '%s' too short for '%s' (%.3fs < %.3fs; min_cycles=%s at fmin=%.2f).",
-                        seg_label,
-                        band,
-                        seg_sec,
-                        req_sec,
-                        min_cycles,
-                        fmin_f,
-                    )
-                    warned_cycles.add((seg_label, str(band)))
+                raise ValueError(
+                    "Asymmetry: segment "
+                    f"'{seg_label}' too short for '{band}' "
+                    f"({seg_sec:.3f}s < {req_sec:.3f}s; "
+                    f"min_cycles={min_cycles} at fmin={fmin_f:.2f})."
+                )
 
-        if not eligible_bands and skip_invalid:
-            continue
+        if not eligible_bands:
+            raise ValueError(
+                f"Asymmetry: no eligible bands for segment '{seg_label}'."
+            )
 
         band_power_all = _compute_psd_band_power_for_segment(
             seg_data_all, sfreq, eligible_bands if eligible_bands else band_ranges, config, logger

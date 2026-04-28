@@ -416,16 +416,19 @@ def extract_complexity_from_precomputed(
         # Validate mask length matches data
         n_times = precomputed.data.shape[2]
         if len(segment_mask) != n_times:
-            if logger:
-                logger.warning(
-                    "Complexity: segment '%s' mask length (%d) != data times (%d); skipping.",
-                    segment_name, len(segment_mask), n_times,
-                )
-            continue
+            raise ValueError(
+                "Complexity: requested segment "
+                f"'{segment_name}' mask length ({len(segment_mask)}) does not "
+                f"match data times ({n_times})."
+            )
 
         n_masked = int(np.sum(segment_mask))
         if n_masked < params.min_samples:
-            continue
+            raise ValueError(
+                "Complexity: requested segment "
+                f"'{segment_name}' is too short "
+                f"({n_masked} samples < {params.min_samples} required)."
+            )
 
         per_epoch = Parallel(n_jobs=n_jobs)(
             delayed(_compute_epoch_complexity)(

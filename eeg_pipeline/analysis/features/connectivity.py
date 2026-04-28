@@ -216,32 +216,55 @@ class ConnectivityConfig:
         sliding_window_len = float(conn_cfg.get("sliding_window_len", 1.0))
         sliding_window_step = float(conn_cfg.get("sliding_window_step", 0.5))
         if not np.isfinite(sliding_window_len) or sliding_window_len <= 0:
-            sliding_window_len = 1.0
+            raise ValueError(
+                "feature_engineering.connectivity.sliding_window_len must be finite and > 0."
+            )
         if not np.isfinite(sliding_window_step) or sliding_window_step <= 0:
-            sliding_window_step = 0.5
+            raise ValueError(
+                "feature_engineering.connectivity.sliding_window_step must be finite and > 0."
+            )
         dynamic_enabled = bool(conn_cfg.get("dynamic_enabled", False))
         dynamic_measures_cfg = conn_cfg.get("dynamic_measures", ["wpli", "aec"])
         if isinstance(dynamic_measures_cfg, str):
             dynamic_measures_cfg = [dynamic_measures_cfg]
         if not isinstance(dynamic_measures_cfg, (list, tuple)):
-            dynamic_measures_cfg = ["wpli", "aec"]
-        dynamic_measures = [
-            str(m).strip().lower()
-            for m in dynamic_measures_cfg
-            if str(m).strip().lower() in {"wpli", "aec"}
-        ]
+            raise TypeError(
+                "feature_engineering.connectivity.dynamic_measures must be a list/tuple "
+                "of strings."
+            )
+        dynamic_measures = [str(m).strip().lower() for m in dynamic_measures_cfg]
+        invalid_dynamic_measures = sorted(set(dynamic_measures) - {"wpli", "aec"})
+        if invalid_dynamic_measures:
+            raise ValueError(
+                "feature_engineering.connectivity.dynamic_measures only supports "
+                f"['aec', 'wpli']; got {invalid_dynamic_measures}."
+            )
         if not dynamic_measures:
-            dynamic_measures = ["wpli", "aec"]
+            raise ValueError(
+                "feature_engineering.connectivity.dynamic_measures must contain at least one measure."
+            )
         dynamic_autocorr_lag = int(conn_cfg.get("dynamic_autocorr_lag", 1))
-        dynamic_autocorr_lag = max(1, dynamic_autocorr_lag)
+        if dynamic_autocorr_lag < 1:
+            raise ValueError(
+                "feature_engineering.connectivity.dynamic_autocorr_lag must be >= 1."
+            )
         dynamic_min_windows = int(conn_cfg.get("dynamic_min_windows", 3))
-        dynamic_min_windows = max(2, dynamic_min_windows)
+        if dynamic_min_windows < 2:
+            raise ValueError(
+                "feature_engineering.connectivity.dynamic_min_windows must be >= 2."
+            )
         dynamic_include_roi_pairs = bool(conn_cfg.get("dynamic_include_roi_pairs", True))
         dynamic_state_enabled = bool(conn_cfg.get("dynamic_state_enabled", True))
         dynamic_state_n_states = int(conn_cfg.get("dynamic_state_n_states", 3))
-        dynamic_state_n_states = max(2, dynamic_state_n_states)
+        if dynamic_state_n_states < 2:
+            raise ValueError(
+                "feature_engineering.connectivity.dynamic_state_n_states must be >= 2."
+            )
         dynamic_state_min_windows = int(conn_cfg.get("dynamic_state_min_windows", 8))
-        dynamic_state_min_windows = max(3, dynamic_state_min_windows)
+        if dynamic_state_min_windows < 3:
+            raise ValueError(
+                "feature_engineering.connectivity.dynamic_state_min_windows must be >= 3."
+            )
         dynamic_state_random_state_raw = conn_cfg.get("dynamic_state_random_state", None)
         dynamic_state_random_state = (
             int(dynamic_state_random_state_raw)
@@ -1399,6 +1422,18 @@ def extract_connectivity_features(
         return pd.DataFrame(), []
 
     conn_cfg = ConnectivityConfig.from_dict(ctx.config)
+    if (
+        conn_cfg.granularity in {"subject", "condition"}
+        and conn_cfg.phase_estimator == "within_epoch"
+        and getattr(ctx, "train_mask", None) is None
+    ):
+        raise ValueError(
+            "Connectivity: granularity="
+            f"'{conn_cfg.granularity}' with phase_estimator='within_epoch' requires "
+            "explicit scientific intent. Set phase_estimator='across_epochs' "
+            "explicitly for cross-trial subject/condition estimates, or use "
+            "granularity='trial'."
+        )
     _warn_if_phase_connectivity_without_spatial_transform(ctx.config, conn_cfg.measures, ctx.logger)
     expected_transform = _get_spatial_transform_type(ctx.config, feature_family="connectivity")
 
@@ -1466,19 +1501,6 @@ def extract_connectivity_features(
     # Guardrail: detect CV/machine learning mode and warn/force within_epoch for phase estimator
     # across_epochs is cross-trial by nature and WILL leak test information in CV
     train_mask = getattr(ctx, "train_mask", None)
-
-    if (
-        granularity in {"subject", "condition"}
-        and phase_estimator_effective == "within_epoch"
-        and train_mask is None
-    ):
-        phase_estimator_effective = "across_epochs"
-        if ctx.logger is not None:
-            ctx.logger.info(
-                "Connectivity: auto-setting phase_estimator='across_epochs' for granularity='%s' "
-                "to avoid averaging per-epoch phase-connectivity estimates.",
-                granularity,
-            )
 
     if train_mask is not None and phase_estimator_effective == "across_epochs":
         if conn_cfg.force_within_epoch_for_ml:
@@ -2363,7 +2385,15 @@ def extract_connectivity_from_precomputed(
                     )
                     dynamic_state_skip_warned = True
             else:
-                n_states = min(int(conn_cfg.dynamic_state_n_states), max(2, n_windows - 1))
+                n_states = int(conn_cfg.dynamic_state_n_states)
+                max_states = max(1, n_windows - 1)
+                if n_states > max_states:
+                    raise ValueError(
+                        "feature_engineering.connectivity.dynamic_state_n_states "
+                        f"({n_states}) requires more dynamic windows; only {n_windows} "
+                        f"windows are available, so at most {max_states} states can "
+                        "support transition metrics."
+                    )
                 random_state = (
                     int(conn_cfg.dynamic_state_random_state)
                     if conn_cfg.dynamic_state_random_state is not None

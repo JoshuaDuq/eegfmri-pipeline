@@ -61,6 +61,33 @@ def _get_min_baseline_samples(config) -> int:
 # Configuration Helpers
 ###################################################################
 
+def _finite_float(value: Any, key: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be a finite number.") from exc
+    if not np.isfinite(parsed):
+        raise ValueError(f"{key} must be finite.")
+    return parsed
+
+
+def _positive_float(value: Any, key: str) -> float:
+    parsed = _finite_float(value, key)
+    if parsed <= 0:
+        raise ValueError(f"{key} must be > 0.")
+    return parsed
+
+
+def _positive_int(value: Any, key: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{key} must be an integer >= 1.") from exc
+    if parsed < 1:
+        raise ValueError(f"{key} must be >= 1.")
+    return parsed
+
+
 def get_tfr_config(config) -> Tuple[float, float, int, float, int, Union[str, list]]:
     """
     Parses TFR configuration from settings with fallback defaults.
@@ -70,11 +97,33 @@ def get_tfr_config(config) -> Tuple[float, float, int, float, int, Union[str, li
     """
     tfr_config = config.get("time_frequency_analysis.tfr", {})
 
-    freq_min = float(tfr_config.get("freq_min", 1.0))
-    freq_max = float(tfr_config.get("freq_max", 100.0))
-    n_freqs = int(tfr_config.get("n_freqs", 40))
-    n_cycles_factor = float(tfr_config.get("n_cycles_factor", 2.0))
-    decim = int(tfr_config.get("decim", 4))
+    freq_min = _positive_float(
+        tfr_config.get("freq_min", 1.0),
+        "time_frequency_analysis.tfr.freq_min",
+    )
+    freq_max = _positive_float(
+        tfr_config.get("freq_max", 100.0),
+        "time_frequency_analysis.tfr.freq_max",
+    )
+    if freq_max <= freq_min:
+        raise ValueError(
+            "time_frequency_analysis.tfr.freq_max must be greater than "
+            "time_frequency_analysis.tfr.freq_min."
+        )
+    n_freqs = _positive_int(
+        tfr_config.get("n_freqs", 40),
+        "time_frequency_analysis.tfr.n_freqs",
+    )
+    if n_freqs < 2:
+        raise ValueError("time_frequency_analysis.tfr.n_freqs must be >= 2.")
+    n_cycles_factor = _positive_float(
+        tfr_config.get("n_cycles_factor", 2.0),
+        "time_frequency_analysis.tfr.n_cycles_factor",
+    )
+    decim = _positive_int(
+        tfr_config.get("decim", 4),
+        "time_frequency_analysis.tfr.decim",
+    )
     picks = tfr_config.get("picks", "eeg")
     
     return freq_min, freq_max, n_freqs, n_cycles_factor, decim, picks
@@ -98,10 +147,18 @@ def get_tfr_decim(config, mode: str = "power") -> int:
     """
     tfr_config = config.get("time_frequency_analysis.tfr", {})
     
+    mode = str(mode).strip().lower()
     if mode == "phase":
-        return int(tfr_config.get("decim_phase", 1))
-    else:
-        return int(tfr_config.get("decim_power", 4))
+        return _positive_int(
+            tfr_config.get("decim_phase", 1),
+            "time_frequency_analysis.tfr.decim_phase",
+        )
+    if mode == "power":
+        return _positive_int(
+            tfr_config.get("decim_power", 4),
+            "time_frequency_analysis.tfr.decim_power",
+        )
+    raise ValueError("TFR decimation mode must be 'power' or 'phase'.")
 
 
 ###################################################################
@@ -679,6 +736,26 @@ def compute_adaptive_n_cycles(
         max_cycles = _get_config_float(config, "time_frequency_analysis.tfr.max_cycles", None)
     
     freqs = np.asarray(freqs, dtype=float)
+    if freqs.size == 0 or not np.all(np.isfinite(freqs)) or np.any(freqs <= 0):
+        raise ValueError("time_frequency_analysis.tfr frequencies must be finite and > 0.")
+    cycles_factor = _positive_float(
+        cycles_factor,
+        "time_frequency_analysis.tfr.n_cycles_factor",
+    )
+    min_cycles = _positive_float(
+        min_cycles,
+        "time_frequency_analysis.tfr.min_cycles",
+    )
+    if max_cycles is not None:
+        max_cycles = _positive_float(
+            max_cycles,
+            "time_frequency_analysis.tfr.max_cycles",
+        )
+        if max_cycles < min_cycles:
+            raise ValueError(
+                "time_frequency_analysis.tfr.max_cycles must be >= "
+                "time_frequency_analysis.tfr.min_cycles."
+            )
     base_cycles = freqs / cycles_factor
     n_cycles = np.maximum(base_cycles, min_cycles)
     
@@ -871,8 +948,10 @@ def restrict_epochs_to_roi(
     
     roi_map = build_rois_from_info(epochs.info, config=config)
     if roi_selection not in roi_map:
-        logger.warning(f"ROI '{roi_selection}' not found; using all channels")
-        return epochs
+        raise ValueError(
+            f"ROI '{roi_selection}' was requested for TFR extraction but is not "
+            "defined or has no matching channels."
+        )
     
     channels = roi_map[roi_selection]
     epochs_restricted = epochs.pick_channels(channels)
@@ -1005,25 +1084,14 @@ def _clip_baseline_window(
 ) -> Tuple[float, float]:
     time_min = float(times[0])
     time_max = float(times[-1])
-    
-    baseline_start_clipped = max(baseline_start, time_min)
-    baseline_end_clipped = min(baseline_end, time_max)
-    
-    if baseline_end_clipped > 0:
-        baseline_end_clipped = min(0.0, time_max)
-        logger.warning(f"Clipping baseline end to 0.0 (was {baseline_end})")
-    
-    was_clipped = (
-        baseline_start_clipped != baseline_start or 
-        baseline_end_clipped != baseline_end
-    )
-    if was_clipped:
-        logger.info(
-            f"Clipped baseline window from [{baseline_start}, {baseline_end}] to "
-            f"[{baseline_start_clipped}, {baseline_end_clipped}] to fit data range."
+
+    if baseline_start < time_min or baseline_end > time_max:
+        raise ValueError(
+            f"Baseline window [{baseline_start}, {baseline_end}] is outside available "
+            f"data range [{time_min}, {time_max}]."
         )
-    
-    return baseline_start_clipped, baseline_end_clipped
+
+    return baseline_start, baseline_end
 
 
 def apply_baseline_safe(
@@ -1188,25 +1256,18 @@ def _apply_crop_window(
     tmin_req = float(times.min()) if tmin_req is None else float(tmin_req)
     tmax_req = float(times.max()) if tmax_req is None else float(tmax_req)
     
-    tmin_clip = max(tmin_req, tmin_avail)
-    tmax_clip = min(tmax_req, tmax_avail)
-    
-    is_invalid_window = tmin_clip > tmax_clip
-    if is_invalid_window:
-        logger.warning(
-            f"Requested crop window [{tmin_req}, {tmax_req}] invalid for available times "
-            f"[{tmin_avail}, {tmax_avail}]; using full range."
+    if tmin_req > tmax_req:
+        raise ValueError(
+            f"Requested crop window start ({tmin_req}) must be <= end ({tmax_req})."
         )
-        tmin_clip, tmax_clip = tmin_avail, tmax_avail
-    else:
-        was_clipped = tmin_clip != tmin_req or tmax_clip != tmax_req
-        if was_clipped:
-            logger.info(
-                f"Clipped crop window from [{tmin_req}, {tmax_req}] to "
-                f"[{tmin_clip}, {tmax_clip}] to fit data range."
-            )
-    
-    tfr_obj.crop(tmin=tmin_clip, tmax=tmax_clip)
+
+    if tmin_req < tmin_avail or tmax_req > tmax_avail:
+        raise ValueError(
+            f"Requested crop window [{tmin_req}, {tmax_req}] is outside available "
+            f"data range [{tmin_avail}, {tmax_avail}]."
+        )
+
+    tfr_obj.crop(tmin=tmin_req, tmax=tmax_req)
 
 
 ###################################################################

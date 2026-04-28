@@ -80,10 +80,17 @@ def _resolve_line_noise_freqs(
     cfg: Dict[str, Any],
     config: Any,
 ) -> List[float]:
-    """Resolve line-noise fundamentals with fallback to preprocessing.line_freq."""
+    """Resolve line-noise fundamentals from explicit config or preprocessing."""
     line_freqs_raw = cfg.get("line_noise_freqs", None)
     if line_freqs_raw is None and hasattr(config, "get"):
-        line_freqs_raw = [config.get("preprocessing.line_freq", 50.0)]
+        try:
+            preprocessing_line_freq = config.get("preprocessing.line_freq", 50.0)
+            preprocessing_line_freq = float(preprocessing_line_freq)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("preprocessing.line_freq must be a finite positive number.") from exc
+        if not np.isfinite(preprocessing_line_freq) or preprocessing_line_freq <= 0:
+            raise ValueError("preprocessing.line_freq must be a finite positive number.")
+        line_freqs_raw = [preprocessing_line_freq]
     elif line_freqs_raw is None:
         line_freqs_raw = [50.0]
 
@@ -92,14 +99,19 @@ def _resolve_line_noise_freqs(
 
     line_freqs: List[float] = []
     for value in line_freqs_raw:
-        if value is None:
-            continue
         try:
             freq = float(value)
-        except (TypeError, ValueError):
-            continue
-        if np.isfinite(freq) and freq > 0:
-            line_freqs.append(freq)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "feature_engineering.spectral.line_noise_freqs must contain "
+                "finite positive numbers."
+            ) from exc
+        if not np.isfinite(freq) or freq <= 0:
+            raise ValueError(
+                "feature_engineering.spectral.line_noise_freqs must contain "
+                "finite positive numbers."
+            )
+        line_freqs.append(freq)
     return line_freqs
 
 
@@ -1536,7 +1548,10 @@ def extract_spectral_features(
     spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
     psd_method = str(spec_cfg.get("psd_method", "multitaper")).strip().lower()
     if psd_method not in {"welch", "multitaper"}:
-        psd_method = "multitaper"
+        raise ValueError(
+            "feature_engineering.spectral.psd_method must be 'welch' or "
+            f"'multitaper' (got '{psd_method}')."
+        )
 
     fmin_psd = float(spec_cfg.get("fmin", 1.0))
     fmax_psd = float(spec_cfg.get("fmax", min(80.0, float(sfreq) / 2.0 - 0.5)))

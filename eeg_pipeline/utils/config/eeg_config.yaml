@@ -685,7 +685,7 @@ feature_engineering:
     min_cycles_at_fmin: 3.0
     normalize: true
     n_surrogates: 200
-    random_seed: null
+    random_seed: 42
     allow_harmonic_overlap: false
     max_harmonic: 6
     harmonic_tolerance_hz: 1.0

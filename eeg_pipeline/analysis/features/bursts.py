@@ -125,21 +125,57 @@ def _parse_burst_config(
     threshold_method = str(burst_config.get("threshold_method", "percentile")).strip().lower()
     valid_methods = {"percentile", "zscore", "mad"}
     if threshold_method not in valid_methods:
-        threshold_method = "percentile"
+        raise ValueError(
+            "feature_engineering.bursts.threshold_method must be one of "
+            f"{sorted(valid_methods)}; got {threshold_method!r}."
+        )
 
     threshold_reference = str(burst_config.get("threshold_reference", "trial")).strip().lower()
     if threshold_reference not in {"trial", "subject", "condition"}:
-        threshold_reference = "trial"
+        raise ValueError(
+            "feature_engineering.bursts.threshold_reference must be one of "
+            "['condition', 'subject', 'trial']; got "
+            f"{threshold_reference!r}."
+        )
+
+    threshold_z = float(burst_config.get("threshold_z", 2.0))
+    if not np.isfinite(threshold_z):
+        raise ValueError("feature_engineering.bursts.threshold_z must be finite.")
+
+    threshold_percentile = float(burst_config.get("threshold_percentile", 95.0))
+    if (
+        not np.isfinite(threshold_percentile)
+        or threshold_percentile < _MIN_PERCENTILE
+        or threshold_percentile > _MAX_PERCENTILE
+    ):
+        raise ValueError(
+            "feature_engineering.bursts.threshold_percentile must be finite and "
+            f"in [{_MIN_PERCENTILE}, {_MAX_PERCENTILE}]."
+        )
+
+    min_duration_ms = float(burst_config.get("min_duration_ms", 50.0))
+    if not np.isfinite(min_duration_ms) or min_duration_ms <= 0:
+        raise ValueError("feature_engineering.bursts.min_duration_ms must be finite and > 0.")
+
+    min_cycles = float(burst_config.get("min_cycles", 3.0))
+    if not np.isfinite(min_cycles) or min_cycles <= 0:
+        raise ValueError("feature_engineering.bursts.min_cycles must be finite and > 0.")
+
+    min_trials_per_condition = int(burst_config.get("min_trials_per_condition", 10))
+    if min_trials_per_condition < 1:
+        raise ValueError(
+            "feature_engineering.bursts.min_trials_per_condition must be >= 1."
+        )
 
     return {
         "bands": burst_config.get("bands") or default_bands,
         "threshold_method": threshold_method,
         "threshold_reference": threshold_reference,
-        "threshold_z": float(burst_config.get("threshold_z", 2.0)),
-        "threshold_percentile": float(burst_config.get("threshold_percentile", 95.0)),
-        "min_duration_ms": float(burst_config.get("min_duration_ms", 50.0)),
-        "min_cycles": float(burst_config.get("min_cycles", 3.0)),
-        "min_trials_per_condition": int(burst_config.get("min_trials_per_condition", 10)),
+        "threshold_z": threshold_z,
+        "threshold_percentile": threshold_percentile,
+        "min_duration_ms": min_duration_ms,
+        "min_cycles": min_cycles,
+        "min_trials_per_condition": min_trials_per_condition,
     }
 
 
@@ -275,8 +311,7 @@ def _compute_thresholds(
         )
         thresholds = median + (threshold_z * _MAD_TO_STD_SCALE * median_abs_deviation)
     else:
-        clipped_percentile = float(np.clip(threshold_percentile, _MIN_PERCENTILE, _MAX_PERCENTILE))
-        thresholds = np.nanpercentile(baseline_envelope, q=clipped_percentile, axis=time_axis)
+        thresholds = np.nanpercentile(baseline_envelope, q=threshold_percentile, axis=time_axis)
     
     if not per_epoch:
         thresholds = np.broadcast_to(thresholds[None, :], (baseline_envelope.shape[0], baseline_envelope.shape[1]))
@@ -548,16 +583,10 @@ def _compute_aggregate_thresholds(
 
     if threshold_reference == "condition":
         if condition_labels is None:
-            thresholds_src = baseline_envelope_agg[train_mask] if train_mask is not None else baseline_envelope_agg
-            thr_train = _compute_thresholds(
-                thresholds_src,
-                method=threshold_method,
-                threshold_z=threshold_z,
-                threshold_percentile=threshold_percentile,
-                per_epoch=False,
+            raise ValueError(
+                "condition-specific burst thresholds require condition labels "
+                "aligned to epochs."
             )
-            thr_val = thr_train[0, 0] if thr_train.size else np.nan
-            return np.full((n_epochs,), float(thr_val), dtype=float)
 
         if train_mask is not None:
             thr = _compute_thresholds_condition_trainmask(
@@ -672,18 +701,9 @@ def extract_burst_features(
         elif threshold_reference == "condition":
             condition_labels = _extract_condition_labels(ctx, n_epochs)
             if condition_labels is None:
-                thresholds_src = baseline_envelope[train_mask] if train_mask is not None else baseline_envelope
-                thresholds_train = _compute_thresholds(
-                    thresholds_src,
-                    method=threshold_method,
-                    threshold_z=burst_config["threshold_z"],
-                    threshold_percentile=burst_config["threshold_percentile"],
-                    per_epoch=False,
-                )
-                thresholds = (
-                    np.broadcast_to(thresholds_train[0][None, :], (n_epochs, thresholds_train.shape[1]))
-                    if thresholds_train.size
-                    else np.full((n_epochs, baseline_envelope.shape[1]), np.nan)
+                raise ValueError(
+                    "condition-specific burst thresholds require condition labels "
+                    "aligned to epochs."
                 )
             elif train_mask is not None:
                 thresholds = _compute_thresholds_condition_trainmask(
@@ -768,7 +788,11 @@ def extract_burst_features(
 
             segment_envelope = envelope[:, :, segment_mask]
             if segment_envelope.shape[-1] < min_samples:
-                continue
+                raise ValueError(
+                    "Bursts: requested segment "
+                    f"'{segment_name}' is too short for band '{band}' "
+                    f"({segment_envelope.shape[-1]} samples < {min_samples} required)."
+                )
 
             for epoch_index in range(n_epochs):
                 record = records[epoch_index]

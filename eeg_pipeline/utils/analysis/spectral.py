@@ -613,14 +613,15 @@ def subtract_evoked(
                 f"train_mask length ({train_mask.size}) must match n_epochs ({n_epochs})"
             )
         if int(np.sum(train_mask)) == 0:
-            train_mask = None
+            raise ValueError("train_mask must contain at least one training epoch.")
 
     ref_mask = train_mask if train_mask is not None else np.ones(n_epochs, dtype=bool)
-    ref_data = data[ref_mask]
-    grand_evoked = np.nanmean(ref_data, axis=0, keepdims=True)
 
     if condition_labels is None:
-        induced = data - grand_evoked
+        raise ValueError(
+            "condition_labels are required for evoked subtraction; "
+            "grand-average substitution would mix conditions."
+        )
     else:
         condition_labels = np.asarray(condition_labels)
         if len(condition_labels) != n_epochs:
@@ -630,7 +631,10 @@ def subtract_evoked(
             )
 
         if min_trials_per_condition < 1:
-            min_trials_per_condition = 1
+            raise ValueError(
+                "min_trials_per_condition must be >= 1 for evoked subtraction "
+                f"(got {min_trials_per_condition})."
+            )
 
         if condition_labels.dtype.kind in {"f", "i", "u"}:
             valid_labels = np.isfinite(condition_labels.astype(float))
@@ -645,23 +649,25 @@ def subtract_evoked(
             )
 
         unique_conditions = np.unique(condition_labels[valid_labels])
+        if not np.all(valid_labels):
+            raise ValueError(
+                "condition_labels contain missing/invalid values; "
+                "evoked subtraction requires complete condition labels."
+            )
 
         for condition in unique_conditions:
             cond_mask_all = condition_labels == condition
             cond_mask_ref = cond_mask_all & ref_mask
             n_ref = int(np.sum(cond_mask_ref))
 
-            if n_ref >= min_trials_per_condition:
-                condition_evoked = np.nanmean(data[cond_mask_ref], axis=0, keepdims=True)
-            else:
-                condition_evoked = grand_evoked
+            if n_ref < min_trials_per_condition:
+                raise ValueError(
+                    f"Condition {condition!r} has fewer than min_trials_per_condition "
+                    f"({n_ref} < {min_trials_per_condition}) for evoked subtraction."
+                )
+            condition_evoked = np.nanmean(data[cond_mask_ref], axis=0, keepdims=True)
 
             induced[cond_mask_all] = data[cond_mask_all] - condition_evoked
-
-        # For missing/invalid condition labels, fall back to grand evoked subtraction
-        missing_mask = ~valid_labels
-        if np.any(missing_mask):
-            induced[missing_mask] = data[missing_mask] - grand_evoked
     
     return induced
 

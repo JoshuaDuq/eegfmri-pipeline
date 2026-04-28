@@ -118,9 +118,11 @@ def _apply_spatial_transform(
     try:
         lambda2 = float(config.get("feature_engineering.spatial_transform_params.lambda2", DEFAULT_CSD_LAMBDA2))
         stiffness = float(config.get("feature_engineering.spatial_transform_params.stiffness", DEFAULT_CSD_STIFFNESS))
-    except (ValueError, TypeError, AttributeError):
-        lambda2 = DEFAULT_CSD_LAMBDA2
-        stiffness = DEFAULT_CSD_STIFFNESS
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError(
+            "feature_engineering.spatial_transform_params.lambda2 and stiffness "
+            "must be numeric when a spatial transform is requested."
+        ) from exc
     
     try:
         transformed = mne.preprocessing.compute_current_source_density(
@@ -155,7 +157,14 @@ def _get_spatial_transform_type(config: Any, feature_family: Optional[str] = Non
     if family in {"directedconnectivity", "directed_connectivity", "dconn"}:
         family = "connectivity"
 
+    valid_transforms = {"none", "csd", "laplacian"}
     global_transform = str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
+    if global_transform not in valid_transforms:
+        raise ValueError(
+            "feature_engineering.spatial_transform must be one of "
+            f"{sorted(valid_transforms)}; got {global_transform!r}."
+        )
+
     # Explicit global override: force transform across families.
     if global_transform in {"csd", "laplacian"}:
         return global_transform
@@ -164,11 +173,14 @@ def _get_spatial_transform_type(config: Any, feature_family: Optional[str] = Non
         per_family = config.get("feature_engineering.spatial_transform_per_family", {})
         if isinstance(per_family, dict) and family in per_family:
             transform = str(per_family[family]).strip().lower()
-            if transform in {"none", "csd", "laplacian"}:
-                return transform
-    
-    if global_transform not in {"none", "csd", "laplacian"}:
-        return "none"
+            if transform not in valid_transforms:
+                raise ValueError(
+                    "feature_engineering.spatial_transform_per_family."
+                    f"{family} must be one of {sorted(valid_transforms)}; "
+                    f"got {transform!r}."
+                )
+            return transform
+
     return global_transform
 
 
@@ -660,6 +672,11 @@ def _compute_psd_with_qc(
             else "baseline"
         )
     else:
+        if not is_resting_state_feature_mode(config):
+            raise ValueError(
+                "Precomputed PSD baseline is required for event-related EEG compute. "
+                "The baseline mask is missing or empty."
+            )
         psd_input = data
         window_type = "full"
     
@@ -750,9 +767,7 @@ def precompute_data(
     )
     
     if len(picks) == 0:
-        if logger:
-            logger.warning("No EEG channels available")
-        return _create_empty_precomputed_data(epochs, config, logger)
+        raise ValueError("No EEG channels available for feature precomputation.")
     
     transform_type = _get_spatial_transform_type(config, feature_family)
     epochs_picked = epochs.copy().pick(picks)

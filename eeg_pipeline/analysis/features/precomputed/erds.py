@@ -478,9 +478,10 @@ def extract_erds_from_precomputed(
                     # Use segment-specific active_mask, not windows.active_mask
                     active_power_trace = power[ch_idx, active_mask]
                     active_power_mean, _, _, _ = nanmean_with_fraction(power[ch_idx], active_mask)
-                    np.maximum(active_power_trace, min_active_power)
                     safe_active_mean = (
-                        float(active_power_mean) if np.isfinite(active_power_mean) else min_active_power
+                        max(float(active_power_mean), min_active_power)
+                        if np.isfinite(active_power_mean)
+                        else min_active_power
                     )
 
                     if baseline_valid:
@@ -713,7 +714,6 @@ def extract_erds_from_precomputed(
                                 active_mean = float(np.nanmean(active_mean_by_channel[valid_mask_ch]))
                                 if (
                                     baseline_mean > epsilon
-                                    and active_mean > 0
                                     and np.isfinite(baseline_mean)
                                     and np.isfinite(active_mean)
                                 ):
@@ -772,7 +772,7 @@ def extract_erds_from_precomputed(
                                     )
                                 ] = np.nan
                             else:
-                                if b_roi > epsilon and a_roi > 0 and np.isfinite(b_roi) and np.isfinite(a_roi):
+                                if b_roi > epsilon and np.isfinite(b_roi) and np.isfinite(a_roi):
                                     roi_db_mean = float(10 * np.log10(max(a_roi, min_active_power) / b_roi))
                                 else:
                                     roi_db_mean = np.nan

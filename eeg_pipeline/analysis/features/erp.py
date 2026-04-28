@@ -355,11 +355,15 @@ def _parse_lowpass_filter(
     
     try:
         lowpass_hz = float(lowpass_hz)
-    except (TypeError, ValueError):
-        return _DEFAULT_LOWPASS_HZ
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"ERP lowpass_hz must be a positive finite float or null (got {lowpass_hz!r})."
+        ) from exc
     
     if not np.isfinite(lowpass_hz) or lowpass_hz <= 0:
-        return None
+        raise ValueError(
+            f"ERP lowpass_hz must be a positive finite float or null (got {lowpass_hz!r})."
+        )
     
     return lowpass_hz
 

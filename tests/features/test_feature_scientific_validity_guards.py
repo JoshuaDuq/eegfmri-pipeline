@@ -916,8 +916,8 @@ class TestScientificValidityGuards(unittest.TestCase):
                             "threshold_reference": "trial",
                             "threshold_method": "percentile",
                             "threshold_percentile": 50.0,
-                            "min_duration_ms": 0.0,
-                            "min_cycles": 0.0,
+                            "min_duration_ms": 1.0,
+                            "min_cycles": 1.0,
                         }
                     },
                 }
@@ -2303,7 +2303,7 @@ class TestScientificValidityGuards(unittest.TestCase):
 
         self.assertEqual(seen["bands"], override_bands)
 
-    def test_itpc_tfr_skips_short_segments_by_duration(self):
+    def test_itpc_tfr_rejects_short_segments_by_duration(self):
         n_epochs, n_ch, n_freqs, n_times = 4, 2, 3, 20  # 0.2 s at 100 Hz
         sfreq = 100.0
         times = np.arange(n_times, dtype=float) / sfreq
@@ -2346,11 +2346,10 @@ class TestScientificValidityGuards(unittest.TestCase):
             aligned_events=None,
         )
 
-        df, cols = extract_phase_features(ctx, bands=["alpha"])
-        self.assertTrue(df.empty)
-        self.assertEqual(cols, [])
+        with self.assertRaisesRegex(ValueError, "ITPC.*too short"):
+            extract_phase_features(ctx, bands=["alpha"])
 
-    def test_itpc_precomputed_skips_short_segments_by_cycles(self):
+    def test_itpc_precomputed_rejects_short_segments_by_cycles(self):
         n_epochs, n_ch, n_times = 4, 2, 20  # 0.2 s at 100 Hz
         sfreq = 100.0
         times = np.arange(n_times, dtype=float) / sfreq
@@ -2399,11 +2398,10 @@ class TestScientificValidityGuards(unittest.TestCase):
             frequency_bands={"alpha": [8.0, 12.0]},
         )
 
-        df, cols = extract_itpc_from_precomputed(precomputed)
-        self.assertTrue(df.empty)
-        self.assertEqual(cols, [])
+        with self.assertRaisesRegex(ValueError, "ITPC .*too short"):
+            extract_itpc_from_precomputed(precomputed)
 
-    def test_pac_precomputed_skips_short_segments(self):
+    def test_pac_precomputed_rejects_short_segments(self):
         n_epochs, n_ch, n_times = 4, 2, 20  # 0.2 s at 100 Hz
         sfreq = 100.0
         times = np.arange(n_times, dtype=float) / sfreq
@@ -2451,6 +2449,7 @@ class TestScientificValidityGuards(unittest.TestCase):
                         "n_surrogates": 0,
                         "min_segment_sec": 1.0,
                         "min_cycles_at_fmin": 3.0,
+                        "allow_harmonic_overlap": True,
                     },
                 },
                 "time_frequency_analysis": {
@@ -2474,9 +2473,8 @@ class TestScientificValidityGuards(unittest.TestCase):
             spatial_modes=["channels"],
         )
 
-        df, cols = extract_pac_from_precomputed(precomputed, cfg)
-        self.assertTrue(df.empty)
-        self.assertEqual(cols, [])
+        with self.assertRaisesRegex(ValueError, "PAC .*too short"):
+            extract_pac_from_precomputed(precomputed, cfg)
 
     def test_pac_precomputed_uses_precomputed_frequency_bands_when_config_bands_missing(self):
         n_epochs, n_ch, n_times = 4, 2, 300
@@ -2675,7 +2673,7 @@ class TestScientificValidityGuards(unittest.TestCase):
                         "normalize": False,
                         "n_surrogates": 0,
                         "min_segment_sec": 0.0,
-                        "min_cycles_at_fmin": 0.0,
+                        "min_cycles_at_fmin": 1.0,
                         "allow_harmonic_overlap": True,
                     },
                     "spatial_modes": ["global"],

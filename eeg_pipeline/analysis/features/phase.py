@@ -43,37 +43,37 @@ _build_roi_map_if_needed = build_roi_map_if_needed
 
 
 def _positive_float_or_default(value: Any, default: float) -> float:
-    """Return a positive finite float, or a fallback default."""
+    """Return a positive finite float."""
     try:
         out = float(value)
-    except (TypeError, ValueError):
-        return float(default)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Expected a positive finite float; got {value!r}.") from exc
     if not np.isfinite(out) or out <= 0:
-        return float(default)
+        raise ValueError(f"Expected a positive finite float; got {value!r}.")
     return float(out)
 
 
 def _nonnegative_float_or_default(value: Any, default: float) -> float:
-    """Return a non-negative finite float, or a fallback default."""
+    """Return a non-negative finite float."""
     try:
         out = float(value)
-    except (TypeError, ValueError):
-        return float(default)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Expected a non-negative finite float; got {value!r}.") from exc
     if not np.isfinite(out) or out < 0:
-        return float(default)
+        raise ValueError(f"Expected a non-negative finite float; got {value!r}.")
     return float(out)
 
 
 def _rng_from_seed(seed: Any) -> np.random.Generator:
     """Create RNG from seed while keeping `0` as a valid deterministic seed."""
     if seed is None:
-        return np.random.default_rng()
+        raise ValueError("PAC random_seed must be an explicit integer.")
     if isinstance(seed, str) and seed.strip() == "":
-        return np.random.default_rng()
+        raise ValueError("PAC random_seed must be an explicit integer.")
     try:
         parsed_seed = int(seed)
     except (TypeError, ValueError):
-        return np.random.default_rng()
+        raise ValueError("PAC random_seed must be an explicit integer.") from None
     return np.random.default_rng(parsed_seed)
 
 
@@ -1407,9 +1407,6 @@ def extract_phase_features(
         return pd.DataFrame(), []
     
     baseline_correction = _get_baseline_correction_mode(config)
-    warned_short_segment = set()
-    warned_short_band = set()
-
     for segment_name in segments:
         segment_mask = segment_masks.get(segment_name)
         if segment_mask is None or getattr(segment_mask, "shape", (0,))[0] != times.shape[0]:
@@ -1422,15 +1419,10 @@ def extract_phase_features(
         if np.isfinite(min_segment_sec) and min_segment_sec > 0 and (
             not np.isfinite(segment_sec) or segment_sec < min_segment_sec
         ):
-            if segment_name not in warned_short_segment and logger is not None:
-                logger.warning(
-                    "ITPC: segment '%s' too short (%.3fs < %.3fs); skipping segment.",
-                    segment_name,
-                    segment_sec,
-                    min_segment_sec,
-                )
-                warned_short_segment.add(str(segment_name))
-            continue
+            raise ValueError(
+                f"ITPC: requested segment '{segment_name}' is too short "
+                f"({segment_sec:.3f}s < {min_segment_sec:.3f}s)."
+            )
 
         baseline_mask = None
         if baseline_correction == "subtract":
@@ -1454,20 +1446,12 @@ def extract_phase_features(
                 min_cycles_at_fmin=min_cycles_at_fmin,
             )
             if not np.isfinite(segment_sec) or segment_sec < required_sec:
-                band_key = (str(segment_name), str(band))
-                if band_key not in warned_short_band and logger is not None:
-                    logger.warning(
-                        "ITPC: segment '%s' too short for band '%s' (%.3fs < %.3fs; "
-                        "min_cycles_at_fmin=%.1f at fmin=%.2fHz).",
-                        segment_name,
-                        band,
-                        segment_sec,
-                        required_sec,
-                        min_cycles_at_fmin,
-                        float(fmin),
-                    )
-                    warned_short_band.add(band_key)
-                continue
+                raise ValueError(
+                    f"ITPC: requested segment '{segment_name}' is too short "
+                    f"for band '{band}' ({segment_sec:.3f}s < {required_sec:.3f}s; "
+                    f"min_cycles_at_fmin={min_cycles_at_fmin:.1f} at "
+                    f"fmin={float(fmin):.2f}Hz)."
+                )
 
             frequency_mask = (freqs >= fmin) & (freqs <= fmax)
             if not np.any(frequency_mask):
@@ -1692,13 +1676,10 @@ def compute_pac_comodulograms(
     if np.isfinite(min_segment_sec) and min_segment_sec > 0 and (
         not np.isfinite(segment_sec) or segment_sec < min_segment_sec
     ):
-        logger.warning(
-            "PAC: segment '%s' too short (%.3fs < %.3fs); skipping.",
-            segment_name,
-            segment_sec,
-            min_segment_sec,
+        raise ValueError(
+            f"PAC: requested segment '{segment_name}' is too short "
+            f"({segment_sec:.3f}s < {min_segment_sec:.3f}s)."
         )
-        return None, None, None, None, None
     
     phase_min, phase_max, amp_min, amp_max = _extract_frequency_ranges(pac_cfg)
     
@@ -1717,7 +1698,7 @@ def compute_pac_comodulograms(
     normalize = bool(pac_cfg.get("normalize", True))
     epsilon = float(get_config_value(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
 
-    rng = _rng_from_seed(pac_cfg.get("random_seed", None))
+    rng = _rng_from_seed(pac_cfg.get("random_seed", None)) if n_surrogates > 0 else None
     
     ch_names = _get_channel_names_from_tfr(tfr_complex, n_ch, logger)
 
@@ -1743,8 +1724,6 @@ def compute_pac_comodulograms(
     
     pair_channel_data = {}
     pair_channel_data_z = {}
-    warned_short_pairs: set[str] = set()
-
     for channel_idx in range(n_ch):
         for phase_band, amp_band, phase_range, amp_range in valid_pairs:
             required_sec = _required_duration_seconds(
@@ -1753,21 +1732,13 @@ def compute_pac_comodulograms(
                 min_cycles_at_fmin=min_cycles_at_fmin,
             )
             if not np.isfinite(segment_sec) or segment_sec < required_sec:
-                pair_key = f"{phase_band}_{amp_band}"
-                if pair_key not in warned_short_pairs:
-                    logger.warning(
-                        "PAC: segment '%s' too short for pair %s->%s (%.3fs < %.3fs; "
-                        "min_cycles_at_fmin=%.1f at fmin=%.2fHz).",
-                        segment_name,
-                        phase_band,
-                        amp_band,
-                        segment_sec,
-                        required_sec,
-                        min_cycles_at_fmin,
-                        float(phase_range[0]),
-                    )
-                    warned_short_pairs.add(pair_key)
-                continue
+                raise ValueError(
+                    f"PAC: requested segment '{segment_name}' is too short "
+                    f"for pair {phase_band}->{amp_band} "
+                    f"({segment_sec:.3f}s < {required_sec:.3f}s; "
+                    f"min_cycles_at_fmin={min_cycles_at_fmin:.1f} at "
+                    f"fmin={float(phase_range[0]):.2f}Hz)."
+                )
 
             pac_values = _compute_pac_for_channel_band_pair(
                 data, channel_idx, phase_freqs, amp_freqs,
@@ -1950,9 +1921,6 @@ def extract_itpc_from_precomputed(
 
     baseline_mask = masks.get("baseline") if baseline_correction == "subtract" else None
     results = {}
-    warned_short_segment = set()
-    warned_short_band = set()
-
     for band, band_data in precomputed.band_data.items():
         phases = band_data.phase
         if phases is None or phases.size == 0:
@@ -1989,15 +1957,10 @@ def extract_itpc_from_precomputed(
             if np.isfinite(min_segment_sec) and min_segment_sec > 0 and (
                 not np.isfinite(segment_sec) or segment_sec < min_segment_sec
             ):
-                if seg_name not in warned_short_segment and logger is not None:
-                    logger.warning(
-                        "ITPC (precomputed): segment '%s' too short (%.3fs < %.3fs); skipping segment.",
-                        seg_name,
-                        segment_sec,
-                        min_segment_sec,
-                    )
-                    warned_short_segment.add(str(seg_name))
-                continue
+                raise ValueError(
+                    f"ITPC (precomputed): requested segment '{seg_name}' is too short "
+                    f"({segment_sec:.3f}s < {min_segment_sec:.3f}s)."
+                )
 
             fmin_band = float(getattr(band_data, "fmin", np.nan))
             if not np.isfinite(fmin_band):
@@ -2008,20 +1971,12 @@ def extract_itpc_from_precomputed(
                 min_cycles_at_fmin=min_cycles_at_fmin,
             )
             if not np.isfinite(segment_sec) or segment_sec < required_sec:
-                band_key = (str(seg_name), str(band))
-                if band_key not in warned_short_band and logger is not None:
-                    logger.warning(
-                        "ITPC (precomputed): segment '%s' too short for band '%s' (%.3fs < %.3fs; "
-                        "min_cycles_at_fmin=%.1f at fmin=%.2fHz).",
-                        seg_name,
-                        band,
-                        segment_sec,
-                        required_sec,
-                        min_cycles_at_fmin,
-                        fmin_band,
-                    )
-                    warned_short_band.add(band_key)
-                continue
+                raise ValueError(
+                    f"ITPC (precomputed): requested segment '{seg_name}' is too short "
+                    f"for band '{band}' ({segment_sec:.3f}s < {required_sec:.3f}s; "
+                    f"min_cycles_at_fmin={min_cycles_at_fmin:.1f} at "
+                    f"fmin={fmin_band:.2f}Hz)."
+                )
             
             segment_complex = complex_vectors[:, :, mask]
             
@@ -2106,7 +2061,7 @@ def extract_pac_from_precomputed(
     min_segment_sec = _nonnegative_float_or_default(pac_cfg.get("min_segment_sec", 1.0), 1.0)
     min_cycles_at_fmin = _positive_float_or_default(pac_cfg.get("min_cycles_at_fmin", 3.0), 3.0)
     eps_amp = float(get_config_value(config, "feature_engineering.constants.epsilon_amp", _EPSILON_COMPLEX))
-    rng = _rng_from_seed(pac_cfg.get("random_seed", None))
+    rng = _rng_from_seed(pac_cfg.get("random_seed", None)) if n_surrogates > 0 else None
     allow_harmonic_overlap = bool(pac_cfg.get("allow_harmonic_overlap", False))
     max_harm = int(pac_cfg.get("max_harmonic", 6))
     tol_hz = float(pac_cfg.get("harmonic_tolerance_hz", 1.0))
@@ -2176,8 +2131,6 @@ def extract_pac_from_precomputed(
     valid_pairs = _get_valid_pac_pairs(
         pairs, tf_bands, allow_harmonic_overlap, max_harm, tol_hz, logger
     )
-    warned_short_segment = set()
-    warned_short_pair = set()
     sfreq_hz = _positive_float_or_default(getattr(precomputed, "sfreq", np.nan), np.nan)
 
     for segment_name, mask in masks.items():
@@ -2188,15 +2141,10 @@ def extract_pac_from_precomputed(
         if np.isfinite(min_segment_sec) and min_segment_sec > 0 and (
             not np.isfinite(segment_sec) or segment_sec < min_segment_sec
         ):
-            if segment_name not in warned_short_segment and logger is not None:
-                logger.warning(
-                    "PAC (precomputed): segment '%s' too short (%.3fs < %.3fs); skipping segment.",
-                    segment_name,
-                    segment_sec,
-                    min_segment_sec,
-                )
-                warned_short_segment.add(str(segment_name))
-            continue
+            raise ValueError(
+                f"PAC (precomputed): requested segment '{segment_name}' is too short "
+                f"({segment_sec:.3f}s < {min_segment_sec:.3f}s)."
+            )
 
         for phase_band, amp_band, _, _ in valid_pairs:
             try:
@@ -2210,21 +2158,13 @@ def extract_pac_from_precomputed(
                 min_cycles_at_fmin=min_cycles_at_fmin,
             )
             if not np.isfinite(segment_sec) or segment_sec < required_sec:
-                pair_key = (str(segment_name), f"{phase_band}_{amp_band}")
-                if pair_key not in warned_short_pair and logger is not None:
-                    logger.warning(
-                        "PAC (precomputed): segment '%s' too short for pair %s->%s (%.3fs < %.3fs; "
-                        "min_cycles_at_fmin=%.1f at fmin=%.2fHz).",
-                        segment_name,
-                        phase_band,
-                        amp_band,
-                        segment_sec,
-                        required_sec,
-                        min_cycles_at_fmin,
-                        fmin_phase,
-                    )
-                    warned_short_pair.add(pair_key)
-                continue
+                raise ValueError(
+                    f"PAC (precomputed): requested segment '{segment_name}' is too short "
+                    f"for pair {phase_band}->{amp_band} "
+                    f"({segment_sec:.3f}s < {required_sec:.3f}s; "
+                    f"min_cycles_at_fmin={min_cycles_at_fmin:.1f} at "
+                    f"fmin={fmin_phase:.2f}Hz)."
+                )
 
             if phase_band not in phases or amp_band not in amplitudes:
                 continue

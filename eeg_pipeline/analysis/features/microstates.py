@@ -58,27 +58,52 @@ class _MicrostateConfig:
 def _load_microstate_config(config: Any) -> _MicrostateConfig:
     micro_cfg = get_config_value(config, "feature_engineering.microstates", {}) or {}
     n_states = int(micro_cfg.get("n_states", _DEFAULT_N_STATES))
-    n_states = int(np.clip(n_states, 2, 12))
+    if n_states < 2 or n_states > 12:
+        raise ValueError(
+            "feature_engineering.microstates.n_states must be between 2 and 12; "
+            f"got {n_states}."
+        )
 
     min_peak_distance_ms = float(
         micro_cfg.get("min_peak_distance_ms", _DEFAULT_MIN_PEAK_DISTANCE_MS)
     )
-    min_peak_distance_ms = max(0.0, min_peak_distance_ms)
+    if min_peak_distance_ms < 0:
+        raise ValueError(
+            "feature_engineering.microstates.min_peak_distance_ms must be >= 0; "
+            f"got {min_peak_distance_ms}."
+        )
 
     max_gfp_peaks_per_epoch = int(
         micro_cfg.get("max_gfp_peaks_per_epoch", _DEFAULT_MAX_GFP_PEAKS_PER_EPOCH)
     )
-    max_gfp_peaks_per_epoch = max(10, max_gfp_peaks_per_epoch)
+    if max_gfp_peaks_per_epoch < 10:
+        raise ValueError(
+            "feature_engineering.microstates.max_gfp_peaks_per_epoch must be >= 10; "
+            f"got {max_gfp_peaks_per_epoch}."
+        )
 
     min_duration_ms = float(micro_cfg.get("min_duration_ms", _DEFAULT_MIN_DURATION_MS))
-    min_duration_ms = max(0.0, min_duration_ms)
+    if min_duration_ms < 0:
+        raise ValueError(
+            "feature_engineering.microstates.min_duration_ms must be >= 0; "
+            f"got {min_duration_ms}."
+        )
 
     gfp_peak_prominence = float(micro_cfg.get("gfp_peak_prominence", 0.0))
-    gfp_peak_prominence = max(0.0, gfp_peak_prominence)
+    if gfp_peak_prominence < 0:
+        raise ValueError(
+            "feature_engineering.microstates.gfp_peak_prominence must be >= 0; "
+            f"got {gfp_peak_prominence}."
+        )
 
     random_state = int(
         micro_cfg.get("random_state", get_config_value(config, "project.random_state", _DEFAULT_RANDOM_STATE))
     )
+    if random_state < 0:
+        raise ValueError(
+            "feature_engineering.microstates.random_state must be >= 0; "
+            f"got {random_state}."
+        )
     assign_from_gfp_peaks = bool(
         micro_cfg.get("assign_from_gfp_peaks", _DEFAULT_ASSIGN_FROM_GFP_PEAKS)
     )
