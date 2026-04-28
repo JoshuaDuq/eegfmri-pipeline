@@ -130,6 +130,7 @@ class TestConnectivityValidityGuards(unittest.TestCase):
                         "output_level": "global_only",
                         "enable_graph_metrics": False,
                         "min_segment_sec": 0.0,
+                        "n_cycles": 2.0,
                     }
                 }
             }

@@ -308,34 +308,46 @@ def _build_component_masks(
 ) -> Dict[str, np.ndarray]:
     components = erp_cfg.get("components", [])
     if not isinstance(components, list):
-        return {}
+        raise ValueError("ERP components must be provided as a list of component specs.")
     
     masks: Dict[str, np.ndarray] = {}
     for comp in components:
         if not isinstance(comp, dict):
-            continue
+            raise ValueError(f"ERP component spec must be a mapping (got {comp!r}).")
         
         name = str(comp.get("name", "")).strip().lower()
         start = comp.get("start")
         end = comp.get("end")
         
         if not name or start is None or end is None:
-            continue
+            raise ValueError(
+                f"ERP component spec requires name, start, and end fields (got {comp!r})."
+            )
         
         try:
             start_time = float(start)
             end_time = float(end)
-        except (TypeError, ValueError):
-            continue
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"ERP component '{name}' start/end must be finite floats."
+            ) from exc
         
         if not np.isfinite(start_time) or not np.isfinite(end_time):
-            continue
+            raise ValueError(f"ERP component '{name}' start/end must be finite floats.")
         if end_time <= start_time:
-            continue
+            raise ValueError(
+                f"ERP component '{name}' requires start < end "
+                f"(got start={start_time}, end={end_time})."
+            )
         
         mask = (times >= start_time) & (times < end_time)
         if np.any(mask):
             masks[name] = mask
+        else:
+            raise ValueError(
+                f"ERP component '{name}' window has no samples "
+                f"(start={start_time}, end={end_time})."
+            )
     
     return masks
 

@@ -602,16 +602,30 @@ def _safe_n_cycles_for_segment(
     sfreq_hz: float,
     n_times: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Compute safe cwt_n_cycles and filter frequencies that would violate MNE constraints."""
+    """Validate cwt_n_cycles for a segment without changing the requested model."""
     freqs_hz = np.asarray(freqs_hz, dtype=float)
     if n_times <= 0:
-        return np.array([]), np.array([])
+        raise ValueError("Connectivity n_cycles validation requires a non-empty segment.")
+    if freqs_hz.size == 0 or not np.all(np.isfinite(freqs_hz)) or np.any(freqs_hz <= 0):
+        raise ValueError("Connectivity n_cycles validation requires positive finite frequencies.")
+    try:
+        sfreq = float(sfreq_hz)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Connectivity n_cycles validation requires a positive finite sfreq.") from exc
+    if not np.isfinite(sfreq) or sfreq <= 0:
+        raise ValueError("Connectivity n_cycles validation requires a positive finite sfreq.")
 
     default_cycles = 7.0
     try:
         base = float(base_n_cycles) if base_n_cycles is not None else default_cycles
-    except (TypeError, ValueError):
-        base = default_cycles
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Connectivity n_cycles must be a positive finite number (got {base_n_cycles!r})."
+        ) from exc
+    if not np.isfinite(base) or base < 1.0:
+        raise ValueError(
+            f"Connectivity n_cycles must be >= 1.0 and finite (got {base_n_cycles!r})."
+        )
 
     # MNE Morlet check:
     # len(W) <= n_times, with len(W) = 2*len(arange(0, 5*sigma_t, 1/sfreq)) - 1
@@ -619,20 +633,27 @@ def _safe_n_cycles_for_segment(
     n_sigma = 5.0
     half_len_max = int((n_times + 1) // 2)
     if half_len_max <= 1:
-        return np.array([]), np.array([])
+        raise ValueError("Connectivity segment is too short for Morlet wavelet estimation.")
 
     safety_factor = 0.95
     max_cycles_by_wavelet = (
         safety_factor
         * float(half_len_max)
         * (2.0 * np.pi * freqs_hz)
-        / (n_sigma * sfreq_hz)
+        / (n_sigma * sfreq)
     )
-    safe_cycles = np.minimum(base, max_cycles_by_wavelet)
-
-    min_required_cycles = 1.0
-    valid_mask = np.isfinite(safe_cycles) & (safe_cycles >= min_required_cycles)
-    return freqs_hz[valid_mask], safe_cycles[valid_mask]
+    if not np.all(np.isfinite(max_cycles_by_wavelet)):
+        raise ValueError("Connectivity n_cycles validation produced non-finite wavelet limits.")
+    if np.any(base > max_cycles_by_wavelet):
+        limiting_freq = float(freqs_hz[np.argmin(max_cycles_by_wavelet)])
+        limiting_cycles = float(np.min(max_cycles_by_wavelet))
+        raise ValueError(
+            "Connectivity n_cycles request cannot fit the segment without changing "
+            "the Morlet wavelet model "
+            f"(n_cycles={base:.3g}, max={limiting_cycles:.3g} at {limiting_freq:.3g}Hz, "
+            f"n_times={int(n_times)}, sfreq={sfreq:.3g})."
+        )
+    return freqs_hz, np.full(freqs_hz.shape, base, dtype=float)
 
 
 def _resolve_phase_measures(conn_cfg: Dict[str, Any]) -> List[str]:
@@ -797,7 +818,10 @@ def _apply_across_epochs_phase_estimates_inplace(
 
     output_level = str(conn_cfg.get("output_level", "full")).strip().lower()
     if output_level not in {"full", "global_only"}:
-        output_level = "full"
+        raise ValueError(
+            "Connectivity: output_level must be one of {'full', 'global_only'} "
+            f"(got {output_level!r})."
+        )
     enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", False))
 
     n_freqs_per_band = int(conn_cfg.get("n_freqs_per_band", 8))
@@ -816,7 +840,7 @@ def _apply_across_epochs_phase_estimates_inplace(
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)
     if n_channels < 2:
-        return
+        raise ValueError("Connectivity across-epochs estimates require at least 2 channels.")
     pair_i, pair_j = np.triu_indices(n_channels, k=1)
     pair_names = [f"{ch_names[i]}-{ch_names[j]}" for i, j in zip(pair_i, pair_j)]
     indices = (pair_i.astype(int), pair_j.astype(int))
@@ -845,7 +869,7 @@ def _apply_across_epochs_phase_estimates_inplace(
     for _label, epoch_idx in epoch_groups.items():
         epoch_idx = np.asarray(epoch_idx, dtype=int)
         if epoch_idx.size == 0:
-            continue
+            raise ValueError("Connectivity across-epochs estimates received an empty epoch group.")
 
         for seg_name in segments:
             if seg_name == "full":
@@ -853,23 +877,33 @@ def _apply_across_epochs_phase_estimates_inplace(
             else:
                 seg_mask = masks.get(seg_name)
             if seg_mask is None or not np.any(seg_mask):
-                continue
+                raise ValueError(
+                    f"Connectivity: requested segment '{seg_name}' has no samples for across-epochs estimation."
+                )
 
             seg_len = int(np.sum(seg_mask))
             seg_sec = float(seg_len) / sfreq if sfreq > 0 else 0.0
             if min_segment_sec > 0 and seg_sec < min_segment_sec:
-                continue
+                raise ValueError(
+                    f"Connectivity: requested segment '{seg_name}' is too short for "
+                    f"across-epochs estimation ({seg_sec:.3f}s < {min_segment_sec:.3f}s)."
+                )
 
             req_cycles = max(float(min_cycles_per_band), 1.0) if np.isfinite(min_cycles_per_band) else 1.0
             min_viable_freq = (req_cycles / seg_sec) if seg_sec > 0 else np.inf
 
             seg_data = precomputed.data[epoch_idx][:, :, seg_mask]
             if seg_data.ndim != 3 or seg_data.shape[-1] < 2:
-                continue
+                raise ValueError(
+                    f"Connectivity: requested segment '{seg_name}' has invalid data shape "
+                    f"for across-epochs estimation ({seg_data.shape})."
+                )
 
             for band in bands:
                 if band not in freq_bands:
-                    continue
+                    raise ValueError(
+                        f"Connectivity: requested band '{band}' has no frequency definition."
+                    )
                 if band in precomputed.band_data and getattr(precomputed.band_data[band], "fmin", None) is not None:
                     fmin = float(precomputed.band_data[band].fmin)
                     fmax = float(precomputed.band_data[band].fmax)
@@ -883,12 +917,19 @@ def _apply_across_epochs_phase_estimates_inplace(
                 if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
                     raise ValueError(f"Invalid frequency band range for '{band}': ({fmin}, {fmax})")
                 if fmax < min_viable_freq:
-                    continue
+                    raise ValueError(
+                        f"Connectivity: requested segment '{seg_name}' is too short for "
+                        f"band '{band}' in across-epochs estimation (fmax {fmax:.2f}Hz < "
+                        f"minimum viable {min_viable_freq:.2f}Hz)."
+                    )
 
                 freqs = np.linspace(fmin, fmax, max(n_freqs_per_band, 2))
                 freqs = freqs[np.asarray(freqs) >= min_viable_freq]
                 if freqs.size < 2:
-                    continue
+                    raise ValueError(
+                        f"Connectivity: requested segment '{seg_name}' leaves fewer than "
+                        f"2 viable frequencies for band '{band}' in across-epochs estimation."
+                    )
 
                 use_n_cycles = n_cycles
                 if conn_mode == "cwt_morlet":
@@ -899,7 +940,10 @@ def _apply_across_epochs_phase_estimates_inplace(
                         int(seg_data.shape[-1]),
                     )
                     if valid_freqs.size < 2:
-                        continue
+                        raise ValueError(
+                            f"Connectivity: requested segment '{seg_name}' leaves fewer than "
+                            f"2 Morlet-valid frequencies for band '{band}' in across-epochs estimation."
+                        )
                     freqs = valid_freqs
                     use_n_cycles = valid_cycles
 
@@ -951,26 +995,25 @@ def _apply_across_epochs_phase_estimates_inplace(
                             elif con_data.ndim == 1:
                                 con_pairs = con_data
                             else:
-                                continue
+                                raise ValueError(
+                                    "Connectivity: unexpected across-epochs connectivity shape "
+                                    f"{con_data.shape} for {method_label}/{seg_name}/{band}."
+                                )
                     except ValueError as exc:
                         if _is_wavelet_longer_than_signal_error(exc):
-                            if logger is not None:
-                                logger.warning(
-                                    "Connectivity: skipped %s for segment=%s band=%s (%.3fs; %d samples @ %.1f Hz): "
-                                    "Morlet wavelet longer than signal. Increase segment duration / raise fmin / or set a smaller "
-                                    "feature_engineering.connectivity.n_cycles.",
-                                    method_label,
-                                    seg_name,
-                                    band,
-                                    seg_sec,
-                                    int(seg_data.shape[-1]),
-                                    float(sfreq),
-                                )
-                            continue
+                            raise ValueError(
+                                "Connectivity: requested across-epochs estimate cannot be computed "
+                                f"for method={method_label}, segment={seg_name}, band={band}: "
+                                "Morlet wavelet is longer than the signal."
+                            ) from exc
                         raise
                     con_pairs = np.asarray(con_pairs, dtype=float).reshape(-1)
                     if con_pairs.size != len(pair_names):
-                        continue
+                        raise ValueError(
+                            "Connectivity: across-epochs pair-count mismatch for "
+                            f"{method_label}/{seg_name}/{band} "
+                            f"(got {con_pairs.size}, expected {len(pair_names)})."
+                        )
                     con_pairs = _require_finite_connectivity_values(
                         con_pairs,
                         context=f"{method_label}/{seg_name}/{band} edge vector",
@@ -1817,21 +1860,30 @@ def extract_connectivity_from_precomputed(
         sfreq_hz: float,
         n_times: int,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Compute safe n_cycles and filter out frequencies that would crash MNE.
-        
-        Returns:
-            Tuple of (valid_freqs, n_cycles_for_valid_freqs)
-        """
+        """Validate n_cycles and return the requested cycles per frequency."""
         freqs_hz = np.asarray(freqs_hz, dtype=float)
-        
         if n_times <= 0:
-            return np.array([]), np.array([])
+            raise ValueError("Connectivity n_cycles validation requires a non-empty segment.")
+        if freqs_hz.size == 0 or not np.all(np.isfinite(freqs_hz)) or np.any(freqs_hz <= 0):
+            raise ValueError("Connectivity n_cycles validation requires positive finite frequencies.")
+        try:
+            sfreq = float(sfreq_hz)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Connectivity n_cycles validation requires a positive finite sfreq.") from exc
+        if not np.isfinite(sfreq) or sfreq <= 0:
+            raise ValueError("Connectivity n_cycles validation requires a positive finite sfreq.")
 
         default_cycles = 7.0
         try:
             base = float(base_n_cycles) if base_n_cycles is not None else default_cycles
-        except (TypeError, ValueError):
-            base = default_cycles
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Connectivity n_cycles must be a positive finite number (got {base_n_cycles!r})."
+            ) from exc
+        if not np.isfinite(base) or base < 1.0:
+            raise ValueError(
+                f"Connectivity n_cycles must be >= 1.0 and finite (got {base_n_cycles!r})."
+            )
 
         # MNE's Morlet wavelet length check is based on:
         #   W = morlet(sfreq, freqs, n_cycles)
@@ -1847,23 +1899,27 @@ def extract_connectivity_from_precomputed(
         n_sigma = 5.0
         half_len_max = int((n_times + 1) // 2)  # len(t) must be <= half_len_max
         if half_len_max <= 1:
-            return np.array([]), np.array([])
+            raise ValueError("Connectivity segment is too short for Morlet wavelet estimation.")
 
         safety_factor = 0.95
         max_cycles_by_wavelet = (
             safety_factor
             * float(half_len_max)
             * (2.0 * np.pi * freqs_hz)
-            / (n_sigma * sfreq_hz)
+            / (n_sigma * sfreq)
         )
-
-        # For each frequency, cap by base (default 7) and enforce a minimum cycles threshold.
-        safe_cycles = np.minimum(base, max_cycles_by_wavelet)
-
-        # Keep at least 1 cycle for phase-based estimation; smaller values are not meaningful.
-        min_required_cycles = 1.0
-        valid_mask = np.isfinite(safe_cycles) & (safe_cycles >= min_required_cycles)
-        return freqs_hz[valid_mask], safe_cycles[valid_mask]
+        if not np.all(np.isfinite(max_cycles_by_wavelet)):
+            raise ValueError("Connectivity n_cycles validation produced non-finite wavelet limits.")
+        if np.any(base > max_cycles_by_wavelet):
+            limiting_freq = float(freqs_hz[np.argmin(max_cycles_by_wavelet)])
+            limiting_cycles = float(np.min(max_cycles_by_wavelet))
+            raise ValueError(
+                "Connectivity n_cycles request cannot fit the segment without changing "
+                "the Morlet wavelet model "
+                f"(n_cycles={base:.3g}, max={limiting_cycles:.3g} at {limiting_freq:.3g}Hz, "
+                f"n_times={int(n_times)}, sfreq={sfreq:.3g})."
+            )
+        return freqs_hz, np.full(freqs_hz.shape, base, dtype=float)
 
     def _slice_epochs(arr_3d: np.ndarray, mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
         if mask is None:
@@ -2246,17 +2302,14 @@ def extract_connectivity_from_precomputed(
                 )
 
             use_n_cycles = n_cycles
-            if conn_mode == "cwt_morlet":
+            if conn_mode == "cwt_morlet" and phase_measures:
                 # Apply strict pre-flight check to filter frequencies that would crash MNE
                 valid_freqs, valid_cycles = _safe_n_cycles_for_segment(n_cycles, freqs, sfreq, seg_n_times)
                 if valid_freqs.size < 2:
-                    if logger is not None:
-                        logger.warning(
-                            f"Connectivity: skipping band '{band}' for segment '{seg_name}' - "
-                            f"segment too short ({seg_n_times} samples = {seg_n_times/sfreq:.2f}s) for reliable "
-                            f"phase connectivity at these frequencies (need longer epochs or higher fmin)."
-                        )
-                    continue
+                    raise ValueError(
+                        f"Connectivity: requested segment '{seg_name}' leaves fewer than "
+                        f"2 Morlet-valid frequencies for band '{band}'."
+                    )
                 freqs = valid_freqs
                 use_n_cycles = valid_cycles
             
@@ -3035,10 +3088,17 @@ def extract_directed_connectivity_from_precomputed(
     bands_use = (
         list(precomputed.band_data.keys()) 
         if bands is None 
-        else [b for b in bands if b in precomputed.band_data]
+        else list(bands)
     )
     if not bands_use:
         return pd.DataFrame(), []
+    if bands is not None:
+        missing_band_data = [b for b in bands_use if b not in precomputed.band_data]
+        if missing_band_data:
+            raise ValueError(
+                "Directed connectivity: requested band(s) are missing precomputed data: "
+                f"{', '.join(missing_band_data)}."
+            )
     
     if config is None:
         directed_cfg = {}
@@ -3060,15 +3120,33 @@ def extract_directed_connectivity_from_precomputed(
     
     output_level = str(directed_cfg.get("output_level", "full")).strip().lower()
     if output_level not in {"full", "global_only"}:
-        output_level = "full"
+        raise ValueError(
+            "Directed connectivity output_level must be one of {'full', 'global_only'} "
+            f"(got {output_level!r})."
+        )
     
-    mvar_order = int(directed_cfg.get("mvar_order", 10))
-    n_freqs = int(directed_cfg.get("n_freqs", 16))
-    min_segment_samples = int(directed_cfg.get("min_segment_samples", 100))
-    min_samples_per_mvar_parameter = int(
-        directed_cfg.get("min_samples_per_mvar_parameter", 10)
-    )
-    min_samples_per_mvar_parameter = max(3, min_samples_per_mvar_parameter)
+    try:
+        mvar_order = int(directed_cfg.get("mvar_order", 10))
+        n_freqs = int(directed_cfg.get("n_freqs", 16))
+        min_segment_samples = int(directed_cfg.get("min_segment_samples", 100))
+        min_samples_per_mvar_parameter = int(
+            directed_cfg.get("min_samples_per_mvar_parameter", 10)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Directed connectivity numeric configuration must be integer-valued.") from exc
+    if mvar_order < 1:
+        raise ValueError(f"Directed connectivity mvar_order must be >= 1 (got {mvar_order}).")
+    if n_freqs < 2:
+        raise ValueError(f"Directed connectivity n_freqs must be >= 2 (got {n_freqs}).")
+    if min_segment_samples < 1:
+        raise ValueError(
+            f"Directed connectivity min_segment_samples must be >= 1 (got {min_segment_samples})."
+        )
+    if min_samples_per_mvar_parameter < 1:
+        raise ValueError(
+            "Directed connectivity min_samples_per_mvar_parameter must be >= 1 "
+            f"(got {min_samples_per_mvar_parameter})."
+        )
     
     sfreq = float(getattr(precomputed, "sfreq", None))
     
@@ -3078,9 +3156,7 @@ def extract_directed_connectivity_from_precomputed(
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)
     if n_channels < 2:
-        if logger is not None:
-            logger.warning("Directed connectivity: fewer than 2 channels; skipping.")
-        return pd.DataFrame(), []
+        raise ValueError("Directed connectivity requires at least 2 channels.")
     
     pair_i, pair_j = np.triu_indices(n_channels, k=1)
     pair_names = [f"{ch_names[i]}-{ch_names[j]}" for i, j in zip(pair_i, pair_j)]
@@ -3119,41 +3195,47 @@ def extract_directed_connectivity_from_precomputed(
         elif seg_mask is not None and np.any(seg_mask):
             seg_data = precomputed.data[:, :, seg_mask]
         else:
-            continue
+            raise ValueError(
+                f"Directed connectivity: requested segment '{seg_name}' has no samples."
+            )
         
         if seg_data.shape[-1] < min_segment_samples:
-            continue
+            raise ValueError(
+                f"Directed connectivity: requested segment '{seg_name}' is too short "
+                f"({seg_data.shape[-1]} samples < {min_segment_samples})."
+            )
         
         for band in bands_use:
             if band not in freq_bands:
-                continue
+                raise ValueError(
+                    f"Directed connectivity: requested band '{band}' has no frequency definition."
+                )
             
             fmin, fmax = freq_bands[band]
             try:
                 fmin = float(fmin)
                 fmax = float(fmax)
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Directed connectivity: invalid frequency definition for band '{band}'."
+                ) from exc
             
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
-                continue
+                raise ValueError(
+                    f"Directed connectivity: invalid frequency definition for band '{band}'."
+                )
 
             n_times_seg = int(seg_data.shape[-1])
             max_stable_order = int(
                 max(1, n_times_seg // max(1, min_samples_per_mvar_parameter * n_channels))
             )
-            mvar_order_eff = int(max(1, min(mvar_order, max_stable_order)))
-            if logger is not None and mvar_order_eff < mvar_order:
-                logger.warning(
-                    "Directed connectivity: reducing MVAR order from %d to %d for segment='%s', band='%s' "
-                    "(n_times=%d, n_channels=%d, min_samples_per_mvar_parameter=%d).",
-                    mvar_order,
-                    mvar_order_eff,
-                    seg_name,
-                    band,
-                    n_times_seg,
-                    n_channels,
-                    min_samples_per_mvar_parameter,
+            if mvar_order > max_stable_order:
+                raise ValueError(
+                    "Directed connectivity mvar_order cannot be estimated for the requested "
+                    f"segment/band without changing the model (mvar_order={mvar_order}, "
+                    f"max_stable_order={max_stable_order}, segment='{seg_name}', band='{band}', "
+                    f"n_times={n_times_seg}, n_channels={n_channels}, "
+                    f"min_samples_per_mvar_parameter={min_samples_per_mvar_parameter})."
                 )
             
             for ep_idx in range(n_epochs):
@@ -3166,7 +3248,7 @@ def extract_directed_connectivity_from_precomputed(
                     fmin,
                     fmax,
                     n_freqs,
-                    mvar_order_eff,
+                    mvar_order,
                     methods,
                 )
                 

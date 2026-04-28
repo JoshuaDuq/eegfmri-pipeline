@@ -22,14 +22,18 @@ from eeg_pipeline.analysis.features.aperiodic import (
     extract_aperiodic_features,
     extract_aperiodic_from_precomputed,
 )
-from eeg_pipeline.analysis.features.connectivity import extract_connectivity_features
 from eeg_pipeline.analysis.features.connectivity import (
     ConnectivityConfig,
+    _apply_across_epochs_phase_estimates_inplace,
+    _safe_n_cycles_for_segment,
+    extract_connectivity_features,
     extract_connectivity_from_precomputed,
+    extract_directed_connectivity_from_precomputed,
 )
 from eeg_pipeline.analysis.features.complexity import extract_complexity_from_precomputed
-from eeg_pipeline.analysis.features.erp import _parse_lowpass_filter
+from eeg_pipeline.analysis.features.erp import _build_component_masks, _parse_lowpass_filter
 from eeg_pipeline.analysis.features.phase import (
+    _get_valid_pac_pairs,
     _nonnegative_float_or_default,
     _positive_float_or_default,
     extract_itpc_from_precomputed,
@@ -54,7 +58,7 @@ from eeg_pipeline.analysis.features.spectral import (
     extract_spectral_features,
 )
 from eeg_pipeline.types import BandData, PrecomputedData, TimeWindows
-from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
+from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed, crop_epochs_to_time_range
 from eeg_pipeline.utils.analysis.spectral import subtract_evoked
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_safe,
@@ -1222,4 +1226,265 @@ def test_requested_roi_aggregation_requires_roi_definitions() -> None:
             ["roi", "global"],
             ["Cz", "Pz"],
             DotConfig({}),
+        )
+
+
+def test_epoch_crop_rejects_reversed_and_out_of_range_windows() -> None:
+    info = mne.create_info(["Cz"], sfreq=100.0, ch_types="eeg")
+    epochs = mne.EpochsArray(np.ones((2, 1, 100), dtype=float), info, verbose=False)
+
+    with pytest.raises(ValueError, match="tmin.*<=.*tmax"):
+        crop_epochs_to_time_range(
+            epochs,
+            0.5,
+            0.1,
+            logging.getLogger("strict-epoch-crop-reversed"),
+        )
+
+    with pytest.raises(ValueError, match="outside available data range"):
+        crop_epochs_to_time_range(
+            epochs,
+            -0.1,
+            0.5,
+            logging.getLogger("strict-epoch-crop-outside"),
+        )
+
+
+def test_connectivity_wavelet_cycles_reject_invalid_or_unviable_requests() -> None:
+    with pytest.raises(ValueError, match="n_cycles"):
+        _safe_n_cycles_for_segment(
+            "bad",
+            np.array([8.0, 12.0], dtype=float),
+            sfreq_hz=100.0,
+            n_times=100,
+        )
+
+    with pytest.raises(ValueError, match="n_cycles"):
+        _safe_n_cycles_for_segment(
+            20.0,
+            np.array([4.0, 5.0], dtype=float),
+            sfreq_hz=100.0,
+            n_times=30,
+        )
+
+
+def test_across_epoch_connectivity_replacement_fails_when_requested_segment_is_short() -> None:
+    n_epochs = 2
+    n_times = 40
+    times = np.arange(n_times, dtype=float) / 100.0
+    mask = np.zeros(n_times, dtype=bool)
+    mask[:20] = True
+    precomputed = PrecomputedData(
+        data=np.ones((n_epochs, 2, n_times), dtype=float),
+        times=times,
+        sfreq=100.0,
+        ch_names=["C3", "C4"],
+        picks=np.array([0, 1], dtype=int),
+        windows=TimeWindows(
+            masks={"short": mask},
+            ranges={"short": (0.0, 0.19)},
+            times=times,
+        ),
+        band_data={},
+        config=DotConfig({}),
+        frequency_bands={"alpha": [8.0, 12.0]},
+    )
+    df = pd.DataFrame({"conn_short_alpha_global_wpli_mean": [0.0, 0.0]})
+
+    with pytest.raises(ValueError, match="too short"):
+        _apply_across_epochs_phase_estimates_inplace(
+            df,
+            precomputed=precomputed,
+            segments=["short"],
+            bands=["alpha"],
+            epoch_groups={"all": np.array([0, 1], dtype=int)},
+            config=DotConfig(
+                {
+                    "feature_engineering": {
+                        "connectivity": {
+                            "measures": ["wpli"],
+                            "min_segment_sec": 1.0,
+                        }
+                    }
+                }
+            ),
+            logger=logging.getLogger("strict-across-epoch-short"),
+        )
+
+
+def test_pac_requested_pairs_reject_missing_bands_and_harmonic_overlap() -> None:
+    tf_bands = {
+        "theta": [4.0, 8.0],
+        "alpha": [8.0, 12.0],
+        "gamma": [30.0, 80.0],
+        "harmonic": [16.0, 24.0],
+    }
+
+    with pytest.raises(ValueError, match="missing"):
+        _get_valid_pac_pairs(
+            [("theta", "gamma"), ("missing", "gamma")],
+            tf_bands,
+            allow_harmonic_overlap=True,
+            max_harm=6,
+            tol_hz=1.0,
+            logger=logging.getLogger("strict-pac-missing-band"),
+        )
+
+    with pytest.raises(ValueError, match="harmonic overlap"):
+        _get_valid_pac_pairs(
+            [("theta", "harmonic"), ("alpha", "gamma")],
+            tf_bands,
+            allow_harmonic_overlap=False,
+            max_harm=6,
+            tol_hz=1.0,
+            logger=logging.getLogger("strict-pac-harmonic"),
+        )
+
+
+def test_precomputed_pac_fails_when_requested_pair_band_data_is_missing() -> None:
+    n_epochs = 3
+    n_times = 220
+    times = np.arange(n_times, dtype=float) / 100.0
+    phase = np.zeros((n_epochs, 1, n_times), dtype=float)
+    analytic = np.exp(1j * phase)
+    power = np.ones((n_epochs, 1, n_times), dtype=float)
+    precomputed = PrecomputedData(
+        data=np.real(analytic),
+        times=times,
+        sfreq=100.0,
+        ch_names=["Cz"],
+        picks=np.array([0], dtype=int),
+        windows=TimeWindows(
+            masks={"active": np.ones(n_times, dtype=bool)},
+            ranges={"active": (0.0, float(times[-1]))},
+            times=times,
+        ),
+        band_data={
+            "theta": BandData(
+                band="theta",
+                fmin=4.0,
+                fmax=8.0,
+                filtered=np.real(analytic),
+                analytic=analytic,
+                envelope=np.ones_like(power),
+                phase=phase,
+                power=power,
+            ),
+            "gamma": BandData(
+                band="gamma",
+                fmin=30.0,
+                fmax=80.0,
+                filtered=np.real(analytic),
+                analytic=analytic,
+                envelope=np.ones_like(power),
+                phase=phase,
+                power=power,
+            ),
+        },
+        config=DotConfig(
+            {
+                "feature_engineering": {
+                    "pac": {
+                        "method": "mvl",
+                        "pairs": [["theta", "gamma"], ["alpha", "gamma"]],
+                        "n_surrogates": 0,
+                        "min_segment_sec": 0.0,
+                        "min_cycles_at_fmin": 1.0,
+                        "allow_harmonic_overlap": True,
+                    },
+                    "spatial_modes": ["global"],
+                },
+                "time_frequency_analysis": {
+                    "bands": {
+                        "theta": [4.0, 8.0],
+                        "alpha": [8.0, 12.0],
+                        "gamma": [30.0, 80.0],
+                    }
+                },
+            }
+        ),
+        logger=logging.getLogger("strict-precomputed-pac-missing-band"),
+        spatial_modes=["global"],
+        frequency_bands={
+            "theta": [4.0, 8.0],
+            "alpha": [8.0, 12.0],
+            "gamma": [30.0, 80.0],
+        },
+    )
+
+    with pytest.raises(ValueError, match="missing precomputed"):
+        extract_pac_from_precomputed(precomputed, precomputed.config)
+
+
+def test_directed_connectivity_rejects_mvar_order_reduction(monkeypatch) -> None:
+    n_epochs = 1
+    n_times = 120
+    times = np.arange(n_times, dtype=float) / 100.0
+    data = np.ones((n_epochs, 2, n_times), dtype=float)
+    precomputed = PrecomputedData(
+        data=data,
+        times=times,
+        sfreq=100.0,
+        ch_names=["C3", "C4"],
+        picks=np.array([0, 1], dtype=int),
+        windows=TimeWindows(
+            masks={"active": np.ones(n_times, dtype=bool)},
+            ranges={"active": (0.0, float(times[-1]))},
+            times=times,
+        ),
+        band_data={
+            "alpha": BandData(
+                band="alpha",
+                fmin=8.0,
+                fmax=12.0,
+                filtered=data,
+                analytic=data.astype(complex),
+                envelope=np.ones_like(data),
+                phase=np.zeros_like(data),
+                power=np.ones_like(data),
+            )
+        },
+        config=DotConfig(
+            {
+                "feature_engineering": {
+                    "directedconnectivity": {
+                        "enable_psi": True,
+                        "mvar_order": 20,
+                        "min_samples_per_mvar_parameter": 10,
+                        "min_segment_samples": 20,
+                    }
+                },
+                "time_frequency_analysis": {"bands": {"alpha": [8.0, 12.0]}},
+            }
+        ),
+        logger=logging.getLogger("strict-directed-mvar-order"),
+    )
+
+    monkeypatch.setattr(
+        "eeg_pipeline.analysis.features.connectivity._compute_directed_connectivity_epoch",
+        lambda *_args, **_kwargs: {"psi": np.ones((2, 2), dtype=float)},
+    )
+
+    with pytest.raises(ValueError, match="mvar_order"):
+        extract_directed_connectivity_from_precomputed(precomputed, bands=["alpha"])
+
+
+def test_erp_component_masks_reject_invalid_requested_components() -> None:
+    times = np.linspace(0.0, 1.0, 101)
+
+    with pytest.raises(ValueError, match="ERP component"):
+        _build_component_masks(
+            times,
+            {
+                "components": [
+                    {"name": "p300", "start": 0.2, "end": 0.4},
+                    {"name": "bad", "start": 0.6, "end": 0.5},
+                ]
+            },
+        )
+
+    with pytest.raises(ValueError, match="no samples"):
+        _build_component_masks(
+            times,
+            {"components": [{"name": "late", "start": 1.5, "end": 2.0}]},
         )

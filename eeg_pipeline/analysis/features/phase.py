@@ -864,7 +864,7 @@ def _validate_pac_band_pair(
     max_harm: int,
     tol_hz: float,
     logger: logging.Logger,
-) -> Optional[Tuple[float, float, float, float]]:
+) -> Tuple[float, float, float, float]:
     """Validate a PAC band pair and check for harmonic overlap.
     
     Args:
@@ -877,19 +877,35 @@ def _validate_pac_band_pair(
         logger: Logger instance for warnings
         
     Returns:
-        Tuple of (pmin, pmax, amin, amax) if valid, None otherwise
+        Tuple of (pmin, pmax, amin, amax)
     """
     phase_range = _extract_band_frequencies(phase_band, tf_bands)
     amp_range = _extract_band_frequencies(amp_band, tf_bands)
     
-    if phase_range is None or amp_range is None:
-        return None
+    missing_bands = [
+        band
+        for band, band_range in (
+            (phase_band, phase_range),
+            (amp_band, amp_range),
+        )
+        if band_range is None
+    ]
+    if missing_bands:
+        raise ValueError(
+            "PAC: requested pair "
+            f"{phase_band}->{amp_band} references missing band(s): "
+            f"{', '.join(missing_bands)}."
+        )
     
     pmin, pmax = phase_range
     amin, amax = amp_range
     
     if amin <= pmax:
-        return None
+        raise ValueError(
+            "PAC: requested pair requires amplitude band to be above phase band "
+            f"(got {phase_band}={pmin:.3g}-{pmax:.3g}Hz, "
+            f"{amp_band}={amin:.3g}-{amax:.3g}Hz)."
+        )
     
     should_check_harmonics = (not allow_harmonic_overlap and 
                               max_harm >= 2 and 
@@ -899,17 +915,12 @@ def _validate_pac_band_pair(
     if should_check_harmonics:
         has_overlap = _check_harmonic_overlap(pmin, pmax, amin, amax, max_harm, tol_hz)
         if has_overlap:
-            logger.warning(
-                "PAC: skipping pair %s→%s due to harmonic overlap (phase=%0.1f-%0.1fHz, amp=%0.1f-%0.1fHz). "
-                "Set feature_engineering.pac.allow_harmonic_overlap=true to override.",
-                phase_band,
-                amp_band,
-                pmin,
-                pmax,
-                amin,
-                amax,
+            raise ValueError(
+                "PAC: requested pair "
+                f"{phase_band}->{amp_band} has harmonic overlap "
+                f"(phase={pmin:.1f}-{pmax:.1f}Hz, amp={amin:.1f}-{amax:.1f}Hz). "
+                "Set feature_engineering.pac.allow_harmonic_overlap=true to override."
             )
-            return None
     
     return (pmin, pmax, amin, amax)
 
@@ -1518,16 +1529,15 @@ def _get_valid_pac_pairs(
     tol_hz: float,
     logger: logging.Logger,
 ) -> List[Tuple[str, str, Tuple[float, float], Tuple[float, float]]]:
-    """Validate and filter PAC band pairs."""
+    """Validate requested PAC band pairs."""
     valid_pairs: List[Tuple[str, str, Tuple[float, float], Tuple[float, float]]] = []
     for phase_band, amp_band in pairs:
         band_range = _validate_pac_band_pair(
             phase_band, amp_band, tf_bands,
             allow_harmonic_overlap, max_harm, tol_hz, logger
         )
-        if band_range is not None:
-            pmin, pmax, amin, amax = band_range
-            valid_pairs.append((phase_band, amp_band, (pmin, pmax), (amin, amax)))
+        pmin, pmax, amin, amax = band_range
+        valid_pairs.append((phase_band, amp_band, (pmin, pmax), (amin, amax)))
     return valid_pairs
 
 
@@ -2166,8 +2176,17 @@ def extract_pac_from_precomputed(
                     f"fmin={fmin_phase:.2f}Hz)."
                 )
 
-            if phase_band not in phases or amp_band not in amplitudes:
-                continue
+            missing_precomputed = []
+            if phase_band not in phases:
+                missing_precomputed.append(f"phase for '{phase_band}'")
+            if amp_band not in amplitudes:
+                missing_precomputed.append(f"amplitude for '{amp_band}'")
+            if missing_precomputed:
+                raise ValueError(
+                    "PAC (precomputed): requested pair "
+                    f"{phase_band}->{amp_band} is missing precomputed "
+                    f"{', '.join(missing_precomputed)}."
+                )
 
             phase_data = phases[phase_band][..., mask]
             amplitude_data = amplitudes[amp_band][..., mask]

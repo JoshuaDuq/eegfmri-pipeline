@@ -207,26 +207,29 @@ def crop_epochs_to_time_range(
     requested_tmax = tmax if tmax is not None else available_tmax
     
     if requested_tmin > requested_tmax:
-        if logger:
-            logger.warning(
-                f"Time range [{requested_tmin}, {requested_tmax}] is reversed; swapping values."
-            )
-        requested_tmin, requested_tmax = requested_tmax, requested_tmin
+        raise ValueError(
+            f"Epoch crop requires tmin <= tmax (got tmin={requested_tmin}, "
+            f"tmax={requested_tmax})."
+        )
 
-    clamped_tmin = max(requested_tmin, available_tmin)
-    clamped_tmax = min(requested_tmax, available_tmax)
-    
-    if clamped_tmin >= clamped_tmax:
-        if logger:
-            logger.warning(
-                f"Invalid time range [{clamped_tmin}, {clamped_tmax}], using full range"
-            )
-        return epochs
+    if requested_tmin < available_tmin or requested_tmax > available_tmax:
+        raise ValueError(
+            "Epoch crop window is outside available data range "
+            f"[{available_tmin:.6g}, {available_tmax:.6g}] "
+            f"(requested [{requested_tmin:.6g}, {requested_tmax:.6g}])."
+        )
+
+    if requested_tmin == requested_tmax:
+        raise ValueError(
+            f"Epoch crop requires a non-empty time range (got {requested_tmin})."
+        )
     
     if logger:
-        logger.info(f"Cropping epochs to time range [{clamped_tmin:.2f}, {clamped_tmax:.2f}] s")
+        logger.info(
+            f"Cropping epochs to time range [{requested_tmin:.2f}, {requested_tmax:.2f}] s"
+        )
     
     if not epochs.preload:
         epochs.load_data()
         
-    return epochs.copy().crop(tmin=clamped_tmin, tmax=clamped_tmax)
+    return epochs.copy().crop(tmin=requested_tmin, tmax=requested_tmax)
