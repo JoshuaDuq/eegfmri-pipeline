@@ -296,7 +296,8 @@ Contrast Computation
    * - Custom formula
      - User-provided string (e.g., ``"stimulation - fixation_rest"``)
 
-Output types: ``z-score`` (default), ``t-stat`` (t-statistic), and ``cope`` (contrast of parameter estimates).
+Output types: ``z-score`` (default), ``t-stat`` (t-statistic), ``cope``
+(contrast of parameter estimates), and ``beta``.
 
 .. note::
 

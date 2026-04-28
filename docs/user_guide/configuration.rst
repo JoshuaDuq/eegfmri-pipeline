@@ -357,8 +357,10 @@ Feature Engineering
      - Default
      - Description
    * - ``feature_engineering.feature_categories``
-     - *(all 14 families)*
-     - Active feature families; see :doc:`../methods/eeg/features`
+     - *(14 default families)*
+     - Active default feature families; ``directedconnectivity`` and
+       ``sourcelocalization`` are available but not enabled by default. See
+       :doc:`../methods/eeg/features`
    * - ``feature_engineering.analysis_mode``
      - ``"group_stats"``
      - ``"group_stats"`` or ``"trial_ml_safe"`` — controls cross-trial leakage guards
@@ -533,7 +535,7 @@ Behavioral Statistics
    * - ``behavior_analysis.predictor_type``
      - Predictor variable type: ``"continuous"`` (default), ``"binary"``, or ``"categorical"``
    * - ``behavior_analysis.statistics.correlation_method``
-     - Correlation method: ``"spearman"`` (default), ``"pearson"``, ``"kendall"``
+     - Correlation method: ``"spearman"`` (default) or ``"pearson"``
    * - ``behavior_analysis.correlations.loso_stability``
      - ``true`` — compute LOSO stability of feature–behavior correlations
    * - ``behavior_analysis.statistics.fdr_alpha``

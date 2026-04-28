@@ -352,8 +352,9 @@ with permuted labels. All hyperparameter tuning is repeated on each permuted dat
 Permutation Schemes
 ~~~~~~~~~~~~~~~~~~~
 
-- ``within_subject_within_block`` *(default)*: permute labels within each subject × block.
-- ``within_subject``: permute within each subject (fallback when block labels unavailable).
+- ``within_subject`` *(default)*: permute labels within each subject.
+- ``within_subject_within_block``: permute labels within each subject × block;
+  requested block labels must be available and valid.
 
 P-Value
 ~~~~~~~

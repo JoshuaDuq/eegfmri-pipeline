@@ -165,7 +165,7 @@ CLI equivalent:
      --source-create-trans \
      --source-create-bem-model \
      --source-create-bem-solution \
-     --source-fs-license /path/to/license_freesurfer.txt
+     --set paths.freesurfer_license=/path/to/license_freesurfer.txt
 
 Manual Docker Workflow
 ~~~~~~~~~~~~~~~~~~~~~~~

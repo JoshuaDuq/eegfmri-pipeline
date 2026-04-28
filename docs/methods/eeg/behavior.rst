@@ -285,7 +285,9 @@ predictor values).
    \text{predictor\_residual}_i = y_i - \hat{y}_i, \qquad \hat{y}_i = f(P_i).
 
 Model selection: spline OLS candidates ``outcome ~ bs(predictor, df=d, degree=3)``
-for configurable degrees of freedom, lowest-AIC selection; fallback to polynomial.
+for configurable degrees of freedom, with the lowest-AIC spline selected.
+Set ``behavior_analysis.predictor_residual.method: "poly"`` to use the
+polynomial model instead.
 Optional cross-fit residuals (``GroupKFold``) via ``--predictor-residual-crossfit``.
 
 .. note::

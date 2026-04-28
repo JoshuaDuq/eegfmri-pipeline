@@ -260,7 +260,8 @@ Key entries to verify before feature extraction:
    * - ``feature_engineering.analysis_mode``
      - ``trial_ml_safe`` for ML inputs; ``group_stats`` for descriptive analyses
    * - ``frequency_bands``
-     - Band edges in Hz (default: delta 1–4, theta 4–8, alpha 8–13, beta 13–30, gamma 30–80)
+     - Band edges in Hz (default: delta 1.0–3.9, theta 4.0–7.9,
+       alpha 8.0–12.9, beta 13.0–30.0, gamma 30.1–80.0)
    * - ``time_windows.active``
      - Active-epoch window in seconds (default ``[3.0, 10.5]``)
    * - ``time_windows.baseline_tfr``
@@ -492,7 +493,7 @@ Use the tabs below for the full command matrix and focused examples.
       permutation p-values, SHAP importance tables, and figures.
 
       Outer CV is Leave-One-Subject-Out (LOSO); inner CV is GroupKFold
-      (default 3 splits unless overridden). All preprocessing statistics are estimated on the training
+      (default 5 splits unless overridden). All preprocessing statistics are estimated on the training
       fold only. The primary regression metric is subject-level Fisher-z
       aggregated Pearson correlation :math:`\bar{r}`.
 

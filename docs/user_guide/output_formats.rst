@@ -157,10 +157,12 @@ Outputs & Advanced Workflows
       and no ``events.tsv`` is required. Event-locked families that depend on
       trial onset markers are rejected as invalid (fail fast):
 
-      - **Skipped:** ``erp``, ``erds``, ``itpc``, ``pac``
+      - **Rejected:** ``erp``, ``erds``, ``itpc``
       - **Compatible:** ``power``, ``spectral``, ``aperiodic``, ``connectivity``,
         ``directedconnectivity``, ``asymmetry``, ``ratios``, ``microstates``,
-        ``complexity``, ``bursts``, ``quality``
+        ``complexity``, ``bursts``, ``quality``, ``pac``, ``sourcelocalization``
+
+      Resting-state feature extraction must run in ``group_stats`` mode.
 
       .. code-block:: bash
 

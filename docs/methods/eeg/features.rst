@@ -677,17 +677,17 @@ Cross-Validation Hygiene
 Resting-State Restrictions
 ---------------------------
 
-The following families require event-locked epochs and are automatically
-skipped when ``task_is_rest = true``:
+The following families require event-locked epochs and are rejected when
+``task_is_rest = true``:
 
 - ``erp`` — requires event-onset-aligned component windows
 - ``erds`` — requires a baseline window relative to event onset
 - ``itpc`` — inter-trial phase clustering requires repeated trial markers
-- ``pac`` — surrogate scheme assumes repeated trial structure
 
-All other families run normally. Analysis mode may be ``group_stats`` or
-``trial_ml_safe``; the latter treats fixed-length segments as the trial unit.
-Evoked subtraction (``subtract_evoked = true``) raises an error in rest mode.
+All other public feature families pass rest-mode category validation.
+Resting-state extraction requires ``group_stats`` mode; ``trial_ml_safe`` raises
+an error because it is event/trial-oriented. Evoked subtraction
+(``subtract_evoked = true``) also raises an error in rest mode.
 
 Output Files
 ------------

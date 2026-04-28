@@ -61,10 +61,14 @@ order regardless of the order you specify them.
    * - ``temporal``
      - Time-resolved correlations between TFR or power/ITPC/ERDS and the
        behavioral outcome, with temporal cluster permutation correction.
+   * - ``cluster``
+     - Cluster permutation tests on epoch-level data.
+   * - ``multilevel_correlations``
+     - Cross-subject multilevel correlations with block-aware permutations.
 
 Multiple comparison correction uses Benjamini–Hochberg FDR within analyses
 and hierarchical Simes gating across analysis families when
-``validation.enabled = true``.
+``behavior_analysis.validation.enabled = true``.
 
 Key Options
 -----------
@@ -79,16 +83,23 @@ Key Options
    * - ``--computations``
      - Space-separated list of stages to run (see table above)
      - all enabled stages from config
-   * - ``--control-temperature``
-     - Partial-correlate out the temperature / intensity predictor before
-       all main analyses
-     - disabled
+   * - ``--predictor-control`` / ``--no-predictor-control``
+     - Enable or disable predictor control in correlation analyses
+     - config ``behavior_analysis.predictor_control_enabled``
+   * - ``--predictor-column``
+     - Explicit predictor column; empty config auto-resolves from
+       ``event_columns.predictor`` aliases
+     - config ``behavior_analysis.predictor_column``
+   * - ``--outcome-column``
+     - Explicit behavioral outcome column; empty config auto-resolves from
+       ``event_columns.outcome`` aliases
+     - config ``behavior_analysis.outcome_column``
    * - ``--n-perm``
      - Number of permutations for non-parametric inference
      - config ``behavior_analysis.statistics.n_permutations`` (1000)
    * - ``--robust-correlation``
      - Use a robust correlation estimator:
-       ``percentage_bend``, ``biweight_midcorrelation``
+       ``percentage_bend``, ``winsorized``, or ``shepherd``
      - disabled (Spearman)
    * - ``--compute-bayes-factors``
      - Compute JZS BF₁₀ alongside classical p-values
@@ -119,7 +130,7 @@ Examples
    # Control for stimulus intensity; permutation testing
    eeg-pipeline behavior compute --subject 0001 \
      --computations correlations predictor_residual \
-     --control-temperature --n-perm 5000
+     --predictor-control --n-perm 5000
 
    # Bayes factors and robust correlations
    eeg-pipeline behavior compute --subject 0001 \

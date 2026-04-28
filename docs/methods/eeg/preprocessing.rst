@@ -497,13 +497,13 @@ frequency resolution).
      - ``freqs / 3.0``
      - Cycles per frequency (adaptive)
    * - ``custom_tfr_decim``
-     - ``2``
+     - ``1``
      - Decimation factor
    * - ``custom_tfr_return_itc``
-     - ``false``
+     - ``true``
      - Compute inter-trial coherence
    * - ``custom_tfr_average``
-     - ``false``
+     - ``true``
      - Average across epochs (vs. single-trial)
 
 Execution Modes

@@ -74,4 +74,4 @@ Examples
       feature coverage inspection.
 
    :doc:`index`
-      Shared runtime flags (``--task``, ``--set``, ``--bids-root``, etc.).
+      Command matrix and shared flags used by the analysis command families.

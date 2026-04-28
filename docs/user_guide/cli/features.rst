@@ -141,11 +141,14 @@ trial onset markers):
 - ``erp`` — requires event-onset-aligned epochs
 - ``erds`` — requires baseline window relative to event onset
 - ``itpc`` — inter-trial phase clustering requires repeated trials
-- ``pac`` — phase–amplitude coupling in its trial-averaged form
 
 All other families (``power``, ``spectral``, ``aperiodic``, ``connectivity``,
 ``directedconnectivity``, ``asymmetry``, ``ratios``, ``microstates``,
-``complexity``, ``bursts``, ``quality``) are fully compatible with rest data.
+``complexity``, ``bursts``, ``quality``, ``pac``, and ``sourcelocalization``)
+are accepted by the feature-category validator for rest data.
+
+Resting-state extraction also requires ``group_stats`` mode; requesting
+``--analysis-mode trial_ml_safe`` with ``--task-is-rest`` raises an error.
 
 Analysis Modes
 --------------

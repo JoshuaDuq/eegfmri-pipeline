@@ -59,6 +59,8 @@ Most analysis commands accept these subject-selection and runtime flags:
 .. note::
 
    ``validate`` uses ``--subjects``; ``info features`` takes a positional subject ID.
+   ``info``, ``stats``, and ``validate`` are reduced read-only/validation
+   interfaces and do not accept ``--set`` or path override flags.
 
 
 .. note::

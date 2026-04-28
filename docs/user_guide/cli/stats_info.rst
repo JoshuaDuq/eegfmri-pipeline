@@ -106,7 +106,7 @@ Examples
 .. seealso::
 
    :doc:`index`
-      Shared ``--subject``, ``--all-subjects``, ``--task``, and ``--set`` flags.
+      Command matrix and shared flags used by the analysis command families.
 
    :doc:`validation`
       Data integrity checks that complement these read-only inspection commands.

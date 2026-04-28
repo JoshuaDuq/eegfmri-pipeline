@@ -76,7 +76,7 @@ Examples
 
          # Pass through raw fMRIPrep args (parsed with shlex)
          eeg-pipeline fmri preprocess --subject 0001 \
-           --fmriprep-extra-args '--verbose'
+           --fmriprep-extra-args=--verbose
 
 Key Options
 -----------
@@ -138,16 +138,16 @@ Key Options
      - ``0``
    * - ``--dummy-scans``
      - Non-steady-state volumes to discard
-     - ``0``
+     - ``0`` (auto-detect)
    * - ``--random-seed``
-     - Reproducibility seed for fMRIPrep stochastic steps (``0`` = no explicit seed)
-     - ``0``
+     - Reproducibility seed for fMRIPrep stochastic steps
+     - ``42``
    * - ``--skull-strip-template``
      - Anatomical skull-strip template
      - ``OASIS30ANTs``
    * - ``--skull-strip-fixed-seed``
      - Use a fixed seed for skull-stripping
-     - disabled
+     - enabled
    * - ``--bold2t1w-init``
      - BOLD-to-T1w initialization strategy (``register`` or ``header``)
      - ``register``
