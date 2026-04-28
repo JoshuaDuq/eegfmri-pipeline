@@ -21,8 +21,8 @@ Modes
        in sequence. Use for a fresh subject.
    * - ``bad-channels``
      - PyPREP bad-channel detection only (deviation + correlation, optional RANSAC).
-      Updates ``channels.tsv``. Cross-run synchronization is optional via
-      ``pyprep.bad_channel_sync_policy=subject_union``.
+       Updates ``channels.tsv``. Cross-run synchronization is optional via
+       ``pyprep.bad_channel_sync_policy=subject_union``.
    * - ``ica``
      - Fits ICA (extended Infomax, 99% variance, 1 Hz high-pass) via
        MNE-BIDS-Pipeline, then labels components with ICLabel
