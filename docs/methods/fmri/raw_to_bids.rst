@@ -98,8 +98,9 @@ Tooling Note
 ------------
 
 ``dcm2niix`` is a standard choice for DICOM conversion, but this repository does
-not provide a built-in raw-to-BIDS CLI wrapper for all paradigms. Study-specific
-conversion scripts live under ``studies/``.
+not provide a built-in raw-to-BIDS CLI wrapper. Users must convert DICOM data
+and harmonize event logs to BIDS layout in an external, dataset-specific step
+before invoking ``eeg-pipeline fmri preprocess``.
 
 Validation
 ----------

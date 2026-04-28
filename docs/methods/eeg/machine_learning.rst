@@ -26,8 +26,9 @@ Machine Learning
 
    .. grid-item-card:: CLI
 
-      ``eeg-pipeline ml [regression | classify | timegen | shap |
-      permutation | ...]``
+      ``eeg-pipeline ml [regression | classify | timegen |
+      model_comparison | incremental_validity | uncertainty |
+      shap | permutation]``
 
    .. grid-item-card:: Config
 
@@ -155,7 +156,7 @@ the training fold only, applied to both train and test.
 Deconfounding
 ~~~~~~~~~~~~~
 
-When ``preprocessing.deconfound = true``, residualize EEG features on covariate
+When ``machine_learning.preprocessing.deconfound = true``, residualize EEG features on covariate
 matrix :math:`Z` using training-fold regression coefficients:
 
 .. math::
@@ -298,7 +299,7 @@ Within-Subject CV (Block-Aware)
      Outer loop: GroupKFold on block labels
        Inner loop: GroupKFold on remaining blocks
 
-**Ordered block mode** (``cv.within_subject_ordered_blocks = true``): folds respect
+**Ordered block mode** (``machine_learning.cv.within_subject_ordered_blocks = true``): folds respect
 temporal ordering — all preceding blocks train, the next block is test.
 
 CV Hygiene
@@ -306,7 +307,7 @@ CV Hygiene
 
 All preprocessing statistics (imputation, variance, scaling, PCA) are estimated
 exclusively on the training fold. IAF estimation and global features (ITPC, etc.)
-are restricted to ``train_mask`` only. Controlled by ``cv.hygiene_enabled`` (default ``true``).
+are restricted to ``train_mask`` only. Controlled by ``machine_learning.cv.hygiene_enabled`` (default ``true``).
 
 Evaluation Metrics
 ------------------

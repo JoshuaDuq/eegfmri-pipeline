@@ -21,8 +21,8 @@ EEG Feature Extraction
 
    .. grid-item-card:: Outputs
 
-      ``features/<category>/features_<category>.parquet`` +
-      ``metadata/<category>.json``
+      ``features/<family>/features_<family>.parquet`` +
+      ``features/<family>/metadata/features_<family>.json``
 
    .. grid-item-card:: CLI
 
@@ -214,7 +214,7 @@ summaries. This keeps derived quantities close to their assumptions.
      - Component amplitude/latency, phase clustering, phase-amplitude coupling
    * - Connectivity, directed connectivity
      - Cross-spectra, amplitudes, phases, MVAR transfer functions
-     - wPLI, imaginary coherence, PLV, AEC, PSI, DTF, PDC
+     - wPLI, PLI, imaginary coherence, PLV, AEC, PSI, DTF, PDC
    * - Source localization
      - Forward/inverse source estimates
      - LCMV, eLORETA, fMRI-constrained cluster/atlas summaries

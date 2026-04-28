@@ -117,7 +117,10 @@ test statistic.
 Pipeline DAG
 ------------
 
-Stages run in dependency order:
+Stages run in dependency order. ``cluster`` operates directly on epoch data
+and is parallel to (not dependent on) the temporal-power stages.
+``hierarchical_fdr_summary`` and ``export`` are leaf stages with no
+downstream consumers within the per-subject DAG.
 
 .. code-block:: text
 
@@ -125,19 +128,18 @@ Stages run in dependency order:
    └── trial_table
        ├── predictor_residual          [continuous predictor only]
        ├── correlate_design
-       │   ├── correlate_effect_sizes
-       │   │   ├── correlate_pvalues
-       │   │   │   └── correlate_primary_selection
-       │   │   │       └── correlate_fdr
+       │   └── correlate_effect_sizes
+       │       ├── correlate_pvalues
+       │       └── correlate_primary_selection
+       │           └── correlate_fdr
        ├── regression
        ├── icc
        ├── condition_column
-       ├── temporal_tfr
-       │   └── temporal_stats
-       │       └── cluster
-       └── hierarchical_fdr_summary
-           ├── report
-           └── export
+       └── temporal_tfr
+           └── temporal_stats
+   cluster                              [requires epochs; parallel to temporal_*]
+   hierarchical_fdr_summary             [validation summary across analyses]
+   export
 
 Computation groups (``--computations``):
 
@@ -163,6 +165,8 @@ Computation groups (``--computations``):
      - ``temporal_tfr``, ``temporal_stats``
    * - ``cluster``
      - ``cluster``
+   * - ``validation``
+     - ``hierarchical_fdr_summary`` (cross-analysis FDR summary; on by default)
    * - ``multilevel_correlations``
      - group-level multilevel correlations (outside subject DAG)
 

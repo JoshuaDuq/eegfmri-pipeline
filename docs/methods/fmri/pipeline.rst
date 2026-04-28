@@ -139,22 +139,22 @@ Pipeline Overview
      - BIDS input dataset + ``events.tsv``
      - Required input contract for downstream modeling
    * - 2
-     - ``pipelines/fmri_preprocessing.py``
+     - ``fmri_pipeline/pipelines/fmri_preprocessing.py``
      - fMRIPrep containerized preprocessing
    * - 3
-     - ``pipelines/fmri_analysis.py`` + ``analysis/contrast_builder.py``
+     - ``fmri_pipeline/pipelines/fmri_analysis.py`` + ``fmri_pipeline/analysis/contrast_builder.py``
      - Multi-run first-level GLM and contrast computation
    * - 3b
-     - ``pipelines/fmri_second_level.py`` + ``analysis/second_level.py``
+     - ``fmri_pipeline/pipelines/fmri_second_level.py`` + ``fmri_pipeline/analysis/second_level.py``
      - Explicit group-level inference from first-level MNI cope/effect-size maps
    * - 4
-     - ``pipelines/fmri_trial_signatures.py`` + ``analysis/trial_signatures.py``
+     - ``fmri_pipeline/pipelines/fmri_trial_signatures.py`` + ``fmri_pipeline/analysis/trial_signatures.py``
      - Trial-wise beta estimation and signature readout
    * - 5
-     - ``analysis/reporting.py``
+     - ``fmri_pipeline/analysis/reporting.py``
      - HTML report generation with QC diagnostics
    * - 6
-     - ``pipelines/fmri_resting_state.py`` + ``analysis/resting_state.py``
+     - ``fmri_pipeline/pipelines/fmri_resting_state.py`` + ``fmri_pipeline/analysis/resting_state.py``
      - Resting-state ROI connectivity analysis
 
 Stage 1 — BIDS Inputs
@@ -467,27 +467,27 @@ Atlas-based ROI connectivity analysis from fMRIPrep resting-state BOLD data.
 4. Compute per-run Pearson correlation connectivity matrices.
 5. Aggregate multi-run matrices via Fisher-z averaging.
 
-Run weights are the number of retained frames per run:
+Runs are aggregated using the variance-stabilizing weight :math:`n_r - 3`,
+where :math:`n_r` is the number of retained frames after motion scrubbing in
+run :math:`r`:
 
 .. math::
 
-   \bar{Z}_{ij} = \frac{\sum_r n_r \cdot \mathrm{arctanh}(r_{ij}^{(r)})}{\sum_r n_r},
+   \bar{Z}_{ij} =
+   \frac{\sum_r (n_r - 3) \cdot \mathrm{arctanh}(r_{ij}^{(r)})}
+        {\sum_r (n_r - 3)},
    \qquad
    \hat{r}_{ij} = \tanh(\bar{Z}_{ij}).
 
-.. caution::
+Multi-run aggregation requires every run to retain at least 4 frames; runs
+with :math:`n_r \le 3` cause a hard failure rather than a silent degenerate
+weight. Single-run subjects skip the weighted average and emit the run's
+correlation matrix directly.
 
-   This is a validity limitation rather than a target method: for Fisher-z
-   averaging the variance-stabilizing weight is proportional to
-   :math:`n_r - 3`, not :math:`n_r`, so short runs are currently misweighted.
-
-.. caution::
-
-   The masker is built from the atlas alone and does not yet intersect each
-   run with the corresponding fMRIPrep brain mask. ROIs near susceptibility
-   dropout or partial coverage can therefore contribute non-brain voxels
-   without necessarily becoming degenerate enough to trigger the existing
-   guards.
+The ``NiftiLabelsMasker`` is constructed with ``mask_img`` set to the per-run
+fMRIPrep brain mask, so atlas voxels falling outside each run's brain mask are
+excluded. A missing per-run brain mask raises ``FileNotFoundError`` instead of
+silently degrading.
 
 Key configuration (``RestingStateAnalysisConfig``):
 
@@ -528,7 +528,7 @@ BEM and Coregistration
 
 .. container:: module-ref
 
-   Module: ``analysis/bem_generation.py``
+   Module: ``fmri_pipeline/analysis/bem_generation.py``
 
 Docker-based BEM model, BEM solution, and EEG↔MRI coregistration via FreeSurfer
 and MNE-Python.
@@ -549,8 +549,8 @@ Dockerfile: ``eeg_pipeline/docker_setup/Dockerfile.freesurfer-mne``.
 Multivariate Signature Readouts
 ---------------------------------
 
-**Modules:** ``analysis/trial_signatures.py`` and
-``analysis/multivariate_signatures.py``
+**Modules:** ``fmri_pipeline/analysis/trial_signatures.py`` and
+``fmri_pipeline/analysis/multivariate_signatures.py``
 
 No signatures are hard-coded. Supply signature maps through configuration:
 
@@ -597,21 +597,43 @@ Output Layout
    derivatives/
    ├── sub-XXXX/
    │   └── fmri/
-   │       ├── first_level/<task>/<contrast_name>/
+   │       ├── first_level/task-<task>/contrast-<name>/
    │       │   ├── sub-XXXX_task-<task>_contrast-<name>_stat-z_score_<hash>.nii.gz
    │       │   ├── sub-XXXX_task-<task>_contrast-<name>_stat-effect_size_<hash>.nii.gz
-   │       │   ├── sub-XXXX_<contrast>_provenance.json
-   │       │   ├── design_matrix_run-01.tsv
-   │       │   └── report.html
-   │       ├── beta_series/<task>/<contrast_name>/
+   │       │   ├── sub-XXXX_task-<task>_contrast-<name>_stat-z_score_<hash>.json   # provenance sidecar
+   │       │   ├── qc/
+   │       │   │   ├── <prefix>_run-XX_design_matrix.tsv
+   │       │   │   ├── <prefix>_run-XX_design_matrix.png
+   │       │   │   ├── motion_qc.{png,svg}
+   │       │   │   ├── carpet_qc.{png,svg}
+   │       │   │   └── tsnr_map.{png,svg}
+   │       │   ├── plots/
+   │       │   └── report.html                                                       # --plot-html-report
+   │       ├── beta_series/task-<task>/contrast-<name>/    # mode=beta-series (LSA)
    │       │   ├── trials.tsv
-   │       │   ├── signatures/trial_signature_expression.tsv
-   │       │   └── trial_betas/<run>/*.nii.gz
-   │       └── rest/<task>/atlas-<name>/
-   │           ├── *_correlation_connectivity.tsv
-   │           ├── *_correlation_connectivity_fisher_z.tsv
+   │       │   ├── signatures/
+   │       │   │   ├── trial_signature_expression.tsv
+   │       │   │   └── condition_signature_expression.tsv
+   │       │   ├── condition_betas/*.nii.gz                # --write-condition-betas
+   │       │   ├── trial_betas/<run>/*.nii.gz              # --write-trial-betas
+   │       │   └── provenance.json
+   │       ├── lss/task-<task>/contrast-<name>/             # mode=lss
+   │       │   ├── trials.tsv
+   │       │   ├── signatures/
+   │       │   │   ├── trial_signature_expression.tsv
+   │       │   │   └── condition_signature_expression.tsv
+   │       │   ├── condition_betas/*.nii.gz                # --write-condition-betas
+   │       │   ├── trial_betas/<run>/*.nii.gz              # --write-trial-betas
+   │       │   └── provenance.json
+   │       └── rest/task-<task>/atlas-<name>/
+   │           ├── sub-XXXX_task-<task>_correlation_connectivity.tsv
+   │           ├── sub-XXXX_task-<task>_correlation_connectivity_fisher_z.tsv
+   │           ├── roi_labels.tsv
+   │           ├── timeseries/sub-XXXX_task-<task>_timeseries_concat.tsv
    │           └── provenance.json
    └── group/
-       └── fmri/second_level/<task>/<contrast>/
-           ├── group_<contrast>_z_score.nii.gz
-           └── provenance.json
+       └── fmri/second_level/task-<task>/model-<model>/contrast-<name>/
+           ├── group_task-<task>_model-<model>_contrast-<name>_stat-z_score.nii.gz
+           ├── group_task-<task>_model-<model>_contrast-<name>_stat-effect_size.nii.gz
+           ├── second_level_metadata.json
+           └── qc/second_level_design_matrix.{tsv,png}

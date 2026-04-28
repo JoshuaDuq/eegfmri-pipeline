@@ -91,10 +91,10 @@ clean epochs and derivatives are written.
      - Behavior
    * - 1
      - ``NoisyChannels`` (PyPREP)
-     - Deviation + correlation; optional RANSAC. Repeated :math:`N` times; union of bads. Writes ``channels.tsv``
+     - Deviation + correlation; optional RANSAC. Repeated :math:`N` times independently; channels marked bad in a strict majority of runs are retained. Writes ``channels.tsv``
    * - 2
-     - ``synchronize_bad_channels_across_runs``
-     - Union of bads across runs per subject; written back to every run's ``channels.tsv`` before ICA
+     - ``synchronize_bad_channels_across_runs`` *(opt-in)*
+     - Only runs when ``pyprep.bad_channel_sync_policy: "subject_union"``. Default ``"per_run"`` keeps each run's bads independent. When enabled, takes the union of bads across runs per subject and writes it back to every run's ``channels.tsv`` before ICA
    * - 3
      - MNE-BIDS-Pipeline (ICA fit)
      - Subprocess: ``init`` → ``_01`` → ``_04`` → ``_05`` → ``_06a1`` — bandpass, artifact regression, extended Infomax ICA
@@ -164,12 +164,12 @@ Method
 3. Optional low-pass filter at ``h_freq`` Hz (default 100 Hz) on EEG channels only.
 4. Optional notch filter at ``notch_freq`` Hz (default 60 Hz) on EEG channels.
 5. Optional average re-reference before detection (disabled by default).
-6. Iterative bad channel detection (``repeats`` iterations, default 3):
+6. Repeated bad channel detection (``repeats`` independent runs, default 3). Each run starts from the same ``raw.info["bads"]`` baseline (any pre-existing bads when ``consider_previous_bads`` is true) and increments ``random_state`` by the run index for reproducibility:
 
    - ``find_bad_by_deviation()`` — channels whose robust z-scored amplitude deviates from the cross-channel median.
    - ``find_bad_by_correlation()`` — channels with low Pearson correlation to neighboring channels.
    - ``find_bad_by_ransac()`` — channels that cannot be predicted from neighbors via RANSAC interpolation (optional; enabled by default via ``pyprep.ransac: true``).
-   - After each iteration, detected bads are accumulated as a union and marked in ``raw.info["bads"]``.
+   - After all runs complete, channels flagged in a strict majority of runs (i.e. at least ``floor(repeats / 2) + 1``) are retained as the final PyPREP bad set.
 
 7. Inject custom bad channels from ``custom_bad_dict`` (per-task, per-subject dict).
 8. Write results to ``channels.tsv`` (sets ``status = "bad"`` for detected channels).
@@ -192,7 +192,7 @@ Configuration
      - Enable RANSAC-based detection
    * - ``pyprep.repeats``
      - ``3``
-     - Detection iterations (union across iterations)
+     - Number of independent PyPREP runs; final bads are channels flagged in a strict majority of runs
    * - ``pyprep.average_reref``
      - ``false``
      - Average re-reference before detection
@@ -212,23 +212,39 @@ Configuration
      - ``60``
      - Notch filter frequency (Hz)
 
-Step 2 — Bad Channel Synchronization
---------------------------------------
+Step 2 — Bad Channel Synchronization (opt-in)
+-----------------------------------------------
 
 .. container:: module-ref
 
    Module: ``preprocessing/pipeline/preprocess.py`` → ``synchronize_bad_channels_across_runs()``
 
-For multi-run paradigms, bad channels detected in any run are propagated to all
-runs of the same subject. This ensures a consistent channel set before ICA fitting.
+For multi-run paradigms, bad channels detected in any run can optionally be
+propagated to all runs of the same subject so that ICA fitting sees a
+consistent channel set. This step is gated by ``pyprep.bad_channel_sync_policy``
+and is **disabled by default**.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Policy
+     - Behavior
+   * - ``"per_run"`` *(default)*
+     - No synchronization; each run's PyPREP-detected bads remain independent.
+   * - ``"subject_union"``
+     - Take the union of bads across runs per subject and write it back to every run's ``channels.tsv``.
+
+When ``"subject_union"`` is selected, the runtime sequence is:
 
 1. For each subject, glob all ``channels.tsv`` files matching the task.
 2. Compute the union of all channels marked ``status == "bad"`` across runs.
-3. Write the unified bad channel set to every run's ``channels.tsv``.
+3. Reset all EEG channels to ``status = "good"`` and re-mark only the unified union as ``"bad"`` in every run's ``channels.tsv``.
 
 MNE-BIDS-Pipeline reads ``channels.tsv`` to determine which channels to exclude
-from ICA fitting and interpolation. Inconsistent bad sets across runs produce
-incompatible ICA decompositions.
+from ICA fitting and interpolation. Inconsistent bad sets across runs can
+produce incompatible ICA decompositions, which is why ``"subject_union"`` is
+recommended for multi-run task designs that share the same channel context.
 
 Step 3 — ICA Fitting
 ---------------------
@@ -539,8 +555,10 @@ Output Structure
    │       ├── sub-XXXX_task-<task>_proc-clean_epo.fif
    │       ├── sub-XXXX_task-<task>_proc-clean_events.tsv
    │       ├── sub-XXXX_task-<task>_bads.tsv
-   │       ├── sub-XXXX_task-<task>_power_epo-tfr.h5   # (optional)
-   │       └── sub-XXXX_task-<task>_itc_epo-tfr.h5     # (optional)
+   │       ├── sub-XXXX_task-<task>_power_epo-tfr.h5            # (optional, single-trial; average=False)
+   │       ├── sub-XXXX_task-<task>_itc_epo-tfr.h5              # (optional, single-trial; average=False)
+   │       ├── sub-XXXX_task-<task>_power+<cond>_avg-tfr.h5     # (optional, per-condition average; average=True or return_average=True)
+   │       └── sub-XXXX_task-<task>_itc+<cond>_avg-tfr.h5       # (optional, per-condition ITC; average=True or return_average=True)
    ├── pyprep_task_<task>_log.csv
    ├── icalabel_task_<task>_log.csv
    ├── task_<task>_preprocessing_stats.tsv

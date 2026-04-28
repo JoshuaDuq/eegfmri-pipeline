@@ -98,8 +98,11 @@ What Is Computed
 
 - Per-trial/window: source-band power and source-band envelope features.
 - Optional: subject-level source contrast tables (``sourcecontrast``) for
-  condition A vs B — only computed when ``--source-fmri-contrast-enabled``
-  is passed.
+  condition A vs B — only computed when ``--source-contrast`` (or
+  ``feature_engineering.sourcelocalization.contrast.enabled: true``) is set.
+  This is independent of the fMRI contrast-builder flag
+  ``--source-fmri-contrast-enabled``, which controls whether the fMRI stats
+  map is built on the fly from BOLD data.
 - fMRI-informed outputs: ``cluster`` space (subject-specific fMRI clusters),
   ``atlas`` space (subject-space ``aparc+aseg`` labels), or ``dual`` (both).
 
