@@ -1,182 +1,64 @@
-# Study 1: Trial-Wise EEG Prediction of fMRI Pain-Signature Expression
+# Materials and Methods
 
-This document serves as the exhaustive computational and methodological reference for **Study 1**. It is designed for direct integration into scientific manuscripts, strictly defining the research objectives, data contracts, mathematical formulations, and rigorous cross-validation paradigms.
+## Research Objectives
+The primary objective of this study was to determine whether the continuous, trial-wise expression of established functional magnetic resonance imaging (fMRI) pain signatures can be directly predicted from concurrent band-limited electroencephalography (EEG) dynamics. Specifically, the predictive targets were the Neurologic Pain Signature (NPS) and the Stimulus Intensity Independent Pain Signature-1 (SIIPS1), modeled via a subject-level, trial-resolved multimodal architecture. 
 
----
+As a secondary sensitivity objective, we assessed whether EEG-derived predictive accuracy remained robust after controlling for known behavioral and temporal confounds. This was achieved by testing the models against fMRI signatures that were strictly residualized against subjective pain ratings, stimulus temperatures, trial timing, and block effects using fold-contained nuisance regression. The analysis was strictly restricted to the plateau phase of thermal stimulation periods (contrasting pain versus non-pain), utilizing fMRI inputs normalized to the MNI152NLin2009cAsym standard space.
 
-## 1. Research Objectives and Scope
+## Data Preconditions and Frequency Definitions
+Analyses relied on task-evoked EEG epochs defined from -7.0 to 15.0 seconds relative to stimulus onset. Baseline correction was applied using the pre-stimulus window of -0.2 to 0.0 seconds. For time-frequency decompositions, a log-ratio baseline correction was independently applied utilizing a pre-stimulus window from -5.0 to -0.01 seconds. The active stimulation window utilized for predictive modeling was restricted to 3.0 to 10.5 seconds post-onset.
 
-### 1.1 Primary Objective
-**To determine whether continuous, trial-wise expression of established fMRI pain signatures can be directly predicted from concurrent band-limited EEG dynamics.**
-The study targets the **Neurologic Pain Signature (NPS)** and the **Stimulus Intensity Independent Pain Signature-1 (SIIPS1)** using a subject-level, trial-resolved multimodal design.
+Neural oscillations were operationalized into standard frequency bands: alpha (8.0–12.9 Hz), beta (13.0–30.0 Hz), and gamma (30.1–80.0 Hz). Composite features spanning the full alpha-to-gamma spectrum were also constructed by concatenating these distinct ranges.
 
-### 1.2 Secondary Sensitivity Objective
-**To test whether EEG-derived predictive accuracy remains robust after controlling for known behavioral and temporal confounds.**
-The model's validity is evaluated against fMRI signatures that are strictly residualized against subjective pain ratings, stimulus temperatures, trial timing, and block effects using fold-contained nuisance regression.
+## fMRI Signature Target Construction
+Trial-by-trial fMRI effect estimates were extracted using the Least-Squares Separate (LSS) generalized linear modeling approach. The LSS models utilized a canonical SPM hemodynamic response function (HRF), a cosine drift model, and a high-pass filter of 0.008 Hz, without additional spatial smoothing. Let $\beta_{s,i}(v)$ denote the LSS-derived blood-oxygen-level-dependent (BOLD) effect estimate for subject $s$, trial $i$, and voxel $v$. Let $M_k(v)$ denote the a priori spatial weight map for target $k \in \{\text{NPS}, \text{SIIPS1}\}$. The primary signature-expression metric was computed as the unscaled dot product across all voxels $V$:
 
-### 1.3 Fixed Analytical Scope
-The analysis is restricted to:
-- **Conditions:** `trial_type == "stimulation"` and `stim_phase == "plateau"`
-- **Contrasts:** `pain_vs_nonpain`
-- **Spaces:** `MNI152NLin2009cAsym` fMRI inputs
-- **Predictive Lanes:**
-  1. Feature-Based Machine Learning (Standard Regressors)
-  2. Deep Regression (Band-Temporal PyTorch Neural Network)
+$$y_{s,i}^{(k)} = \sum_{v \in V} \beta_{s,i}(v)M_k(v)$$
 
----
+To construct the multimodal dataset, the resultant fMRI targets $y_{s,i}^{(k)}$ were matched to clean EEG trials using exact trial indices or rounded temporal onsets. In instances of duplicate event keys, target values were aggregated via the arithmetic mean.
 
-## 2. Preconditions and Data Contracts
+## Feature-Based Machine Learning Architecture
+We employed a rigorously nested, Leave-One-Subject-Out (LOSO) cross-validation framework to ensure true out-of-sample generalization. The primary confirmatory feature family consisted of predefined spectral power metrics, while exploratory models assessed alternative feature representations, including aperiodic components, event-related desynchronization, spectral asymmetries, and signal complexity.
 
-### 2.1 EEG Epoch Contract
-The pipeline relies on clean task epochs with the following shared baselines:
-- `tmin = -7.0 s`, `tmax = 15.0 s`
-- `baseline = [-0.2, 0.0] s`
+To prevent cross-subject data leakage and mitigate the injection of physiological scaling outliers (e.g., variances in skull thickness), a strict sequence of preprocessing steps was applied independently within each outer training fold. Let $X$ represent the trial-by-feature matrix. Raw features were first standardized within-subject as $X_{s} = (X_s - \mu_s) / \sigma_s$. Missing trials were subsequently imputed using the median of the training cohort. Global standardization to unit variance was then applied across the training fold. Finally, to prevent bias against naturally low-amplitude high-frequency oscillations, a variance threshold was applied to remove features with a variance of exactly 0.0.
 
-Time-frequency analyses utilize independent, family-level baselining:
-- `baseline_mode = "logratio"`
-- `baseline_window = [-5.0, -0.01] s`
-- `active_window = [3.0, 10.5] s`
+Processed fMRI targets were normalized using the Yeo-Johnson power transformation, denoted as $\tilde{y} = \mathrm{YJ}(y)$. Predictive mapping was performed using three distinct algorithms: ElasticNet regression, Ridge regression, and a bootstrap Random Forest regressor (500 estimators). The optimization objectives for the linear models were defined as follows:
 
-### 2.2 Frequency Band Definitions
-The exact numeric filter ranges applied across all analyses:
-| Band | Range (Hz) |
-| --- | --- |
-| `alpha` | `[8.0, 12.9]` |
-| `beta` | `[13.0, 30.0]` |
-| `gamma` | `[30.1, 80.0]` |
-| `alpha_beta_gamma` | (Concatenated combinations of the above) |
+For ElasticNet:
+$$\min_{\beta_0,\beta} \frac{1}{2n} \left\| \tilde{y} - \beta_0 - X\beta \right\|_2^2 + \alpha \rho \|\beta\|_1 + \frac{\alpha(1-\rho)}{2}\|\beta\|_2^2$$
 
----
+For Ridge regression:
+$$\min_{\beta_0,\beta} \frac{1}{2n} \left\| \tilde{y} - \beta_0 - X\beta \right\|_2^2 + \frac{\alpha}{2}\|\beta\|_2^2$$
 
-## 3. fMRI Signature Target Construction
+Hyperparameters (e.g., regularization strength $\alpha$, L1 ratio $\rho$, tree depth, and sample split criteria) were dynamically tuned via a 5-fold inner group cross-validation loop restricted to the training subjects. 
 
-### 3.1 Trial-Signature Extraction Parameters
-Targets are extracted trial-by-trial using the following fixed configuration:
-| Parameter | Value |
-| --- | --- |
-| Extraction Method | Least-Squares Separate (`lss`) |
-| Metric | Dot Product (`dot`) |
-| Normalization | None |
-| HRF Model | `spm` |
-| Drift Model | `cosine` |
-| High-pass Filter | `0.008 Hz` |
-| Smoothing FWHM | `null` |
-| Alignment Rounding | `3` decimals |
+## Deep Regression Neural Architecture
+In parallel to feature engineering, a deep regression lane was implemented to learn directly from continuous, band-limited EEG dynamics. To accurately capture oscillatory power without inducing temporal edge artifacts or phase dependency, continuous EEG recordings were first band-pass filtered into the target frequency ranges. Instantaneous power was extracted via the analytic signal envelope using the Hilbert transform, and the resulting tensors were subsequently cropped to the active stimulation window. This yielded a four-dimensional input tensor encompassing trials, frequency bands, spatial channels, and time points.
 
-### 3.2 Target Mathematical Formulation
-Let $\beta_{s,i}(v)$ denote the LSS-derived BOLD effect estimate for subject $s$, trial $i$, and voxel $v$. Let $M_k(v)$ denote the signature-map weight for target $k \in \{\text{NPS}, \text{SIIPS1}\}$. The primary signature-expression metric is:
+Within each LOSO fold, the input tensors were standardized using the channel- and band-specific statistics of the training cohort:
 
-```math
-y_{s,i}^{(k)} = \sum_{v \in V} \beta_{s,i}(v)M_k(v)
-```
+$$\tilde{X}_{n,b,c,t} = \frac{X_{n,b,c,t} - \mu_{b,c}}{\sigma_{b,c}^{*}}$$
 
-### 3.3 Trial Alignment
-fMRI targets $y_{s,i}^{(k)}$ are back-projected to clean EEG trials using exact trial indices or rounded onset/duration keys. Duplicate keys are aggregated by arithmetic mean.
+where $\mu_{b,c}$ is the mean and $\sigma_{b,c}^{*}$ is the lower-bounded standard deviation. Target variables were similarly z-scored utilizing the training subset statistics.
 
----
+A custom PyTorch-based convolutional neural network was designed to enforce neurophysiological constraints. The architecture sequentially isolated spatial topographies prior to temporal integration. The depthwise spatial convolution extracted band-specific spatial maps:
 
-## 4. Feature-Based Machine Learning Lane
+$$H^{(1)}_{n,b,f,t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{c} W^{spat}_{b,f,c}\tilde{X}_{n,b,c,t}\right)\right)$$
 
-### 4.1 Feature Families
-- **Confirmatory Family:** `power` (subjected to strict Holm correction).
-- **Exploratory Families:** `spectral`, `aperiodic`, `erds`, `ratios`, `asymmetry`, `complexity`, `bursts`.
+This was followed by a temporal convolution to integrate power dynamics over time:
 
-### 4.2 Strict Foldwise Preprocessing Sequence
-To prevent cross-subject leakage and outlier injection during cross-validation, processing occurs inside each outer LOSO fold. Let $X \in \mathbb{R}^{N \times P}$ denote the pooled trial-by-feature matrix.
+$$H^{(2)}_{n,f,t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{b,u} W^{temp}_{f,b,u} H^{(1)}_{n,b,f,t+u}\right)\right)$$
 
-1. **Subject-Wise Standardization:** Resolves scale-variant baseline differences (e.g., skull thickness) prior to imputation.
-   ```math
-   X_{s} \leftarrow \frac{X_s - \mu_s}{\sigma_s}
-   ```
-2. **Missing Feature Imputation:** Missing trials are imputed via the cohort `median`.
-3. **Global Scaling:** Features are standardized to unit variance across the entire training fold.
-4. **Variance Thresholding:** To prevent absolute-scale frequency bias (e.g., heavily penalizing Gamma bands), `VarianceThreshold` is applied *after* scaling, strictly locked to `[0.0]` to remove only zero-variance features.
+The latent temporal representation was downsampled via average pooling and passed through a dropout-regularized (probability 0.25) fully connected regression head:
 
-### 4.3 Models and Optimization Objectives
-Targets are transformed using a Yeo-Johnson transform: $\tilde{y} = \mathrm{YJ}(y)$. 
+$$z_n = \mathrm{Pool}_{8}\left(\mathrm{Dropout}(H^{(2)}_n)\right)$$
+$$\hat{y}_n = W_2 \, \mathrm{Dropout}\left(\mathrm{ELU}\left(W_1 \, \mathrm{vec}(z_n) + b_1\right)\right) + b_2$$
 
-**ElasticNet:**
-```math
-\min_{\beta_0,\beta} \frac{1}{2n} \left\| \tilde{y} - \beta_0 - X\beta \right\|_2^2 + \alpha \rho \|\beta\|_1 + \frac{\alpha(1-\rho)}{2}\|\beta\|_2^2
-```
-*Grid:* `alpha \in [0.001, 0.01, 0.1, 1, 10]`, `l1_ratio \in [0.2, 0.5, 0.8]`
+The network was optimized using the AdamW algorithm (learning rate = 0.001, weight decay = 0.0001) minimizing Mean Squared Error over 25 epochs. A 20% validation split of the training subjects was reserved for patience-based early stopping to prevent overfitting.
 
-**Ridge Regression:**
-```math
-\min_{\beta_0,\beta} \frac{1}{2n} \left\| \tilde{y} - \beta_0 - X\beta \right\|_2^2 + \frac{\alpha}{2}\|\beta\|_2^2
-```
-*Grid:* `alpha \in [0.01, 0.1, 1.0, 10.0, 100.0]`
+## Evaluation Metrics and Statistical Inference
+Model performance was evaluated on the strictly held-out test subject during each LOSO iteration. To ensure an unbiased metric of generalizability that precludes target leakage, the coefficient of determination ($R^2$) was calculated using the target mean of the training fold ($\bar{y}_{train,f}$) as the zero-skill baseline:
 
-**Random Forest:** Bootstrap forest utilizing $500$ estimators.
-*Grid:* `max_depth \in [5, 10, 20, null]`, `min_samples_split \in [2, 5, 10]`, `min_samples_leaf \in [1, 2, 4]`
+$$R_f^2 = 1 - \frac{\sum_{i \in f}(y_i - \hat{y}_i)^2}{\sum_{i \in f}(y_i - \bar{y}_{train,f})^2}$$
 
-Hyperparameters are tuned via 5-fold inner group-k-fold cross-validation.
-
----
-
-## 5. Deep Regression Lane
-
-### 5.1 Band-Limited Analytic Envelopes
-To capture oscillatory power free from edge artifacts and arbitrary phase dynamics, tensors are explicitly processed as follows:
-1. Continuous epochs are band-pass filtered into target ranges.
-2. The **analytic signal envelope** is extracted via the Hilbert transform.
-3. Tensors are cropped to the active stimulation window (`[3.0, 10.5] s`).
-
-Input tensor shape: $X \in \mathbb{R}^{n_{trials} \times n_{bands} \times n_{channels} \times n_{times}}$
-
-### 5.2 Foldwise Tensor Normalization
-Inputs are standardized via training cohort statistics:
-```math
-\tilde{X}_{n,b,c,t} = \frac{X_{n,b,c,t} - \mu_{b,c}}{\sigma_{b,c}^{*}}
-```
-where $\mu_{b,c} = \mathrm{mean}_{n,t}(X_{train})$ and $\sigma_{b,c}^{*} = \max(\mathrm{sd}_{n,t}(X_{train}), 10^{-6})$. Targets are similarly scaled: $\tilde{y}_n = \frac{y_n - \mu_y}{\sigma_y^{*}}$.
-
-### 5.3 Network Architecture & Equations
-The model extracts spatial topographies independently for each band prior to temporal integration.
-
-1. **Depthwise Spatial Convolution** (Extracts spatial maps):
-   ```math
-   H^{(1)}_{n,b,f,t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{c} W^{spat}_{b,f,c}\tilde{X}_{n,b,c,t}\right)\right)
-   ```
-   *Parameters:* Kernel `(n_channels, 1)`, Groups `= n_bands`
-
-2. **Temporal Convolution** (Integrates power over time):
-   ```math
-   H^{(2)}_{n,f,t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{b,u} W^{temp}_{f,b,u} H^{(1)}_{n,b,f,t+u}\right)\right)
-   ```
-   *Parameters:* Kernel `(1, 15)`, Temporal Filters `= 8`
-
-3. **Pooling and Head**:
-   ```math
-   z_n = \mathrm{Pool}_{8}\left(\mathrm{Dropout}_{0.25}(H^{(2)}_n)\right)
-   ```
-   ```math
-   \hat{y}_n = W_2 \, \mathrm{Dropout}_{0.25}\left(\mathrm{ELU}\left(W_1 \, \mathrm{vec}(z_n) + b_1\right)\right) + b_2
-   ```
-
-**Optimization Defaults:** `AdamW` (lr=`0.001`, wd=`0.0001`), `batch_size=32`, `epochs=25`, `patience=5`, `validation_fraction=0.2`.
-
----
-
-## 6. Evaluation Metrics and Inference
-
-### 6.1 Strict Zero-Skill $R^2$
-To prevent mean-variance data leakage, the coefficient of determination calculates its zero-skill baseline using the *training fold's* target mean ($\bar{y}_{train,f}$):
-```math
-R_f^2 = 1 - \frac{\sum_{i \in f}(y_i - \hat{y}_i)^2}{\sum_{i \in f}(y_i - \bar{y}_{train,f})^2}
-```
-Mean Absolute Error is calculated simply as: $\mathrm{MAE}_f = \frac{1}{|f|}\sum_{i \in f}|y_i - \hat{y}_i|$.
-
-### 6.2 Permutation Testing
-Statistical inference utilizes **5,000 permutations**. Within the nested CV pipeline, targets $y$ are permuted *prior* to the outer cross-validation splits to ensure unbiased hyperparameter null-tuning. Permutations are performed **within-subject** to preserve block dependencies while dismantling trial-wise predictability. Confirmatory model p-values are corrected using the **Holm** step-down procedure.
-
----
-
-## 7. Manuscript Reporting Checklist
-
-When transitioning this computational reference into a manuscript, ensure the following dynamically generated values are sourced from the output artifacts:
-1. **Target Yield:** Final trial counts surviving artifact rejection and target alignment (`primary_targets.parquet`).
-2. **Subject Inclusion:** Total requested vs. final included subjects per analytical lane (`model_comparison_summary.json`).
-3. **Cross-Validation Yield:** Total fold counts and exact hyperparameter parameters selected (`model_comparison.tsv`).
-4. **Signature Details:** Exact version and mapping file provenance of the `NPS` and `SIIPS1` maps.
-5. **Random State:** Explicitly declare that all initializations and CV folds utilized the deterministic `project.random_state = 42`.
+Statistical inference was established via nonparametric permutation testing (5,000 permutations). To preserve the block-wise temporal dependency structure while dismantling trial-wise predictability, target labels were permuted within-subject. Crucially, permutations were executed prior to the outer cross-validation splits, ensuring that nested hyperparameter tuning was completely unbiased against the null targets. P-values for the primary confirmatory models were corrected for multiple comparisons using the Holm step-down procedure. Absolute computational reproducibility was guaranteed by executing all random processes under a fixed global seed.

@@ -2924,7 +2924,7 @@ def _model_comparison_cv_predictions(
         if not collect_records:
             continue
 
-        from sklearn.metrics import mean_absolute_error, r2_score
+        from sklearn.metrics import mean_absolute_error
 
         y_train_mean = float(np.mean(y_train))
         ss_res = np.sum((y_test - fold_pred) ** 2)
@@ -2972,8 +2972,6 @@ def _model_comparison_permutation_p_value(
 ) -> float:
     if n_perm <= 0:
         return np.nan
-
-    from sklearn.metrics import r2_score
 
     blocks = None
     if meta is not None and "block" in meta.columns:
