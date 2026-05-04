@@ -5,7 +5,20 @@ from studies.pain_study.study1.cohort import primary_targets_parquet_path
 from studies.pain_study.study1.config import load_study1_config
 from studies.pain_study.study1.feature_benchmark import _feature_benchmark_config
 
-LEVEL2_COLUMNS = ["block", "onset", "stimulus_temp_level_46_0"]
+LEVEL2_CONTINUOUS_COLUMNS = [
+    "block",
+    "onset",
+    "trial_index",
+    "framewise_displacement",
+    "std_dvars",
+    "peripheral_low_gamma_power",
+    "residual_ecg_coupling",
+]
+LEVEL2_CATEGORICAL_COLUMNS = ["stimulus_temp", "selected_surface"]
+LEVEL2_COLUMNS = LEVEL2_CONTINUOUS_COLUMNS + [
+    "stimulus_temp_level_46_0",
+    "selected_surface_level_2_0",
+]
 
 
 def test_study1_default_residualization_matches_level2_estimand() -> None:
@@ -14,8 +27,8 @@ def test_study1_default_residualization_matches_level2_estimand() -> None:
     nuisance = config["study1"]["targets"]["nuisance_regression"]
 
     assert nuisance["enabled"] is True
-    assert nuisance["continuous_columns"] == ["block", "onset"]
-    assert nuisance["categorical_columns"] == ["stimulus_temp"]
+    assert nuisance["continuous_columns"] == LEVEL2_CONTINUOUS_COLUMNS
+    assert nuisance["categorical_columns"] == LEVEL2_CATEGORICAL_COLUMNS
 
 
 def test_study1_default_subject_minimum_supports_inner_group_kfold() -> None:
@@ -39,8 +52,15 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
             "SIIPS1": [2.0, 3.0],
             "block": [1, 1],
             "onset": [10.0, 20.0],
+            "trial_index": [1, 2],
+            "framewise_displacement": [0.1, 0.2],
+            "std_dvars": [0.5, 0.6],
+            "peripheral_low_gamma_power": [1.1, 1.2],
+            "residual_ecg_coupling": [0.01, 0.02],
             "stimulus_temp": [44.0, 46.0],
+            "selected_surface": [1.0, 2.0],
             "stimulus_temp_level_46_0": [0.0, 1.0],
+            "selected_surface_level_2_0": [0.0, 1.0],
         }
     ).to_parquet(target_table_path)
 

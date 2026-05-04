@@ -242,9 +242,10 @@ def setup_fmri_analysis(subparsers: argparse._SubParsersAction) -> argparse.Argu
             "motion24",
             "motion24+wmcsf",
             "motion24+wmcsf+fd",
+            "motion24+wmcsf+fd+compcor",
         ],
         default=None,
-        help="Which confound regressors to include (default: auto; motion + WM/CSF + FD + outliers + aCompCor when available)",
+        help="Which confound regressors to include (default: auto; explicit compcor strategy fails if required components are missing)",
     )
     qc_group.add_argument(
         "--write-design-matrix",

@@ -76,7 +76,7 @@ class ContrastBuilderConfig:
     # Events column used for `condition_scope_trial_types`.
     condition_scope_column: str = ""
     # Confounds / QC (optional)
-    confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|auto
+    confounds_strategy: str = "auto"  # none|motion6|motion12|motion24|motion24+wmcsf|motion24+wmcsf+fd|motion24+wmcsf+fd+compcor|auto
     auto_compcor_n: int = 5
     write_design_matrix: bool = False
     smoothing_fwhm: Optional[float] = None

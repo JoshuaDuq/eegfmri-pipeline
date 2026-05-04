@@ -40,15 +40,21 @@ study1:
     high_pass_hz: 0.008
     low_pass_hz: null
     smoothing_fwhm: null
-    confounds_strategy: "auto"
+    confounds_strategy: "motion24+wmcsf+fd+compcor"
     lss_other_regressors: "all"
     nuisance_regression:
       enabled: false
       continuous_columns:
         - "block"
         - "onset"
+        - "trial_index"
+        - "framewise_displacement"
+        - "std_dvars"
+        - "peripheral_low_gamma_power"
+        - "residual_ecg_coupling"
       categorical_columns:
         - "stimulus_temp"
+        - "selected_surface"
   feature_benchmark:
     n_perm: 10
     inner_splits: 3

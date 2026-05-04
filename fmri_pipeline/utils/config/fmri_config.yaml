@@ -219,8 +219,8 @@ fmri_contrast:
   high_pass_hz: 0.008          # High-pass filter (128s period)
   low_pass_hz: null            # Optional; avoid unless you know you need it
   smoothing_fwhm: null         # Optional spatial smoothing kernel FWHM in mm
-  confounds_strategy: "auto"    # "auto" | "none" | "motion6" | "motion12" | "motion24" | "motion24+wmcsf" | "motion24+wmcsf+fd"
-  auto_compcor_n: 5             # Number of CompCor components included when confounds_strategy="auto"
+  confounds_strategy: "auto"    # "auto" | "none" | "motion6" | "motion12" | "motion24" | "motion24+wmcsf" | "motion24+wmcsf+fd" | "motion24+wmcsf+fd+compcor"
+  auto_compcor_n: 5             # Number of CompCor components included when confounds_strategy includes CompCor
   write_design_matrix: false    # Write design matrix TSV/PNG under qc/
   
   # Output format

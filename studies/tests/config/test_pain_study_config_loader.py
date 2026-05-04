@@ -9,6 +9,17 @@ from studies.pain_study.study2.config.eeg_bold_coupling_loader import (
 
 from studies.tests.test_support import REPO_ROOT
 
+LEVEL2_CONTINUOUS_COLUMNS = [
+    "block",
+    "onset",
+    "trial_index",
+    "framewise_displacement",
+    "std_dvars",
+    "peripheral_low_gamma_power",
+    "residual_ecg_coupling",
+]
+LEVEL2_CATEGORICAL_COLUMNS = ["stimulus_temp", "selected_surface"]
+
 
 def test_study2_config_resolves_roi_assets_from_study_package() -> None:
     config = load_eeg_bold_coupling_config(
@@ -48,8 +59,9 @@ def test_study1_production_target_and_inference_settings_are_prespecified() -> N
     )
 
     targets = config["study1"]["targets"]
-    assert targets["metric"] == "cosine"
+    assert targets["metric"] == "dot"
     assert "signature_provenance" in targets
+    assert targets["confounds_strategy"] == "motion24+wmcsf+fd+compcor"
     assert int(config["study1"]["feature_benchmark"]["n_perm"]) > 0
-    assert targets["nuisance_regression"]["continuous_columns"] == ["block", "onset"]
-    assert targets["nuisance_regression"]["categorical_columns"] == ["stimulus_temp"]
+    assert targets["nuisance_regression"]["continuous_columns"] == LEVEL2_CONTINUOUS_COLUMNS
+    assert targets["nuisance_regression"]["categorical_columns"] == LEVEL2_CATEGORICAL_COLUMNS

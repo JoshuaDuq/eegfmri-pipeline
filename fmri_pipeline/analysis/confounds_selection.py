@@ -88,6 +88,30 @@ def select_fmriprep_confounds_columns(
             "csf",
             "framewise_displacement",
         ]
+    elif strategy in {
+        "motion24+wmcsf+fd+compcor",
+        "motion24+wm_csf+fd+compcor",
+        "motion24+wmcsf+fd+compcor5",
+        "motion24+wm_csf+fd+compcor5",
+    }:
+        compcor_cols = _pick_compcor_components(available_columns, n=int(auto_compcor_n))
+        if len(compcor_cols) < int(auto_compcor_n):
+            raise ValueError(
+                f"confounds_strategy '{strategy}' requires {int(auto_compcor_n)} "
+                f"CompCor components, found {len(compcor_cols)}."
+            )
+        base_cols = (
+            motion6
+            + motion_derivs
+            + motion_power2
+            + motion_derivs_power2
+            + [
+                "white_matter",
+                "csf",
+                "framewise_displacement",
+            ]
+            + compcor_cols
+        )
     elif strategy in {"auto"}:
         # Prefer a widely used "24p + WM/CSF + FD" if present, otherwise fall back.
         missing_motion = [c for c in motion6 if c not in avail]
@@ -113,7 +137,8 @@ def select_fmriprep_confounds_columns(
     else:
         raise ValueError(
             f"Unsupported confounds_strategy '{strategy}'. "
-            "Use one of: none, motion6, motion12, motion24, motion24+wmcsf, motion24+wmcsf+fd, auto."
+            "Use one of: none, motion6, motion12, motion24, motion24+wmcsf, "
+            "motion24+wmcsf+fd, motion24+wmcsf+fd+compcor, auto."
         )
 
     if strategy != "auto":

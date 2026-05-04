@@ -1087,6 +1087,46 @@ def test_explicit_confounds_strategy_requires_all_requested_columns() -> None:
         )
 
 
+def test_explicit_compcor_confounds_strategy_requires_requested_components() -> None:
+    available_columns = [
+        "trans_x",
+        "trans_y",
+        "trans_z",
+        "rot_x",
+        "rot_y",
+        "rot_z",
+        "trans_x_derivative1",
+        "trans_y_derivative1",
+        "trans_z_derivative1",
+        "rot_x_derivative1",
+        "rot_y_derivative1",
+        "rot_z_derivative1",
+        "trans_x_power2",
+        "trans_y_power2",
+        "trans_z_power2",
+        "rot_x_power2",
+        "rot_y_power2",
+        "rot_z_power2",
+        "trans_x_derivative1_power2",
+        "trans_y_derivative1_power2",
+        "trans_z_derivative1_power2",
+        "rot_x_derivative1_power2",
+        "rot_y_derivative1_power2",
+        "rot_z_derivative1_power2",
+        "white_matter",
+        "csf",
+        "framewise_displacement",
+        "a_comp_cor_00",
+    ]
+
+    with pytest.raises(ValueError, match="requires 5 CompCor components"):
+        select_fmriprep_confounds_columns(
+            available_columns,
+            strategy="motion24+wmcsf+fd+compcor",
+            auto_compcor_n=5,
+        )
+
+
 def test_auto_confounds_strategy_requires_core_fmriprep_motion_columns() -> None:
     available_columns = ["csf", "white_matter", "framewise_displacement"]
 
