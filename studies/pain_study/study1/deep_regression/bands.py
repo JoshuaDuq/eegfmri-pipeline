@@ -70,14 +70,15 @@ def build_band_tensor(
     for band_name in bands:
         fmin, fmax = band_definitions[band_name]
         working_epochs = epochs.copy().pick(channels)
-        if time_window is not None:
-            working_epochs.crop(tmin=time_window[0], tmax=time_window[1])
         filtered = working_epochs.filter(
             l_freq=float(fmin),
             h_freq=float(fmax),
             picks="eeg",
             verbose=False,
         )
+        filtered.apply_hilbert(envelope=True)
+        if time_window is not None:
+            filtered.crop(tmin=time_window[0], tmax=time_window[1])
         band_data = filtered.get_data(picks="eeg").astype(float)
         tensors.append(band_data)
         logger.info(

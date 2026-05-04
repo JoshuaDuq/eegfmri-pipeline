@@ -20,17 +20,18 @@ def build_band_regressor(*, nn: Any, input_shape: tuple[int, int, int], config: 
             self.features = nn.Sequential(
                 nn.Conv2d(
                     in_channels=n_bands,
+                    out_channels=n_bands * temporal_filters,
+                    kernel_size=(n_channels, 1),
+                    groups=n_bands,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(n_bands * temporal_filters),
+                nn.ELU(inplace=True),
+                nn.Conv2d(
+                    in_channels=n_bands * temporal_filters,
                     out_channels=temporal_filters,
                     kernel_size=(1, kernel_size),
                     padding=(0, kernel_size // 2),
-                    bias=False,
-                ),
-                nn.BatchNorm2d(temporal_filters),
-                nn.ELU(inplace=True),
-                nn.Conv2d(
-                    in_channels=temporal_filters,
-                    out_channels=temporal_filters,
-                    kernel_size=(n_channels, 1),
                     bias=False,
                 ),
                 nn.BatchNorm2d(temporal_filters),

@@ -2926,12 +2926,17 @@ def _model_comparison_cv_predictions(
 
         from sklearn.metrics import mean_absolute_error, r2_score
 
+        y_train_mean = float(np.mean(y_train))
+        ss_res = np.sum((y_test - fold_pred) ** 2)
+        ss_tot = np.sum((y_test - y_train_mean) ** 2)
+        fold_r2 = float(1.0 - (ss_res / ss_tot)) if ss_tot > 1e-12 else np.nan
+
         records.append(
             {
                 "model": model_name,
                 "fold": fold_idx,
                 "test_subject": groups[test_idx[0]],
-                "r2": r2_score(y_test, fold_pred),
+                "r2": fold_r2,
                 "mae": mean_absolute_error(y_test, fold_pred),
                 "best_params": best_params_repr,
                 "target_residualized": bool(target_residualization_columns),
@@ -3004,13 +3009,13 @@ def _model_comparison_permutation_p_value(
             harmonization_mode=harmonization_mode,
             covariates=covariates,
             target_residualization_columns=target_residualization_columns,
-            collect_records=False,
+            collect_records=True,
         )
-        fold_r2 = [
-            float(r2_score(y_true_perm[test_idx], y_pred_perm[test_idx]))
-            for _train_idx, test_idx in outer_folds
-        ]
-        null_scores.append(float(np.mean(fold_r2)))
+        fold_r2 = [float(rec["r2"]) for rec in _records if np.isfinite(rec.get("r2", np.nan))]
+        if fold_r2:
+            null_scores.append(float(np.mean(fold_r2)))
+        else:
+            null_scores.append(np.nan)
 
     if not null_scores:
         raise RuntimeError("No effective model-comparison permutations were generated.")

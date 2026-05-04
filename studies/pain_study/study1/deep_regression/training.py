@@ -44,11 +44,15 @@ def _safe_r(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.corrcoef(y_true, y_pred)[0, 1])
 
 
-def _safe_r2(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+def _safe_r2(y_true: np.ndarray, y_pred: np.ndarray, y_train_mean: float) -> float:
     if len(y_true) < 2:
         return np.nan
     try:
-        return float(r2_score(y_true, y_pred))
+        ss_res = np.sum((y_true - y_pred) ** 2)
+        ss_tot = np.sum((y_true - y_train_mean) ** 2)
+        if ss_tot < 1e-12:
+            return np.nan
+        return float(1.0 - (ss_res / ss_tot))
     except ValueError:
         return np.nan
 
@@ -270,7 +274,7 @@ def run_loso_deep_regression(
                 "test_subject": str(groups[test_idx[0]]),
                 "r": _safe_r(y_true_fold, fold_pred),
                 "mae": float(mean_absolute_error(y_true_fold, fold_pred)),
-                "r2": _safe_r2(y_true_fold, fold_pred),
+                "r2": _safe_r2(y_true_fold, fold_pred, y_train_mean=float(np.mean(y_train))),
                 "n_trials": int(len(test_idx)),
             }
         )

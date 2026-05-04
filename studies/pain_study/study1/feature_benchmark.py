@@ -91,6 +91,8 @@ def _feature_benchmark_config(
     feature_config["machine_learning.fmri_signature.round_decimals"] = int(
         get_config_value(config, "study1.targets.round_decimals", 3)
     )
+    feature_config["machine_learning.preprocessing.subject_standardize_features"] = True
+    feature_config["machine_learning.preprocessing.variance_threshold_grid"] = [0.0]
     columns = list(nuisance_columns(config)) if nuisance_regression_enabled(config) else []
     feature_config["machine_learning.target_residualization.enabled"] = bool(columns)
     feature_config["machine_learning.target_residualization.columns"] = columns

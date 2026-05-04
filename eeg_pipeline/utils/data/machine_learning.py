@@ -948,6 +948,12 @@ def load_active_matrix(
         col_sets.append(set(X_df.columns))
 
         subject_raw, subject_bids = _normalize_subject(sub)
+        
+        if get_config_value(config, "machine_learning.preprocessing.subject_standardize_features", False):
+            mean = X_df.mean(numeric_only=True)
+            std = X_df.std(numeric_only=True).replace(0.0, 1.0)
+            X_df = (X_df - mean) / std
+
         X_dfs.append(X_df)
         y_list.append(np.asarray(y_sub))
         groups_list.extend([subject_bids] * len(y_sub))
