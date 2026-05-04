@@ -103,47 +103,53 @@ def _resolve_behavior_computation_flags(
 
 @dataclass
 class BehaviorPipelineConfig:
-    method: str = "spearman"
-    min_samples: int = 10
-    control_predictor: bool = True
-    control_trial_order: bool = True
-    compute_change_scores: bool = True
-    compute_reliability: bool = False
-    compute_bayes_factors: bool = False
-    compute_loso_stability: bool = True
-    bootstrap: int = 0
-    robust_method: Optional[str] = None
-    method_label: str = "spearman"
-    correlation_types: List[str] = field(default_factory=lambda: ["partial_cov_predictor"])
+    """Typed resolved behavior-analysis settings.
+
+    Defaults come from ``behavior_config.yaml`` through ``from_config()``.
+    Direct construction is reserved for fully resolved test fixtures.
+    """
+
+    method: str
+    min_samples: int
+    control_predictor: bool
+    control_trial_order: bool
+    compute_change_scores: bool
+    compute_reliability: bool
+    compute_bayes_factors: bool
+    compute_loso_stability: bool
+    bootstrap: int
+    robust_method: Optional[str]
+    method_label: str
+    correlation_types: List[str]
     
     # Computation flags
-    run_trial_table: bool = True
-    run_predictor_residual: bool = True
-    run_regression: bool = False
-    run_icc: bool = True
-    run_validation: bool = True
-    run_correlations: bool = True
-    run_multilevel_correlations: bool = False
-    run_condition_comparison: bool = True
-    run_temporal_correlations: bool = True
-    run_cluster_tests: bool = False
+    run_trial_table: bool
+    run_predictor_residual: bool
+    run_regression: bool
+    run_icc: bool
+    run_validation: bool
+    run_correlations: bool
+    run_multilevel_correlations: bool
+    run_condition_comparison: bool
+    run_temporal_correlations: bool
+    run_cluster_tests: bool
     
     # General stats
-    fdr_alpha: float = 0.05
-    n_permutations: int = 0
-    n_jobs: int = -1
+    fdr_alpha: float
+    n_permutations: int
+    n_jobs: int
     
     # Condition-specific
-    condition_effect_threshold: float = 0.5
+    condition_effect_threshold: float
     
     # Temporal-specific
-    temporal_resolution_ms: int = 50
-    temporal_smooth_ms: int = 100
+    temporal_resolution_ms: int
+    temporal_smooth_ms: int
     
     # Cluster-specific
-    cluster_threshold: float = 0.05
-    cluster_min_size: int = 2
-    cluster_tail: int = 0
+    cluster_threshold: float
+    cluster_min_size: int
+    cluster_tail: int
     
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":

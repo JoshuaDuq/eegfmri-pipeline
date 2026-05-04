@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -12,14 +13,35 @@ from studies.tests.test_support import DotConfig
 
 
 def _base_config(root: Path) -> DotConfig:
+    (root / "maps").mkdir(parents=True, exist_ok=True)
+    try:
+        import nibabel as nib
+
+        for rel_path in (
+            "NPS/weights_NSF_grouppred_cvpcr.nii.gz",
+            "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz",
+        ):
+            image_path = root / "maps" / rel_path
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            if not image_path.exists():
+                nib.save(
+                    nib.Nifti1Image(np.ones((2, 2, 2), dtype=float), np.eye(4)),
+                    image_path,
+                )
+    except ImportError:
+        pass
     return DotConfig(
         {
             "paths": {
                 "bids_fmri_root": str(root / "bids_fmri"),
                 "deriv_root": str(root / "derivatives"),
+                "signature_dir": str(root / "maps"),
                 "signature_maps": [
-                    {"name": "NPS", "path": str(root / "maps" / "nps.nii.gz")},
-                    {"name": "SIIPS1", "path": str(root / "maps" / "siips1.nii.gz")},
+                    {"name": "NPS", "path": "NPS/weights_NSF_grouppred_cvpcr.nii.gz"},
+                    {
+                        "name": "SIIPS1",
+                        "path": "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz",
+                    },
                 ],
             },
             "study1": {
@@ -48,6 +70,16 @@ def _base_config(root: Path) -> DotConfig:
                     "confounds_strategy": "auto",
                     "lss_other_regressors": "all",
                     "names": ["NPS", "SIIPS1"],
+                    "signature_provenance": {
+                        "NPS": {
+                            "path": "NPS/weights_NSF_grouppred_cvpcr.nii.gz",
+                            "space": "MNI152NLin2009cAsym",
+                        },
+                        "SIIPS1": {
+                            "path": "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz",
+                            "space": "MNI152NLin2009cAsym",
+                        },
+                    },
                 }
             },
         }
@@ -59,6 +91,7 @@ def _events_frame() -> pd.DataFrame:
         {
             "run_id": [1, 1],
             "trial_number": [1, 2],
+            "pain_binary_coded": [1, 0],
             "onset": [22.150, 65.084],
             "duration": [0.001, 0.001],
         }
@@ -177,6 +210,53 @@ def test_prepare_primary_targets_requires_both_primary_signatures() -> None:
                 )
 
 
+def test_validate_signature_space_checks_configured_provenance_and_maps(tmp_path) -> None:
+    import nibabel as nib
+
+    from studies.pain_study.study1.targets import _validate_signature_space
+
+    maps = tmp_path / "maps"
+    (maps / "NPS").mkdir(parents=True)
+    (maps / "SIIPS1").mkdir(parents=True)
+    for rel_path in (
+        "NPS/weights_NSF_grouppred_cvpcr.nii.gz",
+        "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz",
+    ):
+        image_path = maps / rel_path
+        image = nib.Nifti1Image(np.ones((2, 2, 2), dtype=float), np.eye(4))
+        nib.save(image, image_path)
+
+    cfg = _base_config(tmp_path)
+    cfg["paths"]["signature_dir"] = str(maps)
+    cfg["study1"]["targets"]["signature_provenance"] = {
+        "NPS": {
+            "path": "NPS/weights_NSF_grouppred_cvpcr.nii.gz",
+            "space": "MNI152NLin2009cAsym",
+        },
+        "SIIPS1": {
+            "path": "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz",
+            "space": "MNI152NLin2009cAsym",
+        },
+    }
+
+    _validate_signature_space(
+        cfg,
+        [
+            {"name": "NPS", "path": "NPS/weights_NSF_grouppred_cvpcr.nii.gz"},
+            {"name": "SIIPS1", "path": "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="provenance"):
+        _validate_signature_space(
+            cfg,
+            [
+                {"name": "NPS", "path": "NPS/thresholded.nii.gz"},
+                {"name": "SIIPS1", "path": "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"},
+            ],
+        )
+
+
 def test_prepare_primary_targets_rejects_non_finite_primary_values() -> None:
     from studies.pain_study.study1.targets import prepare_primary_targets
 
@@ -229,6 +309,54 @@ def test_prepare_primary_targets_writes_wide_primary_table() -> None:
         assert list(frame["task"]) == ["pain", "pain"]
         assert list(frame["NPS"]) == [1.1, 1.2]
         assert list(frame["SIIPS1"]) == [2.1, 2.2]
+
+
+def test_prepare_primary_targets_records_nuisance_columns_without_residual_targets() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        cfg["study1"]["targets"]["nuisance_regression"] = {
+            "enabled": True,
+            "columns": ["pain_binary_coded"],
+        }
+
+        events = pd.DataFrame(
+            {
+                "run_id": [1, 1, 1, 1],
+                "trial_number": [1, 2, 3, 4],
+                "pain_binary_coded": [0, 0, 1, 1],
+                "onset": [10.0, 20.0, 30.0, 40.0],
+                "duration": [0.5, 0.5, 0.5, 0.5],
+            }
+        )
+
+        with patch(
+            "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+            return_value={"output_dir": "ignored"},
+        ), patch(
+            "studies.pain_study.study1.targets.load_events_df",
+            return_value=events,
+        ), patch(
+            "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject",
+            side_effect=[
+                (pd.Series([1.0, 3.0, 11.0, 13.0]), "NPS", pd.DataFrame()),
+                (pd.Series([2.0, 4.0, 12.0, 14.0]), "SIIPS1", pd.DataFrame()),
+            ],
+        ):
+            out_path = prepare_primary_targets(
+                subjects=["0001"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+
+        frame = pd.read_parquet(out_path)
+        assert "pain_binary_coded" in frame.columns
+        assert "NPS_nuisance_residual" not in frame.columns
+        assert "SIIPS1_nuisance_residual" not in frame.columns
+        assert list(frame["pain_binary_coded"]) == [0, 0, 1, 1]
 
 
 def test_build_trial_signature_config_propagates_scope_fields() -> None:

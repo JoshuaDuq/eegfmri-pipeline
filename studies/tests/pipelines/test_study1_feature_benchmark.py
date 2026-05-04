@@ -30,7 +30,7 @@ def _config(root: Path) -> DotConfig:
                     "round_decimals": 3,
                 },
                 "feature_benchmark": {
-                    "n_perm": 0,
+                    "n_perm": 10,
                     "inner_splits": 3,
                     "outer_jobs": 1,
                     "feature_harmonization": "intersection",
@@ -167,6 +167,17 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
     )
     assert first_call["config"].get("machine_learning.data.require_trial_ml_safe") is True
     assert first_call["config"].get("feature_engineering.analysis_mode") == "trial_ml_safe"
+    assert first_call["config"].get("machine_learning.fmri_signature.target_table_path") == str(
+        tmp_path
+        / "derivatives"
+        / "group"
+        / "multimodal"
+        / "study1"
+        / "targets"
+        / "primary_targets.parquet"
+    )
+    assert first_call["config"].get("machine_learning.fmri_signature.target_column") == "NPS"
+    assert first_call["config"].get("machine_learning.target_residualization.enabled") is False
     assert first_call["results_root"].parts[-4:] == (
         "feature_benchmark",
         "primary",
@@ -180,6 +191,68 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
     )
     assert exploratory_call["feature_families"] == ["spectral"]
     assert exploratory_call["feature_bands"] is None
+
+
+def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path) -> None:
+    from studies.pain_study.study1.feature_benchmark import run_feature_benchmark
+
+    cfg = _config(tmp_path)
+    cfg["study1"]["features"]["exploratory_feature_families"] = []
+    cfg["study1"]["targets"]["nuisance_regression"] = {
+        "enabled": True,
+        "columns": ["pain_binary_coded", "block", "onset"],
+    }
+    _write_primary_targets(cfg)
+    _write_prepared_power_features(cfg, "sub-0001")
+    _write_prepared_power_features(cfg, "sub-0002")
+    captured_calls: list[dict] = []
+
+    def _capture(**kwargs):
+        captured_calls.append(kwargs)
+        return Path(kwargs["results_root"]) / "model_comparison"
+
+    with patch(
+        "studies.pain_study.study1.feature_benchmark.run_model_comparison_ml",
+        side_effect=_capture,
+    ):
+        run_feature_benchmark(
+            subjects=["0001", "0002"],
+            task="pain",
+            config=cfg,
+            logger=logging.getLogger(__name__),
+        )
+
+    assert len(captured_calls) == 8
+    assert captured_calls[0]["config"].get("machine_learning.fmri_signature.target_column") == "NPS"
+    assert captured_calls[0]["config"].get("machine_learning.target_residualization.enabled") is True
+    assert captured_calls[0]["config"].get("machine_learning.target_residualization.columns") == [
+        "pain_binary_coded",
+        "block",
+        "onset",
+    ]
+
+
+def test_run_feature_benchmark_requires_permutation_inference(tmp_path) -> None:
+    from studies.pain_study.study1.feature_benchmark import run_feature_benchmark
+
+    cfg = _config(tmp_path)
+    cfg["study1"]["feature_benchmark"]["n_perm"] = 0
+    _write_primary_targets(cfg)
+    _write_prepared_power_features(cfg, "sub-0001")
+    _write_prepared_power_features(cfg, "sub-0002")
+
+    with patch("studies.pain_study.study1.feature_benchmark.run_model_comparison_ml"):
+        try:
+            run_feature_benchmark(
+                subjects=["0001", "0002"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+        except ValueError as exc:
+            assert "n_perm" in str(exc)
+        else:
+            raise AssertionError("Expected Study 1 feature benchmark to require n_perm > 0.")
 
 
 def test_run_feature_benchmark_requires_prepared_exploratory_features(tmp_path) -> None:

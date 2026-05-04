@@ -24,7 +24,7 @@ The production workflow:
 5. prepares a Study 1-owned `trial_ml_safe` EEG feature store,
 6. runs a feature-based model-comparison benchmark,
 7. runs deep regression from band-limited EEG trial tensors,
-8. aggregates available summaries into one study-level report.
+8. validates and aggregates the prespecified primary summaries into one study-level report.
 
 The main analysis is restricted to:
 
@@ -33,6 +33,7 @@ The main analysis is restricted to:
 - `trial_type == "stimulation"`,
 - `stim_phase == "plateau"`,
 - fMRI inputs in `MNI152NLin2009cAsym`,
+- fold-contained nuisance residualization of Study 1 targets during prediction,
 - Study 1-owned `trial_ml_safe` EEG features,
 - the fixed deep-regression presets `alpha`, `beta`, `gamma`, and `alpha_beta_gamma`.
 
@@ -122,8 +123,7 @@ reports/study1_report.tsv
 - `prepare-targets` can run on a single subject, but `prepare-features`,
   `feature-benchmark`, and `deep-regression` require at least
   `study1.cohort.min_subjects` subjects because they are LOSO analyses.
-- The `report` stage itself aggregates whatever valid Study 1 results already exist under
-  the study output root, but the top-level `signature-prediction` CLI still requires at
-  least one subject selection.
+- The `report` stage requires the prespecified primary feature-benchmark and
+  deep-regression outputs to be present before writing the study-level table.
 - Study 1 intentionally fails fast on missing or invalid inputs. It does not implement
   fallback behavior or backward-compatibility shims.

@@ -206,6 +206,57 @@ def test_run_loso_deep_regression_validates_shape_and_subject_folds(tmp_path) ->
     assert result.summary["n_folds"] == 2
 
 
+def test_run_loso_deep_regression_uses_foldwise_nuisance_residual_targets(tmp_path) -> None:
+    from studies.pain_study.study1.deep_regression.training import run_loso_deep_regression
+
+    cfg = _config(tmp_path)
+    cfg["study1"]["targets"] = {
+        "names": ["NPS", "SIIPS1"],
+        "nuisance_regression": {
+            "enabled": True,
+            "columns": ["pain_binary_coded"],
+        },
+    }
+    X = np.ones((6, 1, 3, 10), dtype=float)
+    y = np.asarray([100.0, 110.0, 0.0, 10.0, 0.0, 10.0], dtype=float)
+    groups = np.asarray(
+        ["sub-0001", "sub-0001", "sub-0002", "sub-0002", "sub-0003", "sub-0003"],
+        dtype=object,
+    )
+    meta = pd.DataFrame(
+        {
+            "subject_id": groups,
+            "pain_binary_coded": [0, 1, 0, 1, 0, 1],
+            "target_value": y,
+        }
+    )
+    y_train_seen: list[np.ndarray] = []
+
+    def _capture_fit(**kwargs):
+        y_train_seen.append(np.asarray(kwargs["y_train"], dtype=float))
+        return np.zeros(len(kwargs["X_test"]), dtype=float)
+
+    with patch(
+        "studies.pain_study.study1.deep_regression.training._fit_regressor",
+        side_effect=_capture_fit,
+    ):
+        result = run_loso_deep_regression(
+            X=X,
+            y=y,
+            groups=groups,
+            meta=meta,
+            target_name="NPS",
+            preset_name="alpha",
+            bands=["alpha"],
+            config=cfg,
+            logger=logging.getLogger(__name__),
+        )
+
+    assert np.allclose(y_train_seen[0], [0.0, 0.0, 0.0, 0.0])
+    assert np.allclose(result.predictions.loc[:1, "y_true"], [100.0, 100.0])
+    assert result.summary["target_residualization"]["columns"] == ["pain_binary_coded"]
+
+
 def test_target_standardization_round_trips(tmp_path) -> None:
     from studies.pain_study.study1.deep_regression.training import (
         _apply_target_standardization,
@@ -244,6 +295,36 @@ def test_target_standardization_handles_constant_targets(tmp_path) -> None:
         _invert_target_standardization(standardized, mean=mean, std=std),
         values,
     )
+
+
+def test_build_band_tensor_crops_to_configured_deep_time_window(tmp_path) -> None:
+    from studies.pain_study.study1.deep_regression.bands import build_band_tensor
+
+    info = mne.create_info(["Cz"], sfreq=10.0, ch_types="eeg")
+    data = np.arange(10, dtype=float).reshape(1, 1, 10)
+    epochs = mne.EpochsArray(data, info, tmin=0.0, verbose=False)
+    cfg = DotConfig(
+        {
+            "time_frequency_analysis": {
+                "bands": {"alpha": [1.0, 3.0]},
+            },
+            "study1": {
+                "deep_regression": {
+                    "time_window": [0.2, 0.5],
+                }
+            },
+        }
+    )
+
+    tensor = build_band_tensor(
+        epochs=epochs,
+        config=cfg,
+        bands=["alpha"],
+        channels=["Cz"],
+        logger=logging.getLogger(__name__),
+    )
+
+    assert tensor.shape == (1, 1, 1, 4)
 
 
 def test_run_deep_regression_writes_one_output_per_target_and_preset(tmp_path) -> None:

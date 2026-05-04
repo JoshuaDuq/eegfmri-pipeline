@@ -249,6 +249,15 @@ def _behavior_process_config() -> DotConfig:
     )
 
 
+def _resolved_behavior_pipeline_config(**overrides):
+    from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
+
+    config = BehaviorPipelineConfig.from_config(DotConfig({}))
+    for key, value in overrides.items():
+        setattr(config, key, value)
+    return config
+
+
 class TestBehaviorDeep(_BehaviorImportMixin, unittest.TestCase):
         def test_behavior_process_subject_success_path(self):
             from eeg_pipeline.pipelines.behavior import BehaviorPipeline
@@ -512,11 +521,11 @@ class TestBehaviorDeep(_BehaviorImportMixin, unittest.TestCase):
 
 class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
         def test_behavior_init_and_group_level_logging_branches(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
             import pandas as pd
 
             cfg = DotConfig({})
-            pcfg = BehaviorPipelineConfig()
+            pcfg = _resolved_behavior_pipeline_config()
             with patch("eeg_pipeline.pipelines.behavior.PipelineBase.__init__", lambda self, name, config=None: (setattr(self, "config", config or cfg), setattr(self, "logger", Mock()), setattr(self, "deriv_root", Path(tempfile.mkdtemp())))):
                 b = BehaviorPipeline(config=cfg, pipeline_config=pcfg, computations=["icc"])
             self.assertTrue(b.pipeline_config.run_icc)
@@ -537,7 +546,6 @@ class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
         def test_behavior_summary_and_group_level_warning_reject_branches(self):
             from eeg_pipeline.pipelines.behavior import (
                 BehaviorPipeline,
-                BehaviorPipelineConfig,
                 BehaviorPipelineResults,
             )
 
@@ -557,7 +565,7 @@ class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
             self.assertEqual(summary["n_sig_fdr"], 1)
 
             cfg = DotConfig({})
-            pcfg = BehaviorPipelineConfig()
+            pcfg = _resolved_behavior_pipeline_config()
             with patch(
                 "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
                 lambda self, name, config=None: (
@@ -596,10 +604,10 @@ class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
             )
 
         def test_behavior_group_level_skips_by_default_when_not_selected(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 
             cfg = DotConfig({})
-            pcfg = BehaviorPipelineConfig(run_multilevel_correlations=False)
+            pcfg = _resolved_behavior_pipeline_config(run_multilevel_correlations=False)
             with patch(
                 "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
                 lambda self, name, config=None: (
@@ -619,10 +627,10 @@ class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
             run_group_level_analysis_mock.assert_not_called()
 
         def test_behavior_group_level_forwards_feature_file_selection(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 
             cfg = DotConfig({})
-            pcfg = BehaviorPipelineConfig()
+            pcfg = _resolved_behavior_pipeline_config()
             with patch(
                 "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
                 lambda self, name, config=None: (
@@ -657,10 +665,10 @@ class TestBehaviorCompletion(_BehaviorImportMixin, unittest.TestCase):
             )
 
         def test_behavior_group_level_requires_existing_trial_tables(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 
             cfg = DotConfig({})
-            pcfg = BehaviorPipelineConfig(run_multilevel_correlations=True)
+            pcfg = _resolved_behavior_pipeline_config(run_multilevel_correlations=True)
             with patch(
                 "eeg_pipeline.pipelines.behavior.PipelineBase.__init__",
                 lambda self, name, config=None: (
@@ -755,6 +763,9 @@ class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
 
             self.assertIsNone(_resolve_behavior_computation_flags(None))
 
+            with self.assertRaises(TypeError):
+                BehaviorPipelineConfig()
+
             cfg = DotConfig({"behavior_analysis": {"statistics": {"correlation_method": "pearson"}, "robust_correlation": " winsorized "}})
             pcfg = BehaviorPipelineConfig.from_config(cfg)
             self.assertEqual(pcfg.method, "pearson")
@@ -780,7 +791,7 @@ class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
             ):
                 p = BehaviorPipeline(
                     config=DotConfig({}),
-                    pipeline_config=BehaviorPipelineConfig(),
+                    pipeline_config=_resolved_behavior_pipeline_config(),
                     computations=["icc"],
                     feature_categories=["power"],
                     computation_features={"regression": ["power_alpha"]},
@@ -788,10 +799,10 @@ class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
             self.assertEqual(p.name, "behavior_analysis")
 
         def test_behavior_process_subject_cluster_logs(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline
 
             p = object.__new__(BehaviorPipeline)
-            p.pipeline_config = BehaviorPipelineConfig(
+            p.pipeline_config = _resolved_behavior_pipeline_config(
                 run_correlations=True,
                 run_condition_comparison=True,
                 run_temporal_correlations=True,
@@ -840,10 +851,10 @@ class TestBehaviorGapfill(_BehaviorImportMixin, unittest.TestCase):
                 p.process_subject("0001")
 
         def test_behavior_process_subject_cluster_output_log_lines(self):
-            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineConfig, BehaviorPipelineResults
+            from eeg_pipeline.pipelines.behavior import BehaviorPipeline, BehaviorPipelineResults
 
             p = object.__new__(BehaviorPipeline)
-            p.pipeline_config = BehaviorPipelineConfig()
+            p.pipeline_config = _resolved_behavior_pipeline_config()
             p.feature_categories = None
             p.feature_files = None
             p.computation_features = {}

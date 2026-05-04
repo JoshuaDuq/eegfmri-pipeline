@@ -61,6 +61,10 @@ from eeg_pipeline.infra.machine_learning import (
 from eeg_pipeline.infra.tsv import write_tsv, write_parquet
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.analysis.machine_learning.time_generalization import time_generalization_regression
+from eeg_pipeline.analysis.machine_learning.target_residualization import (
+    configured_target_residualization_columns,
+    residualize_targets_for_fold,
+)
 
 logger = get_logger(__name__)
 
@@ -2848,6 +2852,142 @@ def export_baseline_predictions(
 ###################################################################
 
 
+def _model_comparison_cv_predictions(
+    *,
+    model_name: str,
+    pipe: Pipeline,
+    param_grid: Dict[str, Any],
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    meta: pd.DataFrame,
+    outer_folds: List[Tuple[np.ndarray, np.ndarray]],
+    inner_splits: int,
+    outer_jobs: int,
+    config: Any,
+    harmonization_mode: str,
+    covariates: Optional[List[str]],
+    target_residualization_columns: Tuple[str, ...],
+    collect_records: bool,
+) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
+    y_pred = np.zeros(len(y))
+    y_true_eval = np.zeros(len(y))
+    records: list[dict[str, Any]] = []
+    resolved_param_grid = _resolve_param_grid_aliases(pipe, param_grid)
+
+    for fold_idx, (train_idx, test_idx) in enumerate(outer_folds):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        groups_train = groups[train_idx]
+        residualization_details = None
+        if target_residualization_columns:
+            y_train, y_test, residualization_details = residualize_targets_for_fold(
+                y=y,
+                meta=meta,
+                train_idx=train_idx,
+                test_idx=test_idx,
+                columns=target_residualization_columns,
+            )
+
+        n_covs = len(covariates) if covariates else 0
+        X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
+            X_train,
+            X_test,
+            groups_train,
+            harmonization_mode,
+            n_covariates=n_covs,
+        )
+
+        if len(np.unique(groups_train)) >= 2:
+            inner_cv = create_inner_cv(groups_train, inner_splits)
+            grid_n_jobs = determine_inner_n_jobs(outer_jobs, n_jobs=1)
+            grid = GridSearchCV(
+                clone(pipe),
+                resolved_param_grid,
+                cv=inner_cv,
+                scoring=create_scoring_dict(),
+                n_jobs=grid_n_jobs,
+                refit="r",
+                error_score="raise",
+            )
+            grid.fit(X_train, y_train, groups=groups_train)
+            fold_pred = grid.predict(X_test)
+            best_params_repr = str(grid.best_params_)
+        else:
+            estimator = clone(pipe)
+            estimator.fit(X_train, y_train)
+            fold_pred = estimator.predict(X_test)
+            best_params_repr = "{}"
+
+        y_pred[test_idx] = fold_pred
+        y_true_eval[test_idx] = y_test
+        if not collect_records:
+            continue
+
+        from sklearn.metrics import mean_absolute_error, r2_score
+
+        records.append(
+            {
+                "model": model_name,
+                "fold": fold_idx,
+                "test_subject": groups[test_idx[0]],
+                "r2": r2_score(y_test, fold_pred),
+                "mae": mean_absolute_error(y_test, fold_pred),
+                "best_params": best_params_repr,
+                "target_residualized": bool(target_residualization_columns),
+                "target_residualization_columns": (
+                    ",".join(residualization_details["columns"])
+                    if residualization_details is not None
+                    else ""
+                ),
+            }
+        )
+    return y_true_eval, y_pred, records
+
+
+def _model_comparison_permutation_p_value(
+    *,
+    observed_r2: float,
+    y_true_eval: np.ndarray,
+    y_pred: np.ndarray,
+    groups: np.ndarray,
+    meta: pd.DataFrame,
+    config: Any,
+    rng: np.random.Generator,
+    n_perm: int,
+) -> float:
+    if n_perm <= 0:
+        return np.nan
+
+    from sklearn.metrics import r2_score
+
+    blocks = None
+    if meta is not None and "block" in meta.columns:
+        blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy(dtype=float)
+    requested_scheme = _resolve_permutation_scheme(config)
+    min_changed_fraction = float(
+        get_config_value(config, "machine_learning.cv.min_effective_permutation_changed_fraction", 0.01)
+    )
+    null_scores: list[float] = []
+    for _perm_idx in range(int(n_perm)):
+        y_perm, effective, _changed_fraction, _scheme = _generate_effective_permutation(
+            y_true_eval,
+            groups,
+            blocks=blocks,
+            rng=rng,
+            requested_scheme=requested_scheme,
+            min_changed_fraction=min_changed_fraction,
+        )
+        if not effective:
+            continue
+        null_scores.append(float(r2_score(y_perm, y_pred)))
+
+    if not null_scores:
+        raise RuntimeError("No effective model-comparison permutations were generated.")
+    null_arr = np.asarray(null_scores, dtype=float)
+    return float(((null_arr >= float(observed_r2)).sum() + 1) / (len(null_arr) + 1))
+
+
 def run_model_comparison_ml(
     subjects: List[str],
     task: str,
@@ -2909,6 +3049,7 @@ def run_model_comparison_ml(
         config,
         context="Model comparison",
     )
+    target_residualization_columns = configured_target_residualization_columns(config)
     
     n_subjects = len(np.unique(groups))
     logger.info(
@@ -2948,6 +3089,8 @@ def run_model_comparison_ml(
     outer_folds = list(outer_cv.split(X, y, groups))
     
     comparison_records = []
+    observed_overall_r2: Dict[str, float] = {}
+    observed_eval: Dict[str, tuple[np.ndarray, np.ndarray]] = {}
     
     import time as _time
 
@@ -2955,65 +3098,31 @@ def run_model_comparison_ml(
         t_model = _time.perf_counter()
         pipe = model_spec["pipe"]
         param_grid = _resolve_param_grid_aliases(pipe, model_spec["param_grid"])
-        
-        y_pred = np.zeros(len(y))
-        
-        for fold_idx, (train_idx, test_idx) in enumerate(outer_folds):
-            X_train, X_test = X[train_idx], X[test_idx]
-            y_train, y_test = y[train_idx], y[test_idx]
-            groups_train = groups[train_idx]
-            
-            n_covs = len(covariates) if covariates else 0
-            X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
-                X_train,
-                X_test,
-                groups_train,
-                harmonization_mode,
-                n_covariates=n_covs,
-            )
-            
-            # Inner CV for hyperparameter tuning (group-aware)
-            if len(np.unique(groups_train)) >= 2:
-                inner_cv = create_inner_cv(groups_train, inner_splits)
-                grid_n_jobs = determine_inner_n_jobs(outer_jobs, n_jobs=1)
-                scoring = create_scoring_dict()
-                grid = GridSearchCV(
-                    clone(pipe),
-                    param_grid,
-                    cv=inner_cv,
-                    scoring=scoring,
-                    n_jobs=grid_n_jobs,
-                    refit="r",
-                    error_score="raise",
-                )
-                grid.fit(X_train, y_train, groups=groups_train)
-                fold_pred = grid.predict(X_test)
-                best_params_repr = str(grid.best_params_)
-            else:
-                est = clone(pipe)
-                est.fit(X_train, y_train)
-                fold_pred = est.predict(X_test)
-                best_params_repr = "{}"
 
-            y_pred[test_idx] = fold_pred
-            
-            # Record fold metrics
-            from sklearn.metrics import r2_score, mean_absolute_error
-            fold_r2 = r2_score(y_test, fold_pred)
-            fold_mae = mean_absolute_error(y_test, fold_pred)
-            
-            comparison_records.append({
-                "model": model_name,
-                "fold": fold_idx,
-                "test_subject": groups[test_idx[0]],
-                "r2": fold_r2,
-                "mae": fold_mae,
-                "best_params": best_params_repr,
-            })
+        y_true_eval, y_pred, model_records = _model_comparison_cv_predictions(
+            model_name=model_name,
+            pipe=pipe,
+            param_grid=param_grid,
+            X=X,
+            y=y,
+            groups=groups,
+            meta=meta,
+            outer_folds=outer_folds,
+            inner_splits=inner_splits,
+            outer_jobs=outer_jobs,
+            config=config,
+            harmonization_mode=harmonization_mode,
+            covariates=covariates,
+            target_residualization_columns=target_residualization_columns,
+            collect_records=True,
+        )
+        comparison_records.extend(model_records)
         
         # Overall metrics
         from sklearn.metrics import r2_score
-        overall_r2 = r2_score(y, y_pred)
+        overall_r2 = r2_score(y_true_eval, y_pred)
+        observed_overall_r2[model_name] = float(overall_r2)
+        observed_eval[model_name] = (y_true_eval.copy(), y_pred.copy())
         logger.info(
             "  \u2713 %s: R\u00b2=%.4f (%.1fs)",
             model_name, overall_r2, _time.perf_counter() - t_model,
@@ -3037,6 +3146,10 @@ def run_model_comparison_ml(
             "feature_stats": feature_stats,
             "feature_harmonization": feature_harmonization,
             "covariates": covariates,
+            "target_residualization": {
+                "enabled": bool(target_residualization_columns),
+                "columns": list(target_residualization_columns),
+            },
         },
         "subject_selection": subject_selection,
     }
@@ -3067,6 +3180,22 @@ def run_model_comparison_ml(
             "ci_high_mae": mae_ci_high,
             "n_folds": int(len(model_rows)),
         }
+        if int(n_perm) > 0:
+            perm_rng = np.random.default_rng(int(rng_seed) + 300 + len(summary))
+            y_true_model, y_pred_model = observed_eval[model_name]
+            p_value_r2 = _model_comparison_permutation_p_value(
+                observed_r2=observed_overall_r2[model_name],
+                y_true_eval=y_true_model,
+                y_pred=y_pred_model,
+                groups=groups,
+                meta=meta,
+                config=config,
+                rng=perm_rng,
+                n_perm=int(n_perm),
+            )
+            summary[model_name]["overall_r2"] = observed_overall_r2[model_name]
+            summary[model_name]["p_value_r2"] = p_value_r2
+            summary[model_name]["n_perm"] = int(n_perm)
 
     # Pairwise model-difference inference (subject-paired by held-out fold).
     pairwise: Dict[str, Any] = {}

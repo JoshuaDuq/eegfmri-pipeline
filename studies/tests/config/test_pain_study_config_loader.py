@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from studies.pain_study.study1.config.loader import load_study1_config
 from studies.pain_study.study2.config.eeg_bold_coupling_loader import (
     load_eeg_bold_coupling_config,
 )
@@ -31,3 +32,30 @@ def test_smoke_configs_do_not_override_derivatives_root_output_dir() -> None:
             f"{config_path.name} must keep eeg_bold_coupling.output_dir null "
             "so runs write under configured paths.deriv_root."
         )
+
+
+def test_study1_production_loso_requires_inferential_cohort_size() -> None:
+    config = load_study1_config(
+        config_path=REPO_ROOT / "studies/pain_study/study1/config/study1_config.yaml",
+    )
+
+    assert int(config["study1"]["cohort"]["min_subjects"]) >= 4
+
+
+def test_study1_production_target_and_inference_settings_are_prespecified() -> None:
+    config = load_study1_config(
+        config_path=REPO_ROOT / "studies/pain_study/study1/config/study1_config.yaml",
+    )
+
+    targets = config["study1"]["targets"]
+    assert targets["metric"] == "cosine"
+    assert "signature_provenance" in targets
+    assert int(config["study1"]["feature_benchmark"]["n_perm"]) > 0
+    assert set(targets["nuisance_regression"]["columns"]) >= {
+        "pain_binary_coded",
+        "stimulus_temp",
+        "vas_final_coded_rating",
+        "block",
+        "onset",
+        "duration",
+    }

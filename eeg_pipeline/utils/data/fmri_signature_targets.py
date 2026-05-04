@@ -67,6 +67,23 @@ def _signature_target_defaults(config: Any, *, config_path: str) -> dict[str, An
     }
 
 
+def _optional_config_value(config: Any, key: str, default: Any = None) -> Any:
+    if config is None:
+        return default
+    if hasattr(config, "get"):
+        value = config.get(key, default)
+        if value is not None:
+            return value
+    if isinstance(config, dict):
+        current: Any = config
+        for part in key.split("."):
+            if not isinstance(current, dict) or part not in current:
+                return default
+            current = current[part]
+        return current
+    return default
+
+
 def _robust_zscore(values: np.ndarray) -> np.ndarray:
     vals = values.astype(float)
     finite = np.isfinite(vals)
@@ -141,6 +158,220 @@ def _values_for_keys(keys: List[Optional[str]], values: pd.Series) -> pd.Series:
     )
 
 
+def _read_target_table(table_path: Path) -> pd.DataFrame:
+    if not table_path.exists():
+        raise FileNotFoundError(f"Configured fMRI signature target table not found: {table_path}")
+    suffix = table_path.suffix.lower()
+    if suffix == ".parquet":
+        return pd.read_parquet(table_path)
+    if suffix == ".tsv":
+        return pd.read_csv(table_path, sep="\t")
+    raise ValueError(
+        "Configured fMRI signature target table must be .parquet or .tsv, "
+        f"got: {table_path}"
+    )
+
+
+def _load_target_table_values_for_subject(
+    *,
+    table_path: Path,
+    subject_bids: str,
+    task: str,
+    target_column: str,
+    events_df: pd.DataFrame,
+    run_int: np.ndarray,
+    eeg_time_keys: List[Optional[str]],
+    eeg_trial_keys: List[Optional[str]],
+    round_decimals: int,
+) -> tuple[pd.Series, pd.DataFrame]:
+    target_column = str(target_column).strip()
+    if not target_column:
+        raise ValueError("machine_learning.fmri_signature.target_column must be non-empty.")
+
+    table = _read_target_table(table_path)
+    required = {"subject_id", "task", "block", "trial_index", "onset", "duration", target_column}
+    missing = sorted(required - set(table.columns))
+    if missing:
+        raise ValueError(
+            "Configured fMRI signature target table is missing required columns: "
+            f"{missing}. Path: {table_path}"
+        )
+
+    subject_rows = table.loc[
+        (table["subject_id"].astype(str) == subject_bids)
+        & (table["task"].astype(str) == str(task))
+    ].copy()
+    if subject_rows.empty:
+        raise ValueError(
+            f"Configured fMRI signature target table has no rows for {subject_bids}, task-{task}: "
+            f"{table_path}"
+        )
+
+    target_runs = pd.to_numeric(subject_rows["block"], errors="coerce").to_numpy(dtype=float)
+    target_trials = pd.to_numeric(subject_rows["trial_index"], errors="coerce").to_numpy(dtype=float)
+    target_onset = pd.to_numeric(subject_rows["onset"], errors="coerce").to_numpy(dtype=float)
+    target_duration = pd.to_numeric(subject_rows["duration"], errors="coerce").to_numpy(dtype=float)
+    target_values = pd.to_numeric(subject_rows[target_column], errors="coerce")
+
+    def _mk_key(run_num: float, on: float, dur: float) -> Optional[str]:
+        if not (np.isfinite(run_num) and np.isfinite(on) and np.isfinite(dur)):
+            return None
+        return (
+            f"{int(run_num)}|"
+            f"{round(float(on), round_decimals):.{round_decimals}f}|"
+            f"{round(float(dur), round_decimals):.{round_decimals}f}"
+        )
+
+    def _mk_trial_key(run_num: float, trial_num: float) -> Optional[str]:
+        if not (np.isfinite(run_num) and np.isfinite(trial_num)):
+            return None
+        return f"{int(run_num)}|{int(round(float(trial_num)))}"
+
+    target_time_keys = [
+        _mk_key(run_num, onset, duration)
+        for run_num, onset, duration in zip(target_runs, target_onset, target_duration)
+    ]
+    target_trial_keys = [
+        _mk_trial_key(run_num, trial_num)
+        for run_num, trial_num in zip(target_runs, target_trials)
+    ]
+
+    target_frame = pd.DataFrame(
+        {
+            "__key__": target_time_keys,
+            "__trial_key__": target_trial_keys,
+            target_column: target_values,
+        }
+    )
+    _raise_on_conflicting_duplicate_keys(target_frame, "__key__", target_column, "(run,onset,duration)")
+    _raise_on_conflicting_duplicate_keys(target_frame, "__trial_key__", target_column, "(run,trial)")
+
+    agg_time = (
+        target_frame.loc[target_frame["__key__"].notna()]
+        .groupby("__key__", dropna=True)[target_column]
+        .mean()
+    )
+    agg_trial = (
+        target_frame.loc[target_frame["__trial_key__"].notna()]
+        .groupby("__trial_key__", dropna=True)[target_column]
+        .mean()
+    )
+    time_matches = sum(1 for key in eeg_time_keys if key is not None and key in agg_time.index)
+    trial_matches = sum(1 for key in eeg_trial_keys if key is not None and key in agg_trial.index)
+    if time_matches == 0 and trial_matches == 0:
+        raise ValueError(
+            "Configured fMRI signature target table alignment failed: no matching trials via "
+            "(run,onset,duration) or (run,trial_number/trial_index)."
+        )
+
+    time_y = _values_for_keys(eeg_time_keys, agg_time)
+    trial_y = _values_for_keys(eeg_trial_keys, agg_trial)
+    if time_matches > 0 and trial_matches > 0:
+        time_matched = np.isfinite(time_y.to_numpy(dtype=float))
+        trial_matched = np.isfinite(trial_y.to_numpy(dtype=float))
+        if not np.array_equal(time_matched, trial_matched):
+            raise ValueError(
+                "Configured fMRI signature target table alignment is ambiguous: trial-number and "
+                "onset/duration keys match different event rows."
+            )
+        both_matched = time_matched & trial_matched
+        if np.any(both_matched) and not np.allclose(
+            time_y.to_numpy(dtype=float)[both_matched],
+            trial_y.to_numpy(dtype=float)[both_matched],
+            equal_nan=True,
+        ):
+            raise ValueError(
+                "Configured fMRI signature target table alignment is ambiguous: trial-number and "
+                "onset/duration keys match different target values."
+            )
+
+    use_trial_keys = trial_matches >= time_matches and trial_matches > 0
+    active_keys = eeg_trial_keys if use_trial_keys else eeg_time_keys
+    active_key_column = "__trial_key__" if use_trial_keys else "__key__"
+    y = trial_y if use_trial_keys else time_y
+    y_arr = y.to_numpy(dtype=float)
+    if len(y_arr) != len(events_df) or not np.all(np.isfinite(y_arr)):
+        raise ValueError(
+            "Configured fMRI signature target table must align finite target values to every "
+            f"clean EEG event for {subject_bids}, task-{task}, target={target_column}."
+        )
+
+    extra = _aligned_numeric_target_table_columns(
+        subject_rows=subject_rows,
+        active_key_column=active_key_column,
+        active_keys=active_keys,
+        target_column=target_column,
+        round_decimals=round_decimals,
+    )
+    return y, extra
+
+
+def _aligned_numeric_target_table_columns(
+    *,
+    subject_rows: pd.DataFrame,
+    active_key_column: str,
+    active_keys: List[Optional[str]],
+    target_column: str,
+    round_decimals: int,
+) -> pd.DataFrame:
+    excluded = {
+        "subject_id",
+        "task",
+        "block",
+        "trial_index",
+        "onset",
+        "duration",
+        "NPS",
+        "SIIPS1",
+        "NPS_nuisance_residual",
+        "SIIPS1_nuisance_residual",
+        target_column,
+    }
+    extra = pd.DataFrame(index=np.arange(len(active_keys)))
+    source = subject_rows.copy()
+    if active_key_column == "__trial_key__":
+        source[active_key_column] = [
+            f"{int(run_num)}|{int(round(float(trial_num)))}"
+            if np.isfinite(run_num) and np.isfinite(trial_num)
+            else None
+            for run_num, trial_num in zip(
+                pd.to_numeric(source["block"], errors="coerce").to_numpy(dtype=float),
+                pd.to_numeric(source["trial_index"], errors="coerce").to_numpy(dtype=float),
+            )
+        ]
+    else:
+        source[active_key_column] = [
+            f"{int(run_num)}|"
+            f"{round(float(onset), round_decimals):.{round_decimals}f}|"
+            f"{round(float(duration), round_decimals):.{round_decimals}f}"
+            if np.isfinite(run_num) and np.isfinite(onset) and np.isfinite(duration)
+            else None
+            for run_num, onset, duration in zip(
+                pd.to_numeric(source["block"], errors="coerce").to_numpy(dtype=float),
+                pd.to_numeric(source["onset"], errors="coerce").to_numpy(dtype=float),
+                pd.to_numeric(source["duration"], errors="coerce").to_numpy(dtype=float),
+            )
+        ]
+
+    for column in source.columns:
+        if column in excluded or column.startswith("__"):
+            continue
+        numeric = pd.to_numeric(source[column], errors="coerce")
+        if not np.any(np.isfinite(numeric.to_numpy(dtype=float))):
+            continue
+        mapped = (
+            pd.DataFrame({"key": source[active_key_column], "value": numeric})
+            .loc[lambda frame: frame["key"].notna()]
+            .groupby("key", dropna=True)["value"]
+            .mean()
+        )
+        extra[column] = [
+            float(mapped.get(key)) if key is not None and key in mapped.index else np.nan
+            for key in active_keys
+        ]
+    return extra
+
+
 def load_fmri_signature_target_for_subject(
     *,
     subject_raw: str,
@@ -187,8 +418,46 @@ def load_fmri_signature_target_for_subject(
         return f"{int(run_num)}|{int(round(float(trial_num)))}"
 
     eeg_keys = [_mk_key(r, o, d) for r, o, d in zip(run_int, onset, duration)]
+    events_trial = _first_finite_numeric(events_df, ["trial_number", "trial_index", "epoch"])
+    eeg_trial_keys: List[Optional[str]] = [None] * len(events_df)
+    if events_trial is not None:
+        eeg_trial_keys = [
+            _mk_trial_key(r, t) for r, t in zip(run_int, events_trial.to_numpy(dtype=float))
+        ]
 
     subject_bids = f"sub-{subject_raw}" if not str(subject_raw).startswith("sub-") else str(subject_raw)
+    target_table_raw = _optional_config_value(config, f"{config_path}.target_table_path")
+    if target_table_raw:
+        norm = str(cfg["normalization"]).strip().lower()
+        if norm != "none":
+            raise ValueError(
+                "Configured fMRI signature target tables must contain final target values; "
+                "set normalization='none' to avoid applying a second target normalization."
+            )
+        target_column = str(
+            _optional_config_value(config, f"{config_path}.target_column", cfg["signature_name"])
+        ).strip()
+        y, extra_meta = _load_target_table_values_for_subject(
+            table_path=Path(str(target_table_raw)).expanduser(),
+            subject_bids=subject_bids,
+            task=task,
+            target_column=target_column,
+            events_df=events_df,
+            run_int=run_int,
+            eeg_time_keys=eeg_keys,
+            eeg_trial_keys=eeg_trial_keys,
+            round_decimals=round_decimals,
+        )
+        y_label = f"fmri_signature.primary_targets.{target_column}"
+        logger.info(
+            "Loaded fMRI signature target for %s from primary target table: %s (matches=%d/%d)",
+            subject_bids,
+            y_label,
+            int(np.isfinite(y.to_numpy(dtype=float)).sum()),
+            len(y),
+        )
+        return y, y_label, extra_meta
+
     base = deriv_root / subject_bids / "fmri" / ("beta_series" if method == "beta-series" else "lss")
     contrast = str(cfg["contrast_name"]).strip() or "contrast"
     sig_dir = base / f"task-{task}" / f"contrast-{contrast}" / "signatures"
@@ -314,13 +583,7 @@ def load_fmri_signature_target_for_subject(
             )
         ]
 
-    events_trial = _first_finite_numeric(events_df, ["trial_number", "trial_index", "epoch"])
     sig_trial = _first_finite_numeric(sig_df, ["events_trial_number", "trial_number", "trial_index"])
-    eeg_trial_keys: List[Optional[str]] = [None] * len(events_df)
-    if events_trial is not None:
-        eeg_trial_keys = [
-            _mk_trial_key(r, t) for r, t in zip(run_int, events_trial.to_numpy(dtype=float))
-        ]
     sig_df["__trial_key__"] = None
     if sig_trial is not None:
         sig_df["__trial_key__"] = [
@@ -391,7 +654,7 @@ def load_fmri_signature_target_for_subject(
             y = pd.Series(_robust_zscore(y_arr) if norm.startswith("robust") else _zscore(y_arr))
 
     extra_meta = pd.DataFrame(index=np.arange(len(events_df)))
-    for col in ("fd_mean", "dvars_mean", "n_motion_outliers", "confounds_n_cols"):
+    for col in ("n_voxels", "fd_mean", "dvars_mean", "n_motion_outliers", "confounds_n_cols"):
         if col not in sig_df.columns:
             continue
         mapped = sig_df.loc[sig_df[active_sig_key_col].notna()].groupby(active_sig_key_col, dropna=True)[

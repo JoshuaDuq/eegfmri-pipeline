@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any, Iterable
 
+import numpy as np
 import pandas as pd
 
 from eeg_pipeline.infra.paths import load_events_df
@@ -67,6 +68,57 @@ def _validate_signature_space(config: Any, signature_specs: list[dict[str, str]]
         raise ValueError(
             "Study 1 target preparation requires MNI-space fMRI inputs for signature extraction."
         )
+    _validate_signature_provenance(config, signature_specs)
+
+
+def _validate_signature_provenance(config: Any, signature_specs: list[dict[str, str]]) -> None:
+    expected = get_config_value(config, "study1.targets.signature_provenance", None)
+    if not isinstance(expected, dict):
+        raise ValueError("study1.targets.signature_provenance must define expected NPS/SIIPS1 maps.")
+
+    signature_root = Path(str(require_config_value(config, "paths.signature_dir"))).expanduser()
+    specs_by_name = {str(spec["name"]).strip(): spec for spec in signature_specs}
+    for name in PRIMARY_SIGNATURES:
+        expected_spec = expected.get(name)
+        if not isinstance(expected_spec, dict):
+            raise ValueError(f"Missing Study 1 signature provenance entry for {name}.")
+        expected_path = str(expected_spec.get("path", "")).strip()
+        if not expected_path:
+            raise ValueError(f"Study 1 signature provenance for {name} must define a path.")
+        actual_path = str(specs_by_name[name].get("path", "")).strip()
+        if actual_path != expected_path:
+            raise ValueError(
+                "Study 1 signature provenance mismatch for "
+                f"{name}: expected {expected_path!r}, got {actual_path!r}."
+            )
+
+        expected_space = str(expected_spec.get("space", "")).strip().lower()
+        configured_space = str(require_config_value(config, "study1.targets.fmriprep_space")).strip().lower()
+        if expected_space != configured_space:
+            raise ValueError(
+                "Study 1 signature provenance space mismatch for "
+                f"{name}: expected {expected_space!r}, configured {configured_space!r}."
+            )
+        _validate_signature_image(signature_root / actual_path, name=name)
+
+
+def _validate_signature_image(path: Path, *, name: str) -> None:
+    if not path.exists():
+        raise FileNotFoundError(f"Study 1 signature map for {name} does not exist: {path}")
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Study 1 signature provenance validation requires nibabel.") from exc
+
+    image = nib.load(str(path))
+    if len(image.shape) != 3:
+        raise ValueError(f"Study 1 signature map for {name} must be 3D, got shape {image.shape}.")
+    data = np.asanyarray(image.dataobj, dtype=float)
+    finite = np.isfinite(data)
+    if not np.any(finite):
+        raise ValueError(f"Study 1 signature map for {name} contains no finite voxels: {path}")
+    if not np.any(np.abs(data[finite]) > 0):
+        raise ValueError(f"Study 1 signature map for {name} contains only zero weights: {path}")
 
 
 def _build_trial_signature_config(config: Any, *, task: str) -> TrialSignatureExtractionConfig:
@@ -127,6 +179,40 @@ def _config_for_signature(config: Any, signature_name: str) -> Any:
     return config_copy
 
 
+def nuisance_regression_enabled(config: Any) -> bool:
+    return bool(get_config_value(config, "study1.targets.nuisance_regression.enabled", False))
+
+
+def nuisance_columns(config: Any) -> tuple[str, ...]:
+    raw_columns = get_config_value(config, "study1.targets.nuisance_regression.columns", [])
+    if not isinstance(raw_columns, (list, tuple)):
+        raise ValueError("study1.targets.nuisance_regression.columns must be a list of column names.")
+    columns = tuple(str(column).strip() for column in raw_columns if str(column).strip())
+    if nuisance_regression_enabled(config) and not columns:
+        raise ValueError(
+            "study1.targets.nuisance_regression.columns must be non-empty when nuisance regression is enabled."
+        )
+    return columns
+
+
+def _append_required_event_columns(
+    *,
+    frame: pd.DataFrame,
+    events_df: pd.DataFrame,
+    config: Any,
+) -> pd.DataFrame:
+    columns = nuisance_columns(config) if nuisance_regression_enabled(config) else tuple()
+    for column in columns:
+        if column in frame.columns:
+            continue
+        if column not in events_df.columns:
+            raise ValueError(
+                f"Study 1 nuisance regression column '{column}' is missing from clean EEG events."
+            )
+        frame[column] = events_df[column].reset_index(drop=True)
+    return frame
+
+
 def _subject_target_rows(
     *,
     subject: str,
@@ -140,7 +226,7 @@ def _subject_target_rows(
         raise FileNotFoundError(f"Clean events.tsv not found (or empty) for sub-{subject}, task-{task}.")
     events_df = events_df.reset_index(drop=True)
 
-    nps, _nps_label, _nps_extra = load_fmri_signature_target_for_subject(
+    nps, _nps_label, nps_extra = load_fmri_signature_target_for_subject(
         subject_raw=subject,
         task=task,
         deriv_root=deriv_root,
@@ -149,7 +235,7 @@ def _subject_target_rows(
         logger=logger,
         config_path="study1.targets",
     )
-    siips1, _siips1_label, _siips1_extra = load_fmri_signature_target_for_subject(
+    siips1, _siips1_label, siips1_extra = load_fmri_signature_target_for_subject(
         subject_raw=subject,
         task=task,
         deriv_root=deriv_root,
@@ -182,11 +268,35 @@ def _subject_target_rows(
             "SIIPS1": pd.to_numeric(siips1, errors="coerce"),
         }
     )
+    frame = _append_signature_metadata(frame=frame, prefix="NPS", extra=nps_extra)
+    frame = _append_signature_metadata(frame=frame, prefix="SIIPS1", extra=siips1_extra)
+    frame = _append_required_event_columns(frame=frame, events_df=events_df, config=config)
     if not frame["NPS"].notna().all() or not frame["SIIPS1"].notna().all():
         raise ValueError(
             f"Study 1 primary target table requires finite values for both NPS and SIIPS1 "
             f"for every retained trial in sub-{subject}."
         )
+    return frame
+
+
+def _append_signature_metadata(
+    *,
+    frame: pd.DataFrame,
+    prefix: str,
+    extra: pd.DataFrame,
+) -> pd.DataFrame:
+    if extra is None or extra.empty:
+        return frame
+    if len(extra) != len(frame):
+        raise ValueError(
+            f"Study 1 signature metadata length mismatch for {prefix}: "
+            f"metadata={len(extra)}, target_rows={len(frame)}."
+        )
+    for column in extra.columns:
+        values = pd.to_numeric(extra[column], errors="coerce")
+        if not values.notna().any():
+            continue
+        frame[f"{prefix}_{column}"] = values.reset_index(drop=True)
     return frame
 
 
@@ -251,4 +361,10 @@ def iter_primary_subjects(primary_table: pd.DataFrame) -> Iterable[str]:
     return sorted({str(subject).strip() for subject in primary_table["subject_id"].tolist()})
 
 
-__all__ = ["PRIMARY_SIGNATURES", "iter_primary_subjects", "prepare_primary_targets"]
+__all__ = [
+    "PRIMARY_SIGNATURES",
+    "iter_primary_subjects",
+    "nuisance_columns",
+    "nuisance_regression_enabled",
+    "prepare_primary_targets",
+]

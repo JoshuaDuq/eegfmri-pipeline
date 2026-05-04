@@ -35,10 +35,10 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         return
     
     if getattr(args, "dry_run", False):
-        # Build a mock pipeline config to resolve stages
         from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
-        pipeline_config = BehaviorPipelineConfig()
-        # Apply CLI args to config
+
+        apply_behavior_config_defaults(config)
+        pipeline_config = BehaviorPipelineConfig.from_config(config)
         if hasattr(args, "computations") and args.computations:
             for comp in args.computations:
                 setattr(pipeline_config, f"run_{comp}", True)

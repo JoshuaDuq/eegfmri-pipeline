@@ -12,6 +12,7 @@ from eeg_pipeline.utils.config.loader import ConfigDict, get_config_value
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 from studies.pain_study.study1.cohort import (
     primary_targets_parquet_path,
+    resolve_primary_target_name,
     resolve_primary_subjects,
     study1_feature_root,
     study1_output_root,
@@ -22,7 +23,11 @@ from studies.pain_study.study1.feature_spec import (
 )
 from studies.pain_study.study1.output_cleanup import remove_appledouble_sidecars
 from studies.pain_study.study1.prepare_features import require_prepared_study1_features
-from studies.pain_study.study1.targets import PRIMARY_SIGNATURES
+from studies.pain_study.study1.targets import (
+    PRIMARY_SIGNATURES,
+    nuisance_columns,
+    nuisance_regression_enabled,
+)
 
 
 PRIMARY_BAND_PRESETS: dict[str, list[str]] = {
@@ -66,6 +71,13 @@ def _feature_benchmark_config(
         None,
     )
     feature_config["machine_learning.fmri_signature.signature_name"] = target_name
+    feature_config["machine_learning.fmri_signature.target_column"] = resolve_primary_target_name(
+        config,
+        target_name,
+    )
+    feature_config["machine_learning.fmri_signature.target_table_path"] = str(
+        primary_targets_parquet_path(config)
+    )
     feature_config["machine_learning.fmri_signature.metric"] = get_config_value(
         config,
         "study1.targets.metric",
@@ -79,7 +91,17 @@ def _feature_benchmark_config(
     feature_config["machine_learning.fmri_signature.round_decimals"] = int(
         get_config_value(config, "study1.targets.round_decimals", 3)
     )
+    columns = list(nuisance_columns(config)) if nuisance_regression_enabled(config) else []
+    feature_config["machine_learning.target_residualization.enabled"] = bool(columns)
+    feature_config["machine_learning.target_residualization.columns"] = columns
     return feature_config
+
+
+def _require_permutation_inference(config: Any) -> int:
+    n_perm = int(get_config_value(config, "study1.feature_benchmark.n_perm", 0))
+    if n_perm <= 0:
+        raise ValueError("Study 1 feature benchmark requires study1.feature_benchmark.n_perm > 0.")
+    return n_perm
 
 
 def _run_primary_presets(
@@ -91,7 +113,7 @@ def _run_primary_presets(
 ) -> list[Path]:
     deriv_root = resolve_eeg_deriv_root(config)
     feature_root = study1_feature_root(config)
-    n_perm = int(get_config_value(config, "study1.feature_benchmark.n_perm", 0))
+    n_perm = _require_permutation_inference(config)
     inner_splits = int(get_config_value(config, "study1.feature_benchmark.inner_splits", 5))
     outer_jobs = int(get_config_value(config, "study1.feature_benchmark.outer_jobs", 1))
     harmonization = str(
@@ -143,7 +165,7 @@ def _run_exploratory_benchmark(
     if not exploratory_families:
         return []
 
-    n_perm = int(get_config_value(config, "study1.feature_benchmark.n_perm", 0))
+    n_perm = _require_permutation_inference(config)
     inner_splits = int(get_config_value(config, "study1.feature_benchmark.inner_splits", 5))
     outer_jobs = int(get_config_value(config, "study1.feature_benchmark.outer_jobs", 1))
     harmonization = str(
@@ -198,6 +220,7 @@ def run_feature_benchmark(
             f"Study 1 primary target table not found: {target_table_path}. "
             "Run 'signature-prediction prepare-targets' first."
         )
+    _require_permutation_inference(config)
 
     resolved_subjects = resolve_primary_subjects(
         requested_subjects=subjects,

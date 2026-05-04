@@ -37,6 +37,7 @@ multitask framework. The frozen production analysis is restricted to:
 - `trial_type == "stimulation"`,
 - `stim_phase == "plateau"`,
 - MNI-space fMRI inputs,
+- fold-contained nuisance residualization of predictive targets,
 - a fixed confirmatory EEG feature family (`power`),
 - a fixed set of exploratory EEG feature families,
 - a fixed set of deep-regression band presets.
@@ -154,7 +155,7 @@ The production Study 1 target specification is:
 | input source | `fmriprep` |
 | fMRIPrep space | `MNI152NLin2009cAsym` |
 | extraction method | `lss` |
-| metric | `dot` |
+| metric | `cosine` |
 | normalization | `none` |
 | contrast name | `pain_vs_nonpain` |
 | condition A column | `pain_binary_coded` |
@@ -174,8 +175,9 @@ The production Study 1 target specification is:
 | LSS other regressors | `all` |
 | alignment rounding | `3` decimals |
 
-Study 1 requires MNI-space fMRI inputs. If the configured fMRI space does not contain
-`MNI`, target preparation fails.
+Study 1 requires MNI-space fMRI inputs and the configured NPS/SIIPS1 map paths recorded
+in `study1.targets.signature_provenance`. Target preparation fails if the requested
+space or map provenance does not match the frozen Study 1 contract.
 
 ### 2.6 Study namespace and stage dependency
 
@@ -210,7 +212,7 @@ The production default is:
 ```yaml
 study1:
   cohort:
-    min_subjects: 2
+    min_subjects: 4
 ```
 
 The inferential and cross-validation unit is the subject. In both predictive lanes, the
@@ -241,11 +243,13 @@ production mode is least-squares separate (`lss`) restricted to:
 
 Let `beta_{s,i}(v)` denote the LSS-derived effect estimate for subject `s`, trial `i`,
 and voxel `v`. Let `M_k(v)` denote the signature-map weight for target `k`, where
-`k in {NPS, SIIPS1}`. Because Study 1 uses the `dot` metric with
-`normalization = none`, the trial-wise target is:
+`k in {NPS, SIIPS1}`. Study 1 uses cosine expression to reduce dependence on beta-map
+scale and finite-voxel coverage:
 
 ```math
-y_{s,i}^{(k)} = \sum_{v \in V} \beta_{s,i}(v) \, M_k(v).
+y_{s,i}^{(k)} =
+\frac{\sum_{v \in V} \beta_{s,i}(v)M_k(v)}
+{\sqrt{\sum_{v \in V}\beta_{s,i}(v)^2}\sqrt{\sum_{v \in V}M_k(v)^2}}.
 ```
 
 No within-run or within-subject normalization is applied in the frozen production
@@ -299,8 +303,25 @@ required columns:
 - `SIIPS1`.
 
 Finite values for both `NPS` and `SIIPS1` are required for every retained trial. The
-primary target table is then reused as the canonical Study 1 cohort contract for all
-downstream stages.
+primary target table records the configured nuisance columns, but it does not store
+precomputed residual targets. Residualization is performed inside each outer LOSO fold
+by fitting the nuisance model on the outer-training subjects only and applying those
+coefficients to the held-out subject:
+
+```text
+study1.targets.nuisance_regression.columns = [
+  "pain_binary_coded",
+  "stimulus_temp",
+  "vas_final_coded_rating",
+  "block",
+  "onset",
+  "duration",
+]
+```
+
+The nuisance design must be finite and full rank in each outer-training fold. The raw
+signature columns remain in the table for audit and reporting. The primary target table
+is reused as the canonical Study 1 cohort and target contract for all downstream stages.
 
 ### 3.5 Downstream cohort resolution
 
@@ -437,17 +458,13 @@ The primary partition therefore evaluates two targets under four prespecified ba
 presets using the same confirmatory feature family (`power`). The exploratory partition
 evaluates two targets across the configured exploratory families.
 
-### 5.2 Actual target-loading path in the benchmark lane
+### 5.2 Target-loading path in the benchmark lane
 
-The feature benchmark uses the primary target table only to resolve which subjects are
-eligible for Study 1. The machine-learning backend then reloads the per-trial fMRI
-signature targets subject by subject against the clean EEG events table through the
-shared fMRI-signature target loader.
-
-This means the tabular benchmark uses the same target family and alignment rules as
-`prepare-targets`, but the targets are re-materialized at matrix-assembly time rather
-than read directly from `primary_targets.parquet`. Trials with non-finite reloaded
-targets are dropped before matrix assembly.
+The feature benchmark reads targets from `primary_targets.parquet`. It does not reload
+targets from per-subject fMRI signature derivative tables. When nuisance regression is
+enabled, the machine-learning backend loads the raw target plus nuisance columns and
+residualizes targets inside each outer fold. Missing, ambiguous, or non-finite alignment
+between clean EEG events and the primary target table is a hard failure.
 
 ### 5.3 Design matrix assembly and feature harmonization
 
@@ -600,17 +617,17 @@ Under the frozen Study 1 production defaults:
 
 | Parameter | Value |
 | --- | --- |
-| permutations | `0` |
+| permutations | `5000` |
 | inner CV splits | `5` |
 | outer jobs | `1` |
 | feature harmonization | `intersection` |
 | random seed | `project.random_state = 42` |
 
-Because `n_perm = 0` in the frozen production configuration, the default output is
-descriptive: it reports held-out-subject performance and bootstrap intervals but does
-not compute permutation-derived p-values. If permutations are enabled, the shared backend
-also computes subject-paired sign-flip inference for pairwise model differences in
-`delta R^2` and `delta MAE`, with Holm correction across the pairwise tests.
+The production feature benchmark requires `n_perm > 0`. It reports held-out-subject
+performance, bootstrap intervals, model-vs-null permutation p-values for `R^2`, and
+subject-paired sign-flip inference for pairwise model differences in `delta R^2` and
+`delta MAE`. The Study 1 report applies Holm correction across primary feature-benchmark
+model-vs-null tests.
 
 ### 5.7 Benchmark outputs
 
@@ -649,8 +666,15 @@ For each target and preset, the stage:
    `frequency_bands` mapping,
 5. stacks the result into a band tensor.
 
-These tensors are built from the same clean task epochs described above, namely epochs
-spanning `-7.0` to `15.0` seconds relative to the locking event.
+These tensors are built from the same clean task epochs described above, but the
+production deep-regression lane crops the filtered tensors to:
+
+```text
+study1.deep_regression.time_window = [3.0, 10.5] s
+```
+
+This matches the active stimulation window used by the Study 1 feature lane and prevents
+the model from using baseline, rating, or late post-stimulus samples.
 
 If `n_trials`, `n_bands`, `n_channels`, and `n_times` denote the pooled dimensions, the
 input tensor is:
@@ -990,6 +1014,7 @@ Common explicit failure conditions include:
 - missing clean EEG epochs,
 - missing or invalid `paths.signature_maps`,
 - missing `NPS` or `SIIPS1` values,
+- missing, nonfinite, or rank-deficient nuisance-regression columns when fold-contained residualization is enabled,
 - non-MNI fMRI space during target preparation,
 - no successful EEG-to-fMRI trial alignment,
 - missing primary target table for downstream stages,
@@ -1054,8 +1079,8 @@ state at least:
    to each reported result,
 4. whether the report concerns the feature-benchmark lane, the deep-regression lane, or
    both,
-5. whether any permutation-based model-difference inference was enabled beyond the frozen
-   descriptive defaults,
+5. the configured permutation inference count and the multiplicity-corrected primary
+   feature-benchmark p-values,
 6. the exact signature-map files and software versions used for the final run.
 
 Without those dataset-resolved fields, the repository still defines the computational

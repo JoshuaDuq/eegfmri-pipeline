@@ -1,6 +1,6 @@
 study1:
   cohort:
-    min_subjects: 2
+    min_subjects: 4
   features:
     exploratory_feature_families:
       - "spectral"
@@ -12,11 +12,18 @@ study1:
       - "bursts"
   targets:
     contrast_name: "pain_vs_nonpain"
-    metric: "dot"
+    metric: "cosine"
     method: "lss"
     normalization: "none"
     round_decimals: 3
     names: ["NPS", "SIIPS1"]
+    signature_provenance:
+      NPS:
+        path: "NPS/weights_NSF_grouppred_cvpcr.nii.gz"
+        space: "MNI152NLin2009cAsym"
+      SIIPS1:
+        path: "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+        space: "MNI152NLin2009cAsym"
     input_source: "fmriprep"
     fmriprep_space: "MNI152NLin2009cAsym"
     require_fmriprep: true
@@ -35,12 +42,22 @@ study1:
     smoothing_fwhm: null
     confounds_strategy: "auto"
     lss_other_regressors: "all"
+    nuisance_regression:
+      enabled: true
+      columns:
+        - "pain_binary_coded"
+        - "stimulus_temp"
+        - "vas_final_coded_rating"
+        - "block"
+        - "onset"
+        - "duration"
   feature_benchmark:
-    n_perm: 0
+    n_perm: 5000
     inner_splits: 5
     outer_jobs: 1
     feature_harmonization: "intersection"
   deep_regression:
+    time_window: [3.0, 10.5]
     n_epochs: 25
     batch_size: 32
     learning_rate: 0.001

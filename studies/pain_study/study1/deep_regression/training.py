@@ -11,7 +11,9 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.model_selection import LeaveOneGroupOut
 
+from eeg_pipeline.analysis.machine_learning.target_residualization import residualize_targets_for_fold
 from studies.pain_study.study1.deep_regression.model import build_band_regressor
+from studies.pain_study.study1.targets import nuisance_columns, nuisance_regression_enabled
 
 
 def _import_torch():
@@ -228,19 +230,40 @@ def run_loso_deep_regression(
 
     logo = LeaveOneGroupOut()
     predictions = np.full(len(y), np.nan, dtype=float)
+    y_eval = np.full(len(y), np.nan, dtype=float)
     fold_records: list[dict[str, Any]] = []
+    residual_columns = nuisance_columns(config) if nuisance_regression_enabled(config) else tuple()
+    residualization_summary: dict[str, Any] = {
+        "enabled": bool(residual_columns),
+        "columns": list(residual_columns),
+    }
     for fold_id, (train_idx, test_idx) in enumerate(logo.split(X, y, groups)):
         train_groups = groups[train_idx]
+        y_train = y[train_idx]
+        y_test = y[test_idx]
+        if residual_columns:
+            y_train, y_test, residualization_summary = residualize_targets_for_fold(
+                y=y,
+                meta=meta,
+                train_idx=train_idx,
+                test_idx=test_idx,
+                columns=residual_columns,
+            )
+            residualization_summary = {
+                "enabled": True,
+                **residualization_summary,
+            }
         fold_pred = _fit_regressor(
             X_train=X[train_idx],
-            y_train=y[train_idx],
+            y_train=y_train,
             groups_train=train_groups,
             X_test=X[test_idx],
             config=config,
             seed=int(config.get("project.random_state", 42)) + fold_id,
         )
         predictions[test_idx] = fold_pred
-        y_true_fold = y[test_idx]
+        y_eval[test_idx] = y_test
+        y_true_fold = y_test
         fold_records.append(
             {
                 "fold_id": fold_id,
@@ -254,9 +277,12 @@ def run_loso_deep_regression(
 
     if not np.all(np.isfinite(predictions)):
         raise RuntimeError("Deep regression failed to produce predictions for every trial.")
+    if not np.all(np.isfinite(y_eval)):
+        raise RuntimeError("Deep regression failed to produce evaluation targets for every trial.")
 
     pred_df = meta.copy()
-    pred_df["y_true"] = y
+    pred_df["y_raw"] = y
+    pred_df["y_true"] = y_eval
     pred_df["y_pred"] = predictions
     fold_df = pd.DataFrame(fold_records)
     summary = {
@@ -269,6 +295,7 @@ def run_loso_deep_regression(
         "mean_r2": float(pd.to_numeric(fold_df["r2"], errors="coerce").mean()),
         "n_folds": int(len(fold_df)),
         "n_trials": int(len(pred_df)),
+        "target_residualization": residualization_summary,
     }
     logger.info(
         "Deep regression complete for %s/%s: mean_r2=%.4f",
