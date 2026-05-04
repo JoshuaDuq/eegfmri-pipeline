@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 
 from studies.tests.test_support import DotConfig
@@ -313,3 +314,58 @@ def test_run_feature_benchmark_cleans_appledouble_sidecars(tmp_path) -> None:
         tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "feature_benchmark"
     )
     assert not any(path.name.startswith("._") for path in benchmark_root.rglob("._*"))
+
+
+def test_model_comparison_permutation_refits_full_pipeline_for_subject_mean_r2() -> None:
+    from eeg_pipeline.analysis.machine_learning import orchestration
+
+    X = pd.DataFrame({"feature": [1.0, 2.0, 3.0, 4.0]}).to_numpy(dtype=float)
+    y = pd.Series([1.0, 2.0, 3.0, 4.0]).to_numpy(dtype=float)
+    groups = pd.Series(["sub-0001", "sub-0001", "sub-0002", "sub-0002"]).to_numpy(dtype=object)
+    meta = pd.DataFrame({"block": [1, 1, 1, 1]})
+    outer_folds = [
+        (pd.Series([2, 3]).to_numpy(dtype=int), pd.Series([0, 1]).to_numpy(dtype=int)),
+        (pd.Series([0, 1]).to_numpy(dtype=int), pd.Series([2, 3]).to_numpy(dtype=int)),
+    ]
+    permuted = [
+        pd.Series([2.0, 1.0, 4.0, 3.0]).to_numpy(dtype=float),
+        pd.Series([1.5, 2.5, 3.5, 4.5]).to_numpy(dtype=float),
+    ]
+    refit_targets: list[list[float]] = []
+
+    def _capture_cv(**kwargs):
+        refit_targets.append(list(kwargs["y"]))
+        return kwargs["y"].copy(), kwargs["y"].copy(), []
+
+    with patch(
+        "eeg_pipeline.analysis.machine_learning.orchestration._generate_effective_permutation",
+        side_effect=[
+            (permuted[0], True, 1.0, "within_subject"),
+            (permuted[1], True, 1.0, "within_subject"),
+        ],
+    ), patch(
+        "eeg_pipeline.analysis.machine_learning.orchestration._model_comparison_cv_predictions",
+        side_effect=_capture_cv,
+    ):
+        p_value = orchestration._model_comparison_permutation_p_value(
+            observed_mean_r2=1.0,
+            X=X,
+            y=y,
+            groups=groups,
+            meta=meta,
+            outer_folds=outer_folds,
+            model_name="ridge",
+            pipe=object(),
+            param_grid={},
+            inner_splits=2,
+            outer_jobs=1,
+            config=DotConfig({"machine_learning": {"cv": {"permutation_scheme": "within_subject"}}}),
+            harmonization_mode="intersection",
+            covariates=None,
+            target_residualization_columns=tuple(),
+            rng=np.random.default_rng(123),
+            n_perm=2,
+        )
+
+    assert refit_targets == [list(permuted[0]), list(permuted[1])]
+    assert p_value == 1.0

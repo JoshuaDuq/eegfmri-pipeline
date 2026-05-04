@@ -1,7 +1,7 @@
 # Study 1: Trial-Wise EEG Prediction of fMRI Pain-Signature Expression
 
 Study 1 is the pain-study EEG-to-fMRI-signature workflow for trial-wise prediction of
-`NPS` and `SIIPS1` from clean EEG.
+raw `NPS` and `SIIPS1` expression from clean EEG.
 
 This `README.md` is the technical entry point. The publication-style narrative lives in:
 
@@ -22,9 +22,10 @@ The production workflow:
 3. aligns `NPS` and `SIIPS1` back to EEG trials,
 4. writes a shared Study 1 primary target table,
 5. prepares a Study 1-owned `trial_ml_safe` EEG feature store,
-6. runs a feature-based model-comparison benchmark,
-7. runs deep regression from band-limited EEG trial tensors,
-8. validates and aggregates the prespecified primary summaries into one study-level report.
+6. runs a feature-based model-comparison benchmark for the raw-expression primary objective,
+7. runs deep regression from band-limited EEG trial tensors for the same primary objective,
+8. supports nuisance-adjusted sensitivity analyses when explicitly enabled,
+9. validates and aggregates the prespecified primary summaries into one study-level report.
 
 The main analysis is restricted to:
 
@@ -33,7 +34,8 @@ The main analysis is restricted to:
 - `trial_type == "stimulation"`,
 - `stim_phase == "plateau"`,
 - fMRI inputs in `MNI152NLin2009cAsym`,
-- fold-contained nuisance residualization of Study 1 targets during prediction,
+- raw Study 1 targets for the primary analysis,
+- optional fold-contained nuisance residualization for sensitivity analyses,
 - Study 1-owned `trial_ml_safe` EEG features,
 - the fixed deep-regression presets `alpha`, `beta`, `gamma`, and `alpha_beta_gamma`.
 

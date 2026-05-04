@@ -2947,12 +2947,21 @@ def _model_comparison_cv_predictions(
 
 def _model_comparison_permutation_p_value(
     *,
-    observed_r2: float,
-    y_true_eval: np.ndarray,
-    y_pred: np.ndarray,
+    observed_mean_r2: float,
+    X: np.ndarray,
+    y: np.ndarray,
     groups: np.ndarray,
     meta: pd.DataFrame,
+    outer_folds: List[Tuple[np.ndarray, np.ndarray]],
+    model_name: str,
+    pipe: Any,
+    param_grid: Dict[str, Any],
+    inner_splits: int,
+    outer_jobs: int,
     config: Any,
+    harmonization_mode: str,
+    covariates: Optional[List[str]],
+    target_residualization_columns: Tuple[str, ...],
     rng: np.random.Generator,
     n_perm: int,
 ) -> float:
@@ -2971,7 +2980,7 @@ def _model_comparison_permutation_p_value(
     null_scores: list[float] = []
     for _perm_idx in range(int(n_perm)):
         y_perm, effective, _changed_fraction, _scheme = _generate_effective_permutation(
-            y_true_eval,
+            y,
             groups,
             blocks=blocks,
             rng=rng,
@@ -2980,12 +2989,33 @@ def _model_comparison_permutation_p_value(
         )
         if not effective:
             continue
-        null_scores.append(float(r2_score(y_perm, y_pred)))
+        y_true_perm, y_pred_perm, _records = _model_comparison_cv_predictions(
+            model_name=model_name,
+            pipe=pipe,
+            param_grid=param_grid,
+            X=X,
+            y=y_perm,
+            groups=groups,
+            meta=meta,
+            outer_folds=outer_folds,
+            inner_splits=inner_splits,
+            outer_jobs=outer_jobs,
+            config=config,
+            harmonization_mode=harmonization_mode,
+            covariates=covariates,
+            target_residualization_columns=target_residualization_columns,
+            collect_records=False,
+        )
+        fold_r2 = [
+            float(r2_score(y_true_perm[test_idx], y_pred_perm[test_idx]))
+            for _train_idx, test_idx in outer_folds
+        ]
+        null_scores.append(float(np.mean(fold_r2)))
 
     if not null_scores:
         raise RuntimeError("No effective model-comparison permutations were generated.")
     null_arr = np.asarray(null_scores, dtype=float)
-    return float(((null_arr >= float(observed_r2)).sum() + 1) / (len(null_arr) + 1))
+    return float(((null_arr >= float(observed_mean_r2)).sum() + 1) / (len(null_arr) + 1))
 
 
 def run_model_comparison_ml(
@@ -3182,14 +3212,25 @@ def run_model_comparison_ml(
         }
         if int(n_perm) > 0:
             perm_rng = np.random.default_rng(int(rng_seed) + 300 + len(summary))
-            y_true_model, y_pred_model = observed_eval[model_name]
             p_value_r2 = _model_comparison_permutation_p_value(
-                observed_r2=observed_overall_r2[model_name],
-                y_true_eval=y_true_model,
-                y_pred=y_pred_model,
+                observed_mean_r2=float(model_rows["r2"].mean()),
+                X=X,
+                y=y,
                 groups=groups,
                 meta=meta,
+                outer_folds=outer_folds,
+                model_name=model_name,
+                pipe=models[model_name]["pipe"],
+                param_grid=_resolve_param_grid_aliases(
+                    models[model_name]["pipe"],
+                    models[model_name]["param_grid"],
+                ),
+                inner_splits=inner_splits,
+                outer_jobs=outer_jobs,
                 config=config,
+                harmonization_mode=harmonization_mode,
+                covariates=covariates,
+                target_residualization_columns=target_residualization_columns,
                 rng=perm_rng,
                 n_perm=int(n_perm),
             )

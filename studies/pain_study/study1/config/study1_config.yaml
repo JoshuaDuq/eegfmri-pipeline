@@ -12,7 +12,7 @@ study1:
       - "bursts"
   targets:
     contrast_name: "pain_vs_nonpain"
-    metric: "cosine"
+    metric: "dot"
     method: "lss"
     normalization: "none"
     round_decimals: 3
@@ -43,7 +43,7 @@ study1:
     confounds_strategy: "auto"
     lss_other_regressors: "all"
     nuisance_regression:
-      enabled: true
+      enabled: false
       columns:
         - "pain_binary_coded"
         - "stimulus_temp"

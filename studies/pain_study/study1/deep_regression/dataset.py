@@ -37,12 +37,32 @@ def _time_key(run_num: float, onset: float, duration: float) -> str | None:
     return f"{int(run_num)}|{round(float(onset), 3):.3f}|{round(float(duration), 3):.3f}"
 
 
-def _align_subject_targets(
+def _raise_on_conflicting_duplicate_keys(
+    frame: pd.DataFrame,
+    *,
+    key_column: str,
+    value_column: str,
+    label: str,
+) -> None:
+    keyed = frame.loc[frame[key_column].notna(), [key_column, value_column]]
+    if keyed.empty:
+        return
+    value_counts = keyed.groupby(key_column, dropna=True)[value_column].nunique(dropna=False)
+    conflicts = value_counts[value_counts > 1]
+    if not conflicts.empty:
+        examples = ", ".join(str(key) for key in conflicts.index[:5])
+        raise ValueError(
+            f"Deep regression alignment has duplicate {label} keys with different "
+            f"{value_column} values: {examples}."
+        )
+
+
+def _alignment_key_data(
     *,
     aligned_events: pd.DataFrame,
     target_rows: pd.DataFrame,
-    target_name: str,
-) -> np.ndarray:
+    value_column: str,
+) -> tuple[list[str | None], pd.Series]:
     event_runs = find_block_column(aligned_events)
     if event_runs is None:
         raise ValueError("Clean EEG events must contain a usable run/block column for deep regression.")
@@ -58,7 +78,7 @@ def _align_subject_targets(
 
     target_runs = pd.to_numeric(target_rows["block"], errors="coerce")
     target_trials = pd.to_numeric(target_rows["trial_index"], errors="coerce")
-    target_values = pd.to_numeric(target_rows[target_name], errors="coerce")
+    target_values = pd.to_numeric(target_rows[value_column], errors="coerce")
 
     trial_lookup = pd.Series(dtype=float)
     if event_trial is not None:
@@ -70,6 +90,12 @@ def _align_subject_targets(
             )
         ]
         trial_frame = pd.DataFrame({"key": target_trial_keys, "value": target_values})
+        _raise_on_conflicting_duplicate_keys(
+            trial_frame,
+            key_column="key",
+            value_column="value",
+            label="trial",
+        )
         trial_lookup = trial_frame.loc[trial_frame["key"].notna()].groupby("key")["value"].mean()
         event_trial_keys = [
             _trial_key(run_num, trial_index)
@@ -102,17 +128,37 @@ def _align_subject_targets(
         )
     ]
     time_frame = pd.DataFrame({"key": target_time_keys, "value": target_values})
+    _raise_on_conflicting_duplicate_keys(
+        time_frame,
+        key_column="key",
+        value_column="value",
+        label="time",
+    )
     time_lookup = time_frame.loc[time_frame["key"].notna()].groupby("key")["value"].mean()
     time_matches = sum(1 for key in event_time_keys if key is not None and key in time_lookup.index)
 
     if trial_matches == 0 and time_matches == 0:
         raise ValueError(
-            f"Deep regression alignment failed for target '{target_name}': no trial or onset matches."
+            f"Deep regression alignment failed for target '{value_column}': no trial or onset matches."
         )
 
     use_trial = trial_matches >= time_matches and trial_matches > 0
     active_keys = event_trial_keys if use_trial else event_time_keys
     active_lookup = trial_lookup if use_trial else time_lookup
+    return active_keys, active_lookup
+
+
+def _align_subject_targets(
+    *,
+    aligned_events: pd.DataFrame,
+    target_rows: pd.DataFrame,
+    target_name: str,
+) -> np.ndarray:
+    active_keys, active_lookup = _alignment_key_data(
+        aligned_events=aligned_events,
+        target_rows=target_rows,
+        value_column=target_name,
+    )
     y = np.asarray(
         [
             float(active_lookup[key]) if key is not None and key in active_lookup.index else np.nan
@@ -125,6 +171,43 @@ def _align_subject_targets(
             f"Deep regression requires finite aligned targets for every retained trial ({target_name})."
         )
     return y
+
+
+def _append_target_table_metadata(
+    *,
+    meta: pd.DataFrame,
+    aligned_events: pd.DataFrame,
+    target_rows: pd.DataFrame,
+    target_name: str,
+) -> pd.DataFrame:
+    excluded = {
+        "subject_id",
+        "task",
+        "block",
+        "trial_index",
+        "onset",
+        "duration",
+        "NPS",
+        "SIIPS1",
+        target_name,
+    }
+    out = meta.copy()
+    for column in target_rows.columns:
+        if column in excluded or column in out.columns:
+            continue
+        values = pd.to_numeric(target_rows[column], errors="coerce")
+        if not np.any(np.isfinite(values.to_numpy(dtype=float))):
+            continue
+        active_keys, active_lookup = _alignment_key_data(
+            aligned_events=aligned_events,
+            target_rows=target_rows.assign(**{column: values}),
+            value_column=column,
+        )
+        out[column] = [
+            float(active_lookup[key]) if key is not None and key in active_lookup.index else np.nan
+            for key in active_keys
+        ]
+    return out
 
 
 def load_band_tensor_matrix(
@@ -213,6 +296,12 @@ def load_band_tensor_matrix(
                 "target_name": [resolved_target] * len(y),
                 "target_value": y,
             }
+        )
+        meta = _append_target_table_metadata(
+            meta=meta,
+            aligned_events=aligned_events,
+            target_rows=target_rows,
+            target_name=resolved_target,
         )
         tensor_blocks.append(tensors)
         target_blocks.append(y)

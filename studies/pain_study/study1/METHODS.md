@@ -10,7 +10,7 @@ The frozen production specification is:
 studies/pain_study/study1/config/study1_config.yaml
 ```
 
-Study 1 asks whether trial-wise EEG predicts trial-wise expression of two established
+Study 1 asks whether trial-wise EEG predicts raw trial-wise expression of two established
 pain-related fMRI signatures, `NPS` and `SIIPS1`. The implemented study is multimodal
 and trial-resolved: it first constructs a shared table of trial-wise fMRI signature
 targets aligned to clean EEG trials, then evaluates two predictive lanes under a
@@ -27,8 +27,10 @@ outputs or upstream acquisition documentation.
 
 ## 1. Study Design, Objective, and Fixed Analytical Scope
 
-The primary Study 1 objective is to predict continuous trial-wise fMRI signature
-expression from EEG. The workflow is not a generic signature screen and not a flexible
+The primary Study 1 objective is to predict continuous raw trial-wise fMRI signature
+expression from EEG. The secondary sensitivity objective is to test whether EEG predicts
+signature expression after fold-contained adjustment for prespecified pain, timing, and
+run variables. The workflow is not a generic signature screen and not a flexible
 multitask framework. The frozen production analysis is restricted to:
 
 - the two targets `NPS` and `SIIPS1`,
@@ -37,7 +39,8 @@ multitask framework. The frozen production analysis is restricted to:
 - `trial_type == "stimulation"`,
 - `stim_phase == "plateau"`,
 - MNI-space fMRI inputs,
-- fold-contained nuisance residualization of predictive targets,
+- raw predictive targets for the primary analysis,
+- fold-contained nuisance residualization only for sensitivity analyses,
 - a fixed confirmatory EEG feature family (`power`),
 - a fixed set of exploratory EEG feature families,
 - a fixed set of deep-regression band presets.
@@ -155,7 +158,7 @@ The production Study 1 target specification is:
 | input source | `fmriprep` |
 | fMRIPrep space | `MNI152NLin2009cAsym` |
 | extraction method | `lss` |
-| metric | `cosine` |
+| metric | `dot` |
 | normalization | `none` |
 | contrast name | `pain_vs_nonpain` |
 | condition A column | `pain_binary_coded` |
@@ -243,17 +246,16 @@ production mode is least-squares separate (`lss`) restricted to:
 
 Let `beta_{s,i}(v)` denote the LSS-derived effect estimate for subject `s`, trial `i`,
 and voxel `v`. Let `M_k(v)` denote the signature-map weight for target `k`, where
-`k in {NPS, SIIPS1}`. Study 1 uses cosine expression to reduce dependence on beta-map
-scale and finite-voxel coverage:
+`k in {NPS, SIIPS1}`. Study 1 uses dot-product expression as the primary
+signature-expression metric:
 
 ```math
 y_{s,i}^{(k)} =
-\frac{\sum_{v \in V} \beta_{s,i}(v)M_k(v)}
-{\sqrt{\sum_{v \in V}\beta_{s,i}(v)^2}\sqrt{\sum_{v \in V}M_k(v)^2}}.
+\sum_{v \in V} \beta_{s,i}(v)M_k(v).
 ```
 
 No within-run or within-subject normalization is applied in the frozen production
-configuration.
+configuration. Scale-free cosine similarity is not the primary Study 1 estimand.
 
 ### 3.3 EEG-fMRI alignment
 
@@ -304,9 +306,10 @@ required columns:
 
 Finite values for both `NPS` and `SIIPS1` are required for every retained trial. The
 primary target table records the configured nuisance columns, but it does not store
-precomputed residual targets. Residualization is performed inside each outer LOSO fold
-by fitting the nuisance model on the outer-training subjects only and applying those
-coefficients to the held-out subject:
+precomputed residual targets. The primary analysis uses raw signature-expression targets.
+When the secondary nuisance-adjusted sensitivity analysis is explicitly enabled,
+residualization is performed inside each outer LOSO fold by fitting the nuisance model on
+the outer-training subjects only and applying those coefficients to the held-out subject:
 
 ```text
 study1.targets.nuisance_regression.columns = [

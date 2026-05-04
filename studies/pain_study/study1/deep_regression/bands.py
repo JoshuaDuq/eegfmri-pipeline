@@ -22,10 +22,10 @@ def _validate_bands(config: Any, bands: list[str]) -> dict[str, list[float]]:
     return available
 
 
-def _deep_regression_time_mask(epochs: mne.Epochs, config: Any) -> np.ndarray:
+def _deep_regression_time_window(epochs: mne.Epochs, config: Any) -> tuple[float, float] | None:
     raw_window = get_config_value(config, "study1.deep_regression.time_window", None)
     if raw_window is None:
-        return np.ones(len(epochs.times), dtype=bool)
+        return None
     if not isinstance(raw_window, (list, tuple)) or len(raw_window) != 2:
         raise ValueError("study1.deep_regression.time_window must be a two-element [start, end] range.")
 
@@ -47,7 +47,7 @@ def _deep_regression_time_mask(epochs: mne.Epochs, config: Any) -> np.ndarray:
             "study1.deep_regression.time_window does not overlap the clean epoch time axis: "
             f"window=[{start}, {end}], epoch_span=[{epochs.times[0]}, {epochs.times[-1]}]."
         )
-    return mask
+    return start, end
 
 
 def build_band_tensor(
@@ -65,17 +65,20 @@ def build_band_tensor(
     if not channels:
         raise ValueError("Deep regression requires at least one common EEG channel.")
 
-    time_mask = _deep_regression_time_mask(epochs, config)
+    time_window = _deep_regression_time_window(epochs, config)
     tensors: list[np.ndarray] = []
     for band_name in bands:
         fmin, fmax = band_definitions[band_name]
-        filtered = epochs.copy().pick(channels).filter(
+        working_epochs = epochs.copy().pick(channels)
+        if time_window is not None:
+            working_epochs.crop(tmin=time_window[0], tmax=time_window[1])
+        filtered = working_epochs.filter(
             l_freq=float(fmin),
             h_freq=float(fmax),
             picks="eeg",
             verbose=False,
         )
-        band_data = filtered.get_data(picks="eeg").astype(float)[..., time_mask]
+        band_data = filtered.get_data(picks="eeg").astype(float)
         tensors.append(band_data)
         logger.info(
             "Built %s band tensor: %d trials, %d channels, %d timepoints",
