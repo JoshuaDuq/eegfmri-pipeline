@@ -31,7 +31,7 @@ def _config(root: Path) -> DotConfig:
                 "deep_regression": {
                     "presets": {
                         "alpha": ["alpha"],
-                        "alpha_beta_gamma": ["alpha", "beta", "gamma"],
+                        "alpha_beta": ["alpha", "beta"],
                     }
                 },
             },
@@ -87,24 +87,29 @@ def test_load_band_tensor_matrix_builds_subject_grouped_tensor(tmp_path) -> None
     cfg = _config(tmp_path)
     epochs, events = _epochs_and_events()
 
-    with patch(
-        "studies.pain_study.study1.deep_regression.dataset.resolve_primary_subjects",
-        return_value=["sub-0001", "sub-0002"],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.load_epochs_for_analysis",
-        side_effect=[(epochs, events), (epochs, events)],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.subject_target_rows",
-        side_effect=[
-            _subject_targets("sub-0001", "NPS"),
-            _subject_targets("sub-0002", "NPS"),
-        ],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
-        side_effect=[
-            np.ones((2, 2, 3, 10), dtype=float),
-            np.full((2, 2, 3, 10), 2.0, dtype=float),
-        ],
+    with (
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.resolve_primary_subjects",
+            return_value=["sub-0001", "sub-0002"],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.load_epochs_for_analysis",
+            side_effect=[(epochs, events), (epochs, events)],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.subject_target_rows",
+            side_effect=[
+                _subject_targets("sub-0001", "NPS"),
+                _subject_targets("sub-0002", "NPS"),
+            ],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
+            side_effect=[
+                np.ones((2, 2, 3, 10), dtype=float),
+                np.full((2, 2, 3, 10), 2.0, dtype=float),
+            ],
+        ),
     ):
         X, y, groups, channels, meta = load_band_tensor_matrix(
             subjects=["0002", "0001"],
@@ -128,21 +133,26 @@ def test_load_band_tensor_matrix_carries_target_table_nuisance_columns(tmp_path)
     cfg = _config(tmp_path)
     epochs, events = _epochs_and_events()
 
-    with patch(
-        "studies.pain_study.study1.deep_regression.dataset.resolve_primary_subjects",
-        return_value=["sub-0001", "sub-0002"],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.load_epochs_for_analysis",
-        side_effect=[(epochs, events), (epochs, events)],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.subject_target_rows",
-        side_effect=[
-            _subject_targets("sub-0001", "NPS", nuisance=True),
-            _subject_targets("sub-0002", "NPS", nuisance=True),
-        ],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
-        return_value=np.ones((2, 1, 3, 10), dtype=float),
+    with (
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.resolve_primary_subjects",
+            return_value=["sub-0001", "sub-0002"],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.load_epochs_for_analysis",
+            side_effect=[(epochs, events), (epochs, events)],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.subject_target_rows",
+            side_effect=[
+                _subject_targets("sub-0001", "NPS", nuisance=True),
+                _subject_targets("sub-0002", "NPS", nuisance=True),
+            ],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
+            return_value=np.ones((2, 1, 3, 10), dtype=float),
+        ),
     ):
         _X, _y, _groups, _channels, meta = load_band_tensor_matrix(
             subjects=["0001", "0002"],
@@ -192,21 +202,26 @@ def test_load_band_tensor_matrix_rejects_non_finite_targets(tmp_path) -> None:
     cfg = _config(tmp_path)
     epochs, events = _epochs_and_events()
 
-    with patch(
-        "studies.pain_study.study1.deep_regression.dataset.resolve_primary_subjects",
-        return_value=["sub-0001", "sub-0002"],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.load_epochs_for_analysis",
-        side_effect=[(epochs, events), (epochs, events)],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.subject_target_rows",
-        side_effect=[
-            _subject_targets("sub-0001", "NPS", finite=False),
-            _subject_targets("sub-0002", "NPS"),
-        ],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
-        return_value=np.ones((2, 1, 3, 10), dtype=float),
+    with (
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.resolve_primary_subjects",
+            return_value=["sub-0001", "sub-0002"],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.load_epochs_for_analysis",
+            side_effect=[(epochs, events), (epochs, events)],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.subject_target_rows",
+            side_effect=[
+                _subject_targets("sub-0001", "NPS", finite=False),
+                _subject_targets("sub-0002", "NPS"),
+            ],
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.dataset.build_band_tensor",
+            return_value=np.ones((2, 1, 3, 10), dtype=float),
+        ),
     ):
         with pytest.raises(ValueError, match="finite"):
             load_band_tensor_matrix(
@@ -288,7 +303,8 @@ def test_run_loso_deep_regression_uses_foldwise_nuisance_residual_targets(tmp_pa
         "names": ["NPS", "SIIPS1"],
         "nuisance_regression": {
             "enabled": True,
-            "columns": ["pain_binary_coded"],
+            "continuous_columns": ["pain_binary_coded"],
+            "categorical_columns": [],
         },
     }
     X = np.ones((6, 1, 3, 10), dtype=float)
@@ -442,25 +458,34 @@ def test_run_deep_regression_writes_one_output_per_target_and_preset(tmp_path) -
         {
             "predictions": pd.DataFrame({"y_true": [1.0], "y_pred": [1.1]}),
             "fold_metrics": pd.DataFrame({"fold_id": [0], "test_subject": ["sub-0001"]}),
-            "summary": {"model_name": "band_temporal_regressor", "mean_r2": 0.5, "mean_mae": 0.1, "n_folds": 2},
+            "summary": {
+                "model_name": "band_temporal_regressor",
+                "mean_r2": 0.5,
+                "mean_mae": 0.1,
+                "n_folds": 2,
+            },
         },
     )()
 
-    with patch(
-        "studies.pain_study.study1.deep_regression.evaluation.resolve_primary_subjects",
-        return_value=["sub-0001", "sub-0002"],
-    ), patch(
-        "studies.pain_study.study1.deep_regression.evaluation.load_band_tensor_matrix",
-        return_value=(
-            np.ones((4, 1, 3, 10), dtype=float),
-            np.asarray([1.0, 2.0, 3.0, 4.0], dtype=float),
-            np.asarray(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object),
-            ["Cz", "Pz", "Fz"],
-            pd.DataFrame({"subject_id": ["sub-0001"] * 4}),
+    with (
+        patch(
+            "studies.pain_study.study1.deep_regression.evaluation.resolve_primary_subjects",
+            return_value=["sub-0001", "sub-0002"],
         ),
-    ), patch(
-        "studies.pain_study.study1.deep_regression.evaluation.run_loso_deep_regression",
-        return_value=fake_result,
+        patch(
+            "studies.pain_study.study1.deep_regression.evaluation.load_band_tensor_matrix",
+            return_value=(
+                np.ones((4, 1, 3, 10), dtype=float),
+                np.asarray([1.0, 2.0, 3.0, 4.0], dtype=float),
+                np.asarray(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object),
+                ["Cz", "Pz", "Fz"],
+                pd.DataFrame({"subject_id": ["sub-0001"] * 4}),
+            ),
+        ),
+        patch(
+            "studies.pain_study.study1.deep_regression.evaluation.run_loso_deep_regression",
+            return_value=fake_result,
+        ),
     ):
         outputs = run_deep_regression(
             subjects=["0001", "0002"],

@@ -8,12 +8,17 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import LeaveOneGroupOut
 
-from eeg_pipeline.analysis.machine_learning.target_residualization import residualize_targets_for_fold
+from eeg_pipeline.analysis.machine_learning.target_residualization import (
+    residualize_targets_for_fold,
+)
 from studies.pain_study.study1.deep_regression.model import build_band_regressor
-from studies.pain_study.study1.targets import nuisance_columns, nuisance_regression_enabled
+from studies.pain_study.study1.targets import (
+    nuisance_regression_enabled,
+    resolve_residualization_columns,
+)
 
 
 def _import_torch():
@@ -57,7 +62,9 @@ def _safe_r2(y_true: np.ndarray, y_pred: np.ndarray, y_train_mean: float) -> flo
         return np.nan
 
 
-def _validation_indices(groups_train: np.ndarray, *, seed: int, fraction: float) -> tuple[np.ndarray, np.ndarray]:
+def _validation_indices(
+    groups_train: np.ndarray, *, seed: int, fraction: float
+) -> tuple[np.ndarray, np.ndarray]:
     if fraction <= 0:
         return np.arange(len(groups_train), dtype=int), np.asarray([], dtype=int)
 
@@ -172,8 +179,12 @@ def _fit_regressor(
     best_val = np.inf
     no_improve = 0
     has_validation = len(val_idx) > 0
-    X_val_tensor = torch.tensor(X_val, dtype=torch.float32, device=device) if has_validation else None
-    y_val_tensor = torch.tensor(y_val_n, dtype=torch.float32, device=device) if has_validation else None
+    X_val_tensor = (
+        torch.tensor(X_val, dtype=torch.float32, device=device) if has_validation else None
+    )
+    y_val_tensor = (
+        torch.tensor(y_val_n, dtype=torch.float32, device=device) if has_validation else None
+    )
 
     for _epoch in range(n_epochs):
         model.train()
@@ -206,7 +217,9 @@ def _fit_regressor(
 
     model.eval()
     with torch.no_grad():
-        preds_n = model(torch.tensor(X_test_n, dtype=torch.float32, device=device)).detach().cpu().numpy()
+        preds_n = (
+            model(torch.tensor(X_test_n, dtype=torch.float32, device=device)).detach().cpu().numpy()
+        )
     return _invert_target_standardization(preds_n, mean=y_mean, std=y_std)
 
 
@@ -236,7 +249,11 @@ def run_loso_deep_regression(
     predictions = np.full(len(y), np.nan, dtype=float)
     y_eval = np.full(len(y), np.nan, dtype=float)
     fold_records: list[dict[str, Any]] = []
-    residual_columns = nuisance_columns(config) if nuisance_regression_enabled(config) else tuple()
+    residual_columns = (
+        resolve_residualization_columns(frame=meta, config=config)
+        if nuisance_regression_enabled(config)
+        else tuple()
+    )
     residualization_summary: dict[str, Any] = {
         "enabled": bool(residual_columns),
         "columns": list(residual_columns),

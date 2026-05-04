@@ -10,7 +10,6 @@ import pandas as pd
 
 from studies.tests.test_support import DotConfig
 
-
 EXPLORATORY_FAMILIES = ["spectral", "erds"]
 
 
@@ -60,6 +59,7 @@ def _write_primary_targets(config: DotConfig) -> Path:
             "trial_index": [1, 2, 1, 2],
             "onset": [1.0, 2.0, 1.0, 2.0],
             "duration": [0.5, 0.5, 0.5, 0.5],
+            "pain_binary_coded": [0, 1, 0, 1],
             "NPS": [1.0, 1.1, 1.2, 1.3],
             "SIIPS1": [2.0, 2.1, 2.2, 2.3],
         }
@@ -155,10 +155,10 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
             task="pain",
             config=cfg,
             logger=logging.getLogger(__name__),
-        )
+    )
 
-    assert len(outputs) == 12
-    assert len(captured_calls) == 12
+    assert len(outputs) == 10
+    assert len(captured_calls) == 10
     first_call = captured_calls[0]
     assert first_call["subjects"] == ["sub-0001", "sub-0002"]
     assert first_call["target"] == "fmri_signature"
@@ -188,7 +188,8 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
     exploratory_call = next(
         call
         for call in captured_calls
-        if call["results_root"].parts[-4:] == ("feature_benchmark", "exploratory", "NPS", "spectral")
+        if call["results_root"].parts[-4:]
+        == ("feature_benchmark", "exploratory", "NPS", "spectral")
     )
     assert exploratory_call["feature_families"] == ["spectral"]
     assert exploratory_call["feature_bands"] is None
@@ -201,7 +202,8 @@ def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path
     cfg["study1"]["features"]["exploratory_feature_families"] = []
     cfg["study1"]["targets"]["nuisance_regression"] = {
         "enabled": True,
-        "columns": ["pain_binary_coded", "block", "onset"],
+        "continuous_columns": ["pain_binary_coded", "block", "onset"],
+        "categorical_columns": [],
     }
     _write_primary_targets(cfg)
     _write_prepared_power_features(cfg, "sub-0001")
@@ -223,9 +225,11 @@ def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path
             logger=logging.getLogger(__name__),
         )
 
-    assert len(captured_calls) == 8
+    assert len(captured_calls) == 6
     assert captured_calls[0]["config"].get("machine_learning.fmri_signature.target_column") == "NPS"
-    assert captured_calls[0]["config"].get("machine_learning.target_residualization.enabled") is True
+    assert (
+        captured_calls[0]["config"].get("machine_learning.target_residualization.enabled") is True
+    )
     assert captured_calls[0]["config"].get("machine_learning.target_residualization.columns") == [
         "pain_binary_coded",
         "block",
@@ -337,15 +341,18 @@ def test_model_comparison_permutation_refits_full_pipeline_for_subject_mean_r2()
         refit_targets.append(list(kwargs["y"]))
         return kwargs["y"].copy(), kwargs["y"].copy(), []
 
-    with patch(
-        "eeg_pipeline.analysis.machine_learning.orchestration._generate_effective_permutation",
-        side_effect=[
-            (permuted[0], True, 1.0, "within_subject"),
-            (permuted[1], True, 1.0, "within_subject"),
-        ],
-    ), patch(
-        "eeg_pipeline.analysis.machine_learning.orchestration._model_comparison_cv_predictions",
-        side_effect=_capture_cv,
+    with (
+        patch(
+            "eeg_pipeline.analysis.machine_learning.orchestration._generate_effective_permutation",
+            side_effect=[
+                (permuted[0], True, 1.0, "within_subject"),
+                (permuted[1], True, 1.0, "within_subject"),
+            ],
+        ),
+        patch(
+            "eeg_pipeline.analysis.machine_learning.orchestration._model_comparison_cv_predictions",
+            side_effect=_capture_cv,
+        ),
     ):
         p_value = orchestration._model_comparison_permutation_p_value(
             observed_mean_r2=1.0,
@@ -359,7 +366,9 @@ def test_model_comparison_permutation_refits_full_pipeline_for_subject_mean_r2()
             param_grid={},
             inner_splits=2,
             outer_jobs=1,
-            config=DotConfig({"machine_learning": {"cv": {"permutation_scheme": "within_subject"}}}),
+            config=DotConfig(
+                {"machine_learning": {"cv": {"permutation_scheme": "within_subject"}}}
+            ),
             harmonization_mode="intersection",
             covariates=None,
             target_residualization_columns=tuple(),

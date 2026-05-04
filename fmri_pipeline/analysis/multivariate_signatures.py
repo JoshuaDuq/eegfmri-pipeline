@@ -136,33 +136,29 @@ def _flatten_masked_pairs(
     w_data: Any,
     mask_data: Optional[Any] = None,
 ) -> Tuple[List[float], List[float]]:
-    """Flatten (image, weights) into paired vectors with finite values."""
-    x: List[float] = []
-    w: List[float] = []
-    it = zip(img_data.ravel(), w_data.ravel())
-    if mask_data is None:
-        for a, b in it:
-            try:
-                fa = float(a)
-                fb = float(b)
-            except Exception:
-                continue
-            if math.isfinite(fa) and math.isfinite(fb):
-                x.append(fa)
-                w.append(fb)
-        return x, w
+    """Flatten image and signature weights inside a fixed finite-weight mask."""
+    import numpy as np  # type: ignore
 
-    for (a, b), m in zip(it, mask_data.ravel()):
-        try:
-            if not bool(m):
-                continue
-            fa = float(a)
-            fb = float(b)
-        except Exception:
-            continue
-        if math.isfinite(fa) and math.isfinite(fb):
-            x.append(fa)
-            w.append(fb)
+    image = np.asanyarray(img_data, dtype=float)
+    weights = np.asanyarray(w_data, dtype=float)
+    fixed_mask = np.isfinite(weights)
+
+    if mask_data is not None:
+        mask = np.asanyarray(mask_data, dtype=bool)
+        fixed_mask &= mask
+
+    if not bool(np.any(fixed_mask)):
+        raise ValueError("No voxels remain in the fixed signature mask.")
+
+    invalid_image = fixed_mask & ~np.isfinite(image)
+    if bool(np.any(invalid_image)):
+        raise ValueError(
+            "Non-finite image values were found inside the fixed signature mask; "
+            "the trial cannot be scored on a smaller trial-specific voxel set."
+        )
+
+    x = image[fixed_mask].ravel().tolist()
+    w = weights[fixed_mask].ravel().tolist()
     return x, w
 
 
@@ -344,7 +340,7 @@ def compute_signature_expression(
             )
         except Exception as exc:
             raise ValueError(
-                f"Failed to compute signature expression for {name!r} using {w_path}."
+                f"Failed to compute signature expression for {name!r} using {w_path}: {exc}"
             ) from exc
 
     return results

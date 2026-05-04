@@ -25,17 +25,16 @@ from studies.pain_study.study1.output_cleanup import remove_appledouble_sidecars
 from studies.pain_study.study1.prepare_features import require_prepared_study1_features
 from studies.pain_study.study1.targets import (
     PRIMARY_SIGNATURES,
-    nuisance_columns,
     nuisance_regression_enabled,
+    residualization_columns_for_target_table,
 )
-
 
 PRIMARY_BAND_PRESETS: dict[str, list[str]] = {
     "alpha": ["alpha"],
     "beta": ["beta"],
-    "gamma": ["gamma"],
-    "alpha_beta_gamma": ["alpha", "beta", "gamma"],
+    "alpha_beta": ["alpha", "beta"],
 }
+
 
 def _rng_seed(config: Any) -> int:
     return int(get_config_value(config, "project.random_state", 42))
@@ -91,9 +90,18 @@ def _feature_benchmark_config(
     feature_config["machine_learning.fmri_signature.round_decimals"] = int(
         get_config_value(config, "study1.targets.round_decimals", 3)
     )
-    feature_config["machine_learning.preprocessing.subject_standardize_features"] = True
+    feature_config["machine_learning.preprocessing.subject_standardize_features"] = False
     feature_config["machine_learning.preprocessing.variance_threshold_grid"] = [0.0]
-    columns = list(nuisance_columns(config)) if nuisance_regression_enabled(config) else []
+    columns = (
+        list(
+            residualization_columns_for_target_table(
+                config,
+                primary_targets_parquet_path(config),
+            )
+        )
+        if nuisance_regression_enabled(config)
+        else []
+    )
     feature_config["machine_learning.target_residualization.enabled"] = bool(columns)
     feature_config["machine_learning.target_residualization.columns"] = columns
     return feature_config

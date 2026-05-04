@@ -39,7 +39,7 @@ def test_study1_production_loso_requires_inferential_cohort_size() -> None:
         config_path=REPO_ROOT / "studies/pain_study/study1/config/study1_config.yaml",
     )
 
-    assert int(config["study1"]["cohort"]["min_subjects"]) >= 4
+    assert int(config["study1"]["cohort"]["min_subjects"]) >= 20
 
 
 def test_study1_production_target_and_inference_settings_are_prespecified() -> None:
@@ -51,11 +51,5 @@ def test_study1_production_target_and_inference_settings_are_prespecified() -> N
     assert targets["metric"] == "cosine"
     assert "signature_provenance" in targets
     assert int(config["study1"]["feature_benchmark"]["n_perm"]) > 0
-    assert set(targets["nuisance_regression"]["columns"]) >= {
-        "pain_binary_coded",
-        "stimulus_temp",
-        "vas_final_coded_rating",
-        "block",
-        "onset",
-        "duration",
-    }
+    assert targets["nuisance_regression"]["continuous_columns"] == ["block", "onset"]
+    assert targets["nuisance_regression"]["categorical_columns"] == ["stimulus_temp"]

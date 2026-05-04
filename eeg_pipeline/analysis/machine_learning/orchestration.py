@@ -242,10 +242,11 @@ def _resolve_permutation_scheme(config: Any) -> str:
     scheme = str(
         get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject")
     ).strip().lower()
-    if scheme not in {"within_subject", "within_subject_within_block"}:
+    valid = {"within_subject", "within_subject_within_block", "circular_shift_within_run"}
+    if scheme not in valid:
         raise ValueError(
             "Invalid machine_learning.cv.permutation_scheme: "
-            f"{scheme!r}. Expected one of: within_subject, within_subject_within_block."
+            f"{scheme!r}. Expected one of: {sorted(valid)}."
         )
     return scheme
 
@@ -286,22 +287,47 @@ def _permute_labels_by_scheme(
     rng: np.random.Generator,
     scheme: str,
 ) -> np.ndarray:
-    """Permute labels within-subject or within-subject×block."""
+    """Permute labels within-subject, within-subject×block, or circular-shift within-run."""
     y_perm = np.asarray(y, dtype=float).copy()
     groups_arr = np.asarray(groups, dtype=object)
     mode = str(scheme).strip().lower()
-    if mode not in {"within_subject", "within_subject_within_block"}:
+    valid = {"within_subject", "within_subject_within_block", "circular_shift_within_run"}
+    if mode not in valid:
         raise ValueError(
             f"Unsupported permutation scheme: {scheme!r}. "
-            "Expected one of: within_subject, within_subject_within_block."
+            f"Expected one of: {sorted(valid)}."
         )
     blocks_arr = _validate_permutation_blocks(y_perm, blocks, scheme=mode)
+
+    min_circular_shift = 5
 
     for subj in np.unique(groups_arr):
         subj_mask = groups_arr == subj
         if np.sum(subj_mask) < 2:
             continue
-        if mode == "within_subject_within_block" and blocks_arr is not None:
+
+        if mode == "circular_shift_within_run":
+            if blocks_arr is None:
+                subj_indices = np.where(subj_mask)[0]
+                n = len(subj_indices)
+                if n > min_circular_shift:
+                    shift = rng.integers(min_circular_shift, n)
+                    y_perm[subj_indices] = np.roll(y_perm[subj_indices], shift)
+            else:
+                subj_blocks = blocks_arr[subj_mask]
+                subj_global_idx = np.where(subj_mask)[0]
+                for block_id in np.unique(subj_blocks):
+                    if pd.isna(block_id):
+                        block_mask = pd.isna(subj_blocks)
+                    else:
+                        block_mask = subj_blocks == block_id
+                    block_global_idx = subj_global_idx[block_mask]
+                    n = len(block_global_idx)
+                    if n > min_circular_shift:
+                        shift = rng.integers(min_circular_shift, n)
+                        y_perm[block_global_idx] = np.roll(y_perm[block_global_idx], shift)
+
+        elif mode == "within_subject_within_block" and blocks_arr is not None:
             subj_blocks = blocks_arr[subj_mask]
             subj_y = y_perm[subj_mask]
             for block_id in np.unique(subj_blocks):

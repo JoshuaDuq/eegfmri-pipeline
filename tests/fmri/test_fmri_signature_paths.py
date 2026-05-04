@@ -154,3 +154,23 @@ def test_compute_signature_expression_raises_when_mask_data_cannot_be_read(tmp_p
             signature_specs=[{"name": "NPS", "path": "nps.nii.gz"}],
             mask_img=BrokenMask(),
         )
+
+
+def test_compute_signature_expression_rejects_nonfinite_values_inside_fixed_mask(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "signatures"
+    root.mkdir(parents=True, exist_ok=True)
+    weight_path = root / "nps.nii.gz"
+    nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4)), weight_path)
+
+    effect_data = np.ones((2, 2, 2), dtype=np.float32)
+    effect_data[0, 0, 0] = np.nan
+    effect_img = nib.Nifti1Image(effect_data, np.eye(4))
+
+    with pytest.raises(ValueError, match="fixed signature mask"):
+        compute_signature_expression(
+            stat_or_effect_img=effect_img,
+            signature_root=root,
+            signature_specs=[{"name": "NPS", "path": "nps.nii.gz"}],
+        )

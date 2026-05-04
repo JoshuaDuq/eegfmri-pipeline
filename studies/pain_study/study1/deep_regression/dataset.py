@@ -37,24 +37,50 @@ def _time_key(run_num: float, onset: float, duration: float) -> str | None:
     return f"{int(run_num)}|{round(float(onset), 3):.3f}|{round(float(duration), 3):.3f}"
 
 
-def _raise_on_conflicting_duplicate_keys(
+def _raise_on_duplicate_keys(
+    frame: pd.DataFrame,
+    *,
+    key_column: str,
+    label: str,
+) -> None:
+    keyed = frame.loc[frame[key_column].notna(), key_column]
+    if keyed.empty:
+        return
+    counts = keyed.value_counts()
+    duplicates = counts[counts > 1]
+    if not duplicates.empty:
+        examples = ", ".join(str(key) for key in duplicates.index[:5])
+        raise ValueError(
+            f"Deep regression alignment has duplicate {label} keys: {examples}."
+        )
+
+
+def _raise_on_missing_or_duplicate_trial_keys(keys: list[str | None], *, label: str) -> None:
+    missing = [idx for idx, key in enumerate(keys) if key is None]
+    if missing:
+        raise ValueError(
+            f"Deep regression alignment requires finite trial identifiers for every {label} row; "
+            f"missing at rows {missing[:5]}."
+        )
+    _raise_on_duplicate_keys(
+        pd.DataFrame({"key": keys}),
+        key_column="key",
+        label=f"{label} trial",
+    )
+
+
+def _unique_values_by_key(
     frame: pd.DataFrame,
     *,
     key_column: str,
     value_column: str,
     label: str,
-) -> None:
-    keyed = frame.loc[frame[key_column].notna(), [key_column, value_column]]
+) -> pd.Series:
+    _raise_on_duplicate_keys(frame, key_column=key_column, label=label)
+    keyed = frame.loc[frame[key_column].notna(), [key_column, value_column]].copy()
     if keyed.empty:
-        return
-    value_counts = keyed.groupby(key_column, dropna=True)[value_column].nunique(dropna=False)
-    conflicts = value_counts[value_counts > 1]
-    if not conflicts.empty:
-        examples = ", ".join(str(key) for key in conflicts.index[:5])
-        raise ValueError(
-            f"Deep regression alignment has duplicate {label} keys with different "
-            f"{value_column} values: {examples}."
-        )
+        return pd.Series(dtype=float)
+    return keyed.set_index(key_column)[value_column]
 
 
 def _alignment_key_data(
@@ -80,36 +106,34 @@ def _alignment_key_data(
     target_trials = pd.to_numeric(target_rows["trial_index"], errors="coerce")
     target_values = pd.to_numeric(target_rows[value_column], errors="coerce")
 
-    trial_lookup = pd.Series(dtype=float)
-    if event_trial is not None:
-        target_trial_keys = [
-            _trial_key(run_num, trial_index)
-            for run_num, trial_index in zip(
-                target_runs.to_numpy(dtype=float),
-                target_trials.to_numpy(dtype=float),
-            )
-        ]
-        trial_frame = pd.DataFrame({"key": target_trial_keys, "value": target_values})
-        _raise_on_conflicting_duplicate_keys(
-            trial_frame,
-            key_column="key",
-            value_column="value",
-            label="trial",
+    if event_trial is None:
+        raise ValueError(
+            "Deep regression alignment requires trial identifiers in clean EEG events."
         )
-        trial_lookup = trial_frame.loc[trial_frame["key"].notna()].groupby("key")["value"].mean()
-        event_trial_keys = [
-            _trial_key(run_num, trial_index)
-            for run_num, trial_index in zip(
-                event_runs.to_numpy(dtype=float),
-                event_trial.to_numpy(dtype=float),
-            )
-        ]
-        trial_matches = sum(
-            1 for key in event_trial_keys if key is not None and key in trial_lookup.index
+
+    target_trial_keys = [
+        _trial_key(run_num, trial_index)
+        for run_num, trial_index in zip(
+            target_runs.to_numpy(dtype=float),
+            target_trials.to_numpy(dtype=float),
         )
-    else:
-        event_trial_keys = [None] * len(aligned_events)
-        trial_matches = 0
+    ]
+    trial_frame = pd.DataFrame({"key": target_trial_keys, "value": target_values})
+    trial_lookup = _unique_values_by_key(
+        trial_frame,
+        key_column="key",
+        value_column="value",
+        label="target trial",
+    )
+    event_trial_keys = [
+        _trial_key(run_num, trial_index)
+        for run_num, trial_index in zip(
+            event_runs.to_numpy(dtype=float),
+            event_trial.to_numpy(dtype=float),
+        )
+    ]
+    _raise_on_missing_or_duplicate_trial_keys(event_trial_keys, label="EEG event")
+    trial_matches = sum(1 for key in event_trial_keys if key is not None and key in trial_lookup.index)
 
     event_time_keys = [
         _time_key(run_num, onset, duration)
@@ -128,24 +152,49 @@ def _alignment_key_data(
         )
     ]
     time_frame = pd.DataFrame({"key": target_time_keys, "value": target_values})
-    _raise_on_conflicting_duplicate_keys(
+    time_lookup = _unique_values_by_key(
         time_frame,
         key_column="key",
         value_column="value",
-        label="time",
+        label="target time",
     )
-    time_lookup = time_frame.loc[time_frame["key"].notna()].groupby("key")["value"].mean()
     time_matches = sum(1 for key in event_time_keys if key is not None and key in time_lookup.index)
 
-    if trial_matches == 0 and time_matches == 0:
+    if trial_matches == 0:
         raise ValueError(
-            f"Deep regression alignment failed for target '{value_column}': no trial or onset matches."
+            f"Deep regression alignment failed for target '{value_column}': no trial-id matches."
         )
 
-    use_trial = trial_matches >= time_matches and trial_matches > 0
-    active_keys = event_trial_keys if use_trial else event_time_keys
-    active_lookup = trial_lookup if use_trial else time_lookup
-    return active_keys, active_lookup
+    if time_matches > 0:
+        time_y = np.asarray(
+            [
+                float(time_lookup[key]) if key is not None and key in time_lookup.index else np.nan
+                for key in event_time_keys
+            ],
+            dtype=float,
+        )
+        trial_y = np.asarray(
+            [
+                float(trial_lookup[key]) if key is not None and key in trial_lookup.index else np.nan
+                for key in event_trial_keys
+            ],
+            dtype=float,
+        )
+        time_matched = np.isfinite(time_y)
+        trial_matched = np.isfinite(trial_y)
+        if not np.array_equal(time_matched, time_matched & trial_matched):
+            raise ValueError(
+                "Deep regression temporal audit is ambiguous: onset/duration keys match rows "
+                "that are not matched by trial identifiers."
+            )
+        both_matched = time_matched & trial_matched
+        if np.any(both_matched) and not np.allclose(time_y[both_matched], trial_y[both_matched]):
+            raise ValueError(
+                "Deep regression temporal audit is ambiguous: trial and onset/duration keys "
+                "match different target values."
+            )
+
+    return event_trial_keys, trial_lookup
 
 
 def _align_subject_targets(

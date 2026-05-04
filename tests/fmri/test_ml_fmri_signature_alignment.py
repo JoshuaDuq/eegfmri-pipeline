@@ -177,7 +177,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
         self.assertEqual(arr.shape, (1,))
         self.assertAlmostEqual(float(arr[0]), 1.11, places=6)
 
-    def test_keeps_onset_based_alignment_when_trial_ids_unavailable(self):
+    def test_rejects_onset_based_alignment_when_trial_ids_unavailable(self):
         from eeg_pipeline.utils.data.machine_learning import _load_fmri_signature_target_for_subject
 
         cfg = DotConfig(
@@ -226,18 +226,76 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
                 }
             ).to_csv(sig_dir / "trial_signature_expression.tsv", sep="\t", index=False)
 
-            y, _y_label, _extra = _load_fmri_signature_target_for_subject(
-                subject_raw="0001",
-                task="task",
-                deriv_root=root,
-                config=cfg,
-                events_df=events_df,
-                logger=logging.getLogger(__name__),
-            )
+            with self.assertRaisesRegex(ValueError, "trial identifiers"):
+                _load_fmri_signature_target_for_subject(
+                    subject_raw="0001",
+                    task="task",
+                    deriv_root=root,
+                    config=cfg,
+                    events_df=events_df,
+                    logger=logging.getLogger(__name__),
+                )
 
-        arr = np.asarray(y, dtype=float)
-        self.assertTrue(np.all(np.isfinite(arr)))
-        self.assertTrue(np.allclose(arr, np.array([3.0, 4.0], dtype=float)))
+    def test_rejects_duplicate_trial_alignment_keys_even_with_same_value(self):
+        from eeg_pipeline.utils.data.machine_learning import _load_fmri_signature_target_for_subject
+
+        cfg = DotConfig(
+            {
+                "machine_learning": {
+                    "fmri_signature": {
+                        "method": "lss",
+                        "contrast_name": "contrast",
+                        "signature_name": "NPS",
+                        "metric": "dot",
+                        "normalization": "none",
+                        "round_decimals": 3,
+                    }
+                }
+            }
+        )
+
+        events_df = pd.DataFrame(
+            {
+                "run_id": [1, 1],
+                "trial_number": [1, 2],
+                "onset": [10.0, 20.0],
+                "duration": [7.5, 7.5],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sig_dir = (
+                root
+                / "sub-0001"
+                / "fmri"
+                / "lss"
+                / "task-task"
+                / "contrast-contrast"
+                / "signatures"
+            )
+            sig_dir.mkdir(parents=True, exist_ok=True)
+
+            pd.DataFrame(
+                {
+                    "run_num": [1, 1, 1],
+                    "trial_index": [1, 1, 2],
+                    "onset": [10.0, 10.0, 20.0],
+                    "duration": [7.5, 7.5, 7.5],
+                    "signature": ["NPS", "NPS", "NPS"],
+                    "dot": [1.0, 1.0, 2.0],
+                }
+            ).to_csv(sig_dir / "trial_signature_expression.tsv", sep="\t", index=False)
+
+            with self.assertRaisesRegex(ValueError, "duplicate.*trial"):
+                _load_fmri_signature_target_for_subject(
+                    subject_raw="0001",
+                    task="task",
+                    deriv_root=root,
+                    config=cfg,
+                    events_df=events_df,
+                    logger=logging.getLogger(__name__),
+                )
 
     def test_raises_when_trial_and_onset_alignment_disagree(self):
         from eeg_pipeline.utils.data.machine_learning import _load_fmri_signature_target_for_subject

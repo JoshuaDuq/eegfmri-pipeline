@@ -123,6 +123,7 @@ def _write_signature_outputs(
             "trial_index": 1,
             "signature": "NPS",
             "dot": 1.1,
+            "n_voxels": 1000,
             "onset": 21.532,
             "duration": 7.5,
         },
@@ -132,6 +133,7 @@ def _write_signature_outputs(
             "trial_index": 2,
             "signature": "NPS",
             "dot": 1.2,
+            "n_voxels": 1000,
             "onset": 64.465,
             "duration": 7.5,
         },
@@ -145,6 +147,7 @@ def _write_signature_outputs(
                     "trial_index": 1,
                     "signature": "SIIPS1",
                     "dot": 2.1,
+                    "n_voxels": 800,
                     "onset": 21.532,
                     "duration": 7.5,
                 },
@@ -154,6 +157,7 @@ def _write_signature_outputs(
                     "trial_index": 2,
                     "signature": "SIIPS1",
                     "dot": siips1_second_dot,
+                    "n_voxels": 800,
                     "onset": 64.465,
                     "duration": 7.5,
                 },
@@ -194,12 +198,15 @@ def test_prepare_primary_targets_requires_both_primary_signatures() -> None:
         cfg = _base_config(root)
         _write_signature_outputs(root, include_siips1=False)
 
-        with patch(
-            "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
-            return_value={"output_dir": "ignored"},
-        ), patch(
-            "studies.pain_study.study1.targets.load_events_df",
-            return_value=_events_frame(),
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=_events_frame(),
+            ),
         ):
             with pytest.raises(ValueError, match="SIIPS1"):
                 prepare_primary_targets(
@@ -265,12 +272,15 @@ def test_prepare_primary_targets_rejects_non_finite_primary_values() -> None:
         cfg = _base_config(root)
         _write_signature_outputs(root, include_siips1=True, siips1_second_dot=float("nan"))
 
-        with patch(
-            "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
-            return_value={"output_dir": "ignored"},
-        ), patch(
-            "studies.pain_study.study1.targets.load_events_df",
-            return_value=_events_frame(),
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=_events_frame(),
+            ),
         ):
             with pytest.raises(ValueError, match="finite values"):
                 prepare_primary_targets(
@@ -289,12 +299,15 @@ def test_prepare_primary_targets_writes_wide_primary_table() -> None:
         cfg = _base_config(root)
         _write_signature_outputs(root)
 
-        with patch(
-            "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
-            return_value={"output_dir": "ignored"},
-        ), patch(
-            "studies.pain_study.study1.targets.load_events_df",
-            return_value=_events_frame(),
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=_events_frame(),
+            ),
         ):
             out_path = prepare_primary_targets(
                 subjects=["0001"],
@@ -319,7 +332,8 @@ def test_prepare_primary_targets_records_nuisance_columns_without_residual_targe
         cfg = _base_config(root)
         cfg["study1"]["targets"]["nuisance_regression"] = {
             "enabled": True,
-            "columns": ["pain_binary_coded"],
+            "continuous_columns": ["pain_binary_coded"],
+            "categorical_columns": [],
         }
 
         events = pd.DataFrame(
@@ -332,18 +346,30 @@ def test_prepare_primary_targets_records_nuisance_columns_without_residual_targe
             }
         )
 
-        with patch(
-            "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
-            return_value={"output_dir": "ignored"},
-        ), patch(
-            "studies.pain_study.study1.targets.load_events_df",
-            return_value=events,
-        ), patch(
-            "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject",
-            side_effect=[
-                (pd.Series([1.0, 3.0, 11.0, 13.0]), "NPS", pd.DataFrame()),
-                (pd.Series([2.0, 4.0, 12.0, 14.0]), "SIIPS1", pd.DataFrame()),
-            ],
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject",
+                side_effect=[
+                    (
+                        pd.Series([1.0, 3.0, 11.0, 13.0]),
+                        "NPS",
+                        pd.DataFrame({"fmri_n_voxels": [1000, 1000, 1000, 1000]}),
+                    ),
+                    (
+                        pd.Series([2.0, 4.0, 12.0, 14.0]),
+                        "SIIPS1",
+                        pd.DataFrame({"fmri_n_voxels": [800, 800, 800, 800]}),
+                    ),
+                ],
+            ),
         ):
             out_path = prepare_primary_targets(
                 subjects=["0001"],
@@ -357,6 +383,108 @@ def test_prepare_primary_targets_records_nuisance_columns_without_residual_targe
         assert "NPS_nuisance_residual" not in frame.columns
         assert "SIIPS1_nuisance_residual" not in frame.columns
         assert list(frame["pain_binary_coded"]) == [0, 0, 1, 1]
+
+
+def test_prepare_primary_targets_expands_categorical_temperature_nuisance() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        cfg["study1"]["targets"]["nuisance_regression"] = {
+            "enabled": True,
+            "continuous_columns": ["block", "onset"],
+            "categorical_columns": ["stimulus_temp"],
+        }
+
+        events = pd.DataFrame(
+            {
+                "run_id": [1, 1, 1, 1],
+                "trial_number": [1, 2, 3, 4],
+                "stimulus_temp": [44.0, 46.0, 44.0, 47.0],
+                "onset": [10.0, 20.0, 30.0, 40.0],
+                "duration": [0.5, 0.5, 0.5, 0.5],
+            }
+        )
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject",
+                side_effect=[
+                    (
+                        pd.Series([1.0, 3.0, 11.0, 13.0]),
+                        "NPS",
+                        pd.DataFrame({"fmri_n_voxels": [1000, 1000, 1000, 1000]}),
+                    ),
+                    (
+                        pd.Series([2.0, 4.0, 12.0, 14.0]),
+                        "SIIPS1",
+                        pd.DataFrame({"fmri_n_voxels": [800, 800, 800, 800]}),
+                    ),
+                ],
+            ),
+        ):
+            out_path = prepare_primary_targets(
+                subjects=["0001"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+
+        frame = pd.read_parquet(out_path)
+        assert list(frame["stimulus_temp_level_46_0"]) == [0.0, 1.0, 0.0, 0.0]
+        assert list(frame["stimulus_temp_level_47_0"]) == [0.0, 0.0, 0.0, 1.0]
+        assert "stimulus_temp_level_44_0" not in frame.columns
+        assert "NPS_nuisance_residual" not in frame.columns
+
+
+def test_prepare_primary_targets_rejects_variable_signature_voxel_counts() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=_events_frame(),
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject",
+                side_effect=[
+                    (
+                        pd.Series([1.0, 3.0]),
+                        "NPS",
+                        pd.DataFrame({"fmri_n_voxels": [1000, 1001]}),
+                    ),
+                    (
+                        pd.Series([2.0, 4.0]),
+                        "SIIPS1",
+                        pd.DataFrame({"fmri_n_voxels": [800, 800]}),
+                    ),
+                ],
+            ),
+        ):
+            with pytest.raises(ValueError, match="identical voxel count"):
+                prepare_primary_targets(
+                    subjects=["0001"],
+                    task="pain",
+                    config=cfg,
+                    logger=logging.getLogger(__name__),
+                )
 
 
 def test_build_trial_signature_config_propagates_scope_fields() -> None:
