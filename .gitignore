@@ -76,9 +76,6 @@ docs/superpowers/
 docs/_build/
 docs/plans/
 
-### Studies (private package workspace) ###
-studies/
-
 ### IDEs & OS ###
 .vscode/
 .idea/
