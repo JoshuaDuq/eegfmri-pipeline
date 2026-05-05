@@ -23,7 +23,16 @@ Bad channels were identified using PyPREP (Bigdely-Shamlo et al., 2015) with dev
 
 Independent component analysis was performed using the extended infomax algorithm (0.99 variance explained). ICA was fitted on 1.0 Hz high-pass filtered epochs to improve decomposition stability. Component classification used ICLabel (Pion-Tonachini et al., 2019); components were rejected if their predicted probability exceeded 0.8 for any non-brain category other than "other." Because ICLabel was trained on standard (non-fMRI) EEG, retained components were additionally inspected for spectral peaks at the volume-repetition frequency, cardiac phase-locking, and spatial topographies consistent with known artifact patterns.
 
-Preprocessing was performed in the following sequence: 1) preliminary epochs were created on a 1.0 Hz high-pass-filtered copy; 2) ICA was fitted on these filtered epochs; 3) ICA spatial weights were applied to the 0.1–100 Hz continuous analysis data; 4) final analysis epochs were extracted from $-7.0$ to $15.0$ s relative to stimulus onset; 5) autoreject (Jas et al., 2017) was applied in local mode with candidate interpolation counts of $\{4, 8, 16\}$ for trial rejection. Electrode locations were digitized using the EasyCap M1 montage and co-registered to individual MRI. Subject-level unsupervised EEG preprocessing (bad-channel detection, ICA component classification, autoreject thresholds) was performed independently within each subject before cross-validation and is therefore not target-leaking, but not strictly non-transductive with respect to the held-out EEG distribution.
+Preprocessing was performed in the following sequence:
+
+1. Preliminary epochs were created on a 1.0 Hz high-pass-filtered copy.
+2. ICA was fitted on these filtered epochs.
+3. ICA spatial weights were applied to the 0.1–100 Hz continuous analysis data.
+4. Final analysis epochs were extracted from $-7.0$ to $15.0$ s relative to stimulus onset.
+5. Autoreject (Jas et al., 2017) was applied in local mode with candidate interpolation counts
+   of $\{4, 8, 16\}$ for trial rejection.
+
+Electrode locations were digitized using the EasyCap M1 montage and co-registered to individual MRI. Subject-level unsupervised EEG preprocessing (bad-channel detection, ICA component classification, autoreject thresholds) was performed independently within each subject before cross-validation and is therefore not target-leaking, but not strictly non-transductive with respect to the held-out EEG distribution.
 
 ## fMRI Signature Target Construction
 Trial-by-trial fMRI effect estimates were extracted using the Least-Squares Separate (LSS) approach, restricted to thermal plateau trials. The LSS event regressor onset was defined at the beginning of the thermal plateau, with duration equal to the plateau hold time. Ramp-up, ramp-down, and non-stimulation trial types were modeled as separate nuisance regressors. This design aligns the fMRI event with the protocol-defined plateau phase used for EEG feature extraction, though the resulting LSS beta is an HRF-convolved event-amplitude estimate rather than a millisecond-scale neural measure.
@@ -53,15 +62,31 @@ To ensure the Level 2 estimand remains strictly identical across all LOSO folds,
 
 Within each level, nuisance coefficients were estimated exclusively on training subjects via SVD-based least squares:
 
-$$\hat{\gamma} = \underset{\gamma}{\mathrm{argmin}} \; \| y_{train} - Z_{train}\gamma \|_2^2$$
+$$\hat{\gamma} = \underset{\gamma}{\mathrm{argmin}} \; \| y_{\mathrm{train}} - Z_{\mathrm{train}}\gamma \|_2^2$$
 
 Residualized targets for both training and test sets were computed by applying training-derived coefficients:
 
-$$y_{train}^{resid} = y_{train} - Z_{train}\hat{\gamma}, \qquad y_{test}^{resid} = y_{test} - Z_{test}\hat{\gamma}$$
+$$y_{\mathrm{train}}^{\mathrm{resid}} = y_{\mathrm{train}} - Z_{\mathrm{train}}\hat{\gamma}, \qquad y_{\mathrm{test}}^{\mathrm{resid}} = y_{\mathrm{test}} - Z_{\mathrm{test}}\hat{\gamma}$$
 
 To strictly evaluate whether EEG provides incremental predictive value beyond nuisance structure, the primary incremental prediction analysis predicted raw NPS/SIIPS1 using a nuisance-only model versus a combined nuisance + EEG feature model. The nuisance-only model used unpenalized ordinary least squares regression. The primary nuisance-only model used the same rank-stable nuisance design in every fold, with continuous temperature and only globally estimable categorical variables. If the nuisance-only design became rank-deficient despite this, SVD-based least squares was used, but the estimand remained fixed.
 
-For the combined model, core nuisance regressors were not penalized. In each outer fold, the nuisance model was fitted on untransformed raw training targets, yielding training and held-out nuisance predictions $\hat{y}_{Z,train}$ and $\hat{y}_{Z,test}$. Training residuals were then computed as $r_{train} = y_{train} - \hat{y}_{Z,train}$. The EEG model was trained only to predict this residual component from EEG features. When target transformation was enabled, the Yeo-Johnson transformation was fitted on $r_{train}$ only; EEG-model predictions were inverse-transformed back to raw residual units before being added to the nuisance prediction. The combined held-out prediction was therefore $\hat{y}_{test} = \hat{y}_{Z,test} + \hat{r}_{EEG,test}$ on the original target scale. Both models used the exact same outer folds and scoring metrics. The primary test statistic was out-of-sample $\Delta R^2_{\text{LOSO}}$, computed subject-wise and then averaged:
+For the combined model, core nuisance regressors were not penalized. In each outer fold:
+
+1. The nuisance model was fitted on untransformed raw training targets.
+2. Training and held-out nuisance predictions were computed as
+   $\hat{y}_{Z,\mathrm{train}}$ and $\hat{y}_{Z,\mathrm{test}}$.
+3. Training residuals were computed as
+   $r_{\mathrm{train}} = y_{\mathrm{train}} - \hat{y}_{Z,\mathrm{train}}$.
+4. The EEG model was trained only to predict this residual component from EEG features.
+5. When target transformation was enabled, the Yeo-Johnson transformation was fitted on
+   $r_{\mathrm{train}}$ only. EEG-model predictions were inverse-transformed back to raw
+   residual units before being added to the nuisance prediction.
+
+The combined held-out prediction was therefore:
+
+$$\hat{y}_{\mathrm{test}} = \hat{y}_{Z,\mathrm{test}} + \hat{r}_{\mathrm{EEG},\mathrm{test}}$$
+
+Both models used the exact same outer folds and scoring metrics. The primary test statistic was out-of-sample $\Delta R^2_{\text{LOSO}}$, computed subject-wise and then averaged:
 
 $$\Delta R^2_{\text{LOSO}} = R^2_{\text{nuisance+EEG}} - R^2_{\text{nuisance-only}}$$
 
@@ -79,7 +104,7 @@ A nested LOSO cross-validation framework ensured true out-of-sample generalizati
 
 Preprocessing was applied independently within each outer training fold. Feature statistics (medians, means, standard deviations, variance thresholds) were estimated from training subjects only. Missing trials were imputed using training-cohort medians. Features were standardized to zero mean and unit variance; constant features were removed.
 
-The Yeo-Johnson power transformation was applied only to the target component actually learned by the penalized EEG model. In the primary incremental analysis, this component was the training-fold nuisance residual $r_{train}$; the nuisance-only prediction remained on the raw target scale. In secondary residualized-target models, targets were residualized first, and then the transformation was fitted and applied to the training residual targets within the fold. Predictions were inverse-transformed before reporting primary metrics. Both the numerator and denominator of the out-of-sample $R^2$ were computed on the original (untransformed) target scale after inverse-transforming predictions and, for the primary incremental analysis, after adding back the held-out nuisance prediction. This ensured that the training-fold mean baseline ($\bar{y}_{train,f}$), nuisance-only predictions, combined predictions, and prediction residuals were all in commensurate units. Sensitivity analyses without target transformation were reported to evaluate transformation stability. The ElasticNet objective was:
+The Yeo-Johnson power transformation was applied only to the target component actually learned by the penalized EEG model. In the primary incremental analysis, this component was the training-fold nuisance residual $r_{\mathrm{train}}$; the nuisance-only prediction remained on the raw target scale. In secondary residualized-target models, targets were residualized first, and then the transformation was fitted and applied to the training residual targets within the fold. Predictions were inverse-transformed before reporting primary metrics. Both the numerator and denominator of the out-of-sample $R^2$ were computed on the original (untransformed) target scale after inverse-transforming predictions and, for the primary incremental analysis, after adding back the held-out nuisance prediction. This ensured that the training-fold mean baseline ($\bar{y}_{\mathrm{train},f}$), nuisance-only predictions, combined predictions, and prediction residuals were all in commensurate units. Sensitivity analyses without target transformation were reported to evaluate transformation stability. The ElasticNet objective was:
 
 $$\min_{\beta_0,\beta} \frac{1}{2n} \left\| \tilde{y} - \beta_0 - X\beta \right\|_2^2 + \alpha \rho \|\beta\|_1 + \frac{\alpha(1-\rho)}{2}\|\beta\|_2^2$$
 
@@ -98,11 +123,11 @@ $$\tilde{X}_{n,b,c,t} = \frac{X_{n,b,c,t} - \mu_{b,c}}{\sigma_{b,c}^{*}}$$
 
 A custom convolutional neural network was structured to learn band-specific spatial filters before temporal integration. The depthwise spatial convolution used a kernel spanning all channels with independent filter groups per band:
 
-$$H^{(1)}_{n,b,f,t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{c} W^{spat}_{b,f,c}\tilde{X}_{n,b,c,t}\right)\right)$$
+$$H^{(1)}_{n,b,f,t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{c} W^{\mathrm{spat}}_{b,f,c}\tilde{X}_{n,b,c,t}\right)\right)$$
 
 A temporal convolution (kernel length 15, 8 filters) then integrated across bands and time:
 
-$$H^{(2)}_{n,f',t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{b,f,u} W^{temp}_{f',b,f,u} H^{(1)}_{n,b,f,t+u}\right)\right)$$
+$$H^{(2)}_{n,f^{\prime},t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{b,f,u} W^{\mathrm{temp}}_{f^{\prime},b,f,u} H^{(1)}_{n,b,f,t+u}\right)\right)$$
 
 The latent representation was downsampled via average pooling (factor 8) and passed through a dropout-regularized ($p = 0.25$) fully connected regression head:
 
@@ -115,11 +140,23 @@ Optimization used AdamW (learning rate $= 0.001$, weight decay $= 0.0001$) with 
 ## Evaluation Metrics and Statistical Inference
 Primary metrics were computed on the active target scale after inverse-transforming predictions. The coefficient of determination used the training-fold target mean as the zero-skill baseline:
 
-$$R_f^2 = 1 - \frac{\sum_{i \in f}(y_i - \hat{y}_i)^2}{\sum_{i \in f}(y_i - \bar{y}_{train,f})^2}$$
+$$R_f^2 = 1 - \frac{\sum_{i \in f}(y_i - \hat{y}_i)^2}{\sum_{i \in f}(y_i - \bar{y}_{\mathrm{train},f})^2}$$
 
 The primary confirmatory statistic was the subject-weighted mean $\Delta R^2_{\text{LOSO}}$, defined explicitly as $\Delta R^2_{\text{LOSO}} = \frac{1}{S}\sum_{s=1}^{S} \Delta R_s^2$. Mean $R^2$ for the nuisance+EEG model and pooled trial-wise $R^2$ were reported descriptively. A confirmatory cell was positive only when $\Delta R^2_{\text{LOSO}} > 0$ and its permutation $p$-value survived Holm correction. Subject-wise metrics are reported with 95% BCa bootstrap confidence intervals (10,000 resamples). Group-level intervals resampled subjects; within-subject intervals used run/block-level resampling or circular block bootstrap.
 
-Statistical inference for the primary incremental prediction analysis used nonparametric permutation testing (5,000 permutations). To test whether EEG adds predictive value beyond nuisance structure without destroying legitimate nuisance relationships, the following sequence was used for each outer fold and permutation: 1) the nuisance-only model was fitted on the unpermuted training data; 2) nuisance predictions and residuals were computed for both training and held-out subjects using the training-derived nuisance coefficients; 3) the residual component was circularly shifted relative to EEG within each run separately for training and held-out subjects (minimum shift distance of 5 trials); 4) permuted raw targets were reconstructed for both training and held-out subjects as the unshifted nuisance prediction plus the shifted residual; 5) nuisance-only and nuisance+EEG models were refit on the permuted training target and scored against the permuted held-out target. The $R^2$ denominator used the permuted training-target mean for that fold, matching the observed-analysis zero-skill baseline. This approximately preserves within-run temporal autocorrelation (Winkler et al., 2014). To address potential run-level confounding (e.g., sensitization, scanner drift), stricter sensitivity nulls were prespecified, including block-label shuffling and run-level permutations. Additionally, a strict sensitivity test evaluated whether positive prediction survived when subject and run means were explicitly removed from both EEG features and targets prior to permutation. Within-block random shuffling was evaluated as a sensitivity analysis.
+Statistical inference for the primary incremental prediction analysis used nonparametric permutation testing (5,000 permutations). To test whether EEG adds predictive value beyond nuisance structure without destroying legitimate nuisance relationships, the following sequence was used for each outer fold and permutation:
+
+1. The nuisance-only model was fitted on the unpermuted training data.
+2. Nuisance predictions and residuals were computed for both training and held-out subjects
+   using the training-derived nuisance coefficients.
+3. The residual component was circularly shifted relative to EEG within each run separately
+   for training and held-out subjects (minimum shift distance of 5 trials).
+4. Permuted raw targets were reconstructed for both training and held-out subjects as the
+   unshifted nuisance prediction plus the shifted residual.
+5. Nuisance-only and nuisance+EEG models were refit on the permuted training target and
+   scored against the permuted held-out target.
+
+The $R^2$ denominator used the permuted training-target mean for that fold, matching the observed-analysis zero-skill baseline. This approximately preserves within-run temporal autocorrelation (Winkler et al., 2014). To address potential run-level confounding (e.g., sensitization, scanner drift), stricter sensitivity nulls were prespecified, including block-label shuffling and run-level permutations. Additionally, a strict sensitivity test evaluated whether positive prediction survived when subject and run means were explicitly removed from both EEG features and targets prior to permutation. Within-block random shuffling was evaluated as a sensitivity analysis.
 
 The Holm-corrected confirmatory family comprised 2 targets (NPS, SIIPS1) $\times$ 2 models (ElasticNet, Ridge) $\times$ 3 frequency presets (alpha, beta, alpha+beta), all evaluated using the primary $\Delta R^2$ statistic. The secondary convergence family comprised the same 2 targets $\times$ 2 models $\times$ 3 frequency presets, evaluated using residualized-target Level 2 $R^2$, and Holm-corrected separately from the primary $\Delta R^2$ family. The Study 2 (Source Interpretation) gate is not selected from the Study 1 significant cells; it is tied strictly to the predesignated NPS ElasticNet alpha+beta cell regardless of whether other Study 1 cells perform better. Gamma, unadjusted (Level 1), subjective-rating residualization (Level 3), Random Forest, deep regression, and alternative designs were reported outside this family.
 
