@@ -60,6 +60,77 @@ class VarianceThreshold(BaseEstimator, TransformerMixin):
         return self._vt.get_feature_names_out(input_features=input_features)
 
 
+class MissingnessThreshold(BaseEstimator, TransformerMixin):
+    """Drop features with missingness exceeding a given threshold.
+
+    Raises ValueError if subject groups are provided and any retained
+    subject exceeds the maximum missingness limit on retained features.
+    """
+
+    def __init__(
+        self,
+        max_feature_missingness: float = 0.05,
+        max_subject_missingness: float = 0.10,
+    ):
+        self.max_feature_missingness = float(max_feature_missingness)
+        self.max_subject_missingness = float(max_subject_missingness)
+
+    def fit(self, X, y=None, groups=None):
+        X_arr = np.asarray(X, dtype=float)
+        n_samples, _n_features = X_arr.shape
+
+        if n_samples == 0:
+            self.support_mask_ = np.ones(X_arr.shape[1], dtype=bool)
+            return self
+
+        # 1. Feature missingness
+        missing_rates = np.isnan(X_arr).sum(axis=0) / n_samples
+        self.support_mask_ = missing_rates <= self.max_feature_missingness
+
+        # 2. Subject missingness
+        if groups is not None:
+            X_retained = X_arr[:, self.support_mask_]
+            unique_groups = np.unique(groups)
+            for group in unique_groups:
+                group_mask = groups == group
+                if not np.any(group_mask):
+                    continue
+                group_missing = np.isnan(X_retained[group_mask]).sum() / (group_mask.sum() * X_retained.shape[1])
+                if group_missing > self.max_subject_missingness:
+                    raise ValueError(
+                        f"Missingness limit exceeded: subject {group} has {group_missing:.1%} "
+                        f"missingness on retained features, exceeding {self.max_subject_missingness:.1%}."
+                    )
+
+        if not np.any(self.support_mask_):
+            raise ValueError(
+                f"All features dropped due to exceeding {self.max_feature_missingness:.1%} "
+                "missingness limit."
+            )
+
+        return self
+
+    def transform(self, X):
+        X_arr = np.asarray(X, dtype=float)
+        if not hasattr(self, "support_mask_"):
+            raise RuntimeError("MissingnessThreshold is not fitted yet.")
+        return X_arr[:, self.support_mask_]
+
+    def get_support(self, indices: bool = False):
+        if not hasattr(self, "support_mask_"):
+            raise RuntimeError("MissingnessThreshold is not fitted yet.")
+        if indices:
+            return np.flatnonzero(self.support_mask_)
+        return self.support_mask_
+
+    def get_feature_names_out(self, input_features: Optional[Sequence[str]] = None) -> List[str]:
+        if input_features is None:
+            raise ValueError("input_features is required for get_feature_names_out.")
+        support = self.get_support(indices=True)
+        input_list = list(input_features)
+        return [input_list[i] for i in support]
+
+
 class ReplaceInfWithNaN(BaseEstimator, TransformerMixin):
     """Replace +/-inf with NaN so imputers can handle them."""
 
@@ -276,6 +347,13 @@ def build_base_preprocessing_steps(
 
     feature_steps.extend(
         [
+            (
+                "missingness",
+                MissingnessThreshold(
+                    max_feature_missingness=float(cfg.get("max_feature_missingness", 0.05)),
+                    max_subject_missingness=float(cfg.get("max_subject_missingness", 0.10)),
+                ),
+            ),
             ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
             ("var", VarianceThreshold(threshold=cfg["variance_threshold"])),
         ]
@@ -374,6 +452,7 @@ def transform_feature_names_through_steps(
 __all__ = [
     "ReplaceInfWithNaN",
     "DropAllNaNColumns",
+    "MissingnessThreshold",
     "VarianceThreshold",
     "build_base_preprocessing_steps",
     "transform_feature_names_through_steps",

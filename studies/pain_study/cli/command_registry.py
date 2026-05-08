@@ -3,7 +3,7 @@ from __future__ import annotations
 
 def coupling_command():
     from eeg_pipeline.cli.commands import Command
-    from studies.pain_study.study2.cli.coupling import run_coupling, setup_coupling
+    from studies.pain_study.eeg_coupling.cli.coupling import run_coupling, setup_coupling
 
     return Command(
         name="coupling",

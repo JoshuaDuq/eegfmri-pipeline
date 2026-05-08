@@ -2,7 +2,9 @@
 
 Scripts specific to the simultaneous EEG–fMRI pain paradigm. These raw-conversion and event-merging utilities are **not integrated into the TUI or `eeg-pipeline` CLI** and must be run manually before downstream analysis.
 
-These scripts cover raw conversion and event merging only. The study coupling analysis itself is integrated in the main CLI as `eeg-pipeline coupling compute`.
+These scripts cover raw conversion and event merging only. The EEG coupling workflow lives under
+`studies/pain_study/eeg_coupling/` and is integrated in the main CLI as
+`eeg-pipeline coupling compute`.
 
 ## Required Workflow Order
 

@@ -11,7 +11,7 @@ LEVEL2_CONTINUOUS_COLUMNS = [
     "trial_index",
     "framewise_displacement",
     "std_dvars",
-    "peripheral_low_gamma_power",
+    "fp1_fp2_high_frequency_power",
     "residual_ecg_coupling",
 ]
 LEVEL2_CATEGORICAL_COLUMNS = ["stimulus_temp", "selected_surface"]
@@ -40,6 +40,15 @@ def test_study1_default_subject_minimum_supports_inner_group_kfold() -> None:
     assert min_subjects >= inner_splits + 1
 
 
+def test_study1_default_circular_shift_structure_rules_match_readme() -> None:
+    config = load_study1_config()
+    circular_shift = config["study1"]["feature_benchmark"]["circular_shift"]
+
+    assert circular_shift["min_valid_blocks_per_subject"] == 3
+    assert circular_shift["min_retained_trials_per_subject"] == 25
+    assert config["study1"]["feature_benchmark"]["max_invalid_permutation_fraction"] == 0.20
+
+
 def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
     config = ConfigDict(load_study1_config())
     config["paths"] = {"deriv_root": str(tmp_path / "derivatives")}
@@ -55,7 +64,7 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
             "trial_index": [1, 2],
             "framewise_displacement": [0.1, 0.2],
             "std_dvars": [0.5, 0.6],
-            "peripheral_low_gamma_power": [1.1, 1.2],
+            "fp1_fp2_high_frequency_power": [1.1, 1.2],
             "residual_ecg_coupling": [0.01, 0.02],
             "stimulus_temp": [44.0, 46.0],
             "selected_surface": [1.0, 2.0],
@@ -77,4 +86,32 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
     assert (
         get_config_value(feature_config, "machine_learning.target_residualization.columns", None)
         == LEVEL2_COLUMNS
+    )
+    assert (
+        get_config_value(feature_config, "machine_learning.cv.permutation_scheme", None)
+        == "circular_shift_within_run"
+    )
+    assert (
+        get_config_value(
+            feature_config,
+            "machine_learning.cv.circular_shift.min_valid_blocks_per_subject",
+            None,
+        )
+        == 3
+    )
+    assert (
+        get_config_value(
+            feature_config,
+            "machine_learning.cv.circular_shift.min_retained_trials_per_subject",
+            None,
+        )
+        == 25
+    )
+    assert (
+        get_config_value(
+            feature_config,
+            "machine_learning.cv.max_invalid_permutation_fraction",
+            None,
+        )
+        == 0.20
     )

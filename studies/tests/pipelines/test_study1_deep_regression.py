@@ -417,7 +417,7 @@ def test_build_band_tensor_crops_to_configured_deep_time_window(tmp_path) -> Non
     assert tensor.shape == (1, 1, 1, 4)
 
 
-def test_build_band_tensor_filters_only_configured_time_window(tmp_path) -> None:
+def test_build_band_tensor_filters_before_cropping_to_configured_time_window(tmp_path) -> None:
     from studies.pain_study.study1.deep_regression.bands import build_band_tensor
 
     info = mne.create_info(["Cz"], sfreq=10.0, ch_types="eeg")
@@ -444,7 +444,7 @@ def test_build_band_tensor_filters_only_configured_time_window(tmp_path) -> None
             logger=logging.getLogger(__name__),
         )
 
-    assert filtered_time_counts == [4]
+    assert filtered_time_counts == [10]
 
 
 def test_run_deep_regression_writes_one_output_per_target_and_preset(tmp_path) -> None:

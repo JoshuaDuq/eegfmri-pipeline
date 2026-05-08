@@ -1,6 +1,6 @@
 study1:
   cohort:
-    min_subjects: 20
+    min_subjects: 30
   features:
     exploratory_feature_families:
       - "spectral"
@@ -50,7 +50,7 @@ study1:
         - "trial_index"
         - "framewise_displacement"
         - "std_dvars"
-        - "peripheral_low_gamma_power"
+        - "fp1_fp2_high_frequency_power"
         - "residual_ecg_coupling"
       categorical_columns:
         - "stimulus_temp"
@@ -61,6 +61,10 @@ study1:
     outer_jobs: 1
     feature_harmonization: "intersection"
     permutation_scheme: "circular_shift_within_run"
+    max_invalid_permutation_fraction: 0.20
+    circular_shift:
+      min_valid_blocks_per_subject: 3
+      min_retained_trials_per_subject: 25
   deep_regression:
     time_window: [3.0, 10.5]
     n_epochs: 25

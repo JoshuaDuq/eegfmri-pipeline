@@ -39,9 +39,20 @@ def _write_feature_summary(root: Path, target: str, feature_spec: str) -> None:
     )
     feature_summary.mkdir(parents=True, exist_ok=True)
     payload = {
-        "elasticnet": {"mean_r2": 0.4, "mean_mae": 0.2, "n_folds": 4},
-        "ridge": {"mean_r2": 0.3, "mean_mae": 0.3, "n_folds": 4},
-        "rf": {"mean_r2": 0.2, "mean_mae": 0.4, "n_folds": 4},
+        "elasticnet": {
+            "mean_r2": 0.4,
+            "mean_delta_r2": 0.12,
+            "p_value_delta_r2": 0.01,
+            "mean_mae": 0.2,
+            "n_folds": 4,
+        },
+        "ridge": {
+            "mean_r2": 0.3,
+            "mean_delta_r2": 0.08,
+            "p_value_delta_r2": 0.03,
+            "mean_mae": 0.3,
+            "n_folds": 4,
+        },
     }
     with open(feature_summary / "model_comparison_summary.json", "w", encoding="utf-8") as handle:
         json.dump(payload, handle)
@@ -89,10 +100,20 @@ def test_write_study1_report_aggregates_feature_and_deep_summaries(tmp_path) -> 
     report_path = write_study1_report(task="pain", config=cfg)
     report = pd.read_csv(report_path, sep="\t")
 
-    assert len(report) == 25
+    assert len(report) == 19
     assert set(report["lane"]) == {"feature_benchmark", "deep_regression"}
     assert set(report["analysis_partition"]) == {"primary", "exploratory"}
     assert set(report["feature_spec"]) == {"alpha", "beta", "alpha_beta", "spectral"}
+    assert "mean_delta_r2" in report.columns
+    assert "p_value_delta_r2" in report.columns
+    primary_feature_models = set(
+        report.loc[
+            (report["lane"] == "feature_benchmark")
+            & (report["analysis_partition"] == "primary"),
+            "model",
+        ]
+    )
+    assert primary_feature_models == {"elasticnet", "ridge"}
 
 
 def test_write_study1_report_rejects_incomplete_primary_outputs(tmp_path) -> None:

@@ -4,7 +4,7 @@ import argparse
 
 from eeg_pipeline.utils.config.loader import ConfigDict
 from studies.pain_study.cli.command_registry import coupling_command
-from studies.pain_study.study2.cli.coupling import run_coupling, setup_coupling
+from studies.pain_study.eeg_coupling.cli.coupling import run_coupling, setup_coupling
 
 
 class _CaptureCouplingPipeline:
@@ -45,7 +45,7 @@ eeg_bold_coupling:
     )
 
     monkeypatch.setattr(
-        "studies.pain_study.study2.cli.coupling.EEGBOLDCouplingPipeline",
+        "studies.pain_study.eeg_coupling.cli.coupling.EEGBOLDCouplingPipeline",
         _CaptureCouplingPipeline,
     )
 

@@ -1,0 +1,123 @@
+study2:
+  confirmatory:
+    study1_cell:
+      target: "NPS"
+      model: "elasticnet"
+      feature_family: "power"
+      frequency_preset: "alpha_beta"
+      feature_resolution: "individual_channel"
+      residualization_level: 2
+      contribution_bands:
+        - "alpha"
+        - "beta"
+    study1_gates:
+      max_holm_p: 0.05
+      min_delta_r2: 0.02
+      min_delta_r2_lower_ci: 0.005
+      min_level2_delta_r2: 0.005
+      require_positive_within_subject_delta_r2: true
+      require_temporal_negative_controls: true
+      require_artifact_censoring_robustness: true
+  contributions:
+    subject_column: "subject_id"
+    trial_column: "trial_id"
+    alpha_column: "eta_alpha"
+    beta_column: "eta_beta"
+    alpha_standardized_column: "eta_alpha_z"
+    beta_standardized_column: "eta_beta_z"
+  source_stage:
+    min_source_valid_subjects: 30
+    min_feasibility_subjects: 20
+    min_valid_blocks_per_subject: 3
+    min_retained_trials_per_subject: 25
+    min_residual_degrees_of_freedom: 15
+    max_condition_number: 100
+    max_opposite_band_vif: 5
+    max_collinearity_failure_fraction: 0.20
+    continuous_columns:
+      - "onset"
+      - "trial_index"
+      - "framewise_displacement"
+      - "std_dvars"
+      - "fp1_fp2_high_frequency_power"
+      - "residual_ecg_coupling"
+    categorical_columns:
+      - "block"
+      - "stimulus_temp"
+      - "selected_surface"
+  source_modeling:
+    primary_inverse_method: "sLORETA"
+    rank_excluded_channels:
+      - "Fp1"
+      - "Fp2"
+    noise_covariance_baseline_s:
+      - -5.0
+      - -0.01
+    immediate_baseline_s:
+      - -0.2
+      - -0.01
+    early_precue_baseline_s:
+      - -7.0
+      - -5.5
+    active_plateau_window_s:
+      - 3.0
+      - 10.5
+    regularization:
+      snr: 3.0
+      lambda2: 0.1111111111111111
+      loose_orientation: 0.2
+      depth_weighting: 0.8
+    sensitivity_snr:
+      - 1.0
+      - 5.0
+  source_model_qc:
+    min_valid_eeg_channel_location_fraction: 0.90
+    max_mean_coregistration_error_mm: 5.0
+    max_coregistration_error_mm: 10.0
+  artifact_controls:
+    sensor_template_abs_r_threshold: 0.80
+    source_artifact_map_abs_r_threshold: 0.50
+    holm_alpha: 0.05
+  directional_consistency:
+    min_true_target_spatial_r: 0.20
+    min_cluster_same_sign_fraction: 0.60
+  source_inference:
+    calibration_null_fwer_interval:
+      - 0.025
+      - 0.075
+    max_r015_ci_half_width: 0.10
+    min_r015_cluster_recovery: 0.80
+    primary_cluster_forming_p: 0.01
+    sensitivity_cluster_forming_p:
+      - 0.001
+      - 0.05
+  permutations:
+    target_retrained_valid_draws: 1000
+    extended_valid_draws: 5000
+    full_selection_sensitivity_draws: 250
+    max_invalid_draw_fraction: 0.20
+    compute_budget_hours: 72
+    extension_cluster_p_threshold: 0.10
+    extension_null_threshold_margin: 0.10
+  spatial_comparison:
+    min_meaningful_eeg_fmri_abs_r: 0.15
+    brainsmash_surrogates: 5000
+    spin_rotations: 10000
+  criterion_overlap:
+    min_rated_trials: 25
+    min_permutation_valid_blocks: 3
+    permutations: 5000
+    holm_alpha: 0.05
+    min_adjusted_pain_class_variance_fraction: 0.10
+    min_adjusted_pain_class_subjects: 30
+  reporting:
+    bca_bootstrap_resamples: 10000
+  robustness:
+    framewise_displacement_mm: 0.5
+    dvars_robust_z: 3.0
+    fp1_fp2_artifact_robust_z: 3.0
+    cardiac_phase_locking_percentile: 95
+    scanner_residual_robust_z: 3.0
+    min_unthresholded_spatial_r: 0.50
+    min_cluster_dice: 0.40
+    max_centroid_displacement_mm: 15.0

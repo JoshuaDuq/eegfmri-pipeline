@@ -15,7 +15,8 @@ namespaces = true
 [tool.setuptools.package-data]
 "studies.pain_study" = ["scripts/config/*.yaml"]
 "studies.pain_study.study1" = ["config/*.yaml", "README.md"]
-"studies.pain_study.study2" = [
+"studies.pain_study.study2" = ["config/*.yaml", "README.md"]
+"studies.pain_study.eeg_coupling" = [
     "analysis/*.R",
     "config/*.yaml",
     "config/**/*.json",

@@ -32,9 +32,11 @@ The secondary objective is to test whether significant raw-target prediction con
 stimulus- and acquisition-controlled residualized-target analysis. Unadjusted EEG-only prediction is
 descriptive. Subjective-rating residualization is a construct-attenuation sensitivity analysis.
 
-Study 3 source interpretation is tied a priori to the NPS ElasticNet alpha+beta individual-channel
-spectral-power cell. SIIPS1 remains a co-primary prediction target, while ROI-level and
-global-average feature resolutions remain spatial-resolution sensitivities.
+Study 2 is the source-interpretation follow-up to Study 1 and is tied a priori to the NPS
+ElasticNet alpha+beta individual-channel spectral-power cell. The separate EEG coupling workflow is
+kept outside the numbered study sequence under `studies/pain_study/eeg_coupling/`. SIIPS1 remains a
+co-primary prediction target, while ROI-level and global-average feature resolutions remain
+spatial-resolution sensitivities.
 
 ## 3. Hypotheses and Confirmatory Estimands
 
@@ -48,7 +50,7 @@ The primary confirmatory estimand is the subject-weighted mean incremental raw-t
 $$\Delta R^2_{\text{LOSO}} = \frac{1}{S}\sum_{s=1}^{S} \Delta R_s^2.$$
 
 Confirmatory EEG prediction requires positive $\Delta R^2_{\text{LOSO}}$ and Holm-corrected
-permutation significance. Confirmatory Study 3 source interpretation additionally requires the
+permutation significance. Confirmatory Study 2 source interpretation additionally requires the
 predesignated NPS ElasticNet alpha+beta individual-channel spectral-power cell to pass the
 practical-effect gate:
 $\Delta R^2_{\text{LOSO}} \geq 0.02$ with a one-sided 95% lower confidence bound above 0.005.
@@ -58,13 +60,13 @@ The confirmatory family comprises 2 targets (NPS, SIIPS1) × 2 linear models (El
 × 3 frequency presets (alpha, beta, alpha+beta), evaluated with the primary
 $\Delta R^2_{\text{LOSO}}$ statistic and the individual-channel spectral-power feature matrix. The
 secondary convergence family uses the same cells to test residualized-target Level 2
-$\Delta R^2_{\text{LOSO}}$ with separate Holm correction. The downstream Study 3 Level 2 convergence
+$\Delta R^2_{\text{LOSO}}$ with separate Holm correction. The downstream Study 2 Level 2 convergence
 gate is a minimal-effect gate: the predesignated NPS ElasticNet alpha+beta individual-channel cell
-must have Level 2 $\Delta R^2_{\text{LOSO}} \geq 0.005$. Because Study 3 source maps use
+must have Level 2 $\Delta R^2_{\text{LOSO}} \geq 0.005$. Because Study 2 source maps use
 within-subject standardized contribution scores, the same cell must also have positive
 within-subject-centered diagnostic $\Delta R^2_{\text{LOSO}}$. Holm-corrected Level 2 significance is
 reported as stronger stimulus- and acquisition-controlled convergence but is not required for
-Study 3 eligibility.
+Study 2 eligibility.
 ROI-level and global-average feature matrices are spatial-resolution sensitivity analyses with
 separate correction. Gamma, unadjusted Level 1 prediction, subjective-rating residualization, Random
 Forest, deep regression, and alternative designs remain outside the confirmatory family.
@@ -106,7 +108,7 @@ If more than 10% of recruited participants are lost, the study is labeled attrit
 outcome inspection. Confirmatory Study 1 interpretation then requires at least 30 analyzable
 subjects, a retained-trial distribution compatible with the permutation plan, positive primary
 $\Delta R^2_{\text{LOSO}}$ with Holm-corrected significance, and the Section 9.2 precision
-simulation. The practical-effect gate applies to downstream Study 3 source interpretation for the
+simulation. The practical-effect gate applies to downstream Study 2 source interpretation for the
 predesignated NPS ElasticNet alpha+beta individual-channel cell.
 
 ### 4.2 Thermal Pain Protocol
@@ -242,7 +244,7 @@ The preprocessing sequence is fixed in this order.
    {4, 8, 16} for trial rejection.
 
 Subject-specific electrode positions are digitized with EasyCap M1 channel labels and co-registered
-to individual MRI. Confirmatory Study 3 source interpretation requires subject-specific digitization
+to individual MRI. Confirmatory Study 2 source interpretation requires subject-specific digitization
 passing quality control. Subject-level unsupervised EEG preprocessing is performed independently
 within each subject before cross-validation.
 
@@ -266,7 +268,7 @@ excludes a ± 1.0 Hz notch around 60 Hz due to line-noise removal.
 
 Because independent facial EMG channels are not acquired, artifact control uses a prespecified
 Fp1/Fp2 high-frequency proxy and the dedicated ECG channel. Fp1/Fp2 are scalp EEG electrodes, so
-this proxy is artifact control, not independent physiological validation.
+this proxy is artifact control, not independent physiological validation. Furthermore, facial EMG can spread widely to adjacent anterior periphery channels (e.g., AF7, AF8, F7, F8). The Fp1/Fp2 proxy might not fully capture this non-linear spatial spread. Therefore, downstream spatial interpretations (e.g., Haufe patterns) that heavily weight the anterior periphery will be evaluated cautiously as potential residual EMG contamination.
 
 The Fp1/Fp2 proxy is computed from the gradient- and BCG-corrected continuous signal after
 downsampling, band-pass filtering, and notch filtering, but before PyPREP interpolation, ICA,
@@ -431,14 +433,7 @@ designs in any outer training fold are ineligible for confirmatory interpretatio
 nonlinear temperature basis remains a sensitivity analysis.
 
 Within each level, nuisance coefficients are estimated exclusively on training subjects using
-SVD-based least squares.
-
-$$\hat{\gamma} = \underset{\gamma}{\mathrm{argmin}} \, \| y_{\mathrm{train}} - Z_{\mathrm{train}}\gamma \|_2^2.$$
-
-Residualized targets for training and test sets are computed by applying training-derived
-coefficients.
-
-$$y_{\mathrm{train}}^{\mathrm{resid}} = y_{\mathrm{train}} - Z_{\mathrm{train}}\hat{\gamma}, \qquad y_{\mathrm{test}}^{\mathrm{resid}} = y_{\mathrm{test}} - Z_{\mathrm{test}}\hat{\gamma}.$$
+SVD-based least squares. Target and feature residualization follow the transformation sequence defined in Section 9.1.
 
 ## 9. Predictive Modeling
 
@@ -452,32 +447,25 @@ for confirmatory interpretation.
 
 The nuisance-plus-EEG estimator is staged residual learning, not a joint penalized regression with
 nuisance and EEG terms in one objective. The nuisance component is unpenalized ordinary least
-squares. The penalized EEG model learns only training-fold nuisance residuals. Here,
-"nuisance+EEG" means the held-out nuisance prediction plus the inverse-transformed EEG residual
-prediction. The Yeo-Johnson target transformation is part of the prespecified ElasticNet and Ridge
-pipelines and is estimated only from the training residual target. Each outer fold proceeds as
-follows.
+squares. To ensure mathematical stability and prevent feature-side nuisance leakage, the
+transformation and residualization sequence is applied identically across all folds:
 
-1. Fit the nuisance model on untransformed raw training targets.
-2. Compute training and held-out nuisance predictions,
-   $\hat{y}_{Z,\mathrm{train}}$ and $\hat{y}_{Z,\mathrm{test}}$.
-3. Compute training residuals,
-   $r_{\mathrm{train}} = y_{\mathrm{train}} - \hat{y}_{Z,\mathrm{train}}$.
-4. Fit the Yeo-Johnson transformation on $r_{\mathrm{train}}$ only.
-5. Transform $r_{\mathrm{train}}$ and train the EEG model only to predict the transformed residual
-   target from EEG features.
-6. Apply the trained EEG model to held-out EEG features and inverse-transform the held-out EEG
-   residual predictions back to raw residual units.
-
-The held-out combined prediction is defined as follows.
-
-$$\hat{y}_{\mathrm{test}} = \hat{y}_{Z,\mathrm{test}} + \hat{r}_{\mathrm{EEG},\mathrm{test}}.$$
+1. Fit the Yeo-Johnson transformation exclusively on the raw training target $y_{\mathrm{train}}$ and transform both $y_{\mathrm{train}}$ and $y_{\mathrm{test}}$ to obtain $y_{\mathrm{train}}^{\mathrm{YJ}}$ and $y_{\mathrm{test}}^{\mathrm{YJ}}$.
+2. Fit the nuisance model on the transformed training targets $y_{\mathrm{train}}^{\mathrm{YJ}}$.
+3. Compute training and held-out transformed nuisance predictions, $\hat{y}_{Z,\mathrm{train}}^{\mathrm{YJ}}$ and $\hat{y}_{Z,\mathrm{test}}^{\mathrm{YJ}}$.
+4. Compute transformed training residuals, $r_{\mathrm{train}}^{\mathrm{YJ}} = y_{\mathrm{train}}^{\mathrm{YJ}} - \hat{y}_{Z,\mathrm{train}}^{\mathrm{YJ}}$.
+5. Residualize the training EEG feature matrix against the training-fold nuisance matrix to prevent the penalized EEG model from actively canceling nuisance-correlated EEG variance.
+6. Train the penalized EEG model only to predict $r_{\mathrm{train}}^{\mathrm{YJ}}$ from the residualized training EEG features.
+7. Residualize the held-out EEG features by subtracting the product of the held-out nuisance matrix and the feature-nuisance regression coefficients learned exclusively on the training fold.
+8. Apply the trained EEG model to these held-out residualized EEG features to generate $\hat{r}_{\mathrm{EEG},\mathrm{test}}^{\mathrm{YJ}}$.
+9. Add the held-out transformed nuisance prediction to the transformed EEG residual prediction: $\hat{y}_{\mathrm{test}}^{\mathrm{YJ}} = \hat{y}_{Z,\mathrm{test}}^{\mathrm{YJ}} + \hat{r}_{\mathrm{EEG},\mathrm{test}}^{\mathrm{YJ}}$.
+10. Inverse-transform $\hat{y}_{\mathrm{test}}^{\mathrm{YJ}}$ back to the raw target scale to obtain the final $\hat{y}_{\mathrm{test}}$.
 
 ### 9.2 Feature-Based Models
 
 A nested LOSO framework is used. The primary confirmatory model is ElasticNet regression on
 individual-channel spectral power. Ridge is a secondary confirmatory linear model that supports
-Haufe-style forward-pattern sensitivity analyses in Study 3. Random Forest is an exploratory
+Haufe-style forward-pattern sensitivity analyses in Study 2. Random Forest is an exploratory
 nonlinear model.
 
 Feature preprocessing is fold-contained: feature statistics, imputation medians, variance
@@ -663,7 +651,7 @@ passes the temporal-specificity gate only when both pre-stimulus models are nons
 Holm correction across the two windows within that cell and show bounded evidence against a
 meaningful pre-stimulus effect. For the same target, the one-sided 95% upper confidence bound for
 pre-stimulus $\Delta R^2$ must be below 0.02 and below 25% of the observed active-window
-$\Delta R^2$. Study 3 requires the predesignated NPS ElasticNet alpha+beta individual-channel
+$\Delta R^2$. Study 2 requires the predesignated NPS ElasticNet alpha+beta individual-channel
 spectral-power cell to pass this same NPS-specific temporal gate.
 
 Wrong-lag windows are ramp-up ($0.0$-$3.0$ s), late ramp-down ($10.5$-$15.0$ s), early-shifted

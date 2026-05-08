@@ -16,7 +16,7 @@ from studies.pain_study.study1.feature_benchmark import PRIMARY_BAND_PRESETS
 from studies.pain_study.study1.targets import PRIMARY_SIGNATURES
 
 
-FEATURE_MODELS = ("elasticnet", "ridge", "rf")
+FEATURE_MODELS = ("elasticnet", "ridge")
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -52,8 +52,12 @@ def _feature_records(config: Any) -> list[dict[str, Any]]:
                     "feature_spec": feature_spec,
                     "model": model_name,
                     "mean_r2": metrics.get("mean_r2"),
+                    "mean_nuisance_r2": metrics.get("mean_nuisance_r2"),
+                    "mean_delta_r2": metrics.get("mean_delta_r2"),
                     "mean_mae": metrics.get("mean_mae"),
+                    "mean_nuisance_mae": metrics.get("mean_nuisance_mae"),
                     "p_value_r2": metrics.get("p_value_r2"),
+                    "p_value_delta_r2": metrics.get("p_value_delta_r2"),
                     "n_folds": metrics.get("n_folds"),
                     "summary_path": str(summary_path),
                 }
@@ -147,21 +151,28 @@ def _validate_complete_primary_outputs(
 def _append_primary_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     out["p_value_r2_holm"] = pd.NA
+    out["p_value_delta_r2_holm"] = pd.NA
     mask = (
         (out["lane"].astype(str) == "feature_benchmark")
         & (out["analysis_partition"].astype(str) == "primary")
     )
-    p_values = pd.to_numeric(out.loc[mask, "p_value_r2"], errors="coerce")
-    valid = p_values.notna()
-    if not valid.any():
-        return out
     try:
         from statsmodels.stats.multitest import multipletests
     except Exception as exc:
         raise RuntimeError("Study 1 report multiplicity correction requires statsmodels.") from exc
 
-    adjusted = multipletests(p_values.loc[valid].to_numpy(dtype=float), method="holm")[1]
-    out.loc[p_values.loc[valid].index, "p_value_r2_holm"] = adjusted
+    for raw_column, adjusted_column in (
+        ("p_value_r2", "p_value_r2_holm"),
+        ("p_value_delta_r2", "p_value_delta_r2_holm"),
+    ):
+        if raw_column not in out.columns:
+            continue
+        p_values = pd.to_numeric(out.loc[mask, raw_column], errors="coerce")
+        valid = p_values.notna()
+        if not valid.any():
+            continue
+        adjusted = multipletests(p_values.loc[valid].to_numpy(dtype=float), method="holm")[1]
+        out.loc[p_values.loc[valid].index, adjusted_column] = adjusted
     return out
 
 

@@ -17,11 +17,14 @@ EXPECTED_INIT_FILES = (
     "studies/pain_study/study1/config/__init__.py",
     "studies/pain_study/study1/deep_regression/__init__.py",
     "studies/pain_study/study2/__init__.py",
-    "studies/pain_study/study2/analysis/__init__.py",
-    "studies/pain_study/study2/cli/__init__.py",
     "studies/pain_study/study2/config/__init__.py",
-    "studies/pain_study/study2/pipelines/__init__.py",
+    "studies/pain_study/eeg_coupling/__init__.py",
+    "studies/pain_study/eeg_coupling/analysis/__init__.py",
+    "studies/pain_study/eeg_coupling/cli/__init__.py",
+    "studies/pain_study/eeg_coupling/config/__init__.py",
+    "studies/pain_study/eeg_coupling/pipelines/__init__.py",
 )
+
 
 def test_pain_study_package_layout_and_metadata() -> None:
     for rel_path in EXPECTED_INIT_FILES:
@@ -44,6 +47,10 @@ def test_pain_study_package_layout_and_metadata() -> None:
         "README.md",
     ]
     assert package_data["studies.pain_study.study2"] == [
+        "config/*.yaml",
+        "README.md",
+    ]
+    assert package_data["studies.pain_study.eeg_coupling"] == [
         "analysis/*.R",
         "config/*.yaml",
         "config/**/*.json",

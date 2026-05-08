@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from studies.pain_study.study1.config.loader import load_study1_config
-from studies.pain_study.study2.config.eeg_bold_coupling_loader import (
+from studies.pain_study.eeg_coupling.config.eeg_bold_coupling_loader import (
     load_eeg_bold_coupling_config,
 )
 
@@ -15,26 +15,26 @@ LEVEL2_CONTINUOUS_COLUMNS = [
     "trial_index",
     "framewise_displacement",
     "std_dvars",
-    "peripheral_low_gamma_power",
+    "fp1_fp2_high_frequency_power",
     "residual_ecg_coupling",
 ]
 LEVEL2_CATEGORICAL_COLUMNS = ["stimulus_temp", "selected_surface"]
 
 
-def test_study2_config_resolves_roi_assets_from_study_package() -> None:
+def test_eeg_coupling_config_resolves_roi_assets_from_study_package() -> None:
     config = load_eeg_bold_coupling_config(
-        config_path=REPO_ROOT / "studies/pain_study/study2/config/eeg_bold_coupling_study2.yaml",
+        config_path=REPO_ROOT / "studies/pain_study/eeg_coupling/config/eeg_bold_coupling_production.yaml",
     )
 
     label_file = Path(config["eeg_bold_coupling"]["rois"]["items"][0]["label_files"][0])
-    assert "studies/pain_study/study2/config/roi_library" in str(label_file)
+    assert "studies/pain_study/eeg_coupling/config/roi_library" in str(label_file)
     assert label_file.exists()
 
 
 def test_smoke_configs_do_not_override_derivatives_root_output_dir() -> None:
     smoke_paths = (
-        REPO_ROOT / "studies/pain_study/study2/config/eeg_bold_coupling_smoketest.yaml",
-        REPO_ROOT / "studies/pain_study/study2/config/eeg_bold_coupling_smoke_robustness.yaml",
+        REPO_ROOT / "studies/pain_study/eeg_coupling/config/eeg_bold_coupling_smoketest.yaml",
+        REPO_ROOT / "studies/pain_study/eeg_coupling/config/eeg_bold_coupling_smoke_robustness.yaml",
     )
     for config_path in smoke_paths:
         config = load_eeg_bold_coupling_config(config_path=config_path)
@@ -50,7 +50,7 @@ def test_study1_production_loso_requires_inferential_cohort_size() -> None:
         config_path=REPO_ROOT / "studies/pain_study/study1/config/study1_config.yaml",
     )
 
-    assert int(config["study1"]["cohort"]["min_subjects"]) >= 20
+    assert int(config["study1"]["cohort"]["min_subjects"]) >= 30
 
 
 def test_study1_production_target_and_inference_settings_are_prespecified() -> None:

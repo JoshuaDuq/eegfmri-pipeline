@@ -50,7 +50,7 @@ study1:
         - "trial_index"
         - "framewise_displacement"
         - "std_dvars"
-        - "peripheral_low_gamma_power"
+        - "fp1_fp2_high_frequency_power"
         - "residual_ecg_coupling"
       categorical_columns:
         - "stimulus_temp"

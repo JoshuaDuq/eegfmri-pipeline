@@ -42,6 +42,7 @@ from eeg_pipeline.analysis.machine_learning.cv import (
     is_effective_permutation,
     safe_pearsonr,
 )
+from eeg_pipeline.analysis.machine_learning.circular_shift import admissible_circular_shifts
 from eeg_pipeline.analysis.machine_learning.pipelines import (
     create_elasticnet_pipeline,
     create_ridge_pipeline,
@@ -63,6 +64,7 @@ from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.analysis.machine_learning.time_generalization import time_generalization_regression
 from eeg_pipeline.analysis.machine_learning.target_residualization import (
     configured_target_residualization_columns,
+    fit_nuisance_model_for_fold,
     residualize_targets_for_fold,
 )
 
@@ -257,26 +259,69 @@ def _validate_permutation_blocks(
     *,
     scheme: str,
 ) -> Optional[np.ndarray]:
-    if scheme != "within_subject_within_block":
+    if scheme not in {"within_subject_within_block", "circular_shift_within_run"}:
         return None
     if blocks is None:
         raise ValueError(
-            "machine_learning.cv.permutation_scheme='within_subject_within_block' "
-            "requires block labels."
+            f"machine_learning.cv.permutation_scheme='{scheme}' requires block labels."
         )
 
     blocks_arr = np.asarray(blocks)
     if len(blocks_arr) != len(y):
         raise ValueError(
             "Permutation blocks must have the same length as y when "
-            "machine_learning.cv.permutation_scheme='within_subject_within_block'."
+            f"machine_learning.cv.permutation_scheme='{scheme}'."
         )
     if np.all(pd.isna(blocks_arr)):
         raise ValueError(
-            "machine_learning.cv.permutation_scheme='within_subject_within_block' "
-            "requires block labels."
+            f"machine_learning.cv.permutation_scheme='{scheme}' requires block labels."
         )
     return blocks_arr
+
+
+def _validate_permutation_trial_indices(
+    y: np.ndarray,
+    trial_indices: Optional[np.ndarray],
+    *,
+    scheme: str,
+) -> Optional[np.ndarray]:
+    if scheme != "circular_shift_within_run":
+        return None
+    if trial_indices is None:
+        raise ValueError(
+            "machine_learning.cv.permutation_scheme='circular_shift_within_run' "
+            "requires original within-block trial indices."
+        )
+
+    trial_arr = pd.to_numeric(pd.Series(trial_indices), errors="coerce").to_numpy(dtype=float)
+    if len(trial_arr) != len(y):
+        raise ValueError(
+            "Permutation trial indices must have the same length as y when "
+            "machine_learning.cv.permutation_scheme='circular_shift_within_run'."
+        )
+    if not np.all(np.isfinite(trial_arr)):
+        raise ValueError(
+            "machine_learning.cv.permutation_scheme='circular_shift_within_run' "
+            "requires finite original within-block trial indices."
+        )
+    return trial_arr.astype(int)
+
+
+def _admissible_circular_shifts(
+    trial_indices: np.ndarray,
+    *,
+    min_retained_trials: int = 8,
+    min_original_distance: int = 5,
+    original_block_length: int = 11,
+    min_admissible_shifts: int = 4,
+) -> tuple[int, ...]:
+    return admissible_circular_shifts(
+        trial_indices,
+        min_retained_trials=min_retained_trials,
+        min_original_distance=min_original_distance,
+        original_block_length=original_block_length,
+        min_admissible_shifts=min_admissible_shifts,
+    )
 
 
 def _permute_labels_by_scheme(
@@ -284,6 +329,7 @@ def _permute_labels_by_scheme(
     groups: np.ndarray,
     *,
     blocks: Optional[np.ndarray],
+    trial_indices: Optional[np.ndarray] = None,
     rng: np.random.Generator,
     scheme: str,
 ) -> np.ndarray:
@@ -298,8 +344,11 @@ def _permute_labels_by_scheme(
             f"Expected one of: {sorted(valid)}."
         )
     blocks_arr = _validate_permutation_blocks(y_perm, blocks, scheme=mode)
-
-    min_circular_shift = 5
+    trial_indices_arr = _validate_permutation_trial_indices(
+        y_perm,
+        trial_indices,
+        scheme=mode,
+    )
 
     for subj in np.unique(groups_arr):
         subj_mask = groups_arr == subj
@@ -307,25 +356,25 @@ def _permute_labels_by_scheme(
             continue
 
         if mode == "circular_shift_within_run":
-            if blocks_arr is None:
-                subj_indices = np.where(subj_mask)[0]
-                n = len(subj_indices)
-                if n > min_circular_shift:
-                    shift = rng.integers(min_circular_shift, n)
-                    y_perm[subj_indices] = np.roll(y_perm[subj_indices], shift)
-            else:
-                subj_blocks = blocks_arr[subj_mask]
-                subj_global_idx = np.where(subj_mask)[0]
-                for block_id in np.unique(subj_blocks):
-                    if pd.isna(block_id):
-                        block_mask = pd.isna(subj_blocks)
-                    else:
-                        block_mask = subj_blocks == block_id
-                    block_global_idx = subj_global_idx[block_mask]
-                    n = len(block_global_idx)
-                    if n > min_circular_shift:
-                        shift = rng.integers(min_circular_shift, n)
-                        y_perm[block_global_idx] = np.roll(y_perm[block_global_idx], shift)
+            subj_blocks = blocks_arr[subj_mask]
+            subj_global_idx = np.where(subj_mask)[0]
+            for block_id in np.unique(subj_blocks):
+                if pd.isna(block_id):
+                    block_mask = pd.isna(subj_blocks)
+                else:
+                    block_mask = subj_blocks == block_id
+                block_global_idx = subj_global_idx[block_mask]
+                admissible_shifts = _admissible_circular_shifts(
+                    trial_indices_arr[block_global_idx],
+                )
+                if not admissible_shifts:
+                    raise ValueError(
+                        "circular_shift_within_run requires permutation-valid blocks "
+                        "with at least 8 retained trials and at least four admissible "
+                        "nonzero circular shifts."
+                    )
+                shift = int(rng.choice(np.asarray(admissible_shifts, dtype=int)))
+                y_perm[block_global_idx] = np.roll(y_perm[block_global_idx], shift)
 
         elif mode == "within_subject_within_block" and blocks_arr is not None:
             subj_blocks = blocks_arr[subj_mask]
@@ -349,6 +398,7 @@ def _generate_effective_permutation(
     groups: np.ndarray,
     *,
     blocks: Optional[np.ndarray],
+    trial_indices: Optional[np.ndarray] = None,
     rng: np.random.Generator,
     requested_scheme: str,
     min_changed_fraction: float,
@@ -358,6 +408,7 @@ def _generate_effective_permutation(
         y,
         groups,
         blocks=blocks,
+        trial_indices=trial_indices,
         rng=rng,
         scheme=requested_scheme,
     )
@@ -370,6 +421,168 @@ def _generate_effective_permutation(
         return y_perm, True, float(changed_fraction), requested_scheme
 
     return y_perm, False, float(changed_fraction), requested_scheme
+
+
+def _resolve_target_residualization_strategy(config: Any) -> str:
+    strategy = str(
+        get_config_value(
+            config,
+            "machine_learning.target_residualization.strategy",
+            "residualized_target",
+        )
+    ).strip().lower()
+    valid = {"residualized_target", "staged_residual_learning"}
+    if strategy not in valid:
+        raise ValueError(
+            "Invalid machine_learning.target_residualization.strategy: "
+            f"{strategy!r}. Expected one of: {sorted(valid)}."
+        )
+    return strategy
+
+
+def _filter_circular_shift_permutation_rows(
+    *,
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    meta: pd.DataFrame,
+    config: Any,
+    logger: logging.Logger,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, pd.DataFrame]:
+    if _resolve_permutation_scheme(config) != "circular_shift_within_run":
+        return X, y, groups, meta
+    if "block" not in meta.columns:
+        raise ValueError(
+            "machine_learning.cv.permutation_scheme='circular_shift_within_run' "
+            "requires a 'block' metadata column."
+        )
+    trial_column = next(
+        (column for column in ("trial_index", "trial_number") if column in meta.columns),
+        None,
+    )
+    if trial_column is None:
+        raise ValueError(
+            "machine_learning.cv.permutation_scheme='circular_shift_within_run' "
+            "requires 'trial_index' or 'trial_number' metadata."
+        )
+
+    groups_arr = np.asarray(groups, dtype=object)
+    blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy(dtype=float)
+    trial_indices = pd.to_numeric(meta[trial_column], errors="coerce").to_numpy(dtype=float)
+    _validate_permutation_blocks(y, blocks, scheme="circular_shift_within_run")
+    _validate_permutation_trial_indices(
+        y,
+        trial_indices,
+        scheme="circular_shift_within_run",
+    )
+
+    valid_block_mask = np.zeros(len(y), dtype=bool)
+    invalid_block_records: list[dict[str, Any]] = []
+    for subject_id in np.unique(groups_arr):
+        subject_mask = groups_arr == subject_id
+        subject_indices = np.flatnonzero(subject_mask)
+        subject_blocks = blocks[subject_indices]
+        for block_id in np.unique(subject_blocks):
+            block_mask = subject_blocks == block_id
+            block_indices = subject_indices[block_mask]
+            admissible_shifts = _admissible_circular_shifts(trial_indices[block_indices])
+            if admissible_shifts:
+                valid_block_mask[block_indices] = True
+                continue
+            invalid_block_records.append(
+                {
+                    "subject_id": str(subject_id),
+                    "block": _json_safe_scalar(block_id),
+                    "retained_trials": int(len(block_indices)),
+                }
+            )
+
+    if not np.any(valid_block_mask):
+        raise RuntimeError("No permutation-valid circular-shift task blocks remain.")
+
+    min_valid_blocks_raw = get_config_value(
+        config,
+        "machine_learning.cv.circular_shift.min_valid_blocks_per_subject",
+        None,
+    )
+    min_retained_trials_raw = get_config_value(
+        config,
+        "machine_learning.cv.circular_shift.min_retained_trials_per_subject",
+        None,
+    )
+    min_valid_blocks = (
+        int(min_valid_blocks_raw) if min_valid_blocks_raw is not None else None
+    )
+    min_retained_trials = (
+        int(min_retained_trials_raw) if min_retained_trials_raw is not None else None
+    )
+
+    eligible_subject_mask = np.zeros(len(y), dtype=bool)
+    subject_exclusion_records: list[dict[str, str]] = []
+    for subject_id in np.unique(groups_arr):
+        subject_valid_mask = (groups_arr == subject_id) & valid_block_mask
+        retained_trials = int(np.sum(subject_valid_mask))
+        valid_blocks = int(len(np.unique(blocks[subject_valid_mask])))
+        too_few_blocks = (
+            min_valid_blocks is not None
+            and valid_blocks < int(min_valid_blocks)
+        )
+        too_few_trials = (
+            min_retained_trials is not None
+            and retained_trials < int(min_retained_trials)
+        )
+        if too_few_blocks or too_few_trials:
+            subject_exclusion_records.append(
+                {
+                    "subject_id": str(subject_id),
+                    "reason": (
+                        "Excluded by circular-shift permutation structure: "
+                        f"valid_blocks={valid_blocks}, retained_trials={retained_trials}."
+                    ),
+                }
+            )
+            continue
+        eligible_subject_mask |= subject_valid_mask
+
+    if not np.any(eligible_subject_mask):
+        raise RuntimeError(
+            "No subjects remain after circular-shift permutation structure filtering."
+        )
+
+    meta_filtered = meta.loc[eligible_subject_mask].reset_index(drop=True).copy()
+    previous_exclusions = list(meta.attrs.get("excluded_subjects", []))
+    meta_filtered.attrs.update(dict(meta.attrs))
+    meta_filtered.attrs["excluded_subjects"] = previous_exclusions + subject_exclusion_records
+    meta_filtered.attrs["circular_shift_trial_structure"] = {
+        "invalid_blocks": invalid_block_records,
+        "excluded_subjects": subject_exclusion_records,
+        "n_trials_before": int(len(y)),
+        "n_trials_after": int(np.sum(eligible_subject_mask)),
+    }
+
+    n_removed = int(len(y) - np.sum(eligible_subject_mask))
+    if n_removed > 0:
+        logger.info(
+            "Circular-shift trial-structure filtering removed %d trial(s), "
+            "%d invalid block(s), and %d subject(s).",
+            n_removed,
+            len(invalid_block_records),
+            len(subject_exclusion_records),
+        )
+    return (
+        np.asarray(X)[eligible_subject_mask],
+        np.asarray(y, dtype=float)[eligible_subject_mask],
+        groups_arr[eligible_subject_mask],
+        meta_filtered,
+    )
+
+
+def _json_safe_scalar(value: Any) -> Any:
+    if pd.isna(value):
+        return None
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
 
 
 def _normalize_subject_ids(subjects: List[str]) -> List[str]:
@@ -2900,20 +3113,74 @@ def _model_comparison_cv_predictions(
     y_true_eval = np.zeros(len(y))
     records: list[dict[str, Any]] = []
     resolved_param_grid = _resolve_param_grid_aliases(pipe, param_grid)
+    residualization_strategy = _resolve_target_residualization_strategy(config)
 
     for fold_idx, (train_idx, test_idx) in enumerate(outer_folds):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
         groups_train = groups[train_idx]
         residualization_details = None
+        nuisance_test_prediction = None
+        nuisance_r2 = np.nan
+        nuisance_mae = np.nan
+        current_pipe = clone(pipe)
+        current_param_grid = resolved_param_grid.copy()
+        pt = None
+
         if target_residualization_columns:
-            y_train, y_test, residualization_details = residualize_targets_for_fold(
-                y=y,
-                meta=meta,
-                train_idx=train_idx,
-                test_idx=test_idx,
-                columns=target_residualization_columns,
-            )
+            if residualization_strategy == "staged_residual_learning":
+                from sklearn.preprocessing import PowerTransformer
+                from eeg_pipeline.analysis.machine_learning.config import get_ml_config
+                cfg = get_ml_config(config)
+                pt = PowerTransformer(
+                    method=cfg.get("power_transformer_method", "yeo-johnson"),
+                    standardize=cfg.get("power_transformer_standardize", True)
+                )
+                y_train_yj = pt.fit_transform(y_train.reshape(-1, 1)).flatten()
+                y_test_yj = pt.transform(y_test.reshape(-1, 1)).flatten()
+
+                y_fold = y.copy().astype(float)
+                y_fold[train_idx] = y_train_yj
+                y_fold[test_idx] = y_test_yj
+
+                nuisance_fit = fit_nuisance_model_for_fold(
+                    y=y_fold,
+                    meta=meta,
+                    train_idx=train_idx,
+                    test_idx=test_idx,
+                    columns=target_residualization_columns,
+                )
+                y_train = nuisance_fit.train_residual
+                y_test = nuisance_fit.test_target
+                nuisance_test_prediction = nuisance_fit.test_prediction
+                residualization_details = nuisance_fit.details
+
+                from eeg_pipeline.analysis.machine_learning.target_residualization import _design_matrix
+                design_train = _design_matrix(meta.iloc[train_idx], tuple(target_residualization_columns), check_rank=True)
+                design_test = _design_matrix(meta.iloc[test_idx], tuple(target_residualization_columns), check_rank=False)
+                coeffs_X, *_ = np.linalg.lstsq(design_train, X_train, rcond=None)
+                X_train = X_train - design_train @ coeffs_X
+                X_test = X_test - design_test @ coeffs_X
+
+                from sklearn.compose import TransformedTargetRegressor
+                if isinstance(current_pipe, TransformedTargetRegressor):
+                    current_pipe = clone(current_pipe.regressor)
+                    new_param_grid = {}
+                    for k, v in current_param_grid.items():
+                        if k.startswith("regressor__"):
+                            new_param_grid[k[11:]] = v
+                        else:
+                            new_param_grid[k] = v
+                    current_param_grid = new_param_grid
+
+            else:
+                y_train, y_test, residualization_details = residualize_targets_for_fold(
+                    y=y,
+                    meta=meta,
+                    train_idx=train_idx,
+                    test_idx=test_idx,
+                    columns=target_residualization_columns,
+                )
 
         n_covs = len(covariates) if covariates else 0
         X_train, X_test, _ = _apply_fold_feature_harmonization_foldwise(
@@ -2928,8 +3195,8 @@ def _model_comparison_cv_predictions(
             inner_cv = create_inner_cv(groups_train, inner_splits)
             grid_n_jobs = determine_inner_n_jobs(outer_jobs, n_jobs=1)
             grid = GridSearchCV(
-                clone(pipe),
-                resolved_param_grid,
+                current_pipe,
+                current_param_grid,
                 cv=inner_cv,
                 scoring=create_scoring_dict(),
                 n_jobs=grid_n_jobs,
@@ -2940,22 +3207,42 @@ def _model_comparison_cv_predictions(
             fold_pred = grid.predict(X_test)
             best_params_repr = str(grid.best_params_)
         else:
-            estimator = clone(pipe)
+            estimator = clone(current_pipe)
             estimator.fit(X_train, y_train)
             fold_pred = estimator.predict(X_test)
             best_params_repr = "{}"
 
+        if nuisance_test_prediction is not None:
+            residual_prediction = np.asarray(fold_pred, dtype=float)
+            fold_pred = np.asarray(nuisance_test_prediction, dtype=float) + residual_prediction
+            if residualization_strategy == "staged_residual_learning" and pt is not None:
+                fold_pred = pt.inverse_transform(fold_pred.reshape(-1, 1)).flatten()
+
         y_pred[test_idx] = fold_pred
-        y_true_eval[test_idx] = y_test
+        y_test_raw = y[test_idx]
+        if nuisance_test_prediction is not None:
+            fold_eval_target = y_test_raw
+            fold_train_mean = float(np.mean(y[train_idx]))
+        else:
+            fold_eval_target = y_test
+            fold_train_mean = float(np.mean(y_train))
+        y_true_eval[test_idx] = fold_eval_target
         if not collect_records:
             continue
 
         from sklearn.metrics import mean_absolute_error
 
-        y_train_mean = float(np.mean(y_train))
-        ss_res = np.sum((y_test - fold_pred) ** 2)
-        ss_tot = np.sum((y_test - y_train_mean) ** 2)
+        ss_res = np.sum((fold_eval_target - fold_pred) ** 2)
+        ss_tot = np.sum((fold_eval_target - fold_train_mean) ** 2)
         fold_r2 = float(1.0 - (ss_res / ss_tot)) if ss_tot > 1e-12 else np.nan
+        if nuisance_test_prediction is not None:
+            if pt is not None:
+                nuisance_pred_raw = pt.inverse_transform(np.asarray(nuisance_test_prediction).reshape(-1, 1)).flatten()
+            else:
+                nuisance_pred_raw = np.asarray(nuisance_test_prediction, dtype=float)
+            nuisance_res = np.sum((y_test_raw - nuisance_pred_raw) ** 2)
+            nuisance_r2 = float(1.0 - (nuisance_res / ss_tot)) if ss_tot > 1e-12 else np.nan
+            nuisance_mae = float(mean_absolute_error(y_test_raw, nuisance_pred_raw))
 
         records.append(
             {
@@ -2963,9 +3250,13 @@ def _model_comparison_cv_predictions(
                 "fold": fold_idx,
                 "test_subject": groups[test_idx[0]],
                 "r2": fold_r2,
-                "mae": mean_absolute_error(y_test, fold_pred),
+                "r2_nuisance": nuisance_r2,
+                "delta_r2": fold_r2 - nuisance_r2,
+                "mae": mean_absolute_error(fold_eval_target, fold_pred),
+                "mae_nuisance": nuisance_mae,
                 "best_params": best_params_repr,
                 "target_residualized": bool(target_residualization_columns),
+                "target_residualization_strategy": residualization_strategy,
                 "target_residualization_columns": (
                     ",".join(residualization_details["columns"])
                     if residualization_details is not None
@@ -2974,6 +3265,68 @@ def _model_comparison_cv_predictions(
             }
         )
     return y_true_eval, y_pred, records
+
+
+def _reconstruct_staged_permutation_target_for_fold(
+    *,
+    y: np.ndarray,
+    groups: np.ndarray,
+    meta: pd.DataFrame,
+    train_idx: np.ndarray,
+    test_idx: np.ndarray,
+    columns: Tuple[str, ...],
+    blocks: Optional[np.ndarray],
+    trial_indices: Optional[np.ndarray],
+    rng: np.random.Generator,
+    scheme: str,
+) -> np.ndarray:
+    y_arr = np.asarray(y, dtype=float)
+    train_indices = np.asarray(train_idx, dtype=int)
+    test_indices = np.asarray(test_idx, dtype=int)
+    fold_mask = np.zeros(len(y_arr), dtype=bool)
+    fold_mask[train_indices] = True
+    if np.any(fold_mask[test_indices]):
+        raise ValueError("Outer fold train and test indices must be disjoint.")
+    fold_mask[test_indices] = True
+    fold_indices = np.flatnonzero(fold_mask)
+
+    nuisance_fit = fit_nuisance_model_for_fold(
+        y=y_arr,
+        meta=meta,
+        train_idx=train_indices,
+        test_idx=test_indices,
+        columns=columns,
+    )
+    nuisance_prediction = np.full(len(y_arr), np.nan, dtype=float)
+    residual = np.full(len(y_arr), np.nan, dtype=float)
+    nuisance_prediction[train_indices] = nuisance_fit.train_prediction
+    nuisance_prediction[test_indices] = nuisance_fit.test_prediction
+    residual[train_indices] = nuisance_fit.train_residual
+    residual[test_indices] = nuisance_fit.test_residual
+
+    residual_fold = residual[fold_indices]
+    nuisance_prediction_fold = nuisance_prediction[fold_indices]
+    if not np.all(np.isfinite(residual_fold)):
+        raise ValueError("Staged residual permutation requires finite fold residuals.")
+    if not np.all(np.isfinite(nuisance_prediction_fold)):
+        raise ValueError("Staged residual permutation requires finite nuisance predictions.")
+
+    blocks_fold = None if blocks is None else np.asarray(blocks)[fold_indices]
+    trial_indices_fold = None
+    if trial_indices is not None:
+        trial_indices_fold = np.asarray(trial_indices)[fold_indices]
+    shifted_residual_fold = _permute_labels_by_scheme(
+        residual_fold,
+        np.asarray(groups, dtype=object)[fold_indices],
+        blocks=blocks_fold,
+        trial_indices=trial_indices_fold,
+        rng=rng,
+        scheme=scheme,
+    )
+
+    y_perm = y_arr.copy()
+    y_perm[fold_indices] = nuisance_prediction_fold + shifted_residual_fold
+    return y_perm
 
 
 def _model_comparison_permutation_p_value(
@@ -2995,6 +3348,7 @@ def _model_comparison_permutation_p_value(
     target_residualization_columns: Tuple[str, ...],
     rng: np.random.Generator,
     n_perm: int,
+    score_column: str = "r2",
 ) -> float:
     if n_perm <= 0:
         return np.nan
@@ -3002,16 +3356,108 @@ def _model_comparison_permutation_p_value(
     blocks = None
     if meta is not None and "block" in meta.columns:
         blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy(dtype=float)
+    trial_indices = None
+    if meta is not None:
+        for trial_column in ("trial_index", "trial_number"):
+            if trial_column in meta.columns:
+                trial_indices = pd.to_numeric(
+                    meta[trial_column],
+                    errors="coerce",
+                ).to_numpy(dtype=float)
+                break
     requested_scheme = _resolve_permutation_scheme(config)
     min_changed_fraction = float(
         get_config_value(config, "machine_learning.cv.min_effective_permutation_changed_fraction", 0.01)
     )
+    max_invalid_fraction = float(
+        get_config_value(
+            config,
+            "machine_learning.cv.max_invalid_permutation_fraction",
+            0.20,
+        )
+    )
+    if not 0.0 <= max_invalid_fraction < 1.0:
+        raise ValueError(
+            "machine_learning.cv.max_invalid_permutation_fraction must be in [0, 1)."
+        )
+    max_attempts = int(np.ceil(int(n_perm) / (1.0 - max_invalid_fraction)))
+    residualization_strategy = _resolve_target_residualization_strategy(config)
+    use_staged_residual_permutation = (
+        bool(target_residualization_columns)
+        and residualization_strategy == "staged_residual_learning"
+    )
     null_scores: list[float] = []
-    for _perm_idx in range(int(n_perm)):
+    attempts = 0
+    while len(null_scores) < int(n_perm) and attempts < max_attempts:
+        attempts += 1
+        if use_staged_residual_permutation:
+            fold_scores: list[float] = []
+            effective_permutation = True
+            for train_idx, test_idx in outer_folds:
+                y_perm = _reconstruct_staged_permutation_target_for_fold(
+                    y=y,
+                    groups=groups,
+                    meta=meta,
+                    train_idx=train_idx,
+                    test_idx=test_idx,
+                    columns=target_residualization_columns,
+                    blocks=blocks,
+                    trial_indices=trial_indices,
+                    rng=rng,
+                    scheme=requested_scheme,
+                )
+                fold_indices = np.unique(
+                    np.concatenate(
+                        [
+                            np.asarray(train_idx, dtype=int),
+                            np.asarray(test_idx, dtype=int),
+                        ]
+                    )
+                )
+                effective, _changed_fraction = is_effective_permutation(
+                    y[fold_indices],
+                    y_perm[fold_indices],
+                    min_changed_fraction=min_changed_fraction,
+                )
+                if not effective:
+                    effective_permutation = False
+                    break
+
+                _y_true_perm, _y_pred_perm, records = _model_comparison_cv_predictions(
+                    model_name=model_name,
+                    pipe=pipe,
+                    param_grid=param_grid,
+                    X=X,
+                    y=y_perm,
+                    groups=groups,
+                    meta=meta,
+                    outer_folds=[(train_idx, test_idx)],
+                    inner_splits=inner_splits,
+                    outer_jobs=outer_jobs,
+                    config=config,
+                    harmonization_mode=harmonization_mode,
+                    covariates=covariates,
+                    target_residualization_columns=target_residualization_columns,
+                    collect_records=True,
+                )
+                fold_scores.extend(
+                    float(rec[score_column])
+                    for rec in records
+                    if np.isfinite(rec.get(score_column, np.nan))
+                )
+            if not effective_permutation:
+                continue
+            if fold_scores:
+                null_score = float(np.mean(fold_scores))
+                if np.isfinite(null_score):
+                    null_scores.append(null_score)
+            continue
+
         y_perm, effective, _changed_fraction, _scheme = _generate_effective_permutation(
             y,
             groups,
             blocks=blocks,
+            trial_indices=trial_indices,
             rng=rng,
             requested_scheme=requested_scheme,
             min_changed_fraction=min_changed_fraction,
@@ -3035,14 +3481,22 @@ def _model_comparison_permutation_p_value(
             target_residualization_columns=target_residualization_columns,
             collect_records=True,
         )
-        fold_r2 = [float(rec["r2"]) for rec in _records if np.isfinite(rec.get("r2", np.nan))]
-        if fold_r2:
-            null_scores.append(float(np.mean(fold_r2)))
-        else:
-            null_scores.append(np.nan)
+        fold_scores = [
+            float(rec[score_column])
+            for rec in _records
+            if np.isfinite(rec.get(score_column, np.nan))
+        ]
+        if fold_scores:
+            null_score = float(np.mean(fold_scores))
+            if np.isfinite(null_score):
+                null_scores.append(null_score)
 
-    if not null_scores:
-        raise RuntimeError("No effective model-comparison permutations were generated.")
+    if len(null_scores) < int(n_perm):
+        raise RuntimeError(
+            "Model-comparison permutation inference did not reach the requested valid "
+            f"draw count: valid={len(null_scores)}, requested={int(n_perm)}, "
+            f"attempted={attempts}, max_attempts={max_attempts}."
+        )
     null_arr = np.asarray(null_scores, dtype=float)
     return float(((null_arr >= float(observed_mean_r2)).sum() + 1) / (len(null_arr) + 1))
 
@@ -3068,6 +3522,7 @@ def run_model_comparison_ml(
     feature_segments: Optional[List[str]] = None,
     feature_scopes: Optional[List[str]] = None,
     feature_stats: Optional[List[str]] = None,
+    model_names: Optional[List[str]] = None,
 ) -> Path:
     """Compare multiple model families with identical outer folds.
     
@@ -3109,6 +3564,14 @@ def run_model_comparison_ml(
         context="Model comparison",
     )
     target_residualization_columns = configured_target_residualization_columns(config)
+    X, y, groups, meta = _filter_circular_shift_permutation_rows(
+        X=X,
+        y=y,
+        groups=groups,
+        meta=meta,
+        config=config,
+        logger=logger,
+    )
     
     n_subjects = len(np.unique(groups))
     logger.info(
@@ -3123,7 +3586,7 @@ def run_model_comparison_ml(
     subject_selection = export_subject_selection_report(results_dir, subjects, groups, meta, config)
     
     # Define model pipelines (shared preprocessing + config)
-    models = {
+    available_models = {
         "elasticnet": {
             "pipe": create_elasticnet_pipeline(seed=rng_seed, config=config),
             "param_grid": build_elasticnet_param_grid(config),
@@ -3137,6 +3600,13 @@ def run_model_comparison_ml(
             "param_grid": build_rf_param_grid(config),
         },
     }
+    requested_models = list(model_names) if model_names is not None else list(available_models)
+    if not requested_models:
+        raise ValueError("Model comparison requires at least one model.")
+    unknown_models = sorted(set(requested_models) - set(available_models))
+    if unknown_models:
+        raise ValueError(f"Unknown model comparison model(s): {unknown_models}")
+    models = {name: available_models[name] for name in requested_models}
     
     # Shared outer CV folds
     from sklearn.model_selection import LeaveOneGroupOut
@@ -3239,10 +3709,50 @@ def run_model_comparison_ml(
             "ci_high_mae": mae_ci_high,
             "n_folds": int(len(model_rows)),
         }
+        if "r2_nuisance" in model_rows.columns:
+            nuisance_r2_vals = pd.to_numeric(
+                model_rows["r2_nuisance"],
+                errors="coerce",
+            ).to_numpy(dtype=float)
+            if np.any(np.isfinite(nuisance_r2_vals)):
+                summary[model_name]["mean_nuisance_r2"] = float(
+                    np.nanmean(nuisance_r2_vals)
+                )
+                summary[model_name]["std_nuisance_r2"] = float(
+                    np.nanstd(nuisance_r2_vals, ddof=1)
+                )
+        if "mae_nuisance" in model_rows.columns:
+            nuisance_mae_vals = pd.to_numeric(
+                model_rows["mae_nuisance"],
+                errors="coerce",
+            ).to_numpy(dtype=float)
+            if np.any(np.isfinite(nuisance_mae_vals)):
+                summary[model_name]["mean_nuisance_mae"] = float(
+                    np.nanmean(nuisance_mae_vals)
+                )
+        primary_score_column = "r2"
+        if "delta_r2" in model_rows.columns:
+            delta_r2_vals = pd.to_numeric(
+                model_rows["delta_r2"],
+                errors="coerce",
+            ).to_numpy(dtype=float)
+            if np.any(np.isfinite(delta_r2_vals)):
+                delta_ci_low, delta_ci_high = _bootstrap_mean_ci(
+                    delta_r2_vals,
+                    rng=boot_rng,
+                    n_boot=n_boot,
+                )
+                summary[model_name]["mean_delta_r2"] = float(np.nanmean(delta_r2_vals))
+                summary[model_name]["std_delta_r2"] = float(
+                    np.nanstd(delta_r2_vals, ddof=1)
+                )
+                summary[model_name]["ci_low_delta_r2"] = delta_ci_low
+                summary[model_name]["ci_high_delta_r2"] = delta_ci_high
+                primary_score_column = "delta_r2"
         if int(n_perm) > 0:
             perm_rng = np.random.default_rng(int(rng_seed) + 300 + len(summary))
             p_value_r2 = _model_comparison_permutation_p_value(
-                observed_mean_r2=float(model_rows["r2"].mean()),
+                observed_mean_r2=float(model_rows[primary_score_column].mean()),
                 X=X,
                 y=y,
                 groups=groups,
@@ -3262,8 +3772,11 @@ def run_model_comparison_ml(
                 target_residualization_columns=target_residualization_columns,
                 rng=perm_rng,
                 n_perm=int(n_perm),
+                score_column=primary_score_column,
             )
             summary[model_name]["overall_r2"] = observed_overall_r2[model_name]
+            if primary_score_column == "delta_r2":
+                summary[model_name]["p_value_delta_r2"] = p_value_r2
             summary[model_name]["p_value_r2"] = p_value_r2
             summary[model_name]["n_perm"] = int(n_perm)
 

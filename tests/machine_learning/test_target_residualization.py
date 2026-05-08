@@ -58,3 +58,24 @@ def test_residualize_targets_for_fold_rejects_missing_or_degenerate_design() -> 
             test_idx=np.asarray([2], dtype=int),
             columns=("pain_binary_coded",),
         )
+
+
+def test_residualize_targets_for_fold_checks_rank_only_on_training_design() -> None:
+    from eeg_pipeline.analysis.machine_learning.target_residualization import (
+        residualize_targets_for_fold,
+    )
+
+    y = np.asarray([0.0, 1.0, 2.0, 3.0, 10.0], dtype=float)
+    meta = pd.DataFrame({"nuisance": [0.0, 1.0, 2.0, 3.0, 1.0]})
+
+    y_train, y_test, details = residualize_targets_for_fold(
+        y=y,
+        meta=meta,
+        train_idx=np.asarray([0, 1, 2, 3], dtype=int),
+        test_idx=np.asarray([4], dtype=int),
+        columns=("nuisance",),
+    )
+
+    assert np.allclose(y_train, np.zeros(4, dtype=float))
+    assert y_test.shape == (1,)
+    assert details["columns"] == ["nuisance"]

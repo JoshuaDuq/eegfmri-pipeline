@@ -14,6 +14,7 @@ def test_public_package_does_not_include_private_studies() -> None:
     assert "studies.pain_study" not in package_data
     assert "studies.pain_study.study1" not in package_data
     assert "studies.pain_study.study2" not in package_data
+    assert "studies.pain_study.eeg_coupling" not in package_data
 
 
 def test_gitignore_ignores_coverage_artifacts() -> None:

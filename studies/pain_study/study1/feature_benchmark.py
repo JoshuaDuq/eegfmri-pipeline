@@ -92,6 +92,30 @@ def _feature_benchmark_config(
     )
     feature_config["machine_learning.preprocessing.subject_standardize_features"] = False
     feature_config["machine_learning.preprocessing.variance_threshold_grid"] = [0.0]
+    feature_config["machine_learning.cv.permutation_scheme"] = str(
+        get_config_value(
+            config,
+            "study1.feature_benchmark.permutation_scheme",
+            "circular_shift_within_run",
+        )
+    ).strip()
+    for key in ("min_valid_blocks_per_subject", "min_retained_trials_per_subject"):
+        value = get_config_value(
+            config,
+            f"study1.feature_benchmark.circular_shift.{key}",
+            None,
+        )
+        if value is not None:
+            feature_config[f"machine_learning.cv.circular_shift.{key}"] = int(value)
+    max_invalid_permutation_fraction = get_config_value(
+        config,
+        "study1.feature_benchmark.max_invalid_permutation_fraction",
+        None,
+    )
+    if max_invalid_permutation_fraction is not None:
+        feature_config["machine_learning.cv.max_invalid_permutation_fraction"] = float(
+            max_invalid_permutation_fraction
+        )
     columns = (
         list(
             residualization_columns_for_target_table(
@@ -104,6 +128,9 @@ def _feature_benchmark_config(
     )
     feature_config["machine_learning.target_residualization.enabled"] = bool(columns)
     feature_config["machine_learning.target_residualization.columns"] = columns
+    feature_config["machine_learning.target_residualization.strategy"] = (
+        "staged_residual_learning"
+    )
     return feature_config
 
 
@@ -157,6 +184,7 @@ def _run_primary_presets(
                     feature_input_root=feature_root,
                     feature_bands=list(preset_bands),
                     feature_harmonization=harmonization,
+                    model_names=["elasticnet", "ridge"],
                 )
             )
     return outputs

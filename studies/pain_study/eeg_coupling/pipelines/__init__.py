@@ -1,0 +1,1 @@
+"""EEG coupling pipelines."""
