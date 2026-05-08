@@ -2,65 +2,42 @@
 
 ## 1. Problem Statement
 
-Pain responses vary substantially among individuals exposed to the same nociceptive stimulus
-(Coghill et al., 2003; Kim et al., 2004). This variability limits inference based solely on
-stimulus intensity and motivates brain-based measures that can distinguish thermal input,
-subjective report, acquisition artifacts, and neural pain-related processes. Electroencephalography
-(EEG) is clinically accessible and temporally precise, making it well suited to measuring fast
-oscillatory dynamics during painful stimulation (Kim et al., 2020; Mari et al., 2022). Its principal
-limitation is spatial ambiguity: scalp alpha, beta, and gamma power can reflect nociceptive
-processing, aversion, movement, facial muscle activity, cardiac contamination, scanner artifact, or
-expectancy.
+Pain responses vary among individuals exposed to the same nociceptive stimulus (Coghill et al.,
+2003; Kim et al., 2004). EEG can measure fast oscillatory dynamics during painful stimulation
+(Kim et al., 2020; Mari et al., 2022), but scalp alpha, beta, and gamma power are spatially
+ambiguous and can reflect nociception, aversion, movement, facial muscle activity, cardiac
+contamination, scanner artifact, or expectancy.
 
-Functional MRI partly addresses this limitation by providing spatially resolved multivariate
-targets for EEG validation (Davis et al., 2020; van der Miesen et al., 2019). The Neurologic Pain
-Signature (NPS; Wager et al., 2013) was developed as a marker of evoked nociceptive processing,
-whereas the Stimulus Intensity Independent Pain Signature-1 (SIIPS1; Woo et al., 2017) was designed
-to capture pain-related variance less dependent on stimulus intensity. These signatures provide
-useful neuroimaging targets, although fMRI remains costly, less accessible, and temporally coarse
-relative to EEG.
+Simultaneous fMRI provides spatially defined targets for EEG validation (Davis et al., 2020;
+van der Miesen et al., 2019). The Neurologic Pain Signature (NPS; Wager et al., 2013) indexes
+evoked nociceptive signature expression, whereas the Stimulus Intensity Independent Pain
+Signature-1 (SIIPS1; Woo et al., 2017) targets pain-related variance less dependent on stimulus
+intensity. Both are treated as predefined fMRI-derived targets, not direct pain measurements.
+Subjective ratings, thermal intensity, and fMRI signature expression are analyzed as related but
+distinct criteria.
 
-The central question is whether EEG oscillatory activity predicts trial-wise expression of these
-spatially defined fMRI signatures when both modalities are acquired during the same painful
-stimulation task. The specific gap addressed here is simultaneous EEG-fMRI prediction of trial-wise
-NPS and SIIPS1 expression from EEG spectral power beyond prespecified stimulus, acquisition, and
-physiological nuisance structure. The analysis therefore emphasizes fold-contained,
-subject-held-out prediction rather than within-sample EEG-target association.
-
-NPS and SIIPS1 expression are treated as predefined fMRI-derived target variables, not as direct
-measurements of pain. NPS indexes evoked nociceptive signature expression, whereas SIIPS1 indexes a
-related but distinct stimulus-intensity-independent pain-signature construct. Subjective pain
-ratings, thermal intensity, and fMRI signature expression are analyzed as separable criteria rather
-than interchangeable measurements of a single latent variable.
-
-The primary scientific risk is that apparent EEG prediction could reflect stimulus intensity,
-session structure, motion, scanner artifact, frontal high-frequency artifact, cardiac
-contamination, or expectancy rather than pain-signature-related neural activity. Accordingly, the
-primary estimand is incremental prediction above a nuisance-only model, not the unadjusted
-association between EEG features and fMRI signature expression.
+This study tests whether plateau-window EEG spectral power predicts trial-wise NPS and SIIPS1
+expression during simultaneous EEG-fMRI thermal stimulation. The primary estimand is
+fold-contained, subject-held-out incremental prediction beyond prespecified stimulus, acquisition,
+and physiological nuisance structure, not within-sample EEG-target association.
 
 ## 2. Objectives
 
 The primary objective is to test whether plateau-window EEG spectral power predicts trial-wise NPS
-or SIIPS1 expression beyond measured nuisance structure. Prediction is evaluated with
-leave-one-subject-out (LOSO) cross-validation and subject-grouped inner validation. Target
-construction, feature preprocessing, imputation, filtering, nuisance residualization,
-hyperparameter selection, and target transformation are all estimated without held-out-subject
-information.
+or SIIPS1 expression beyond measured nuisance structure. Prediction uses leave-one-subject-out
+(LOSO) cross-validation with subject-grouped inner validation. Target construction, feature
+preprocessing, imputation, filtering, nuisance residualization, hyperparameter selection, and target
+transformation are all estimated without held-out-subject information.
 
-The secondary objective is to determine whether significant raw-target prediction converges with a
+The secondary objective is to test whether significant raw-target prediction converges with a
 stimulus- and acquisition-controlled residualized-target analysis. Unadjusted EEG-only prediction is
-retained descriptively, and subjective-rating residualization is treated as a
-construct-attenuation sensitivity analysis rather than as the primary test of pain relevance.
+descriptive. Subjective-rating residualization is a construct-attenuation sensitivity analysis.
 
-The downstream source-interpretation study is tied a priori to the NPS ElasticNet alpha+beta
-individual-channel spectral-power cell, not selected post hoc from the best-performing Study 1
-result. This hierarchy does not demote SIIPS1 as a Study 1 prediction target; it restricts the later
-source-localization claim to the target whose original construct is most closely tied to evoked
-nociceptive processing. SIIPS1 remains a co-primary prediction target because it tests whether EEG
-also tracks stimulus-intensity-independent fMRI pain-signature variance, but it does not define the
-primary downstream source-interpretation model. ROI-level and global-average feature resolutions
-cannot redefine the Study 3 source-driving cell.
+Study 3 source interpretation is tied a priori to the NPS ElasticNet alpha+beta individual-channel
+spectral-power cell, not to the best-performing Study 1 result. SIIPS1 remains a co-primary
+prediction target for stimulus-intensity-independent fMRI pain-signature variance, but it does not
+define the downstream source model. ROI-level and global-average feature resolutions cannot redefine
+the Study 3 source-driving cell.
 
 ## 3. Hypotheses and Confirmatory Estimands
 
@@ -74,15 +51,15 @@ The primary confirmatory estimand is the subject-weighted mean incremental raw-t
 $$\Delta R^2_{\text{LOSO}} = \frac{1}{S}\sum_{s=1}^{S} \Delta R_s^2.$$
 
 Confirmatory EEG prediction requires positive $\Delta R^2_{\text{LOSO}}$ and Holm-corrected
-permutation significance. For the downstream source-interpretation study to proceed
-confirmatorily, the predesignated NPS ElasticNet alpha+beta individual-channel spectral-power cell
-must also satisfy a practical-effect gate:
+permutation significance. Confirmatory Study 3 source interpretation additionally requires the
+predesignated NPS ElasticNet alpha+beta individual-channel spectral-power cell to pass the
+practical-effect gate:
 $\Delta R^2_{\text{LOSO}} \geq 0.02$ with a one-sided 95% lower confidence bound above 0.005.
 Statistically significant effects that do not pass this practical-effect gate support only
 exploratory source mapping.
 
 The confirmatory family comprises 2 targets (NPS, SIIPS1) × 2 linear models (ElasticNet, Ridge)
-× 3 frequency presets (alpha, beta, alpha+beta), all evaluated with the primary
+× 3 frequency presets (alpha, beta, alpha+beta), evaluated with the primary
 $\Delta R^2_{\text{LOSO}}$ statistic and the individual-channel spectral-power feature matrix. The
 secondary convergence family uses the same cells to test residualized-target Level 2
 $\Delta R^2_{\text{LOSO}}$ with separate Holm correction. The downstream Study 3 Level 2 convergence
@@ -109,65 +86,50 @@ pregnancy or breastfeeding, medication use that alters attention or vigilance, M
 contraindications, and hair or hairstyle characteristics incompatible with high-quality EEG
 recording.
 
-Participants complete one experimental session of approximately 180 minutes at the CERVO
-neuroimaging unit, comprising EEG preparation, task familiarization, structural MRI, resting-state
-fMRI, and the simultaneous EEG-fMRI thermal pain task.
+Participants complete one approximately 180 min session at the CERVO neuroimaging unit, including
+EEG preparation, task familiarization, structural MRI, resting-state fMRI, and the simultaneous
+EEG-fMRI thermal pain task.
 
-Self-report instruments characterize demographic, psychological, sleep, handedness, and
-pain-related individual-difference variables. These instruments comprise a sociodemographic and
-hormonal-status questionnaire, PHQ-9, GAD-7, RU-SATED, the adapted Edinburgh Handedness Inventory,
-the Gender Role Expectation of Pain questionnaire, and the Pain Catastrophizing Scale. They describe
-the sample and support prespecified exploratory covariate or moderation analyses; they are not part
-of the primary EEG-to-fMRI-signature prediction estimand. Exploratory moderation analyses are
-restricted to sex assigned at recruitment, hormonal-status variables, PCS total score, GREP
-self-ratings, PHQ-9, GAD-7, and RU-SATED total score. Each moderator is evaluated in a separate
-trial-level linear mixed model with random intercepts for participant. Dependent variables are NPS
-expression, SIIPS1 expression, and the within-scale thermal/pain intensity score. This behavioral
-score is not interpreted as a single linear pain continuum across non-painful and painful trials.
-Fixed effects include the out-of-sample EEG residual prediction, the moderator, and their
-interaction. Continuous moderators are standardized within the retained sample, and categorical
-moderators use prespecified reference levels recorded in the data dictionary. Analyses are run
-separately for NPS, SIIPS1, and behavioral-rating outcomes, with Holm correction of
-moderator-interaction p-values within each outcome. They remain exploratory and do not alter primary
-inclusion, model selection, or confirmatory interpretation.
+Self-report instruments characterize demographic, psychological, sleep, handedness, and pain-related
+individual differences: sociodemographic and hormonal status, PHQ-9, GAD-7, RU-SATED, adapted
+Edinburgh Handedness Inventory, Gender Role Expectation of Pain questionnaire, and Pain
+Catastrophizing Scale. These variables describe the sample and support exploratory moderation
+analyses; they are not part of the primary EEG-to-fMRI-signature estimand. Moderators are restricted
+to sex assigned at recruitment, hormonal-status variables, PCS total score, GREP self-ratings,
+PHQ-9, GAD-7, and RU-SATED total score. Each moderator is tested in a separate trial-level linear
+mixed model with random intercepts for participant. Outcomes are NPS expression, SIIPS1 expression,
+and the within-scale thermal/pain intensity score, which is not interpreted as a single linear
+continuum across non-painful and painful trials. Fixed effects are the out-of-sample EEG residual
+prediction, moderator, and interaction. Continuous moderators are standardized within the retained
+sample; categorical moderators use data-dictionary reference levels. Moderator-interaction p-values
+are Holm-corrected within each outcome. These analyses cannot alter inclusion, model selection, or
+confirmatory interpretation.
 
-The target sample size exceeds typical earlier fMRI samples while allowing approximately 10% data
-loss from motion, technical failure, or physiological artifact. The expected analyzable sample is
-therefore approximately 54 participants. Any confirmatory analysis requires at least 30 analyzable
-subjects after EEG, fMRI, synchronization, and artifact-quality exclusions. This lower bound is not
-the planned effective sample size and does not itself justify confirmatory interpretation; it marks
-the point below which trial-wise prediction estimates are considered too unstable for confirmatory
-testing.
+The target sample allows approximately 10% loss from motion, technical failure, or physiological
+artifact, yielding an expected analyzable sample of approximately 54 participants. Confirmatory
+analysis requires at least 30 analyzable subjects after EEG, fMRI, synchronization, and
+artifact-quality exclusions. This lower bound does not itself justify confirmatory interpretation;
+below it, trial-wise prediction estimates are considered too unstable.
 
-If more than 10% of the recruited sample is lost, the study is labeled attrition-limited before
-outcome inspection. Confirmatory Study 1 prediction interpretation then requires at least
-30 analyzable subjects, a retained-trial distribution compatible with the permutation plan,
-positive primary $\Delta R^2_{\text{LOSO}}$ with Holm-corrected significance, and the preregistered
-precision simulation described in Section 9.2. The practical-effect gate applies to downstream
-Study 3 confirmatory source interpretation for the predesignated NPS ElasticNet alpha+beta
-individual-channel cell, not to every Study 1 prediction cell. Failure of the precision simulation
-downgrades the result to exploratory even when the nominal subject-count threshold and permutation
-test are satisfied.
+If more than 10% of recruited participants are lost, the study is labeled attrition-limited before
+outcome inspection. Confirmatory Study 1 interpretation then requires at least 30 analyzable
+subjects, a retained-trial distribution compatible with the permutation plan, positive primary
+$\Delta R^2_{\text{LOSO}}$ with Holm-corrected significance, and the Section 9.2 precision
+simulation. The practical-effect gate applies only to downstream Study 3 source interpretation for
+the predesignated NPS ElasticNet alpha+beta individual-channel cell. Precision-simulation failure
+downgrades the result to exploratory even if subject-count and permutation criteria are met.
 
 ### 4.2 Thermal Pain Protocol
 
-Thermal stimulation is delivered with an MRI-compatible QST.Lab T11 thermode placed on the inner
-forearm contralateral to the response hand. The thermode stimulates a 9 cm² surface divided into
-five independently controlled contact surfaces. Temperatures are not individually calibrated to
-subjective pain intensity. This design choice reflects the primary fMRI targets: NPS and SIIPS1
-expression under a common stimulus protocol, rather than subjective pain ratings matched across
-participants. The protocol therefore preserves between-participant variability in thermal
-sensitivity as part of the target phenomenon while modeling temperature effects, pain ratings, and
-nuisance structure separately.
+Thermal stimulation is delivered to the inner forearm contralateral to the response hand using an
+MRI-compatible QST.Lab T11 thermode with five independently controlled contact surfaces over 9 cm².
+Temperatures are not individually calibrated to subjective pain intensity. The common stimulus
+protocol targets NPS and SIIPS1 expression while preserving between-participant thermal-sensitivity
+variance; temperature, ratings, and nuisance structure are modeled separately.
 
-Before the MRI task, participants complete two practice trials outside the scanner to verify task
-comprehension and maximum-temperature tolerability. This step checks safety and instructions rather
-than calibrating pain intensity; participants unable to tolerate the maximum temperature do not
-proceed to scanning.
-
-This safety screen bounds generalization to healthy adults able to tolerate the full
-fixed-temperature protocol; between-participant thermal sensitivity is therefore preserved only
-within that tolerability-bounded sample.
+Before scanning, two practice trials verify task comprehension and maximum-temperature tolerability;
+participants unable to tolerate the maximum temperature do not proceed. This safety screen bounds
+generalization to healthy adults who can tolerate the fixed-temperature protocol.
 
 The MRI task comprises six blocks of 11 trials, for a total of 66 thermal trials. Six temperatures
 from 44.3 to 49.3 °C are presented 11 times each. Trial order is generated by constrained
@@ -199,10 +161,9 @@ Failure of either first-exposure sensitivity downgrades the affected target-mode
 exploratory, regardless of the primary permutation p-value.
 
 Trial-history sensitivity analyses augment the Level 2 nuisance design with previous-trial
-temperature, signed temperature change from the previous trial, cumulative exposure count within
-the session, and previous-trial within-scale rating when available. These regressors are
-sensitivity terms only, because they can absorb construct-relevant habituation or sensitization
-variance.
+temperature, signed temperature change, cumulative exposure count, and previous-trial within-scale
+rating when available. These sensitivity terms may absorb construct-relevant habituation or
+sensitization variance.
 
 Each trial begins with a variable 15-20 s fixation interval while the thermode is held at 35.0 °C.
 Thermal stimulation lasts 12.5 s, including a 3.0 s ramp-up, a 7.5 s plateau, and a 2.0 s return to
@@ -218,12 +179,11 @@ and is not used as a single linear covariate in Level 3 residualization. Respons
 with an MRI-compatible five-button Pyka response device, and visual stimuli are projected to an
 MRI-compatible display viewed through a head-coil mirror.
 
-Behaviorally implausible responses are excluded by fixed rules applied before EEG or fMRI outcome
-inspection. A trial is implausible when the raw displayed rating is outside the logged response
-scale or equals 0 ("no sensation") at a stimulus temperature ≥ 47.3 °C. A participant is excluded
-from confirmatory analyses if at least 3 high-temperature trials meet the 0-rating rule or if more
-than 10% of otherwise synchronized thermal trials are behaviorally implausible. These
-quality-control rules are fixed before inspection of prediction performance or source maps.
+Behaviorally implausible responses are excluded before EEG or fMRI outcome inspection. A trial is
+implausible when the raw displayed rating is outside the logged response scale or equals 0
+("no sensation") at a stimulus temperature ≥ 47.3 °C. A participant is excluded from confirmatory
+analyses if at least 3 high-temperature trials meet the 0-rating rule or if more than 10% of
+otherwise synchronized thermal trials are behaviorally implausible.
 
 ### 4.3 Acquisition Summary
 
@@ -243,9 +203,8 @@ resting-state characterization, and distortion correction.
 
 ### 4.4 Modeling Scope
 
-Analyses use simultaneous EEG-fMRI data from thermal stimulation trials. Predictive modeling is
-restricted to thermal plateau trials, including both pain and non-pain thermal trials. fMRI inputs
-are normalized to MNI152NLin2009cAsym space.
+Analyses use simultaneous EEG-fMRI data from thermal plateau trials, including painful and
+non-painful trials. fMRI inputs are normalized to MNI152NLin2009cAsym space.
 
 EEG epochs span −7.0 to 15.0 s relative to stimulus onset. The active EEG prediction window is the
 thermal plateau interval from 3.0 to 10.5 s post-onset, and fMRI trial targets are LSS plateau
@@ -261,9 +220,8 @@ absolute mismatch ≤ 0.010 s.
 ### 5.1 Simultaneous EEG-fMRI Preprocessing
 
 MRI-induced EEG artifacts are corrected in BrainVision Analyzer 2.0 (Brain Products GmbH). Gradient
-artifacts are removed with average artifact subtraction using a sliding-window template, and
-ballistocardiogram artifacts are corrected with template subtraction aligned to the detected cardiac
-cycle.
+artifacts are removed with sliding-window average artifact subtraction, and ballistocardiogram
+artifacts are corrected with template subtraction aligned to the detected cardiac cycle.
 
 Corrected EEG data are imported into the MNE-BIDS-Pipeline, downsampled to 500 Hz, band-pass
 filtered from 0.1 to 100 Hz, and notch-filtered at 60 Hz. Bad channels are identified with PyPREP
@@ -271,28 +229,26 @@ filtered from 0.1 to 100 Hz, and notch-filtered at 60 Hz. Bad channels are ident
 repeated three times with independent random seeds; a channel is marked bad only when flagged in a
 strict majority. Bad channels are interpolated with spherical splines.
 
-Confirmatory analyses use a common-average reference computed after excluding Fp1 and Fp2. This
-reference prevents frontal artifact-proxy channels from distributing their signal into retained
-predictive channels or source-reconstruction inputs. A secondary reference including Fp1/Fp2 is
-reported only as an artifact-sensitivity analysis and does not alter confirmatory interpretation.
+Confirmatory analyses use a common-average reference excluding Fp1 and Fp2, preventing frontal
+artifact-proxy channels from distributing signal into retained predictive channels or
+source-reconstruction inputs. A reference including Fp1/Fp2 is reported only as an
+artifact-sensitivity analysis.
 
 ICA uses extended infomax with 0.99 variance explained and is fitted on 1.0 Hz high-pass-filtered
 epochs. ICA spatial weights are then applied to the 0.1-100 Hz continuous analysis data. ICLabel
 (Pion-Tonachini et al., 2019) is used for component classification. Components are rejected when
 their predicted probability exceeds 0.8 for any non-brain category other than "other."
 
-Because ICLabel was trained on standard non-fMRI EEG, retained components undergo an additional
-artifact audit before target construction and before any EEG-fMRI prediction model is fit. This
-audit is blind to NPS, SIIPS1, ratings, and model outcomes, and uses only component spectra,
-cardiac phase-locking, volume-repetition spectral peaks, and scalp topographies. Components are not
-removed by unconstrained visual judgment. At this stage, rejection requires a prespecified artifact
-rule: volume-repetition spectral peak robust z > 3, cardiac phase-locking above the 95th percentile
-of the within-subject circular-shift null, or a high-frequency topographic artifact rule. The
-topographic rule requires both 70-95 Hz component power robust z > 3 and at least 50% of the
-absolute IC topographic mass on Fp1, Fp2, FT9, FT10, TP9, and TP10, or a within-subject Pearson
-correlation r ≥ 0.50 between the component 70-95 Hz plateau envelope and the Fp1/Fp2 artifact
-proxy. All audited components, rejection reasons, and thresholds are logged before feature
-extraction.
+Because ICLabel was trained on standard non-fMRI EEG, retained components undergo a prespecified
+artifact audit before target construction and model fitting. The audit is blind to NPS, SIIPS1,
+ratings, and model outcomes, and uses only component spectra, cardiac phase-locking,
+volume-repetition spectral peaks, and scalp topographies. Components are rejected for
+volume-repetition spectral peak robust z > 3, cardiac phase-locking above the 95th percentile of the
+within-subject circular-shift null, or a high-frequency topographic artifact rule. The topographic
+rule requires 70-95 Hz component power robust z > 3 plus either at least 50% absolute IC topographic
+mass on Fp1, Fp2, FT9, FT10, TP9, and TP10, or within-subject Pearson r ≥ 0.50 between the component
+70-95 Hz plateau envelope and the Fp1/Fp2 artifact proxy. Audited components, rejection reasons, and
+thresholds are logged before feature extraction.
 
 The preprocessing sequence is fixed in this order.
 
@@ -303,39 +259,34 @@ The preprocessing sequence is fixed in this order.
 5. Apply autoreject (Jas et al., 2017) in local mode with candidate interpolation counts
    {4, 8, 16} for trial rejection.
 
-Subject-specific electrode positions are digitized for each participant using EasyCap M1 channel
-labels and co-registered to individual MRI. Template EasyCap coordinates alone are insufficient for
-confirmatory Study 3 source interpretation; if subject-specific electrode digitization is unavailable
-or fails quality control, Study 3 source maps are exploratory. Subject-level unsupervised EEG
-preprocessing is performed independently within each subject before cross-validation. This design
-prevents target leakage, although it is not strictly non-transductive with respect to the held-out EEG
-distribution.
+Subject-specific electrode positions are digitized with EasyCap M1 channel labels and co-registered
+to individual MRI. Template EasyCap coordinates alone are insufficient for confirmatory Study 3
+source interpretation; if subject-specific digitization is unavailable or fails quality control,
+Study 3 source maps are exploratory. Subject-level unsupervised EEG preprocessing is performed
+independently within each subject before cross-validation. This prevents target leakage, although it
+is not strictly non-transductive with respect to the held-out EEG distribution.
 
 ### 5.2 Epochs, Baselines, and Frequency Bands
 
 A −0.2 to 0.0 s pre-stimulus voltage baseline removes DC offset before ERP and amplitude-based
-analyses. For time-frequency decompositions, the primary log-ratio baseline is −5.0 to −0.01 s,
-chosen to provide stable alpha-band power estimates given Morlet cycle requirements. Because this
-interval may contain cue-locked expectancy activity, two sensitivity baselines are prespecified: an
-immediate pre-stimulus baseline (−0.2 to −0.01 s) and an early pre-stimulus baseline
-(−7.0 to −5.5 s), interpreted only when event logs confirm no cue onset inside that window.
-Baseline conclusions are considered stable only when the sign and inferential status of primary
-alpha and beta effects are unchanged across the primary and immediate-baseline analyses.
+analyses. For time-frequency decompositions, the primary log-ratio baseline is −5.0 to −0.01 s to
+support stable alpha-band estimates under Morlet cycle requirements. Because this interval may
+include cue-locked expectancy activity, sensitivity baselines are −0.2 to −0.01 s and −7.0 to
+−5.5 s; the latter is interpreted only if event logs confirm no cue onset in that window. Baseline
+conclusions require unchanged sign and inferential status of primary alpha and beta effects across
+the primary and immediate-baseline analyses.
 
 Neural oscillations are operationalized as alpha (8.0–12.9 Hz), beta (13.0–30.0 Hz), and gamma
-(30.1–80.0 Hz). Confirmatory frequency presets are alpha, beta, and alpha+beta. Gamma and any
-gamma-containing composite feature set are exploratory. The gamma band excludes a ± 1.0 Hz notch
-around 60 Hz due to line-noise removal. Gamma-band analyses remain exploratory because simultaneous
-EEG-fMRI gamma is vulnerable to facial muscle activity, jaw tension, scanner residuals, and cardiac
-artifacts.
+(30.1–80.0 Hz). Confirmatory frequency presets are alpha, beta, and alpha+beta. Gamma and
+gamma-containing composites are exploratory because simultaneous EEG-fMRI gamma is vulnerable to
+facial muscle activity, jaw tension, scanner residuals, and cardiac artifacts. The gamma band
+excludes a ± 1.0 Hz notch around 60 Hz due to line-noise removal.
 
 ### 5.3 Fp1/Fp2 Frontal High-Frequency Artifact Proxy
 
-Independent facial EMG channels are not acquired. Physiological artifact control therefore uses a
-prespecified frontal high-frequency proxy from Fp1 and Fp2, together with the dedicated ECG channel
-for cardiac artifact metrics. Because Fp1 and Fp2 are scalp EEG electrodes rather than independent
-EMG sensors, this proxy is interpreted only as artifact control and not as independent
-physiological validation.
+Because independent facial EMG channels are not acquired, artifact control uses a prespecified
+Fp1/Fp2 high-frequency proxy and the dedicated ECG channel. Fp1/Fp2 are scalp EEG electrodes, so
+this proxy is artifact control, not independent physiological validation.
 
 The Fp1/Fp2 proxy is computed from the gradient- and BCG-corrected continuous signal after
 downsampling, band-pass filtering, and notch filtering, but before PyPREP bad-channel
@@ -346,16 +297,14 @@ the training fold, averaged across Fp1 and Fp2, and standardized within subject 
 MAD of retained plateau trials.
 
 The HRF-weighted Fp1/Fp2 nuisance regressor is the canonical-HRF convolution of this trial series
-sampled at each trial's fMRI plateau regressor peak. The unweighted trial-level proxy supports
-categorical artifact censoring and continuous artifact-effect reporting. Fp1/Fp2 high-frequency
-power is excluded from confirmatory predictive features, and Fp1/Fp2 channels are excluded from all
-confirmatory EEG feature matrices.
+sampled at each trial's fMRI plateau regressor peak. The unweighted proxy supports categorical
+artifact censoring and continuous artifact-effect reporting. Fp1/Fp2 high-frequency power and
+channels are excluded from confirmatory predictive features.
 
 A subject fails primary inclusion if Fp1, Fp2, or ECG is absent, unsynchronized with EEG/fMRI event
 logs, flat or saturated for any retained acquisition run, marked bad by PyPREP in a strict majority
 of repetitions, interpolated, or unable to yield valid artifact metrics for at least 90% of
-otherwise retained plateau trials. Missing physiological artifact metrics are not imputed or
-replaced by alternate proxies.
+otherwise retained plateau trials. Missing physiological artifact metrics are not imputed.
 
 Artifact censoring thresholds are framewise displacement > 0.5 mm, Fp1/Fp2 high-frequency power
 robust z > 3, DVARS robust z > 3, cardiac phase-locking above the 95th percentile of the
@@ -366,69 +315,60 @@ eliminates significance.
 
 ## 6. fMRI Signature Target Construction
 
-Trial-wise fMRI effects are estimated with Least-Squares Separate (LSS) models restricted to
-thermal plateau trials. For each eligible target trial, one GLM includes a target-trial plateau
-regressor with onset at the beginning of the thermal plateau and duration equal to the plateau hold
-time. All other eligible plateau trials in the same acquisition run are modeled with the
-prespecified pooled `other_trials` nuisance regressor (`lss_other_regressors: all`), so the target
-beta is estimated relative to the remaining plateau-event variance rather than an empty-event
-baseline. Ramp-up, ramp-down, fixation, and response epochs are modeled as non-plateau nuisance
-events when their timing is available. This alignment matches the fMRI event to the EEG feature
-window while recognizing that the LSS beta is an HRF-convolved event-amplitude estimate rather than
-a millisecond-scale neural measure.
+Trial-wise fMRI effects are estimated with Least-Squares Separate (LSS) models restricted to thermal
+plateau trials. For each eligible target trial, one GLM includes a target-trial plateau regressor
+with onset at plateau start and duration equal to the plateau hold. Other eligible plateau trials in
+the same acquisition run are modeled with the prespecified pooled `other_trials` nuisance regressor
+(`lss_other_regressors: all`), so the target beta is estimated relative to remaining plateau-event
+variance rather than an empty-event baseline. Ramp-up, ramp-down, fixation, and response epochs are
+modeled as non-plateau nuisance events when timing is available. The LSS beta is an HRF-convolved
+event-amplitude estimate, not a millisecond-scale neural measure.
 
-Primary LSS models use a canonical SPM hemodynamic response function, a cosine drift model, and a
-0.008 Hz high-pass filter without spatial smoothing. The denoising design includes the
-24-parameter rigid-body motion expansion, white-matter and CSF signals, framewise displacement,
-CompCor regressors, and motion-outlier regressors from fMRIPrep. Trials exceeding framewise
-displacement > 0.5 mm or standardized DVARS robust z > 3 are ineligible as target trials. Their
-thermal-event timing remains in the nuisance-event design when the timing record is valid, so
-censoring target eligibility does not leave known stimulation-evoked BOLD variance unmodeled. Task
-blocks losing more than 20% of plateau target trials fail confirmatory inclusion. LSS diagnostics
-are evaluated after target-trial censoring. A target GLM is ineligible if the target regressor is
-absent, duplicate-labeled, nonestimable, or has variance inflation that pushes the design condition
-number above the prespecified threshold.
+Primary LSS models use a canonical SPM hemodynamic response function, cosine drift model, and
+0.008 Hz high-pass filter without spatial smoothing. The denoising design includes the 24-parameter
+rigid-body motion expansion, white-matter and CSF signals, framewise displacement, CompCor
+regressors, and fMRIPrep motion-outlier regressors. Trials with framewise displacement > 0.5 mm or
+standardized DVARS robust z > 3 are ineligible as target trials, but their thermal-event timing
+remains in the nuisance-event design when valid. Task blocks losing more than 20% of plateau target
+trials fail confirmatory inclusion. A target GLM is ineligible if the target regressor is absent,
+duplicate-labeled, nonestimable, or has variance inflation pushing the design condition number above
+the prespecified threshold.
 
 HRF and timing robustness are evaluated by repeating target construction with HRF temporal and
-dispersion derivatives, with a finite-impulse-response model, and by shifting the EEG active window
-by ± 2.0 s. A result is considered HRF/timing-stable only when the primary incremental
-$\Delta R^2_{\text{LOSO}}$ remains stable (|Δ(ΔR²)| < 0.02), retains significance, and
-the Level 2 residualized-target convergence remains positive.
+dispersion derivatives, with a finite-impulse-response model, and after shifting the EEG active
+window by ± 2.0 s. HRF/timing stability requires stable primary incremental
+$\Delta R^2_{\text{LOSO}}$ (|Δ(ΔR²)| < 0.02), retained significance, and positive Level 2
+residualized-target convergence.
 
-The NPS and SIIPS1 maps are registered to MNI152NLin2009cAsym space. Signature assets are
-`NPS/weights_NSF_grouppred_cvpcr.nii.gz` for NPS and
-`SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz` for SIIPS1, both resolved relative to the
-signature-map root. SIIPS1 provenance is anchored to the CANlab Neuroimaging_Pattern_Masks
-repository. NPS provenance is anchored to the Wager et al. (2013) publication and the authorized
-CANlab NPS distribution or access record used to obtain the local map. CanlabCore pattern-mask
-conventions define the scoring convention. A frozen signature manifest is created before target
-extraction and records each source publication, source repository or authorized-access record,
-source commit or release when applicable, retrieval date, resolved local path, file size, SHA-256
-checksum, image shape, affine, voxel size, nonzero voxel count, positive/negative weight counts,
-and total positive/negative absolute weight mass. Missing files, absent provenance fields, changed
-checksums after manifest freeze, or mismatched target names make the affected signature ineligible
-for analysis.
+NPS and SIIPS1 maps are registered to MNI152NLin2009cAsym space. Signature assets are
+`NPS/weights_NSF_grouppred_cvpcr.nii.gz` and
+`SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz`, resolved relative to the signature-map root.
+SIIPS1 provenance is anchored to the CANlab Neuroimaging_Pattern_Masks repository. NPS provenance is
+anchored to Wager et al. (2013) and the authorized CANlab NPS distribution or access record.
+CanlabCore pattern-mask conventions define scoring. A frozen signature manifest records each source
+publication, source repository or access record, source commit or release when applicable, retrieval
+date, local path, file size, SHA-256 checksum, image shape, affine, voxel size, nonzero voxel count,
+positive/negative weight counts, and total positive/negative absolute weight mass. Missing files,
+absent provenance fields, changed checksums after manifest freeze, or mismatched target names make
+the affected signature ineligible.
 
 When image grids differ, LSS beta maps are resampled to the signature-weight grid using continuous
-interpolation. The published sign and scale of each weight map are preserved. Weights are not
-normalized, re-estimated, rescaled, thresholded, or sign-flipped using study data. For each
-signature, a fixed common group scoring mask $V^{(k)}$ is defined a priori before subject-level
-scoring so that contributing voxel count and spatial extent are identical across subjects, runs,
-and trials.
+interpolation. Published weight sign and scale are preserved; weights are not normalized,
+re-estimated, rescaled, thresholded, or sign-flipped using study data. For each signature, a fixed
+common group scoring mask $V^{(k)}$ is defined before subject-level scoring so voxel count and
+spatial extent are identical across subjects, runs, and trials.
 
-A signature target fails validity checks if the common mask retains less than 90% of the original
-nonzero signature support, retains less than 90% of either the positive- or negative-weight support,
-or changes either positive or negative total absolute weight mass by more than 10% after resampling.
-Reports include the number of positive and negative voxels retained, the percentage of original
-signature support retained, and positive/negative weight-distribution stability. Sensitivity
-analyses use the canonical signature grid.
+A signature target fails validity checks if the common mask retains less than 90% of original
+nonzero signature support, retains less than 90% of either positive- or negative-weight support, or
+changes positive or negative total absolute weight mass by more than 10% after resampling. Reports
+include retained positive and negative voxel counts, percentage support retained, and
+positive/negative weight-distribution stability. Sensitivity analyses use the canonical signature
+grid.
 
 Primary LSS beta maps are not smoothed, z-scored, or trial-normalized before scoring. This preserves
-the voxelwise scoring convention and avoids introducing an outcome-dependent smoothing choice into
-the confirmatory target. A fixed 4 mm FWHM smoothing sensitivity repeats signature scoring after
-target-map construction and is reported as a robustness analysis; it cannot replace the primary
-unsmoothed target. Signature weights are not re-estimated from study data. Signature expression is
-computed as the following dot product.
+the voxelwise scoring convention and avoids outcome-dependent smoothing. A fixed 4 mm FWHM smoothing
+sensitivity repeats signature scoring after target-map construction but cannot replace the primary
+unsmoothed target. Signature weights are not re-estimated from study data. Signature expression is:
 
 $$y_{s,i}^{(k)} = \sum_{v \in V^{(k)}} \beta_{s,i}(v) \, M_k(v),$$
 
@@ -438,21 +378,18 @@ $M_k(v)$ is the a priori weight map for target $k \in \{\text{NPS}, \text{SIIPS1
 LSS diagnostics include retained trial counts, design efficiency and collinearity, and
 temperature-stratified split-half reliability of NPS/SIIPS1 expression. Primary inclusion is based
 on acquisition and design estimability. Subjects are excluded from confirmatory analyses if they
-retain fewer than 25 plateau trials, have an LSS design condition number above 100, or have LSS
-design efficiency below 0.1. Subjects with 15-24 retained plateau trials are summarized only in
-feasibility or exploratory analyses. Split-half reliability is reported as a target-specific
-diagnostic, not as a primary exclusion rule, because excluding low-reliability targets can select a
-predictability-enriched sample. Reliability-informed sensitivity analyses use split-half reliability
-r ≥ 0.4 and ≥ 30 plateau trials.
+retain fewer than 25 plateau trials, have LSS design condition number above 100, or have LSS design
+efficiency below 0.1. Subjects with 15-24 retained plateau trials are summarized only in feasibility
+or exploratory analyses. Split-half reliability is a target-specific diagnostic, not an exclusion
+rule, because excluding low-reliability targets can enrich predictability. Reliability-informed
+sensitivity analyses use split-half reliability r ≥ 0.4 and ≥ 30 plateau trials.
 
-Target reliability constrains interpretation. If confirmatory EEG prediction is significant but
-temperature-stratified split-half reliability of the corresponding fMRI signature is low, the result
-is interpreted as evidence that EEG predicted the measured LSS-derived signature score, not as
-strong evidence for a stable neural pain-signature construct. Conversely, failed prediction in the
-presence of low target reliability is not interpreted as evidence that EEG lacks a relationship with
-the underlying construct, because unreliable targets bound attainable out-of-sample prediction.
-Reliability diagnostics are therefore reported before substantive interpretation of either positive
-or null predictive results.
+Target reliability constrains interpretation. Significant EEG prediction with low
+temperature-stratified split-half reliability indicates prediction of the measured LSS-derived
+signature score, not strong evidence for a stable neural pain-signature construct. Failed prediction
+with low target reliability is not evidence against the underlying construct because unreliable
+targets bound attainable out-of-sample prediction. Reliability diagnostics are reported before
+substantive interpretation.
 
 ## 7. EEG Feature Construction
 
@@ -465,11 +402,10 @@ subtraction is not used in the primary fold-isolated analysis. Condition-specifi
 evaluated as a stricter sensitivity analysis.
 
 Spectral power is log-ratio baseline-corrected using the primary baseline and averaged within
-3.0–10.5 s. Each retained trial contributes one power value per channel and frequency band. The
-primary confirmatory feature matrix uses individual channels. ROI-level and global-average matrices
-are prespecified spatial-resolution sensitivity analyses. All feature resolutions exclude Fp1 and
-Fp2 unless explicitly labeled as exploratory artifact-sensitivity analyses. Feature matrices
-retaining Fp1/Fp2 cannot support confirmatory interpretation.
+3.0–10.5 s. Each retained trial contributes one power value per channel and band. The primary
+confirmatory matrix uses individual channels; ROI-level and global-average matrices are
+spatial-resolution sensitivities. All confirmatory feature matrices exclude Fp1 and Fp2. Matrices
+retaining Fp1/Fp2 are exploratory artifact-sensitivity analyses.
 
 The ROI feature matrix uses fixed, non-overlapping scalp groups resolved from normalized extended
 10-20 channel names before model fitting. Channel normalization uppercases names and removes
@@ -488,20 +424,18 @@ channel-level log-ratio power within each ROI, computed separately for each freq
 Exploratory features include spectral peak frequency and bandwidth, aperiodic slope and offset
 (specparam fixed model), event-related desynchronization/synchronization, band power ratios
 (θ/β, θ/α, α/β, δ/α, δ/θ), hemispheric alpha asymmetry, nonlinear complexity measures, and
-oscillatory burst statistics. These families are hypothesis-generating only. Exploratory reports
-list the full tested feature family, target, model, frequency preset, preprocessing variant, and
-correction family. Within each exploratory feature family, permutation p-values are Holm-corrected
-across the tested target-model-frequency cells. Exploratory findings cannot support confirmatory
-biomarker, mechanistic, or source-localization claims without independent replication or a later
-preregistered confirmatory analysis.
+oscillatory burst statistics. Reports list feature family, target, model, frequency preset,
+preprocessing variant, and correction family. Within each exploratory feature family, permutation
+p-values are Holm-corrected across tested target-model-frequency cells. Exploratory findings cannot
+support confirmatory biomarker, mechanistic, or source-localization claims without independent
+replication or later preregistration.
 
 ## 8. Nuisance Structure and Residualization Levels
 
 The study separates three estimands by residualization level.
 
-**Level 1 - Raw expression.** Models predict the full NPS/SIIPS1 dot-product expression. This level
-can include stimulus intensity, condition, temporal structure, subjective experience, and neural
-pain processing in an unknown mixture.
+**Level 1 - Raw expression.** Models predict full NPS/SIIPS1 dot-product expression, which can mix
+stimulus intensity, condition, temporal structure, subjective experience, and neural pain processing.
 
 **Level 2 - Stimulus- and acquisition-controlled expression.** Targets are residualized against an
 intercept, stimulus temperature, task-block index, trial onset time, within-block trial number,
@@ -513,25 +447,22 @@ Celsius and centered temperature squared) is retained only as a sensitivity anal
 condition is excluded because it is a deterministic or near-deterministic recoding of the thermal
 manipulation.
 
-Level 2 is not interpreted as a purer measurement of pain. It estimates whether EEG predicts the
-portion of fMRI signature expression not explained by prespecified stimulus and acquisition
-structure. Because thermal intensity and trial structure are scientifically meaningful components
-of evoked pain processing, Level 2 can remove construct-relevant variance as well as nuisance
-variance. Positive Level 2 prediction therefore supports incremental EEG-fMRI correspondence under
-stronger controls, whereas weak Level 2 prediction does not by itself invalidate a raw-target
-association.
+Level 2 is not a purer pain measure. It tests whether EEG predicts fMRI signature expression beyond
+prespecified stimulus and acquisition structure. Because thermal intensity and trial structure are
+meaningful components of evoked pain, Level 2 can remove construct-relevant variance. Positive
+Level 2 prediction supports EEG-fMRI correspondence under stronger controls; weak Level 2 prediction
+does not invalidate a raw-target association.
 
-**Level 3 - Rating-residualized sensitivity.** The Level 2 design is augmented with behavioral
-report variables: the binary pain report and the within-scale thermal/pain intensity score, not the
-raw discontinuous 0 to 200 displayed rating. Because ratings are criterion measures of pain
-experience rather than pure nuisance variables, this level can remove construct-relevant variance
-and is interpreted only as a sensitivity analysis.
+**Level 3 - Rating-residualized sensitivity.** The Level 2 design is augmented with the binary pain
+report and within-scale thermal/pain intensity score, not the raw discontinuous 0 to 200 displayed
+rating. Because ratings are criterion measures rather than pure nuisance variables, this level can
+remove construct-relevant variance and is interpreted only as a sensitivity analysis.
 
-The primary Level 2 design is fixed across LOSO folds. Rank is checked before SVD fitting using
-singular values of the centered and scaled training-fold nuisance matrix. The design is full rank
-only when every non-intercept singular value satisfies σ_j / σ_max ≥ 10⁻¹⁰. Cells with
-rank-deficient Level 2 designs in any outer training fold are ineligible for confirmatory
-interpretation. The continuous nonlinear temperature basis remains a sensitivity analysis.
+The primary Level 2 design is fixed across LOSO folds. Before SVD fitting, rank is checked from the
+centered and scaled training-fold nuisance matrix. The design is full rank only when every
+non-intercept singular value satisfies σ_j / σ_max ≥ 10⁻¹⁰. Cells with rank-deficient Level 2
+designs in any outer training fold are ineligible for confirmatory interpretation. The continuous
+nonlinear temperature basis remains a sensitivity analysis.
 
 Within each level, nuisance coefficients are estimated exclusively on training subjects using
 SVD-based least squares.
@@ -553,13 +484,13 @@ same rank-stable nuisance design in every fold. The same pre-SVD rank tolerance 
 applies here; if the nuisance-only design becomes rank deficient, the affected cell is ineligible
 for confirmatory interpretation.
 
-The nuisance-plus-EEG estimator is a staged residual-learning estimator rather than a single joint
-penalized regression with nuisance and EEG terms in the same objective. The nuisance component is
-fit by unpenalized ordinary least squares, and the penalized EEG model learns only the training-fold
-nuisance residuals. Throughout this document, "nuisance+EEG" denotes the sum of the held-out
-nuisance prediction and the inverse-transformed EEG residual prediction. The Yeo-Johnson target
-transformation is part of the prespecified primary ElasticNet and Ridge pipelines and is estimated
-only from the training residual target. Each outer fold proceeds as follows.
+The nuisance-plus-EEG estimator is staged residual learning, not a joint penalized regression with
+nuisance and EEG terms in one objective. The nuisance component is unpenalized ordinary least
+squares; the penalized EEG model learns only training-fold nuisance residuals. Here,
+"nuisance+EEG" means the held-out nuisance prediction plus the inverse-transformed EEG residual
+prediction. The Yeo-Johnson target transformation is part of the prespecified ElasticNet and Ridge
+pipelines and is estimated only from the training residual target. Each outer fold proceeds as
+follows.
 
 1. Fit the nuisance model on untransformed raw training targets.
 2. Compute training and held-out nuisance predictions,
@@ -579,18 +510,17 @@ $$\hat{y}_{\mathrm{test}} = \hat{y}_{Z,\mathrm{test}} + \hat{r}_{\mathrm{EEG},\m
 ### 9.2 Feature-Based Models
 
 A nested LOSO framework is used. The primary confirmatory model is ElasticNet regression on
-individual-channel spectral power features. Ridge regression is included as a secondary
-confirmatory model because it is linear and supports Haufe-style forward-pattern sensitivity
-analyses in the downstream source-interpretation study. Random Forest is exploratory because it is
-sensitive to correlated predictors in high-dimensional, low-subject neuroimaging settings, and
-because its nonlinearity precludes formal Haufe transformation.
+individual-channel spectral power. Ridge is a secondary confirmatory linear model that supports
+Haufe-style forward-pattern sensitivity analyses in Study 3. Random Forest is exploratory because it
+is sensitive to correlated predictors in high-dimensional, low-subject neuroimaging settings and
+precludes formal Haufe transformation.
 
-Feature preprocessing is fold-contained. Feature statistics, imputation medians, variance
+Feature preprocessing is fold-contained: feature statistics, imputation medians, variance
 thresholds, standardization means, and standard deviations are estimated from training subjects
-only. Imputation is restricted to isolated nonfatal missing feature values within otherwise valid
-trials and features. Missing fMRI targets, missing EEG-fMRI synchronization, missing event
-identifiers, absent required channels, failed artifact metrics, failed frequency-band extraction,
-and missing entire trials are exclusion or analysis-failure events and are not imputed.
+only. Imputation is limited to isolated nonfatal missing feature values within otherwise valid
+trials and features. Missing fMRI targets, EEG-fMRI synchronization, event identifiers, required
+channels, artifact metrics, frequency-band extraction, or entire trials are exclusion or
+analysis-failure events and are not imputed.
 
 For imputation-eligible feature values, the missingness rate must be below 5% for each feature
 within the outer training fold and below 10% for each retained subject. Values are imputed with the
@@ -598,13 +528,12 @@ corresponding training-cohort median for that feature. Exceeding either limit ma
 cell ineligible for confirmatory interpretation. Retained features are standardized to zero mean and
 unit variance, with constant features removed.
 
-The Yeo-Johnson transformation is applied in every confirmatory ElasticNet and Ridge cell, and only
-to the target component learned by the penalized EEG model. In the primary incremental analysis,
-this component is $r_{\mathrm{train}}$; the nuisance-only prediction remains on the raw target
-scale. In secondary residualized-target models, targets are residualized before the transformation
-is fitted and applied to training residual targets within the fold. Predictions are
-inverse-transformed before reporting primary metrics. Analyses without target transformation are
-sensitivity analyses and do not replace the primary confirmatory pipeline.
+The Yeo-Johnson transformation is applied in every confirmatory ElasticNet and Ridge cell, only to
+the target component learned by the penalized EEG model. In the primary incremental analysis this is
+$r_{\mathrm{train}}$; the nuisance-only prediction remains on the raw target scale. In secondary
+residualized-target models, targets are residualized before fold-contained transformation.
+Predictions are inverse-transformed before primary metrics are reported. Analyses without target
+transformation are sensitivities.
 
 The ElasticNet objective is defined as follows.
 
@@ -618,46 +547,44 @@ Hyperparameters are tuned with 5-fold inner GroupKFold cross-validation restrict
 subjects, using the same subject-weighted $R^2$ metric as the outer LOSO evaluation. ElasticNet uses
 $\rho \in \{0.2, 0.5, 0.8\}$ and a fold-specific logarithmic $\alpha$ grid derived from the
 training-fold $\alpha_{\max}$ for each $\rho$:
-$\alpha_{\max} \times \{1.0, 0.1, 0.01, 0.001, 0.0001\}$. This keeps regularization scale tied to
-training-fold feature and target variance without using held-out subjects. ElasticNet uses
-10,000 maximum iterations. Ridge uses $\alpha \in \{0.01, 0.1, 1.0, 10.0, 100.0\}$. Random Forest
-uses 500 estimators with max depths $\in \{5, 10, 20, \text{None}\}$, min samples split
+$\alpha_{\max} \times \{1.0, 0.1, 0.01, 0.001, 0.0001\}$. This ties regularization scale to
+training-fold feature and target variance without held-out subjects. ElasticNet uses 10,000 maximum
+iterations. Ridge uses $\alpha \in \{0.01, 0.1, 1.0, 10.0, 100.0\}$. Random Forest uses
+500 estimators with max depths $\in \{5, 10, 20, \text{None}\}$, min samples split
 $\in \{2, 5, 10\}$, and min samples leaf $\in \{1, 2, 4\}$.
 
 Confirmatory inference requires at least 30 analyzable subjects and a preregistered precision
-simulation showing a 95% CI half-width ≤ 0.10 for the primary $\Delta R^2$ statistic. The
-simulation complements, but does not replace, the minimum subject-count requirement. It uses the
-observed subject count, retained-trial counts, task-block structure, temperature sequence, nuisance
-matrix, and target split-half reliability estimated without EEG prediction outcomes.
+simulation showing a 95% CI half-width ≤ 0.10 for the primary $\Delta R^2$ statistic. The simulation
+complements, but does not replace, the subject-count requirement. It uses observed subject count,
+retained-trial counts, task-block structure, temperature sequence, nuisance matrix, and target
+split-half reliability estimated without EEG prediction outcomes.
 
 The simulation uses 10,000 Monte Carlo datasets per retained-sample scenario. Subject-level random
 effects, within-block autocorrelation, and trial-wise residual variance are matched to the observed
-target and nuisance structure. Variance components are estimated from the nuisance-only target
-residuals using a random-intercept mixed model with participant and task-block effects.
-Within-block autocorrelation is estimated as the median Fisher-z-transformed AR(1) coefficient
-across retained task blocks and then back-transformed for simulation. Trial-wise residual variance
-is the residual variance from the same nuisance-only mixed model. Simulated EEG residual-prediction
-effects span $\Delta R^2 \in \{0.000, 0.005, 0.010, 0.020, 0.050\}$ to evaluate the precision of
-null, negligible, practical-threshold, and larger effects. For each Monte Carlo dataset, the
+target and nuisance structure. Variance components come from nuisance-only target residuals using a
+random-intercept mixed model with participant and task-block effects. Within-block autocorrelation
+is the median Fisher-z-transformed AR(1) coefficient across retained task blocks, back-transformed
+for simulation. Simulated EEG residual-prediction effects span
+$\Delta R^2 \in \{0.000, 0.005, 0.010, 0.020, 0.050\}$. For each Monte Carlo dataset, the
 subject-weighted $\Delta R^2_{\text{LOSO}}$ confidence interval is computed with a percentile
-bootstrap over subjects using 10,000 bootstrap resamples. The decision output is the 95th percentile
-of the simulated 95% CI half-widths under the observed retained sample. Results exceeding the 0.10
-half-width threshold are interpreted as exploratory regardless of permutation significance.
+bootstrap over subjects using 10,000 resamples. The decision output is the 95th percentile of
+simulated 95% CI half-widths under the observed retained sample. Results exceeding 0.10 are
+exploratory regardless of permutation significance.
 
 Before downstream source-map implementation or inspection, an attrition and precision audit
-estimates the number of subjects expected to survive both Study 1 prediction inclusion and
-source-stage quality control. If fewer than 30 source-valid subjects are expected or observed, the
-downstream source analysis is downgraded to exploratory even if the Study 1 prediction gate passes.
+estimates how many subjects are expected to survive both Study 1 prediction inclusion and
+source-stage quality control. If fewer than 30 source-valid subjects are expected or observed,
+downstream source analysis is exploratory even if the Study 1 prediction gate passes.
 
 ### 9.3 Exploratory Deep Regression Model
 
-The BandTemporalRegressor is an exploratory deep regression lane that learns directly from
-continuous, band-limited EEG dynamics. It remains exploratory regardless of sample size.
+The BandTemporalRegressor is an exploratory deep regression lane for continuous, band-limited EEG
+dynamics. It remains exploratory regardless of sample size.
 
 Continuous EEG is band-pass filtered into target frequency ranges, and instantaneous power is
 extracted with the Hilbert transform. Tensors are cropped to 3.0–10.5 s, yielding input shape
-N × B × C × T. The tensor dimensions correspond to trials, bands, channels, and time. They are
-then standardized per channel and band using training-cohort statistics.
+N × B × C × T for trials, bands, channels, and time. They are standardized per channel and band
+using training-cohort statistics.
 
 $$\tilde{X}_{n,b,c,t} = \frac{X_{n,b,c,t} - \mu_{b,c}}{\sigma_{b,c}^{*}}.$$
 
@@ -671,7 +598,7 @@ A temporal convolution with kernel length 15 and 8 filters integrates across ban
 $$H^{(2)}_{n,f^{\prime},t} = \mathrm{ELU}\left(\mathrm{BN}\left(\sum_{b,f,u} W^{\mathrm{temp}}_{f^{\prime},b,f,u} H^{(1)}_{n,b,f,t+u}\right)\right).$$
 
 The latent representation is downsampled with average pooling (factor 8) and passed through a
-dropout-regularized (p = 0.25) fully connected regression head.
+dropout-regularized fully connected regression head (p = 0.25).
 
 $$z_n = \mathrm{Pool}_{8}\left(\mathrm{Dropout}(H^{(2)}_n)\right).$$
 
@@ -686,7 +613,7 @@ contributing to their estimation.
 ## 10. Statistical Inference
 
 Primary metrics are computed on the original target scale after inverse-transforming predictions
-and, for the primary incremental analysis, after adding back the held-out nuisance prediction. The
+and, for the primary incremental analysis, adding back the held-out nuisance prediction. The
 coefficient of determination uses the training-fold target mean as the zero-skill baseline.
 
 $$R_f^2 = 1 - \frac{\sum_{i \in f}(y_i - \hat{y}_i)^2}{\sum_{i \in f}(y_i - \bar{y}_{\mathrm{train},f})^2}.$$
@@ -696,31 +623,27 @@ Subject-wise metrics are reported with 95% BCa bootstrap confidence intervals (1
 Group-level intervals resample subjects; within-subject intervals use task-block-level resampling or
 circular block bootstrap.
 
-Because LOSO prediction can reflect stable between-participant differences as well as within-person
-trial fluctuations, reports decompose held-out predictions and targets into subject means and
-within-subject deviations. The primary confirmatory claim remains out-of-sample trial-level
-prediction in held-out subjects. A stronger within-person trial-tracking interpretation requires
-the within-subject-centered diagnostic $\Delta R^2_{\text{LOSO}}$ to remain positive for the same
-target-model-frequency cell; otherwise, the result is described as generalization to unseen
-participants rather than trial-by-trial coupling within participants.
+Because LOSO prediction can reflect between-participant differences and within-person trial
+fluctuations, reports decompose held-out predictions and targets into subject means and
+within-subject deviations. The primary confirmatory claim is out-of-sample trial-level prediction in
+held-out subjects. Stronger within-person trial-tracking interpretation requires positive
+within-subject-centered diagnostic $\Delta R^2_{\text{LOSO}}$ for the same target-model-frequency
+cell; otherwise, the result is described as generalization to unseen participants.
 
-Primary inference uses nonparametric permutation testing with 5,000 permutations. The primary
-permutation null repeats the full observed-analysis training procedure, including fold-level
-preprocessing statistics, imputation, constant-feature filtering, target transformation, and inner
-GroupKFold hyperparameter selection. Frozen-hyperparameter permutation results are reported only as
-a computational sensitivity analysis and do not replace the primary null.
+Primary inference uses nonparametric permutation testing with 5,000 permutations. The primary null
+repeats the full observed-analysis training procedure, including fold-level preprocessing
+statistics, imputation, constant-feature filtering, target transformation, and inner GroupKFold
+hyperparameter selection. Frozen-hyperparameter permutations are computational sensitivities only.
 
-Circular-shift permutations use the six 11-trial task blocks as exchangeability units while
-retaining censored blocks when they still support a valid circular shift. Within each task block,
-trials are ordered by original trial index after censoring. A permutation-valid block must retain at
-least 8 plateau trials and allow at least four distinct nonzero circular shifts after excluding
-shifts shorter than the minimum distance of 5 original trial positions. Blocks failing these rules
-are excluded before confirmatory model fitting, but isolated censored trials do not by themselves
-remove an entire block. A subject fails confirmatory prediction analysis if fewer than three
-permutation-valid task blocks or fewer than 25 retained plateau trials remain. The precision
-simulation uses the observed post-censoring block lengths and admissible-shift counts, so the
-confirmatory interpretation reflects the retained trial structure rather than an idealized
-complete-block design.
+Circular-shift permutations use the six 11-trial task blocks as exchangeability units, retaining
+censored blocks when they still support a valid circular shift. Within each block, trials are
+ordered by original trial index after censoring. A permutation-valid block must retain at least
+8 plateau trials and allow at least four distinct nonzero circular shifts after excluding shifts
+shorter than 5 original trial positions. Blocks failing these rules are excluded before confirmatory
+model fitting, but isolated censored trials do not remove an entire block. A subject fails
+confirmatory prediction analysis if fewer than three permutation-valid task blocks or fewer than
+25 retained plateau trials remain. The precision simulation uses observed post-censoring block
+lengths and admissible-shift counts.
 
 For censored blocks, admissible shifts are defined on the retained plateau-trial sequence, not on
 the complete 11-trial sequence with imputed gaps. Let retained trials be ordered by their original
@@ -744,10 +667,10 @@ Each outer fold and permutation proceeds as follows.
 
 The $R^2$ denominator uses the permuted training-target mean for that fold, matching the
 observed-analysis zero-skill baseline. This approximately preserves within-block temporal
-autocorrelation (Winkler et al., 2014). Stricter sensitivity nulls include block-label shuffling,
-acquisition-run-level permutations when acquisition runs contain multiple task blocks, and a test
-that removes subject and task-block means from both EEG features and targets before permutation.
-Within-block random shuffling is reported as a sensitivity analysis.
+autocorrelation (Winkler et al., 2014). Sensitivity nulls include block-label shuffling,
+acquisition-run-level permutations when acquisition runs contain multiple task blocks, removal of
+subject and task-block means from both EEG features and targets before permutation, and within-block
+random shuffling.
 
 A permutation draw is invalid if any outer fold cannot be scored under the prespecified pipeline:
 rank-deficient nuisance design, failed target transformation, zero target or prediction variance
@@ -764,44 +687,39 @@ reduced based on interim results.
 ### 11.1 Nuisance Prediction Reporting
 
 Supplementary models predict each nuisance variable and behavioral report variable from the same EEG
-features. Behavioral report variables include the binary pain report and the within-scale
-thermal/pain intensity score. Permutation p-values for nuisance-prediction models are
-Holm-corrected across the full set of supplementary targets. Strong prediction of nuisance
-variables indicates caution that the model may track task structure or acquisition noise. Strong
-prediction of behavioral report variables is interpreted as construct overlap with pain report. The
-primary incremental $\Delta R^2$ framework remains the main evidence; EEG features must add
-predictive value beyond measured nuisance variables before any pain-relevant interpretation is made.
+features. Behavioral report variables are the binary pain report and within-scale thermal/pain
+intensity score. Nuisance-prediction p-values are Holm-corrected across supplementary targets.
+Strong nuisance prediction indicates possible tracking of task structure or acquisition noise.
+Strong behavioral-report prediction indicates construct overlap with pain report. Pain-relevant
+interpretation still requires EEG features to add predictive value beyond measured nuisance
+variables.
 
 ### 11.2 Temporal Negative Controls
 
 Temporal negative controls use the same nuisance-only versus nuisance-plus-EEG
-$\Delta R^2_{\text{LOSO}}$ framework. Models trained on EEG features from the pre-stimulus window
-(−5.0 to 0.0 s) and the immediate pre-stimulus window (−0.2 to 0.0 s) predict
-post-stimulus target expression.
+$\Delta R^2_{\text{LOSO}}$ framework. Models trained on EEG features from −5.0 to 0.0 s and
+−0.2 to 0.0 s predict post-stimulus target expression.
 
 Negative controls are evaluated separately for NPS and SIIPS1. A target-specific confirmatory cell
 passes the temporal-specificity gate only when both pre-stimulus models are nonsignificant after
-Holm correction across the two pre-stimulus windows within that target-model-frequency cell and
-show bounded evidence against a meaningful pre-stimulus effect. For the same target, the one-sided
-95% upper confidence bound for pre-stimulus $\Delta R^2$ must be below 0.02 and below 25% of the
-observed active-window $\Delta R^2$. If either pre-stimulus model yields significant
-$\Delta R^2$ after this correction or fails this bounded-effect criterion, that
-target-model-frequency cell is interpreted as capturing expectancy, block structure, or
-subject-level state rather than stimulus-locked fMRI pain-signature expression. The downstream
-source-interpretation study requires the predesignated NPS ElasticNet alpha+beta individual-channel
-spectral-power cell to pass this same NPS-specific temporal gate.
+Holm correction across the two windows within that cell and show bounded evidence against a
+meaningful pre-stimulus effect. For the same target, the one-sided 95% upper confidence bound for
+pre-stimulus $\Delta R^2$ must be below 0.02 and below 25% of the observed active-window
+$\Delta R^2$. If either pre-stimulus model is significant or fails this bounded-effect criterion,
+the cell is interpreted as capturing expectancy, block structure, or subject-level state rather than
+stimulus-locked fMRI pain-signature expression. Study 3 requires the predesignated NPS ElasticNet
+alpha+beta individual-channel spectral-power cell to pass this same NPS-specific temporal gate.
 
 Wrong-lag windows are ramp-up ($0.0$-$3.0$ s), late ramp-down ($10.5$-$15.0$ s), early-shifted
-active ($1.0$-$8.5$ s), and late-shifted active ($5.0$-$12.5$ s). These windows are
-timing-specificity sensitivity controls rather than substitutes for the pre-stimulus
-expectancy/block-structure gate. Wrong-lag p-values are Holm-corrected across the four wrong-lag
-windows within each target-model-frequency cell. A cell retains temporal-specificity eligibility
-only if no wrong-lag window exceeds the active-window $\Delta R^2$ and no Holm-corrected
-significant wrong-lag window has $\Delta R^2$ at least 75% of the active-window $\Delta R^2$.
-Failure of either condition downgrades the affected cell to exploratory. The primary
-temporal-negative control analysis repeats full inner GroupKFold hyperparameter selection
-independently for every pre-stimulus and wrong-lag window. Active-window hyperparameters are reused
-only in a secondary frozen-model temporal-specificity sensitivity analysis.
+active ($1.0$-$8.5$ s), and late-shifted active ($5.0$-$12.5$ s). These timing-specificity
+sensitivities do not replace the pre-stimulus expectancy/block-structure gate. Wrong-lag p-values
+are Holm-corrected across the four windows within each target-model-frequency cell. A cell retains
+temporal-specificity eligibility only if no wrong-lag window exceeds active-window
+$\Delta R^2$ and no Holm-corrected significant wrong-lag window has $\Delta R^2$ at least 75% of the
+active-window $\Delta R^2$. Failure downgrades the affected cell to exploratory. The primary
+temporal-negative control analysis repeats full inner GroupKFold hyperparameter selection for every
+pre-stimulus and wrong-lag window. Active-window hyperparameters are reused only in a secondary
+frozen-model sensitivity analysis.
 
 ## References
 
