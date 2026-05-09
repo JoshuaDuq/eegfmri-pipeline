@@ -954,6 +954,8 @@ def load_active_matrix(
             std = X_df.std(numeric_only=True).replace(0.0, 1.0)
             X_df = (X_df - mean) / std
 
+        X_df = X_df.copy()
+        X_df.attrs.clear()
         X_dfs.append(X_df)
         y_list.append(np.asarray(y_sub))
         groups_list.extend([subject_bids] * len(y_sub))

@@ -75,6 +75,16 @@ def _write_prepared_power_features(config: DotConfig, subject_id: str) -> None:
 
 
 def _write_prepared_feature(config: DotConfig, subject_id: str, family: str) -> None:
+    _write_prepared_feature_rows(config, subject_id, family, n_trials=2)
+
+
+def _write_prepared_feature_rows(
+    config: DotConfig,
+    subject_id: str,
+    family: str,
+    *,
+    n_trials: int,
+) -> None:
     feature_dir = (
         Path(config.get("paths.deriv_root"))
         / "group"
@@ -88,7 +98,17 @@ def _write_prepared_feature(config: DotConfig, subject_id: str, family: str) -> 
     )
     metadata_dir = feature_dir / "metadata"
     metadata_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({f"{family}_analysis_feature": [1.0, 1.1]}).to_parquet(
+    subject_numeric = int(subject_id.rsplit("-", maxsplit=1)[-1])
+    trial_ids = np.arange(1, n_trials + 1, dtype=int)
+    feature_values = trial_ids.astype(float) + subject_numeric * 0.1
+    pd.DataFrame(
+        {
+            "trial_id": trial_ids,
+            f"{family}_baseline_alpha_ch_Fp1_mean": feature_values,
+            f"{family}_baseline_alpha_ch_Fp2_mean": feature_values[::-1],
+            f"{family}_baseline_beta_ch_Fp1_mean": feature_values * 0.5,
+        }
+    ).to_parquet(
         feature_dir / f"features_{family}.parquet",
         index=False,
     )
@@ -106,6 +126,68 @@ def _write_prepared_feature(config: DotConfig, subject_id: str, family: str) -> 
         + "\n",
         encoding="utf-8",
     )
+
+
+def _write_clean_events(
+    config: DotConfig,
+    subject_id: str,
+    *,
+    task: str,
+    n_trials: int,
+) -> None:
+    events_dir = (
+        Path(config.get("paths.deriv_root"))
+        / "preprocessed"
+        / "eeg"
+        / subject_id
+        / "eeg"
+    )
+    events_dir.mkdir(parents=True, exist_ok=True)
+    trial_ids = np.arange(1, n_trials + 1, dtype=int)
+    pd.DataFrame(
+        {
+            "trial_id": trial_ids,
+            "trial_number": trial_ids,
+            "block": ((trial_ids - 1) // 3) + 1,
+            "onset": trial_ids.astype(float) * 10.0,
+            "duration": np.ones(n_trials, dtype=float),
+        }
+    ).to_csv(
+        events_dir / f"{subject_id}_task-{task}_proc-clean_events.tsv",
+        sep="\t",
+        index=False,
+    )
+
+
+def _write_four_subject_targets(config: DotConfig, *, task: str, n_trials: int) -> list[str]:
+    subjects = [f"sub-000{i}" for i in range(1, 5)]
+    rows: list[dict[str, float | int | str]] = []
+    for subject_number, subject_id in enumerate(subjects, start=1):
+        for trial_id in range(1, n_trials + 1):
+            rows.append(
+                {
+                    "subject_id": subject_id,
+                    "task": task,
+                    "block": ((trial_id - 1) // 3) + 1,
+                    "trial_index": trial_id,
+                    "onset": float(trial_id * 10),
+                    "duration": 1.0,
+                    "NPS": float(subject_number + trial_id * 0.25),
+                    "SIIPS1": float(subject_number * 2 + trial_id * 0.5),
+                }
+            )
+
+    target_path = (
+        Path(config.get("paths.deriv_root"))
+        / "group"
+        / "multimodal"
+        / "study1"
+        / "targets"
+        / "primary_targets.parquet"
+    )
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_parquet(target_path, index=False)
+    return subjects
 
 
 def test_run_feature_benchmark_requires_prepared_features(tmp_path) -> None:
@@ -247,6 +329,55 @@ def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path
         "block",
         "onset",
     ]
+
+
+def test_run_feature_benchmark_uses_grouped_inner_cv_with_four_subjects(tmp_path) -> None:
+    from studies.pain_study.study1 import feature_benchmark
+
+    cfg = _config(tmp_path)
+    cfg["study1"]["features"]["exploratory_feature_families"] = []
+    cfg["study1"]["feature_benchmark"]["n_perm"] = 1
+    cfg["study1"]["feature_benchmark"]["inner_splits"] = 3
+    cfg["study1"]["feature_benchmark"]["permutation_scheme"] = "within_subject"
+    cfg["machine_learning"] = {
+        "evaluation": {"bootstrap_iterations": 10},
+        "models": {
+            "elasticnet": {
+                "alpha_grid": [0.1],
+                "l1_ratio_grid": [0.5],
+                "max_iter": 1000,
+            },
+            "ridge": {"alpha_grid": [0.1, 1.0]},
+        },
+        "preprocessing": {"variance_threshold_grid": [0.0]},
+    }
+    task = "pain"
+    n_trials = 6
+    subjects = _write_four_subject_targets(cfg, task=task, n_trials=n_trials)
+    for subject_id in subjects:
+        _write_clean_events(cfg, subject_id, task=task, n_trials=n_trials)
+        _write_prepared_feature_rows(cfg, subject_id, "power", n_trials=n_trials)
+
+    with (
+        patch.object(feature_benchmark, "PRIMARY_SIGNATURES", ("NPS",)),
+        patch.object(feature_benchmark, "PRIMARY_BAND_PRESETS", {"alpha": ["alpha"]}),
+    ):
+        outputs = feature_benchmark.run_feature_benchmark(
+            subjects=subjects,
+            task=task,
+            config=cfg,
+            logger=logging.getLogger(__name__),
+        )
+
+    assert len(outputs) == 1
+    metrics_path = outputs[0] / "metrics" / "model_comparison.tsv"
+    metrics = pd.read_csv(metrics_path, sep="\t")
+    assert set(metrics["test_subject"]) == set(subjects)
+    assert metrics.groupby("model")["fold"].nunique().to_dict() == {
+        "elasticnet": 4,
+        "ridge": 4,
+    }
+    assert not (metrics["best_params"].astype(str) == "{}").any()
 
 
 def test_run_feature_benchmark_requires_permutation_inference(tmp_path) -> None:

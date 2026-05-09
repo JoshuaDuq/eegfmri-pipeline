@@ -616,6 +616,65 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         self.assertEqual(groups.tolist(), ["sub-0001", "sub-0001", "sub-0002"])
         self.assertEqual(meta["trial_id"].tolist(), [10, 11, 21])
 
+    def test_load_active_matrix_ignores_subject_feature_attrs_during_concat(self):
+        ml_data = self._import_ml_data()
+
+        config = DotConfig(
+            {
+                "feature_engineering": {"analysis_mode": "trial_ml_safe"},
+            }
+        )
+
+        def _feature_frame(values, trial_ids):
+            frame = pd.DataFrame({"power_feature": values})
+            frame.attrs["trial_id"] = np.asarray(trial_ids, dtype=int)
+            return frame
+
+        subject_payloads = {
+            "0001": (
+                _feature_frame([1.0, 2.0], [10, 11]),
+                np.array([10.0, 20.0], dtype=float),
+                "rating",
+                pd.DataFrame(
+                    {
+                        "subject_id": ["sub-0001", "sub-0001"],
+                        "trial_id": [10, 11],
+                        "trial_index": [0, 1],
+                    }
+                ),
+            ),
+            "0002": (
+                _feature_frame([3.0], [21]),
+                np.array([30.0], dtype=float),
+                "rating",
+                pd.DataFrame(
+                    {
+                        "subject_id": ["sub-0002"],
+                        "trial_id": [21],
+                        "trial_index": [0],
+                    }
+                ),
+            ),
+        }
+
+        def _fake_load_subject(subject, *_args, **_kwargs):
+            return subject_payloads[str(subject)]
+
+        with patch.object(ml_data, "_load_subject_ml_from_features", side_effect=_fake_load_subject):
+            X, y, groups, feature_names, meta = ml_data.load_active_matrix(
+                subjects=["0001", "0002"],
+                task="task",
+                deriv_root=Path("."),
+                config=config,
+                feature_families=["power"],
+            )
+
+        self.assertEqual(X.tolist(), [[1.0], [2.0], [3.0]])
+        self.assertEqual(y.tolist(), [10.0, 20.0, 30.0])
+        self.assertEqual(groups.tolist(), ["sub-0001", "sub-0001", "sub-0002"])
+        self.assertEqual(feature_names, ["power_feature"])
+        self.assertEqual(meta["trial_id"].tolist(), [10, 11, 21])
+
     def test_load_subject_ml_from_features_passes_deriv_root_to_clean_event_lookup(self):
         ml_data = self._import_ml_data()
         deriv_root = Path(tempfile.mkdtemp())
