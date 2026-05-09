@@ -7,23 +7,25 @@ import json as json_module
 from typing import Any, Dict, List
 
 from eeg_pipeline.cli.common import get_deriv_root, resolve_task
-from eeg_pipeline.cli.commands.validate_checks import (
-    _collect_subjects_to_validate,
-    _output_json_report,
-    _output_text_report,
-    _should_validate_mode,
-    _validate_behavior,
-    _validate_bids,
-    _validate_epochs,
-    _validate_features,
-    _validate_structure,
-)
+
 
 
 def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the validate command."""
     task = resolve_task(args.task, config)
     deriv_root = get_deriv_root(config, command="validate")
+
+    from eeg_pipeline.cli.commands.validate_checks import (
+        _collect_subjects_to_validate,
+        _output_json_report,
+        _output_text_report,
+        _should_validate_mode,
+        _validate_behavior,
+        _validate_bids,
+        _validate_epochs,
+        _validate_features,
+        _validate_structure,
+    )
 
     subjects_to_validate = _collect_subjects_to_validate(
         args.subjects,
