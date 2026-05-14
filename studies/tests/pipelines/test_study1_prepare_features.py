@@ -93,6 +93,7 @@ def _write_feature_output(
     aperiodic_subtract_evoked: bool = False,
     bands_use_iaf: bool = False,
     bursts_threshold_reference: str = "trial",
+    primary_erp_subtraction: str | None = None,
 ) -> None:
     family_dir = feature_root / subject_id / "eeg" / "features" / family
     metadata_dir = family_dir / "metadata"
@@ -109,6 +110,8 @@ def _write_feature_output(
         "bands_use_iaf": bands_use_iaf,
         "bursts_threshold_reference": bursts_threshold_reference,
     }
+    if family == "power" and primary_erp_subtraction is not None:
+        payload["primary_erp_subtraction"] = primary_erp_subtraction
     (metadata_dir / "extraction_config.json").write_text(
         json.dumps(payload, indent=2) + "\n",
         encoding="utf-8",
@@ -263,6 +266,42 @@ def test_prepare_study1_features_pins_trial_safe_family_overrides(tmp_path) -> N
     assert cfg.get("feature_engineering.aperiodic.subtract_evoked") is True
     assert cfg.get("feature_engineering.bands.use_iaf") is True
     assert cfg.get("feature_engineering.bursts.threshold_reference") == "subject"
+
+
+def test_prepare_study1_features_rejects_power_evoked_subtraction_metadata(tmp_path) -> None:
+    from studies.pain_study.study1.prepare_features import prepare_study1_features
+
+    cfg = _config(tmp_path / "derivatives")
+    cfg["study1"]["features"]["exploratory_feature_families"] = []
+    _write_primary_targets(cfg)
+
+    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+        feature_pipeline = feature_pipeline_cls.return_value
+
+        def _write_outputs(**kwargs) -> list[dict]:
+            feature_root = Path(kwargs["feature_output_root"])
+            for subject_id in kwargs["subjects"]:
+                _write_feature_output(
+                    feature_root,
+                    subject_id,
+                    "power",
+                    power_subtract_evoked=True,
+                )
+            return []
+
+        feature_pipeline.run_batch.side_effect = _write_outputs
+
+        try:
+            prepare_study1_features(
+                subjects=["0001", "0002"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+        except ValueError as exc:
+            assert "power.subtract_evoked" in str(exc)
+        else:
+            raise AssertionError("Expected evoked-subtracted power metadata to raise ValueError.")
 
 
 def test_prepare_study1_features_requires_all_configured_family_outputs(tmp_path) -> None:

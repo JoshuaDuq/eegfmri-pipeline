@@ -34,6 +34,9 @@ PRIMARY_BAND_PRESETS: dict[str, list[str]] = {
     "beta": ["beta"],
     "alpha_beta": ["alpha", "beta"],
 }
+PRIMARY_FEATURE_SEGMENTS = ("active",)
+PRIMARY_FEATURE_SCOPES = ("ch",)
+PRIMARY_FEATURE_STATS = ("logratio",)
 
 
 def _rng_seed(config: Any) -> int:
@@ -92,6 +95,18 @@ def _feature_benchmark_config(
     )
     feature_config["machine_learning.preprocessing.subject_standardize_features"] = False
     feature_config["machine_learning.preprocessing.variance_threshold_grid"] = [0.0]
+    excluded_channels = get_config_value(
+        config,
+        "study1.feature_benchmark.excluded_channels",
+        ["Fp1", "Fp2"],
+    )
+    if not isinstance(excluded_channels, (list, tuple)):
+        raise ValueError("study1.feature_benchmark.excluded_channels must be a list.")
+    feature_config["machine_learning.data.excluded_channels"] = [
+        str(channel).strip()
+        for channel in excluded_channels
+        if str(channel).strip()
+    ]
     feature_config["machine_learning.cv.permutation_scheme"] = str(
         get_config_value(
             config,
@@ -183,6 +198,9 @@ def _run_primary_presets(
                     feature_families=[PRIMARY_FEATURE_FAMILY],
                     feature_input_root=feature_root,
                     feature_bands=list(preset_bands),
+                    feature_segments=list(PRIMARY_FEATURE_SEGMENTS),
+                    feature_scopes=list(PRIMARY_FEATURE_SCOPES),
+                    feature_stats=list(PRIMARY_FEATURE_STATS),
                     feature_harmonization=harmonization,
                     model_names=["elasticnet", "ridge"],
                 )

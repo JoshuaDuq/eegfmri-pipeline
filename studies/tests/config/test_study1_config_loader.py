@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 import yaml
 
@@ -23,6 +20,7 @@ def test_load_study1_config_resolves_default_yaml() -> None:
 
     assert "study1" in config
     assert config["study1"]["targets"]["names"] == ["NPS", "SIIPS1"]
+    assert config["study1"]["features"]["exploratory_feature_families"] == []
 
 
 def test_load_study1_config_resolves_explicit_path() -> None:

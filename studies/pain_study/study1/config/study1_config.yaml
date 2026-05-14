@@ -2,14 +2,7 @@ study1:
   cohort:
     min_subjects: 30
   features:
-    exploratory_feature_families:
-      - "spectral"
-      - "aperiodic"
-      - "erds"
-      - "ratios"
-      - "asymmetry"
-      - "complexity"
-      - "bursts"
+    exploratory_feature_families: []
   targets:
     contrast_name: "pain_vs_nonpain"
     metric: "dot"
@@ -60,6 +53,7 @@ study1:
     inner_splits: 5
     outer_jobs: 1
     feature_harmonization: "intersection"
+    excluded_channels: ["Fp1", "Fp2"]
     permutation_scheme: "circular_shift_within_run"
     max_invalid_permutation_fraction: 0.20
     circular_shift:
@@ -83,3 +77,11 @@ study1:
       alpha_beta: ["alpha", "beta"]
   outputs:
     root_name: "study1"
+
+preprocessing:
+  clean_events_qc:
+    peripheral_low_gamma:
+      enabled: true
+      output_column: "fp1_fp2_high_frequency_power"
+      channels: ["Fp1", "Fp2"]
+      band: [70.0, 95.0]

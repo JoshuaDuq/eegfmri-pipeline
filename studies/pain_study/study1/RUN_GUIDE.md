@@ -66,6 +66,14 @@ COMMON_ARGS=(
 )
 ```
 
+### Preprocessing Prerequisite
+
+Study 1 nuisance regression requires the clean-events columns `fp1_fp2_high_frequency_power` and
+`residual_ecg_coupling`. The Study 1 YAML sets the Fp1/Fp2 artifact proxy to Fp1/Fp2-only,
+70-95 Hz output named `fp1_fp2_high_frequency_power`; use that config for preprocessing or pass the
+same `preprocessing.clean_events_qc.peripheral_low_gamma` overrides when generating
+`*_proc-clean_events.tsv`.
+
 For a formal rerun, prefer a new output root rather than mixing outputs from different configs or
 dates:
 
@@ -105,6 +113,19 @@ Use all discoverable subjects only when the BIDS and derivative roots are alread
 SUBJECT_ARGS=(--all-subjects)
 ```
 
+### Audit Checkpoints
+
+Treat the production run as a sequence of decision points, not just a command chain. After target
+preparation, inspect signature provenance, scoring-mask support, LSS estimability, retained
+subjects, and retained plateau-trial counts before investing in feature extraction or permutation
+testing. Missing provenance, invalid signature support, unstable LSS designs, or inadequate retained
+trials should be fixed at the derivative or event-log level rather than compensated for downstream.
+
+The final report interprets results in this order: hard analysis-validity checks, primary thesis
+gate, missing or failed interpretation diagnostics, then the Study 2 source-entry tier. Secondary
+benchmark cells and exploratory models can qualify the result, but they do not replace the `NPS` /
+`alpha_beta` / `elasticnet` thesis gate.
+
 ### Pipeline Stages
 
 Run stages in this order.
@@ -123,6 +144,10 @@ Run stages in this order.
    $STUDY1_ROOT/targets/primary_targets.parquet
    ```
 
+   Check this output before continuing. A target table with too few retained subjects, sparse
+   plateau trials, invalid signature provenance, or unresolved LSS design failures leaves the
+   primary estimand unevaluable even if the feature benchmark runs.
+
 2. Prepare Study 1 trial-safe EEG feature tables:
 
    ```bash
@@ -131,12 +156,13 @@ Run stages in this order.
      "${COMMON_ARGS[@]}"
    ```
 
-   Required per-subject outputs include:
+   Required per-subject output:
 
    ```text
    $STUDY1_ROOT/features_trial_ml_safe/sub-*/eeg/features/power/features_power.parquet
-   $STUDY1_ROOT/features_trial_ml_safe/sub-*/eeg/features/spectral/features_spectral.parquet
    ```
+
+   Exploratory families produce additional per-family tables only when explicitly enabled.
 
 3. Run the feature benchmark:
 
@@ -152,10 +178,17 @@ Run stages in this order.
    $STUDY1_ROOT/feature_benchmark/primary/<target>/<preset>/model_comparison/
    ```
 
-   Required primary targets are `NPS` and `SIIPS1`. Required primary presets are `alpha`, `beta`,
-   and `alpha_beta`.
+   Required benchmark targets are `NPS` and `SIIPS1`. Required benchmark presets are `alpha`,
+   `beta`, and `alpha_beta`. The benchmark filters predictors to active-window,
+   individual-channel, log-ratio power columns and excludes Fp1/Fp2. The primary thesis gate is the
+   `NPS` / `alpha_beta` / `elasticnet` cell; the other required cells form the secondary
+   confirmatory prediction family.
 
-4. Run exploratory deep regression if the report stage will be used:
+Exploratory feature families are disabled in the default Study 1 configs. Enable them explicitly with
+`--set "study1.features.exploratory_feature_families=[spectral,aperiodic,erds]"` when they are part
+of the planned run.
+
+4. Run exploratory deep regression only when the thesis report should include that lane:
 
    ```bash
    eeg-pipeline signature-prediction deep-regression \
@@ -171,9 +204,13 @@ Run stages in this order.
      "${COMMON_ARGS[@]}"
    ```
 
-   The report stage validates that all prespecified feature-benchmark outputs and configured
-   deep-regression outputs exist. If deep regression is intentionally omitted, do not run the report
-   stage.
+   The report stage validates that all prespecified feature-benchmark outputs exist and contain the
+   protocol audit fields: confidence intervals, valid permutation counts, invalid permutation
+   attempts, subject-selection counts, fold-level best hyperparameters, claim tier,
+   analysis-validity status, primary prediction status, missing interpretation diagnostics,
+   interpretation flags, and Study 2 source-entry status.
+   Deep-regression and exploratory feature-benchmark summaries are included when present, but they
+   are not required for the primary Study 1 report.
 
 ### Smoke Test on Kingston
 
@@ -237,7 +274,6 @@ SUBJECT_ARGS=(
 )
 COMMON_ARGS+=(
   --set "study1.cohort.min_subjects=4"
-  --set "study1.features.exploratory_feature_families=[]"
   --set "study1.feature_benchmark.n_perm=1"
   --set "study1.outputs.root_name=study1_groupcv_smoke_$(date +%Y%m%d)"
 )
@@ -290,4 +326,3 @@ extraction. Two common blockers are:
   grid; align the image and signature grids or repair the image before scoring
 
 Do not zero-fill nuisance regressors or mask away non-finite voxels inside Study 1 as a workaround.
-

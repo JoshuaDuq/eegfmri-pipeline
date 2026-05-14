@@ -24,7 +24,7 @@ stimulus-intensity-independent pain-signature construct. SIIPS1, Ridge, Random F
 BandTemporalRegressor, Level 1, Level 3, ROI-level, and global-average analyses are reported only
 as sensitivity or exploratory analyses in Study 2.
 
-## 2. Objectives and Confirmatory Boundary
+## 2. Objectives and Claim Tiers
 
 The primary objective is to derive band-specific standardized source-power association maps from
 the frozen out-of-sample transformed-space EEG contribution scores of the predesignated Study 1 NPS
@@ -32,25 +32,26 @@ ElasticNet alpha+beta individual-channel spectral-power cell. The analysis is in
 where source-power fluctuations covary with the portion of the EEG signal used by the Study 1 model
 for NPS prediction.
 
-The Study 2 confirmatory family comprises two contribution-matched full-plateau source maps. The
+The Study 2 primary source family comprises two contribution-matched full-plateau source maps. The
 alpha map, denoted $A_\alpha$, associates processed alpha source power with the standardized alpha
 contribution score. The beta map, denoted $A_\beta$, associates processed beta source power with
 the standardized beta contribution score.
 
-Study 2 proceeds confirmatorily only if the predesignated Study 1 NPS ElasticNet alpha+beta
-individual-channel spectral-power cell satisfies all Study 1 gates. These gates require significant
-positive out-of-sample $\Delta R^2_{\text{LOSO}}$, passage of the Study 1 practical-effect gate,
-Level 2 residualized-target $\Delta R^2_{\text{LOSO}} \geq 0.005$, positive
-within-subject-centered diagnostic $\Delta R^2_{\text{LOSO}}$, successful temporal negative
-controls, and artifact-censoring robustness for the same prediction cell. Holm-corrected Level 2
-significance strengthens the convergence interpretation but is not required for confirmatory
-Study 2 eligibility. If any required gate is not satisfied, all Study 2 source maps, multimodal
-spatial comparisons, and behavioral associations are labeled exploratory.
+Study 2 is run and reported as a planned source-interpretation study. Its claim tier is set by the
+predesignated Study 1 NPS ElasticNet alpha+beta individual-channel spectral-power cell and by the
+source-stage validity checks. Confirmatory source interpretation requires significant positive
+out-of-sample $\Delta R^2_{\text{LOSO}}$, practical effect
+($\Delta R^2_{\text{LOSO}} \geq 0.02$ with one-sided 95% lower confidence bound > 0.005), positive
+Level 2 convergence ($\Delta R^2_{\text{LOSO}} \geq 0.005$), positive within-subject-centered
+diagnostic prediction, temporally specific negative controls, artifact-censoring robustness, and
+interpretable target split-half reliability. If any configured criterion is not satisfied, Study 2
+remains a planned exploratory/source-characterization analysis for the affected maps, multimodal
+spatial comparisons, and behavioral associations.
 
-This confirmatory chain is intentionally high-specificity and may yield an exploratory Study 2 even
-when Study 1 provides scientifically useful prediction evidence. If Study 2 is downgraded, its
-dissertation role is limited to feasibility, sensitivity, and hypothesis-generation about the source
-structure of the predesignated EEG prediction component.
+This claim-tier structure preserves the prespecified Study 1-to-Study 2 bridge without broad model
+search. Holm-corrected Level 2 significance strengthens the convergence interpretation but is not
+required for confirmatory source interpretation when the configured minimal Level 2 effect criterion
+is met.
 
 Confirmatory source-map success is evaluated separately for $A_\alpha$ and $A_\beta$. Evidence
 cannot be assembled across bands. A band may support a candidate NPS-predictive EEG source-power
@@ -98,15 +99,15 @@ are reported beside the unique contribution maps to characterize shared alpha-be
 structure. These full-prediction maps are sensitivity analyses and do not support band-specific
 claims.
 
-Band-unique source maps are eligible for confirmatory interpretation only when the alpha/beta
+Band-unique source maps support confirmatory interpretation only when the alpha/beta
 contribution decomposition is numerically stable. Before source mapping, the within-subject
 source-stage design containing $\eta_\alpha$, $\eta_\beta$, and the fixed nuisance terms must have
 condition number ≤ 100 after centering and scaling non-intercept columns, and the opposite-band
 contribution term must have variance inflation factor ≤ 5 for every retained source subject.
-Subjects failing these gates are excluded from band-unique confirmatory maps. If fewer than
+Subjects failing these criteria are excluded from band-unique confirmatory maps. If fewer than
 30 source-valid subjects remain, or if more than 20% of otherwise source-valid subjects fail the
-collinearity gate, the band-unique alpha and beta maps are downgraded to exploratory and only the
-shared full-prediction maps are reported descriptively.
+collinearity gate, the band-unique alpha and beta maps are reported under the
+exploratory/source-characterization tier and the shared full-prediction maps remain descriptive.
 
 ## 4. Sensor-Level Interpretation
 
@@ -148,8 +149,8 @@ framewise displacement, DVARS, cardiac phase, scanner-frequency residual power, 
 high-frequency artifact power. A map is labeled artifact-contaminated when its absolute spatial
 correlation exceeds $r = 0.80$ with any artifact template or when its expression significantly
 covaries with any artifact metric after Holm correction. If a primary confirmatory map is
-artifact-contaminated, the source claim is ineligible for confirmatory interpretation. Contaminated
-maps remain descriptive sensitivity outputs.
+artifact-contaminated, it is reported under the exploratory/source-characterization tier.
+Contaminated maps remain descriptive sensitivity outputs.
 
 The same artifact gate applies in source space. For each primary source map, trial-wise
 source-pattern expression is computed from the processed source-power matrix before group
@@ -162,8 +163,8 @@ score with each artifact metric after the same source-stage preprocessing. A pri
 labeled artifact-contaminated if source-pattern expression significantly tracks any artifact metric
 after correction, if its unthresholded spatial correlation with an artifact-prediction source map
 exceeds $|r| = 0.50$, or if the predesignated Study 1 NPS ElasticNet alpha+beta individual-channel
-spectral-power cell does not retain the same sign, $\Delta R^2_{\text{LOSO}} \geq 0.02$, and
-Holm-corrected significance after artifact censoring.
+spectral-power cell changes sign or loses Holm-corrected significance after artifact censoring. The
+practical-effect threshold is reported separately when enabled in the Study 2 gate configuration.
 
 ## 6. Exploratory Spatio-Temporal Mapping
 
@@ -285,7 +286,7 @@ source-stage design is not full rank after censoring. Full rank alone is not suf
 inclusion. A subject must also have at least 15 residual degrees of freedom after source-stage
 censoring, defined as retained source-valid trials minus the rank of the fixed source-stage design.
 If fewer than 30 subjects remain after this residual-degrees-of-freedom gate, confirmatory source
-inference is downgraded to exploratory.
+inference is assigned to the exploratory/source-characterization tier.
 The source-stage quality-control report includes retained source-valid trial counts, retained
 permutation-valid block counts, fixed-design rank, residual degrees of freedom, condition number,
 and opposite-band VIF for every subject before source-map inspection.
@@ -323,11 +324,11 @@ does not erase source-map success, but it prevents stronger NPS-convergent inter
 
 ## 10. Group-Level Source Inference
 
-Confirmatory source inference requires at least 30 source-valid subjects after source-stage
-inclusion checks. Analyses with 20-29 source-valid subjects are reported as feasibility-limited
-exploratory analyses even if cluster tests are significant.
+Confirmatory source interpretation requires at least 30 source-valid subjects after source-stage
+inclusion checks. Analyses with 20-29 source-valid subjects are reported under the
+feasibility-limited exploratory/source-characterization tier even if cluster tests are significant.
 
-Before source-map inspection, a source-stage precision and calibration simulation is completed using
+Before outcome-map interpretation, a source-stage precision and calibration simulation is completed using
 only source-valid trial counts, task-block structure, baseline source-noise covariance, observed
 post-source-QC block lengths, admissible source-shift counts, source-stage nuisance matrices,
 cortical adjacency, and each subject's empirical point-spread and cross-talk summaries. Simulated
@@ -349,12 +350,12 @@ effects; the $|r| \in \{0.15, 0.20\}$ conditions evaluate the boundary between a
 interpretable source association and a clearly recoverable one.
 
 Confirmatory source interpretation requires acceptable null calibration and precision before
-outcome-map inspection. The null family-wise error rate must fall between 0.025 and 0.075 for the
+outcome-map interpretation. The null family-wise error rate must fall between 0.025 and 0.075 for the
 nominal 0.05 cluster test, the 95% bootstrap CI half-width for mean cluster expression at
 $|r| = 0.15$ must be ≤ 0.10, and the simulation must show at least 80% recovery of an embedded
 $|r| = 0.15$ cluster whose spatial extent matches the median empirical point-spread FWHM. Failure of
-any simulation gate downgrades Study 2 source inference to exploratory, regardless of observed
-cluster p-values.
+any simulation criterion assigns Study 2 source inference to the exploratory/source-characterization
+tier, regardless of observed cluster p-values.
 
 Regularization uses SNR = 3.0, corresponding to $\lambda^2 \approx 0.111$, oct6 source spacing,
 loose orientation constraint of 0.2, and depth weighting of 0.8. Before outcome-map inspection,
@@ -427,7 +428,8 @@ same condition-number or VIF gates used for observed band-unique maps. Invalidit
 discards the entire permutation draw for both bands so the alpha and beta nulls remain paired.
 Invalid draws are resampled before outcome-map inspection. If more than 20% of attempted draws are
 invalid, or if 1,000 valid draws cannot be obtained within the prespecified compute budget,
-source-space inference is downgraded to exploratory. If either band has an uncorrected cluster
+source-space inference is assigned to the exploratory/source-characterization tier. If either band
+has an uncorrected cluster
 p-value below 0.10 or a maximum cluster statistic within 10% of the 95th-percentile null threshold,
 both bands are extended to 5,000 valid paired draws before final reporting.
 
@@ -437,7 +439,8 @@ complete this sensitivity null within the compute budget does not invalidate the
 source null, but it prevents claims about full source-selection stability. If the cached
 implementation cannot complete at least 1,000 target-retrained permutations within the prespecified
 72 h compute budget on the available workstation or cluster allocation, source-space inference is
-downgraded to exploratory. The null size is not reduced based on interim results.
+assigned to the exploratory/source-characterization tier. The null size is not reduced based on
+interim results.
 
 ### 11.2 Cluster-Based Inference
 

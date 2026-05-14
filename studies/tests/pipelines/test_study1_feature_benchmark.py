@@ -70,8 +70,21 @@ def _write_primary_targets(config: DotConfig) -> Path:
     return target_path
 
 
-def _write_prepared_power_features(config: DotConfig, subject_id: str) -> None:
-    _write_prepared_feature(config, subject_id, "power")
+def _write_prepared_power_features(
+    config: DotConfig,
+    subject_id: str,
+    *,
+    primary_erp_subtraction: str | None = None,
+    power_subtract_evoked: bool = False,
+) -> None:
+    _write_prepared_feature_rows(
+        config,
+        subject_id,
+        "power",
+        n_trials=2,
+        primary_erp_subtraction=primary_erp_subtraction,
+        power_subtract_evoked=power_subtract_evoked,
+    )
 
 
 def _write_prepared_feature(config: DotConfig, subject_id: str, family: str) -> None:
@@ -84,6 +97,8 @@ def _write_prepared_feature_rows(
     family: str,
     *,
     n_trials: int,
+    primary_erp_subtraction: str | None = None,
+    power_subtract_evoked: bool = False,
 ) -> None:
     feature_dir = (
         Path(config.get("paths.deriv_root"))
@@ -106,23 +121,34 @@ def _write_prepared_feature_rows(
             "trial_id": trial_ids,
             f"{family}_baseline_alpha_ch_Fp1_mean": feature_values,
             f"{family}_baseline_alpha_ch_Fp2_mean": feature_values[::-1],
+            f"{family}_baseline_alpha_ch_Cz_mean": feature_values + 0.25,
+            f"{family}_active_alpha_ch_Fp1_logratio": feature_values,
+            f"{family}_active_alpha_ch_Fp2_logratio": feature_values[::-1],
+            f"{family}_active_alpha_ch_Cz_logratio": feature_values + 0.25,
+            f"{family}_active_alpha_roi_frontal_logratio_mean": feature_values + 0.50,
+            f"{family}_active_alpha_global_logratio_mean": feature_values + 0.75,
+            f"{family}_active_alpha_ch_Cz_db": (feature_values + 0.25) * 10.0,
             f"{family}_baseline_beta_ch_Fp1_mean": feature_values * 0.5,
+            f"{family}_baseline_beta_ch_Cz_mean": feature_values * 0.75,
+            f"{family}_active_beta_ch_Fp1_logratio": feature_values * 0.5,
+            f"{family}_active_beta_ch_Cz_logratio": feature_values * 0.75,
         }
     ).to_parquet(
         feature_dir / f"features_{family}.parquet",
         index=False,
     )
+    metadata = {
+        "analysis_mode": "trial_ml_safe",
+        "power_subtract_evoked": power_subtract_evoked,
+        "precomputed_subtract_evoked": False,
+        "aperiodic_subtract_evoked": False,
+        "bands_use_iaf": False,
+        "bursts_threshold_reference": "trial",
+    }
+    if primary_erp_subtraction is not None:
+        metadata["primary_erp_subtraction"] = primary_erp_subtraction
     (metadata_dir / "extraction_config.json").write_text(
-        json.dumps(
-            {
-                "analysis_mode": "trial_ml_safe",
-                "power_subtract_evoked": False,
-                "precomputed_subtract_evoked": False,
-                "aperiodic_subtract_evoked": False,
-                "bands_use_iaf": False,
-                "bursts_threshold_reference": "trial",
-            }
-        )
+        json.dumps(metadata)
         + "\n",
         encoding="utf-8",
     )
@@ -214,6 +240,26 @@ def test_run_feature_benchmark_requires_prepared_features(tmp_path) -> None:
     run_model_comparison.assert_not_called()
 
 
+def test_study1_prepared_power_features_must_not_claim_primary_erp_subtraction(
+    tmp_path,
+) -> None:
+    from studies.pain_study.study1.prepare_features import require_prepared_study1_features
+
+    cfg = _config(tmp_path)
+    _write_prepared_power_features(
+        cfg,
+        "sub-0001",
+        primary_erp_subtraction="fold_level_training_grand_average",
+    )
+
+    with pytest.raises(ValueError, match="primary_erp_subtraction"):
+        require_prepared_study1_features(
+            subjects=["sub-0001"],
+            config=cfg,
+            feature_families=["power"],
+        )
+
+
 def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> None:
     from studies.pain_study.study1.feature_benchmark import run_feature_benchmark
 
@@ -248,6 +294,9 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
     assert first_call["subjects"] == ["sub-0001", "sub-0002"]
     assert first_call["target"] == "fmri_signature"
     assert first_call["feature_families"] == ["power"]
+    assert first_call["feature_segments"] == ["active"]
+    assert first_call["feature_scopes"] == ["ch"]
+    assert first_call["feature_stats"] == ["logratio"]
     assert first_call["feature_input_root"] == (
         tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_trial_ml_safe"
     )
@@ -356,7 +405,12 @@ def test_run_feature_benchmark_uses_grouped_inner_cv_with_four_subjects(tmp_path
     subjects = _write_four_subject_targets(cfg, task=task, n_trials=n_trials)
     for subject_id in subjects:
         _write_clean_events(cfg, subject_id, task=task, n_trials=n_trials)
-        _write_prepared_feature_rows(cfg, subject_id, "power", n_trials=n_trials)
+        _write_prepared_feature_rows(
+            cfg,
+            subject_id,
+            "power",
+            n_trials=n_trials,
+        )
 
     with (
         patch.object(feature_benchmark, "PRIMARY_SIGNATURES", ("NPS",)),
@@ -520,7 +574,10 @@ def test_model_comparison_permutation_refits_full_pipeline_for_subject_mean_r2()
         )
 
     assert refit_targets == [list(permuted[0]), list(permuted[1])]
-    assert p_value == 1.0
+    assert p_value.p_value == 1.0
+    assert p_value.n_perm_completed == 2
+    assert p_value.n_perm_attempted == 2
+    assert p_value.n_invalid_permutations == 0
 
 
 def test_model_comparison_permutation_resamples_until_requested_valid_draws() -> None:
@@ -577,7 +634,10 @@ def test_model_comparison_permutation_resamples_until_requested_valid_draws() ->
 
     assert generate_permutation.call_count == 3
     assert refit_cv.call_count == 2
-    assert p_value == pytest.approx(2 / 3)
+    assert p_value.p_value == pytest.approx(2 / 3)
+    assert p_value.n_perm_completed == 2
+    assert p_value.n_perm_attempted == 3
+    assert p_value.n_invalid_permutations == 1
 
 
 def test_model_comparison_staged_residual_learning_scores_raw_incremental_prediction() -> None:
@@ -849,7 +909,9 @@ def test_model_comparison_permutation_reconstructs_staged_targets_per_outer_fold
     assert reconstruct.call_count == 2
     np.testing.assert_array_equal(captured_refit_targets[0], y + 10.0)
     np.testing.assert_array_equal(captured_refit_targets[1], y + 20.0)
-    assert p_value == 1.0
+    assert p_value.p_value == 1.0
+    assert p_value.n_perm_completed == 1
+    assert p_value.n_perm_attempted == 1
 
 
 def test_circular_shift_within_run_requires_blocks() -> None:

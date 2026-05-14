@@ -15,15 +15,19 @@ This module intentionally uses a single canonical CV implementation.
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
+import hashlib
 import json
+import logging
 import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Optional, List, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, ParameterGrid
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
 
@@ -69,6 +73,16 @@ from eeg_pipeline.analysis.machine_learning.target_residualization import (
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class ModelComparisonPermutationResult:
+    p_value: float
+    n_perm_requested: int
+    n_perm_completed: int
+    n_perm_attempted: int
+    n_invalid_permutations: int
+    max_invalid_permutation_fraction: float
 
 
 def _write_json(payload: Dict[str, Any], output_path: Path) -> None:
@@ -324,6 +338,14 @@ def _admissible_circular_shifts(
     )
 
 
+def _trial_index_ordered_indices(
+    indices: np.ndarray,
+    trial_indices: np.ndarray,
+) -> np.ndarray:
+    order = np.argsort(np.asarray(trial_indices)[indices], kind="stable")
+    return np.asarray(indices, dtype=int)[order]
+
+
 def _permute_labels_by_scheme(
     y: np.ndarray,
     groups: np.ndarray,
@@ -364,6 +386,10 @@ def _permute_labels_by_scheme(
                 else:
                     block_mask = subj_blocks == block_id
                 block_global_idx = subj_global_idx[block_mask]
+                block_global_idx = _trial_index_ordered_indices(
+                    block_global_idx,
+                    trial_indices_arr,
+                )
                 admissible_shifts = _admissible_circular_shifts(
                     trial_indices_arr[block_global_idx],
                 )
@@ -485,6 +511,7 @@ def _filter_circular_shift_permutation_rows(
         for block_id in np.unique(subject_blocks):
             block_mask = subject_blocks == block_id
             block_indices = subject_indices[block_mask]
+            block_indices = _trial_index_ordered_indices(block_indices, trial_indices)
             admissible_shifts = _admissible_circular_shifts(trial_indices[block_indices])
             if admissible_shifts:
                 valid_block_mask[block_indices] = True
@@ -921,7 +948,7 @@ def run_regression_ml(
     if target is None:
         target = get_config_value(config, "machine_learning.targets.regression", None)
 
-    X, y, groups, _feature_names, meta = load_active_matrix(
+    X, y, groups, feature_names, meta = load_active_matrix(
         subjects,
         task,
         deriv_root,
@@ -1151,8 +1178,19 @@ def run_regression_ml(
         **baseline_metrics,
     }
 
-    # Write reproducibility info
-    write_reproducibility_info(results_dir, subjects, config, rng_seed)
+    write_reproducibility_info(
+        results_dir,
+        subjects,
+        config,
+        rng_seed,
+        input_hashes=build_ml_input_hashes(
+            X=X,
+            y=y,
+            groups=groups,
+            feature_names=feature_names,
+            config=config,
+        ),
+    )
 
     metrics_path = metrics_dir / "pooled_metrics.json"
     _write_json(metrics, metrics_path)
@@ -1165,7 +1203,7 @@ def run_regression_ml(
 
     if bool(require_config_value(config, "machine_learning.analysis.permutation_importance.enabled")):
         _run_permutation_importance_stage(
-            X, y, groups, _feature_names, config, rng_seed, 
+            X, y, groups, feature_names, config, rng_seed,
             int(require_config_value(config, "machine_learning.analysis.permutation_importance.n_repeats")),
             results_dir, logger,
             model_name=model_name, covariates=covariates,
@@ -1173,7 +1211,7 @@ def run_regression_ml(
 
     if bool(require_config_value(config, "machine_learning.analysis.shap.enabled")):
         _run_shap_importance_stage(
-            X, y, groups, _feature_names, config, rng_seed, results_dir, logger,
+            X, y, groups, feature_names, config, rng_seed, results_dir, logger,
             model_name=model_name, covariates=covariates,
         )
 
@@ -2225,8 +2263,19 @@ def run_classification_ml(
                 empirical_auc_subject_mean=auc_for_inference,
             )
 
-    # Write reproducibility info
-    write_reproducibility_info(results_dir, subjects, config, rng_seed)
+    write_reproducibility_info(
+        results_dir,
+        subjects,
+        config,
+        rng_seed,
+        input_hashes=build_ml_input_hashes(
+            X=X,
+            y=y_binary,
+            groups=groups,
+            feature_names=feature_names,
+            config=config,
+        ),
+    )
 
     metrics_path = metrics_dir / "pooled_metrics.json"
     _write_json(metrics, metrics_path)
@@ -2303,7 +2352,7 @@ def run_within_subject_classification_ml(
     )
 
     if model_type == "cnn":
-        X, y, groups, _feature_names, meta = load_epoch_tensor_matrix(
+        X, y, groups, feature_names, meta = load_epoch_tensor_matrix(
             subjects,
             task,
             deriv_root,
@@ -2314,7 +2363,7 @@ def run_within_subject_classification_ml(
             binary_threshold=binary_threshold,
         )
     else:
-        X, y, groups, _feature_names, meta = load_active_matrix(
+        X, y, groups, feature_names, meta = load_active_matrix(
             subjects,
             task,
             deriv_root,
@@ -2846,7 +2895,19 @@ def run_within_subject_classification_ml(
                 empirical_auc_subject_mean=auc_for_inference,
             )
 
-    write_reproducibility_info(results_dir, subjects, config, rng_seed)
+    write_reproducibility_info(
+        results_dir,
+        subjects,
+        config,
+        rng_seed,
+        input_hashes=build_ml_input_hashes(
+            X=X,
+            y=y,
+            groups=groups,
+            feature_names=feature_names,
+            config=config,
+        ),
+    )
     _write_json(metrics, metrics_dir / "pooled_metrics.json")
 
     p_info = ""
@@ -2982,20 +3043,131 @@ def _run_classification_permutations(
 ###################################################################
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    return value
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _sha256_array(array: np.ndarray) -> str:
+    arr = np.ascontiguousarray(array)
+    digest = hashlib.sha256()
+    digest.update(json.dumps({"shape": arr.shape, "dtype": str(arr.dtype)}).encode())
+    digest.update(arr.tobytes())
+    return digest.hexdigest()
+
+
+def _sha256_json(payload: Any) -> str:
+    encoded = json.dumps(_json_safe(payload), sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _configured_signature_hashes(config: Any) -> dict[str, dict[str, str]]:
+    signature_dir = get_config_value(config, "paths.signature_dir", None)
+    provenance = get_config_value(config, "study1.targets.signature_provenance", None)
+    if signature_dir is None or not isinstance(provenance, dict):
+        return {}
+
+    root = Path(str(signature_dir)).expanduser()
+    hashes: dict[str, dict[str, str]] = {}
+    for name, spec in sorted(provenance.items()):
+        if not isinstance(spec, dict):
+            raise ValueError(f"Study 1 signature provenance for {name} must be a mapping.")
+        relative_path = str(spec.get("path", "")).strip()
+        if not relative_path:
+            raise ValueError(f"Study 1 signature provenance for {name} must define a path.")
+        path = root / relative_path
+        hashes[str(name)] = {
+            "path": str(path),
+            "sha256": _sha256_file(path),
+        }
+    return hashes
+
+
+def build_ml_input_hashes(
+    *,
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    feature_names: List[str],
+    config: Any,
+) -> dict[str, Any]:
+    input_hashes: dict[str, Any] = {
+        "feature_matrix_sha256": _sha256_array(np.asarray(X, dtype=float)),
+        "target_vector_sha256": _sha256_array(np.asarray(y, dtype=float)),
+        "groups_sha256": _sha256_json([str(group) for group in groups.tolist()]),
+        "feature_names_sha256": _sha256_json([str(name) for name in feature_names]),
+    }
+
+    target_table_path = get_config_value(
+        config,
+        "machine_learning.fmri_signature.target_table_path",
+        None,
+    )
+    if target_table_path is not None:
+        path = Path(str(target_table_path)).expanduser()
+        input_hashes["target_table"] = {
+            "path": str(path),
+            "sha256": _sha256_file(path),
+        }
+
+    signature_hashes = _configured_signature_hashes(config)
+    if signature_hashes:
+        input_hashes["signature_maps"] = signature_hashes
+    return input_hashes
+
+
+def _git_metadata() -> dict[str, Any]:
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=Path.cwd(),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=Path.cwd(),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return {"commit": commit, "dirty": bool(status.strip())}
+
+
 def write_reproducibility_info(
     results_dir: Path,
     subjects: List[str],
     config: Any,
     rng_seed: int,
+    input_hashes: Dict[str, Any],
 ) -> Path:
     """Write reproducibility information for ML results.
     
     Includes: config snapshot, data signature, sklearn version, RNG seed.
     """
     import sklearn
-    import hashlib
     
-    # Data signature: subjects list + hash
     subjects_str = ",".join(sorted(subjects))
     data_hash = hashlib.sha256(subjects_str.encode()).hexdigest()[:16]
     
@@ -3007,9 +3179,10 @@ def write_reproducibility_info(
         "subjects": subjects,
         "n_subjects": len(subjects),
         "data_signature": data_hash,
-        "config_snapshot": {
-            "machine_learning": config.get("machine_learning", {}) if hasattr(config, "get") else {},
-        },
+        "command": sys.argv,
+        "git": _git_metadata(),
+        "input_hashes": _json_safe(input_hashes),
+        "config_snapshot": _json_safe(dict(config) if isinstance(config, dict) else config),
     }
     
     reports_dir = results_dir / "reports"
@@ -3089,6 +3262,102 @@ def export_baseline_predictions(
 ###################################################################
 # Model Comparison Compute Stage
 ###################################################################
+
+
+def _subject_weighted_r2_scores(
+    *,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    groups: np.ndarray,
+    train_mean: float,
+) -> list[float]:
+    scores: list[float] = []
+    group_labels = groups.astype(str)
+    for group in np.unique(group_labels):
+        group_mask = group_labels == group
+        y_group = np.asarray(y_true[group_mask], dtype=float)
+        pred_group = np.asarray(y_pred[group_mask], dtype=float)
+        ss_res = float(np.sum((y_group - pred_group) ** 2))
+        ss_tot = float(np.sum((y_group - float(train_mean)) ** 2))
+        if ss_tot <= 1e-12:
+            raise ValueError(
+                "Subject-weighted R2 is undefined for an inner validation subject "
+                f"with zero denominator: {group}."
+            )
+        score = 1.0 - (ss_res / ss_tot)
+        if not np.isfinite(score):
+            raise ValueError(f"Subject-weighted R2 is non-finite for {group}.")
+        scores.append(float(score))
+    return scores
+
+
+def _fit_estimator_with_optional_groups(
+    estimator: Any,
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+) -> Any:
+    fit_params: dict[str, Any] = {}
+    pipeline = estimator if isinstance(estimator, Pipeline) else getattr(estimator, "regressor", None)
+    if isinstance(pipeline, Pipeline):
+        step_names = [name for name, _step in pipeline.steps]
+        if "missingness" in step_names:
+            fit_params["missingness__groups"] = groups
+        if "preprocessing" in step_names:
+            fit_params["preprocessing__eeg__missingness__groups"] = groups
+    return estimator.fit(X, y, **fit_params)
+
+
+def _fit_subject_weighted_inner_cv_estimator(
+    *,
+    base_estimator: Any,
+    param_grid: Dict[str, Any],
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    groups_train: np.ndarray,
+    inner_splits: int,
+) -> Any:
+    inner_cv = create_inner_cv(groups_train, inner_splits)
+    candidates = list(ParameterGrid(param_grid))
+    if not candidates:
+        raise ValueError("Model comparison inner CV received an empty parameter grid.")
+
+    best_params: dict[str, Any] | None = None
+    best_score = -np.inf
+    for params in candidates:
+        subject_scores: list[float] = []
+        for inner_train_idx, inner_test_idx in inner_cv.split(X_train, y_train, groups_train):
+            estimator = clone(base_estimator)
+            estimator.set_params(**params)
+            _fit_estimator_with_optional_groups(
+                estimator,
+                X_train[inner_train_idx],
+                y_train[inner_train_idx],
+                groups_train[inner_train_idx],
+            )
+            fold_pred = estimator.predict(X_train[inner_test_idx])
+            subject_scores.extend(
+                _subject_weighted_r2_scores(
+                    y_true=y_train[inner_test_idx],
+                    y_pred=np.asarray(fold_pred, dtype=float),
+                    groups=groups_train[inner_test_idx],
+                    train_mean=float(np.mean(y_train[inner_train_idx])),
+                )
+            )
+
+        score = float(np.mean(subject_scores))
+        if score > best_score:
+            best_score = score
+            best_params = dict(params)
+
+    if best_params is None:
+        raise RuntimeError("Model comparison inner CV could not select finite hyperparameters.")
+
+    best_estimator = clone(base_estimator)
+    best_estimator.set_params(**best_params)
+    _fit_estimator_with_optional_groups(best_estimator, X_train, y_train, groups_train)
+    best_estimator.best_params_ = best_params
+    return best_estimator
 
 
 def _model_comparison_cv_predictions(
@@ -3192,20 +3461,16 @@ def _model_comparison_cv_predictions(
         )
 
         if len(np.unique(groups_train)) >= 2:
-            inner_cv = create_inner_cv(groups_train, inner_splits)
-            grid_n_jobs = determine_inner_n_jobs(outer_jobs, n_jobs=1)
-            grid = GridSearchCV(
-                current_pipe,
-                current_param_grid,
-                cv=inner_cv,
-                scoring=create_scoring_dict(),
-                n_jobs=grid_n_jobs,
-                refit="r",
-                error_score="raise",
+            estimator = _fit_subject_weighted_inner_cv_estimator(
+                base_estimator=current_pipe,
+                param_grid=current_param_grid,
+                X_train=X_train,
+                y_train=y_train,
+                groups_train=groups_train,
+                inner_splits=inner_splits,
             )
-            grid.fit(X_train, y_train, groups=groups_train)
-            fold_pred = grid.predict(X_test)
-            best_params_repr = str(grid.best_params_)
+            fold_pred = estimator.predict(X_test)
+            best_params_repr = str(getattr(estimator, "best_params_", {}))
         else:
             estimator = clone(current_pipe)
             estimator.fit(X_train, y_train)
@@ -3349,9 +3614,16 @@ def _model_comparison_permutation_p_value(
     rng: np.random.Generator,
     n_perm: int,
     score_column: str = "r2",
-) -> float:
+) -> ModelComparisonPermutationResult:
     if n_perm <= 0:
-        return np.nan
+        return ModelComparisonPermutationResult(
+            p_value=np.nan,
+            n_perm_requested=0,
+            n_perm_completed=0,
+            n_perm_attempted=0,
+            n_invalid_permutations=0,
+            max_invalid_permutation_fraction=0.0,
+        )
 
     blocks = None
     if meta is not None and "block" in meta.columns:
@@ -3498,7 +3770,15 @@ def _model_comparison_permutation_p_value(
             f"attempted={attempts}, max_attempts={max_attempts}."
         )
     null_arr = np.asarray(null_scores, dtype=float)
-    return float(((null_arr >= float(observed_mean_r2)).sum() + 1) / (len(null_arr) + 1))
+    p_value = float(((null_arr >= float(observed_mean_r2)).sum() + 1) / (len(null_arr) + 1))
+    return ModelComparisonPermutationResult(
+        p_value=p_value,
+        n_perm_requested=int(n_perm),
+        n_perm_completed=int(len(null_arr)),
+        n_perm_attempted=int(attempts),
+        n_invalid_permutations=int(attempts - len(null_arr)),
+        max_invalid_permutation_fraction=float(max_invalid_fraction),
+    )
 
 
 def run_model_comparison_ml(
@@ -3751,7 +4031,7 @@ def run_model_comparison_ml(
                 primary_score_column = "delta_r2"
         if int(n_perm) > 0:
             perm_rng = np.random.default_rng(int(rng_seed) + 300 + len(summary))
-            p_value_r2 = _model_comparison_permutation_p_value(
+            permutation = _model_comparison_permutation_p_value(
                 observed_mean_r2=float(model_rows[primary_score_column].mean()),
                 X=X,
                 y=y,
@@ -3776,9 +4056,16 @@ def run_model_comparison_ml(
             )
             summary[model_name]["overall_r2"] = observed_overall_r2[model_name]
             if primary_score_column == "delta_r2":
-                summary[model_name]["p_value_delta_r2"] = p_value_r2
-            summary[model_name]["p_value_r2"] = p_value_r2
-            summary[model_name]["n_perm"] = int(n_perm)
+                summary[model_name]["p_value_delta_r2"] = permutation.p_value
+            summary[model_name]["p_value_r2"] = permutation.p_value
+            summary[model_name]["n_perm"] = permutation.n_perm_completed
+            summary[model_name]["n_perm_requested"] = permutation.n_perm_requested
+            summary[model_name]["n_perm_completed"] = permutation.n_perm_completed
+            summary[model_name]["n_perm_attempted"] = permutation.n_perm_attempted
+            summary[model_name]["n_invalid_permutations"] = permutation.n_invalid_permutations
+            summary[model_name]["max_invalid_permutation_fraction"] = (
+                permutation.max_invalid_permutation_fraction
+            )
 
     # Pairwise model-difference inference (subject-paired by held-out fold).
     pairwise: Dict[str, Any] = {}
@@ -3873,7 +4160,19 @@ def run_model_comparison_ml(
     
     _write_json(summary, metrics_dir / "model_comparison_summary.json")
     
-    write_reproducibility_info(results_dir, subjects, config, rng_seed)
+    write_reproducibility_info(
+        results_dir,
+        subjects,
+        config,
+        rng_seed,
+        input_hashes=build_ml_input_hashes(
+            X=X,
+            y=y,
+            groups=groups,
+            feature_names=feature_names,
+            config=config,
+        ),
+    )
     best_model = max(models.keys(), key=lambda m: summary[m]["mean_r2"])
     logger.info(
         "Model comparison complete: best=%s (mean R\u00b2=%.4f)",
@@ -4175,7 +4474,19 @@ def run_incremental_validity_ml(
     
     _write_json(summary, metrics_dir / "incremental_validity_summary.json")
     
-    write_reproducibility_info(results_dir, subjects, config, rng_seed)
+    write_reproducibility_info(
+        results_dir,
+        subjects,
+        config,
+        rng_seed,
+        input_hashes=build_ml_input_hashes(
+            X=X,
+            y=y,
+            groups=groups,
+            feature_names=feature_names,
+            config=config,
+        ),
+    )
     logger.info(
         "Incremental validity: subject-level \u0394R\u00b2=%.4f (pooled-trials \u0394R\u00b2=%.4f; %d/%d folds positive)",
         summary["delta_r2"], summary["pooled_trials"]["delta_r2"],

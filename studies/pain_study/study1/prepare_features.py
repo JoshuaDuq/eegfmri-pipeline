@@ -104,6 +104,13 @@ def _validate_prepared_feature_metadata(
             expected=False,
             setting_name="feature_engineering.power.subtract_evoked",
         )
+        primary_erp_subtraction = metadata.get("primary_erp_subtraction")
+        if primary_erp_subtraction not in (None, "", False):
+            raise ValueError(
+                "Study 1 prepared power features must not claim primary_erp_subtraction. "
+                "Fold-level ERP subtraction requires CV-owned signal extraction and is not "
+                f"part of the precomputed Study 1 feature benchmark. Invalid metadata file: {metadata_path}"
+            )
         return
 
     _require_boolean_metadata(

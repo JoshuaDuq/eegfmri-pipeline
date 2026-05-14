@@ -49,6 +49,16 @@ def test_study1_default_circular_shift_structure_rules_match_readme() -> None:
     assert config["study1"]["feature_benchmark"]["max_invalid_permutation_fraction"] == 0.20
 
 
+def test_study1_default_clean_events_qc_matches_artifact_proxy_estimand() -> None:
+    config = load_study1_config()
+    qc = config["preprocessing"]["clean_events_qc"]["peripheral_low_gamma"]
+
+    assert qc["enabled"] is True
+    assert qc["output_column"] == "fp1_fp2_high_frequency_power"
+    assert qc["channels"] == ["Fp1", "Fp2"]
+    assert qc["band"] == [70.0, 95.0]
+
+
 def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
     config = ConfigDict(load_study1_config())
     config["paths"] = {"deriv_root": str(tmp_path / "derivatives")}
@@ -114,4 +124,8 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
             None,
         )
         == 0.20
+    )
+    assert (
+        get_config_value(feature_config, "machine_learning.data.excluded_channels", None)
+        == ["Fp1", "Fp2"]
     )

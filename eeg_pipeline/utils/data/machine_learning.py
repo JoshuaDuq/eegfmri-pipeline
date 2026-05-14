@@ -110,6 +110,45 @@ def _as_list(value: Any) -> Optional[List[str]]:
     return None
 
 
+def filter_feature_columns_by_metadata(
+    feature_names: List[str],
+    *,
+    bands: Optional[List[str]],
+    segments: Optional[List[str]],
+    scopes: Optional[List[str]],
+    stats: Optional[List[str]],
+    excluded_channels: Optional[List[str]],
+) -> List[str]:
+    from eeg_pipeline.domain.features.naming import NamingSchema
+
+    band_set = set(bands) if bands is not None else None
+    segment_set = set(segments) if segments is not None else None
+    scope_set = set(scopes) if scopes is not None else None
+    stat_set = set(stats) if stats is not None else None
+    excluded_channel_set = set(excluded_channels) if excluded_channels is not None else set()
+
+    keep: List[str] = []
+    for column in feature_names:
+        parsed = NamingSchema.parse(str(column))
+        if not parsed.get("valid", False):
+            continue
+        if band_set is not None and parsed.get("band") not in band_set:
+            continue
+        if segment_set is not None and parsed.get("segment") not in segment_set:
+            continue
+        if scope_set is not None and parsed.get("scope") not in scope_set:
+            continue
+        if stat_set is not None and parsed.get("stat") not in stat_set:
+            continue
+        if (
+            parsed.get("scope") == "ch"
+            and str(parsed.get("identifier", "")).strip() in excluded_channel_set
+        ):
+            continue
+        keep.append(column)
+    return keep
+
+
 def _resolve_feature_families(
     *,
     feature_families: Optional[List[str]],
@@ -998,29 +1037,25 @@ def load_active_matrix(
     stats = _sanitize_list(
         feature_stats if feature_stats is not None else _as_list(get_config_value(config, "machine_learning.data.feature_stats", None))
     )
+    excluded_channels = _sanitize_list(
+        _as_list(get_config_value(config, "machine_learning.data.excluded_channels", None))
+    )
 
-    if bands or segments or scopes or stats:
-        from eeg_pipeline.domain.features.naming import NamingSchema
-
-        keep: List[str] = []
-        for col in feature_names:
-            parsed = NamingSchema.parse(str(col))
-            if not parsed.get("valid", False):
-                continue
-            if bands is not None and parsed.get("band") not in set(bands):
-                continue
-            if segments is not None and parsed.get("segment") not in set(segments):
-                continue
-            if scopes is not None and parsed.get("scope") not in set(scopes):
-                continue
-            if stats is not None and parsed.get("stat") not in set(stats):
-                continue
-            keep.append(col)
+    if bands or segments or scopes or stats or excluded_channels:
+        keep = filter_feature_columns_by_metadata(
+            feature_names,
+            bands=bands,
+            segments=segments,
+            scopes=scopes,
+            stats=stats,
+            excluded_channels=excluded_channels,
+        )
 
         if not keep:
             raise ValueError(
                 "No ML feature columns match requested filters. "
-                f"bands={bands}, segments={segments}, scopes={scopes}, stats={stats}. "
+                f"bands={bands}, segments={segments}, scopes={scopes}, stats={stats}, "
+                f"excluded_channels={excluded_channels}. "
                 "Tip: run `eeg-pipeline info ml-feature-space --json` to see available values."
             )
 

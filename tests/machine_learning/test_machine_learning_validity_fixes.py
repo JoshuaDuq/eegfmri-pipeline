@@ -3377,7 +3377,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 rng=np.random.default_rng(7),
             )
 
-    def test_model_comparison_uses_correlation_refit_objective(self):
+    def test_model_comparison_uses_subject_weighted_inner_cv_objective(self):
         from sklearn.dummy import DummyRegressor
 
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
@@ -3399,12 +3399,13 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             dtype=object,
         )
         meta = pd.DataFrame({"subject_id": groups, "trial_id": np.arange(len(groups), dtype=int)})
-        calls = []
+        tuner_calls = []
+        grid_calls = []
 
         class _CaptureGrid:
             def __init__(self, estimator, param_grid, cv, scoring, n_jobs, error_score, refit=None):
                 _ = (estimator, param_grid, cv, n_jobs, error_score)
-                calls.append({"scoring": scoring, "refit": refit})
+                grid_calls.append({"scoring": scoring, "refit": refit})
                 self.best_params_ = {}
 
             def fit(self, X_fit, y_fit, groups=None):
@@ -3414,9 +3415,24 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             def predict(self, X_pred):
                 return np.zeros(len(X_pred), dtype=float)
 
+        def _capture_tuner(**kwargs):
+            tuner_calls.append(
+                {
+                    "groups_train": kwargs["groups_train"].copy(),
+                    "inner_splits": kwargs["inner_splits"],
+                    "param_grid": kwargs["param_grid"],
+                }
+            )
+            estimator = kwargs["base_estimator"]
+            estimator.fit(kwargs["X_train"], kwargs["y_train"])
+            estimator.best_params_ = {}
+            return estimator
+
         with tempfile.TemporaryDirectory() as td:
             with patch.object(orch, "load_active_matrix", return_value=(X, y, groups, ["f1", "f2"], meta)), patch.object(
                 orch, "GridSearchCV", _CaptureGrid
+            ), patch.object(
+                orch, "_fit_subject_weighted_inner_cv_estimator", side_effect=_capture_tuner
             ), patch.object(
                 orch, "create_elasticnet_pipeline", return_value=DummyRegressor(strategy="mean")
             ), patch.object(
@@ -3443,11 +3459,11 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     logger=Mock(),
                 )
 
-        self.assertTrue(calls)
-        for rec in calls:
-            self.assertIsInstance(rec["scoring"], dict)
-            self.assertIn("r", rec["scoring"])
-            self.assertEqual(rec["refit"], "r")
+        self.assertTrue(tuner_calls)
+        self.assertFalse(grid_calls)
+        for rec in tuner_calls:
+            self.assertEqual(rec["inner_splits"], 2)
+            self.assertLess(len(set(rec["groups_train"])), len(set(groups)))
 
     def test_load_epoch_tensor_matrix_preserves_canonical_trial_ids(self):
         ml_data = self._import_ml_data()

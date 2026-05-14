@@ -20,6 +20,7 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     assert gates["min_delta_r2"] == 0.02
     assert gates["min_delta_r2_lower_ci"] == 0.005
     assert gates["min_level2_delta_r2"] == 0.005
+    assert gates["min_target_split_half_reliability"] == 0.4
     assert gates["require_positive_within_subject_delta_r2"] is True
     assert gates["require_temporal_negative_controls"] is True
     assert gates["require_artifact_censoring_robustness"] is True
