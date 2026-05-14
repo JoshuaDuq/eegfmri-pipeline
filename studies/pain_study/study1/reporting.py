@@ -47,6 +47,7 @@ INTERPRETATION_DIAGNOSTIC_FIELDS = (
 )
 SOURCE_ENTRY_DIAGNOSTIC_FIELDS = (
     "target_split_half_reliability",
+    "target_reliability_n_trials",
     "level2_mean_delta_r2",
     "within_subject_centered_delta_r2",
     "temporal_negative_controls_passed",
@@ -251,6 +252,8 @@ def _study2_source_entry_status(record: pd.Series) -> str:
         < SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2
         or _optional_float(record, "target_split_half_reliability")
         < SOURCE_ENTRY_MIN_TARGET_RELIABILITY
+        or _optional_float(record, "target_reliability_n_trials")
+        < MIN_TARGET_RELIABILITY_TRIALS
         or _optional_float(record, "within_subject_centered_delta_r2") <= 0.0
         or _optional_bool(record, "temporal_negative_controls_passed") is False
         or _optional_bool(record, "artifact_censoring_robustness_passed") is False

@@ -329,6 +329,32 @@ def test_report_marks_failed_diagnostics_without_invalidating_primary_prediction
     assert "artifact_robustness_limited" in flags
 
 
+def test_report_requires_reliability_trial_count_for_source_entry(tmp_path) -> None:
+    from studies.pain_study.study1.reporting import write_study1_report
+
+    cfg = _config(tmp_path)
+    root = _study1_root(cfg)
+    diagnostics = {
+        "target_split_half_reliability": 0.62,
+        "target_reliability_n_trials": 29,
+        "level2_mean_delta_r2": 0.006,
+        "within_subject_centered_delta_r2": 0.002,
+        "temporal_negative_controls_passed": True,
+        "artifact_censoring_robustness_passed": True,
+    }
+    for target in ("NPS", "SIIPS1"):
+        for feature_spec in ("alpha", "beta", "alpha_beta"):
+            _write_feature_summary(root, target, feature_spec, diagnostics=diagnostics)
+
+    report_path = write_study1_report(task="pain", config=cfg)
+    report = pd.read_csv(report_path, sep="\t")
+    primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
+
+    assert primary_gate["study2_source_entry_status"] == "source_interpretation_exploratory"
+    flags = set(str(primary_gate["interpretation_flags"]).split(";"))
+    assert "target_reliability_limited" in flags
+
+
 def test_report_marks_missing_diagnostics_as_not_evaluated_not_invalid(tmp_path) -> None:
     from studies.pain_study.study1.reporting import write_study1_report
 

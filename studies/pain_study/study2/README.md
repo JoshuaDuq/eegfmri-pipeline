@@ -44,9 +44,10 @@ out-of-sample $\Delta R^2_{\text{LOSO}}$, practical effect
 ($\Delta R^2_{\text{LOSO}} \geq 0.02$ with one-sided 95% lower confidence bound > 0.005), positive
 Level 2 convergence ($\Delta R^2_{\text{LOSO}} \geq 0.005$), positive within-subject-centered
 diagnostic prediction, temporally specific negative controls, artifact-censoring robustness, and
-interpretable target split-half reliability. If any configured criterion is not satisfied, Study 2
-remains a planned exploratory/source-characterization analysis for the affected maps, multimodal
-spatial comparisons, and behavioral associations.
+interpretable target split-half reliability supported by at least 30 retained target trials. If any
+configured criterion is not satisfied, Study 2 remains a planned
+exploratory/source-characterization analysis for the affected maps, multimodal spatial comparisons,
+and behavioral associations.
 
 This claim-tier structure preserves the prespecified Study 1-to-Study 2 bridge without broad model
 search. Holm-corrected Level 2 significance strengthens the convergence interpretation but is not

@@ -13,6 +13,7 @@ def _passing_study1_metrics() -> dict[str, object]:
         "ci_low_delta_r2": 0.006,
         "level2_mean_delta_r2": 0.006,
         "target_split_half_reliability": 0.51,
+        "target_reliability_n_trials": 31,
         "within_subject_centered_delta_r2": 0.004,
         "temporal_negative_controls_passed": True,
         "artifact_censoring_robustness_passed": True,
@@ -81,3 +82,23 @@ def test_study2_confirmatory_gates_report_target_reliability_failure() -> None:
 
     assert qc.confirmatory_eligible is False
     assert qc.failed_gates == ("target_split_half_reliability",)
+
+
+def test_study2_confirmatory_gates_require_reliability_trial_count() -> None:
+    config = load_study2_config()
+    metrics = _passing_study1_metrics()
+    del metrics["target_reliability_n_trials"]
+
+    with pytest.raises(ValueError, match="target_reliability_n_trials"):
+        evaluate_study1_confirmatory_gates(metrics, config)
+
+
+def test_study2_confirmatory_gates_report_reliability_trial_count_failure() -> None:
+    config = load_study2_config()
+    metrics = _passing_study1_metrics()
+    metrics["target_reliability_n_trials"] = 29
+
+    qc = evaluate_study1_confirmatory_gates(metrics, config)
+
+    assert qc.confirmatory_eligible is False
+    assert qc.failed_gates == ("target_reliability_n_trials",)

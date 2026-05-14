@@ -645,14 +645,14 @@ def test_model_comparison_staged_residual_learning_scores_raw_incremental_predic
         _model_comparison_cv_predictions,
     )
 
-    nuisance = np.array([-1.0, 0.0, 1.0, -1.0, 0.0, 1.0], dtype=float)
-    eeg_signal = np.array([1.0, -2.0, 1.0, 2.0, -4.0, 2.0], dtype=float)
+    nuisance = np.tile(np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=float), 2)
+    eeg_signal = np.tile(np.array([0.0, 1.0, -1.0, 2.0, -2.0], dtype=float), 2)
     y = 10.0 + 2.0 * nuisance + 5.0 * eeg_signal
-    groups = np.array(["sub-0001"] * 3 + ["sub-0002"] * 3, dtype=object)
+    groups = np.array(["sub-0001"] * 5 + ["sub-0002"] * 5, dtype=object)
     meta = pd.DataFrame({"nuisance": nuisance})
     outer_folds = [
-        (np.array([0, 1, 2]), np.array([3, 4, 5])),
-        (np.array([3, 4, 5]), np.array([0, 1, 2])),
+        (np.array([0, 1, 2, 3, 4]), np.array([5, 6, 7, 8, 9])),
+        (np.array([5, 6, 7, 8, 9]), np.array([0, 1, 2, 3, 4])),
     ]
 
     y_true, y_pred, records = _model_comparison_cv_predictions(
@@ -688,6 +688,65 @@ def test_model_comparison_staged_residual_learning_scores_raw_incremental_predic
         assert record["mae"] == pytest.approx(expected_mae)
     assert all(record["delta_r2"] > 0.0 for record in records)
     assert all(record["r2_nuisance"] < record["r2"] for record in records)
+
+
+def test_model_comparison_staged_residual_learning_scores_raw_nuisance_model() -> None:
+    from eeg_pipeline.analysis.machine_learning.orchestration import (
+        _model_comparison_cv_predictions,
+    )
+
+    nuisance = np.array([0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0], dtype=float)
+    y = np.exp(1.0 + 0.55 * nuisance) + np.array(
+        [0.0, 0.2, -0.1, 0.1, 0.6, -0.3, 0.4, -0.2],
+        dtype=float,
+    )
+    groups = np.array(["sub-0001"] * 4 + ["sub-0002"] * 4, dtype=object)
+    meta = pd.DataFrame({"nuisance": nuisance})
+    outer_folds = [
+        (np.array([0, 1, 2, 3]), np.array([4, 5, 6, 7])),
+        (np.array([4, 5, 6, 7]), np.array([0, 1, 2, 3])),
+    ]
+
+    _y_true, _y_pred, records = _model_comparison_cv_predictions(
+        model_name="linear",
+        pipe=LinearRegression(),
+        param_grid={},
+        X=np.zeros((len(y), 1), dtype=float),
+        y=y,
+        groups=groups,
+        meta=meta,
+        outer_folds=outer_folds,
+        inner_splits=2,
+        outer_jobs=1,
+        config=DotConfig(
+            {
+                "machine_learning": {
+                    "target_residualization": {
+                        "strategy": "staged_residual_learning",
+                    }
+                }
+            }
+        ),
+        harmonization_mode="none",
+        covariates=None,
+        target_residualization_columns=("nuisance",),
+        collect_records=True,
+    )
+
+    for record, (train_idx, test_idx) in zip(records, outer_folds):
+        design_train = np.column_stack(
+            [np.ones(len(train_idx), dtype=float), nuisance[train_idx]]
+        )
+        design_test = np.column_stack(
+            [np.ones(len(test_idx), dtype=float), nuisance[test_idx]]
+        )
+        coefficients, *_ = np.linalg.lstsq(design_train, y[train_idx], rcond=None)
+        raw_nuisance_prediction = design_test @ coefficients
+        ss_res = np.sum((y[test_idx] - raw_nuisance_prediction) ** 2)
+        ss_tot = np.sum((y[test_idx] - np.mean(y[train_idx])) ** 2)
+        expected_r2 = 1.0 - ss_res / ss_tot
+
+        assert record["r2_nuisance"] == pytest.approx(expected_r2)
 
 
 def test_model_comparison_summary_reports_staged_incremental_delta_r2(tmp_path) -> None:

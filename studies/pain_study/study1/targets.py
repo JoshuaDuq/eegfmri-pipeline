@@ -355,6 +355,26 @@ def _append_required_event_columns(
     return frame
 
 
+def _required_trial_index(events_df: pd.DataFrame) -> pd.Series:
+    if "trial_number" in events_df.columns:
+        source = events_df["trial_number"]
+    elif "trial_index" in events_df.columns:
+        source = events_df["trial_index"]
+    else:
+        raise ValueError(
+            "Study 1 target preparation requires clean EEG events to contain "
+            "'trial_number' or 'trial_index' with original trial-order labels."
+        )
+
+    trial_index = pd.to_numeric(source, errors="coerce")
+    if not trial_index.notna().all():
+        raise ValueError(
+            "Study 1 target preparation requires finite values in 'trial_number' "
+            "or 'trial_index' for every clean EEG event row."
+        )
+    return trial_index
+
+
 def _subject_target_rows(
     *,
     subject: str,
@@ -369,6 +389,7 @@ def _subject_target_rows(
             f"Clean events.tsv not found (or empty) for sub-{subject}, task-{task}."
         )
     events_df = events_df.reset_index(drop=True)
+    trial_index = _required_trial_index(events_df)
 
     nps, _nps_label, nps_extra = load_fmri_signature_target_for_subject(
         subject_raw=subject,
@@ -392,13 +413,6 @@ def _subject_target_rows(
     block = find_block_column(events_df)
     if block is None:
         block = pd.Series(pd.NA, index=events_df.index, dtype="float64")
-
-    if "trial_number" in events_df.columns:
-        trial_index = pd.to_numeric(events_df["trial_number"], errors="coerce")
-    elif "trial_index" in events_df.columns:
-        trial_index = pd.to_numeric(events_df["trial_index"], errors="coerce")
-    else:
-        trial_index = pd.Series(range(1, len(events_df) + 1), dtype="int64")
 
     frame = pd.DataFrame(
         {

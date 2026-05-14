@@ -58,6 +58,10 @@ def evaluate_study1_confirmatory_gates(
         config,
         "study2.confirmatory.study1_gates.min_target_split_half_reliability",
     )
+    min_target_reliability_n_trials = _optional_config_float(
+        config,
+        "study2.confirmatory.study1_gates.min_target_reliability_n_trials",
+    )
 
     mean_delta_r2 = require_finite_metric(metrics, "mean_delta_r2")
     p_value_delta_r2_holm = require_probability_metric(
@@ -98,6 +102,13 @@ def evaluate_study1_confirmatory_gates(
         )
         if target_split_half_reliability < min_target_split_half_reliability:
             failed_gates.append("target_split_half_reliability")
+    if min_target_reliability_n_trials is not None:
+        target_reliability_n_trials = require_finite_metric(
+            metrics,
+            "target_reliability_n_trials",
+        )
+        if target_reliability_n_trials < min_target_reliability_n_trials:
+            failed_gates.append("target_reliability_n_trials")
     if require_positive_within_subject:
         within_subject_delta_r2 = require_finite_metric(
             metrics,

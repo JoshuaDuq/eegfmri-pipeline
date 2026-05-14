@@ -217,6 +217,34 @@ def test_prepare_primary_targets_requires_both_primary_signatures() -> None:
                 )
 
 
+def test_prepare_primary_targets_requires_original_trial_indices() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        _write_signature_outputs(root)
+        events = _events_frame().drop(columns=["trial_number"])
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+        ):
+            with pytest.raises(ValueError, match="trial_number.*trial_index"):
+                prepare_primary_targets(
+                    subjects=["0001"],
+                    task="pain",
+                    config=cfg,
+                    logger=logging.getLogger(__name__),
+                )
+
+
 def test_validate_signature_space_checks_configured_provenance_and_maps(tmp_path) -> None:
     import nibabel as nib
 

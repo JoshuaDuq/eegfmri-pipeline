@@ -65,11 +65,11 @@ outputs.
 
 When analysis-validity gates pass, the primary prediction status is determined only by the
 prespecified NPS ElasticNet alpha+beta individual-channel cell: positive
-$\Delta R^2_{\text{LOSO}}$ and valid permutation p ≤ 0.05. Target reliability, precision,
-Level 2 convergence, within-subject-centered prediction, temporal controls, artifact robustness,
-HRF/timing robustness, first-exposure sensitivity, baseline sensitivity, and smoothing sensitivity
-are interpretation flags. Failed or missing flags are reported explicitly, but they do not
-invalidate the primary Study 1 prediction analysis.
+$\Delta R^2_{\text{LOSO}}$ and valid one-sided upper-tail permutation p ≤ 0.05. Target
+reliability, precision, Level 2 convergence, within-subject-centered prediction, temporal
+controls, artifact robustness, HRF/timing robustness, first-exposure sensitivity, baseline
+sensitivity, and smoothing sensitivity are interpretation flags. Failed or missing flags are
+reported explicitly, but they do not invalidate the primary Study 1 prediction analysis.
 
 Study 2 source-entry criteria are evaluated separately for the primary cell. Passing those criteria
 supports confirmatory source interpretation; failing or missing them sets Study 2 to the planned
@@ -88,9 +88,11 @@ $$\Delta R^2_{\text{LOSO}} = \frac{1}{S}\sum_{s=1}^{S} \Delta R_s^2.$$
 
 The primary thesis gate is the NPS ElasticNet alpha+beta individual-channel spectral-power cell.
 After analysis-validity gates pass, it passes the Study 1 prediction gate when
-$\Delta R^2_{\text{LOSO}} > 0$ and its valid permutation p-value is ≤ 0.05. Because this gate
-contains one prespecified cell, its Holm-corrected p-value is identical to the raw permutation
-p-value.
+$\Delta R^2_{\text{LOSO}} > 0$ and its valid one-sided upper-tail permutation p-value is
+≤ 0.05. Because this gate contains one prespecified cell, its Holm-corrected p-value is identical
+to the raw permutation p-value. If this statistical gate passes but
+$\Delta R^2_{\text{LOSO}} < 0.02$, the result is labeled statistically positive but practically
+small; it cannot support confirmatory Study 2 source interpretation.
 
 Confirmatory Study 2 source interpretation additionally requires the primary cell to meet all
 configured source-interpretation criteria:
@@ -169,7 +171,11 @@ not remove novelty, threat, or scanner-acclimation effects from that trial. The 
 blocks serve as the analytic within-session units for block nuisance terms, block-aware resampling,
 and circular-shift permutation. If acquisition files use a separate BIDS `run` label, that label is
 retained as acquisition metadata, whereas confirmatory trial-order and permutation rules use the
-explicit task-block identifier.
+explicit task-block identifier. The target table records the original event-level trial order from
+`trial_number` when available and from `trial_index` otherwise. One of these columns is required;
+Study 1 does not synthesize trial-order labels during target preparation. Censored trials retain
+their original labels and are not renumbered. The task block plus original trial-order label defines
+the within-block position used by block nuisance terms and circular-shift distance checks.
 
 Because fixed temperatures can evoke painful and non-painful percepts in different participants,
 all quality-controlled thermal trials are retained for the primary fMRI-signature prediction
@@ -401,13 +407,21 @@ efficiency below 0.1. Subjects with 15-24 retained plateau trials are summarized
 exploratory analyses. Reliability-informed sensitivity analyses use split-half reliability r ≥ 0.4
 and ≥ 30 plateau trials.
 
-Target reliability is the first substantive results audit, before EEG prediction metrics. If the
-target split-half reliability is below r = 0.4, or if fewer than 30 retained plateau trials support
-the reliability estimate, the affected target is labeled target-reliability-limited. A significant
-prediction result for a reliability-limited target may be reported as out-of-sample statistical
-prediction of the measured target, but it does not support a strong pain-signature interpretation or
-Study 2 confirmatory source entry. Unreliable targets bound attainable out-of-sample prediction and
-must be discussed before model-performance results.
+Target reliability is the first substantive results audit, before EEG prediction metrics.
+Reliability is computed separately for NPS and SIIPS1 using retained raw LSS signature expression
+after acquisition and design-estimability exclusions and before EEG feature inspection. A fixed
+random seed generates 1,000 split-half partitions stratified within subject and stimulus
+temperature. For each split, each subject-by-temperature cell contributes the mean expression from
+half A and half B; the reliability statistic is the median Spearman-Brown-corrected Pearson
+correlation across valid split-half vectors. A split is valid only when both halves contain finite
+values for every included subject-by-temperature cell, and the target reliability estimate is
+valid only when at least 30 retained plateau trials support the estimate. If the target split-half
+reliability is below r = 0.4, if the 30-trial requirement is not met, or if the 1,000 valid
+stratified splits cannot be generated, the affected target is labeled
+target-reliability-limited. A significant prediction result for a reliability-limited target may be
+reported as out-of-sample statistical prediction of the measured target, but it does not support a
+strong pain-signature interpretation or Study 2 confirmatory source entry. Unreliable targets bound
+attainable out-of-sample prediction and must be discussed before model-performance results.
 
 ## 7. EEG Feature Construction
 
@@ -484,10 +498,11 @@ for confirmatory interpretation.
 
 The nuisance-plus-EEG estimator is staged residual learning, not a joint penalized regression with
 nuisance and EEG terms in one objective. The nuisance component is unpenalized ordinary least
-squares. Within each fold, the target transformation, nuisance model, feature residualization,
-standardization, imputation, and EEG model are learned from training subjects only. Held-out
-prediction adds the transformed nuisance prediction to the EEG residual prediction and is
-inverse-transformed to the raw target scale before scoring.
+squares fit on the raw target scale. Within each fold, the nuisance model, residual-target
+transformation, feature residualization, standardization, imputation, and EEG model are learned from
+training subjects only. The EEG model is fit to the Yeo-Johnson-transformed training residuals from
+the raw-scale nuisance model. Held-out EEG residual predictions are inverse-transformed back to the
+raw residual scale and then added to the held-out raw-scale nuisance prediction before scoring.
 
 ### 9.2 Feature-Based Models
 
@@ -527,9 +542,11 @@ The Ridge objective is defined as follows.
 $$\min_{\beta_0,\beta} \frac{1}{2n} \left\| \tilde{y} - \beta_0 - X\beta \right\|_2^2 + \frac{\alpha}{2}\|\beta\|_2^2.$$
 
 Hyperparameters are tuned with 5-fold inner GroupKFold cross-validation restricted to training
-subjects, using the same subject-weighted $R^2$ metric as the outer LOSO evaluation. ElasticNet uses
-$\rho \in \{0.2, 0.5, 0.8\}$ and the configured $\alpha \in \{0.001, 0.01, 0.1, 1.0, 10.0\}$ grid.
-ElasticNet uses 10,000 maximum iterations. Ridge uses
+subjects. In the staged primary incremental model, inner selection uses subject-weighted $R^2$ in
+the transformed residual-target space learned inside the outer training fold; final LOSO inference
+uses raw-scale subject-weighted $\Delta R^2_{\text{LOSO}}$ after inverse transformation and
+nuisance prediction add-back. ElasticNet uses $\rho \in \{0.2, 0.5, 0.8\}$ and the configured
+$\alpha \in \{0.001, 0.01, 0.1, 1.0, 10.0\}$ grid. ElasticNet uses 10,000 maximum iterations. Ridge uses
 $\alpha \in \{0.01, 0.1, 1.0, 10.0, 100.0\}$. Random Forest uses 500 estimators with max depths
 $\in \{5, 10, 20, \text{None}\}$, min samples split $\in \{2, 5, 10\}$, and min samples leaf
 $\in \{1, 2, 4\}$.
@@ -590,22 +607,23 @@ claim, or a causal neural-generator claim. Within-person trial-tracking interpre
 positive within-subject-centered diagnostic $\Delta R^2_{\text{LOSO}}$ for the same
 target-model-frequency cell.
 
-Primary inference uses nonparametric permutation testing with 5,000 permutations. The primary null
-repeats the full observed-analysis training procedure, including fold-level preprocessing
-statistics, imputation, constant-feature filtering, target transformation, and inner GroupKFold
-hyperparameter selection. Frozen-hyperparameter permutations are computational sensitivities only.
+Primary inference uses nonparametric permutation testing with 5,000 valid permutations and a
+one-sided upper-tail p-value for positive $\Delta R^2_{\text{LOSO}}$. The primary null repeats the
+full observed-analysis training procedure, including fold-level preprocessing statistics,
+imputation, constant-feature filtering, target transformation, and inner GroupKFold hyperparameter
+selection. Frozen-hyperparameter permutations are computational sensitivities only.
 
 Circular-shift permutations use the six 11-trial task blocks as exchangeability units, retaining
 censored blocks when they still support a valid circular shift. Within each block, trials are
-ordered by original trial index after censoring. A permutation-valid block must retain at least
-8 plateau trials and allow at least four distinct nonzero circular shifts after excluding shifts
-shorter than 5 original trial positions. Blocks failing these rules are excluded before confirmatory
-model fitting. A subject fails confirmatory prediction analysis if fewer than three
+ordered by the original trial-order label after censoring. A permutation-valid block must retain at
+least 8 plateau trials and allow at least four distinct nonzero circular shifts after excluding
+shifts shorter than 5 original trial positions. Blocks failing these rules are excluded before
+confirmatory model fitting. A subject fails confirmatory prediction analysis if fewer than three
 permutation-valid task blocks or fewer than 25 retained plateau trials remain. The precision
 simulation uses observed post-censoring block lengths and admissible-shift counts.
 
 For censored blocks, admissible shifts are defined on retained plateau trials ordered by original
-within-block trial index. Censored trials are not imputed. Each valid shift keeps every
+trial-order label within the task block. Censored trials are not imputed. Each valid shift keeps every
 source-to-target reassignment at least 5 original trial positions apart. Each permutation refits the
 nuisance-only and nuisance-plus-EEG models, including inner-fold hyperparameter selection.
 
@@ -621,10 +639,20 @@ rank-deficient nuisance design, failed target transformation, zero target or pre
 needed for the metric, no retained EEG features after fold-contained filtering, failed inner
 GroupKFold split, model non-convergence after the prespecified maximum iterations, or a retained
 trial structure that violates the permutation-valid block rules. Invalid draws are resampled before
-outcome inspection. Confirmatory inference requires 5,000 valid draws. If more than 20% of attempted
-draws are invalid, or if 5,000 valid draws cannot be obtained within the prespecified compute
-budget, the affected target-model-frequency cell is downgraded to exploratory. The null size is not
-reduced based on interim results.
+outcome inspection. Confirmatory inference requires 5,000 valid draws. Each
+target-model-frequency cell attempts at most 6,250 draws, corresponding to the prespecified maximum
+invalid-draw fraction of 20%. If 5,000 valid draws are not obtained within those 6,250 attempts, the
+affected target-model-frequency cell is downgraded to exploratory. The null size is not reduced
+based on interim results.
+
+Source-entry diagnostics are required fields for Study 2 claim-tier assignment, not narrative
+placeholders. Missing target reliability, reliability trial count, Level 2 convergence,
+within-subject-centered prediction, temporal-negative-control, or artifact-robustness diagnostics
+set the Study 2 source-entry status to not evaluated. Missing precision, HRF/timing,
+first-exposure, baseline, or smoothing diagnostics are reported as missing interpretation
+diagnostics and prevent the corresponding robustness language. The primary feature benchmark does
+not synthesize these diagnostics. They must be supplied by their prespecified diagnostic analyses or
+the report remains explicit about their missing status.
 
 ## 11. Validity and Sensitivity Analyses
 

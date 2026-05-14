@@ -3403,30 +3403,36 @@ def _model_comparison_cv_predictions(
                 cfg = get_ml_config(config)
                 pt = PowerTransformer(
                     method=cfg.get("power_transformer_method", "yeo-johnson"),
-                    standardize=cfg.get("power_transformer_standardize", True)
+                    standardize=cfg.get("power_transformer_standardize", True),
                 )
-                y_train_yj = pt.fit_transform(y_train.reshape(-1, 1)).flatten()
-                y_test_yj = pt.transform(y_test.reshape(-1, 1)).flatten()
-
-                y_fold = y.copy().astype(float)
-                y_fold[train_idx] = y_train_yj
-                y_fold[test_idx] = y_test_yj
 
                 nuisance_fit = fit_nuisance_model_for_fold(
-                    y=y_fold,
+                    y=y,
                     meta=meta,
                     train_idx=train_idx,
                     test_idx=test_idx,
                     columns=target_residualization_columns,
                 )
-                y_train = nuisance_fit.train_residual
+                y_train = pt.fit_transform(
+                    nuisance_fit.train_residual.reshape(-1, 1)
+                ).flatten()
                 y_test = nuisance_fit.test_target
                 nuisance_test_prediction = nuisance_fit.test_prediction
                 residualization_details = nuisance_fit.details
 
-                from eeg_pipeline.analysis.machine_learning.target_residualization import _design_matrix
-                design_train = _design_matrix(meta.iloc[train_idx], tuple(target_residualization_columns), check_rank=True)
-                design_test = _design_matrix(meta.iloc[test_idx], tuple(target_residualization_columns), check_rank=False)
+                from eeg_pipeline.analysis.machine_learning.target_residualization import (
+                    _design_matrix,
+                )
+                design_train = _design_matrix(
+                    meta.iloc[train_idx],
+                    tuple(target_residualization_columns),
+                    check_rank=True,
+                )
+                design_test = _design_matrix(
+                    meta.iloc[test_idx],
+                    tuple(target_residualization_columns),
+                    check_rank=False,
+                )
                 coeffs_X, *_ = np.linalg.lstsq(design_train, X_train, rcond=None)
                 X_train = X_train - design_train @ coeffs_X
                 X_test = X_test - design_test @ coeffs_X
@@ -3478,10 +3484,16 @@ def _model_comparison_cv_predictions(
             best_params_repr = "{}"
 
         if nuisance_test_prediction is not None:
-            residual_prediction = np.asarray(fold_pred, dtype=float)
-            fold_pred = np.asarray(nuisance_test_prediction, dtype=float) + residual_prediction
             if residualization_strategy == "staged_residual_learning" and pt is not None:
-                fold_pred = pt.inverse_transform(fold_pred.reshape(-1, 1)).flatten()
+                residual_prediction = pt.inverse_transform(
+                    np.asarray(fold_pred, dtype=float).reshape(-1, 1)
+                ).flatten()
+            else:
+                residual_prediction = np.asarray(fold_pred, dtype=float)
+            fold_pred = (
+                np.asarray(nuisance_test_prediction, dtype=float)
+                + residual_prediction
+            )
 
         y_pred[test_idx] = fold_pred
         y_test_raw = y[test_idx]
@@ -3501,12 +3513,13 @@ def _model_comparison_cv_predictions(
         ss_tot = np.sum((fold_eval_target - fold_train_mean) ** 2)
         fold_r2 = float(1.0 - (ss_res / ss_tot)) if ss_tot > 1e-12 else np.nan
         if nuisance_test_prediction is not None:
-            if pt is not None:
-                nuisance_pred_raw = pt.inverse_transform(np.asarray(nuisance_test_prediction).reshape(-1, 1)).flatten()
-            else:
-                nuisance_pred_raw = np.asarray(nuisance_test_prediction, dtype=float)
+            nuisance_pred_raw = np.asarray(nuisance_test_prediction, dtype=float)
             nuisance_res = np.sum((y_test_raw - nuisance_pred_raw) ** 2)
-            nuisance_r2 = float(1.0 - (nuisance_res / ss_tot)) if ss_tot > 1e-12 else np.nan
+            nuisance_r2 = (
+                float(1.0 - (nuisance_res / ss_tot))
+                if ss_tot > 1e-12
+                else np.nan
+            )
             nuisance_mae = float(mean_absolute_error(y_test_raw, nuisance_pred_raw))
 
         records.append(
