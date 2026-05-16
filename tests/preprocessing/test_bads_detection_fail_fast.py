@@ -276,32 +276,12 @@ def test_bads_detection_raises_when_no_eeg_files_match(tmp_path: Path) -> None:
 def test_preprocessing_stats_rejects_missing_bad_channel_provenance(tmp_path: Path) -> None:
     from eeg_pipeline.preprocessing.pipeline import stats
 
-    epo_path = tmp_path / "sub-0001_ses-01_task-pain_proc-clean_epo.fif"
-
-    class FakeBIDSPath:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def match(self) -> list[Path]:
-            return [epo_path]
-
-    class FakeEpochs:
-        event_id = {"pain": 1}
-        drop_log: list[tuple[str, ...]] = []
-
-        def __len__(self) -> int:
-            return 0
-
-        def __getitem__(self, _key: str) -> "FakeEpochs":
-            return self
+    pipeline_path = tmp_path / "preprocessed" / "eeg"
+    epo_path = pipeline_path / "sub-0001" / "eeg" / "sub-0001_task-pain_proc-clean_epo.fif"
+    epo_path.parent.mkdir(parents=True)
+    epo_path.write_text("", encoding="utf-8")
 
     with (
-        patch.object(stats, "BIDSPath", FakeBIDSPath),
-        patch.object(
-            stats,
-            "get_entities_from_fname",
-            return_value={"subject": "0001", "session": "01"},
-        ),
         patch.object(
             stats.utils,
             "get_derived_path",
@@ -316,15 +296,66 @@ def test_preprocessing_stats_rejects_missing_bad_channel_provenance(tmp_path: Pa
             "read_components_tsv",
             return_value=None,
         ),
-        patch.object(
-            stats.io,
-            "load_epochs",
-            return_value=FakeEpochs(),
-        ),
     ):
         with pytest.raises(FileNotFoundError, match="Missing bad-channel provenance"):
             stats.collect_preprocessing_stats(
                 bids_path=tmp_path,
-                pipeline_path=tmp_path,
+                pipeline_path=pipeline_path,
                 task="pain",
             )
+
+
+def test_preprocessing_stats_ignores_archived_epoch_files(tmp_path: Path) -> None:
+    from eeg_pipeline.preprocessing.pipeline import stats
+
+    pipeline_path = tmp_path / "preprocessed" / "eeg"
+    active_path = pipeline_path / "sub-0001" / "eeg" / "sub-0001_task-pain_proc-clean_epo.fif"
+    archived_path = (
+        pipeline_path
+        / "sub-0001"
+        / "eeg"
+        / "stale_before_restart_trigger_fix_20260516"
+        / active_path.name
+    )
+    bads_path = active_path.with_name("sub-0001_task-pain_bads.tsv")
+    components_path = active_path.with_name("sub-0001_task-pain_proc-ica_components.tsv")
+
+    active_path.parent.mkdir(parents=True)
+    archived_path.parent.mkdir(parents=True)
+    active_path.write_text("", encoding="utf-8")
+    archived_path.write_text("", encoding="utf-8")
+    bads_path.write_text("name\nCz\n", encoding="utf-8")
+    components_path.write_text("status\nbad\ngood\n", encoding="utf-8")
+
+    loaded_epoch_paths = []
+
+    class FakeEpochs:
+        event_id = {"pain": 1}
+        drop_log = [(), ("BAD boundary",)]
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, _key: str) -> "FakeEpochs":
+            return self
+
+    def load_epochs(path: str) -> FakeEpochs:
+        loaded_epoch_paths.append(Path(path))
+        return FakeEpochs()
+
+    with (
+        patch.object(stats.io, "read_channels_tsv", return_value=pd.DataFrame({"name": ["Cz"]})),
+        patch.object(
+            stats.io,
+            "read_components_tsv",
+            return_value=pd.DataFrame({"status": ["bad", "good"]}),
+        ),
+        patch.object(stats.io, "load_epochs", side_effect=load_epochs),
+    ):
+        stats.collect_preprocessing_stats(
+            bids_path=tmp_path,
+            pipeline_path=pipeline_path,
+            task="pain",
+        )
+
+    assert loaded_epoch_paths == [active_path]

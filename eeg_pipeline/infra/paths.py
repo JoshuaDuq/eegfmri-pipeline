@@ -11,7 +11,6 @@ from mne_bids import BIDSPath
 
 from eeg_pipeline.utils.config.loader import ConfigDict
 
-
 EEGConfig = ConfigDict
 
 # BIDS naming constants
@@ -138,6 +137,10 @@ def _check_clean_tokens(filename: str) -> bool:
     return any(token in filename for token in CLEAN_PROCESSING_TOKENS)
 
 
+def _is_visible_file(path: Path) -> bool:
+    return path.is_file() and not path.name.startswith("._")
+
+
 def _search_standard_bids_paths(root: Path, subject_id: str, task: str) -> Optional[Path]:
     """Search standard BIDS paths for clean epochs file."""
     bids_path = BIDSPath(
@@ -157,11 +160,12 @@ def _search_standard_bids_paths(root: Path, subject_id: str, task: str) -> Optio
     filename = f"{subject_label}_task-{task}_proc-clean_{EPOCHS_SUFFIX}"
     standard_paths = [
         root / subject_label / "eeg" / filename,
+        root / "preprocessed" / "eeg" / subject_label / "eeg" / filename,
         root / "preprocessed" / "eeg" / subject_label / filename,
     ]
 
     for path in standard_paths:
-        if path.exists():
+        if _is_visible_file(path):
             return path
 
     return None
@@ -179,10 +183,10 @@ def _search_directory_for_epochs(
 
     subject_label = f"{SUBJECT_PREFIX}{subject_id}"
     pattern = f"{subject_label}_task-{task}*{EPOCHS_SUFFIX}"
-    candidates = sorted(directory.glob(pattern))
+    candidates = sorted(path for path in directory.glob(pattern) if _is_visible_file(path))
     if not candidates:
         # Common MNE-BIDS derivative layout nests files under datatype/session folders.
-        candidates = sorted(directory.rglob(pattern))
+        candidates = sorted(path for path in directory.rglob(pattern) if _is_visible_file(path))
         if not candidates:
             return None
 
@@ -231,7 +235,9 @@ def _derive_clean_events_from_epochs_path(epochs_path: Path) -> Optional[Path]:
     if name.endswith("_proc-clean_epo.fif"):
         return epochs_path.with_name(name.replace("_proc-clean_epo.fif", "_proc-clean_events.tsv"))
     if name.endswith("_proc-cleaned_epo.fif"):
-        return epochs_path.with_name(name.replace("_proc-cleaned_epo.fif", "_proc-cleaned_events.tsv"))
+        return epochs_path.with_name(
+            name.replace("_proc-cleaned_epo.fif", "_proc-cleaned_events.tsv")
+        )
     if name.endswith("_clean_epo.fif"):
         return epochs_path.with_name(name.replace("_clean_epo.fif", "_clean_events.tsv"))
     return None
@@ -344,7 +350,9 @@ def _find_events_path(bids_root: Path, subject_id: str, task: str) -> Optional[P
         return bids_path.fpath
 
     subject_label = f"{SUBJECT_PREFIX}{subject_id}"
-    fallback_path = bids_root / subject_label / "eeg" / f"{subject_label}_task-{task}_{EVENTS_SUFFIX}"
+    fallback_path = (
+        bids_root / subject_label / "eeg" / f"{subject_label}_task-{task}_{EVENTS_SUFFIX}"
+    )
     return fallback_path
 
 

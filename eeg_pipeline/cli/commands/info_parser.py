@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from eeg_pipeline.cli.common import add_task_arg
+from eeg_pipeline.cli.common import add_path_args, add_task_arg
 from eeg_pipeline.cli.commands.info_helpers import (
     MODE_CONFIG,
     MODE_DISCOVER,
@@ -45,6 +45,7 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Subject ID (for features mode) or config key (for config mode)",
     )
     add_task_arg(parser)
+    add_path_args(parser)
     parser.add_argument(
         "--status",
         action="store_true",

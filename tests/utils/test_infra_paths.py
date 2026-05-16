@@ -34,12 +34,7 @@ def test_resolve_deriv_root_accepts_direct_config_and_constants(tmp_path: Path) 
 
 def test_find_clean_epochs_and_events_paths(tmp_path: Path) -> None:
     deriv_root = tmp_path / "derivatives"
-    epochs_path = (
-        deriv_root
-        / "sub-0001"
-        / "eeg"
-        / "sub-0001_task-rest_proc-clean_epo.fif"
-    )
+    epochs_path = deriv_root / "sub-0001" / "eeg" / "sub-0001_task-rest_proc-clean_epo.fif"
     events_path = epochs_path.with_name("sub-0001_task-rest_proc-clean_events.tsv")
     epochs_path.parent.mkdir(parents=True, exist_ok=True)
     epochs_path.write_text("epochs", encoding="utf-8")
@@ -52,19 +47,39 @@ def test_find_clean_epochs_and_events_paths(tmp_path: Path) -> None:
     assert found_events == events_path
 
 
+def test_find_clean_epochs_prefers_active_file_over_archived_stale_copy(
+    tmp_path: Path,
+) -> None:
+    deriv_root = tmp_path / "derivatives"
+    active_path = (
+        deriv_root
+        / "preprocessed"
+        / "eeg"
+        / "sub-0001"
+        / "eeg"
+        / "sub-0001_task-task_proc-clean_epo.fif"
+    )
+    stale_path = (
+        active_path.parent
+        / "stale_before_restart_trigger_fix_20260516"
+        / "sub-0001_task-task_proc-clean_epo.fif"
+    )
+    active_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_path.parent.mkdir(parents=True, exist_ok=True)
+    active_path.write_text("active", encoding="utf-8")
+    stale_path.write_text("stale", encoding="utf-8")
+
+    found = find_clean_epochs_path("0001", "task", deriv_root=deriv_root)
+
+    assert found == active_path
+
+
 def test_load_events_df_prefers_clean_events_when_available(tmp_path: Path) -> None:
     deriv_root = tmp_path / "derivatives"
     bids_root = tmp_path / "bids"
 
-    clean_epochs_path = (
-        deriv_root
-        / "sub-0001"
-        / "eeg"
-        / "sub-0001_task-rest_proc-clean_epo.fif"
-    )
-    clean_events_path = clean_epochs_path.with_name(
-        "sub-0001_task-rest_proc-clean_events.tsv"
-    )
+    clean_epochs_path = deriv_root / "sub-0001" / "eeg" / "sub-0001_task-rest_proc-clean_epo.fif"
+    clean_events_path = clean_epochs_path.with_name("sub-0001_task-rest_proc-clean_events.tsv")
     bids_events_path = bids_root / "sub-0001" / "eeg" / "sub-0001_task-rest_events.tsv"
 
     clean_events_path.parent.mkdir(parents=True, exist_ok=True)

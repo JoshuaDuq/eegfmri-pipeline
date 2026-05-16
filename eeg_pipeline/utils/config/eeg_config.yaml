@@ -7,13 +7,13 @@ project:
   subject_list: null  # Optional list of subjects to process (null = all found)
 
 paths:
-  bids_root: "../../../data/bids_output/eeg"  # BIDS-formatted EEG data directory
+  bids_root: "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg"  # BIDS-formatted EEG data directory
   bids_rest_root: null  # Optional resting-state EEG BIDS directory used when task_is_rest is enabled
-  bids_fmri_root: "../../../data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
-  deriv_root: "../../../data/derivatives"  # Processed derivatives output directory
+  bids_fmri_root: "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri"  # BIDS-formatted fMRI data directory (for contrast builder)
+  deriv_root: "/Volumes/KINGSTON/EEG_fMRI_data/derivatives"  # Processed derivatives output directory
   deriv_rest_root: null  # Resting-state EEG derivatives directory used when task_is_rest is enabled
-  source_data: "../../../data/source_data"  # Raw source data directory
-  freesurfer_dir: "../../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
+  source_data: "/Volumes/KINGSTON/EEG_fMRI_data/source_data"  # Raw source data directory
+  freesurfer_dir: "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
   freesurfer_license: null  # Path to FreeSurfer license.txt (otherwise use EEG_PIPELINE_FREESURFER_LICENSE, then ~/license.txt)
   signature_dir: null  # Root directory for multivariate signature weight maps
   signature_maps: []  # List of {name, path} entries relative to signature_dir

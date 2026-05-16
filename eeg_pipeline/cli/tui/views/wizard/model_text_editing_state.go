@@ -12,23 +12,23 @@ func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 	if (m.task == "" || m.task == "task") && summary.Task != "" {
 		m.task = summary.Task
 	}
-	if m.bidsRoot == "" && summary.BidsRoot != "" {
+	if summary.BidsRoot != "" {
 		m.bidsRoot = summary.BidsRoot
 	}
-	if m.bidsRestRoot == "" && summary.BidsRestRoot != "" {
+	if summary.BidsRestRoot != "" {
 		m.bidsRestRoot = summary.BidsRestRoot
 	}
-	if m.bidsFmriRoot == "" && summary.BidsFmriRoot != "" {
+	if summary.BidsFmriRoot != "" {
 		m.bidsFmriRoot = summary.BidsFmriRoot
 	}
-	if m.derivRoot == "" && summary.DerivRoot != "" {
+	if summary.DerivRoot != "" {
 		m.derivRoot = summary.DerivRoot
 		m.fmriSecondLevelContrastDiscoveryKey = ""
 	}
-	if m.derivRestRoot == "" && summary.DerivRestRoot != "" {
+	if summary.DerivRestRoot != "" {
 		m.derivRestRoot = summary.DerivRestRoot
 	}
-	if m.sourceRoot == "" && summary.SourceRoot != "" {
+	if summary.SourceRoot != "" {
 		m.sourceRoot = summary.SourceRoot
 	}
 	if summary.PreprocessingNJobs > 0 {

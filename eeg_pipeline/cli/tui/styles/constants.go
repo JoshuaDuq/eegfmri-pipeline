@@ -21,7 +21,7 @@ const (
 
 	DefaultLogHeight = 12
 	MinLogHeight     = 8
-	MaxLogHeight     = 150
+	MaxLogHeight     = 500
 	MinLogWidth      = 60
 	MaxLogWidth      = 300
 
@@ -48,13 +48,13 @@ const (
 )
 
 const (
-	CheckMark           = "✓"
-	CrossMark           = "✗"
-	PendingMark         = "○"
-	ActiveMark          = "●"
-	SelectedMark        = "›"
-	BulletMark          = "·"
-	WarningMark         = "⚠"
+	CheckMark    = "✓"
+	CrossMark    = "✗"
+	PendingMark  = "○"
+	ActiveMark   = "●"
+	SelectedMark = "›"
+	BulletMark   = "·"
+	WarningMark  = "⚠"
 	// Spacing only; RenderFooterSeparator() applies Secondary + the same rhythm.
 	FooterHintSeparator = "    ·    "
 
