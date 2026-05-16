@@ -74,6 +74,14 @@ def _validate_inputs(source_power: np.ndarray, score: np.ndarray, design: np.nda
         raise ValueError("Study 2 source-stage score contains non-finite values.")
     if not np.all(np.isfinite(design)):
         raise ValueError("Study 2 source-stage design contains non-finite values.")
+    _validate_design_full_rank(design)
+
+
+def _validate_design_full_rank(design: np.ndarray) -> None:
+    predictors = _with_intercept(design)
+    rank = int(np.linalg.matrix_rank(predictors))
+    if rank < predictors.shape[1]:
+        raise ValueError("Study 2 source-stage design must have full column rank.")
 
 
 def _residualize_vector(values: np.ndarray, design: np.ndarray) -> np.ndarray:

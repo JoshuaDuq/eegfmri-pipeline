@@ -69,17 +69,19 @@ def get_run_index(path: Path) -> Optional[int]:
     run_index = extract_run_number(path)
     if run_index is not None:
         return run_index
-    
+
     all_runs = sorted(path.parent.glob("*.vhdr"))
     if len(all_runs) <= 1:
         return None
-    
+
     inferred_run = all_runs.index(path) + 1
     logger.warning(
         "No explicit run found in filename '%s'. "
         "Inferring run=%d by alphabetical order among %d files. "
         "Prefer 'run-01' style filenames to guarantee correct run IDs.",
-        path.name, inferred_run, len(all_runs)
+        path.name,
+        inferred_run,
+        len(all_runs),
     )
     return inferred_run
 
@@ -190,14 +192,14 @@ def add_run_id_column(dataframe: pd.DataFrame, run_number: int) -> None:
 def update_sample_indices(dataframe: pd.DataFrame, cumulative_offset: int) -> int:
     if "sample" not in dataframe.columns:
         return cumulative_offset
-    
+
     sample_numeric = pd.to_numeric(dataframe["sample"], errors="coerce")
     if not sample_numeric.notna().any():
         return cumulative_offset
-    
+
     if cumulative_offset > 0:
         dataframe["sample"] = sample_numeric + cumulative_offset
-    
+
     max_sample = int((sample_numeric + cumulative_offset).max())
     return max_sample + 1
 
@@ -209,7 +211,7 @@ def get_sort_columns(combined_df: pd.DataFrame) -> List[str]:
         if "run" in combined_df.columns:
             return ["run", "onset"]
         return ["onset"]
-    
+
     if "run_id" in combined_df.columns:
         return ["run_id"]
     if "run" in combined_df.columns:
@@ -218,7 +220,11 @@ def get_sort_columns(combined_df: pd.DataFrame) -> List[str]:
 
 
 def combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
-    run_files = sorted(p for p in sub_eeg_dir.glob(f"*_task-{task}_run-*_events.tsv") if not p.name.startswith("._"))
+    run_files = sorted(
+        p
+        for p in sub_eeg_dir.glob(f"*_task-{task}_run-*_events.tsv")
+        if not p.name.startswith("._")
+    )
     if not run_files:
         return None
 
@@ -232,16 +238,16 @@ def combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
 
     dataframes = []
     cumulative_sample_offset = 0
-    
+
     for run_number, dataframe, _ in frames:
         for column in union_columns:
             if column not in dataframe.columns:
                 dataframe[column] = pd.NA
         dataframe = dataframe[union_columns]
-        
+
         add_run_id_column(dataframe, run_number)
         cumulative_sample_offset = update_sample_indices(dataframe, cumulative_sample_offset)
-        
+
         dataframes.append(dataframe)
 
     combined = pd.concat(dataframes, axis=0, ignore_index=True)
@@ -254,7 +260,9 @@ def combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
 
     try:
         combined.to_csv(out_path, sep="\t", index=False)
-        logger.info("Wrote combined events (%d run(s), %d rows): %s", n_runs, len(combined), out_path)
+        logger.info(
+            "Wrote combined events (%d run(s), %d rows): %s", n_runs, len(combined), out_path
+        )
         return out_path
     except OSError as e:
         logger.error("Failed writing combined events for %s: %s", sub_prefix, e)
@@ -266,30 +274,27 @@ def combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
 ###################################################################
 
 
-
-
 def trim_to_first_volume(raw: mne.io.BaseRaw) -> bool:
     if len(raw.annotations) == 0:
         return False
-    
+
     volume_pattern = re.compile(r"(^|[/,])V\s*1(\D|$)")
     volume_indices = [
         idx
         for idx, description in enumerate(raw.annotations.description)
-        if normalize_string(description).startswith("Volume/V") 
+        if normalize_string(description).startswith("Volume/V")
         or volume_pattern.search(normalize_string(description)) is not None
     ]
-    
+
     if not volume_indices:
         return False
-    
+
     first_onset = min(raw.annotations.onset[idx] for idx in volume_indices)
     if not isinstance(first_onset, (int, float)) or first_onset <= 0:
         return False
-    
+
     logger.info(
-        "Trimming raw to first volume trigger at %.3fs relative to recording start.",
-        first_onset
+        "Trimming raw to first volume trigger at %.3fs relative to recording start.", first_onset
     )
     raw.crop(tmin=float(first_onset), tmax=None)
     return True
@@ -321,30 +326,31 @@ def filter_annotations(
         )
         raw.set_annotations(shifted)
         return
-    
+
     if event_prefixes is None:
         # Default: keep both task triggers and fMRI volume triggers for
         # simultaneous EEG-fMRI alignment/QC.
         normalized_prefixes = ["Trig_", "Volume"]
     else:
         normalized_prefixes = [normalize_string(p) for p in event_prefixes if str(p).strip() != ""]
-    
+
     keep_indices = [
         idx
         for idx, description in enumerate(raw.annotations.description)
         if any(normalize_string(description).startswith(prefix) for prefix in normalized_prefixes)
     ]
-    
+
     if not keep_indices:
         logger.warning(
             "No annotations matched provided prefixes. "
             "Prefixes=%s. Found %d annotations but will drop all, resulting in no events.tsv. "
             "Use --keep_all_annotations or adjust --event_prefix to keep the desired events.",
-            normalized_prefixes, len(raw.annotations)
+            normalized_prefixes,
+            len(raw.annotations),
         )
         raw.set_annotations(mne.Annotations([], [], [], orig_time=raw.annotations.orig_time))
         return
-    
+
     new_onsets = [raw.annotations.onset[idx] for idx in keep_indices]
     new_durations = [raw.annotations.duration[idx] for idx in keep_indices]
     new_descriptions = [raw.annotations.description[idx] for idx in keep_indices]
@@ -353,7 +359,7 @@ def filter_annotations(
         base = float(min(float(o) for o in new_onsets))
         if base != 0.0:
             new_onsets = [float(onset) - base for onset in new_onsets]
-    
+
     filtered_annotations = mne.Annotations(
         onset=new_onsets,
         duration=new_durations,
@@ -383,6 +389,7 @@ def set_montage(raw: mne.io.BaseRaw, montage_name: str) -> None:
 
 def ensure_dataset_description(bids_root: Path, name: str = "EEG BIDS dataset") -> None:
     from mne_bids import make_dataset_description
+
     bids_root.mkdir(parents=True, exist_ok=True)
     dataset_description = bids_root / "dataset_description.json"
     if dataset_description.exists():
@@ -482,9 +489,7 @@ class CleanEventsQCConfig:
             enabled=bool(raw.get("enabled", True)),
             ecg_coupling=ECGCouplingQCConfig(
                 enabled=bool(ecg_raw.get("enabled", True)),
-                output_column=str(
-                    ecg_raw.get("output_column", "residual_ecg_coupling")
-                ).strip(),
+                output_column=str(ecg_raw.get("output_column", "residual_ecg_coupling")).strip(),
                 channels=tuple(
                     str(value).strip()
                     for value in _require_sequence(
@@ -634,12 +639,8 @@ def _compute_clean_events_qc_table(
 def _build_epoch_event_mask(
     events_df: pd.DataFrame,
     conditions: List[str],
-    condition_columns: Optional[List[str]] = None,
 ) -> tuple[pd.Series, str]:
-    condition_column = _resolve_epoch_condition_column(
-        events_df,
-        condition_columns=condition_columns,
-    )
+    condition_column = _resolve_epoch_condition_column(events_df)
     trial_type_norm = events_df[condition_column].astype(str).map(normalize_string)
     cond_norm = [normalize_string(c) for c in conditions if str(c).strip() != ""]
 
@@ -650,65 +651,44 @@ def _build_epoch_event_mask(
     return mask, condition_column
 
 
-def _resolve_epoch_condition_column(
-    events_df: pd.DataFrame,
-    *,
-    condition_columns: Optional[List[str]] = None,
-) -> str:
-    candidates: list[str] = []
-    if condition_columns:
-        candidates.extend(str(col).strip() for col in condition_columns if str(col).strip())
-    candidates.extend(["condition", "trial_type"])
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for col in candidates:
-        key = col.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(col)
-
+def _resolve_epoch_condition_column(events_df: pd.DataFrame) -> str:
     column_lookup = {str(col).strip().lower(): str(col) for col in events_df.columns}
-    for col in deduped:
-        resolved = column_lookup.get(col.lower())
-        if resolved is not None:
-            return resolved
+    resolved = column_lookup.get("trial_type")
+    if resolved is not None:
+        return resolved
 
     raise ValueError(
-        "events.tsv is missing a usable condition column for epoch alignment. "
-        f"Tried: {deduped}; available columns: {list(events_df.columns)}"
+        "events.tsv is missing BIDS trial_type, which is required for clean-events "
+        f"epoch alignment. Available columns: {list(events_df.columns)}"
     )
 
 
-def _load_subject_events_for_epochs(bids_sub_eeg_dir: Path, subject_label: str, task: str) -> pd.DataFrame:
-    """Load a subject/task events table suitable for epoch alignment.
+def _sort_events_for_epoch_alignment(events_df: pd.DataFrame) -> pd.DataFrame:
+    sort_cols = []
+    if "run_id" in events_df.columns:
+        sort_cols.append("run_id")
+    if "onset" in events_df.columns:
+        sort_cols.append("onset")
+    if "sample" in events_df.columns:
+        sort_cols.append("sample")
+    if not sort_cols:
+        return events_df.reset_index(drop=True)
+    return events_df.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
 
-    Prefers the combined ``*_task-<task>_events.tsv`` when present; otherwise
-    concatenates per-run ``run-*_events.tsv`` in run order.
-    """
-    combined = bids_sub_eeg_dir / f"{subject_label}_task-{task}_events.tsv"
-    if combined.exists():
-        df = read_tsv(combined)
-        if "onset" in df.columns:
-            sort_cols = ["onset"]
-            if "run_id" in df.columns:
-                sort_cols.insert(0, "run_id")
-            if "sample" in df.columns:
-                sort_cols.append("sample")
-            df = df.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
-        return df
 
-    run_files = sorted(bids_sub_eeg_dir.glob(f"{subject_label}_task-{task}_run-*_events.tsv"))
+def _load_run_level_events_for_epochs(
+    run_files: list[Path],
+    subject_label: str,
+    task: str,
+) -> pd.DataFrame:
     if not run_files:
-        raise FileNotFoundError(
-            f"No events.tsv found for {subject_label}, task-{task} under {bids_sub_eeg_dir}"
-        )
+        raise ValueError("run_files must contain at least one run-level events file.")
 
     frames = load_run_files(run_files)
-    if not frames:
-        raise FileNotFoundError(
-            f"Found {len(run_files)} run events files but none could be read for {subject_label}, task-{task}"
+    if len(frames) != len(run_files):
+        raise ValueError(
+            f"Could not read all run-level events files for {subject_label}, task-{task}: "
+            f"read={len(frames)}, expected={len(run_files)}"
         )
 
     frames.sort(key=lambda t: t[0])
@@ -724,14 +704,24 @@ def _load_subject_events_for_epochs(bids_sub_eeg_dir: Path, subject_label: str, 
         parts.append(df)
 
     out = pd.concat(parts, axis=0, ignore_index=True)
-    sort_cols = ["run_id"] if "run_id" in out.columns else []
-    if "onset" in out.columns:
-        sort_cols.append("onset")
-    if "sample" in out.columns:
-        sort_cols.append("sample")
-    if sort_cols:
-        out = out.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
-    return out
+    return _sort_events_for_epoch_alignment(out)
+
+
+def _load_subject_events_for_epochs(
+    bids_sub_eeg_dir: Path, subject_label: str, task: str
+) -> pd.DataFrame:
+    """Load the events table that matches the epoch source files."""
+    run_files = sorted(bids_sub_eeg_dir.glob(f"{subject_label}_task-{task}_run-*_events.tsv"))
+    if run_files:
+        return _load_run_level_events_for_epochs(run_files, subject_label, task)
+
+    combined = bids_sub_eeg_dir / f"{subject_label}_task-{task}_events.tsv"
+    if combined.exists():
+        return _sort_events_for_epoch_alignment(read_tsv(combined))
+
+    raise FileNotFoundError(
+        f"No events.tsv found for {subject_label}, task-{task} under {bids_sub_eeg_dir}"
+    )
 
 
 def _derive_clean_events_path_from_epochs(epochs_path: Path) -> Path:
@@ -739,7 +729,9 @@ def _derive_clean_events_path_from_epochs(epochs_path: Path) -> Path:
     if name.endswith("_proc-clean_epo.fif"):
         return epochs_path.with_name(name.replace("_proc-clean_epo.fif", "_proc-clean_events.tsv"))
     if name.endswith("_proc-cleaned_epo.fif"):
-        return epochs_path.with_name(name.replace("_proc-cleaned_epo.fif", "_proc-cleaned_events.tsv"))
+        return epochs_path.with_name(
+            name.replace("_proc-cleaned_epo.fif", "_proc-cleaned_events.tsv")
+        )
     if name.endswith("_clean_epo.fif"):
         return epochs_path.with_name(name.replace("_clean_epo.fif", "_clean_events.tsv"))
     if name.endswith("_epo.fif"):
@@ -755,7 +747,6 @@ def write_clean_events_tsv_for_epochs(
     epochs_path: Path,
     config: Any,
     conditions: Optional[List[str]] = None,
-    condition_columns: Optional[List[str]] = None,
     overwrite: bool = True,
     _logger: Optional[logging.Logger] = None,
 ) -> Path:
@@ -795,7 +786,6 @@ def write_clean_events_tsv_for_epochs(
     mask, condition_column = _build_epoch_event_mask(
         events_df,
         conditions,
-        condition_columns=condition_columns,
     )
     target = events_df.loc[mask].copy().reset_index(drop=True)
 

@@ -26,30 +26,81 @@ def test_bads_detection_surfaces_bids_read_errors(tmp_path: Path) -> None:
         }
     )
 
-    with patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.get_entities_from_fname",
-        return_value={"subject": "0001", "session": "01", "task": "pain"},
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.utils.get_channels_path_from_eeg_file",
-        return_value=str(channels_path),
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.io.read_channels_tsv",
-        return_value=channels_df,
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.read_raw_bids",
-        side_effect=RuntimeError("BIDS metadata broken"),
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.mne.io.read_raw",
-        side_effect=AssertionError("raw-reader fallback should not be used"),
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.pyprep.NoisyChannels",
-        Mock(),
+    with (
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.get_entities_from_fname",
+            return_value={"subject": "0001", "session": "01", "task": "pain"},
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.utils.get_channels_path_from_eeg_file",
+            return_value=str(channels_path),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.io.read_channels_tsv",
+            return_value=channels_df,
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.read_raw_bids",
+            side_effect=RuntimeError("BIDS metadata broken"),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.mne.io.read_raw",
+            side_effect=AssertionError("raw-reader fallback should not be used"),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.pyprep.NoisyChannels",
+            Mock(),
+        ),
     ):
         with pytest.raises(RuntimeError, match="BIDS metadata broken"):
             run_bads_detection_single_file(
                 str(eeg_path),
                 bids_path=tmp_path,
             )
+
+
+def test_bads_detection_preserves_run_entity_when_reading_bids(tmp_path: Path) -> None:
+    eeg_path = tmp_path / "sub-0001_ses-01_task-pain_run-1_eeg.vhdr"
+    eeg_path.write_text("", encoding="utf-8")
+    channels_path = tmp_path / "sub-0001_ses-01_task-pain_run-1_channels.tsv"
+    channels_path.write_text("name\ttype\tstatus\tdescription\nCz\tEEG\tgood\t\n", encoding="utf-8")
+    channels_df = pd.DataFrame(
+        {
+            "name": ["Cz"],
+            "type": ["EEG"],
+            "status": ["good"],
+            "description": [""],
+        }
+    )
+    captured_run = None
+
+    def _capture_bids_path(bids_path, verbose=False):
+        nonlocal captured_run
+        _ = verbose
+        captured_run = bids_path.run
+        raise RuntimeError("captured BIDSPath")
+
+    with (
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.utils.get_channels_path_from_eeg_file",
+            return_value=str(channels_path),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.io.read_channels_tsv",
+            return_value=channels_df,
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.read_raw_bids",
+            side_effect=_capture_bids_path,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="captured BIDSPath"):
+            run_bads_detection_single_file(
+                str(eeg_path),
+                bids_path=tmp_path,
+            )
+
+    assert str(captured_run) == "1"
 
 
 def test_bads_detection_surfaces_montage_application_errors(tmp_path: Path) -> None:
@@ -79,24 +130,31 @@ def test_bads_detection_surfaces_montage_application_errors(tmp_path: Path) -> N
         }
     )
 
-    with patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.get_entities_from_fname",
-        return_value={"subject": "0001", "session": "01", "task": "pain"},
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.utils.get_channels_path_from_eeg_file",
-        return_value=str(channels_path),
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.io.read_channels_tsv",
-        return_value=channels_df,
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.read_raw_bids",
-        return_value=FakeRaw(),
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.mne.io.BaseRaw",
-        FakeRaw,
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.pyprep.NoisyChannels",
-        side_effect=AssertionError("PyPREP should not be reached after montage failure"),
+    with (
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.get_entities_from_fname",
+            return_value={"subject": "0001", "session": "01", "task": "pain"},
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.utils.get_channels_path_from_eeg_file",
+            return_value=str(channels_path),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.io.read_channels_tsv",
+            return_value=channels_df,
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.read_raw_bids",
+            return_value=FakeRaw(),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.mne.io.BaseRaw",
+            FakeRaw,
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.pyprep.NoisyChannels",
+            side_effect=AssertionError("PyPREP should not be reached after montage failure"),
+        ),
     ):
         with pytest.raises(RuntimeError, match="montage missing"):
             run_bads_detection_single_file(
@@ -156,27 +214,35 @@ def test_bads_detection_uses_independent_pyprep_repeats_with_majority_vote(tmp_p
         _ = index
         written[str(path)] = frame.copy()
 
-    with patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.get_entities_from_fname",
-        return_value={"subject": "0001", "session": "01", "task": "pain"},
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.utils.get_channels_path_from_eeg_file",
-        return_value=str(channels_path),
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.io.read_channels_tsv",
-        return_value=channels_df,
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.io.write_channels_tsv",
-        side_effect=_capture_channels_tsv,
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.read_raw_bids",
-        return_value=FakeRaw(),
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.mne.io.BaseRaw",
-        FakeRaw,
-    ), patch(
-        "eeg_pipeline.preprocessing.pipeline.preprocess.pyprep.NoisyChannels",
-        FakeNoisyChannels,
+    with (
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.get_entities_from_fname",
+            return_value={"subject": "0001", "session": "01", "task": "pain"},
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.utils.get_channels_path_from_eeg_file",
+            return_value=str(channels_path),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.io.read_channels_tsv",
+            return_value=channels_df,
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.io.write_channels_tsv",
+            side_effect=_capture_channels_tsv,
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.read_raw_bids",
+            return_value=FakeRaw(),
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.mne.io.BaseRaw",
+            FakeRaw,
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.pipeline.preprocess.pyprep.NoisyChannels",
+            FakeNoisyChannels,
+        ),
     ):
         result = run_bads_detection_single_file(
             str(eeg_path),
@@ -229,25 +295,32 @@ def test_preprocessing_stats_rejects_missing_bad_channel_provenance(tmp_path: Pa
         def __getitem__(self, _key: str) -> "FakeEpochs":
             return self
 
-    with patch.object(stats, "BIDSPath", FakeBIDSPath), patch.object(
-        stats,
-        "get_entities_from_fname",
-        return_value={"subject": "0001", "session": "01"},
-    ), patch.object(
-        stats.utils,
-        "get_derived_path",
-        return_value=str(tmp_path / "missing_bads.tsv"),
-    ), patch(
-        "glob.glob",
-        return_value=[],
-    ), patch.object(
-        stats.io,
-        "read_components_tsv",
-        return_value=None,
-    ), patch.object(
-        stats.io,
-        "load_epochs",
-        return_value=FakeEpochs(),
+    with (
+        patch.object(stats, "BIDSPath", FakeBIDSPath),
+        patch.object(
+            stats,
+            "get_entities_from_fname",
+            return_value={"subject": "0001", "session": "01"},
+        ),
+        patch.object(
+            stats.utils,
+            "get_derived_path",
+            return_value=str(tmp_path / "missing_bads.tsv"),
+        ),
+        patch(
+            "glob.glob",
+            return_value=[],
+        ),
+        patch.object(
+            stats.io,
+            "read_components_tsv",
+            return_value=None,
+        ),
+        patch.object(
+            stats.io,
+            "load_epochs",
+            return_value=FakeEpochs(),
+        ),
     ):
         with pytest.raises(FileNotFoundError, match="Missing bad-channel provenance"):
             stats.collect_preprocessing_stats(

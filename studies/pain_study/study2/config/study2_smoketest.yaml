@@ -38,16 +38,39 @@ study2:
     max_collinearity_failure_fraction: 0.20
     continuous_columns:
       - "onset"
-      - "trial_index"
-      - "framewise_displacement"
-      - "std_dvars"
-      - "fp1_fp2_high_frequency_power"
+      - "trial_index_within_block"
+      - "hrf_weighted_framewise_displacement"
+      - "hrf_weighted_std_dvars"
+      - "hrf_weighted_fp1_fp2_high_frequency_power"
       - "residual_ecg_coupling"
     categorical_columns:
       - "block"
       - "stimulus_temp"
       - "selected_surface"
+    fixed_categorical_levels:
+      block:
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+      stimulus_temp:
+        - 44.3
+        - 45.3
+        - 46.3
+        - 47.3
+        - 48.3
+        - 49.3
+      selected_surface:
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
   source_modeling:
+    primary_power_estimand: "total_power"
+    erp_subtracted_power: "sensitivity_only"
     primary_inverse_method: "sLORETA"
     rank_excluded_channels:
       - "Fp1"

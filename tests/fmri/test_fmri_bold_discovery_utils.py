@@ -23,7 +23,9 @@ from fmri_pipeline.utils.bold_discovery import (
 )
 
 
-def test_discover_fmriprep_preproc_bold_accepts_zero_padded_and_non_padded_runs(tmp_path: Path) -> None:
+def test_discover_fmriprep_preproc_bold_accepts_zero_padded_and_non_padded_runs(
+    tmp_path: Path,
+) -> None:
     func_dir = tmp_path / "fmriprep" / "sub-0001" / "func"
     func_dir.mkdir(parents=True, exist_ok=True)
 
@@ -337,6 +339,49 @@ def test_validate_design_matrices_rejects_rank_deficient_designs() -> None:
 
     with pytest.raises(ValueError, match="rank-deficient"):
         validate_design_matrices(model, context="unit-test")
+
+
+def test_validate_design_matrices_rejects_unstable_condition_number() -> None:
+    model = SimpleNamespace(
+        design_matrices_=[
+            pd.DataFrame(
+                {
+                    "target": [1.0, 0.0, 0.0, 0.0],
+                    "nearly_target": [1.0, 1e-8, 0.0, 0.0],
+                    "constant": [1.0, 1.0, 1.0, 1.0],
+                }
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="condition number"):
+        validate_design_matrices(
+            model,
+            context="unit-test",
+            max_condition_number=100.0,
+        )
+
+
+def test_validate_design_matrices_rejects_low_target_design_efficiency() -> None:
+    model = SimpleNamespace(
+        design_matrices_=[
+            pd.DataFrame(
+                {
+                    "target": [0.0, 0.001, 0.0, 0.001, 0.0],
+                    "other": [0.0, 0.0, 1.0, 0.0, 1.0],
+                    "constant": [1.0, 1.0, 1.0, 1.0, 1.0],
+                }
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="design efficiency"):
+        validate_design_matrices(
+            model,
+            context="unit-test",
+            target_columns=("target",),
+            min_target_efficiency=0.1,
+        )
 
 
 def test_select_consistent_run_source_rejects_mixed_preproc_availability(tmp_path: Path) -> None:

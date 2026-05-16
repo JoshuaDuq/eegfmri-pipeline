@@ -184,6 +184,17 @@ def _values_for_keys(keys: List[Optional[str]], values: pd.Series) -> pd.Series:
     )
 
 
+def _metadata_values_for_keys(keys: List[Optional[str]], values: pd.Series) -> pd.Series:
+    return pd.Series(
+        [
+            values.get(key)
+            if key is not None and key in values.index
+            else np.nan
+            for key in keys
+        ]
+    )
+
+
 def _read_target_table(table_path: Path) -> pd.DataFrame:
     if not table_path.exists():
         raise FileNotFoundError(f"Configured fMRI signature target table not found: {table_path}")
@@ -681,6 +692,16 @@ def load_fmri_signature_target_for_subject(
             float(mapped.get(key)) if key is not None and key in mapped.index else np.nan
             for key in active_keys
         ]
+    for col in ("scoring_mask_sha256",):
+        if col not in sig_df.columns:
+            continue
+        mapped = _unique_values_by_key(
+            sig_df[[active_sig_key_col, col]].rename(columns={active_sig_key_col: "key"}),
+            "key",
+            col,
+            "(run,trial)",
+        )
+        extra_meta[f"fmri_{col}"] = _metadata_values_for_keys(active_keys, mapped)
 
     y_label = f"fmri_signature.{method}.{contrast}.{sig_name}.{metric}"
     logger.info(

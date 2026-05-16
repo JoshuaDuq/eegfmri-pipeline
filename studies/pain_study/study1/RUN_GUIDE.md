@@ -41,6 +41,7 @@ SIGNATURE_DIR="/Volumes/KINGSTON/EEG_fMRI_data/external"
 TASK="thermalactive"
 NPS_MAP="NPS/weights_NSF_grouppred_cvpcr.nii.gz"
 SIIPS1_MAP="SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+SIGNATURE_MANIFEST="signature_manifest.yaml"
 SIGNATURE_MAPS_JSON='[
   {"name":"NPS","path":"NPS/weights_NSF_grouppred_cvpcr.nii.gz"},
   {"name":"SIIPS1","path":"SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"}
@@ -61,6 +62,7 @@ COMMON_ARGS=(
   --deriv-root "$DERIV_ROOT"
   --set "paths.signature_dir=$SIGNATURE_DIR"
   --set "paths.signature_maps=$SIGNATURE_MAPS_JSON"
+  --set "study1.targets.signature_manifest_path=$SIGNATURE_MANIFEST"
   --set "study1.targets.signature_provenance.NPS.path=$NPS_MAP"
   --set "study1.targets.signature_provenance.SIIPS1.path=$SIIPS1_MAP"
 )
@@ -68,11 +70,12 @@ COMMON_ARGS=(
 
 ### Preprocessing Prerequisite
 
-Study 1 nuisance regression requires the clean-events columns `fp1_fp2_high_frequency_power` and
-`residual_ecg_coupling`. The Study 1 YAML sets the Fp1/Fp2 artifact proxy to Fp1/Fp2-only,
-70-95 Hz output named `fp1_fp2_high_frequency_power`; use that config for preprocessing or pass the
-same `preprocessing.clean_events_qc.peripheral_low_gamma` overrides when generating
-`*_proc-clean_events.tsv`.
+Study 1 nuisance regression requires explicit task `block`, original `trial_number` or
+`trial_index`, HRF-weighted artifact columns
+`hrf_weighted_framewise_displacement`, `hrf_weighted_std_dvars`, and
+`hrf_weighted_fp1_fp2_high_frequency_power`, plus `residual_ecg_coupling`. The raw Fp1/Fp2
+artifact proxy remains `fp1_fp2_high_frequency_power`; it is an upstream input to the HRF-weighted
+covariate and artifact-censoring audits, not the Level 2 nuisance column.
 
 For a formal rerun, prefer a new output root rather than mixing outputs from different configs or
 dates:
@@ -225,6 +228,7 @@ SIGNATURE_DIR="/Volumes/KINGSTON/EEG_fMRI_data/external"
 TASK="thermalactive"
 NPS_MAP="NPS/weights_NSF_grouppred_cvpcr.nii.gz"
 SIIPS1_MAP="SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+SIGNATURE_MANIFEST="signature_manifest.yaml"
 SIGNATURE_MAPS_JSON='[
   {"name":"NPS","path":"NPS/weights_NSF_grouppred_cvpcr.nii.gz"},
   {"name":"SIIPS1","path":"SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"}
@@ -238,6 +242,7 @@ COMMON_ARGS=(
   --deriv-root "$DERIV_ROOT"
   --set "paths.signature_dir=$SIGNATURE_DIR"
   --set "paths.signature_maps=$SIGNATURE_MAPS_JSON"
+  --set "study1.targets.signature_manifest_path=$SIGNATURE_MANIFEST"
   --set "study1.targets.signature_provenance.NPS.path=$NPS_MAP"
   --set "study1.targets.signature_provenance.SIIPS1.path=$SIIPS1_MAP"
   --set "study1.outputs.root_name=study1_smoke_$(date +%Y%m%d)"

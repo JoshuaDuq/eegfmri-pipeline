@@ -9,12 +9,12 @@ backward models: their raw weights can reflect noise cancellation, feature covar
 preprocessing choices, or artifact structure rather than the neural activity that gives rise to
 pain-relevant signal (Haufe et al., 2014).
 
-Study 2 addresses this interpretability problem by testing whether the predesignated EEG prediction
-component from Study 1 is associated with spatially coherent cortical source-power patterns. These
-patterns must remain interpretable after artifact, regularization, baseline, and permutation
-controls. The analysis estimates source-power association patterns linked to the EEG-derived
-residual prediction of NPS expression, without claiming causal localization of pain processing or
-direct identification of cortical generators.
+Study 2 addresses this interpretability problem by testing whether the predesignated Study 1 EEG
+prediction component is associated with spatially coherent cortical source-power patterns that
+survive artifact, regularization, baseline, and permutation controls. The analysis estimates
+source-power association patterns linked to the EEG-derived residual prediction of NPS
+expression; it does not claim causal localization of pain processing or direct identification of
+cortical generators.
 
 The source-interpretation target is restricted a priori to the Study 1 NPS ElasticNet alpha+beta
 individual-channel spectral-power cell. This restriction follows the thesis hierarchy rather than
@@ -27,27 +27,21 @@ as sensitivity or exploratory analyses in Study 2.
 ## 2. Objectives and Claim Tiers
 
 The primary objective is to derive band-specific standardized source-power association maps from
-the frozen out-of-sample transformed-space EEG contribution scores of the predesignated Study 1 NPS
-ElasticNet alpha+beta individual-channel spectral-power cell. The analysis is interpretive: it asks
-where source-power fluctuations covary with the portion of the EEG signal used by the Study 1 model
-for NPS prediction.
+the frozen out-of-sample transformed-space EEG contribution scores of the predesignated Study 1
+NPS ElasticNet alpha+beta individual-channel spectral-power cell.
 
 The Study 2 primary source family comprises two contribution-matched full-plateau source maps. The
 alpha map, denoted $A_\alpha$, associates processed alpha source power with the standardized alpha
 contribution score. The beta map, denoted $A_\beta$, associates processed beta source power with
 the standardized beta contribution score.
 
-Study 2 is run and reported as a planned source-interpretation study. Its claim tier is set by the
-predesignated Study 1 NPS ElasticNet alpha+beta individual-channel spectral-power cell and by the
-source-stage validity checks. Confirmatory source interpretation requires significant positive
-out-of-sample $\Delta R^2_{\text{LOSO}}$, practical effect
-($\Delta R^2_{\text{LOSO}} \geq 0.02$ with one-sided 95% lower confidence bound > 0.005), positive
-Level 2 convergence ($\Delta R^2_{\text{LOSO}} \geq 0.005$), positive within-subject-centered
-diagnostic prediction, temporally specific negative controls, artifact-censoring robustness, and
-interpretable target split-half reliability supported by at least 30 retained target trials. If any
-configured criterion is not satisfied, Study 2 remains a planned
-exploratory/source-characterization analysis for the affected maps, multimodal spatial comparisons,
-and behavioral associations.
+Study 2 is run and reported as a planned source-interpretation study. Its claim tier is set by
+the predesignated Study 1 cell and the source-stage validity checks. Confirmatory source
+interpretation requires the primary cell to satisfy every Study 1 source-interpretation criterion
+(Section 3 of the Study 1 README), with target split-half reliability supported by at least 30
+retained target trials. Any unmet criterion routes the affected maps, multimodal spatial
+comparisons, and behavioral associations to the planned exploratory/source-characterization
+tier.
 
 This claim-tier structure preserves the prespecified Study 1-to-Study 2 bridge without broad model
 search. Holm-corrected Level 2 significance strengthens the convergence interpretation but is not
@@ -64,6 +58,19 @@ dominant band-matched full-model prediction-error association. Stronger thermal/
 convergence requires behavioral criterion-overlap support as defined in Section 13. Stronger
 pain-relevance language additionally requires the pain-specific criterion defined in Section 13.
 fMRI spatial correspondence is descriptive and does not serve as a confirmatory gate.
+
+### Current Implementation Status
+
+The repository currently implements the Study 1 entry gates, band-contribution score
+decomposition, source-model QC, source-stage design/QC, and subject-level source-power
+association maps. The sLORETA source-power extraction workflow, source-stage precision and
+calibration simulation, true-target and prediction-error diagnostic maps, artifact and robustness
+interpretation gates, target-retrained source permutation null, group-level cluster inference,
+directional-consistency gate, BrainSMASH spatial comparison, cross-validated criterion-overlap
+analysis, and bootstrap reporting intervals remain protocol requirements that are not yet
+executable in the Study 2 package. The code exposes this explicitly through
+`assert_confirmatory_pipeline_ready()`, which raises until those confirmatory components are
+implemented.
 
 ## 3. Frozen Study 1 Model and Band Contributions
 
@@ -86,11 +93,11 @@ then centered and scaled to unit variance within the held-out subject and band u
 retained plateau trials. Zero-variance contribution scores are ineligible for source-stage
 analysis.
 
-The band contribution scores are model-contribution variables, not additive raw-scale NPS residual
-predictions. Source maps are interpreted as associations with transformed-space alpha or beta
+The band contribution scores are model-contribution variables rather than additive raw-scale NPS
+residual predictions, so source maps index associations with transformed-space alpha or beta
 contributions from the frozen ElasticNet decoder. Raw-scale
-$\hat{r}_{\mathrm{EEG},\mathrm{test}}^{\mathrm{NPS}}$ values are used for performance reporting and
-full-prediction sensitivity maps, but they are not decomposed into raw-scale band contributions.
+$\hat{r}_{\mathrm{EEG},\mathrm{test}}^{\mathrm{NPS}}$ values feed performance reporting and
+full-prediction sensitivity maps and are never decomposed into raw-scale band contributions.
 
 Each band-specific source analysis includes the standardized opposite-band contribution score as a
 prespecified nuisance regressor. Alpha maps are interpreted as alpha-specific only if they survive
@@ -137,21 +144,22 @@ quantities. Complexity topographies remain sensor-level analyses.
 
 ## 5. Artifact Controls
 
-Artifact control is treated as an interpretive gate rather than a secondary cleaning step.
-Sensor-level maps are compared against artifact topographies derived from independent calibration
-data or from ICA components labeled as ocular, cardiac, scanner, or high-frequency frontal
-artifacts. Template correlations are treated as flags, not correction procedures. Maps are not
-orthogonalized against artifact templates because orthogonalization can remove neural signal when
-neural and artifact topographies overlap. Additionally, facial EMG can spread widely to adjacent anterior periphery channels (e.g., AF7, AF8, F7, F8). If a spatial interpretation (such as a Haufe pattern) heavily weights the anterior periphery, it will be evaluated cautiously as potential residual EMG contamination, even if the Fp1/Fp2 proxy itself passes quality control.
+Artifact control is treated as an interpretive gate, not a secondary cleaning step. Sensor-level
+maps are compared against artifact topographies derived from independent calibration data or from
+ICA components labeled as ocular, cardiac, scanner, or high-frequency frontal artifacts. Template
+correlations act as flags rather than correction procedures: orthogonalization against artifact
+templates can remove neural signal when neural and artifact topographies overlap. Because facial
+EMG can spread to adjacent anterior-periphery channels (e.g., AF7, AF8, F7, F8), spatial patterns
+whose mass concentrates on the anterior periphery are flagged as potential residual EMG
+contamination even when the Fp1/Fp2 proxy passes quality control.
 
 For each sensor-level map, trial-wise map expression is computed by projecting each trial's feature
 vector onto the map. Artifact association is tested by regressing this expression score against
 framewise displacement, DVARS, cardiac phase, scanner-frequency residual power, and Fp1/Fp2
 high-frequency artifact power. A map is labeled artifact-contaminated when its absolute spatial
-correlation exceeds $r = 0.80$ with any artifact template or when its expression significantly
-covaries with any artifact metric after Holm correction. If a primary confirmatory map is
-artifact-contaminated, it is reported under the exploratory/source-characterization tier.
-Contaminated maps remain descriptive sensitivity outputs.
+correlation with any artifact template exceeds $r = 0.80$ or its expression significantly covaries
+with any artifact metric after Holm correction. A contaminated primary confirmatory map is
+reported under the exploratory/source-characterization tier as a descriptive sensitivity output.
 
 The same artifact gate applies in source space. For each primary source map, trial-wise
 source-pattern expression is computed from the processed source-power matrix before group
@@ -164,8 +172,7 @@ score with each artifact metric after the same source-stage preprocessing. A pri
 labeled artifact-contaminated if source-pattern expression significantly tracks any artifact metric
 after correction, if its unthresholded spatial correlation with an artifact-prediction source map
 exceeds $|r| = 0.50$, or if the predesignated Study 1 NPS ElasticNet alpha+beta individual-channel
-spectral-power cell changes sign or loses Holm-corrected significance after artifact censoring. The
-practical-effect threshold is reported separately when enabled in the Study 2 gate configuration.
+spectral-power cell changes sign or loses Holm-corrected significance after artifact censoring.
 
 ## 6. Exploratory Spatio-Temporal Mapping
 
@@ -185,13 +192,12 @@ evaluated within predefined early, mid, and late plateau windows to control temp
 ## 7. Source Modeling
 
 Source-space analysis estimates cortical source-power association with the out-of-sample
-band-specific contribution scores from the EEG-predicted NPS residual model. The source estimand is
-defined at the level of band-limited voltage time series. Inverse modeling is therefore applied to
-band-passed voltage rather than to sensor-level power or covariance topographies. Power is a
-nonlinear, nonnegative summary of voltage and does not represent an electric field from cortical
-dipoles. The resulting maps are described as inverse-model-dependent standardized source-power
-association estimates, not as source-localized Haufe weight maps or causal localizations of
-cortical generators.
+band-specific contribution scores from the EEG-predicted NPS residual model. The source estimand
+is defined at the level of band-limited voltage time series. Inverse modeling is therefore
+applied to band-passed voltage rather than to sensor-level power or covariance topographies.
+Power is a nonlinear, nonnegative summary of voltage and does not represent an electric field
+from cortical dipoles. The resulting maps are reported as inverse-model-dependent standardized
+source-power association estimates.
 
 The primary inverse operator uses sLORETA (Pascual-Marqui, 2002), FreeSurfer subject-specific head
 models, and boundary element method forward solutions. Confirmatory forward solutions, noise
@@ -216,12 +222,13 @@ association between source power and the standardized prediction-derived score, 
 negative current flow.
 
 Confirmatory source-power construction mirrors the Study 1 individual-channel spectral-power
-estimand. For each LOSO held-out subject, the fold-specific condition-agnostic Study 1 ERP template
-is subtracted in sensor space before band-pass filtering and inverse projection. Source-space
-Hilbert power is then baseline-corrected as a log-ratio using the same primary baseline
-(−5.0 to −0.01 s) and averaged over the same active plateau window (3.0 to 10.5 s). Absolute
-plateau log-power maps that omit this ERP and baseline alignment are descriptive sensitivity maps
-only and cannot replace the confirmatory source-power maps.
+estimand by using total band-limited power without evoked-response subtraction. Source-space
+Hilbert power is baseline-corrected as a log-ratio using the same primary baseline
+(−5.0 to −0.01 s) and averaged over the same active plateau window (3.0 to 10.5 s).
+ERP-subtracted source power is eligible only as a sensitivity analysis when the template is
+estimated within the relevant Study 1 training fold and recorded as fold-owned provenance.
+Absolute plateau log-power maps that omit this baseline alignment are descriptive sensitivity
+maps only.
 
 Source modeling quality-control checks are completed before source-map inspection. A subject is
 excluded from source-stage analyses if FreeSurfer reconstruction fails visual quality control, the
@@ -249,10 +256,11 @@ the Study 1 Level 2 nuisance family and includes the following terms.
 1. Task-block intercepts.
 2. Categorical stimulus temperature with the Study 1 reference coding.
 3. Selected thermode surface with the Study 1 reference coding.
-4. Trial onset time and linear trial number within task block.
+4. Trial onset time and explicit linear trial number within task block
+   (`trial_index_within_block`).
 5. HRF-weighted framewise displacement.
 6. HRF-weighted standardized DVARS.
-7. Fp1/Fp2 high-frequency artifact power.
+7. HRF-weighted Fp1/Fp2 high-frequency artifact power.
 8. Residual ECG coupling.
 9. The opposite-band contribution score for band-specific maps.
 
@@ -272,8 +280,15 @@ therefore represents the portion of the Study 1 transformed-space band contribut
 after additional removal of discrete stimulus intensity, selected thermode surface, task-block
 structure, trial order, acquisition-noise structure, and cross-band prediction association.
 
-The unique-contribution estimand is intentionally conservative, but it can suppress shared
-alpha-beta pain-related variance if the true neural generator produces a highly correlated broad-band response. Reports therefore include full-prediction band association maps with identical artifact and robustness summaries. If a valid source cluster appears in the full-prediction map but vanishes in the mutually-adjusted maps, this is explicitly interpreted as a **shared broadband mechanism** rather than a failure of the specific bands. A parallel unadjusted source-power association map using the original $\hat{r}_{\mathrm{EEG},\mathrm{test}}^{\mathrm{NPS}}$ values, with only task-block intercepts removed, is also reported as a sensitivity analysis.
+The unique-contribution estimand is intentionally conservative and can suppress shared
+alpha-beta pain-related variance when the underlying generator produces a highly correlated
+broadband response. Reports therefore include full-prediction band association maps with
+identical artifact and robustness summaries. A valid source cluster that appears in the
+full-prediction map but vanishes in the mutually-adjusted maps is interpreted as a shared
+broadband mechanism rather than band-specific failure. A parallel unadjusted source-power
+association map using the original $\hat{r}_{\mathrm{EEG},\mathrm{test}}^{\mathrm{NPS}}$
+values, with only task-block intercepts removed, is reported as an additional sensitivity
+analysis.
 
 Circular-shift source permutations use the six 11-trial task blocks as exchangeability units,
 matching Study 1. Source-stage censoring uses the same variable-length retained-block rule: a
@@ -315,19 +330,20 @@ are met: the unthresholded Pearson spatial correlation between the primary contr
 band-matched true-target map is ≥ 0.20 across the cortical analysis mask; the median true-target
 association inside the primary FWE-corrected source cluster has the same sign as the primary cluster
 statistic; and at least 60% of vertices in that cluster have true-target association values with the
-primary cluster sign. Failure of this criterion does not erase the source-map result, but it
-prevents the stronger NPS-convergent source interpretation for that band. The full-model
-prediction-error association map is a diagnostic flag, not a band-specific error decomposition. It
-is considered dominant if its absolute spatial correlation with a primary contribution-matched map
-equals or exceeds that map's true-target association correlation, or if it produces a larger
-FWE-corrected cluster in the same broad anatomical region. A dominant prediction-error association
-does not erase source-map success, but it prevents stronger NPS-convergent interpretation.
+primary cluster sign. Failure of this criterion preserves the source-map result but blocks the
+stronger NPS-convergent source interpretation for that band. The full-model prediction-error
+association map is a diagnostic flag, not a band-specific error decomposition; it is dominant
+when its absolute spatial correlation with a primary contribution-matched map equals or exceeds
+that map's true-target association correlation, or when it produces a larger FWE-corrected
+cluster in the same broad anatomical region. Dominant prediction-error association also blocks
+stronger NPS-convergent interpretation.
 
 ## 10. Group-Level Source Inference
 
-Confirmatory source interpretation requires at least 30 source-valid subjects after source-stage
-inclusion checks. Analyses with 20-29 source-valid subjects are reported under the
-feasibility-limited exploratory/source-characterization tier even if cluster tests are significant.
+Analyses with 20-29 source-valid subjects are reported under the feasibility-limited
+exploratory/source-characterization tier even if cluster tests are significant. Analyses with
+fewer than 20 source-valid subjects fail the feasibility floor for source-characterization
+inference and are reported as descriptive QC summaries only.
 
 Before outcome-map interpretation, a source-stage precision and calibration simulation is completed using
 only source-valid trial counts, task-block structure, baseline source-noise covariance, observed
@@ -339,16 +355,15 @@ retained-sample scenario, 2,000 Monte Carlo datasets are generated and tested wi
 cluster-forming thresholds, target-retrained permutation count, subject weighting, morphing, and
 robustness checks planned for the observed maps.
 
-The $|r| = 0.15$ recovery threshold defines the smallest source association considered
-scientifically interpretable for this 64-channel EEG source-space analysis. Effects below this
-level are treated as too small to separate reliably from inverse-solution point spread, morphing
-error, residual artifact covariance, and block-level nuisance structure, even if a large sample or
-liberal cluster-forming threshold makes them detectable. The embedded cluster width matches the
-median empirical point-spread FWHM so the simulation tests recovery of a spatial pattern that the
-actual inverse operator can resolve, not an unrealistically focal source. The lower
-$|r| \in \{0.05, 0.10\}$ conditions calibrate false-positive behavior and sensitivity to negligible
-effects; the $|r| \in \{0.15, 0.20\}$ conditions evaluate the boundary between a minimal
-interpretable source association and a clearly recoverable one.
+The $|r| = 0.15$ recovery threshold sets the smallest source association considered
+scientifically interpretable for this 64-channel analysis: smaller effects cannot be reliably
+separated from inverse-solution point spread, morphing error, residual artifact covariance, or
+block-level nuisance structure even when sample size or a liberal cluster-forming threshold
+makes them detectable. The embedded cluster width matches the median empirical point-spread
+FWHM, so the simulation tests recovery of a spatial pattern the inverse operator can resolve
+rather than an unrealistically focal source. The $|r| \in \{0.05, 0.10\}$ conditions calibrate
+false-positive behavior and sensitivity to negligible effects; $|r| \in \{0.15, 0.20\}$ delimit
+the boundary between a minimal interpretable association and a clearly recoverable one.
 
 Confirmatory source interpretation requires acceptable null calibration and precision before
 outcome-map interpretation. The null family-wise error rate must fall between 0.025 and 0.075 for the
@@ -367,25 +382,24 @@ Sensitivity analyses use SNR values of 1.0 and 5.0. A source-space result is reg
 only if the primary cluster retains significance and the same sign under both sensitivity values.
 
 Subject-specific source maps are morphed to fsaverage and optionally normalized by Global Field
-Power. Because map GFP is itself an outcome-associated derived metric, GFP-based map exclusion is
-not used in the primary analysis. All subjects are included in the primary non-normalized group
-aggregation. GFP normalization is retained strictly as a sensitivity analysis.
+Power. Because GFP is itself an outcome-associated derived metric, GFP-based exclusion is not
+used in the primary analysis; the primary group aggregation is non-normalized and includes every
+source-valid subject, with GFP normalization retained as a sensitivity analysis.
 
 ## 11. Statistical Validation
 
 ### 11.1 Permutation Strategy
 
 Nonparametric permutation testing is performed on source-localized maps. Standard sign-flip
-permutations are inappropriate because they violate exchangeability for this estimand. The
-prediction-derived scores are deterministic functions of EEG features, so naive sign-flipping of
-subject maps does not generate a valid null for feature-prediction association. Such permutations
-could preserve spatial structure driven by the intrinsic covariance of human EEG even when the model
-does not track the true fMRI target.
+permutations violate exchangeability here: prediction-derived scores are deterministic functions
+of EEG features, so naive sign-flipping of subject maps does not generate a valid null for
+feature-prediction association and can preserve spatial structure driven by intrinsic EEG
+covariance even when the model fails to track the fMRI target.
 
-The primary confirmatory null is target-retrained with frozen Study 1 model-selection outputs after
-the Study 1 gate has been evaluated with the full Study 1 permutation procedure. This source-stage
-null tests map specificity for the selected source-interpretation model. It does not retest the
-full source-selection procedure or the original Study 1 prediction-performance claim.
+The primary confirmatory null is target-retrained with frozen Study 1 model-selection outputs,
+run after the Study 1 gate has been evaluated under the full Study 1 permutation procedure. This
+source-stage null tests map specificity for the selected source-interpretation model; it does not
+retest source selection or the original Study 1 prediction-performance claim.
 
 Observed and permuted contribution scores are generated from the original Study 1 prediction-valid
 LOSO training folds. Source-stage censoring and source-valid subject restrictions are applied only
@@ -434,14 +448,13 @@ has an uncorrected cluster
 p-value below 0.10 or a maximum cluster statistic within 10% of the 95th-percentile null threshold,
 both bands are extended to 5,000 valid paired draws before final reporting.
 
-A smaller full-selection sensitivity null repeats Study 1 inner GroupKFold hyperparameter selection
-and source-map computation for at least 250 permutations before final interpretation. Failure to
-complete this sensitivity null within the compute budget does not invalidate the selected-model
-source null, but it prevents claims about full source-selection stability. If the cached
-implementation cannot complete at least 1,000 target-retrained permutations within the prespecified
-72 h compute budget on the available workstation or cluster allocation, source-space inference is
-assigned to the exploratory/source-characterization tier. The null size is not reduced based on
-interim results.
+A smaller full-selection sensitivity null repeats Study 1 inner GroupKFold hyperparameter
+selection and source-map computation for at least 250 permutations before final interpretation;
+failure to complete it within the compute budget blocks claims about full source-selection
+stability without affecting the selected-model source null. If the cached implementation cannot
+complete at least 1,000 target-retrained permutations within the prespecified 72 h compute budget
+on the available workstation or cluster allocation, source-space inference is assigned to the
+exploratory/source-characterization tier. The null size is not reduced based on interim results.
 
 ### 11.2 Cluster-Based Inference
 
@@ -501,13 +514,12 @@ maps across held-out source-valid subjects, after projecting each fold map to th
 analysis mask. No EEG source outcome map, behavioral-overlap result, or spatial-comparison result
 enters this fMRI vector construction.
 
-The EEG source association map and $A_{\mathrm{fMRI}}^{\mathrm{NPS-L2}}$ are derived with respect
-to the same or closely related NPS Level 2 target variable. Their spatial correlation can therefore
-be inflated by shared target dependency. Spatial specificity tests evaluate whether the observed
-correlation exceeds expectations from spatially autocorrelated noise under a shared-target
-structure, but they cannot fully separate shared-target inflation from genuine multimodal
-neurophysiological convergence. Independent-cohort replication with a held-out fMRI covariance
-target is required for a strong convergence claim.
+The EEG source map and $A_{\mathrm{fMRI}}^{\mathrm{NPS-L2}}$ are derived from the same or
+closely related NPS Level 2 target, so their spatial correlation can be inflated by shared
+target dependency. Spatial specificity tests evaluate whether the observed correlation exceeds
+expectations from spatially autocorrelated noise under a shared-target structure but cannot
+fully separate shared-target inflation from genuine multimodal convergence. A strong convergence
+claim requires independent-cohort replication with a held-out fMRI covariance target.
 
 Specificity is tested as a descriptive superiority analysis. The fMRI spatial comparison is
 performed separately for $A_\alpha$ and $A_\beta$ with the same fMRI cortical vector. The EEG source
@@ -547,11 +559,11 @@ analysis using 10,000 rotations (Alexander-Bloch et al., 2018).
 ## 13. Internal Cross-Validated Criterion Overlap
 
 Internal criterion overlap characterizes whether the derived pattern is associated with the
-prespecified behavioral intensity criterion. It is not described as independent validation. The
-primary analysis uses the same two contribution-matched full-plateau source-power association maps,
-$A_\alpha$ and $A_\beta$, that define the confirmatory source family. Their behavioral p-values are
-Holm-corrected across the two bands as a separate internal-convergence family. No vertex set or
-cluster is selected from the source-space significance map.
+prespecified behavioral intensity criterion; it is not independent validation. The primary
+analysis uses the same two contribution-matched full-plateau source-power association maps,
+$A_\alpha$ and $A_\beta$, that define the confirmatory source family, with behavioral p-values
+Holm-corrected across bands as a separate internal-convergence family. No vertex set or cluster
+is selected from the source-space significance map.
 
 For each target subject, the group-level pattern is estimated from all remaining subjects. The
 held-out subject's source power is transformed with the same log-power, source-stage
@@ -570,15 +582,13 @@ zero-norm pattern is ineligible for criterion-overlap analysis. No cluster mask,
 outcome-informed vertex selection is applied.
 
 The primary behavioral criterion-overlap test evaluates association with the Study 1 within-scale
-thermal/pain intensity score beyond stimulus, acquisition, and session structure. This score is not
-interpreted as a single linear pain continuum across non-painful and painful trials. The raw 0 to
-200 displayed rating is described separately. Painful-trial-only intensity association and a
-two-part sensitivity analysis separating binary pain report from intensity conditional on pain are
-reported as criterion-specific sensitivity analyses. A subject is excluded from criterion-overlap
-analyses if any retained source-valid trial lacks a synchronized rating, fewer than 25 rated
-source-valid plateau trials remain, fewer than three permutation-valid task blocks remain, or
-within-subject rating variance is zero after source-stage censoring. Missing ratings are not
-imputed.
+thermal/pain intensity score beyond stimulus, acquisition, and session structure.
+Painful-trial-only intensity association and a two-part sensitivity analysis separating binary
+pain report from intensity conditional on pain are reported as criterion-specific sensitivity
+analyses. A subject is excluded from criterion-overlap analyses if any retained source-valid
+trial lacks a synchronized rating, fewer than 25 rated source-valid plateau trials remain, fewer
+than three permutation-valid task blocks remain, or within-subject rating variance is zero after
+source-stage censoring. Missing ratings are not imputed.
 
 Within each held-out subject, the association between expression score and the within-scale
 thermal/pain intensity score is estimated with ordinary least squares regression controlling for the
@@ -603,10 +613,9 @@ The pain/non-pain classification contrast may be deterministically coupled to th
 manipulation. It is therefore dropped unless pain class exhibits meaningful residual variance
 beyond the nonlinear temperature basis. Meaningful residual variance requires at least 10% of the
 unadjusted within-subject pain-class variance to remain after adjustment in at least 30 source-valid
-subjects, with nonzero adjusted pain-class variance in every subject retained for that contrast.
-Absence of adjusted rating association does not prove that the EEG pattern is unrelated to pain, but
-it prevents strong pain-relevance claims. The label "EEG pain signature" is reserved for future
-independent-cohort replication.
+subjects, with nonzero adjusted pain-class variance in every retained subject for that contrast.
+Without adjusted rating association, strong pain-relevance claims are not supported. The label
+"EEG pain signature" is reserved for future independent-cohort replication.
 
 ## 14. Reporting and Robustness Controls
 
@@ -627,8 +636,7 @@ equalizing trial counts. A candidate pattern is considered robust only when pres
 quantitative thresholds are met across sensitivity controls. These thresholds require preserved
 statistical significance, retained cluster sign, spatial correlation of unthresholded maps of at
 least 0.50, Dice overlap of at least 0.40 for thresholded clusters, and centroid displacement no
-greater than 15 mm within the same broad anatomical region. Gamma-band maps remain exploratory
-regardless of these robustness results.
+greater than 15 mm within the same broad anatomical region.
 
 ## References
 

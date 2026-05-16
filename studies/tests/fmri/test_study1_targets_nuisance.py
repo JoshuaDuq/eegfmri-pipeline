@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -88,6 +85,23 @@ def test_nuisance_source_columns_requires_at_least_one_when_enabled() -> None:
     cfg = _nuisance_config(continuous=[], categorical=[])
 
     with pytest.raises(ValueError, match="at least one"):
+        nuisance_source_columns(cfg)
+
+
+def test_nuisance_source_columns_rejects_raw_artifact_columns_for_level2() -> None:
+    from studies.pain_study.study1.targets import nuisance_source_columns
+
+    cfg = _nuisance_config(
+        continuous=[
+            "block",
+            "framewise_displacement",
+            "std_dvars",
+            "fp1_fp2_high_frequency_power",
+        ],
+        categorical=[],
+    )
+
+    with pytest.raises(ValueError, match="HRF-weighted"):
         nuisance_source_columns(cfg)
 
 
@@ -259,9 +273,7 @@ def test_iter_primary_subjects_deduplicates_and_sorts() -> None:
 def test_primary_signatures_rejects_wrong_order() -> None:
     from studies.pain_study.study1.targets import _primary_signatures
 
-    cfg = DotConfig(
-        {"study1": {"targets": {"names": ["SIIPS1", "NPS"]}}}
-    )
+    cfg = DotConfig({"study1": {"targets": {"names": ["SIIPS1", "NPS"]}}})
 
     with pytest.raises(ValueError, match="exactly"):
         _primary_signatures(cfg)
@@ -270,9 +282,7 @@ def test_primary_signatures_rejects_wrong_order() -> None:
 def test_primary_signatures_rejects_non_list() -> None:
     from studies.pain_study.study1.targets import _primary_signatures
 
-    cfg = DotConfig(
-        {"study1": {"targets": {"names": "NPS"}}}
-    )
+    cfg = DotConfig({"study1": {"targets": {"names": "NPS"}}})
 
     with pytest.raises(ValueError, match="list"):
         _primary_signatures(cfg)

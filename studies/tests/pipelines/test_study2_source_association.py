@@ -45,6 +45,20 @@ def test_compute_source_power_association_map_rejects_zero_variance_score() -> N
         )
 
 
+def test_compute_source_power_association_map_rejects_rank_deficient_design() -> None:
+    from studies.pain_study.study2.association import compute_source_power_association_map
+
+    nuisance = np.linspace(-1.0, 1.0, 20)
+    design = np.column_stack([nuisance, nuisance * 2.0])
+
+    with pytest.raises(ValueError, match="full column rank"):
+        compute_source_power_association_map(
+            source_power=np.column_stack([nuisance, nuisance**2]),
+            score=nuisance + 0.1,
+            design=design,
+        )
+
+
 def test_compute_source_power_association_map_validates_shapes() -> None:
     from studies.pain_study.study2.association import compute_source_power_association_map
 
@@ -54,4 +68,3 @@ def test_compute_source_power_association_map_validates_shapes() -> None:
             score=np.ones(3, dtype=float),
             design=np.ones((4, 1), dtype=float),
         )
-

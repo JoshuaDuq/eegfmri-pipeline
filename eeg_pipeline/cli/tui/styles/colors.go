@@ -35,15 +35,15 @@ var (
 	Error   = lipgloss.Color("#C07878")
 	// Info is grayscale; informational highlights rely on Bold instead of
 	// a colored accent.
-	Info       = lipgloss.Color("#BFC3C7")
-	Muted      = lipgloss.Color("#6A6D72") // De-emphasized text.
-	Text       = lipgloss.Color("#E6E8EB") // Primary text — cool near-white.
-	TextDim    = lipgloss.Color("#A4A8AD") // Secondary text.
-	BgDark     = lipgloss.Color("#0A0B0D") // App background — inky black.
-	Surface    = lipgloss.Color("#131518") // Card/panel background.
-	SurfaceAlt = lipgloss.Color("#1A1C20") // Slightly-raised panel surface.
-	Border     = lipgloss.Color("#24262A") // Subtle panel borders.
-	BorderBright = lipgloss.Color("#3D4045") // Focus-adjacent borders.
+	Info         = lipgloss.Color("#BFC3C7")
+	Muted        = lipgloss.Color("#6A6D72") // De-emphasized text.
+	Text         = lipgloss.Color("#E6E8EB") // Primary text — cool near-white.
+	TextDim      = lipgloss.Color("#A4A8AD") // Secondary text.
+	BgDark       = lipgloss.Color("#0A0B0D") // App background — inky black.
+	Surface      = lipgloss.Color("#131518") // Card/panel background.
+	SurfaceAlt   = lipgloss.Color("#1A1C20") // Slightly-raised panel surface.
+	Border       = lipgloss.Color("#3A3D43") // Subtle panel borders.
+	BorderBright = lipgloss.Color("#585B61") // Focus-adjacent borders.
 )
 
 var noColorOnce sync.Once

@@ -26,7 +26,9 @@ def _coerce_float(value: Any) -> Optional[float]:
         return None
 
 
-def _parse_optional_positive_float_attr(cfg: Any, attr_name: str, default: Any = None) -> Optional[float]:
+def _parse_optional_positive_float_attr(
+    cfg: Any, attr_name: str, default: Any = None
+) -> Optional[float]:
     raw_value = getattr(cfg, attr_name, default)
     if raw_value is None:
         return None
@@ -114,9 +116,7 @@ def discover_runless_fmriprep_preproc_bold(
 
     patterns: List[str] = []
     if space:
-        patterns.append(
-            f"{sub_label}_task-{task}_space-{space}_desc-preproc_bold.nii.gz"
-        )
+        patterns.append(f"{sub_label}_task-{task}_space-{space}_desc-preproc_bold.nii.gz")
     patterns.append(f"{sub_label}_task-{task}_desc-preproc_bold.nii.gz")
 
     for func_dir in search_dirs:
@@ -171,10 +171,7 @@ def select_consistent_run_source(
     raw BIDS is therefore the sole consistent source.
     Raises when preprocessed availability is mixed across runs.
     """
-    preproc_by_run = {
-        int(run_num): discover_preproc_bold(int(run_num))
-        for run_num in run_numbers
-    }
+    preproc_by_run = {int(run_num): discover_preproc_bold(int(run_num)) for run_num in run_numbers}
     found_runs = [run_num for run_num, path in preproc_by_run.items() if path is not None]
     missing_runs = [run_num for run_num, path in preproc_by_run.items() if path is None]
 
@@ -202,9 +199,7 @@ def _validate_unique_preprocessed_paths(
     preproc_by_run: Dict[int, Optional[Path]],
 ) -> None:
     resolved_by_run = {
-        run_num: path.resolve()
-        for run_num, path in preproc_by_run.items()
-        if path is not None
+        run_num: path.resolve() for run_num, path in preproc_by_run.items() if path is not None
     }
     unique_paths = set(resolved_by_run.values())
     if len(unique_paths) == len(resolved_by_run):
@@ -213,14 +208,9 @@ def _validate_unique_preprocessed_paths(
     path_to_runs: Dict[Path, List[int]] = {}
     for run_num, path in resolved_by_run.items():
         path_to_runs.setdefault(path, []).append(run_num)
-    duplicates = {
-        str(path): sorted(runs)
-        for path, runs in path_to_runs.items()
-        if len(runs) > 1
-    }
+    duplicates = {str(path): sorted(runs) for path, runs in path_to_runs.items() if len(runs) > 1}
     raise FileNotFoundError(
-        "The same fMRIPrep preprocessed BOLD file resolved for multiple runs: "
-        f"{duplicates}."
+        "The same fMRIPrep preprocessed BOLD file resolved for multiple runs: " f"{duplicates}."
     )
 
 
@@ -244,7 +234,9 @@ def get_tr_from_bold(bold_path: Path) -> float:
             try:
                 header_tr = _read_header_tr(bold_path)
             except Exception as exc:
-                raise ValueError(f"Could not validate TR from NIfTI header for {bold_path}: {exc}") from exc
+                raise ValueError(
+                    f"Could not validate TR from NIfTI header for {bold_path}: {exc}"
+                ) from exc
             if (
                 header_tr is not None
                 and math.isfinite(header_tr)
@@ -312,6 +304,9 @@ def validate_design_matrices(
     *,
     context: str,
     min_residual_dof: int = 1,
+    max_condition_number: Optional[float] = None,
+    target_columns: Sequence[str] = (),
+    min_target_efficiency: Optional[float] = None,
 ) -> None:
     """Fail fast when nilearn produced a rank-deficient or overfit design."""
     design_mats = getattr(flm, "design_matrices_", None)
@@ -319,6 +314,16 @@ def validate_design_matrices(
         raise ValueError(f"{context}: nilearn did not expose any fitted design matrices.")
 
     min_residual_dof = max(int(min_residual_dof), 0)
+    if max_condition_number is not None:
+        max_condition_number = float(max_condition_number)
+        if not math.isfinite(max_condition_number) or max_condition_number <= 0:
+            raise ValueError("max_condition_number must be finite and positive when provided.")
+    if min_target_efficiency is not None:
+        min_target_efficiency = float(min_target_efficiency)
+        if not math.isfinite(min_target_efficiency) or min_target_efficiency <= 0:
+            raise ValueError("min_target_efficiency must be finite and positive when provided.")
+        if not target_columns:
+            raise ValueError("target_columns must be provided when min_target_efficiency is set.")
 
     for run_idx, design_matrix in enumerate(design_mats, start=1):
         values = np.asarray(design_matrix, dtype=float)
@@ -328,6 +333,14 @@ def validate_design_matrices(
             raise ValueError(f"{context}: run {run_idx} design matrix contains non-finite values.")
 
         n_frames, n_regressors = values.shape
+        columns = [str(column) for column in getattr(design_matrix, "columns", [])]
+        if columns:
+            duplicates = sorted({column for column in columns if columns.count(column) > 1})
+            if duplicates:
+                raise ValueError(
+                    f"{context}: run {run_idx} design matrix contains duplicate columns: "
+                    f"{duplicates}."
+                )
         rank = int(np.linalg.matrix_rank(values))
         residual_dof = int(n_frames - rank)
 
@@ -343,6 +356,39 @@ def validate_design_matrices(
                 f"(frames={n_frames}, rank={rank}, residual_dof={residual_dof}). "
                 "Reduce nuisance regressors or modeled events."
             )
+        if max_condition_number is not None:
+            condition_number = float(np.linalg.cond(values))
+            if not math.isfinite(condition_number) or condition_number > max_condition_number:
+                raise ValueError(
+                    f"{context}: run {run_idx} design matrix condition number "
+                    f"{condition_number:.6g} exceeds {max_condition_number:.6g}."
+                )
+        if min_target_efficiency is not None:
+            if not columns:
+                raise ValueError(
+                    f"{context}: run {run_idx} design matrix columns are required "
+                    "for target design-efficiency validation."
+                )
+            index_by_column = {column: idx for idx, column in enumerate(columns)}
+            missing_targets = [
+                str(column) for column in target_columns if str(column) not in index_by_column
+            ]
+            if missing_targets:
+                raise ValueError(
+                    f"{context}: run {run_idx} missing target design column(s): "
+                    f"{missing_targets}."
+                )
+            xtx_inv = np.linalg.pinv(values.T @ values)
+            for target_column in target_columns:
+                contrast = np.zeros(n_regressors, dtype=float)
+                contrast[int(index_by_column[str(target_column)])] = 1.0
+                variance_factor = float(contrast @ xtx_inv @ contrast)
+                efficiency = math.inf if variance_factor <= 0 else 1.0 / variance_factor
+                if not math.isfinite(efficiency) or efficiency < min_target_efficiency:
+                    raise ValueError(
+                        f"{context}: run {run_idx} target '{target_column}' design efficiency "
+                        f"{efficiency:.6g} is below {min_target_efficiency:.6g}."
+                    )
 
 
 def coerce_condition_value(value: Any, series: Any) -> Any:
@@ -392,7 +438,8 @@ def select_confound_columns(
 
     numeric = selected.apply(pd.to_numeric, errors="coerce")
     non_numeric_cols = [
-        col for col in numeric.columns
+        col
+        for col in numeric.columns
         if numeric[col].isna().any() or not np.isfinite(numeric[col].to_numpy(dtype=float)).all()
     ]
     if non_numeric_cols:

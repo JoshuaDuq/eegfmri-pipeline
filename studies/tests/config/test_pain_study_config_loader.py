@@ -13,9 +13,9 @@ LEVEL2_CONTINUOUS_COLUMNS = [
     "block",
     "onset",
     "trial_index",
-    "framewise_displacement",
-    "std_dvars",
-    "fp1_fp2_high_frequency_power",
+    "hrf_weighted_framewise_displacement",
+    "hrf_weighted_std_dvars",
+    "hrf_weighted_fp1_fp2_high_frequency_power",
     "residual_ecg_coupling",
 ]
 LEVEL2_CATEGORICAL_COLUMNS = ["stimulus_temp", "selected_surface"]
@@ -23,7 +23,8 @@ LEVEL2_CATEGORICAL_COLUMNS = ["stimulus_temp", "selected_surface"]
 
 def test_eeg_coupling_config_resolves_roi_assets_from_study_package() -> None:
     config = load_eeg_bold_coupling_config(
-        config_path=REPO_ROOT / "studies/pain_study/eeg_coupling/config/eeg_bold_coupling_production.yaml",
+        config_path=REPO_ROOT
+        / "studies/pain_study/eeg_coupling/config/eeg_bold_coupling_production.yaml",
     )
 
     label_file = Path(config["eeg_bold_coupling"]["rois"]["items"][0]["label_files"][0])
@@ -34,7 +35,8 @@ def test_eeg_coupling_config_resolves_roi_assets_from_study_package() -> None:
 def test_smoke_configs_do_not_override_derivatives_root_output_dir() -> None:
     smoke_paths = (
         REPO_ROOT / "studies/pain_study/eeg_coupling/config/eeg_bold_coupling_smoketest.yaml",
-        REPO_ROOT / "studies/pain_study/eeg_coupling/config/eeg_bold_coupling_smoke_robustness.yaml",
+        REPO_ROOT
+        / "studies/pain_study/eeg_coupling/config/eeg_bold_coupling_smoke_robustness.yaml",
     )
     for config_path in smoke_paths:
         config = load_eeg_bold_coupling_config(config_path=config_path)

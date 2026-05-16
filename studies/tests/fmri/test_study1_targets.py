@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import tempfile
 from pathlib import Path
@@ -12,8 +14,13 @@ import pytest
 from studies.tests.test_support import DotConfig
 
 
+NPS_MASK_HASH = "0" * 64
+SIIPS1_MASK_HASH = "1" * 64
+
+
 def _base_config(root: Path) -> DotConfig:
     (root / "maps").mkdir(parents=True, exist_ok=True)
+    manifest_entries = {}
     try:
         import nibabel as nib
 
@@ -28,6 +35,30 @@ def _base_config(root: Path) -> DotConfig:
                     nib.Nifti1Image(np.ones((2, 2, 2), dtype=float), np.eye(4)),
                     image_path,
                 )
+            data = np.asanyarray(nib.load(str(image_path)).dataobj, dtype=float)
+            finite = np.isfinite(data)
+            positive = finite & (data > 0.0)
+            negative = finite & (data < 0.0)
+            manifest_entries["NPS" if rel_path.startswith("NPS/") else "SIIPS1"] = {
+                "path": rel_path,
+                "space": "MNI152NLin2009cAsym",
+                "source_publication": "test fixture",
+                "source_repository_or_access_record": "test fixture",
+                "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
+                "shape": [2, 2, 2],
+                "affine": np.eye(4).tolist(),
+                "support": {
+                    "nonzero_voxels": int(np.count_nonzero(finite & (np.abs(data) > 0.0))),
+                    "positive_voxels": int(np.count_nonzero(positive)),
+                    "negative_voxels": int(np.count_nonzero(negative)),
+                    "positive_abs_weight_mass": float(np.sum(np.abs(data[positive]))),
+                    "negative_abs_weight_mass": float(np.sum(np.abs(data[negative]))),
+                },
+            }
+        (root / "maps" / "signature_manifest.yaml").write_text(
+            json.dumps({"signatures": manifest_entries}),
+            encoding="utf-8",
+        )
     except ImportError:
         pass
     return DotConfig(
@@ -51,6 +82,7 @@ def _base_config(root: Path) -> DotConfig:
                     "normalization": "none",
                     "round_decimals": 3,
                     "contrast_name": "pain_vs_nonpain",
+                    "signature_manifest_path": "signature_manifest.yaml",
                     "fmriprep_space": "MNI152NLin2009cAsym",
                     "input_source": "fmriprep",
                     "require_fmriprep": True,
@@ -89,6 +121,7 @@ def _base_config(root: Path) -> DotConfig:
 def _events_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
+            "block": [1, 1],
             "run_id": [1, 1],
             "trial_number": [1, 2],
             "pain_binary_coded": [1, 0],
@@ -124,6 +157,7 @@ def _write_signature_outputs(
             "signature": "NPS",
             "dot": 1.1,
             "n_voxels": 1000,
+            "scoring_mask_sha256": NPS_MASK_HASH,
             "onset": 21.532,
             "duration": 7.5,
         },
@@ -134,6 +168,7 @@ def _write_signature_outputs(
             "signature": "NPS",
             "dot": 1.2,
             "n_voxels": 1000,
+            "scoring_mask_sha256": NPS_MASK_HASH,
             "onset": 64.465,
             "duration": 7.5,
         },
@@ -148,6 +183,7 @@ def _write_signature_outputs(
                     "signature": "SIIPS1",
                     "dot": 2.1,
                     "n_voxels": 800,
+                    "scoring_mask_sha256": SIIPS1_MASK_HASH,
                     "onset": 21.532,
                     "duration": 7.5,
                 },
@@ -158,6 +194,7 @@ def _write_signature_outputs(
                     "signature": "SIIPS1",
                     "dot": siips1_second_dot,
                     "n_voxels": 800,
+                    "scoring_mask_sha256": SIIPS1_MASK_HASH,
                     "onset": 64.465,
                     "duration": 7.5,
                 },
@@ -292,6 +329,25 @@ def test_validate_signature_space_checks_configured_provenance_and_maps(tmp_path
         )
 
 
+def test_validate_signature_space_requires_frozen_signature_manifest(tmp_path) -> None:
+    from studies.pain_study.study1.targets import _validate_signature_space
+
+    cfg = _base_config(tmp_path)
+    cfg["study1"]["targets"].pop("signature_manifest_path")
+
+    with pytest.raises(ValueError, match="signature_manifest_path"):
+        _validate_signature_space(
+            cfg,
+            [
+                {"name": "NPS", "path": "NPS/weights_NSF_grouppred_cvpcr.nii.gz"},
+                {
+                    "name": "SIIPS1",
+                    "path": "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz",
+                },
+            ],
+        )
+
+
 def test_prepare_primary_targets_rejects_non_finite_primary_values() -> None:
     from studies.pain_study.study1.targets import prepare_primary_targets
 
@@ -311,6 +367,34 @@ def test_prepare_primary_targets_rejects_non_finite_primary_values() -> None:
             ),
         ):
             with pytest.raises(ValueError, match="finite values"):
+                prepare_primary_targets(
+                    subjects=["0001"],
+                    task="pain",
+                    config=cfg,
+                    logger=logging.getLogger(__name__),
+                )
+
+
+def test_prepare_primary_targets_requires_explicit_task_block_column() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        _write_signature_outputs(root)
+        events = _events_frame().drop(columns=["block"])
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+        ):
+            with pytest.raises(ValueError, match="task block"):
                 prepare_primary_targets(
                     subjects=["0001"],
                     task="pain",
@@ -350,6 +434,11 @@ def test_prepare_primary_targets_writes_wide_primary_table() -> None:
         assert list(frame["task"]) == ["pain", "pain"]
         assert list(frame["NPS"]) == [1.1, 1.2]
         assert list(frame["SIIPS1"]) == [2.1, 2.2]
+        assert list(frame["NPS_fmri_scoring_mask_sha256"]) == [NPS_MASK_HASH, NPS_MASK_HASH]
+        assert list(frame["SIIPS1_fmri_scoring_mask_sha256"]) == [
+            SIIPS1_MASK_HASH,
+            SIIPS1_MASK_HASH,
+        ]
 
 
 def test_prepare_primary_targets_records_nuisance_columns_without_residual_targets() -> None:
@@ -366,6 +455,7 @@ def test_prepare_primary_targets_records_nuisance_columns_without_residual_targe
 
         events = pd.DataFrame(
             {
+                "block": [1, 1, 1, 1],
                 "run_id": [1, 1, 1, 1],
                 "trial_number": [1, 2, 3, 4],
                 "pain_binary_coded": [0, 0, 1, 1],
@@ -389,12 +479,22 @@ def test_prepare_primary_targets_records_nuisance_columns_without_residual_targe
                     (
                         pd.Series([1.0, 3.0, 11.0, 13.0]),
                         "NPS",
-                        pd.DataFrame({"fmri_n_voxels": [1000, 1000, 1000, 1000]}),
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [1000, 1000, 1000, 1000],
+                                "fmri_scoring_mask_sha256": [NPS_MASK_HASH] * 4,
+                            }
+                        ),
                     ),
                     (
                         pd.Series([2.0, 4.0, 12.0, 14.0]),
                         "SIIPS1",
-                        pd.DataFrame({"fmri_n_voxels": [800, 800, 800, 800]}),
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [800, 800, 800, 800],
+                                "fmri_scoring_mask_sha256": [SIIPS1_MASK_HASH] * 4,
+                            }
+                        ),
                     ),
                 ],
             ),
@@ -427,6 +527,7 @@ def test_prepare_primary_targets_expands_categorical_temperature_nuisance() -> N
 
         events = pd.DataFrame(
             {
+                "block": [1, 1, 1, 1],
                 "run_id": [1, 1, 1, 1],
                 "trial_number": [1, 2, 3, 4],
                 "stimulus_temp": [44.0, 46.0, 44.0, 47.0],
@@ -450,12 +551,22 @@ def test_prepare_primary_targets_expands_categorical_temperature_nuisance() -> N
                     (
                         pd.Series([1.0, 3.0, 11.0, 13.0]),
                         "NPS",
-                        pd.DataFrame({"fmri_n_voxels": [1000, 1000, 1000, 1000]}),
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [1000, 1000, 1000, 1000],
+                                "fmri_scoring_mask_sha256": [NPS_MASK_HASH] * 4,
+                            }
+                        ),
                     ),
                     (
                         pd.Series([2.0, 4.0, 12.0, 14.0]),
                         "SIIPS1",
-                        pd.DataFrame({"fmri_n_voxels": [800, 800, 800, 800]}),
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [800, 800, 800, 800],
+                                "fmri_scoring_mask_sha256": [SIIPS1_MASK_HASH] * 4,
+                            }
+                        ),
                     ),
                 ],
             ),
@@ -496,17 +607,78 @@ def test_prepare_primary_targets_rejects_variable_signature_voxel_counts() -> No
                     (
                         pd.Series([1.0, 3.0]),
                         "NPS",
-                        pd.DataFrame({"fmri_n_voxels": [1000, 1001]}),
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [1000, 1001],
+                                "fmri_scoring_mask_sha256": [NPS_MASK_HASH] * 2,
+                            }
+                        ),
                     ),
                     (
                         pd.Series([2.0, 4.0]),
                         "SIIPS1",
-                        pd.DataFrame({"fmri_n_voxels": [800, 800]}),
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [800, 800],
+                                "fmri_scoring_mask_sha256": [SIIPS1_MASK_HASH] * 2,
+                            }
+                        ),
                     ),
                 ],
             ),
         ):
             with pytest.raises(ValueError, match="identical voxel count"):
+                prepare_primary_targets(
+                    subjects=["0001"],
+                    task="pain",
+                    config=cfg,
+                    logger=logging.getLogger(__name__),
+                )
+
+
+def test_prepare_primary_targets_rejects_variable_signature_mask_extent() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=_events_frame(),
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject",
+                side_effect=[
+                    (
+                        pd.Series([1.0, 3.0]),
+                        "NPS",
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [1000, 1000],
+                                "fmri_scoring_mask_sha256": [NPS_MASK_HASH, "2" * 64],
+                            }
+                        ),
+                    ),
+                    (
+                        pd.Series([2.0, 4.0]),
+                        "SIIPS1",
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [800, 800],
+                                "fmri_scoring_mask_sha256": [SIIPS1_MASK_HASH] * 2,
+                            }
+                        ),
+                    ),
+                ],
+            ),
+        ):
+            with pytest.raises(ValueError, match="identical scoring-mask extent"):
                 prepare_primary_targets(
                     subjects=["0001"],
                     task="pain",

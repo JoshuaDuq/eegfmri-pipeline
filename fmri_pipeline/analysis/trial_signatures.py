@@ -52,6 +52,30 @@ def _normalize_optional_frequency(value: Any, *, field_name: str) -> Optional[fl
     return numeric_value
 
 
+def _normalize_optional_fraction(value: Any, *, field_name: str) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be numeric or null, got {value!r}.") from exc
+    if not math.isfinite(numeric_value) or numeric_value < 0.0 or numeric_value > 1.0:
+        raise ValueError(f"{field_name} must be a finite fraction in [0, 1], got {value!r}.")
+    return numeric_value
+
+
+def _normalize_optional_positive_float(value: Any, *, field_name: str) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be numeric or null, got {value!r}.") from exc
+    if not math.isfinite(numeric_value) or numeric_value <= 0.0:
+        raise ValueError(f"{field_name} must be finite and positive when provided, got {value!r}.")
+    return numeric_value
+
+
 @dataclass(frozen=True)
 class TrialSignatureExtractionConfig:
     # Data selection
@@ -94,8 +118,14 @@ class TrialSignatureExtractionConfig:
     fixed_effects_weighting: str = "variance"  # "variance" | "mean"
     signatures: Optional[Tuple[str, ...]] = None  # default: all discovered
     signature_group_column: Optional[str] = None  # e.g., "temperature"
-    signature_group_values: Optional[Tuple[str, ...]] = None  # values to include (e.g., ("44.3","45.3"))
+    signature_group_values: Optional[Tuple[str, ...]] = (
+        None  # values to include (e.g., ("44.3","45.3"))
+    )
     signature_group_scope: str = "across_runs"  # "across_runs" | "per_run"
+    min_signature_support_fraction: Optional[float] = None
+    max_signature_weight_mass_change_fraction: Optional[float] = None
+    max_design_condition_number: Optional[float] = None
+    min_target_design_efficiency: Optional[float] = None
 
     # Outputs
     write_trial_betas: bool = False
@@ -118,9 +148,7 @@ class TrialSignatureExtractionConfig:
 
         method = (self.method or "beta-series").strip().lower()
         if method not in {"beta-series", "lss"}:
-            raise ValueError(
-                f"method must be 'beta-series' or 'lss', got {self.method!r}."
-            )
+            raise ValueError(f"method must be 'beta-series' or 'lss', got {self.method!r}.")
 
         lss_other = (self.lss_other_regressors or "per_condition").strip().lower().replace("-", "_")
         if lss_other not in {"per_condition", "all"}:
@@ -189,12 +217,30 @@ class TrialSignatureExtractionConfig:
                 dedup_vals.append(k)
             group_vals = tuple(dedup_vals) if dedup_vals else None
 
-        group_scope = (self.signature_group_scope or "across_runs").strip().lower().replace("-", "_")
+        group_scope = (
+            (self.signature_group_scope or "across_runs").strip().lower().replace("-", "_")
+        )
         if group_scope not in {"across_runs", "per_run"}:
             raise ValueError(
                 "signature_group_scope must be 'across_runs' or 'per_run', "
                 f"got {self.signature_group_scope!r}."
             )
+        min_support = _normalize_optional_fraction(
+            self.min_signature_support_fraction,
+            field_name="min_signature_support_fraction",
+        )
+        max_mass_change = _normalize_optional_fraction(
+            self.max_signature_weight_mass_change_fraction,
+            field_name="max_signature_weight_mass_change_fraction",
+        )
+        max_condition_number = _normalize_optional_positive_float(
+            self.max_design_condition_number,
+            field_name="max_design_condition_number",
+        )
+        min_efficiency = _normalize_optional_positive_float(
+            self.min_target_design_efficiency,
+            field_name="min_target_design_efficiency",
+        )
 
         scope_trial_type_column = (self.condition_scope_trial_type_column or "").strip()
         scope_phase_column = (self.condition_scope_phase_column or "").strip()
@@ -203,9 +249,7 @@ class TrialSignatureExtractionConfig:
                 "condition_scope_trial_types requires condition_scope_trial_type_column."
             )
         if scope_stim_phases and not scope_phase_column:
-            raise ValueError(
-                "condition_scope_stim_phases requires condition_scope_phase_column."
-            )
+            raise ValueError("condition_scope_stim_phases requires condition_scope_phase_column.")
 
         return TrialSignatureExtractionConfig(
             **{
@@ -224,6 +268,10 @@ class TrialSignatureExtractionConfig:
                 "signature_group_column": group_col,
                 "signature_group_values": group_vals,
                 "signature_group_scope": group_scope,
+                "min_signature_support_fraction": min_support,
+                "max_signature_weight_mass_change_fraction": max_mass_change,
+                "max_design_condition_number": max_condition_number,
+                "min_target_design_efficiency": min_efficiency,
             }
         )
 
@@ -249,19 +297,26 @@ def _resample_mask_to_target(mask_img: Any, target_img: Any) -> Any:
     try:
         from nilearn import image as nilearn_image  # type: ignore
     except Exception as exc:  # pragma: no cover
-        raise RuntimeError("Mask resampling requires nilearn to align masks to the target image grid.") from exc
+        raise RuntimeError(
+            "Mask resampling requires nilearn to align masks to the target image grid."
+        ) from exc
 
     # Best-effort: if already aligned, avoid resampling. (nilearn will still handle it if needed.)
     try:
-        same_shape = tuple(getattr(mask_img, "shape", ())) == tuple(getattr(target_img, "shape", ()))
+        same_shape = tuple(getattr(mask_img, "shape", ())) == tuple(
+            getattr(target_img, "shape", ())
+        )
         same_affine = np.allclose(np.asanyarray(mask_img.affine), np.asanyarray(target_img.affine))
         if same_shape and same_affine:
             return mask_img
     except Exception as exc:
         logger.debug("Mask/target alignment pre-check failed; falling back to resampling: %s", exc)
     return nilearn_image.resample_to_img(
-        mask_img, target_img, interpolation="nearest",
-        force_resample=True, copy_header=True,
+        mask_img,
+        target_img,
+        interpolation="nearest",
+        force_resample=True,
+        copy_header=True,
     )
 
 
@@ -339,7 +394,9 @@ def _discover_runs(
 
     # Discover run numbers from events files first.
     events_glob = [
-        p for p in sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_events.tsv")) if not p.name.endswith("_bold_events.tsv")
+        p
+        for p in sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_events.tsv"))
+        if not p.name.endswith("_bold_events.tsv")
     ]
     if not events_glob:
         events_glob = sorted(func_dir.glob(f"{sub_label}_task-{task}_run-*_bold_events.tsv"))
@@ -417,7 +474,9 @@ def _discover_runs(
                 f"{sub_label}_task-{task}_run-{run_num}_bold_events.tsv",
                 f"{sub_label}_task-{task}_run-0{run_num}_bold_events.tsv",
             ]
-            events_path = next((func_dir / n for n in events_patterns if (func_dir / n).exists()), None)
+            events_path = next(
+                (func_dir / n for n in events_patterns if (func_dir / n).exists()), None
+            )
         if events_path is None:
             continue
 
@@ -447,7 +506,9 @@ def _discover_runs(
                     f"{sub_label}_task-{task}_run-{run_num:02d}_bold.nii.gz",
                     f"{sub_label}_task-{task}_run-{run_num}_bold.nii.gz",
                 ]
-                bold_path = next((func_dir / n for n in raw_patterns if (func_dir / n).exists()), None)
+                bold_path = next(
+                    (func_dir / n for n in raw_patterns if (func_dir / n).exists()), None
+                )
 
         if bold_path is None:
             raise FileNotFoundError(
@@ -460,8 +521,7 @@ def _discover_runs(
     if runs is not None:
         requested_runs = {int(run_num) for run_num in runs}
         discovered_runs = {
-            int(run_num)
-            for run_num, _bold_path, _events_path, _confounds_path in out
+            int(run_num) for run_num, _bold_path, _events_path, _confounds_path in out
         }
         missing_runs = sorted(requested_runs - discovered_runs)
         if missing_runs:
@@ -504,20 +564,28 @@ def _validate_events_against_bold_run(
 
     if onset.isna().any():
         bad_rows = onset.index[onset.isna()].tolist()
-        raise ValueError(f"{context}: onset contains non-numeric or missing values at rows {bad_rows}.")
+        raise ValueError(
+            f"{context}: onset contains non-numeric or missing values at rows {bad_rows}."
+        )
     if duration.isna().any():
         bad_rows = duration.index[duration.isna()].tolist()
-        raise ValueError(f"{context}: duration contains non-numeric or missing values at rows {bad_rows}.")
+        raise ValueError(
+            f"{context}: duration contains non-numeric or missing values at rows {bad_rows}."
+        )
     if not np.isfinite(onset.to_numpy(dtype=float)).all():
         raise ValueError(f"{context}: onset contains non-finite values.")
     if not np.isfinite(duration.to_numpy(dtype=float)).all():
         raise ValueError(f"{context}: duration contains non-finite values.")
     if (onset < 0).any():
         bad_rows = onset.index[onset < 0].tolist()
-        raise ValueError(f"{context}: onset must be >= 0, found negative values at rows {bad_rows}.")
+        raise ValueError(
+            f"{context}: onset must be >= 0, found negative values at rows {bad_rows}."
+        )
     if (duration < 0).any():
         bad_rows = duration.index[duration < 0].tolist()
-        raise ValueError(f"{context}: duration must be >= 0, found negative values at rows {bad_rows}.")
+        raise ValueError(
+            f"{context}: duration must be >= 0, found negative values at rows {bad_rows}."
+        )
 
     run_duration = _get_bold_run_duration_seconds(bold_path)
     tr = float(_get_tr_from_bold(bold_path))
@@ -601,7 +669,9 @@ def _extract_trials_for_run(
 
     if group_mode:
         if group_col not in events_df.columns:
-            raise ValueError(f"Events file missing signature group column: {group_col} in {events_path}")
+            raise ValueError(
+                f"Events file missing signature group column: {group_col} in {events_path}"
+            )
         allowed = {str(v).strip() for v in group_vals if str(v).strip()}
         col_str = events_df[group_col].astype(str).str.strip()
         sel_mask = scope_mask & col_str.isin(list(allowed))
@@ -613,7 +683,9 @@ def _extract_trials_for_run(
         selected = selected.sort_values("onset").reset_index(drop=False)
     else:
         if col_a not in events_df.columns or col_b not in events_df.columns:
-            raise ValueError(f"Events file missing selection columns: {col_a}, {col_b} in {events_path}")
+            raise ValueError(
+                f"Events file missing selection columns: {col_a}, {col_b} in {events_path}"
+            )
 
         val_a = _coerce_condition_value(cfg.condition_a_value, events_df[col_a])
         val_b = _coerce_condition_value(cfg.condition_b_value, events_df[col_b])
@@ -714,7 +786,9 @@ def _build_lss_events(
     grouping_enabled = bool(cfg.signature_group_column and cfg.signature_group_values)
 
     # Other selected trials
-    others = [t for t in all_trials if not (t.run == trial.run and t.trial_index == trial.trial_index)]
+    others = [
+        t for t in all_trials if not (t.run == trial.run and t.trial_index == trial.trial_index)
+    ]
     if cfg.lss_other_regressors == "all":
         for t in others:
             rows.append({"onset": t.onset, "duration": t.duration, "trial_type": "other_trials"})
@@ -749,7 +823,9 @@ def _build_lss_events(
             if row_id is not None and row_id in represented_rows:
                 continue
             tt = str(row.get("trial_type", "other"))
-            rows.append({"onset": onset, "duration": duration, "trial_type": f"nuis_{_safe_slug(tt)}"})
+            rows.append(
+                {"onset": onset, "duration": duration, "trial_type": f"nuis_{_safe_slug(tt)}"}
+            )
 
     return pd.DataFrame(rows, columns=["onset", "duration", "trial_type"])
 
@@ -794,10 +870,9 @@ def _compute_effect_variance(
     cfg: TrialSignatureExtractionConfig,
     context: str,
 ) -> Optional[Any]:
-    needs_variance = (
-        str(cfg.fixed_effects_weighting or "variance").strip().lower() == "variance"
-        or bool(cfg.write_trial_variances)
-    )
+    needs_variance = str(
+        cfg.fixed_effects_weighting or "variance"
+    ).strip().lower() == "variance" or bool(cfg.write_trial_variances)
     try:
         return flm.compute_contrast(contrast, output_type="effect_variance")
     except Exception as exc:
@@ -903,6 +978,25 @@ def _write_tsv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
             w.writerow({k: r.get(k, "") for k in keys})
 
 
+def _signature_support_fields(result: Any) -> Dict[str, Any]:
+    return {
+        "nonzero_support_fraction": getattr(result, "nonzero_support_fraction", None),
+        "positive_support_fraction": getattr(result, "positive_support_fraction", None),
+        "negative_support_fraction": getattr(result, "negative_support_fraction", None),
+        "positive_weight_mass_change_fraction": getattr(
+            result,
+            "positive_weight_mass_change_fraction",
+            None,
+        ),
+        "negative_weight_mass_change_fraction": getattr(
+            result,
+            "negative_weight_mass_change_fraction",
+            None,
+        ),
+        "scoring_mask_sha256": getattr(result, "scoring_mask_sha256", None),
+    }
+
+
 def run_trial_signature_extraction_for_subject(
     *,
     bids_fmri_root: Path,
@@ -941,9 +1035,23 @@ def run_trial_signature_extraction_for_subject(
                 "(or provide MNI-space inputs)."
             )
     if cfg.method == "beta-series":
-        root = deriv_root / sub_label / "fmri" / "beta_series" / f"task-{cfg.task}" / f"contrast-{_safe_slug(cfg.name)}"
+        root = (
+            deriv_root
+            / sub_label
+            / "fmri"
+            / "beta_series"
+            / f"task-{cfg.task}"
+            / f"contrast-{_safe_slug(cfg.name)}"
+        )
     else:
-        root = deriv_root / sub_label / "fmri" / "lss" / f"task-{cfg.task}" / f"contrast-{_safe_slug(cfg.name)}"
+        root = (
+            deriv_root
+            / sub_label
+            / "fmri"
+            / "lss"
+            / f"task-{cfg.task}"
+            / f"contrast-{_safe_slug(cfg.name)}"
+        )
     out_dir = Path(output_dir).expanduser().resolve() if output_dir is not None else root
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -988,7 +1096,9 @@ def run_trial_signature_extraction_for_subject(
     def _append_group(container: Dict[str, List[Any]], key: str, value: Any) -> None:
         container.setdefault(str(key), []).append(value)
 
-    def _append_group_by_run(container: Dict[int, Dict[str, List[Any]]], run_num: int, key: str, value: Any) -> None:
+    def _append_group_by_run(
+        container: Dict[int, Dict[str, List[Any]]], run_num: int, key: str, value: Any
+    ) -> None:
         container.setdefault(int(run_num), {}).setdefault(str(key), []).append(value)
 
     for run_num, bold_path, events_path, confounds_path in runs:
@@ -1089,14 +1199,26 @@ def run_trial_signature_extraction_for_subject(
                     context=f"Trial-wise beta-series GLM ({bold_path.name}, {t.regressor})",
                 )
 
-                run_regressors_by_condition.setdefault(str(t.condition), []).append(str(t.regressor))
+                run_regressors_by_condition.setdefault(str(t.condition), []).append(
+                    str(t.regressor)
+                )
 
                 if cfg.write_trial_betas:
-                    p = out_dir / "trial_betas" / t.run_label / f"{sub_label}_task-{cfg.task}_{t.run_label}_{t.regressor}_beta.nii.gz"
+                    p = (
+                        out_dir
+                        / "trial_betas"
+                        / t.run_label
+                        / f"{sub_label}_task-{cfg.task}_{t.run_label}_{t.regressor}_beta.nii.gz"
+                    )
                     p.parent.mkdir(parents=True, exist_ok=True)
                     nib.save(beta_img, str(p))
                 if cfg.write_trial_variances and var_img is not None:
-                    p = out_dir / "trial_betas" / t.run_label / f"{sub_label}_task-{cfg.task}_{t.run_label}_{t.regressor}_var.nii.gz"
+                    p = (
+                        out_dir
+                        / "trial_betas"
+                        / t.run_label
+                        / f"{sub_label}_task-{cfg.task}_{t.run_label}_{t.regressor}_var.nii.gz"
+                    )
                     p.parent.mkdir(parents=True, exist_ok=True)
                     nib.save(var_img, str(p))
 
@@ -1107,6 +1229,8 @@ def run_trial_signature_extraction_for_subject(
                         signature_specs=signature_specs,
                         mask_img=mask_img,
                         signatures=cfg.signatures,
+                        min_support_fraction=cfg.min_signature_support_fraction,
+                        max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
                     )
                     for s in sigs:
                         trial_sig_rows.append(
@@ -1130,6 +1254,7 @@ def run_trial_signature_extraction_for_subject(
                                 "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
                                 "n_voxels": s.n_voxels,
                                 "weights": str(s.weight_path),
+                                **_signature_support_fields(s),
                             }
                         )
 
@@ -1154,9 +1279,7 @@ def run_trial_signature_extraction_for_subject(
             # Build the run-level trial list once, then fit per-trial models.
             for t in trials:
                 if progress_callback is not None:
-                    progress_callback(
-                        f"lss {sub_label} {t.run_label} trial-{t.trial_index:03d}"
-                    )
+                    progress_callback(f"lss {sub_label} {t.run_label} trial-{t.trial_index:03d}")
                 trial_infos.append(t)
                 trial_rows_out.append(
                     {
@@ -1175,7 +1298,9 @@ def run_trial_signature_extraction_for_subject(
                     }
                 )
 
-                lss_events = _build_lss_events(trial=t, all_trials=trials, original_events_df=events_df, cfg=cfg)
+                lss_events = _build_lss_events(
+                    trial=t, all_trials=trials, original_events_df=events_df, cfg=cfg
+                )
                 flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
                 flm.fit(bold_path, events=lss_events, confounds=confounds)
                 _validate_design_matrices(
@@ -1185,6 +1310,9 @@ def run_trial_signature_extraction_for_subject(
                         f"trial {t.trial_index:03d})"
                     ),
                     min_residual_dof=1,
+                    max_condition_number=cfg.max_design_condition_number,
+                    target_columns=("target",),
+                    min_target_efficiency=cfg.min_target_design_efficiency,
                 )
 
                 dm = flm.design_matrices_[0]
@@ -1208,11 +1336,21 @@ def run_trial_signature_extraction_for_subject(
                     _append_group_by_run(group_vars_by_run, run_num, t.condition, var_img)
 
                 if cfg.write_trial_betas:
-                    p = out_dir / "trial_betas" / t.run_label / f"{sub_label}_task-{cfg.task}_{t.run_label}_trial-{t.trial_index:03d}_beta.nii.gz"
+                    p = (
+                        out_dir
+                        / "trial_betas"
+                        / t.run_label
+                        / f"{sub_label}_task-{cfg.task}_{t.run_label}_trial-{t.trial_index:03d}_beta.nii.gz"
+                    )
                     p.parent.mkdir(parents=True, exist_ok=True)
                     nib.save(beta_img, str(p))
                 if cfg.write_trial_variances and var_img is not None:
-                    p = out_dir / "trial_betas" / t.run_label / f"{sub_label}_task-{cfg.task}_{t.run_label}_trial-{t.trial_index:03d}_var.nii.gz"
+                    p = (
+                        out_dir
+                        / "trial_betas"
+                        / t.run_label
+                        / f"{sub_label}_task-{cfg.task}_{t.run_label}_trial-{t.trial_index:03d}_var.nii.gz"
+                    )
                     p.parent.mkdir(parents=True, exist_ok=True)
                     nib.save(var_img, str(p))
 
@@ -1223,6 +1361,8 @@ def run_trial_signature_extraction_for_subject(
                         signature_specs=signature_specs,
                         mask_img=mask_img,
                         signatures=cfg.signatures,
+                        min_support_fraction=cfg.min_signature_support_fraction,
+                        max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
                     )
                     for s in sigs:
                         trial_sig_rows.append(
@@ -1244,6 +1384,7 @@ def run_trial_signature_extraction_for_subject(
                                 "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
                                 "n_voxels": s.n_voxels,
                                 "weights": str(s.weight_path),
+                                **_signature_support_fields(s),
                                 "onset": f"{t.onset:.6f}",
                                 "duration": f"{t.duration:.6f}",
                             }
@@ -1286,7 +1427,9 @@ def run_trial_signature_extraction_for_subject(
                     method=cfg.fixed_effects_weighting,
                 )
                 if cfg.write_condition_betas:
-                    nib.save(a_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_beta.nii.gz"))
+                    nib.save(
+                        a_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_beta.nii.gz")
+                    )
             if cond_b_effects:
                 b_img = _combine_effect_images(
                     effects=cond_b_effects,
@@ -1294,7 +1437,9 @@ def run_trial_signature_extraction_for_subject(
                     method=cfg.fixed_effects_weighting,
                 )
                 if cfg.write_condition_betas:
-                    nib.save(b_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-b_beta.nii.gz"))
+                    nib.save(
+                        b_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-b_beta.nii.gz")
+                    )
 
             diff_img = None
             if a_img is not None and b_img is not None:
@@ -1304,7 +1449,10 @@ def run_trial_signature_extraction_for_subject(
                 b = np.asanyarray(b_img.dataobj)
                 diff_img = nib.Nifti1Image(a - b, a_img.affine, a_img.header)
                 if cfg.write_condition_betas:
-                    nib.save(diff_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_minus_b_beta.nii.gz"))
+                    nib.save(
+                        diff_img,
+                        str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_minus_b_beta.nii.gz"),
+                    )
 
             if signature_root is not None and signature_specs:
                 for label, img in [
@@ -1325,6 +1473,8 @@ def run_trial_signature_extraction_for_subject(
                         signature_specs=signature_specs,
                         mask_img=brain_union,
                         signatures=cfg.signatures,
+                        min_support_fraction=cfg.min_signature_support_fraction,
+                        max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
                     )
                     for s in sigs:
                         cond_rows.append(
@@ -1340,11 +1490,13 @@ def run_trial_signature_extraction_for_subject(
                                 "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
                                 "n_voxels": s.n_voxels,
                                 "weights": str(s.weight_path),
+                                **_signature_support_fields(s),
                             }
                         )
                 _write_tsv(out_dir / "signatures" / "condition_signature_expression.tsv", cond_rows)
 
         else:
+
             def _count_trials_for_group(run_label: Optional[str], group: str) -> int:
                 n = 0
                 for t in trial_infos:
@@ -1356,7 +1508,12 @@ def run_trial_signature_extraction_for_subject(
                 return n
 
             def _iter_group_sets():
-                scope = str(cfg.signature_group_scope or "across_runs").strip().lower().replace("-", "_")
+                scope = (
+                    str(cfg.signature_group_scope or "across_runs")
+                    .strip()
+                    .lower()
+                    .replace("-", "_")
+                )
                 if scope == "per_run":
                     for r in sorted(group_effects_by_run.keys()):
                         by_group = group_effects_by_run.get(int(r), {})
@@ -1410,6 +1567,8 @@ def run_trial_signature_extraction_for_subject(
                         signature_specs=signature_specs,
                         mask_img=brain_union,
                         signatures=cfg.signatures,
+                        min_support_fraction=cfg.min_signature_support_fraction,
+                        max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
                     )
                     for s in sigs:
                         group_rows.append(
@@ -1430,6 +1589,7 @@ def run_trial_signature_extraction_for_subject(
                                 "pearson_r": "" if s.pearson_r is None else f"{s.pearson_r:.8g}",
                                 "n_voxels": s.n_voxels,
                                 "weights": str(s.weight_path),
+                                **_signature_support_fields(s),
                             }
                         )
 

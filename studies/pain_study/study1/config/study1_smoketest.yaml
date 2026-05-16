@@ -10,6 +10,7 @@ study1:
     normalization: "none"
     round_decimals: 3
     names: ["NPS", "SIIPS1"]
+    signature_manifest_path: "signature_manifest.yaml"
     signature_provenance:
       NPS:
         path: "NPS/weights_NSF_grouppred_cvpcr.nii.gz"
@@ -33,6 +34,10 @@ study1:
     high_pass_hz: 0.008
     low_pass_hz: null
     smoothing_fwhm: null
+    min_signature_support_fraction: 0.90
+    max_signature_weight_mass_change_fraction: 0.10
+    max_design_condition_number: 100.0
+    min_target_design_efficiency: 0.1
     confounds_strategy: "motion24+wmcsf+fd+compcor"
     lss_other_regressors: "all"
     nuisance_regression:
@@ -41,9 +46,9 @@ study1:
         - "block"
         - "onset"
         - "trial_index"
-        - "framewise_displacement"
-        - "std_dvars"
-        - "fp1_fp2_high_frequency_power"
+        - "hrf_weighted_framewise_displacement"
+        - "hrf_weighted_std_dvars"
+        - "hrf_weighted_fp1_fp2_high_frequency_power"
         - "residual_ecg_coupling"
       categorical_columns:
         - "stimulus_temp"
@@ -54,6 +59,12 @@ study1:
     outer_jobs: 1
     feature_harmonization: "intersection"
     excluded_channels: ["Fp1", "Fp2"]
+  temporal_negative_controls:
+    feature_transform: "raw_log_power"
+    feature_baseline_window: null
+    windows:
+      prestimulus_wide: [-5.0, 0.0]
+      immediate_prestimulus: [-0.2, 0.0]
   deep_regression:
     n_epochs: 2
     batch_size: 8
@@ -70,6 +81,10 @@ study1:
       alpha_beta: ["alpha", "beta"]
   outputs:
     root_name: "study1"
+
+pyprep:
+  # Match the production Study 1 bad-channel policy in smoke runs.
+  bad_channel_sync_policy: "subject_union"
 
 preprocessing:
   clean_events_qc:

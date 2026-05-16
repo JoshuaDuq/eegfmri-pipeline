@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +11,15 @@ import pandas as pd
 
 from eeg_pipeline.analysis.machine_learning.circular_shift import admissible_circular_shifts
 from eeg_pipeline.utils.config.loader import get_config_value
+from studies.pain_study.study1.targets import _categorical_level_column
+
+
+RAW_LEVEL2_ARTIFACT_COLUMNS = {
+    "framewise_displacement": "hrf_weighted_framewise_displacement",
+    "std_dvars": "hrf_weighted_std_dvars",
+    "fp1_fp2_high_frequency_power": "hrf_weighted_fp1_fp2_high_frequency_power",
+}
+PERMUTATION_STRUCTURE_COLUMNS = ("block", "trial_index")
 
 
 @dataclass(frozen=True)
@@ -30,9 +40,11 @@ class SourceStageSubjectQC:
 class SourceStageCohortQC:
     band: str
     confirmatory_eligible: bool
+    feasibility_eligible: bool
     n_subjects: int
     n_source_valid_subjects: int
     min_source_valid_subjects: int
+    min_feasibility_subjects: int
     collinearity_failure_fraction: float
     max_collinearity_failure_fraction: float
     reason: str
@@ -76,6 +88,9 @@ def evaluate_source_stage_cohort(
     min_source_valid_subjects = int(
         get_config_value(config, "study2.source_stage.min_source_valid_subjects", 30)
     )
+    min_feasibility_subjects = int(
+        get_config_value(config, "study2.source_stage.min_feasibility_subjects", 20)
+    )
     max_collinearity_failure_fraction = float(
         get_config_value(
             config,
@@ -83,21 +98,22 @@ def evaluate_source_stage_cohort(
             0.20,
         )
     )
-    collinearity_failures = qc_frame["reason"].astype(str).str.contains(
-        "condition number|opposite-band VIF",
-        regex=True,
-    )
-    collinearity_failure_fraction = (
-        float(collinearity_failures.mean()) if n_subjects else 0.0
-    )
+    collinearity_failure_fraction = _collinearity_failure_fraction(qc_frame)
 
     reason = ""
-    confirmatory_eligible = True
-    if n_source_valid_subjects < min_source_valid_subjects:
+    feasibility_eligible = n_source_valid_subjects >= min_feasibility_subjects
+    confirmatory_eligible = feasibility_eligible
+    if not feasibility_eligible:
+        confirmatory_eligible = False
+        reason = (
+            f"Study 2 source-stage cohort has fewer than {min_feasibility_subjects} "
+            f"feasibility source-valid subjects: {n_source_valid_subjects}."
+        )
+    elif n_source_valid_subjects < min_source_valid_subjects:
         confirmatory_eligible = False
         reason = (
             f"Study 2 source-stage cohort has fewer than {min_source_valid_subjects} "
-            f"source-valid subjects: {n_source_valid_subjects}."
+            f"confirmatory source-valid subjects: {n_source_valid_subjects}."
         )
     elif collinearity_failure_fraction > max_collinearity_failure_fraction:
         confirmatory_eligible = False
@@ -109,14 +125,35 @@ def evaluate_source_stage_cohort(
     status = SourceStageCohortQC(
         band=str(band).strip().lower(),
         confirmatory_eligible=confirmatory_eligible,
+        feasibility_eligible=feasibility_eligible,
         n_subjects=n_subjects,
         n_source_valid_subjects=n_source_valid_subjects,
         min_source_valid_subjects=min_source_valid_subjects,
+        min_feasibility_subjects=min_feasibility_subjects,
         collinearity_failure_fraction=collinearity_failure_fraction,
         max_collinearity_failure_fraction=max_collinearity_failure_fraction,
         reason=reason,
     )
     return qc_frame, status
+
+
+def _collinearity_failure_fraction(qc_frame: pd.DataFrame) -> float:
+    if qc_frame.empty:
+        return 0.0
+
+    collinearity_failures = _collinearity_failure_mask(qc_frame)
+    otherwise_valid = qc_frame["eligible"].astype(bool) | collinearity_failures
+    denominator = int(otherwise_valid.sum())
+    if denominator == 0:
+        return 0.0
+    return float(collinearity_failures.sum() / denominator)
+
+
+def _collinearity_failure_mask(qc_frame: pd.DataFrame) -> pd.Series:
+    return qc_frame["reason"].astype(str).str.contains(
+        "condition number|contribution design|opposite-band VIF",
+        regex=True,
+    )
 
 
 def evaluate_source_stage_subject(
@@ -138,9 +175,14 @@ def evaluate_source_stage_subject(
         )
     subject_id = subject_ids[0]
     band_name = str(band).strip().lower()
+    target_column = _band_contribution_column(config, band_name)
     opposite_column = _opposite_band_column(config, band_name)
 
-    required_columns = _source_stage_required_columns(config, opposite_column)
+    required_columns = _source_stage_required_columns(
+        config,
+        target_column=target_column,
+        opposite_column=opposite_column,
+    )
     missing = [column for column in required_columns if column not in frame.columns]
     if missing:
         return _ineligible_qc(
@@ -175,6 +217,10 @@ def evaluate_source_stage_subject(
         config=config,
         opposite_column=opposite_column,
     )
+    target_values = _source_stage_contribution_values(
+        valid_frame,
+        column=target_column,
+    )
     rank, condition_number, rank_reason = _rank_and_condition_number(design)
     residual_degrees_of_freedom = retained_trials - rank
     if rank_reason:
@@ -187,6 +233,24 @@ def evaluate_source_stage_subject(
             residual_degrees_of_freedom=residual_degrees_of_freedom,
             condition_number=condition_number,
             reason=rank_reason,
+        )
+
+    contribution_condition_number, contribution_rank_reason = (
+        _contribution_stability_condition_number(
+            design=design,
+            target_values=target_values,
+        )
+    )
+    if contribution_rank_reason:
+        return _ineligible_qc(
+            subject_id=subject_id,
+            band=band_name,
+            retained_trials=retained_trials,
+            valid_blocks=valid_blocks,
+            design_rank=rank,
+            residual_degrees_of_freedom=residual_degrees_of_freedom,
+            condition_number=contribution_condition_number,
+            reason=contribution_rank_reason,
         )
 
     min_residual_df = int(
@@ -210,7 +274,7 @@ def evaluate_source_stage_subject(
     max_condition_number = float(
         get_config_value(config, "study2.source_stage.max_condition_number", 100)
     )
-    if condition_number > max_condition_number:
+    if contribution_condition_number > max_condition_number:
         return _ineligible_qc(
             subject_id=subject_id,
             band=band_name,
@@ -218,10 +282,10 @@ def evaluate_source_stage_subject(
             valid_blocks=valid_blocks,
             design_rank=rank,
             residual_degrees_of_freedom=residual_degrees_of_freedom,
-            condition_number=condition_number,
+            condition_number=contribution_condition_number,
             reason=(
-                "Source-stage condition number exceeds threshold: "
-                f"condition_number={condition_number:.6g}."
+                "Source-stage contribution design condition number exceeds threshold: "
+                f"condition_number={contribution_condition_number:.6g}."
             ),
         )
 
@@ -255,24 +319,46 @@ def evaluate_source_stage_subject(
         valid_blocks=valid_blocks,
         design_rank=rank,
         residual_degrees_of_freedom=residual_degrees_of_freedom,
-        condition_number=condition_number,
+        condition_number=contribution_condition_number,
         opposite_band_vif=opposite_band_vif,
         reason="",
     )
 
 
-def _source_stage_required_columns(config: Any, opposite_column: str) -> tuple[str, ...]:
-    continuous = tuple(
-        str(column).strip()
-        for column in get_config_value(config, "study2.source_stage.continuous_columns", [])
-        if str(column).strip()
+def _source_stage_required_columns(
+    config: Any,
+    *,
+    target_column: str,
+    opposite_column: str,
+) -> tuple[str, ...]:
+    columns = (
+        *PERMUTATION_STRUCTURE_COLUMNS,
+        *_source_stage_continuous_columns(config),
+        *_source_stage_categorical_columns(config),
+        target_column,
+        opposite_column,
     )
-    categorical = tuple(
-        str(column).strip()
-        for column in get_config_value(config, "study2.source_stage.categorical_columns", [])
-        if str(column).strip()
-    )
-    return (*continuous, *categorical, opposite_column)
+    return tuple(dict.fromkeys(columns))
+
+
+def _band_contribution_column(config: Any, band: str) -> str:
+    if band == "alpha":
+        return str(
+            get_config_value(
+                config,
+                "study2.contributions.alpha_standardized_column",
+                "eta_alpha_z",
+            )
+        )
+    if band == "beta":
+        return str(
+            get_config_value(
+                config,
+                "study2.contributions.beta_standardized_column",
+                "eta_beta_z",
+            )
+        )
+    raise ValueError("Study 2 source-stage band must be 'alpha' or 'beta'.")
 
 
 def _opposite_band_column(config: Any, band: str) -> str:
@@ -325,40 +411,189 @@ def _build_source_stage_design(
     opposite_column: str,
 ) -> tuple[np.ndarray, list[str]]:
     design_parts: list[pd.DataFrame] = []
-    continuous_columns = tuple(
-        str(column).strip()
-        for column in get_config_value(config, "study2.source_stage.continuous_columns", [])
-        if str(column).strip()
-    )
-    categorical_columns = tuple(
-        str(column).strip()
-        for column in get_config_value(config, "study2.source_stage.categorical_columns", [])
-        if str(column).strip()
-    )
+    continuous_columns = _source_stage_continuous_columns(config)
+    categorical_columns = _source_stage_categorical_columns(config)
     for column in continuous_columns:
         values = pd.to_numeric(frame[column], errors="coerce")
         if values.isna().any():
-            raise ValueError(f"Source-stage continuous column '{column}' contains non-finite values.")
+            raise ValueError(
+                f"Source-stage continuous column '{column}' contains non-finite values."
+            )
         design_parts.append(pd.DataFrame({column: values.to_numpy(dtype=float)}))
 
     for column in categorical_columns:
-        values = frame[column].astype(str)
-        if values.nunique(dropna=False) < 2:
-            raise ValueError(
-                f"Source-stage categorical column '{column}' must contain at least two levels."
+        design_parts.append(
+            _build_fixed_categorical_design(
+                frame=frame,
+                config=config,
+                column=column,
             )
-        dummies = pd.get_dummies(values, prefix=column, drop_first=True, dtype=float)
-        design_parts.append(dummies.reset_index(drop=True))
+        )
 
     opposite_values = pd.to_numeric(frame[opposite_column], errors="coerce")
     if opposite_values.isna().any():
         raise ValueError(
-            f"Source-stage opposite-band contribution '{opposite_column}' contains non-finite values."
+            "Source-stage opposite-band contribution "
+            f"'{opposite_column}' contains non-finite values."
         )
     design_parts.append(pd.DataFrame({opposite_column: opposite_values.to_numpy(dtype=float)}))
 
     design_frame = pd.concat(design_parts, axis=1)
     return design_frame.to_numpy(dtype=float), list(design_frame.columns)
+
+
+def _source_stage_contribution_values(frame: pd.DataFrame, *, column: str) -> np.ndarray:
+    values = pd.to_numeric(frame[column], errors="coerce")
+    if values.isna().any():
+        raise ValueError(
+            f"Source-stage contribution column '{column}' contains non-finite values."
+        )
+    return values.to_numpy(dtype=float)
+
+
+def _contribution_stability_condition_number(
+    *,
+    design: np.ndarray,
+    target_values: np.ndarray,
+) -> tuple[float, str]:
+    augmented_design = np.column_stack([design, target_values])
+    _rank, condition_number, rank_reason = _rank_and_condition_number(augmented_design)
+    if not rank_reason:
+        return condition_number, ""
+    return (
+        condition_number,
+        rank_reason.replace(
+            "Source-stage design",
+            "Source-stage contribution design",
+        ),
+    )
+
+
+def _source_stage_continuous_columns(config: Any) -> tuple[str, ...]:
+    raw_columns = get_config_value(config, "study2.source_stage.continuous_columns", [])
+    columns = _required_string_tuple(
+        raw_columns,
+        field_name="study2.source_stage.continuous_columns",
+    )
+    _reject_raw_level2_artifact_columns(columns)
+    return columns
+
+
+def _source_stage_categorical_columns(config: Any) -> tuple[str, ...]:
+    raw_columns = get_config_value(config, "study2.source_stage.categorical_columns", [])
+    return _required_string_tuple(
+        raw_columns,
+        field_name="study2.source_stage.categorical_columns",
+    )
+
+
+def _required_string_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{field_name} must be a list of column names.")
+    columns = tuple(str(column).strip() for column in value if str(column).strip())
+    if len(columns) != len(set(columns)):
+        raise ValueError(f"{field_name} must not contain duplicate column names.")
+    return columns
+
+
+def _reject_raw_level2_artifact_columns(columns: tuple[str, ...]) -> None:
+    raw_columns = [column for column in columns if column in RAW_LEVEL2_ARTIFACT_COLUMNS]
+    if not raw_columns:
+        return
+
+    replacements = {column: RAW_LEVEL2_ARTIFACT_COLUMNS[column] for column in raw_columns}
+    raise ValueError(
+        "Study 2 source-stage design requires HRF-weighted Study 1 Level 2 "
+        "artifact covariates, got raw columns: "
+        f"{json.dumps(replacements, sort_keys=True)}."
+    )
+
+
+def _build_fixed_categorical_design(
+    *,
+    frame: pd.DataFrame,
+    config: Any,
+    column: str,
+) -> pd.DataFrame:
+    values = frame[column]
+    if values.isna().any():
+        raise ValueError(f"Source-stage categorical column '{column}' contains missing values.")
+
+    levels = _fixed_categorical_levels(config, column=column)
+    unknown_levels = _unknown_categorical_levels(values, allowed_levels=levels)
+    if unknown_levels:
+        raise ValueError(
+            f"Source-stage categorical column '{column}' contains levels outside "
+            f"the fixed Study 1 coding: {unknown_levels}."
+        )
+
+    dummies = pd.DataFrame(index=frame.index)
+    for level in levels[1:]:
+        dummy_column = _categorical_level_column(column, level)
+        dummies[dummy_column] = _level_membership(values, level).astype(float)
+    return dummies.reset_index(drop=True)
+
+
+def _fixed_categorical_levels(config: Any, *, column: str) -> tuple[Any, ...]:
+    raw_levels = get_config_value(
+        config,
+        f"study2.source_stage.fixed_categorical_levels.{column}",
+        None,
+    )
+    if not isinstance(raw_levels, (list, tuple)):
+        raise ValueError(
+            "Study 2 source-stage fixed categorical levels must be configured for "
+            f"'{column}'."
+        )
+    levels = tuple(raw_levels)
+    if len(levels) < 2:
+        raise ValueError(
+            "Study 2 source-stage fixed categorical levels must include at least "
+            f"two levels for '{column}'."
+        )
+
+    dummy_columns = [_categorical_level_column(column, level) for level in levels]
+    if len(dummy_columns) != len(set(dummy_columns)):
+        raise ValueError(
+            "Study 2 source-stage fixed categorical levels must be unique after "
+            f"Study 1 dummy-name normalization for '{column}'."
+        )
+    return levels
+
+
+def _unknown_categorical_levels(
+    values: pd.Series,
+    *,
+    allowed_levels: tuple[Any, ...],
+) -> tuple[Any, ...]:
+    unknown: list[Any] = []
+    for value in pd.unique(values):
+        if not any(_values_match_level(value, level) for level in allowed_levels):
+            unknown.append(value)
+    return tuple(unknown)
+
+
+def _level_membership(values: pd.Series, level: Any) -> np.ndarray:
+    numeric_level = _numeric_value(level)
+    if numeric_level is not None:
+        numeric_values = pd.to_numeric(values, errors="coerce")
+        return np.isclose(numeric_values.to_numpy(dtype=float), numeric_level)
+    return (values.astype(str).str.strip() == str(level).strip()).to_numpy(dtype=bool)
+
+
+def _values_match_level(value: Any, level: Any) -> bool:
+    numeric_value = _numeric_value(value)
+    numeric_level = _numeric_value(level)
+    if numeric_value is not None and numeric_level is not None:
+        return bool(np.isclose(numeric_value, numeric_level))
+    return str(value).strip() == str(level).strip()
+
+
+def _numeric_value(value: Any) -> float | None:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric):
+        return None
+    return float(numeric)
 
 
 def _rank_and_condition_number(

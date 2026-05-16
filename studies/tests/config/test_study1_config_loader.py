@@ -23,6 +23,20 @@ def test_load_study1_config_resolves_default_yaml() -> None:
     assert config["study1"]["features"]["exploratory_feature_families"] == []
 
 
+def test_load_study1_config_defines_unbaselined_temporal_negative_controls() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+    temporal = config["study1"]["temporal_negative_controls"]
+
+    assert temporal["feature_transform"] == "raw_log_power"
+    assert temporal["feature_baseline_window"] is None
+    assert temporal["windows"] == {
+        "prestimulus_wide": [-5.0, 0.0],
+        "immediate_prestimulus": [-0.2, 0.0],
+    }
+
+
 def test_load_study1_config_resolves_explicit_path() -> None:
     from studies.pain_study.study1.config.loader import load_study1_config
 
@@ -49,6 +63,64 @@ def test_load_study1_config_rejects_non_mapping_yaml(tmp_path) -> None:
         load_study1_config(config_path=bad_config)
 
 
+def test_load_study1_config_rejects_baselined_temporal_negative_controls(tmp_path) -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    bad_config = tmp_path / "bad_temporal.yaml"
+    bad_config.write_text(
+        yaml.dump(
+            {
+                "study1": {
+                    "temporal_negative_controls": {
+                        "feature_transform": "logratio",
+                        "feature_baseline_window": [-5.0, -0.01],
+                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="raw_log_power"):
+        load_study1_config(config_path=bad_config)
+
+
+def test_load_study1_config_rejects_missing_temporal_negative_controls(tmp_path) -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    bad_config = tmp_path / "missing_temporal.yaml"
+    bad_config.write_text(yaml.dump({"study1": {"cohort": {"min_subjects": 99}}}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="temporal_negative_controls"):
+        load_study1_config(config_path=bad_config)
+
+
+def test_load_study1_config_rejects_poststimulus_temporal_negative_control_window(
+    tmp_path,
+) -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    bad_config = tmp_path / "bad_temporal_window.yaml"
+    bad_config.write_text(
+        yaml.dump(
+            {
+                "study1": {
+                    "temporal_negative_controls": {
+                        "feature_transform": "raw_log_power",
+                        "feature_baseline_window": None,
+                        "windows": {"invalid": [-0.2, 0.1]},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="pre-stimulus"):
+        load_study1_config(config_path=bad_config)
+
+
 def test_load_study1_config_uses_env_var_override(tmp_path, monkeypatch) -> None:
     from studies.pain_study.study1.config.loader import (
         STUDY1_CONFIG_ENV_VAR,
@@ -57,7 +129,18 @@ def test_load_study1_config_uses_env_var_override(tmp_path, monkeypatch) -> None
 
     custom_config = tmp_path / "custom.yaml"
     custom_config.write_text(
-        yaml.dump({"study1": {"cohort": {"min_subjects": 99}}}),
+        yaml.dump(
+            {
+                "study1": {
+                    "cohort": {"min_subjects": 99},
+                    "temporal_negative_controls": {
+                        "feature_transform": "raw_log_power",
+                        "feature_baseline_window": None,
+                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                    },
+                }
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setenv(STUDY1_CONFIG_ENV_VAR, str(custom_config))

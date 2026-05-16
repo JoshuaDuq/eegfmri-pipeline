@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import logging
 import re
 from pathlib import Path
@@ -16,7 +18,6 @@ from eeg_pipeline.infra.tsv import write_parquet, write_tsv
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root, resolve_fmri_bids_root
 from eeg_pipeline.utils.data.fmri_signature_targets import (
-    find_block_column,
     load_fmri_signature_target_for_subject,
 )
 from fmri_pipeline.analysis.trial_signatures import (
@@ -26,6 +27,11 @@ from fmri_pipeline.analysis.trial_signatures import (
 from fmri_pipeline.utils.signature_paths import discover_signature_root_and_specs
 
 PRIMARY_SIGNATURES = ("NPS", "SIIPS1")
+RAW_LEVEL2_ARTIFACT_COLUMNS = {
+    "framewise_displacement": "hrf_weighted_framewise_displacement",
+    "std_dvars": "hrf_weighted_std_dvars",
+    "fp1_fp2_high_frequency_power": "hrf_weighted_fp1_fp2_high_frequency_power",
+}
 
 
 def _study1_output_root(config: Any) -> Path:
@@ -67,6 +73,7 @@ def _validate_signature_space(config: Any, signature_specs: list[dict[str, str]]
             "Study 1 target preparation requires MNI-space fMRI inputs for signature extraction."
         )
     _validate_signature_provenance(config, signature_specs)
+    _validate_signature_manifest(config, signature_specs)
 
 
 def _validate_signature_provenance(config: Any, signature_specs: list[dict[str, str]]) -> None:
@@ -123,6 +130,185 @@ def _validate_signature_image(path: Path, *, name: str) -> None:
         raise ValueError(f"Study 1 signature map for {name} contains only zero weights: {path}")
 
 
+def _signature_manifest_path(config: Any) -> Path:
+    raw_value = get_config_value(config, "study1.targets.signature_manifest_path", None)
+    if raw_value is None:
+        raise ValueError("study1.targets.signature_manifest_path must be configured.")
+    raw_path = str(raw_value).strip()
+    if not raw_path:
+        raise ValueError("study1.targets.signature_manifest_path must be non-empty.")
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return path
+    signature_root = Path(str(require_config_value(config, "paths.signature_dir"))).expanduser()
+    return signature_root / path
+
+
+def _load_signature_manifest(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"Study 1 frozen signature manifest does not exist: {path}")
+    try:
+        import yaml  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Study 1 signature manifest validation requires PyYAML.") from exc
+
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Study 1 signature manifest must be a mapping: {path}")
+    return payload
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _signature_support_summary(path: Path) -> dict[str, float | int]:
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Study 1 signature manifest validation requires nibabel.") from exc
+
+    image = nib.load(str(path))
+    data = np.asanyarray(image.dataobj, dtype=float)
+    finite = np.isfinite(data)
+    nonzero = finite & (np.abs(data) > 0.0)
+    positive = finite & (data > 0.0)
+    negative = finite & (data < 0.0)
+    return {
+        "nonzero_voxels": int(np.count_nonzero(nonzero)),
+        "positive_voxels": int(np.count_nonzero(positive)),
+        "negative_voxels": int(np.count_nonzero(negative)),
+        "positive_abs_weight_mass": float(np.sum(np.abs(data[positive]))),
+        "negative_abs_weight_mass": float(np.sum(np.abs(data[negative]))),
+    }
+
+
+def _validate_manifest_support(
+    *,
+    name: str,
+    entry: dict[str, Any],
+    actual: dict[str, float | int],
+) -> None:
+    support = entry.get("support")
+    if not isinstance(support, dict):
+        raise ValueError(f"Study 1 signature manifest entry for {name} must define support.")
+    required = (
+        "nonzero_voxels",
+        "positive_voxels",
+        "negative_voxels",
+        "positive_abs_weight_mass",
+        "negative_abs_weight_mass",
+    )
+    missing = [field for field in required if field not in support]
+    if missing:
+        raise ValueError(
+            f"Study 1 signature manifest support for {name} is missing fields: {missing}."
+        )
+    count_fields = ("nonzero_voxels", "positive_voxels", "negative_voxels")
+    for field in count_fields:
+        if int(support[field]) != int(actual[field]):
+            raise ValueError(
+                f"Study 1 signature manifest support mismatch for {name}.{field}: "
+                f"expected {support[field]!r}, actual {actual[field]!r}."
+            )
+    mass_fields = ("positive_abs_weight_mass", "negative_abs_weight_mass")
+    for field in mass_fields:
+        if not np.isclose(float(support[field]), float(actual[field]), rtol=1e-7, atol=1e-9):
+            raise ValueError(
+                f"Study 1 signature manifest support mismatch for {name}.{field}: "
+                f"expected {support[field]!r}, actual {actual[field]!r}."
+            )
+
+
+def _validate_manifest_entry(
+    *,
+    name: str,
+    entry: dict[str, Any],
+    configured_path: str,
+    configured_space: str,
+    image_path: Path,
+) -> None:
+    required_text_fields = ("source_publication", "source_repository_or_access_record")
+    missing_text = [
+        field for field in required_text_fields if not str(entry.get(field, "")).strip()
+    ]
+    if missing_text:
+        raise ValueError(
+            f"Study 1 signature manifest provenance for {name} is missing fields: {missing_text}."
+        )
+    if str(entry.get("path", "")).strip() != configured_path:
+        raise ValueError(
+            f"Study 1 signature manifest path mismatch for {name}: "
+            f"expected {configured_path!r}, got {entry.get('path')!r}."
+        )
+    if str(entry.get("space", "")).strip().lower() != configured_space:
+        raise ValueError(
+            f"Study 1 signature manifest space mismatch for {name}: "
+            f"expected {configured_space!r}, got {entry.get('space')!r}."
+        )
+    checksum = str(entry.get("sha256", "")).strip().lower()
+    if not checksum:
+        raise ValueError(f"Study 1 signature manifest entry for {name} must define sha256.")
+    actual_checksum = _sha256(image_path)
+    if checksum != actual_checksum:
+        raise ValueError(
+            f"Study 1 signature manifest checksum mismatch for {name}: "
+            f"expected {checksum}, actual {actual_checksum}."
+        )
+
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Study 1 signature manifest validation requires nibabel.") from exc
+
+    image = nib.load(str(image_path))
+    expected_shape = tuple(int(value) for value in entry.get("shape", ()))
+    if expected_shape != tuple(image.shape):
+        raise ValueError(
+            f"Study 1 signature manifest shape mismatch for {name}: "
+            f"expected {expected_shape!r}, actual {tuple(image.shape)!r}."
+        )
+    expected_affine = np.asarray(entry.get("affine"), dtype=float)
+    if expected_affine.shape != (4, 4) or not np.allclose(expected_affine, image.affine):
+        raise ValueError(f"Study 1 signature manifest affine mismatch for {name}.")
+    _validate_manifest_support(
+        name=name,
+        entry=entry,
+        actual=_signature_support_summary(image_path),
+    )
+
+
+def _validate_signature_manifest(config: Any, signature_specs: list[dict[str, str]]) -> None:
+    manifest_path = _signature_manifest_path(config)
+    manifest = _load_signature_manifest(manifest_path)
+    entries = manifest.get("signatures")
+    if not isinstance(entries, dict):
+        raise ValueError("Study 1 signature manifest must define a 'signatures' mapping.")
+
+    signature_root = Path(str(require_config_value(config, "paths.signature_dir"))).expanduser()
+    configured_space = (
+        str(require_config_value(config, "study1.targets.fmriprep_space")).strip().lower()
+    )
+    specs_by_name = {str(spec["name"]).strip(): spec for spec in signature_specs}
+    for name in PRIMARY_SIGNATURES:
+        entry = entries.get(name)
+        if not isinstance(entry, dict):
+            raise ValueError(f"Study 1 signature manifest is missing entry for {name}.")
+        configured_path = str(specs_by_name[name].get("path", "")).strip()
+        _validate_manifest_entry(
+            name=name,
+            entry=entry,
+            configured_path=configured_path,
+            configured_space=configured_space,
+            image_path=signature_root / configured_path,
+        )
+
+
 def _build_trial_signature_config(config: Any, *, task: str) -> TrialSignatureExtractionConfig:
     target_cfg = _study1_target_config(config)
     return TrialSignatureExtractionConfig(
@@ -170,6 +356,12 @@ def _build_trial_signature_config(config: Any, *, task: str) -> TrialSignatureEx
             target_cfg.get("condition_scope_stim_phases"),
             field_name="study1.targets.condition_scope_stim_phases",
         ),
+        min_signature_support_fraction=target_cfg.get("min_signature_support_fraction"),
+        max_signature_weight_mass_change_fraction=target_cfg.get(
+            "max_signature_weight_mass_change_fraction"
+        ),
+        max_design_condition_number=target_cfg.get("max_design_condition_number"),
+        min_target_design_efficiency=target_cfg.get("min_target_design_efficiency"),
         signatures=PRIMARY_SIGNATURES,
     )
 
@@ -229,6 +421,14 @@ def nuisance_source_columns(config: Any) -> tuple[str, ...]:
         )
     if len(columns) != len(set(columns)):
         raise ValueError("Study 1 nuisance regression columns must be unique.")
+    if nuisance_regression_enabled(config):
+        raw_columns = [column for column in columns if column in RAW_LEVEL2_ARTIFACT_COLUMNS]
+        if raw_columns:
+            replacements = {column: RAW_LEVEL2_ARTIFACT_COLUMNS[column] for column in raw_columns}
+            raise ValueError(
+                "Study 1 Level 2 nuisance regression requires HRF-weighted artifact "
+                f"covariates, got raw columns: {json.dumps(replacements, sort_keys=True)}."
+            )
     return columns
 
 
@@ -375,6 +575,18 @@ def _required_trial_index(events_df: pd.DataFrame) -> pd.Series:
     return trial_index
 
 
+def _required_task_block(events_df: pd.DataFrame) -> pd.Series:
+    if "block" not in events_df.columns:
+        raise ValueError(
+            "Study 1 target preparation requires an explicit task block column named 'block'. "
+            "BIDS run/session labels are acquisition metadata and cannot substitute for task blocks."
+        )
+    block = pd.to_numeric(events_df["block"], errors="coerce")
+    if not block.notna().all():
+        raise ValueError("Study 1 task block column 'block' must contain finite values.")
+    return block
+
+
 def _subject_target_rows(
     *,
     subject: str,
@@ -390,6 +602,7 @@ def _subject_target_rows(
         )
     events_df = events_df.reset_index(drop=True)
     trial_index = _required_trial_index(events_df)
+    block = _required_task_block(events_df)
 
     nps, _nps_label, nps_extra = load_fmri_signature_target_for_subject(
         subject_raw=subject,
@@ -409,10 +622,6 @@ def _subject_target_rows(
         logger=logger,
         config_path="study1.targets",
     )
-
-    block = find_block_column(events_df)
-    if block is None:
-        block = pd.Series(pd.NA, index=events_df.index, dtype="float64")
 
     frame = pd.DataFrame(
         {
@@ -451,14 +660,23 @@ def _append_signature_metadata(
             f"metadata={len(extra)}, target_rows={len(frame)}."
         )
     for column in extra.columns:
-        values = pd.to_numeric(extra[column], errors="coerce")
-        if not values.notna().any():
+        series = extra[column].reset_index(drop=True)
+        if column.endswith("scoring_mask_sha256"):
+            if not series.notna().any():
+                continue
+            frame[f"{prefix}_{column}"] = series.astype("string")
             continue
-        frame[f"{prefix}_{column}"] = values.reset_index(drop=True)
+        numeric_values = pd.to_numeric(series, errors="coerce")
+        if numeric_values.notna().any():
+            frame[f"{prefix}_{column}"] = numeric_values
+            continue
+        if not series.notna().any():
+            continue
+        frame[f"{prefix}_{column}"] = series
     return frame
 
 
-def _validate_signature_voxel_counts(frame: pd.DataFrame) -> None:
+def _validate_signature_scoring_masks(frame: pd.DataFrame) -> None:
     for prefix in PRIMARY_SIGNATURES:
         column = f"{prefix}_fmri_n_voxels"
         if column not in frame.columns:
@@ -473,6 +691,22 @@ def _validate_signature_voxel_counts(frame: pd.DataFrame) -> None:
             raise ValueError(
                 f"Study 1 {prefix} scoring requires an identical voxel count across all "
                 f"retained observations, got {unique_counts}."
+            )
+        hash_column = f"{prefix}_fmri_scoring_mask_sha256"
+        if hash_column not in frame.columns:
+            raise ValueError(
+                f"Study 1 target table is missing required scoring-mask column: {hash_column}."
+            )
+        hashes = frame[hash_column].astype("string").str.strip()
+        if hashes.isna().any() or (hashes == "").any():
+            raise ValueError(
+                f"Study 1 scoring-mask column '{hash_column}' contains missing values."
+            )
+        unique_hashes = sorted(set(hashes.astype(str).tolist()))
+        if len(unique_hashes) != 1:
+            raise ValueError(
+                f"Study 1 {prefix} scoring requires an identical scoring-mask extent across "
+                f"all retained observations, got {len(unique_hashes)} extents."
             )
 
 
@@ -527,7 +761,7 @@ def prepare_primary_targets(
         )
 
     primary_table = pd.concat(subject_frames, axis=0, ignore_index=True)
-    _validate_signature_voxel_counts(primary_table)
+    _validate_signature_scoring_masks(primary_table)
     if nuisance_regression_enabled(config):
         primary_table = _append_categorical_nuisance_columns(frame=primary_table, config=config)
     parquet_path, tsv_path = _target_output_paths(config)

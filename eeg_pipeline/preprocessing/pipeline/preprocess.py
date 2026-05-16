@@ -12,7 +12,6 @@ from mne_bids_pipeline._logging import gen_log_kwargs, logger
 from . import utils
 from . import io
 
-
 ###################################################################
 # Bad Channel Detection
 ###################################################################
@@ -24,11 +23,7 @@ def _majority_bad_channels(repeated_bads):
         return []
 
     threshold = (len(repeated_bads) // 2) + 1
-    counts = Counter(
-        channel
-        for bads in repeated_bads
-        for channel in set(bads)
-    )
+    counts = Counter(channel for bads in repeated_bads for channel in set(bads))
     return sorted(channel for channel, count in counts.items() if count >= threshold)
 
 
@@ -119,12 +114,14 @@ def run_bads_detection_single_file(
             chan_file = io.read_channels_tsv(channels_path)
 
             bads_frame.loc[file, "participant_id"] = get_entities_from_fname(file)["subject"]
-            
+
             if get_entities_from_fname(file).get("session") is not None:
                 bads_frame.loc[file, "session"] = get_entities_from_fname(file)["session"]
 
-            previous_bads = chan_file[(chan_file["status"] == "bad") & (chan_file["type"].isin(['eeg', 'EEG']))]["name"].tolist()
-            
+            previous_bads = chan_file[
+                (chan_file["status"] == "bad") & (chan_file["type"].isin(["eeg", "EEG"]))
+            ]["name"].tolist()
+
             if previous_bads:
                 if not consider_previous_bads:
                     msg = f"Found {len(previous_bads)} bad channels already marked. THOSE WILL BE IGNORED AND CLEARED BECAUSE consider_previous_bads=False."
@@ -139,18 +136,10 @@ def run_bads_detection_single_file(
                     )
                 )
 
-            eog_chans = chan_file.loc[
-                chan_file["type"].isin(["EOG", "eog"]), "name"
-            ].tolist()
-            ecg_chans = chan_file.loc[
-                chan_file["type"].isin(["ecg", "ECG"]), "name"
-            ].tolist()
-            emg_chans = chan_file.loc[
-                chan_file["type"].isin(["EMG", "emg"]), "name"
-            ].tolist()
-            misc_chans = chan_file.loc[
-                chan_file["type"].isin(["MISC", "misc"]), "name"
-            ].tolist()
+            eog_chans = chan_file.loc[chan_file["type"].isin(["EOG", "eog"]), "name"].tolist()
+            ecg_chans = chan_file.loc[chan_file["type"].isin(["ecg", "ECG"]), "name"].tolist()
+            emg_chans = chan_file.loc[chan_file["type"].isin(["EMG", "emg"]), "name"].tolist()
+            misc_chans = chan_file.loc[chan_file["type"].isin(["MISC", "misc"]), "name"].tolist()
 
             is_gsr = (chan_file["name"].astype(str).str.upper() == "GSR") | (
                 chan_file["type"].astype(str).str.upper() == "GSR"
@@ -167,6 +156,7 @@ def run_bads_detection_single_file(
                     subject=ents.get("subject"),
                     session=ents.get("session"),
                     task=ents.get("task"),
+                    run=ents.get("run"),
                     datatype="eeg",
                     suffix="eeg",
                     extension=file_extension,
@@ -189,7 +179,7 @@ def run_bads_detection_single_file(
 
             if l_pass:
                 raw.filter(None, l_pass, picks="eeg", verbose=False)
-            
+
             if notch:
                 raw.notch_filter(notch, picks="eeg", verbose=False)
 
@@ -217,7 +207,7 @@ def run_bads_detection_single_file(
                 )
                 bads_frame.loc[file, "n_breaks_found"] = len(annot_breaks)
                 bads_frame.loc[file, "removed_breaks_duration"] = removed_dur
-            
+
             if rename_anot_dict:
                 raw.annotations.rename(rename_anot_dict)
 
@@ -264,8 +254,7 @@ def run_bads_detection_single_file(
                             )
                         )
                         removed_custom_bads = [
-                            ch for ch in custom_bad_dict[task][sub]
-                            if ch not in raw.info["bads"] 
+                            ch for ch in custom_bad_dict[task][sub] if ch not in raw.info["bads"]
                         ]
                         raw.info["bads"] = list(all_bads)
                     else:
@@ -287,12 +276,16 @@ def run_bads_detection_single_file(
 
             task = get_entities_from_fname(file)["task"]
             sub = get_entities_from_fname(file)["subject"]
-            
+
             for ch in bad_chans:
                 chan_file.loc[chan_file["name"] == ch, "status"] = "bad"
-                chan_file.loc[chan_file["name"] == ch, "description"] = "Bad channel detected by pyprep"
+                chan_file.loc[chan_file["name"] == ch, "description"] = (
+                    "Bad channel detected by pyprep"
+                )
                 if custom_bad_dict is not None and ch in custom_bad_dict.get(task, {}).get(sub, []):
-                    chan_file.loc[chan_file["name"] == ch, "description"] = "Bad channel from custom bad channel list"
+                    chan_file.loc[chan_file["name"] == ch, "description"] = (
+                        "Bad channel from custom bad channel list"
+                    )
 
             if overwrite_chans_tsv:
                 io.write_channels_tsv(chan_file, channels_path, index=False)
@@ -370,7 +363,7 @@ def run_bads_detection(
     n_jobs=1,
     l_pass=100,
     notch=None,
-    subjects='all',
+    subjects="all",
     custom_bad_dict=None,
     random_state=42,
 ):
@@ -414,7 +407,8 @@ def run_bads_detection(
                 custom_bad_dict=custom_bad_dict,
                 file_extension=file_extension,
                 random_state=random_state,
-            ) for file in eeg_files
+            )
+            for file in eeg_files
         )
     else:
         bads_frame_list = []
@@ -455,49 +449,56 @@ def run_bads_detection(
 # Bad Channel Synchronization
 ###################################################################
 
+
 def synchronize_bad_channels_across_runs(bids_path, task, subjects="all"):
     import glob
-    
+
     logger.info("🔄 Synchronizing bad channels across runs for each subject...")
-    
+
     if subjects == "all":
         subject_dirs = glob.glob(os.path.join(bids_path, "sub-*"))
-        subjects = [os.path.basename(d).replace("sub-", "") for d in subject_dirs if os.path.isdir(d)]
+        subjects = [
+            os.path.basename(d).replace("sub-", "") for d in subject_dirs if os.path.isdir(d)
+        ]
         logger.info(f"📂 Discovered {len(subjects)} subjects: {subjects}")
-    
+
     for subject in subjects:
-        pattern = os.path.join(bids_path, f"sub-{subject}", "eeg", f"sub-{subject}_task-{task}_*_channels.tsv")
+        pattern = os.path.join(
+            bids_path, f"sub-{subject}", "eeg", f"sub-{subject}_task-{task}_*_channels.tsv"
+        )
         channel_files = glob.glob(pattern)
-        
+
         if not channel_files:
             logger.warning(f"No channel files found for subject {subject}")
             continue
-            
+
         logger.info(f"📋 Processing {len(channel_files)} channel files for sub-{subject}")
-        
+
         all_bad_channels = set()
         channel_data = {}
-        
+
         for file_path in channel_files:
             df = io.read_channels_tsv(file_path)
-            bad_channels = df[df['status'] == 'bad']['name'].tolist()
+            bad_channels = df[df["status"] == "bad"]["name"].tolist()
             all_bad_channels.update(bad_channels)
             channel_data[file_path] = df
-            
-            run_info = os.path.basename(file_path).split('_')
-            run_id = next((part for part in run_info if part.startswith('run-')), 'unknown')
+
+            run_info = os.path.basename(file_path).split("_")
+            run_id = next((part for part in run_info if part.startswith("run-")), "unknown")
             logger.info(f"  📁 {run_id}: Found {len(bad_channels)} bad channels: {bad_channels}")
-        
+
         unified_bad_channels = sorted(list(all_bad_channels))
-        logger.info(f"🔗 Unified bad channels for sub-{subject}: {unified_bad_channels} (total: {len(unified_bad_channels)})")
-        
+        logger.info(
+            f"🔗 Unified bad channels for sub-{subject}: {unified_bad_channels} (total: {len(unified_bad_channels)})"
+        )
+
         for file_path, df in channel_data.items():
-            df['status'] = 'good'
-            df.loc[df['name'].isin(unified_bad_channels), 'status'] = 'bad'
+            df["status"] = "good"
+            df.loc[df["name"].isin(unified_bad_channels), "status"] = "bad"
             io.write_channels_tsv(df, file_path, index=False)
-            
-            run_info = os.path.basename(file_path).split('_')
-            run_id = next((part for part in run_info if part.startswith('run-')), 'unknown')
+
+            run_info = os.path.basename(file_path).split("_")
+            run_id = next((part for part in run_info if part.startswith("run-")), "unknown")
             logger.info(f"  ✅ Updated {run_id} with {len(unified_bad_channels)} bad channels")
-    
+
     logger.info("✅ Bad channel synchronization completed")

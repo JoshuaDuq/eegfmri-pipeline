@@ -9,9 +9,9 @@ LEVEL2_CONTINUOUS_COLUMNS = [
     "block",
     "onset",
     "trial_index",
-    "framewise_displacement",
-    "std_dvars",
-    "fp1_fp2_high_frequency_power",
+    "hrf_weighted_framewise_displacement",
+    "hrf_weighted_std_dvars",
+    "hrf_weighted_fp1_fp2_high_frequency_power",
     "residual_ecg_coupling",
 ]
 LEVEL2_CATEGORICAL_COLUMNS = ["stimulus_temp", "selected_surface"]
@@ -72,9 +72,9 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
             "block": [1, 1],
             "onset": [10.0, 20.0],
             "trial_index": [1, 2],
-            "framewise_displacement": [0.1, 0.2],
-            "std_dvars": [0.5, 0.6],
-            "fp1_fp2_high_frequency_power": [1.1, 1.2],
+            "hrf_weighted_framewise_displacement": [0.1, 0.2],
+            "hrf_weighted_std_dvars": [0.5, 0.6],
+            "hrf_weighted_fp1_fp2_high_frequency_power": [1.1, 1.2],
             "residual_ecg_coupling": [0.01, 0.02],
             "stimulus_temp": [44.0, 46.0],
             "selected_surface": [1.0, 2.0],
@@ -125,7 +125,7 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
         )
         == 0.20
     )
-    assert (
-        get_config_value(feature_config, "machine_learning.data.excluded_channels", None)
-        == ["Fp1", "Fp2"]
-    )
+    assert get_config_value(feature_config, "machine_learning.data.excluded_channels", None) == [
+        "Fp1",
+        "Fp2",
+    ]

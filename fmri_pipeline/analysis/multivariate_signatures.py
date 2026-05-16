@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,12 @@ class SignatureResult:
     dot: float
     cosine: Optional[float]
     pearson_r: Optional[float]
+    nonzero_support_fraction: Optional[float] = None
+    positive_support_fraction: Optional[float] = None
+    negative_support_fraction: Optional[float] = None
+    positive_weight_mass_change_fraction: Optional[float] = None
+    negative_weight_mass_change_fraction: Optional[float] = None
+    scoring_mask_sha256: Optional[str] = None
 
 
 def discover_signature_files(
@@ -41,9 +48,7 @@ def discover_signature_files(
             raise ValueError(f"Duplicate signature name: {name!r}")
         candidate = root / rel_path
         if not candidate.exists():
-            raise FileNotFoundError(
-                f"Signature weight map not found for {name!r}: {candidate}"
-            )
+            raise FileNotFoundError(f"Signature weight map not found for {name!r}: {candidate}")
         out[name] = candidate
     return out
 
@@ -162,6 +167,34 @@ def _flatten_masked_pairs(
     return x, w
 
 
+def _scoring_mask(
+    *,
+    w_data: Any,
+    mask_data: Optional[Any],
+) -> Any:
+    import numpy as np  # type: ignore
+
+    weights = np.asanyarray(w_data, dtype=float)
+    mask = np.isfinite(weights)
+    if mask_data is not None:
+        mask &= np.asanyarray(mask_data, dtype=bool)
+    return mask
+
+
+def _scoring_mask_sha256(*, scoring_mask: Any, affine: Any) -> str:
+    import numpy as np  # type: ignore
+
+    mask = np.ascontiguousarray(np.asanyarray(scoring_mask, dtype=np.uint8))
+    grid_shape = np.ascontiguousarray(np.asarray(mask.shape, dtype=np.int64))
+    grid_affine = np.ascontiguousarray(np.asarray(affine, dtype=np.float64))
+
+    digest = hashlib.sha256()
+    digest.update(grid_shape.tobytes())
+    digest.update(grid_affine.tobytes())
+    digest.update(mask.tobytes())
+    return digest.hexdigest()
+
+
 def _dot(x: Sequence[float], w: Sequence[float]) -> float:
     return float(sum(a * b for a, b in zip(x, w)))
 
@@ -185,6 +218,122 @@ def _pearson_r(x: Sequence[float], w: Sequence[float]) -> Optional[float]:
     return float(num / den)
 
 
+def _validate_fraction(value: Optional[float], *, field_name: str) -> Optional[float]:
+    if value is None:
+        return None
+    numeric = float(value)
+    if not math.isfinite(numeric) or numeric < 0.0 or numeric > 1.0:
+        raise ValueError(f"{field_name} must be a finite fraction in [0, 1], got {value!r}.")
+    return numeric
+
+
+def _support_fraction(*, original_count: int, retained_count: int) -> Optional[float]:
+    if original_count <= 0:
+        return None
+    return float(retained_count) / float(original_count)
+
+
+def _mass_change_fraction(*, original_mass: float, retained_mass: float) -> Optional[float]:
+    if original_mass <= 0:
+        return None
+    return abs(float(retained_mass) - float(original_mass)) / float(original_mass)
+
+
+def _signature_support_summary(
+    *,
+    original_weights: Any,
+    scored_weights: Any,
+    mask_data: Optional[Any],
+) -> Dict[str, Optional[float]]:
+    import numpy as np  # type: ignore
+
+    original = np.asanyarray(original_weights, dtype=float)
+    scored = np.asanyarray(scored_weights, dtype=float)
+    original_finite = np.isfinite(original)
+    scored_mask = np.isfinite(scored)
+    if mask_data is not None:
+        scored_mask &= np.asanyarray(mask_data, dtype=bool)
+
+    original_nonzero = original_finite & (np.abs(original) > 0.0)
+    original_positive = original_finite & (original > 0.0)
+    original_negative = original_finite & (original < 0.0)
+
+    scored_nonzero = scored_mask & (np.abs(scored) > 0.0)
+    scored_positive = scored_mask & (scored > 0.0)
+    scored_negative = scored_mask & (scored < 0.0)
+
+    positive_mass_original = float(np.sum(np.abs(original[original_positive])))
+    negative_mass_original = float(np.sum(np.abs(original[original_negative])))
+    positive_mass_scored = float(np.sum(np.abs(scored[scored_positive])))
+    negative_mass_scored = float(np.sum(np.abs(scored[scored_negative])))
+
+    return {
+        "nonzero_support_fraction": _support_fraction(
+            original_count=int(np.count_nonzero(original_nonzero)),
+            retained_count=int(np.count_nonzero(scored_nonzero)),
+        ),
+        "positive_support_fraction": _support_fraction(
+            original_count=int(np.count_nonzero(original_positive)),
+            retained_count=int(np.count_nonzero(scored_positive)),
+        ),
+        "negative_support_fraction": _support_fraction(
+            original_count=int(np.count_nonzero(original_negative)),
+            retained_count=int(np.count_nonzero(scored_negative)),
+        ),
+        "positive_weight_mass_change_fraction": _mass_change_fraction(
+            original_mass=positive_mass_original,
+            retained_mass=positive_mass_scored,
+        ),
+        "negative_weight_mass_change_fraction": _mass_change_fraction(
+            original_mass=negative_mass_original,
+            retained_mass=negative_mass_scored,
+        ),
+    }
+
+
+def _raise_if_support_thresholds_fail(
+    *,
+    name: str,
+    summary: Dict[str, Optional[float]],
+    min_support_fraction: Optional[float],
+    max_weight_mass_change_fraction: Optional[float],
+) -> None:
+    support_fields = (
+        "nonzero_support_fraction",
+        "positive_support_fraction",
+        "negative_support_fraction",
+    )
+    support_failures = [
+        field
+        for field in support_fields
+        if summary[field] is not None
+        and min_support_fraction is not None
+        and float(summary[field]) < min_support_fraction
+    ]
+    if support_failures:
+        raise ValueError(
+            f"{name} failed positive/negative signature support retention: "
+            f"{support_failures} below {min_support_fraction:.3f}."
+        )
+
+    mass_fields = (
+        "positive_weight_mass_change_fraction",
+        "negative_weight_mass_change_fraction",
+    )
+    mass_failures = [
+        field
+        for field in mass_fields
+        if summary[field] is not None
+        and max_weight_mass_change_fraction is not None
+        and float(summary[field]) > max_weight_mass_change_fraction
+    ]
+    if mass_failures:
+        raise ValueError(
+            f"{name} failed positive/negative signature weight-mass stability: "
+            f"{mass_failures} above {max_weight_mass_change_fraction:.3f}."
+        )
+
+
 def compute_signature_expression(
     *,
     stat_or_effect_img: Any,
@@ -193,6 +342,8 @@ def compute_signature_expression(
     mask_img: Optional[Any] = None,
     signatures: Optional[Sequence[str]] = None,
     resampling: str = "image_to_weights",
+    min_support_fraction: Optional[float] = None,
+    max_weight_mass_change_fraction: Optional[float] = None,
 ) -> List[SignatureResult]:
     """
     Compute multivariate signature expression (dot product and Pearson correlation).
@@ -226,6 +377,14 @@ def compute_signature_expression(
     resampling = str(resampling or "image_to_weights").strip().lower().replace("-", "_")
     if resampling not in {"image_to_weights", "weights_to_image"}:
         raise ValueError("resampling must be one of: image_to_weights, weights_to_image")
+    min_support_fraction = _validate_fraction(
+        min_support_fraction,
+        field_name="min_support_fraction",
+    )
+    max_weight_mass_change_fraction = _validate_fraction(
+        max_weight_mass_change_fraction,
+        field_name="max_weight_mass_change_fraction",
+    )
 
     img = stat_or_effect_img
     if isinstance(img, (str, Path)):
@@ -242,66 +401,97 @@ def compute_signature_expression(
     for name, w_path in files.items():
         try:
             w_img = nib.load(str(w_path))
+            original_w_data = w_img.get_fdata()
             if resampling == "image_to_weights":
                 x_img = img
                 if tuple(getattr(x_img, "shape", ())) != tuple(getattr(w_img, "shape", ())):
-                    x_img = _maybe_resample_to_img(moving_img=x_img, target_img=w_img, interpolation="continuous")
+                    x_img = _maybe_resample_to_img(
+                        moving_img=x_img, target_img=w_img, interpolation="continuous"
+                    )
                 else:
                     try:
                         import numpy as np
 
                         if not np.allclose(x_img.affine, w_img.affine):
-                            x_img = _maybe_resample_to_img(moving_img=x_img, target_img=w_img, interpolation="continuous")
+                            x_img = _maybe_resample_to_img(
+                                moving_img=x_img, target_img=w_img, interpolation="continuous"
+                            )
                     except Exception:
-                        x_img = _maybe_resample_to_img(moving_img=x_img, target_img=w_img, interpolation="continuous")
+                        x_img = _maybe_resample_to_img(
+                            moving_img=x_img, target_img=w_img, interpolation="continuous"
+                        )
 
                 mask_data = None
                 if m is not None:
                     mask_on_ref = m
-                    if tuple(getattr(mask_on_ref, "shape", ())) != tuple(getattr(w_img, "shape", ())):
-                        mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=w_img, interpolation="nearest")
+                    if tuple(getattr(mask_on_ref, "shape", ())) != tuple(
+                        getattr(w_img, "shape", ())
+                    ):
+                        mask_on_ref = _maybe_resample_to_img(
+                            moving_img=mask_on_ref, target_img=w_img, interpolation="nearest"
+                        )
                     else:
                         try:
                             import numpy as np
 
                             if not np.allclose(mask_on_ref.affine, w_img.affine):
-                                mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=w_img, interpolation="nearest")
+                                mask_on_ref = _maybe_resample_to_img(
+                                    moving_img=mask_on_ref,
+                                    target_img=w_img,
+                                    interpolation="nearest",
+                                )
                         except Exception:
-                            mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=w_img, interpolation="nearest")
+                            mask_on_ref = _maybe_resample_to_img(
+                                moving_img=mask_on_ref, target_img=w_img, interpolation="nearest"
+                            )
                     mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
 
                 img_data = x_img.get_fdata()
-                w_data = w_img.get_fdata()
+                w_data = original_w_data
+                scoring_affine = w_img.affine
             else:
                 w_on_ref = w_img
                 if tuple(getattr(w_on_ref, "shape", ())) != tuple(getattr(img, "shape", ())):
-                    w_on_ref = _maybe_resample_to_img(moving_img=w_on_ref, target_img=img, interpolation="continuous")
+                    w_on_ref = _maybe_resample_to_img(
+                        moving_img=w_on_ref, target_img=img, interpolation="continuous"
+                    )
                 else:
                     try:
                         import numpy as np
 
                         if not np.allclose(w_on_ref.affine, img.affine):
-                            w_on_ref = _maybe_resample_to_img(moving_img=w_on_ref, target_img=img, interpolation="continuous")
+                            w_on_ref = _maybe_resample_to_img(
+                                moving_img=w_on_ref, target_img=img, interpolation="continuous"
+                            )
                     except Exception:
-                        w_on_ref = _maybe_resample_to_img(moving_img=w_on_ref, target_img=img, interpolation="continuous")
+                        w_on_ref = _maybe_resample_to_img(
+                            moving_img=w_on_ref, target_img=img, interpolation="continuous"
+                        )
 
                 mask_data = None
                 if m is not None:
                     mask_on_ref = m
                     if tuple(getattr(mask_on_ref, "shape", ())) != tuple(getattr(img, "shape", ())):
-                        mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=img, interpolation="nearest")
+                        mask_on_ref = _maybe_resample_to_img(
+                            moving_img=mask_on_ref, target_img=img, interpolation="nearest"
+                        )
                     else:
                         try:
                             import numpy as np
 
                             if not np.allclose(mask_on_ref.affine, img.affine):
-                                mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=img, interpolation="nearest")
+                                mask_on_ref = _maybe_resample_to_img(
+                                    moving_img=mask_on_ref, target_img=img, interpolation="nearest"
+                                )
                         except Exception:
-                            mask_on_ref = _maybe_resample_to_img(moving_img=mask_on_ref, target_img=img, interpolation="nearest")
+                            mask_on_ref = _maybe_resample_to_img(
+                                moving_img=mask_on_ref, target_img=img, interpolation="nearest"
+                            )
                     mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
 
                 img_data = img.get_fdata()
                 w_data = w_on_ref.get_fdata()
+                scoring_affine = img.affine
 
             if tuple(getattr(w_data, "shape", ())) != tuple(getattr(img_data, "shape", ())):
                 raise ValueError(
@@ -310,13 +500,30 @@ def compute_signature_expression(
                     f"weights_shape={getattr(w_data, 'shape', None)}"
                 )
 
-            if mask_data is not None and tuple(getattr(mask_data, "shape", ())) != tuple(getattr(img_data, "shape", ())):
+            if mask_data is not None and tuple(getattr(mask_data, "shape", ())) != tuple(
+                getattr(img_data, "shape", ())
+            ):
                 raise ValueError(
                     f"Mask grid mismatch for signature {name}: "
                     f"mask_shape={getattr(mask_data,'shape',None)} img_shape={getattr(img_data,'shape',None)}"
                 )
 
-            x_vec, w_vec = _flatten_masked_pairs(img_data=img_data, w_data=w_data, mask_data=mask_data)
+            support_summary = _signature_support_summary(
+                original_weights=original_w_data,
+                scored_weights=w_data,
+                mask_data=mask_data,
+            )
+            _raise_if_support_thresholds_fail(
+                name=name,
+                summary=support_summary,
+                min_support_fraction=min_support_fraction,
+                max_weight_mass_change_fraction=max_weight_mass_change_fraction,
+            )
+
+            scoring_mask = _scoring_mask(w_data=w_data, mask_data=mask_data)
+            x_vec, w_vec = _flatten_masked_pairs(
+                img_data=img_data, w_data=w_data, mask_data=mask_data
+            )
             if not x_vec:
                 raise ValueError(
                     f"No overlapping finite voxels remained for signature {name} after masking/resampling."
@@ -336,6 +543,11 @@ def compute_signature_expression(
                     dot=float(dot),
                     cosine=cosine,
                     pearson_r=r,
+                    **support_summary,
+                    scoring_mask_sha256=_scoring_mask_sha256(
+                        scoring_mask=scoring_mask,
+                        affine=scoring_affine,
+                    ),
                 )
             )
         except Exception as exc:
