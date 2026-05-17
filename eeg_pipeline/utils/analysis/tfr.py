@@ -1324,33 +1324,61 @@ def extract_trial_spectral_profiles(
     if not hasattr(tfr_epochs, "data"):
         return None
 
-    tfr_copy = tfr_epochs.copy()
-    apply_baseline_and_crop(
-        tfr_copy,
-        baseline=baseline,
-        mode="logratio",
-        logger=logger,
-    )
+    # Check if TFR is already baselined
+    is_baselined = False
+    comment = getattr(tfr_epochs, "comment", None)
+    if isinstance(comment, str) and "BASELINED:" in comment:
+        is_baselined = True
 
-    times = np.asarray(tfr_copy.times, dtype=float)
+    times = np.asarray(tfr_epochs.times, dtype=float)
+    freqs = np.asarray(tfr_epochs.freqs, dtype=float)
+    
     clipped_window = clip_time_range(times, float(active_window[0]), float(active_window[1]))
     if clipped_window is None:
         return None
-
     tmin, tmax = clipped_window
-    tfr_window = tfr_copy.copy().crop(tmin=tmin, tmax=tmax)
-    data = np.asarray(tfr_window.data, dtype=float)
-    freqs = np.asarray(tfr_window.freqs, dtype=float)
+    a_mask = (times >= tmin) & (times < tmax)
+    
+    if not np.any(a_mask):
+        return None
 
-    if data.ndim != 4:
-        raise ValueError("Trial spectral profiles require 4D TFR data.")
-    if freqs.ndim != 1:
-        raise ValueError("Trial spectral profiles require a 1D frequency axis.")
+    if is_baselined:
+        # TFR is already baselined (contains logratio values)
+        # Average the logratio values directly
+        active_data = np.asarray(tfr_epochs.data, dtype=float)[:, :, :, a_mask]
+        profiles = np.nanmean(active_data, axis=(1, 3))
+        return freqs, profiles
 
-    profiles = np.nanmean(data, axis=(1, 3))
-    if profiles.ndim != 2 or profiles.shape[1] != len(freqs):
-        raise ValueError("Trial spectral profile matrix must match the frequency axis.")
-
+    # Otherwise, it's raw power.
+    # Compute arithmetic mean of raw power over time first, then logratio,
+    # matching Jensen's inequality correction used in ML feature extraction.
+    b_start = float(times.min()) if baseline[0] is None else float(baseline[0])
+    b_end = 0.0 if baseline[1] is None else float(baseline[1])
+    b_mask = (times >= b_start) & (times < b_end)
+    
+    if not np.any(b_mask):
+        if logger:
+            logger.warning("No timepoints found for baseline window.")
+        return None
+        
+    # Extract baseline power
+    baseline_data = np.asarray(tfr_epochs.data, dtype=float)[:, :, :, b_mask]
+    baseline_power = np.nanmean(baseline_data, axis=3)  # Average time
+    baseline_power = np.nanmean(baseline_power, axis=1) # Average channels
+    
+    # Extract active power
+    active_data = np.asarray(tfr_epochs.data, dtype=float)[:, :, :, a_mask]
+    active_power = np.nanmean(active_data, axis=3) # Average time
+    active_power = np.nanmean(active_power, axis=1) # Average channels
+    
+    # Compute log-ratio
+    epsilon = 1e-12
+    base_floor = np.maximum(baseline_power, epsilon)
+    active_floor = np.maximum(active_power, epsilon)
+    
+    with np.errstate(divide="ignore", invalid="ignore"):
+        profiles = np.log10(active_floor / base_floor)
+        
     return freqs, profiles
 
 

@@ -167,9 +167,9 @@ def get_viz_params(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
     default_sig_mask_params = {
         "marker": "o",
-        "markerfacecolor": "none",
-        "markeredgecolor": "g",
-        "linewidth": 0.8,
+        "markerfacecolor": "white",
+        "markeredgecolor": "black",
+        "linewidth": 0.5,
         "markersize": 3,
     }
 
@@ -236,10 +236,12 @@ def plot_topomap_on_ax(
         show=False,
         mask=mask,
         mask_params=mask_params or {},
-        sensors=True,
-        contours=viz_params["topo_contours"],
+        sensors=False,
+        contours=viz_params["topo_contours"] if viz_params["topo_contours"] is not None else 0,
         cmap=viz_params["topo_cmap"],
         vlim=vlim,
+        extrapolate="local",
+        res=300,
     )
     
     if viz_params["annotate_descriptive_topo"] and hasattr(ax, "figure"):

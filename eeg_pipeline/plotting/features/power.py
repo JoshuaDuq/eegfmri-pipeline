@@ -56,6 +56,7 @@ TIMECOURSE_BASELINE_MODE = "ratio"
 TOPO_COLORBAR_PAD = 0.02
 TOPO_COLORBAR_WIDTH = 0.012
 FOREST_BOOTSTRAP_SAMPLES = 2000
+TOPO_EXTRAPOLATE = "head"
 
 
 ###################################################################
@@ -97,20 +98,44 @@ def _get_condition_color_map(labels: List[str], config: Any) -> Dict[str, Any]:
 def _build_channel_data_array(
     channel_values: Dict[str, float],
     epochs_info: mne.Info,
+    primary_stat: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Project channel-level values into epochs_info order."""
     data_array = np.full(len(epochs_info.ch_names), np.nan, dtype=float)
     valid_mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
+
+    scale_factor = 1e12 if primary_stat == "mean" else 1.0
 
     for channel_index, channel_name in enumerate(epochs_info.ch_names):
         if channel_name not in channel_values:
             continue
         value = channel_values[channel_name]
         if np.isfinite(value):
-            data_array[channel_index] = float(value)
+            data_array[channel_index] = float(value) * scale_factor
             valid_mask[channel_index] = True
 
     return data_array, valid_mask
+
+
+def _compute_topomap_head_sphere(epochs_info: mne.Info) -> Tuple[float, float, float, float]:
+    """Return a head sphere whose outline matches the topomap interpolation clip."""
+    from mne.channels.layout import _find_topomap_coords
+
+    picks = np.arange(len(epochs_info.ch_names))
+    positions = _find_topomap_coords(epochs_info, picks=picks, sphere=None)
+    if positions.ndim != 2 or positions.shape[1] != 2:
+        raise ValueError("Topomap projection must yield two-dimensional sensor positions.")
+
+    radii = np.linalg.norm(positions, axis=1)
+    finite_radii = radii[np.isfinite(radii)]
+    if finite_radii.size == 0:
+        raise ValueError("Topomap projection must contain finite sensor positions.")
+
+    radius = float(np.max(finite_radii) * 1.02)
+    if not np.isfinite(radius) or radius <= 0:
+        raise ValueError("Topomap head sphere radius must be positive and finite.")
+
+    return (0.0, 0.0, 0.0, radius)
 
 
 def _compute_shared_topomap_vlim(
@@ -118,10 +143,19 @@ def _compute_shared_topomap_vlim(
     config: Any,
     *,
     symmetric: bool = True,
+    cap: Optional[float] = None,
+    adaptive_multiplier: Optional[float] = None,
 ) -> Tuple[float, float]:
     """Compute a robust value range for a set of topomap panels."""
     if symmetric:
-        vmax = float(robust_sym_vlim(topomap_arrays, config=config))
+        vmax = float(
+            robust_sym_vlim(
+                topomap_arrays,
+                cap=cap,
+                adaptive_multiplier=adaptive_multiplier,
+                config=config,
+            )
+        )
         if not np.isfinite(vmax) or vmax <= 0:
             vmax = 1.0
         return -vmax, vmax
@@ -161,6 +195,24 @@ def _compute_shared_topomap_vlim(
         vmin -= padding
         vmax += padding
     return vmin, vmax
+
+
+def _compute_contrast_topomap_vlim(
+    topomap_arrays: List[np.ndarray],
+    config: Any,
+) -> Tuple[float, float]:
+    """Compute an uncapped symmetric range for topomap contrasts.
+
+    The global robust cap is tuned for log-ratio maps. Raw-power baseline
+    contrasts can be orders of magnitude larger and must keep their own scale.
+    """
+    return _compute_shared_topomap_vlim(
+        topomap_arrays,
+        config,
+        symmetric=True,
+        cap=np.inf,
+        adaptive_multiplier=1.0,
+    )
 
 
 def _resolve_topomap_colormap(
@@ -236,7 +288,8 @@ def _add_topomap_colorbar(
     colorbar_left = min(max_right + TOPO_COLORBAR_PAD, 0.98 - TOPO_COLORBAR_WIDTH)
     colorbar_height = max(top - bottom, 0.1)
     cax = fig.add_axes([colorbar_left, bottom, TOPO_COLORBAR_WIDTH, colorbar_height])
-    fig.colorbar(image, cax=cax, label=label)
+    cb = fig.colorbar(image, cax=cax, label=label)
+    cb.outline.set_visible(False)
 
 
 def _add_topomap_colorbar_in_rect(
@@ -245,12 +298,15 @@ def _add_topomap_colorbar_in_rect(
     *,
     rect: Tuple[float, float, float, float],
     label: str,
+    label_size: int = 8,
+    tick_size: int = 7,
 ) -> None:
     """Place a topomap colorbar into an explicit figure rectangle."""
     cax = fig.add_axes(list(rect))
     colorbar = fig.colorbar(image, cax=cax)
-    colorbar.set_label(label, fontsize=10)
-    colorbar.ax.tick_params(labelsize=8)
+    colorbar.set_label(label, fontsize=label_size)
+    colorbar.ax.tick_params(labelsize=tick_size)
+    colorbar.outline.set_visible(False)
 
 
 def _format_triptych_condition_label(
@@ -292,9 +348,10 @@ def _wrap_topomap_panel_title(
 def _build_topomap_panel(
     channel_values: Dict[str, float],
     epochs_info: mne.Info,
+    primary_stat: Optional[str] = None,
 ) -> Optional[Tuple[np.ndarray, mne.Info]]:
     """Build one topomap panel from channel values."""
-    data_array, present_mask = _build_channel_data_array(channel_values, epochs_info)
+    data_array, present_mask = _build_channel_data_array(channel_values, epochs_info, primary_stat)
     if int(present_mask.sum()) <= MIN_CHANNELS_FOR_TOPO:
         return None
     return data_array[present_mask], mne.pick_info(epochs_info, np.where(present_mask)[0])
@@ -331,13 +388,12 @@ def _save_band_topomap_triptych(
         symmetric=False,
     )
     desc_cmap = _resolve_topomap_colormap(desc_vmin, desc_vmax, symmetric=False)
-    contrast_vmin, contrast_vmax = _compute_shared_topomap_vlim(
+    contrast_vmin, contrast_vmax = _compute_contrast_topomap_vlim(
         [contrast_data],
         config,
-        symmetric=True,
     )
 
-    fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.9))
+    fig, axes = plt.subplots(1, 3, figsize=(8.8, 3.6))
     fig.patch.set_facecolor("white")
 
     display_label1 = _format_condition_display_label(label1, config)
@@ -345,7 +401,6 @@ def _save_band_topomap_triptych(
     panel_label1 = _format_triptych_condition_label(label1, config)
     panel_label2 = _format_triptych_condition_label(label2, config)
     band_title = str(band).upper()
-    band_color = get_band_color(band, config)
 
     for ax in axes:
         ax.set_facecolor("white")
@@ -357,13 +412,18 @@ def _save_band_topomap_triptych(
         axes=axes[0],
         show=False,
         cmap=desc_cmap,
-        contours=viz_params.get("topo_contours"),
+        contours=viz_params.get("topo_contours") if viz_params.get("topo_contours") is not None else 0,
         vlim=(desc_vmin, desc_vmax),
+        extrapolate=TOPO_EXTRAPOLATE,
+        sphere=_compute_topomap_head_sphere(desc_info_1),
+        res=300,
+        sensors=False,
     )
     axes[0].set_title(
         _wrap_topomap_panel_title(panel_label1),
-        fontsize=10,
+        fontsize=plot_cfg.font.title,
         fontweight="bold",
+        color="0.2",
         pad=12,
     )
 
@@ -373,13 +433,18 @@ def _save_band_topomap_triptych(
         axes=axes[1],
         show=False,
         cmap=desc_cmap,
-        contours=viz_params.get("topo_contours"),
+        contours=viz_params.get("topo_contours") if viz_params.get("topo_contours") is not None else 0,
         vlim=(desc_vmin, desc_vmax),
+        extrapolate=TOPO_EXTRAPOLATE,
+        sphere=_compute_topomap_head_sphere(desc_info_2),
+        res=300,
+        sensors=False,
     )
     axes[1].set_title(
         _wrap_topomap_panel_title(panel_label2),
-        fontsize=10,
+        fontsize=plot_cfg.font.title,
         fontweight="bold",
+        color="0.2",
         pad=12,
     )
 
@@ -389,15 +454,20 @@ def _save_band_topomap_triptych(
         axes=axes[2],
         show=False,
         cmap="RdBu_r",
-        contours=viz_params.get("topo_contours"),
+        contours=viz_params.get("topo_contours") if viz_params.get("topo_contours") is not None else 0,
         vlim=(contrast_vmin, contrast_vmax),
         mask=contrast_sig,
         mask_params=_build_topomap_mask_params(config),
+        extrapolate=TOPO_EXTRAPOLATE,
+        sphere=_compute_topomap_head_sphere(contrast_info),
+        res=300,
+        sensors=False,
     )
     axes[2].set_title(
         _wrap_topomap_panel_title(f"{panel_label2} - {panel_label1}"),
-        fontsize=10,
+        fontsize=plot_cfg.font.title,
         fontweight="bold",
+        color="0.2",
         pad=12,
     )
 
@@ -416,11 +486,11 @@ def _save_band_topomap_triptych(
     )
 
     fig.suptitle(
-        f"{band_title} topomap comparison | {segment_label}",
-        fontsize=plot_cfg.font.figure_title,
+        f"{band_title.title()} topomap comparison | {segment_label}",
+        fontsize=plot_cfg.font.suptitle,
         fontweight="bold",
-        color=band_color,
-        y=0.97,
+        color="0.15",
+        y=0.96,
     )
     save_fig(
         fig,
@@ -1084,6 +1154,10 @@ def _plot_power_effect_summary_heatmap(
         annot_kws={"fontsize": plot_cfg.font.small},
     )
 
+    cbar = ax.collections[0].colorbar
+    if cbar is not None:
+        cbar.outline.set_visible(False)
+
     ax.set_yticklabels(roi_labels, rotation=0, fontsize=plot_cfg.font.small)
     ax.set_xticklabels(band_labels, rotation=0, fontsize=plot_cfg.font.medium, fontweight="bold")
     ax.set_xlabel("Frequency band", fontsize=plot_cfg.font.label)
@@ -1095,10 +1169,10 @@ def _plot_power_effect_summary_heatmap(
         ax.scatter(
             col_index + 0.5,
             row_index + 0.5,
-            s=36,
-            facecolors="none",
+            s=20,
+            facecolors="white",
             edgecolors="black",
-            linewidths=1.0,
+            linewidths=0.5,
             zorder=5,
         )
 
@@ -1229,6 +1303,7 @@ def _plot_power_effect_forest(
         ax.set_yticks(y_positions)
         if axis_index == 0:
             ax.set_yticklabels(roi_display_labels, fontsize=plot_cfg.font.small)
+            ax.tick_params(axis="y", labelleft=True)
         else:
             ax.set_yticklabels([])
 
@@ -1292,6 +1367,10 @@ def _plot_power_sample_count_heatmap(
         fmt=".0f",
         annot_kws={"fontsize": plot_cfg.font.small},
     )
+
+    cbar = ax.collections[0].colorbar
+    if cbar is not None:
+        cbar.outline.set_visible(False)
 
     ax.set_yticklabels(roi_labels, rotation=0, fontsize=plot_cfg.font.small)
     ax.set_xticklabels(band_labels, rotation=0, fontsize=plot_cfg.font.medium, fontweight="bold")
@@ -3028,7 +3107,7 @@ def _plot_band_power_topomaps_single_segment(
         panel_arrays: Dict[str, np.ndarray] = {}
         panel_infos: Dict[str, mne.Info] = {}
         for band in cond_valid_bands:
-            data_array, present_mask = _build_channel_data_array(cond_band_data[band], epochs_info)
+            data_array, present_mask = _build_channel_data_array(cond_band_data[band], epochs_info, primary_stat)
             if present_mask.sum() <= MIN_CHANNELS_FOR_TOPO:
                 continue
             panel_arrays[band] = data_array[present_mask]
@@ -3062,8 +3141,12 @@ def _plot_band_power_topomaps_single_segment(
                 axes=ax,
                 show=False,
                 cmap=cmap,
-                contours=get_viz_params(config).get("topo_contours"),
+                contours=get_viz_params(config).get("topo_contours") if get_viz_params(config).get("topo_contours") is not None else 0,
                 vlim=(vmin, vmax),
+                extrapolate=TOPO_EXTRAPOLATE,
+                sphere=_compute_topomap_head_sphere(panel_infos[band]),
+                res=300,
+                sensors=False,
             )
             band_color = get_band_color(band, config)
             ax.set_title(f"{band.upper()}", fontweight="bold", color=band_color, fontsize=12)
@@ -3205,7 +3288,10 @@ def _plot_band_power_topomaps_single_segment(
                 key = (band, ch_name)
                 if key not in effect_map:
                     continue
-                data_array[ch_idx] = float(effect_map[key])
+                val = float(effect_map[key])
+                if primary_stat == "mean":
+                    val *= 1e12
+                data_array[ch_idx] = val
                 if sig_map.get(key, False):
                     sig_mask_full[ch_idx] = True
 
@@ -3223,7 +3309,7 @@ def _plot_band_power_topomaps_single_segment(
             plt.close(fig)
             return
 
-        vmin, vmax = _compute_shared_topomap_vlim(panel_arrays, config)
+        vmin, vmax = _compute_contrast_topomap_vlim(panel_arrays, config)
         shared_image = None
 
         for i, band in enumerate([str(b) for b in bands]):
@@ -3240,10 +3326,14 @@ def _plot_band_power_topomaps_single_segment(
                 axes=ax,
                 show=False,
                 cmap="RdBu_r",
-                contours=viz_params.get("topo_contours"),
+                contours=viz_params.get("topo_contours") if viz_params.get("topo_contours") is not None else 0,
                 vlim=(vmin, vmax),
                 mask=valid_sig,
                 mask_params=_build_topomap_mask_params(config),
+                extrapolate=TOPO_EXTRAPOLATE,
+                sphere=_compute_topomap_head_sphere(valid_info),
+                res=300,
+                sensors=False,
             )
 
             band_color = get_band_color(band, config)
@@ -3294,8 +3384,8 @@ def _plot_band_power_topomaps_single_segment(
             if condition_band_1 is None or condition_band_2 is None or contrast_panel_data is None:
                 continue
 
-            descriptive_panel_1 = _build_topomap_panel(condition_band_1, epochs_info)
-            descriptive_panel_2 = _build_topomap_panel(condition_band_2, epochs_info)
+            descriptive_panel_1 = _build_topomap_panel(condition_band_1, epochs_info, primary_stat)
+            descriptive_panel_2 = _build_topomap_panel(condition_band_2, epochs_info, primary_stat)
             if descriptive_panel_1 is None or descriptive_panel_2 is None:
                 continue
 
@@ -3489,7 +3579,7 @@ def plot_band_power_topomaps_window_contrast(
         plt.close(fig)
         return
 
-    vmin, vmax = _compute_shared_topomap_vlim(panel_arrays, config)
+    vmin, vmax = _compute_contrast_topomap_vlim(panel_arrays, config)
     shared_image = None
 
     for i, band in enumerate([str(b) for b in bands]):
@@ -3506,10 +3596,14 @@ def plot_band_power_topomaps_window_contrast(
             axes=ax,
             show=False,
             cmap="RdBu_r",
-            contours=viz_params.get("topo_contours"),
+            contours=viz_params.get("topo_contours") if viz_params.get("topo_contours") is not None else 0,
             vlim=(vmin, vmax),
             mask=valid_sig,
             mask_params=_build_topomap_mask_params(config),
+            extrapolate=TOPO_EXTRAPOLATE,
+            sphere=_compute_topomap_head_sphere(valid_info),
+            res=300,
+            sensors=False,
         )
 
         band_color = get_band_color(band, config)
@@ -3736,7 +3830,7 @@ def plot_band_power_topomaps_group_condition_contrast(
         plt.close(fig)
         return
 
-    vmin, vmax = _compute_shared_topomap_vlim(panel_arrays, config)
+    vmin, vmax = _compute_contrast_topomap_vlim(panel_arrays, config)
     shared_image = None
 
     for i, band in enumerate([str(b) for b in bands]):
@@ -3753,10 +3847,14 @@ def plot_band_power_topomaps_group_condition_contrast(
             axes=ax,
             show=False,
             cmap="RdBu_r",
-            contours=viz_params.get("topo_contours"),
+            contours=viz_params.get("topo_contours") if viz_params.get("topo_contours") is not None else 0,
             vlim=(vmin, vmax),
             mask=valid_sig,
             mask_params=_build_topomap_mask_params(config),
+            extrapolate=TOPO_EXTRAPOLATE,
+            sphere=_compute_topomap_head_sphere(valid_info),
+            res=300,
+            sensors=False,
         )
 
         band_color = get_band_color(band, config)

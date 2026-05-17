@@ -239,7 +239,10 @@ def _plot_topomap_grid(axes: np.ndarray, bands: List[str], time_bins: List[str],
                     show=False,
                     cmap="viridis",
                     vlim=(vmin_use, vmax_use),
-                    contours=6,
+                    contours=0,
+                    extrapolate="local",
+                    res=300,
+                    sensors=False,
                 )
                 ax.set_title(f"{band} | {time_bin}")
             else:

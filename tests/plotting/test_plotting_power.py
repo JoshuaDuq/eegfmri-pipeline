@@ -29,6 +29,7 @@ from eeg_pipeline.plotting.features.power import (
     _format_condition_display_label,
     _format_triptych_condition_label,
     _format_topomap_condition_title_label,
+    _save_band_topomap_triptych,
 )
 from eeg_pipeline.plotting.features.utils import (
     _format_count_range,
@@ -1443,6 +1444,99 @@ def test_build_topomap_panel_requires_more_than_minimum_channels() -> None:
     data, panel_info = panel
     assert data.shape == (4,)
     assert len(panel_info.ch_names) == 4
+
+
+def test_band_topomap_triptych_uses_uncapped_contrast_scale(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    from eeg_pipeline.plotting.features import power as power_module
+
+    info = mne.create_info(["Fz", "Cz", "Pz", "Oz"], sfreq=250.0, ch_types="eeg")
+    info.set_montage(mne.channels.make_standard_montage("standard_1020"))
+    recorded_vlims = []
+
+    def fake_plot_topomap(*args, **kwargs):
+        recorded_vlims.append(kwargs["vlim"])
+        vmin, vmax = kwargs["vlim"]
+        return ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=kwargs["cmap"]), None
+
+    monkeypatch.setattr(power_module, "plot_topomap", fake_plot_topomap)
+    monkeypatch.setattr(power_module, "save_fig", lambda fig, *args, **kwargs: plt.close(fig))
+
+    config = {"visualization": {"robust_vlim": {"cap": 0.25, "min_v": 1e-6}}}
+    _save_band_topomap_triptych(
+        descriptive_panel_1=(np.array([1000.0, 2000.0, 3000.0, 4000.0]), info),
+        descriptive_panel_2=(np.array([1200.0, 2400.0, 3600.0, 4800.0]), info),
+        contrast_panel=(
+            np.array([-5000.0, -2500.0, 2500.0, 5000.0]),
+            np.array([False, False, True, True]),
+            info,
+        ),
+        band="alpha",
+        subject="0001",
+        save_path=tmp_path / "triptych",
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        config=config,
+        segment_label="Baseline",
+        label1="44.3",
+        label2="49.3",
+        descriptive_value_label="mean power (uV^2)",
+        contrast_value_label="Delta power (uV^2)",
+        footer="Subject: 0001",
+    )
+
+    assert recorded_vlims[-1][1] > 4000.0
+
+
+def test_band_topomap_triptych_uses_head_bounded_extrapolation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    from eeg_pipeline.plotting.features import power as power_module
+
+    info = mne.create_info(["Fz", "Cz", "Pz", "Oz"], sfreq=250.0, ch_types="eeg")
+    info.set_montage(mne.channels.make_standard_montage("standard_1020"))
+    extrapolate_modes = []
+    spheres = []
+
+    def fake_plot_topomap(*args, **kwargs):
+        extrapolate_modes.append(kwargs["extrapolate"])
+        spheres.append(kwargs.get("sphere"))
+        vmin, vmax = kwargs["vlim"]
+        return ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=kwargs["cmap"]), None
+
+    monkeypatch.setattr(power_module, "plot_topomap", fake_plot_topomap)
+    monkeypatch.setattr(power_module, "save_fig", lambda fig, *args, **kwargs: plt.close(fig))
+
+    _save_band_topomap_triptych(
+        descriptive_panel_1=(np.array([1.0, 2.0, 3.0, 4.0]), info),
+        descriptive_panel_2=(np.array([1.5, 2.5, 3.5, 4.5]), info),
+        contrast_panel=(
+            np.array([-0.2, -0.1, 0.1, 0.2]),
+            np.array([False, False, True, True]),
+            info,
+        ),
+        band="alpha",
+        subject="0001",
+        save_path=tmp_path / "triptych",
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        config={"visualization": {"robust_vlim": {"min_v": 1e-6}}},
+        segment_label="Baseline",
+        label1="44.3",
+        label2="49.3",
+        descriptive_value_label="mean power",
+        contrast_value_label="Delta power",
+        footer="Subject: 0001",
+    )
+
+    assert extrapolate_modes == ["head", "head", "head"]
+    assert all(sphere is not None for sphere in spheres)
+    assert all(len(sphere) == 4 and sphere[3] > 0 for sphere in spheres)
 
 
 def test_draw_group_subject_traces_requires_matching_time_axis() -> None:

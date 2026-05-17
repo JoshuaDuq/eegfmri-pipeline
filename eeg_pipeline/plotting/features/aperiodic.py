@@ -555,7 +555,7 @@ def plot_aperiodic_topomaps(
         ax = axes[row_idx, 0]
         mne.viz.plot_topomap(
             data_overall, info_subset, axes=ax, show=False, cmap=cmap,
-            contours=TOPO_CONTOURS
+            contours=0, extrapolate="local", res=300, sensors=False
         )
         ax.set_title(f"{metric_label.title()} - Overall")
         
@@ -581,14 +581,14 @@ def plot_aperiodic_topomaps(
             ax = axes[row_idx, 1]
             mne.viz.plot_topomap(
                 data_cond_a, info_common, axes=ax, show=False, cmap=cmap,
-                contours=TOPO_CONTOURS
+                contours=0, extrapolate="local", res=300, sensors=False
             )
             ax.set_title(f"{metric_label.title()} - {cond1_label}")
 
             ax = axes[row_idx, 2]
             mne.viz.plot_topomap(
                 data_cond_b, info_common, axes=ax, show=False, cmap=cmap,
-                contours=TOPO_CONTOURS
+                contours=0, extrapolate="local", res=300, sensors=False
             )
             ax.set_title(f"{metric_label.title()} - {cond2_label}")
             
@@ -597,10 +597,10 @@ def plot_aperiodic_topomaps(
             if np.any(sig_mask):
                 mask_params = dict(
                     marker="o",
-                    markerfacecolor="none",
+                    markerfacecolor="white",
                     markeredgecolor="black",
-                    linewidth=1.0,
-                    markersize=8,
+                    linewidth=0.5,
+                    markersize=4,
                 )
             mne.viz.plot_topomap(
                 diff,
@@ -608,7 +608,7 @@ def plot_aperiodic_topomaps(
                 axes=ax,
                 show=False,
                 cmap="RdBu_r",
-                contours=TOPO_CONTOURS,
+                contours=0, extrapolate="local", res=300, sensors=False,
                 mask=sig_mask,
                 mask_params=mask_params,
             )

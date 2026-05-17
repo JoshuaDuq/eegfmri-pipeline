@@ -128,7 +128,8 @@ def add_normalized_colorbar(
     """
     fraction, pad, shrink = _get_colorbar_params(config)
     sm = _create_scalar_mappable(vmin, vmax, cmap)
-    fig.colorbar(sm, ax=axes_list, fraction=fraction, pad=pad, shrink=shrink)
+    cb = fig.colorbar(sm, ax=axes_list, fraction=fraction, pad=pad, shrink=shrink)
+    cb.outline.set_visible(False)
 
 
 def create_difference_colorbar(
@@ -172,6 +173,7 @@ def create_difference_colorbar(
     cbar = fig.colorbar(
         sm, ax=axes_list, fraction=fraction, pad=pad, shrink=shrink, aspect=aspect
     )
+    cbar.outline.set_visible(False)
     
     if label:
         cbar.set_label(label, fontsize=fontsize)
@@ -200,5 +202,6 @@ def add_diff_colorbar(
     
     fraction, pad, shrink = _get_colorbar_params(config)
     sm = _create_scalar_mappable(-vabs, vabs, cmap, vcenter=0.0)
-    fig.colorbar(sm, ax=ax, fraction=fraction, pad=pad, shrink=shrink)
+    cb = fig.colorbar(sm, ax=ax, fraction=fraction, pad=pad, shrink=shrink)
+    cb.outline.set_visible(False)
 
