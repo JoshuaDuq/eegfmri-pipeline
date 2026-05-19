@@ -59,12 +59,22 @@ study1:
     outer_jobs: 1
     feature_harmonization: "intersection"
     excluded_channels: ["Fp1", "Fp2"]
+    permutation_scheme: "circular_shift_within_run"
+    max_invalid_permutation_fraction: 0.20
+    circular_shift:
+      min_valid_blocks_per_subject: 3
+      min_retained_trials_per_subject: 25
   temporal_negative_controls:
     feature_transform: "raw_log_power"
     feature_baseline_window: null
     windows:
       prestimulus_wide: [-5.0, 0.0]
       immediate_prestimulus: [-0.2, 0.0]
+    wrong_lag_windows:
+      ramp_up: [0.0, 3.0]
+      late_ramp_down: [10.5, 15.0]
+      early_shifted_active: [1.0, 8.5]
+      late_shifted_active: [5.0, 12.5]
   deep_regression:
     n_epochs: 2
     batch_size: 8

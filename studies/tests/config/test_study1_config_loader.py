@@ -35,6 +35,34 @@ def test_load_study1_config_defines_unbaselined_temporal_negative_controls() -> 
         "prestimulus_wide": [-5.0, 0.0],
         "immediate_prestimulus": [-0.2, 0.0],
     }
+    assert temporal["wrong_lag_windows"] == {
+        "ramp_up": [0.0, 3.0],
+        "late_ramp_down": [10.5, 15.0],
+        "early_shifted_active": [1.0, 8.5],
+        "late_shifted_active": [5.0, 12.5],
+    }
+
+
+def test_load_study1_config_defines_prespecified_permutation_controls() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+    benchmark = config["study1"]["feature_benchmark"]
+
+    assert benchmark["permutation_scheme"] == "circular_shift_within_run"
+    assert benchmark["max_invalid_permutation_fraction"] == 0.20
+    assert benchmark["circular_shift"] == {
+        "min_valid_blocks_per_subject": 3,
+        "min_retained_trials_per_subject": 25,
+    }
+
+
+def test_load_study1_config_uses_readme_bootstrap_iterations() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["machine_learning"]["evaluation"]["bootstrap_iterations"] == 10000
 
 
 def test_load_study1_config_resolves_explicit_path() -> None:
@@ -121,6 +149,61 @@ def test_load_study1_config_rejects_poststimulus_temporal_negative_control_windo
         load_study1_config(config_path=bad_config)
 
 
+def test_load_study1_config_rejects_missing_wrong_lag_temporal_controls(tmp_path) -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    bad_config = tmp_path / "missing_wrong_lag.yaml"
+    bad_config.write_text(
+        yaml.dump(
+            {
+                "study1": {
+                    "temporal_negative_controls": {
+                        "feature_transform": "raw_log_power",
+                        "feature_baseline_window": None,
+                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="wrong_lag_windows"):
+        load_study1_config(config_path=bad_config)
+
+
+def test_load_study1_config_rejects_missing_permutation_scheme(tmp_path) -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    bad_config = tmp_path / "missing_permutation_scheme.yaml"
+    bad_config.write_text(
+        yaml.dump(
+            {
+                "study1": {
+                    "feature_benchmark": {
+                        "n_perm": 5000,
+                        "max_invalid_permutation_fraction": 0.20,
+                        "circular_shift": {
+                            "min_valid_blocks_per_subject": 3,
+                            "min_retained_trials_per_subject": 25,
+                        },
+                    },
+                    "temporal_negative_controls": {
+                        "feature_transform": "raw_log_power",
+                        "feature_baseline_window": None,
+                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                        "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="permutation_scheme"):
+        load_study1_config(config_path=bad_config)
+
+
 def test_load_study1_config_uses_env_var_override(tmp_path, monkeypatch) -> None:
     from studies.pain_study.study1.config.loader import (
         STUDY1_CONFIG_ENV_VAR,
@@ -133,10 +216,20 @@ def test_load_study1_config_uses_env_var_override(tmp_path, monkeypatch) -> None
             {
                 "study1": {
                     "cohort": {"min_subjects": 99},
+                    "feature_benchmark": {
+                        "n_perm": 5000,
+                        "permutation_scheme": "circular_shift_within_run",
+                        "max_invalid_permutation_fraction": 0.20,
+                        "circular_shift": {
+                            "min_valid_blocks_per_subject": 3,
+                            "min_retained_trials_per_subject": 25,
+                        },
+                    },
                     "temporal_negative_controls": {
                         "feature_transform": "raw_log_power",
                         "feature_baseline_window": None,
                         "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                        "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
                     },
                 }
             }
@@ -232,3 +325,18 @@ def test_smoketest_config_uses_low_permutation_count() -> None:
     config = load_study1_config(config_path=smoketest_path)
 
     assert config["study1"]["feature_benchmark"]["n_perm"] <= 100
+
+
+def test_smoketest_config_defines_prespecified_permutation_controls() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    smoketest_path = REPO_ROOT / "studies/pain_study/study1/config/study1_smoketest.yaml"
+    config = load_study1_config(config_path=smoketest_path)
+    benchmark = config["study1"]["feature_benchmark"]
+
+    assert benchmark["permutation_scheme"] == "circular_shift_within_run"
+    assert benchmark["max_invalid_permutation_fraction"] == 0.20
+    assert benchmark["circular_shift"] == {
+        "min_valid_blocks_per_subject": 3,
+        "min_retained_trials_per_subject": 25,
+    }

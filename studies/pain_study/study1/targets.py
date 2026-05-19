@@ -19,6 +19,7 @@ from eeg_pipeline.utils.config.loader import get_config_value, require_config_va
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root, resolve_fmri_bids_root
 from eeg_pipeline.utils.data.fmri_signature_targets import (
     load_fmri_signature_target_for_subject,
+    parse_run_label_to_int,
 )
 from fmri_pipeline.analysis.trial_signatures import (
     TrialSignatureExtractionConfig,
@@ -32,6 +33,7 @@ RAW_LEVEL2_ARTIFACT_COLUMNS = {
     "std_dvars": "hrf_weighted_std_dvars",
     "fp1_fp2_high_frequency_power": "hrf_weighted_fp1_fp2_high_frequency_power",
 }
+ACQUISITION_RUN_COLUMNS = ("run_id", "run", "session")
 
 
 def _study1_output_root(config: Any) -> Path:
@@ -587,6 +589,42 @@ def _required_task_block(events_df: pd.DataFrame) -> pd.Series:
     return block
 
 
+def _parse_acquisition_run(series: pd.Series, *, column: str) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.notna().all():
+        return numeric
+
+    parsed = pd.Series(
+        [parse_run_label_to_int(value) for value in series],
+        index=series.index,
+        dtype="float64",
+    )
+    if parsed.notna().all():
+        return parsed
+
+    raise ValueError(
+        f"Study 1 acquisition run column '{column}' must contain finite run labels "
+        "for every clean EEG event row."
+    )
+
+
+def _required_acquisition_run(events_df: pd.DataFrame, task_block: pd.Series) -> pd.Series:
+    for column in ACQUISITION_RUN_COLUMNS:
+        if column in events_df.columns:
+            return _parse_acquisition_run(events_df[column], column=column)
+    return task_block
+
+
+def _events_for_signature_alignment(
+    *,
+    events_df: pd.DataFrame,
+    acquisition_run: pd.Series,
+) -> pd.DataFrame:
+    aligned_events = events_df.copy()
+    aligned_events["block"] = acquisition_run.reset_index(drop=True)
+    return aligned_events
+
+
 def _subject_target_rows(
     *,
     subject: str,
@@ -603,13 +641,18 @@ def _subject_target_rows(
     events_df = events_df.reset_index(drop=True)
     trial_index = _required_trial_index(events_df)
     block = _required_task_block(events_df)
+    acquisition_run = _required_acquisition_run(events_df, task_block=block)
+    signature_events = _events_for_signature_alignment(
+        events_df=events_df,
+        acquisition_run=acquisition_run,
+    )
 
     nps, _nps_label, nps_extra = load_fmri_signature_target_for_subject(
         subject_raw=subject,
         task=task,
         deriv_root=deriv_root,
         config=_config_for_signature(config, "NPS"),
-        events_df=events_df,
+        events_df=signature_events,
         logger=logger,
         config_path="study1.targets",
     )
@@ -618,7 +661,7 @@ def _subject_target_rows(
         task=task,
         deriv_root=deriv_root,
         config=_config_for_signature(config, "SIIPS1"),
-        events_df=events_df,
+        events_df=signature_events,
         logger=logger,
         config_path="study1.targets",
     )
@@ -628,6 +671,7 @@ def _subject_target_rows(
             "subject_id": f"sub-{subject}" if not str(subject).startswith("sub-") else str(subject),
             "task": task,
             "block": block,
+            "acquisition_run": acquisition_run,
             "trial_index": trial_index,
             "onset": pd.to_numeric(events_df["onset"], errors="coerce"),
             "duration": pd.to_numeric(events_df["duration"], errors="coerce"),

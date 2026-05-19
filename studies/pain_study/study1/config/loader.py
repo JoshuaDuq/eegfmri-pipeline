@@ -41,6 +41,7 @@ def load_study1_config(config_path: Optional[str | Path] = None) -> dict[str, An
 
     resolved = resolve_config_paths(parsed, resolved_path)
     _validate_temporal_negative_controls(resolved)
+    _validate_feature_benchmark(resolved)
     return resolved
 
 
@@ -76,8 +77,19 @@ def _validate_temporal_negative_controls(config: dict[str, Any]) -> None:
             field_name=f"study1.temporal_negative_controls.windows.{name}",
         )
 
+    wrong_lag_windows = temporal_config.get("wrong_lag_windows")
+    if not isinstance(wrong_lag_windows, dict) or not wrong_lag_windows:
+        raise ValueError(
+            "study1.temporal_negative_controls.wrong_lag_windows must be a non-empty mapping."
+        )
+    for name, window in wrong_lag_windows.items():
+        _validate_time_window(
+            window,
+            field_name=f"study1.temporal_negative_controls.wrong_lag_windows.{name}",
+        )
 
-def _validate_prestimulus_window(value: Any, *, field_name: str) -> None:
+
+def _validate_time_window(value: Any, *, field_name: str) -> tuple[float, float]:
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         raise ValueError(f"{field_name} must be a two-value [start, end] window.")
     try:
@@ -89,8 +101,64 @@ def _validate_prestimulus_window(value: Any, *, field_name: str) -> None:
         raise ValueError(f"{field_name} must contain finite seconds.")
     if start >= end:
         raise ValueError(f"{field_name} must have start < end.")
+    return start, end
+
+
+def _validate_prestimulus_window(value: Any, *, field_name: str) -> None:
+    _start, end = _validate_time_window(value, field_name=field_name)
     if end > 0.0:
         raise ValueError(f"{field_name} must be a pre-stimulus window ending at or before 0 s.")
+
+
+def _validate_feature_benchmark(config: dict[str, Any]) -> None:
+    study1_config = config.get("study1")
+    if not isinstance(study1_config, dict):
+        return
+    feature_config = study1_config.get("feature_benchmark")
+    if not isinstance(feature_config, dict):
+        raise ValueError("study1.feature_benchmark must be a mapping.")
+
+    _validate_positive_int(
+        feature_config.get("n_perm"),
+        field_name="study1.feature_benchmark.n_perm",
+    )
+    permutation_scheme = str(feature_config.get("permutation_scheme", "")).strip()
+    if not permutation_scheme:
+        raise ValueError("study1.feature_benchmark.permutation_scheme must be configured.")
+
+    _validate_fraction(
+        feature_config.get("max_invalid_permutation_fraction"),
+        field_name="study1.feature_benchmark.max_invalid_permutation_fraction",
+    )
+    if permutation_scheme == "circular_shift_within_run":
+        circular_shift = feature_config.get("circular_shift")
+        if not isinstance(circular_shift, dict):
+            raise ValueError("study1.feature_benchmark.circular_shift must be a mapping.")
+        for key in ("min_valid_blocks_per_subject", "min_retained_trials_per_subject"):
+            _validate_positive_int(
+                circular_shift.get(key),
+                field_name=f"study1.feature_benchmark.circular_shift.{key}",
+            )
+
+
+def _validate_positive_int(value: Any, *, field_name: str) -> int:
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a positive integer.") from exc
+    if numeric <= 0:
+        raise ValueError(f"{field_name} must be a positive integer.")
+    return numeric
+
+
+def _validate_fraction(value: Any, *, field_name: str) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a fraction in [0, 1).") from exc
+    if not math.isfinite(numeric) or not 0.0 <= numeric < 1.0:
+        raise ValueError(f"{field_name} must be a fraction in [0, 1).")
+    return numeric
 
 
 def _merge_non_null(base: dict[str, Any], extra: dict[str, Any]) -> None:

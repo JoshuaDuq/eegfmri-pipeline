@@ -70,6 +70,11 @@ study1:
     windows:
       prestimulus_wide: [-5.0, 0.0]
       immediate_prestimulus: [-0.2, 0.0]
+    wrong_lag_windows:
+      ramp_up: [0.0, 3.0]
+      late_ramp_down: [10.5, 15.0]
+      early_shifted_active: [1.0, 8.5]
+      late_shifted_active: [5.0, 12.5]
   deep_regression:
     time_window: [3.0, 10.5]
     n_epochs: 25
@@ -88,6 +93,10 @@ study1:
       alpha_beta: ["alpha", "beta"]
   outputs:
     root_name: "study1"
+
+machine_learning:
+  evaluation:
+    bootstrap_iterations: 10000
 
 pyprep:
   # Study 1 fits shared subject-level ICA and epochs across runs, so MNE-BIDS

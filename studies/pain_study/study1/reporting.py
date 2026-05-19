@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,10 @@ PRIMARY_REQUIRED_NUMERIC_FIELDS = (
     "n_perm_attempted",
     "n_invalid_permutations",
     "n_folds",
+    "n_subjects_requested",
+    "n_subjects_included",
+    "n_subjects_excluded",
+    "subject_excluded_fraction",
 )
 INTERPRETATION_DIAGNOSTIC_FIELDS = (
     "target_split_half_reliability",
@@ -454,6 +459,57 @@ def _validate_complete_primary_outputs(
                     "Study 1 primary feature report has the wrong valid permutation count for "
                     f"{'/'.join(key)}: completed={completed}, expected={int(expected_n_perm)}."
                 )
+            _validate_permutation_budget(
+                record=record,
+                config=config,
+                key=key,
+                expected_n_perm=int(expected_n_perm),
+            )
+
+
+def _validate_permutation_budget(
+    *,
+    record: dict[str, Any],
+    config: Any,
+    key: tuple[str, str, str, str, str],
+    expected_n_perm: int,
+) -> None:
+    completed = int(float(record["n_perm_completed"]))
+    attempted = int(float(record["n_perm_attempted"]))
+    invalid = int(float(record["n_invalid_permutations"]))
+    label = "/".join(key)
+    if attempted < completed:
+        raise ValueError(
+            "Study 1 primary feature report has an invalid permutation accounting "
+            f"record for {label}: attempted={attempted}, completed={completed}."
+        )
+    if invalid != attempted - completed:
+        raise ValueError(
+            "Study 1 primary feature report has an invalid permutation accounting "
+            f"record for {label}: invalid={invalid}, attempted-completed={attempted - completed}."
+        )
+
+    raw_fraction = get_config_value(
+        config,
+        "study1.feature_benchmark.max_invalid_permutation_fraction",
+        None,
+    )
+    if raw_fraction is None:
+        return
+    max_invalid_fraction = float(raw_fraction)
+    if not 0.0 <= max_invalid_fraction < 1.0:
+        raise ValueError(
+            "study1.feature_benchmark.max_invalid_permutation_fraction must be in [0, 1)."
+        )
+
+    max_attempts = int(math.ceil(expected_n_perm / (1.0 - max_invalid_fraction)))
+    if attempted > max_attempts:
+        raise ValueError(
+            "Study 1 primary feature report exceeds the invalid permutation budget for "
+            f"{label}: attempted={attempted}, maximum={max_attempts}, "
+            f"valid={completed}, invalid={invalid}, "
+            f"max_invalid_fraction={max_invalid_fraction}."
+        )
 
 
 def _append_primary_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:

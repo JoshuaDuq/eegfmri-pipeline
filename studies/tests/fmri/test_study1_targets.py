@@ -137,6 +137,7 @@ def _write_signature_outputs(
     contrast_name: str = "pain_vs_nonpain",
     include_siips1: bool = True,
     siips1_second_dot=2.2,
+    trial_count: int = 2,
 ) -> None:
     sig_dir = (
         root
@@ -153,25 +154,15 @@ def _write_signature_outputs(
         {
             "run": "run-01",
             "run_num": 1,
-            "trial_index": 1,
+            "trial_index": trial_index,
             "signature": "NPS",
-            "dot": 1.1,
+            "dot": 1.0 + trial_index / 10.0,
             "n_voxels": 1000,
             "scoring_mask_sha256": NPS_MASK_HASH,
-            "onset": 21.532,
+            "onset": 20.0 + trial_index,
             "duration": 7.5,
-        },
-        {
-            "run": "run-01",
-            "run_num": 1,
-            "trial_index": 2,
-            "signature": "NPS",
-            "dot": 1.2,
-            "n_voxels": 1000,
-            "scoring_mask_sha256": NPS_MASK_HASH,
-            "onset": 64.465,
-            "duration": 7.5,
-        },
+        }
+        for trial_index in range(1, trial_count + 1)
     ]
     if include_siips1:
         rows.extend(
@@ -179,33 +170,23 @@ def _write_signature_outputs(
                 {
                     "run": "run-01",
                     "run_num": 1,
-                    "trial_index": 1,
+                    "trial_index": trial_index,
                     "signature": "SIIPS1",
-                    "dot": 2.1,
+                    "dot": siips1_second_dot if trial_index == 2 else 2.0 + trial_index / 10.0,
                     "n_voxels": 800,
                     "scoring_mask_sha256": SIIPS1_MASK_HASH,
-                    "onset": 21.532,
+                    "onset": 20.0 + trial_index,
                     "duration": 7.5,
-                },
-                {
-                    "run": "run-01",
-                    "run_num": 1,
-                    "trial_index": 2,
-                    "signature": "SIIPS1",
-                    "dot": siips1_second_dot,
-                    "n_voxels": 800,
-                    "scoring_mask_sha256": SIIPS1_MASK_HASH,
-                    "onset": 64.465,
-                    "duration": 7.5,
-                },
+                }
+                for trial_index in range(1, trial_count + 1)
             ]
         )
     pd.DataFrame(rows).to_csv(sig_dir / "trial_signature_expression.tsv", sep="\t", index=False)
     pd.DataFrame(
         {
-            "run": ["run-01", "run-01"],
-            "trial_index": [1, 2],
-            "events_trial_number": [1, 2],
+            "run": ["run-01"] * trial_count,
+            "trial_index": list(range(1, trial_count + 1)),
+            "events_trial_number": list(range(1, trial_count + 1)),
         }
     ).to_csv(sig_dir.parent / "trials.tsv", sep="\t", index=False)
 
@@ -439,6 +420,49 @@ def test_prepare_primary_targets_writes_wide_primary_table() -> None:
             SIIPS1_MASK_HASH,
             SIIPS1_MASK_HASH,
         ]
+
+
+def test_prepare_primary_targets_aligns_signatures_by_acquisition_run_not_task_block() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        _write_signature_outputs(root, trial_count=4)
+        events = pd.DataFrame(
+            {
+                "block": [1, 1, 2, 2],
+                "run_id": [1, 1, 1, 1],
+                "trial_number": [1, 2, 3, 4],
+                "pain_binary_coded": [1, 0, 1, 0],
+                "onset": [10.0, 20.0, 30.0, 40.0],
+                "duration": [0.001, 0.001, 0.001, 0.001],
+            }
+        )
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+        ):
+            out_path = prepare_primary_targets(
+                subjects=["0001"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+
+        frame = pd.read_parquet(out_path)
+        assert list(frame["block"]) == [1, 1, 2, 2]
+        assert list(frame["acquisition_run"]) == [1, 1, 1, 1]
+        assert list(frame["trial_index"]) == [1, 2, 3, 4]
+        assert list(frame["NPS"]) == [1.1, 1.2, 1.3, 1.4]
+        assert list(frame["SIIPS1"]) == [2.1, 2.2, 2.3, 2.4]
 
 
 def test_prepare_primary_targets_records_nuisance_columns_without_residual_targets() -> None:

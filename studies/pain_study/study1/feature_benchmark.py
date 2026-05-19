@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from eeg_pipeline.analysis.machine_learning.orchestration import run_model_comparison_ml
-from eeg_pipeline.utils.config.loader import ConfigDict, get_config_value
+from eeg_pipeline.utils.config.loader import ConfigDict, get_config_value, require_config_value
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 from studies.pain_study.study1.cohort import (
     primary_targets_parquet_path,
@@ -107,30 +107,23 @@ def _feature_benchmark_config(
         for channel in excluded_channels
         if str(channel).strip()
     ]
-    feature_config["machine_learning.cv.permutation_scheme"] = str(
-        get_config_value(
-            config,
-            "study1.feature_benchmark.permutation_scheme",
-            "circular_shift_within_run",
-        )
+    permutation_scheme = str(
+        require_config_value(config, "study1.feature_benchmark.permutation_scheme")
     ).strip()
-    for key in ("min_valid_blocks_per_subject", "min_retained_trials_per_subject"):
-        value = get_config_value(
-            config,
-            f"study1.feature_benchmark.circular_shift.{key}",
-            None,
-        )
-        if value is not None:
+    feature_config["machine_learning.cv.permutation_scheme"] = permutation_scheme
+    if permutation_scheme == "circular_shift_within_run":
+        for key in ("min_valid_blocks_per_subject", "min_retained_trials_per_subject"):
+            value = require_config_value(
+                config,
+                f"study1.feature_benchmark.circular_shift.{key}",
+            )
             feature_config[f"machine_learning.cv.circular_shift.{key}"] = int(value)
-    max_invalid_permutation_fraction = get_config_value(
-        config,
-        "study1.feature_benchmark.max_invalid_permutation_fraction",
-        None,
-    )
-    if max_invalid_permutation_fraction is not None:
-        feature_config["machine_learning.cv.max_invalid_permutation_fraction"] = float(
-            max_invalid_permutation_fraction
+    feature_config["machine_learning.cv.max_invalid_permutation_fraction"] = float(
+        require_config_value(
+            config,
+            "study1.feature_benchmark.max_invalid_permutation_fraction",
         )
+    )
     columns = (
         list(
             residualization_columns_for_target_table(

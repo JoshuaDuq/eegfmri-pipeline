@@ -18,6 +18,10 @@ def _config(root: Path) -> DotConfig:
             "study1": {
                 "outputs": {"root_name": "study1"},
                 "targets": {"names": ["NPS", "SIIPS1"]},
+                "feature_benchmark": {
+                    "n_perm": 5000,
+                    "max_invalid_permutation_fraction": 0.20,
+                },
                 "deep_regression": {
                     "presets": {
                         "alpha": ["alpha"],
@@ -262,6 +266,55 @@ def test_report_rejects_missing_primary_delta_p_values(tmp_path) -> None:
             _write_feature_summary(root, target, feature_spec, p_value_delta_r2=None)
 
     with pytest.raises(ValueError, match="p_value_delta_r2"):
+        write_study1_report(task="pain", config=cfg)
+
+
+def test_report_rejects_missing_primary_subject_selection_counts(tmp_path) -> None:
+    from studies.pain_study.study1.reporting import write_study1_report
+
+    cfg = _config(tmp_path)
+    root = _study1_root(cfg)
+    _write_complete_outputs(root, cfg)
+    summary_path = (
+        root
+        / "feature_benchmark"
+        / "primary"
+        / "NPS"
+        / "alpha"
+        / "model_comparison"
+        / "metrics"
+        / "model_comparison_summary.json"
+    )
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload.pop("subject_selection")
+    summary_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="n_subjects_requested"):
+        write_study1_report(task="pain", config=cfg)
+
+
+def test_report_rejects_invalid_permutation_budget_violation(tmp_path) -> None:
+    from studies.pain_study.study1.reporting import write_study1_report
+
+    cfg = _config(tmp_path)
+    root = _study1_root(cfg)
+    _write_complete_outputs(root, cfg)
+    summary_path = (
+        root
+        / "feature_benchmark"
+        / "primary"
+        / "NPS"
+        / "alpha_beta"
+        / "model_comparison"
+        / "metrics"
+        / "model_comparison_summary.json"
+    )
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["elasticnet"]["n_perm_attempted"] = 6251
+    payload["elasticnet"]["n_invalid_permutations"] = 1251
+    summary_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid permutation budget"):
         write_study1_report(task="pain", config=cfg)
 
 

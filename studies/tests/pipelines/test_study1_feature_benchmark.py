@@ -37,6 +37,11 @@ def _config(root: Path) -> DotConfig:
                     "outer_jobs": 1,
                     "feature_harmonization": "intersection",
                     "permutation_scheme": "circular_shift_within_run",
+                    "max_invalid_permutation_fraction": 0.20,
+                    "circular_shift": {
+                        "min_valid_blocks_per_subject": 3,
+                        "min_retained_trials_per_subject": 25,
+                    },
                 },
                 "features": {"exploratory_feature_families": list(EXPLORATORY_FAMILIES)},
             },
@@ -332,6 +337,17 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
     )
     assert exploratory_call["feature_families"] == ["spectral"]
     assert exploratory_call["feature_bands"] is None
+
+
+def test_feature_benchmark_config_requires_permutation_scheme(tmp_path) -> None:
+    from eeg_pipeline.utils.config.loader import ConfigError
+    from studies.pain_study.study1.feature_benchmark import _feature_benchmark_config
+
+    cfg = _config(tmp_path)
+    cfg["study1"]["feature_benchmark"].pop("permutation_scheme")
+
+    with pytest.raises(ConfigError, match="permutation_scheme"):
+        _feature_benchmark_config(cfg, target_name="NPS")
 
 
 def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path) -> None:
