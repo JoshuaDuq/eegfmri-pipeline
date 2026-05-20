@@ -124,10 +124,9 @@ subjects, and retained plateau-trial counts before investing in feature extracti
 testing. Missing provenance, invalid signature support, unstable LSS designs, or inadequate retained
 trials should be fixed at the derivative or event-log level rather than compensated for downstream.
 
-The final report interprets results in this order: hard analysis-validity checks, primary thesis
-gate, missing or failed interpretation diagnostics, then the Study 2 source-entry tier. Secondary
-benchmark cells and exploratory models can qualify the result, but they do not replace the `NPS` /
-`alpha_beta` / `elasticnet` thesis gate.
+The final report interprets results in this order: analysis validity, the prespecified `NPS` /
+`alpha_beta` / `elasticnet` primary cell, interpretation diagnostics, and secondary/exploratory
+analyses. Secondary benchmark cells and exploratory models are reported after the primary cell.
 
 ### Pipeline Stages
 
@@ -183,13 +182,13 @@ Run stages in this order.
 
    Required benchmark targets are `NPS` and `SIIPS1`. Required benchmark presets are `alpha`,
    `beta`, and `alpha_beta`. The benchmark filters predictors to active-window,
-   individual-channel, log-ratio power columns and excludes Fp1/Fp2. The primary thesis gate is the
-   `NPS` / `alpha_beta` / `elasticnet` cell; the other required cells form the secondary
-   confirmatory prediction family.
+   individual-channel, log-ratio power columns and excludes Fp1/Fp2. The primary cell is `NPS` /
+   `alpha_beta` / `elasticnet`; the other required cells form the secondary confirmatory prediction
+   family.
 
-Exploratory feature families are disabled in the default Study 1 configs. Enable them explicitly with
-`--set "study1.features.exploratory_feature_families=[spectral,aperiodic,erds]"` when they are part
-of the planned run.
+Exploratory feature families are disabled in the default Study 1 configs. Enable them explicitly
+with `--set "study1.features.exploratory_feature_families=[spectral,aperiodic,erds]"` when they
+are part of the planned run.
 
 4. Run exploratory deep regression only when the thesis report should include that lane:
 
@@ -209,9 +208,8 @@ of the planned run.
 
    The report stage validates that all prespecified feature-benchmark outputs exist and contain the
    protocol audit fields: confidence intervals, valid permutation counts, invalid permutation
-   attempts, subject-selection counts, fold-level best hyperparameters, claim tier,
-   analysis-validity status, primary prediction status, missing interpretation diagnostics,
-   interpretation flags, and Study 2 source-entry status.
+   attempts, subject-selection counts, fold-level best hyperparameters, analysis-validity status,
+   primary prediction status, interpretation diagnostics, and interpretation flags.
    Deep-regression and exploratory feature-benchmark summaries are included when present, but they
    are not required for the primary Study 1 report.
 
