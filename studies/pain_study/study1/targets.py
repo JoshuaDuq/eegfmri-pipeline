@@ -577,6 +577,54 @@ def _required_trial_index(events_df: pd.DataFrame) -> pd.Series:
     return trial_index
 
 
+def _trials_per_block(config: Any) -> int:
+    trials_per_block = int(require_config_value(config, "study1.targets.trials_per_block"))
+    if trials_per_block <= 0:
+        raise ValueError("study1.targets.trials_per_block must be a positive integer.")
+    return trials_per_block
+
+
+def _within_block_trial_number(
+    *,
+    trial_index: pd.Series,
+    block: pd.Series,
+    config: Any,
+) -> pd.Series:
+    trials_per_block = _trials_per_block(config)
+    labels = pd.to_numeric(trial_index, errors="coerce")
+    blocks = pd.to_numeric(block, errors="coerce")
+    values = labels.to_numpy(dtype=float)
+    block_values = blocks.to_numpy(dtype=float)
+    if not np.all(np.isfinite(values)):
+        raise ValueError("Study 1 trial-order labels must be finite.")
+    if not np.all(values >= 1):
+        raise ValueError("Study 1 trial-order labels must be one-based positive integers.")
+    rounded = np.rint(values)
+    if not np.allclose(values, rounded):
+        raise ValueError("Study 1 trial-order labels must be integer-valued.")
+
+    if not np.all(np.isfinite(block_values)):
+        raise ValueError("Study 1 task block labels must be finite.")
+    block_rounded = np.rint(block_values)
+    if not np.allclose(block_values, block_rounded):
+        raise ValueError("Study 1 task block labels must be integer-valued.")
+
+    trial_labels = rounded.astype(int)
+    task_blocks = block_rounded.astype(int)
+    global_label_mask = trial_labels > trials_per_block
+    if np.any(global_label_mask):
+        expected_blocks = ((trial_labels[global_label_mask] - 1) // trials_per_block) + 1
+        actual_blocks = task_blocks[global_label_mask]
+        if not np.array_equal(expected_blocks, actual_blocks):
+            raise ValueError(
+                "Study 1 trial-order labels and task blocks are inconsistent. "
+                "Global trial labels must map to the explicit task block."
+            )
+
+    within_block = ((trial_labels - 1) % trials_per_block) + 1
+    return pd.Series(within_block, index=trial_index.index, dtype="int64")
+
+
 def _required_task_block(events_df: pd.DataFrame) -> pd.Series:
     if "block" not in events_df.columns:
         raise ValueError(
@@ -641,6 +689,11 @@ def _subject_target_rows(
     events_df = events_df.reset_index(drop=True)
     trial_index = _required_trial_index(events_df)
     block = _required_task_block(events_df)
+    within_block_trial = _within_block_trial_number(
+        trial_index=trial_index,
+        block=block,
+        config=config,
+    )
     acquisition_run = _required_acquisition_run(events_df, task_block=block)
     signature_events = _events_for_signature_alignment(
         events_df=events_df,
@@ -673,6 +726,7 @@ def _subject_target_rows(
             "block": block,
             "acquisition_run": acquisition_run,
             "trial_index": trial_index,
+            "within_block_trial": within_block_trial,
             "onset": pd.to_numeric(events_df["onset"], errors="coerce"),
             "duration": pd.to_numeric(events_df["duration"], errors="coerce"),
             "NPS": pd.to_numeric(nps, errors="coerce"),

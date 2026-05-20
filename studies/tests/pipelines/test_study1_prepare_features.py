@@ -10,7 +10,6 @@ import pandas as pd
 from studies.pain_study.study1.runner import SignaturePredictionRunner
 from studies.tests.test_support import DotConfig
 
-
 EXPLORATORY_FAMILIES = [
     "spectral",
     "aperiodic",
@@ -67,6 +66,7 @@ def _write_primary_targets(config: DotConfig) -> None:
             "task": ["pain", "pain"],
             "block": [1, 1],
             "trial_index": [1, 1],
+            "within_block_trial": [1, 1],
             "onset": [0.0, 0.0],
             "duration": [1.0, 1.0],
             "NPS": [1.0, 1.1],
@@ -79,7 +79,10 @@ def test_study1_feature_root_is_under_group_multimodal(tmp_path) -> None:
     from studies.pain_study.study1.cohort import study1_feature_root
 
     root = study1_feature_root(_config(tmp_path / "derivatives"))
-    assert root == tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_trial_ml_safe"
+    assert (
+        root
+        == tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_trial_ml_safe"
+    )
 
 
 def _write_feature_output(
@@ -118,7 +121,9 @@ def _write_feature_output(
     )
 
 
-def _write_all_prepared_outputs(feature_root: Path, subjects: list[str], families: list[str]) -> None:
+def _write_all_prepared_outputs(
+    feature_root: Path, subjects: list[str], families: list[str]
+) -> None:
     for subject_id in subjects:
         for family in families:
             _write_feature_output(feature_root, subject_id, family)
@@ -161,7 +166,9 @@ def test_prepare_study1_features_uses_study1_feature_root_and_full_family_set(tm
     cfg = _config(tmp_path / "derivatives")
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         feature_pipeline = feature_pipeline_cls.return_value
 
         def _write_outputs(**kwargs) -> list[dict]:
@@ -235,7 +242,9 @@ def test_prepare_study1_features_pins_trial_safe_family_overrides(tmp_path) -> N
     cfg = _config(tmp_path / "derivatives")
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         feature_pipeline = feature_pipeline_cls.return_value
 
         def _write_outputs(**kwargs) -> list[dict]:
@@ -275,7 +284,9 @@ def test_prepare_study1_features_rejects_power_evoked_subtraction_metadata(tmp_p
     cfg["study1"]["features"]["exploratory_feature_families"] = []
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         feature_pipeline = feature_pipeline_cls.return_value
 
         def _write_outputs(**kwargs) -> list[dict]:
@@ -310,12 +321,16 @@ def test_prepare_study1_features_requires_all_configured_family_outputs(tmp_path
     cfg = _config(tmp_path / "derivatives")
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         feature_pipeline = feature_pipeline_cls.return_value
 
         def _write_outputs(**kwargs) -> list[dict]:
             feature_root = Path(kwargs["feature_output_root"])
-            _write_all_prepared_outputs(feature_root, list(kwargs["subjects"]), ["power", "spectral"])
+            _write_all_prepared_outputs(
+                feature_root, list(kwargs["subjects"]), ["power", "spectral"]
+            )
             return []
 
         feature_pipeline.run_batch.side_effect = _write_outputs
@@ -340,7 +355,9 @@ def test_prepare_study1_features_prunes_windowed_duplicates_and_sidecars(tmp_pat
     cfg["study1"]["features"]["exploratory_feature_families"] = ["erds", "bursts"]
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         feature_pipeline = feature_pipeline_cls.return_value
 
         def _write_outputs(**kwargs) -> list[dict]:
@@ -362,7 +379,9 @@ def test_prepare_study1_features_prunes_windowed_duplicates_and_sidecars(tmp_pat
             logger=logging.getLogger(__name__),
         )
 
-    feature_root = tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_trial_ml_safe"
+    feature_root = (
+        tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_trial_ml_safe"
+    )
     erds_dir = feature_root / "sub-0001" / "eeg" / "features" / "erds"
     bursts_dir = feature_root / "sub-0001" / "eeg" / "features" / "bursts"
     assert (erds_dir / "features_erds.parquet").exists()
@@ -384,7 +403,9 @@ def test_prepare_study1_features_rejects_invalid_baseline_window_for_windowed_fa
     cfg["time_frequency_analysis"]["baseline_window"] = [0.0, -1.0]
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         try:
             prepare_study1_features(
                 subjects=["0001", "0002"],
@@ -407,7 +428,9 @@ def test_prepare_study1_features_rejects_invalid_aperiodic_metadata(tmp_path) ->
     cfg["study1"]["features"]["exploratory_feature_families"] = ["aperiodic"]
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         feature_pipeline = feature_pipeline_cls.return_value
 
         def _write_outputs(**kwargs) -> list[dict]:
@@ -444,7 +467,9 @@ def test_prepare_study1_features_rejects_iaf_enabled_metadata(tmp_path) -> None:
     cfg["study1"]["features"]["exploratory_feature_families"] = ["spectral"]
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         feature_pipeline = feature_pipeline_cls.return_value
 
         def _write_outputs(**kwargs) -> list[dict]:
@@ -481,7 +506,9 @@ def test_prepare_study1_features_rejects_non_trial_burst_threshold_metadata(tmp_
     cfg["study1"]["features"]["exploratory_feature_families"] = ["bursts"]
     _write_primary_targets(cfg)
 
-    with patch("studies.pain_study.study1.prepare_features.FeaturePipeline") as feature_pipeline_cls:
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
         feature_pipeline = feature_pipeline_cls.return_value
 
         def _write_outputs(**kwargs) -> list[dict]:
@@ -508,9 +535,7 @@ def test_prepare_study1_features_rejects_non_trial_burst_threshold_metadata(tmp_
         except ValueError as exc:
             assert "bursts.threshold_reference" in str(exc)
         else:
-            raise AssertionError(
-                "Expected non-trial burst threshold metadata to raise ValueError."
-            )
+            raise AssertionError("Expected non-trial burst threshold metadata to raise ValueError.")
 
 
 def test_clear_subject_feature_outputs_ignores_transient_missing_entries(tmp_path) -> None:
@@ -518,7 +543,13 @@ def test_clear_subject_feature_outputs_ignores_transient_missing_entries(tmp_pat
 
     cfg = _config(tmp_path / "derivatives")
     subject_root = (
-        tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_trial_ml_safe" / "sub-0001"
+        tmp_path
+        / "derivatives"
+        / "group"
+        / "multimodal"
+        / "study1"
+        / "features_trial_ml_safe"
+        / "sub-0001"
     )
     subject_root.mkdir(parents=True, exist_ok=True)
 

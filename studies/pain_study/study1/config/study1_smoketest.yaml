@@ -9,6 +9,7 @@ study1:
     method: "lss"
     normalization: "none"
     round_decimals: 3
+    trials_per_block: 11
     names: ["NPS", "SIIPS1"]
     signature_manifest_path: "signature_manifest.yaml"
     signature_provenance:
@@ -45,7 +46,7 @@ study1:
       continuous_columns:
         - "block"
         - "onset"
-        - "trial_index"
+        - "within_block_trial"
         - "hrf_weighted_framewise_displacement"
         - "hrf_weighted_std_dvars"
         - "hrf_weighted_fp1_fp2_high_frequency_power"

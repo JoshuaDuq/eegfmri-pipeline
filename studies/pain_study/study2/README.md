@@ -84,7 +84,9 @@ Sensor-level linear feature patterns are interpreted with the Haufe transformati
 linear (Haufe et al., 2014). For the primary ElasticNet model, the pattern is computed within each
 outer fold using training-fold statistics.
 
-$$A_{\mathrm{Haufe}} = \Sigma_{X,\mathrm{train}} \, W.$$
+$$
+A_{\mathrm{Haufe}} = \Sigma_{X,\mathrm{train}} \, W.
+$$
 
 Here, $\Sigma_{X,\mathrm{train}}$ is the training-fold feature covariance matrix and $W$ is the
 fitted weight vector in the same feature space. Because Study 1 standardizes features to zero mean
@@ -94,7 +96,9 @@ $\Sigma_{X,\mathrm{train}}$ is the training-fold correlation matrix.
 For nonlinear models, Random Forest and BandTemporalRegressor maps are reported as
 prediction-covariance association maps.
 
-$$A_{\mathrm{assoc}} \propto \mathrm{Cov}(X_{\mathrm{features}},\; \hat{y}_{\mathrm{test}}).$$
+$$
+A_{\mathrm{assoc}} \propto \mathrm{Cov}(X_{\mathrm{features}},\; \hat{y}_{\mathrm{test}}).
+$$
 
 Source-space follow-up uses spectral power features. Source-space power is recomputed from
 inverse-projected voltage time series. Complexity topographies remain sensor-level analyses.
@@ -132,7 +136,9 @@ prediction-covariance mapping. Its spatio-temporal maps are exploratory.
 Pain-evoked high-frequency oscillations are largely induced and non-phase-locked. The
 spatio-temporal map is computed on instantaneous power envelopes.
 
-$$A_{\mathrm{assoc}}(t) \propto \mathrm{Cov}(E_{\mathrm{test}}(t),\; \hat{y}_{\mathrm{test}}).$$
+$$
+A_{\mathrm{assoc}}(t) \propto \mathrm{Cov}(E_{\mathrm{test}}(t),\; \hat{y}_{\mathrm{test}}).
+$$
 
 This analysis produces maps with dimensions bands, channels, and time. Time-resolved analyses are
 evaluated within predefined early, mid, and late plateau windows to control temporal multiplicity.
@@ -248,7 +254,9 @@ Parallel maps are computed for the actual held-out residual target and the full-
 error, allowing contribution-associated source patterns to be compared with target-associated and
 error-associated source patterns.
 
-$$\mathrm{Assoc}(\text{processed source power},\; r_{\mathrm{NPS-L2}}).$$
+$$
+\mathrm{Assoc}(\text{processed source power},\; r_{\mathrm{NPS-L2}}).
+$$
 
 $$
 \mathrm{Assoc}(
@@ -365,9 +373,9 @@ morphing to fsaverage. Positive values indicate greater processed source power o
 band-specific prediction contribution after nuisance and opposite-band adjustment. Vertex-wise
 one-sample $t$ statistics test whether the mean association differs from zero.
 
-Vertex-wise statistics exceeding an uncorrected cluster-forming threshold of $p < 0.01$ are
+Vertex-wise statistics exceeding an uncorrected cluster-forming threshold of $p \lt 0.01$ are
 aggregated into contiguous sign-preserving clusters. Results are checked under thresholds of
-$p < 0.001$ and $p < 0.05$ and report whether the primary cluster retains significance and sign.
+$p \lt 0.001$ and $p \lt 0.05$ and report whether the primary cluster retains significance and sign.
 Family-wise error correction uses a two-sided maximum statistic across positive and negative
 clusters within each band. Band-level p-values for $A_\alpha$ and $A_\beta$ are Holm-corrected as
 the primary source family.

@@ -8,7 +8,7 @@ from studies.pain_study.study1.feature_benchmark import _feature_benchmark_confi
 LEVEL2_CONTINUOUS_COLUMNS = [
     "block",
     "onset",
-    "trial_index",
+    "within_block_trial",
     "hrf_weighted_framewise_displacement",
     "hrf_weighted_std_dvars",
     "hrf_weighted_fp1_fp2_high_frequency_power",
@@ -72,6 +72,7 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
             "block": [1, 1],
             "onset": [10.0, 20.0],
             "trial_index": [1, 2],
+            "within_block_trial": [1, 2],
             "hrf_weighted_framewise_displacement": [0.1, 0.2],
             "hrf_weighted_std_dvars": [0.5, 0.6],
             "hrf_weighted_fp1_fp2_high_frequency_power": [1.1, 1.2],

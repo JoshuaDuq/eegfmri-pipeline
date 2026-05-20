@@ -39,6 +39,7 @@ def _write_primary_targets(
                 "task": task,
                 "block": 1,
                 "trial_index": 1,
+                "within_block_trial": 1,
                 "onset": 10.0,
                 "duration": 1.0,
                 "NPS": 1.0,
@@ -136,9 +137,7 @@ def test_resolve_primary_subjects_returns_sorted_available(tmp_path) -> None:
     cfg = _config(tmp_path / "derivatives")
     _write_primary_targets(cfg, subjects=["sub-0003", "sub-0001", "sub-0002"])
 
-    resolved = resolve_primary_subjects(
-        requested_subjects=[], task="pain", config=cfg
-    )
+    resolved = resolve_primary_subjects(requested_subjects=[], task="pain", config=cfg)
 
     assert resolved == ["sub-0001", "sub-0002", "sub-0003"]
 
@@ -163,9 +162,7 @@ def test_resolve_primary_subjects_rejects_missing_requested(tmp_path) -> None:
     _write_primary_targets(cfg, subjects=["sub-0001", "sub-0002"])
 
     with pytest.raises(ValueError, match="missing"):
-        resolve_primary_subjects(
-            requested_subjects=["0001", "9999"], task="pain", config=cfg
-        )
+        resolve_primary_subjects(requested_subjects=["0001", "9999"], task="pain", config=cfg)
 
 
 def test_resolve_primary_subjects_enforces_min_subjects(tmp_path) -> None:
@@ -176,9 +173,7 @@ def test_resolve_primary_subjects_enforces_min_subjects(tmp_path) -> None:
     _write_primary_targets(cfg, subjects=["sub-0001", "sub-0002"])
 
     with pytest.raises(ValueError, match="at least 5 subjects"):
-        resolve_primary_subjects(
-            requested_subjects=[], task="pain", config=cfg
-        )
+        resolve_primary_subjects(requested_subjects=[], task="pain", config=cfg)
 
 
 def test_resolve_primary_subjects_rejects_wrong_task(tmp_path) -> None:
@@ -188,9 +183,7 @@ def test_resolve_primary_subjects_rejects_wrong_task(tmp_path) -> None:
     _write_primary_targets(cfg, task="pain")
 
     with pytest.raises(ValueError, match="no rows"):
-        resolve_primary_subjects(
-            requested_subjects=[], task="rest", config=cfg
-        )
+        resolve_primary_subjects(requested_subjects=[], task="rest", config=cfg)
 
 
 ###################################################################
@@ -284,10 +277,20 @@ def test_load_primary_target_table_rejects_empty_table(tmp_path) -> None:
     target_path = primary_targets_parquet_path(cfg)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
-        {col: pd.Series(dtype=str) for col in (
-            "subject_id", "task", "block", "trial_index",
-            "onset", "duration", "NPS", "SIIPS1",
-        )}
+        {
+            col: pd.Series(dtype=str)
+            for col in (
+                "subject_id",
+                "task",
+                "block",
+                "trial_index",
+                "within_block_trial",
+                "onset",
+                "duration",
+                "NPS",
+                "SIIPS1",
+            )
+        }
     ).to_parquet(target_path, index=False)
 
     with pytest.raises(ValueError, match="empty"):

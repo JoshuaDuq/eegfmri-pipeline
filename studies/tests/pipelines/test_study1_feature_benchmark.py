@@ -65,6 +65,7 @@ def _write_primary_targets(config: DotConfig) -> Path:
             "task": ["pain", "pain", "pain", "pain"],
             "block": [1, 1, 1, 1],
             "trial_index": [1, 2, 1, 2],
+            "within_block_trial": [1, 2, 1, 2],
             "onset": [1.0, 2.0, 1.0, 2.0],
             "duration": [0.5, 0.5, 0.5, 0.5],
             "pain_binary_coded": [0, 1, 0, 1],
@@ -153,8 +154,7 @@ def _write_prepared_feature_rows(
     if primary_erp_subtraction is not None:
         metadata["primary_erp_subtraction"] = primary_erp_subtraction
     (metadata_dir / "extraction_config.json").write_text(
-        json.dumps(metadata)
-        + "\n",
+        json.dumps(metadata) + "\n",
         encoding="utf-8",
     )
 
@@ -166,13 +166,7 @@ def _write_clean_events(
     task: str,
     n_trials: int,
 ) -> None:
-    events_dir = (
-        Path(config.get("paths.deriv_root"))
-        / "preprocessed"
-        / "eeg"
-        / subject_id
-        / "eeg"
-    )
+    events_dir = Path(config.get("paths.deriv_root")) / "preprocessed" / "eeg" / subject_id / "eeg"
     events_dir.mkdir(parents=True, exist_ok=True)
     trial_ids = np.arange(1, n_trials + 1, dtype=int)
     pd.DataFrame(
@@ -201,6 +195,7 @@ def _write_four_subject_targets(config: DotConfig, *, task: str, n_trials: int) 
                     "task": task,
                     "block": ((trial_id - 1) // 3) + 1,
                     "trial_index": trial_id,
+                    "within_block_trial": ((trial_id - 1) % 3) + 1,
                     "onset": float(trial_id * 10),
                     "duration": 1.0,
                     "NPS": float(subject_number + trial_id * 0.25),
@@ -291,7 +286,7 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
             task="pain",
             config=cfg,
             logger=logging.getLogger(__name__),
-    )
+        )
 
     assert len(outputs) == 10
     assert len(captured_calls) == 10
@@ -750,12 +745,8 @@ def test_model_comparison_staged_residual_learning_scores_raw_nuisance_model() -
     )
 
     for record, (train_idx, test_idx) in zip(records, outer_folds):
-        design_train = np.column_stack(
-            [np.ones(len(train_idx), dtype=float), nuisance[train_idx]]
-        )
-        design_test = np.column_stack(
-            [np.ones(len(test_idx), dtype=float), nuisance[test_idx]]
-        )
+        design_train = np.column_stack([np.ones(len(train_idx), dtype=float), nuisance[train_idx]])
+        design_test = np.column_stack([np.ones(len(test_idx), dtype=float), nuisance[test_idx]])
         coefficients, *_ = np.linalg.lstsq(design_train, y[train_idx], rcond=None)
         raw_nuisance_prediction = design_test @ coefficients
         ss_res = np.sum((y[test_idx] - raw_nuisance_prediction) ** 2)

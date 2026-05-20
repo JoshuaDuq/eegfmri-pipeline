@@ -10,12 +10,12 @@ import pandas as pd
 from eeg_pipeline.utils.config.loader import get_config_value, require_config_value
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 
-
 REQUIRED_PRIMARY_COLUMNS = (
     "subject_id",
     "task",
     "block",
     "trial_index",
+    "within_block_trial",
     "onset",
     "duration",
     "NPS",
@@ -61,7 +61,10 @@ def study1_feature_table_path(
     family_name = str(family).strip()
     if not family_name:
         raise ValueError("Feature family names must be non-empty.")
-    return study1_feature_family_dir(config, subject_id, family_name) / f"features_{family_name}.parquet"
+    return (
+        study1_feature_family_dir(config, subject_id, family_name)
+        / f"features_{family_name}.parquet"
+    )
 
 
 def study1_feature_metadata_path(
@@ -69,7 +72,11 @@ def study1_feature_metadata_path(
     subject_id: str,
     family: str,
 ) -> Path:
-    return study1_feature_family_dir(config, subject_id, family) / "metadata" / "extraction_config.json"
+    return (
+        study1_feature_family_dir(config, subject_id, family)
+        / "metadata"
+        / "extraction_config.json"
+    )
 
 
 def primary_targets_parquet_path(config: Any) -> Path:
@@ -152,7 +159,8 @@ def subject_target_rows(
     subject_label = _normalize_subject(subject_id)
     table = load_primary_target_table(config)
     subject_rows = table.loc[
-        (table["subject_id"].astype(str) == subject_label) & (table["task"].astype(str) == str(task))
+        (table["subject_id"].astype(str) == subject_label)
+        & (table["task"].astype(str) == str(task))
     ].copy()
     if subject_rows.empty:
         raise ValueError(
@@ -169,7 +177,9 @@ def resolve_primary_target_name(config: Any, target_name: str) -> str:
     allowed = {str(name).strip() for name in names if str(name).strip()}
     resolved = str(target_name).strip()
     if resolved not in allowed:
-        raise ValueError(f"Invalid Study 1 target '{target_name}'. Expected one of {sorted(allowed)}.")
+        raise ValueError(
+            f"Invalid Study 1 target '{target_name}'. Expected one of {sorted(allowed)}."
+        )
     return resolved
 
 

@@ -12,7 +12,7 @@ from studies.tests.test_support import REPO_ROOT
 LEVEL2_CONTINUOUS_COLUMNS = [
     "block",
     "onset",
-    "trial_index",
+    "within_block_trial",
     "hrf_weighted_framewise_displacement",
     "hrf_weighted_std_dvars",
     "hrf_weighted_fp1_fp2_high_frequency_power",

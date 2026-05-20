@@ -13,7 +13,6 @@ import pytest
 
 from studies.tests.test_support import DotConfig
 
-
 NPS_MASK_HASH = "0" * 64
 SIIPS1_MASK_HASH = "1" * 64
 
@@ -81,6 +80,7 @@ def _base_config(root: Path) -> DotConfig:
                     "metric": "dot",
                     "normalization": "none",
                     "round_decimals": 3,
+                    "trials_per_block": 11,
                     "contrast_name": "pain_vs_nonpain",
                     "signature_manifest_path": "signature_manifest.yaml",
                     "fmriprep_space": "MNI152NLin2009cAsym",
@@ -463,6 +463,113 @@ def test_prepare_primary_targets_aligns_signatures_by_acquisition_run_not_task_b
         assert list(frame["trial_index"]) == [1, 2, 3, 4]
         assert list(frame["NPS"]) == [1.1, 1.2, 1.3, 1.4]
         assert list(frame["SIIPS1"]) == [2.1, 2.2, 2.3, 2.4]
+
+
+def test_prepare_primary_targets_records_within_block_trial_number() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        cfg["study1"]["targets"]["trials_per_block"] = 11
+        _write_signature_outputs(root, trial_count=4)
+        events = pd.DataFrame(
+            {
+                "block": [1, 1, 2, 2],
+                "run_id": [1, 1, 1, 1],
+                "trial_number": [1, 2, 12, 13],
+                "pain_binary_coded": [1, 0, 1, 0],
+                "onset": [10.0, 20.0, 30.0, 40.0],
+                "duration": [0.001, 0.001, 0.001, 0.001],
+            }
+        )
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject",
+                side_effect=[
+                    (
+                        pd.Series([1.0, 3.0, 11.0, 13.0]),
+                        "NPS",
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [1000, 1000, 1000, 1000],
+                                "fmri_scoring_mask_sha256": [NPS_MASK_HASH] * 4,
+                            }
+                        ),
+                    ),
+                    (
+                        pd.Series([2.0, 4.0, 12.0, 14.0]),
+                        "SIIPS1",
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [800, 800, 800, 800],
+                                "fmri_scoring_mask_sha256": [SIIPS1_MASK_HASH] * 4,
+                            }
+                        ),
+                    ),
+                ],
+            ),
+        ):
+            out_path = prepare_primary_targets(
+                subjects=["0001"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+
+        frame = pd.read_parquet(out_path)
+        assert list(frame["trial_index"]) == [1, 2, 12, 13]
+        assert list(frame["within_block_trial"]) == [1, 2, 1, 2]
+
+
+def test_prepare_primary_targets_rejects_global_trial_block_mismatch() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        events = pd.DataFrame(
+            {
+                "block": [1, 1],
+                "run_id": [1, 1],
+                "trial_number": [1, 12],
+                "pain_binary_coded": [1, 0],
+                "onset": [10.0, 20.0],
+                "duration": [0.001, 0.001],
+            }
+        )
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject"
+            ) as load_target,
+        ):
+            with pytest.raises(ValueError, match="trial-order labels.*task blocks"):
+                prepare_primary_targets(
+                    subjects=["0001"],
+                    task="pain",
+                    config=cfg,
+                    logger=logging.getLogger(__name__),
+                )
+
+        load_target.assert_not_called()
 
 
 def test_prepare_primary_targets_records_nuisance_columns_without_residual_targets() -> None:

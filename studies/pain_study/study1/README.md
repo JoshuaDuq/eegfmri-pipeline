@@ -32,11 +32,15 @@ after the primary inference.
 The primary hypothesis is that EEG features add out-of-sample predictive value for trial-wise fMRI
 pain-signature expression beyond a nuisance-only model.
 
-$$\Delta R^2_{\text{LOSO}} = R^2_{\text{nuisance+EEG}} - R^2_{\text{nuisance-only}} > 0.$$
+$$
+\Delta R^2_{\text{LOSO}} = R^2_{\text{nuisance+EEG}} - R^2_{\text{nuisance-only}} > 0.
+$$
 
 The primary confirmatory estimand is the subject-weighted mean incremental raw-target prediction:
 
-$$\Delta R^2_{\text{LOSO}} = \frac{1}{S}\sum_{s=1}^{S} \Delta R_s^2.$$
+$$
+\Delta R^2_{\text{LOSO}} = \frac{1}{S}\sum_{s=1}^{S} \Delta R_s^2.
+$$
 
 The primary cell supports the hypothesis when $\Delta R^2_{\text{LOSO}} > 0$ and the one-sided
 upper-tail permutation p-value is ≤ 0.05. Effect magnitude and bootstrap confidence intervals are
@@ -288,7 +292,9 @@ Primary LSS beta maps are not smoothed, z-scored, or trial-normalized before sco
 FWHM smoothing sensitivity repeats signature scoring after target-map construction. Signature
 expression is:
 
-$$y_{s,i}^{(k)} = \sum_{v \in V^{(k)}} \beta_{s,i}(v) \, M_k(v),$$
+$$
+y_{s,i}^{(k)} = \sum_{v \in V^{(k)}} \beta_{s,i}(v) \, M_k(v),
+$$
 
 where $\beta_{s,i}(v)$ is the LSS-derived BOLD estimate for subject $s$, trial $i$, voxel $v$, and
 $M_k(v)$ is the a priori weight map for target $k \in \{\text{NPS}, \text{SIIPS1}\}$.
