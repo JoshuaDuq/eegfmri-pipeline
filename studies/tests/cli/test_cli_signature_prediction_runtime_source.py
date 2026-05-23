@@ -49,6 +49,17 @@ def test_run_signature_prediction_loads_study_yaml_into_runtime_config(
 study1:
   targets:
     contrast_name: "custom_contrast"
+  feature_benchmark:
+    n_perm: 1
+    permutation_scheme: "within_subject"
+    max_invalid_permutation_fraction: 0.2
+  temporal_negative_controls:
+    feature_transform: "raw_log_power"
+    feature_baseline_window: null
+    windows:
+      prestimulus: [-1.0, 0.0]
+    wrong_lag_windows:
+      active: [1.0, 2.0]
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -82,3 +93,84 @@ study1:
         "subjects": ["0001"],
         "task": "pain",
     }
+
+
+def test_run_signature_prediction_all_subjects_prepare_targets_keeps_fmri_subjects(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "studies.pain_study.cli.signature_prediction.SignaturePredictionRunner",
+        _CaptureSignaturePredictionRunner,
+    )
+    bids_fmri_root = tmp_path / "bids_fmri"
+    (bids_fmri_root / "sub-0001" / "func").mkdir(parents=True)
+
+    args = _build_args(
+        [
+            "signature-prediction",
+            "prepare-targets",
+            "--all-subjects",
+            "--task",
+            "pain",
+        ]
+    )
+    config = ConfigDict({"paths": {"bids_fmri_root": str(bids_fmri_root)}})
+    run_signature_prediction(args, ["0001", "0006eegonly"], config)
+
+    assert _CaptureSignaturePredictionRunner.last_call == {
+        "mode": "prepare-targets",
+        "subjects": ["0001"],
+        "task": "pain",
+    }
+
+
+def test_run_signature_prediction_all_subjects_later_stage_uses_target_table(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "studies.pain_study.cli.signature_prediction.SignaturePredictionRunner",
+        _CaptureSignaturePredictionRunner,
+    )
+
+    args = _build_args(
+        [
+            "signature-prediction",
+            "feature-benchmark",
+            "--all-subjects",
+            "--task",
+            "pain",
+        ]
+    )
+    run_signature_prediction(args, ["0001", "0006eegonly"], ConfigDict({}))
+
+    assert _CaptureSignaturePredictionRunner.last_call == {
+        "mode": "feature-benchmark",
+        "subjects": [],
+        "task": "pain",
+    }
+
+
+def test_run_signature_prediction_dry_run_does_not_dispatch(tmp_path, monkeypatch) -> None:
+    _CaptureSignaturePredictionRunner.last_call = None
+    monkeypatch.setattr(
+        "studies.pain_study.cli.signature_prediction.SignaturePredictionRunner",
+        _CaptureSignaturePredictionRunner,
+    )
+    bids_fmri_root = tmp_path / "bids_fmri"
+    (bids_fmri_root / "sub-0001" / "func").mkdir(parents=True)
+
+    args = _build_args(
+        [
+            "signature-prediction",
+            "prepare-targets",
+            "--all-subjects",
+            "--task",
+            "pain",
+            "--dry-run",
+        ]
+    )
+    config = ConfigDict({"paths": {"bids_fmri_root": str(bids_fmri_root)}})
+    run_signature_prediction(args, ["0001"], config)
+
+    assert _CaptureSignaturePredictionRunner.last_call is None

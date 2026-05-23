@@ -26,7 +26,7 @@ from studies.pain_study.study1.output_cleanup import (
 )
 
 
-WINDOWED_FEATURE_FAMILIES = {"erds", "bursts"}
+WINDOWED_FEATURE_FAMILIES = {"power", "erds", "bursts"}
 
 
 def _clear_subject_feature_outputs(

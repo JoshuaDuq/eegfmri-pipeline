@@ -55,6 +55,7 @@ from fmri_pipeline.analysis.trial_signatures import (
     _build_lss_events,
     _discover_runs,
     _extract_trials_for_run,
+    _prepare_confounds_for_first_level_model,
     run_trial_signature_extraction_for_subject,
 )
 
@@ -1306,6 +1307,130 @@ def test_trial_signature_extraction_requires_confounds_for_included_runs(tmp_pat
                 signature_root=None,
                 signature_specs=None,
             )
+
+
+def test_trial_signature_extraction_passes_censor_mask_to_first_level_model(tmp_path) -> None:
+    import nibabel as nib
+
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="MNI152NLin2009cAsym",
+        require_fmriprep=True,
+        runs=[1],
+        task="task",
+        name="pain",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="auto",
+        method="beta-series",
+        write_condition_betas=False,
+    )
+    bold_path = tmp_path / "sub-0001_task-task_run-01_space-MNI152NLin2009cAsym_desc-preproc_bold.nii.gz"
+    mask_path = tmp_path / "sub-0001_task-task_run-01_space-MNI152NLin2009cAsym_desc-brain_mask.nii.gz"
+    events_path = tmp_path / "sub-0001_task-task_run-01_events.tsv"
+    confounds_path = tmp_path / "sub-0001_task-task_run-01_desc-confounds_regressors.tsv"
+
+    image = nib.Nifti1Image(np.zeros((2, 2, 2, 3), dtype=np.float32), np.eye(4))
+    nib.save(image, bold_path)
+    nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4)), mask_path)
+    pd.DataFrame(
+        {
+            "onset": [0.0, 2.0],
+            "duration": [1.0, 1.0],
+            "trial_type": ["pain", "rest"],
+        }
+    ).to_csv(events_path, sep="\t", index=False)
+    pd.DataFrame(
+        {
+            "trans_x": [0.0, 0.1, 0.2],
+            "trans_y": [0.0, 0.1, 0.2],
+            "trans_z": [0.0, 0.1, 0.2],
+            "rot_x": [0.0, 0.1, 0.2],
+            "rot_y": [0.0, 0.1, 0.2],
+            "rot_z": [0.0, 0.1, 0.2],
+            "trans_x_derivative1": [None, 0.1, 0.2],
+            "trans_y_derivative1": [None, 0.1, 0.2],
+            "trans_z_derivative1": [None, 0.1, 0.2],
+            "rot_x_derivative1": [None, 0.1, 0.2],
+            "rot_y_derivative1": [None, 0.1, 0.2],
+            "rot_z_derivative1": [None, 0.1, 0.2],
+            "non_steady_state_outlier00": [1, 0, 0],
+        }
+    ).to_csv(confounds_path, sep="\t", index=False)
+
+    fit_kwargs = {}
+    effect_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
+
+    class FakeFirstLevelModel:
+        design_matrices_ = [
+            pd.DataFrame(
+                np.ones((3, 3), dtype=float),
+                columns=["trial_run-01_001_a", "trial_run-01_002_b", "constant"],
+            )
+        ]
+
+        def fit(self, *_args, **kwargs):
+            fit_kwargs.update(kwargs)
+            return self
+
+        def compute_contrast(self, _contrast, *, output_type):
+            return effect_img
+
+    with patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_runs",
+        return_value=[(1, bold_path, events_path, confounds_path)],
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._get_tr_from_bold",
+        return_value=2.0,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._discover_brain_mask_for_bold",
+        return_value=mask_path,
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._build_first_level_model",
+        return_value=FakeFirstLevelModel(),
+    ), patch(
+        "fmri_pipeline.analysis.trial_signatures._validate_design_matrices",
+        return_value=None,
+    ):
+        run_trial_signature_extraction_for_subject(
+            bids_fmri_root=tmp_path,
+            bids_derivatives=tmp_path,
+            deriv_root=tmp_path,
+            subject="0001",
+            cfg=cfg,
+            signature_root=None,
+            signature_specs=None,
+        )
+
+    assert fit_kwargs["sample_masks"].tolist() == [1, 2]
+    assert "non_steady_state_outlier00" not in fit_kwargs["confounds"].columns
+
+
+def test_prepare_confounds_standardizes_retained_volumes_and_fills_censored_only() -> None:
+    confounds = pd.DataFrame(
+        {
+            "motion": [None, 2.0, 4.0, 6.0],
+            "rotation_power2": [None, 1e-8, 2e-8, 3e-8],
+        }
+    )
+
+    prepared = _prepare_confounds_for_first_level_model(
+        confounds,
+        sample_mask=np.array([1, 2, 3], dtype=int),
+    )
+
+    assert prepared is not None
+    retained = prepared.iloc[[1, 2, 3]]
+    np.testing.assert_allclose(retained.mean(axis=0).to_numpy(dtype=float), [0.0, 0.0], atol=1e-12)
+    np.testing.assert_allclose(retained.std(axis=0, ddof=0).to_numpy(dtype=float), [1.0, 1.0])
+    np.testing.assert_allclose(prepared.iloc[0].to_numpy(dtype=float), [0.0, 0.0])
 
 
 def test_trial_signature_config_rejects_invalid_method() -> None:

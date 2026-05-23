@@ -63,10 +63,27 @@ func (m Model) subjectIndex(subject string) int {
 
 func (m Model) subjectStatus(subject string) subjectState {
 	status, ok := m.SubjectStatuses[subject]
+	var currentStatus subjectState
 	if !ok || status == "" {
-		return subjectPending
+		currentStatus = subjectPending
+	} else {
+		currentStatus = subjectState(status)
 	}
-	return subjectState(status)
+
+	// Dynamic status resolution for parallel/step-by-step pipelines
+	if currentStatus == subjectPending {
+		if m.Status == StatusRunning && m.SubjectCurrent == 0 {
+			return subjectRunning
+		}
+	}
+
+	if m.Status == StatusSuccess {
+		if currentStatus != subjectFailed {
+			return subjectDone
+		}
+	}
+
+	return currentStatus
 }
 
 func (m *Model) beginSubject(subject string) {
@@ -74,7 +91,7 @@ func (m *Model) beginSubject(subject string) {
 		return
 	}
 	if m.CurrentSubject != "" && !m.SubjectStartTime.IsZero() {
-		m.finishCurrentSubject(subjectDone)
+		m.finishSubject(m.CurrentSubject, subjectDone)
 	}
 
 	if m.SubjectCurrent < m.SubjectTotal || m.SubjectTotal == 0 {
@@ -90,26 +107,30 @@ func (m *Model) beginSubject(subject string) {
 	m.OperationTotal = 0
 }
 
-func (m *Model) finishCurrentSubject(status subjectState) {
-	subject := m.CurrentSubject
+func (m *Model) finishSubject(subject string, status subjectState) {
+	if subject == "" {
+		subject = m.CurrentSubject
+	}
 	if subject == "" {
 		return
 	}
 
-	if !m.SubjectStartTime.IsZero() && status == subjectDone {
-		m.SubjectDurations = append(m.SubjectDurations, time.Since(m.SubjectStartTime))
-	}
-
+	m.trackSubject(subject)
 	m.SubjectStatuses[subject] = string(status)
 	if status == subjectFailed {
 		m.recordFailedSubject(subject)
 	}
 
-	m.CurrentSubject = ""
-	m.CurrentOperation = ""
-	m.OperationCurrent = 0
-	m.OperationTotal = 0
-	m.SubjectStartTime = time.Time{}
+	if subject == m.CurrentSubject {
+		if !m.SubjectStartTime.IsZero() && status == subjectDone {
+			m.SubjectDurations = append(m.SubjectDurations, time.Since(m.SubjectStartTime))
+		}
+		m.CurrentSubject = ""
+		m.CurrentOperation = ""
+		m.OperationCurrent = 0
+		m.OperationTotal = 0
+		m.SubjectStartTime = time.Time{}
+	}
 }
 
 func (m *Model) recordFailedSubject(subject string) {
@@ -126,15 +147,37 @@ func (m Model) renderSubjectSummary(maxWidth int) string {
 		return ""
 	}
 
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	sepStyle := lipgloss.NewStyle().Foreground(styles.Border)
+
+	if m.SubjectCurrent == 0 {
+		var actionLabel string
+		switch m.Status {
+		case StatusRunning:
+			actionLabel = "Processing "
+		case StatusSuccess:
+			actionLabel = "Completed "
+		case StatusFailed:
+			actionLabel = "Failed "
+		case StatusCancelled:
+			actionLabel = "Cancelled "
+		default:
+			actionLabel = "Subjects "
+		}
+
+		line := labelStyle.Render(actionLabel) +
+			valueStyle.Render(fmt.Sprintf("%d subjects", m.SubjectTotal)) +
+			sepStyle.Render(" · ") +
+			valueStyle.Render(fmt.Sprintf("%.0f%%", m.Progress*100))
+		return styles.TruncateLine(line, maxWidth)
+	}
+
 	subjectCount := m.SubjectCurrent
 	if subjectCount > m.SubjectTotal {
 		subjectCount = m.SubjectTotal
 	}
 	pct := float64(subjectCount) / float64(m.SubjectTotal)
-
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	sepStyle := lipgloss.NewStyle().Foreground(styles.Border)
 
 	line := labelStyle.Render("Subjects ") +
 		valueStyle.Render(fmt.Sprintf("%d/%d", subjectCount, m.SubjectTotal)) +

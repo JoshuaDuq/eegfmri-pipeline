@@ -180,6 +180,35 @@ def test_compute_signature_expression_rejects_nonfinite_values_inside_fixed_mask
         )
 
 
+def test_compute_signature_expression_resamples_masked_effect_with_nonfinite_background(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "signatures"
+    root.mkdir(parents=True, exist_ok=True)
+    weight_path = root / "nps.nii.gz"
+    nib.save(
+        nib.Nifti1Image(np.ones((3, 3, 3), dtype=np.float32), np.eye(4)),
+        weight_path,
+    )
+
+    effect_data = np.ones((2, 2, 2), dtype=np.float32)
+    effect_data[0, 0, 0] = np.nan
+    effect_img = nib.Nifti1Image(effect_data, np.eye(4))
+    mask_data = np.ones((2, 2, 2), dtype=np.uint8)
+    mask_data[0, 0, 0] = 0
+    mask_img = nib.Nifti1Image(mask_data, np.eye(4))
+
+    results = compute_signature_expression(
+        stat_or_effect_img=effect_img,
+        signature_root=root,
+        signature_specs=[{"name": "NPS", "path": "nps.nii.gz"}],
+        mask_img=mask_img,
+    )
+
+    assert results[0].name == "NPS"
+    assert results[0].n_voxels > 0
+
+
 def test_compute_signature_expression_records_scoring_mask_extent_hash(
     tmp_path: Path,
 ) -> None:

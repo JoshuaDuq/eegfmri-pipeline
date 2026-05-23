@@ -42,6 +42,7 @@ func (m *Model) processOutputLine(line string) {
 			TotalSubjects int      `json:"total_subjects"`
 			Subjects      []string `json:"subjects"`
 			Message       string   `json:"message"`
+			Success       bool     `json:"success"`
 			CPU           float64  `json:"cpu"`
 			Memory        float64  `json:"memory"`
 			Epoch         string   `json:"epoch"`
@@ -73,8 +74,8 @@ func (m *Model) processOutputLine(line string) {
 
 				hasStepProgress := event.Total > 0
 				stepFraction := 0.0
-				if hasStepProgress {
-					stepFraction = float64(event.Current) / float64(event.Total)
+				if hasStepProgress && event.Current > 0 {
+					stepFraction = float64(event.Current-1) / float64(event.Total)
 				}
 				useSubjectProgress := m.SubjectTotal > 0 && m.SubjectCurrent > 0
 
@@ -83,7 +84,13 @@ func (m *Model) processOutputLine(line string) {
 					stepContrib := stepFraction / float64(m.SubjectTotal)
 					m.Progress = clampProgress(subjProgress + stepContrib)
 				} else if hasStepProgress {
-					m.Progress = clampProgress(stepFraction)
+					if m.SubjectTotal > 0 && !strings.Contains(m.Command, "preprocessing") {
+						// In sequential mode before first subject starts, scale down step contribution
+						m.Progress = clampProgress(stepFraction / float64(m.SubjectTotal))
+					} else {
+						// In parallel mode or when no subjects, step progress is the overall progress
+						m.Progress = clampProgress(stepFraction)
+					}
 				} else if event.Pct > 0 {
 					m.Progress = clampProgress(float64(event.Pct) / 100.0)
 				}
@@ -92,12 +99,16 @@ func (m *Model) processOutputLine(line string) {
 					m.addLog(fmt.Sprintf("  → %s (%d/%d)", event.Step, event.Current, event.Total))
 				}
 			case "subject_done":
-				m.finishCurrentSubject(subjectDone)
+				status := subjectDone
+				if !event.Success {
+					status = subjectFailed
+				}
+				m.finishSubject(event.Subject, status)
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent) / float64(m.SubjectTotal))
 				}
 			case "subject_failed":
-				m.finishCurrentSubject(subjectFailed)
+				m.finishSubject(event.Subject, subjectFailed)
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent) / float64(m.SubjectTotal))
 				}
@@ -107,7 +118,9 @@ func (m *Model) processOutputLine(line string) {
 				if m.SubjectTotal > 0 && m.SubjectCurrent == 0 {
 					m.SubjectCurrent = m.SubjectTotal
 				}
-				m.Progress = 1.0
+				if event.Success {
+					m.Progress = 1.0
+				}
 			}
 			return
 		} else {

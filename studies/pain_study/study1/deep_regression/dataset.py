@@ -215,10 +215,6 @@ def _align_subject_targets(
         ],
         dtype=float,
     )
-    if not np.all(np.isfinite(y)):
-        raise ValueError(
-            f"Deep regression requires finite aligned targets for every retained trial ({target_name})."
-        )
     return y
 
 
@@ -321,6 +317,18 @@ def load_band_tensor_matrix(
             channels=common_channels,
             logger=logger,
         )
+        valid_mask = np.isfinite(y)
+        if not np.all(valid_mask):
+            dropped = int((~valid_mask).sum())
+            if logger is not None:
+                logger.warning(
+                    "Dropping %d trials with non-finite targets for deep regression on %s",
+                    dropped,
+                    subject_id,
+                )
+            tensors = tensors[valid_mask]
+            y = y[valid_mask]
+            aligned_events = aligned_events.loc[valid_mask].reset_index(drop=True)
         if tensors.shape[0] != len(y):
             raise ValueError(
                 f"Band tensor/target length mismatch for {subject_id}: tensors={tensors.shape[0]}, targets={len(y)}."

@@ -16,6 +16,7 @@ from fmri_pipeline.utils.bold_discovery import (
     coerce_condition_value,
     discover_fmriprep_preproc_bold,
     get_tr_from_bold,
+    select_confounds_for_glm,
     select_consistent_run_source,
     select_confound_columns,
     select_confounds,
@@ -323,6 +324,83 @@ def test_select_confound_columns_rejects_missing_values_in_selected_confounds() 
 
     with pytest.raises(ValueError, match="missing values.*trans_x"):
         select_confound_columns(confounds, strategy="auto")
+
+
+def test_select_confounds_for_glm_censors_nonfinite_rows_marked_by_outlier() -> None:
+    confounds = pd.DataFrame(
+        {
+            "trans_x": [0.0, 0.1, 0.2],
+            "trans_y": [0.0, 0.1, 0.2],
+            "trans_z": [0.0, 0.1, 0.2],
+            "rot_x": [0.0, 0.1, 0.2],
+            "rot_y": [0.0, 0.1, 0.2],
+            "rot_z": [0.0, 0.1, 0.2],
+            "trans_x_derivative1": [None, 0.1, 0.1],
+            "trans_y_derivative1": [None, 0.1, 0.1],
+            "trans_z_derivative1": [None, 0.1, 0.1],
+            "rot_x_derivative1": [None, 0.1, 0.1],
+            "rot_y_derivative1": [None, 0.1, 0.1],
+            "rot_z_derivative1": [None, 0.1, 0.1],
+            "non_steady_state_outlier00": [1, 0, 0],
+        }
+    )
+
+    selected, columns, sample_mask = select_confounds_for_glm(confounds, strategy="auto")
+
+    assert selected is not None
+    assert "non_steady_state_outlier00" not in columns
+    assert sample_mask is not None
+    assert sample_mask.tolist() == [1, 2]
+    assert pd.isna(selected.loc[0, "trans_x_derivative1"])
+
+
+def test_select_confounds_for_glm_rejects_unmarked_nonfinite_rows() -> None:
+    confounds = pd.DataFrame(
+        {
+            "trans_x": [0.0, 0.1],
+            "trans_y": [0.0, 0.1],
+            "trans_z": [0.0, 0.1],
+            "rot_x": [0.0, 0.1],
+            "rot_y": [0.0, 0.1],
+            "rot_z": [0.0, 0.1],
+            "trans_x_derivative1": [0.1, None],
+            "trans_y_derivative1": [0.1, None],
+            "trans_z_derivative1": [0.1, None],
+            "rot_x_derivative1": [0.1, None],
+            "rot_y_derivative1": [0.1, None],
+            "rot_z_derivative1": [0.1, None],
+        }
+    )
+
+    with pytest.raises(ValueError, match="not marked by censor columns"):
+        select_confounds_for_glm(confounds, strategy="auto")
+
+
+def test_select_confounds_for_glm_censors_initial_derivative_nan_row() -> None:
+    confounds = pd.DataFrame(
+        {
+            "trans_x": [0.0, 0.1, 0.2],
+            "trans_y": [0.0, 0.1, 0.2],
+            "trans_z": [0.0, 0.1, 0.2],
+            "rot_x": [0.0, 0.1, 0.2],
+            "rot_y": [0.0, 0.1, 0.2],
+            "rot_z": [0.0, 0.1, 0.2],
+            "trans_x_derivative1": [None, 0.1, 0.2],
+            "trans_y_derivative1": [None, 0.1, 0.2],
+            "trans_z_derivative1": [None, 0.1, 0.2],
+            "rot_x_derivative1": [None, 0.1, 0.2],
+            "rot_y_derivative1": [None, 0.1, 0.2],
+            "rot_z_derivative1": [None, 0.1, 0.2],
+            "framewise_displacement": [None, 0.1, 0.2],
+        }
+    )
+
+    selected, _columns, sample_mask = select_confounds_for_glm(confounds, strategy="auto")
+
+    assert selected is not None
+    assert sample_mask is not None
+    assert sample_mask.tolist() == [1, 2]
+    assert pd.isna(selected.loc[0, "framewise_displacement"])
 
 
 def test_validate_design_matrices_rejects_rank_deficient_designs() -> None:

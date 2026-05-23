@@ -458,6 +458,42 @@ class TestFmriPreprocessingGapfill(unittest.TestCase):
         self.assertIn("/bids_filter.json", cmd_str)
         self.assertIn("/fs", cmd_str)
 
+    def test_apptainer_command_binds_templateflow_cache(self):
+        from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline
+
+        tmp = Path(tempfile.mkdtemp())
+        bids = tmp / "bids"
+        bids.mkdir(parents=True, exist_ok=True)
+        (bids / "sub-0001").mkdir(parents=True, exist_ok=True)
+        lic = tmp / "lic.txt"
+        lic.write_text("x", encoding="utf-8")
+        templateflow_home = tmp / "templateflow"
+        templateflow_home.mkdir(parents=True, exist_ok=True)
+
+        p = object.__new__(FmriPreprocessingPipeline)
+        p.deriv_root = tmp / "deriv"
+        p.deriv_root.mkdir(parents=True, exist_ok=True)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "paths": {"bids_fmri_root": str(bids)},
+                "fmri_preprocessing": {
+                    "engine": "apptainer",
+                    "fmriprep": {"fs_license_file": str(lic)},
+                },
+            }
+        )
+
+        with patch.dict("os.environ", {"TEMPLATEFLOW_HOME": str(templateflow_home)}), patch(
+            "fmri_pipeline.pipelines.fmri_preprocessing._require_executable"
+        ):
+            p.process_subject("0001", task="", dry_run=True)
+
+        cmd_str = p.logger.info.call_args[0][1]
+        self.assertIn("--env", cmd_str)
+        self.assertIn(f"TEMPLATEFLOW_HOME={templateflow_home.resolve()}", cmd_str)
+        self.assertIn(f"{templateflow_home.resolve()}:{templateflow_home.resolve()}", cmd_str)
+
     def test_freesurfer_license_from_env_var(self):
         from fmri_pipeline.pipelines.fmri_preprocessing import FmriPreprocessingPipeline
 

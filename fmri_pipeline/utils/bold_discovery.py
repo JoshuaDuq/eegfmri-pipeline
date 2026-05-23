@@ -412,6 +412,130 @@ def coerce_condition_value(value: Any, series: Any) -> Any:
     return value
 
 
+def _is_censor_column(column: str) -> bool:
+    return (
+        column.startswith("motion_outlier")
+        or column.startswith("non_steady_state_outlier")
+        or column.startswith("outlier")
+    )
+
+
+def _finite_numeric_frame(frame: pd.DataFrame, *, context: str) -> pd.DataFrame:
+    numeric = frame.apply(pd.to_numeric, errors="coerce")
+    nonfinite_columns = [
+        column
+        for column in numeric.columns
+        if not np.isfinite(numeric[column].to_numpy(dtype=float)).all()
+    ]
+    if nonfinite_columns:
+        raise ValueError(f"{context} must be finite numeric values in columns {nonfinite_columns}.")
+    return numeric
+
+
+def _sample_mask_from_censor_columns(censor_frame: pd.DataFrame) -> Optional[np.ndarray]:
+    if censor_frame.empty:
+        return None
+
+    numeric = _finite_numeric_frame(censor_frame, context="Censor confound columns")
+    values = numeric.to_numpy(dtype=float)
+    censor_rows = np.any(values > 0.0, axis=1)
+    sample_mask = np.flatnonzero(~censor_rows).astype(int)
+    if sample_mask.size == values.shape[0]:
+        return None
+    if sample_mask.size == 0:
+        raise ValueError("Censor confound columns remove every BOLD volume.")
+    return sample_mask
+
+
+def _exclude_initial_nonfinite_volume(
+    *,
+    sample_mask: Optional[np.ndarray],
+    nonfinite_values: np.ndarray,
+) -> Optional[np.ndarray]:
+    if nonfinite_values.shape[0] == 0 or not np.any(nonfinite_values[0, :]):
+        return sample_mask
+
+    retained = np.ones(nonfinite_values.shape[0], dtype=bool)
+    if sample_mask is not None:
+        retained[:] = False
+        retained[np.asarray(sample_mask, dtype=int)] = True
+    retained[0] = False
+    updated = np.flatnonzero(retained).astype(int)
+    if updated.size == 0:
+        raise ValueError("Initial-volume confound censoring removes every BOLD volume.")
+    return updated
+
+
+def select_confounds_for_glm(
+    confounds_df: pd.DataFrame,
+    strategy: str,
+    *,
+    auto_compcor_n: int = 5,
+) -> Tuple[Optional[pd.DataFrame], List[str], Optional[np.ndarray]]:
+    """Select confounds and explicit sample mask for nilearn first-level GLMs."""
+    cols = select_fmriprep_confounds_columns(
+        list(confounds_df.columns),
+        strategy=str(strategy or "auto"),
+        auto_compcor_n=int(auto_compcor_n),
+    )
+    if not cols:
+        return None, [], None
+
+    censor_cols = [column for column in cols if _is_censor_column(column)]
+    nuisance_cols = [column for column in cols if column not in censor_cols]
+    if not nuisance_cols:
+        return None, [], _sample_mask_from_censor_columns(confounds_df[censor_cols].copy())
+
+    nuisance = confounds_df[nuisance_cols].copy()
+    numeric = nuisance.apply(pd.to_numeric, errors="coerce")
+    nonfinite_values = ~np.isfinite(numeric.to_numpy(dtype=float))
+    if not nonfinite_values.any():
+        sample_mask = _sample_mask_from_censor_columns(confounds_df[censor_cols].copy())
+        return numeric, list(numeric.columns), sample_mask
+
+    sample_mask = _sample_mask_from_censor_columns(confounds_df[censor_cols].copy())
+    sample_mask = _exclude_initial_nonfinite_volume(
+        sample_mask=sample_mask,
+        nonfinite_values=nonfinite_values,
+    )
+    retained = np.zeros(len(numeric), dtype=bool)
+    if sample_mask is None:
+        retained[:] = True
+    else:
+        retained[sample_mask] = True
+    bad_rows = np.flatnonzero(np.any(nonfinite_values, axis=1) & retained)
+    if bad_rows.size:
+        bad_columns = [
+            str(numeric.columns[column_idx])
+            for column_idx in np.flatnonzero(nonfinite_values[bad_rows].any(axis=0))
+        ]
+        raise ValueError(
+            "Selected fMRIPrep confounds contain non-finite values in rows "
+            f"{bad_rows.tolist()} that are not marked by censor columns. "
+            f"Columns: {bad_columns}."
+        )
+
+    return numeric, list(numeric.columns), sample_mask
+
+
+def select_confounds_for_glm_from_path(
+    confounds_path: Optional[Path],
+    strategy: str,
+    *,
+    auto_compcor_n: int = 5,
+) -> Tuple[Optional[pd.DataFrame], List[str], Optional[np.ndarray]]:
+    """Read fMRIPrep confounds and select GLM regressors plus censor mask."""
+    if confounds_path is None or not confounds_path.exists():
+        return None, [], None
+
+    confounds_df = pd.read_csv(confounds_path, sep="\t")
+    return select_confounds_for_glm(
+        confounds_df,
+        strategy,
+        auto_compcor_n=auto_compcor_n,
+    )
+
+
 def select_confound_columns(
     confounds_df: pd.DataFrame,
     strategy: str,

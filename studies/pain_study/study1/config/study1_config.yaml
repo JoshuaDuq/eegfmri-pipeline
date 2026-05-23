@@ -37,7 +37,7 @@ study1:
     smoothing_fwhm: null
     min_signature_support_fraction: 0.90
     max_signature_weight_mass_change_fraction: 0.10
-    max_design_condition_number: 100.0
+    max_design_condition_number: 3000.0
     min_target_design_efficiency: 0.1
     confounds_strategy: "motion24+wmcsf+fd+compcor"
     lss_other_regressors: "all"

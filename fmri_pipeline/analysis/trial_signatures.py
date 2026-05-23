@@ -19,13 +19,70 @@ from fmri_pipeline.utils.bold_discovery import (
     discover_runless_fmriprep_preproc_bold as _discover_runless_fmriprep_preproc_bold,
     discover_single_runless_bids_pair,
     get_tr_from_bold as _get_tr_from_bold,
-    select_confounds as _select_confounds,
+    select_confounds_for_glm_from_path as _select_confounds_for_glm,
     select_consistent_run_source,
     validate_design_matrices as _validate_design_matrices,
 )
 from fmri_pipeline.utils.text import safe_slug as _safe_slug
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_confounds_for_first_level_model(
+    confounds: Optional[Any],
+    sample_mask: Optional[Any],
+) -> Optional[Any]:
+    if confounds is None:
+        return None
+
+    import numpy as np  # type: ignore
+
+    values = confounds.to_numpy(dtype=float)
+    nonfinite = ~np.isfinite(values)
+    if not nonfinite.any():
+        return confounds
+
+    retained = np.zeros(values.shape[0], dtype=bool)
+    if sample_mask is None:
+        retained[:] = True
+    else:
+        retained[np.asarray(sample_mask, dtype=int)] = True
+    if np.any(nonfinite & retained[:, None]):
+        raise ValueError("First-level confounds contain non-finite values in retained volumes.")
+
+    prepared = confounds.copy()
+    for column in prepared.columns:
+        column_values = prepared[column].to_numpy(dtype=float)
+        missing_rows = ~np.isfinite(column_values)
+        if not missing_rows.any():
+            continue
+        retained_values = column_values[retained]
+        finite_retained = retained_values[np.isfinite(retained_values)]
+        if finite_retained.size == 0:
+            raise ValueError(
+                "First-level confounds cannot be prepared because retained volumes contain "
+                f"no finite values for {column!r}."
+            )
+        column_values[missing_rows] = float(finite_retained.mean())
+        prepared[column] = column_values
+
+    values = prepared.to_numpy(dtype=float)
+    retained_values = values[retained, :]
+    means = retained_values.mean(axis=0)
+    scales = retained_values.std(axis=0)
+    invalid_scales = [
+        str(prepared.columns[index])
+        for index, scale in enumerate(scales)
+        if not math.isfinite(float(scale)) or float(scale) <= 0.0
+    ]
+    if invalid_scales:
+        raise ValueError(
+            "First-level confounds must vary across retained volumes before GLM fitting. "
+            f"Constant columns: {invalid_scales}."
+        )
+
+    scaled = (values - means) / scales
+    return type(prepared)(scaled, columns=prepared.columns, index=prepared.index)
 
 
 def _normalize_input_source(input_source: str) -> str:
@@ -1006,6 +1063,7 @@ def run_trial_signature_extraction_for_subject(
     cfg: TrialSignatureExtractionConfig,
     signature_root: Optional[Path],
     signature_specs: Optional[List[Any]] = None,
+    signature_mask_img: Optional[Any] = None,
     output_dir: Optional[Path] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
@@ -1136,6 +1194,7 @@ def run_trial_signature_extraction_for_subject(
 
         confounds = None
         conf_cols: List[str] = []
+        sample_mask = None
         if confounds_strategy not in {"none", "no", "off"}:
             if confounds_path is None or not confounds_path.exists():
                 raise ValueError(
@@ -1143,20 +1202,25 @@ def run_trial_signature_extraction_for_subject(
                     "confounds_strategy is 'none'. "
                     f"Missing confounds for {bold_path.name}."
                 )
-            confounds, conf_cols = _select_confounds(
+            confounds, conf_cols, sample_mask = _select_confounds_for_glm(
                 confounds_path,
                 confounds_strategy,
-                logger=logger,
             )
             if confounds is None or not conf_cols:
                 raise ValueError(
                     "Trial-wise fMRI GLMs require at least one confound regressor for every "
                     f"included run. Strategy={confounds_strategy!r}, file={confounds_path}."
                 )
+            confounds = _prepare_confounds_for_first_level_model(confounds, sample_mask)
 
         if cfg.method == "beta-series":
             flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
-            flm.fit(bold_path, events=modeled_events, confounds=confounds)
+            flm.fit(
+                bold_path,
+                events=modeled_events,
+                confounds=confounds,
+                sample_masks=sample_mask,
+            )
             _validate_design_matrices(
                 flm,
                 context=f"Trial-wise beta-series GLM ({bold_path.name})",
@@ -1227,7 +1291,7 @@ def run_trial_signature_extraction_for_subject(
                         stat_or_effect_img=beta_img,
                         signature_root=signature_root,
                         signature_specs=signature_specs,
-                        mask_img=mask_img,
+                        mask_img=signature_mask_img if signature_mask_img is not None else mask_img,
                         signatures=cfg.signatures,
                         min_support_fraction=cfg.min_signature_support_fraction,
                         max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
@@ -1302,7 +1366,12 @@ def run_trial_signature_extraction_for_subject(
                     trial=t, all_trials=trials, original_events_df=events_df, cfg=cfg
                 )
                 flm = _build_first_level_model(tr=tr, cfg=cfg, mask_img=mask_img, logger=logger)
-                flm.fit(bold_path, events=lss_events, confounds=confounds)
+                flm.fit(
+                    bold_path,
+                    events=lss_events,
+                    confounds=confounds,
+                    sample_masks=sample_mask,
+                )
                 _validate_design_matrices(
                     flm,
                     context=(
@@ -1359,7 +1428,7 @@ def run_trial_signature_extraction_for_subject(
                         stat_or_effect_img=beta_img,
                         signature_root=signature_root,
                         signature_specs=signature_specs,
-                        mask_img=mask_img,
+                        mask_img=signature_mask_img if signature_mask_img is not None else mask_img,
                         signatures=cfg.signatures,
                         min_support_fraction=cfg.min_signature_support_fraction,
                         max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,

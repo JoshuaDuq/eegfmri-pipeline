@@ -19,6 +19,7 @@ from eeg_pipeline.utils.config.roots import (
 
 FS_LICENSE_ENV_VAR = "EEG_PIPELINE_FREESURFER_LICENSE"
 FS_LICENSE_DEFAULT_PATH = "~/license.txt"
+TEMPLATEFLOW_ENV_VAR = "TEMPLATEFLOW_HOME"
 MACOS_METADATA_FILENAMES = {".DS_Store"}
 MACOS_METADATA_PREFIX = "._"
 BIDS_SANITIZED_SOURCE_MOUNT = "/bids_source"
@@ -60,6 +61,17 @@ def _resolve_fs_license_path(config: Any, fmriprep_cfg: dict[str, Any]) -> Path:
     if env_path is not None:
         return env_path
     return Path(FS_LICENSE_DEFAULT_PATH).expanduser().resolve()
+
+
+def _resolve_templateflow_home() -> Optional[Path]:
+    templateflow_home = _resolve_path(os.getenv(TEMPLATEFLOW_ENV_VAR))
+    if templateflow_home is None:
+        return None
+    if not templateflow_home.exists():
+        raise FileNotFoundError(
+            f"{TEMPLATEFLOW_ENV_VAR} does not exist: {templateflow_home}"
+        )
+    return templateflow_home
 
 
 def _is_macos_metadata_path(path: Path) -> bool:
@@ -369,6 +381,7 @@ class FmriPreprocessingPipeline(PipelineBase):
                 cmd += participant_args
             else:
                 executable_name = "apptainer"
+                templateflow_home = _resolve_templateflow_home()
                 cmd = [
                     "apptainer",
                     "run",
@@ -382,6 +395,13 @@ class FmriPreprocessingPipeline(PipelineBase):
                     "-B",
                     f"{fs_license}:/license.txt",
                 ]
+                if templateflow_home is not None:
+                    cmd += [
+                        "-B",
+                        f"{templateflow_home}:{templateflow_home}",
+                        "--env",
+                        f"{TEMPLATEFLOW_ENV_VAR}={templateflow_home}",
+                    ]
                 if needs_sanitized_source_mount:
                     cmd += ["-B", f"{bids_dir}:{BIDS_SANITIZED_SOURCE_MOUNT}"]
                 if bids_filter_file is not None:

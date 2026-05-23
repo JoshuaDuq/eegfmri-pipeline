@@ -68,14 +68,29 @@ COMMON_ARGS=(
 )
 ```
 
+If the frozen signature manifest is missing or the signature files changed, regenerate it before
+target preparation:
+
+```bash
+python -m studies.pain_study.study1.signature_manifest \
+  "$SIGNATURE_DIR" \
+  "$SIGNATURE_DIR/$SIGNATURE_MANIFEST"
+```
+
 ### Preprocessing Prerequisite
 
-Study 1 nuisance regression requires explicit task `block`, original `trial_number` or
-`trial_index`, HRF-weighted artifact columns
+Study 1 target alignment requires an explicit task `block` column or the protocol event column
+`run_id`, plus original `trial_number` or `trial_index`. Production nuisance regression requires
+HRF-weighted artifact columns
 `hrf_weighted_framewise_displacement`, `hrf_weighted_std_dvars`, and
 `hrf_weighted_fp1_fp2_high_frequency_power`, plus `residual_ecg_coupling`. The raw Fp1/Fp2
 artifact proxy remains `fp1_fp2_high_frequency_power`; it is an upstream input to the HRF-weighted
 covariate and artifact-censoring audits, not the Level 2 nuisance column.
+
+The smoke-test config uses the nuisance columns available in the current cleaned Kingston events:
+`block`, `onset`, `within_block_trial`, `residual_ecg_coupling`, `stimulus_temp`, and
+`selected_surface`. This keeps the smoke report structurally identical to the production
+incremental benchmark while avoiding production-only HRF-weighted artifact prerequisites.
 
 For a formal rerun, prefer a new output root rather than mixing outputs from different configs or
 dates:
@@ -115,6 +130,11 @@ Use all discoverable subjects only when the BIDS and derivative roots are alread
 ```bash
 SUBJECT_ARGS=(--all-subjects)
 ```
+
+For `prepare-targets`, Study 1 filters `--all-subjects` to subjects with task fMRI `func`
+directories and logs EEG-only exclusions. Later stages intentionally resolve their analysis cohort
+from the prepared primary target table, so rerun `prepare-targets` after changing the intended
+multimodal subject set.
 
 ### Audit Checkpoints
 
@@ -323,9 +343,13 @@ Sidecars and stale outputs should be removed or isolated before formal reporting
 `prepare-targets` fails fast when the fMRI inputs are not valid for trial-wise signature
 extraction. Two common blockers are:
 
-- selected fMRIPrep confounds contain missing values, often in derivative or framewise-displacement
-  columns; fix the confounds file or use an explicitly justified confound/censoring policy
-- trial beta images contain non-finite voxels that require continuous resampling to the signature
-  grid; align the image and signature grids or repair the image before scoring
+- selected fMRIPrep confounds contain non-finite values in retained volumes; fMRIPrep
+  motion-outlier/non-steady-state columns and the undefined initial derivative or
+  framewise-displacement row are converted to a Nilearn `sample_mask`, but any non-finite nuisance
+  value that remains in a retained volume is an error
+- trial beta images contain non-finite voxels inside the analysis mask; non-finite background
+  outside the mask is filled only to permit continuous resampling, but in-mask non-finite values
+  require repairing the image or mask
 
-Do not zero-fill nuisance regressors or mask away non-finite voxels inside Study 1 as a workaround.
+Do not zero-fill retained nuisance regressors or mask away non-finite voxels inside Study 1 as a
+workaround.

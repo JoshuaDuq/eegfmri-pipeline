@@ -90,6 +90,9 @@ Thumbs.db
 output.json
 columns_sample.txt
 
+### Local workflow state ###
+local_workflows/
+
 ### R ###
 .Rhistory
 .RData

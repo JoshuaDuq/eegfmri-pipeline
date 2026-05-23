@@ -57,3 +57,14 @@ def test_pain_study_package_layout_and_metadata() -> None:
         "config/**/*.label",
         "README.md",
     ]
+
+
+def test_studies_package_has_installable_pyproject() -> None:
+    private_config = tomllib.loads(
+        (REPO_ROOT / "studies" / "private_package.toml").read_text(encoding="utf-8")
+    )
+    install_config = tomllib.loads(
+        (REPO_ROOT / "studies" / "pyproject.toml").read_text(encoding="utf-8")
+    )
+
+    assert install_config == private_config

@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -20,11 +20,15 @@ from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root, resolve_fmri
 from eeg_pipeline.utils.data.fmri_signature_targets import (
     load_fmri_signature_target_for_subject,
     parse_run_label_to_int,
+    find_block_column,
+    _first_finite_numeric,
 )
 from fmri_pipeline.analysis.trial_signatures import (
     TrialSignatureExtractionConfig,
+    _discover_runs,
     run_trial_signature_extraction_for_subject,
 )
+from fmri_pipeline.utils.bold_discovery import discover_brain_mask_for_bold
 from fmri_pipeline.utils.signature_paths import discover_signature_root_and_specs
 
 PRIMARY_SIGNATURES = ("NPS", "SIIPS1")
@@ -626,14 +630,22 @@ def _within_block_trial_number(
 
 
 def _required_task_block(events_df: pd.DataFrame) -> pd.Series:
-    if "block" not in events_df.columns:
+    if "block" in events_df.columns:
+        block = pd.to_numeric(events_df["block"], errors="coerce")
+        if not block.notna().all():
+            raise ValueError("Study 1 task block column 'block' must contain finite values.")
+        return block
+
+    if "run_id" not in events_df.columns:
         raise ValueError(
-            "Study 1 target preparation requires an explicit task block column named 'block'. "
-            "BIDS run/session labels are acquisition metadata and cannot substitute for task blocks."
+            "Study 1 target preparation requires an explicit task block column named "
+            "'block' or the protocol event column 'run_id'. BIDS run/session labels "
+            "are acquisition metadata and cannot substitute for task blocks."
         )
-    block = pd.to_numeric(events_df["block"], errors="coerce")
+
+    block = pd.to_numeric(events_df["run_id"], errors="coerce")
     if not block.notna().all():
-        raise ValueError("Study 1 task block column 'block' must contain finite values.")
+        raise ValueError("Study 1 protocol block column 'run_id' must contain finite values.")
     return block
 
 
@@ -673,6 +685,151 @@ def _events_for_signature_alignment(
     return aligned_events
 
 
+def _filter_events_by_fmri_availability(
+    *,
+    subject: str,
+    task: str,
+    config: Any,
+    deriv_root: Path,
+    events_df: pd.DataFrame,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    """Filter clean EEG events to keep only those trials that have matching, finite fMRI signature values in the derivatives."""
+    run_series = find_block_column(events_df)
+    if run_series is None or not np.any(np.isfinite(run_series.to_numpy(dtype=float))):
+        return events_df
+
+    events_trial = _first_finite_numeric(events_df, ["trial_number", "trial_index", "epoch"])
+    if events_trial is None:
+        return events_df
+
+    run_int = pd.to_numeric(run_series, errors="coerce").to_numpy(dtype=float)
+    trial_num = events_trial.to_numpy(dtype=float)
+
+    def _mk_trial_key(run_num: float, t_num: float) -> Optional[str]:
+        if not (np.isfinite(run_num) and np.isfinite(t_num)):
+            return None
+        return f"{int(run_num)}|{int(round(float(t_num)))}"
+
+    eeg_keys = [_mk_trial_key(r, t) for r, t in zip(run_int, trial_num)]
+
+    subject_bids = f"sub-{subject}" if not str(subject).startswith("sub-") else str(subject)
+    method = str(get_config_value(config, "study1.targets.method", "lss")).strip().lower()
+    base = deriv_root / subject_bids / "fmri" / ("beta_series" if method == "beta-series" else "lss")
+    contrast = str(get_config_value(config, "study1.targets.contrast_name", "contrast")).strip() or "contrast"
+    sig_dir = base / f"task-{task}" / f"contrast-{contrast}" / "signatures"
+    sig_path = sig_dir / "trial_signature_expression.tsv"
+    trials_path = base / f"task-{task}" / f"contrast-{contrast}" / "trials.tsv"
+
+    if not sig_path.exists() and sig_dir.exists():
+        candidates = sorted(sig_dir.glob("trial_signature_expression*.tsv"))
+        if candidates:
+            subject_tokens = {subject_bids.lower(), subject.lower(), subject_bids.replace("sub-", "", 1).lower()}
+            preferred = [p for p in candidates if any(tok and tok in p.stem.lower() for tok in subject_tokens)]
+            sig_path = preferred[0] if preferred else candidates[0]
+
+    if not sig_path.exists():
+        logger.warning("fMRI trial signature expression path does not exist: %s. Skipping filtering.", sig_path)
+        return events_df
+
+    try:
+        sig_df = pd.read_csv(sig_path, sep="\t")
+    except Exception as e:
+        logger.warning("Failed to load fMRI trial signature expression: %s. Error: %s", sig_path, e)
+        return events_df
+
+    if sig_df.empty:
+        return events_df
+
+    if trials_path.exists():
+        try:
+            trials_df = pd.read_csv(trials_path, sep="\t")
+            if (
+                not trials_df.empty
+                and "run" in sig_df.columns
+                and "trial_index" in sig_df.columns
+                and "run" in trials_df.columns
+                and "trial_index" in trials_df.columns
+            ):
+                enrich_cols = [
+                    col
+                    for col in ("onset", "duration", "run_num", "trial_number", "events_trial_number")
+                    if col in trials_df.columns
+                ]
+                if enrich_cols:
+                    sig_df = sig_df.merge(
+                        trials_df[["run", "trial_index", *enrich_cols]],
+                        on=["run", "trial_index"],
+                        how="left",
+                        suffixes=("", "_trial"),
+                    )
+                    for col in enrich_cols:
+                        trial_col = f"{col}_trial"
+                        if trial_col not in sig_df.columns:
+                            continue
+                        left = pd.to_numeric(sig_df[col], errors="coerce") if col in sig_df.columns else pd.Series(np.nan, index=sig_df.index)
+                        right = pd.to_numeric(sig_df[trial_col], errors="coerce")
+                        sig_df[col] = left.where(np.isfinite(left.to_numpy(dtype=float)), right)
+        except Exception as e:
+            logger.warning("Failed to load or merge trials.tsv: %s. Error: %s", trials_path, e)
+
+    if "run_num" not in sig_df.columns:
+        if "run" in sig_df.columns:
+            sig_df["run_num"] = sig_df["run"].map(parse_run_label_to_int)
+        else:
+            sig_df["run_num"] = np.nan
+
+    sig_trial = _first_finite_numeric(sig_df, ["events_trial_number", "trial_number", "trial_index"])
+    if sig_trial is None:
+        return events_df
+
+    sig_run_num = pd.to_numeric(sig_df["run_num"], errors="coerce").to_numpy(dtype=float)
+    sig_trial_num = sig_trial.to_numpy(dtype=float)
+
+    nps_finite = np.isfinite(pd.to_numeric(sig_df.loc[sig_df["signature"].str.casefold() == "nps", "dot"], errors="coerce").to_numpy(dtype=float))
+    nps_keys = {
+        _mk_trial_key(r, t)
+        for r, t, is_fin in zip(
+            sig_run_num[sig_df["signature"].str.casefold() == "nps"],
+            sig_trial_num[sig_df["signature"].str.casefold() == "nps"],
+            nps_finite,
+        )
+        if is_fin
+    }
+
+    siips1_finite = np.isfinite(pd.to_numeric(sig_df.loc[sig_df["signature"].str.casefold() == "siips1", "dot"], errors="coerce").to_numpy(dtype=float))
+    siips1_keys = {
+        _mk_trial_key(r, t)
+        for r, t, is_fin in zip(
+            sig_run_num[sig_df["signature"].str.casefold() == "siips1"],
+            sig_trial_num[sig_df["signature"].str.casefold() == "siips1"],
+            siips1_finite,
+        )
+        if is_fin
+    }
+
+    valid_fmri_keys = nps_keys & siips1_keys
+
+    keep_indices = []
+    excluded_trials = []
+    for idx, key in enumerate(eeg_keys):
+        if key in valid_fmri_keys:
+            keep_indices.append(idx)
+        else:
+            excluded_trials.append(key or f"index-{idx}")
+
+    if excluded_trials:
+        logger.info(
+            "Subject sub-%s: filtered out %d trial(s) because they were censored or lacked finite fMRI signature targets: %s",
+            subject,
+            len(excluded_trials),
+            ", ".join(sorted(excluded_trials)),
+        )
+
+    filtered_df = events_df.iloc[keep_indices].reset_index(drop=True)
+    return filtered_df
+
+
 def _subject_target_rows(
     *,
     subject: str,
@@ -687,6 +844,14 @@ def _subject_target_rows(
             f"Clean events.tsv not found (or empty) for sub-{subject}, task-{task}."
         )
     events_df = events_df.reset_index(drop=True)
+    events_df = _filter_events_by_fmri_availability(
+        subject=subject,
+        task=task,
+        config=config,
+        deriv_root=deriv_root,
+        events_df=events_df,
+        logger=logger,
+    )
     trial_index = _required_trial_index(events_df)
     block = _required_task_block(events_df)
     within_block_trial = _within_block_trial_number(
@@ -813,6 +978,92 @@ def _target_output_paths(config: Any) -> tuple[Path, Path]:
     return base / "primary_targets.parquet", base / "primary_targets.tsv"
 
 
+def _image_grids_match(left_img: Any, right_img: Any) -> bool:
+    return tuple(left_img.shape) == tuple(right_img.shape) and np.allclose(
+        left_img.affine,
+        right_img.affine,
+    )
+
+
+def _resample_mask_to_reference(mask_img: Any, reference_img: Any) -> Any:
+    if _image_grids_match(mask_img, reference_img):
+        return mask_img
+    try:
+        from nilearn import image  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Study 1 common signature mask construction requires nilearn.") from exc
+    return image.resample_to_img(
+        mask_img,
+        reference_img,
+        interpolation="nearest",
+        force_resample=True,
+        copy_header=True,
+    )
+
+
+def _intersect_mask_images(mask_paths: list[Path]) -> Any:
+    if not mask_paths:
+        raise ValueError("Study 1 common signature scoring mask requires at least one run mask.")
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Study 1 common signature mask construction requires nibabel.") from exc
+
+    reference_img = nib.load(str(mask_paths[0]))
+    intersection = np.asanyarray(reference_img.dataobj, dtype=float) > 0
+    for mask_path in mask_paths[1:]:
+        mask_img = _resample_mask_to_reference(nib.load(str(mask_path)), reference_img)
+        intersection &= np.asanyarray(mask_img.dataobj, dtype=float) > 0
+    if not bool(np.any(intersection)):
+        raise ValueError("Study 1 common signature scoring mask is empty.")
+    return nib.Nifti1Image(intersection.astype("uint8"), reference_img.affine, reference_img.header)
+
+
+def _build_common_signature_scoring_mask(
+    *,
+    subjects: list[str],
+    task: str,
+    config: Any,
+    bids_fmri_root: Path,
+    deriv_root: Path,
+    trial_cfg: TrialSignatureExtractionConfig,
+) -> Any:
+    configured_mask = get_config_value(config, "study1.targets.signature_scoring_mask_path", None)
+    if configured_mask is not None and str(configured_mask).strip():
+        mask_path = Path(str(configured_mask)).expanduser()
+        if not mask_path.is_absolute():
+            mask_path = Path(str(require_config_value(config, "paths.signature_dir"))) / mask_path
+        if not mask_path.exists():
+            raise FileNotFoundError(f"Configured Study 1 signature scoring mask not found: {mask_path}")
+        try:
+            import nibabel as nib  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("Study 1 common signature mask construction requires nibabel.") from exc
+        return nib.load(str(mask_path))
+
+    mask_paths: list[Path] = []
+    for subject in subjects:
+        runs = _discover_runs(
+            bids_fmri_root=bids_fmri_root,
+            bids_derivatives=deriv_root,
+            subject=subject,
+            task=task,
+            runs=trial_cfg.runs,
+            input_source=trial_cfg.input_source,
+            fmriprep_space=trial_cfg.fmriprep_space,
+            require_fmriprep=trial_cfg.require_fmriprep,
+        )
+        for _run_num, bold_path, _events_path, _confounds_path in runs:
+            mask_path = discover_brain_mask_for_bold(bold_path)
+            if mask_path is None or not mask_path.exists():
+                raise FileNotFoundError(
+                    "Study 1 common signature scoring mask requires a matching fMRIPrep "
+                    f"brain mask for {bold_path.name}."
+                )
+            mask_paths.append(mask_path)
+    return _intersect_mask_images(mask_paths)
+
+
 def prepare_primary_targets(
     *,
     subjects: list[str],
@@ -831,6 +1082,14 @@ def prepare_primary_targets(
     signature_root, signature_specs = discover_signature_root_and_specs(config, deriv_root)
     _validate_signature_space(config, signature_specs)
     trial_cfg = _build_trial_signature_config(config, task=task)
+    signature_mask_img = _build_common_signature_scoring_mask(
+        subjects=subjects,
+        task=task,
+        config=config,
+        bids_fmri_root=bids_fmri_root,
+        deriv_root=deriv_root,
+        trial_cfg=trial_cfg,
+    )
 
     subject_frames: list[pd.DataFrame] = []
     for subject in subjects:
@@ -842,6 +1101,7 @@ def prepare_primary_targets(
             cfg=trial_cfg,
             signature_root=signature_root,
             signature_specs=signature_specs,
+            signature_mask_img=signature_mask_img,
         )
         logger.info(
             "Prepared trial signatures for sub-%s at %s",

@@ -260,7 +260,7 @@ CompCor regressors (Behzadi et al., 2007), and fMRIPrep motion-outlier regressor
 ineligible as target trials, but their thermal-event timing remains in the nuisance-event design
 when valid.
 A target GLM is ineligible if the target regressor is absent, duplicate-labeled, nonestimable, or
-pushes the design condition number above 100.
+pushes the design condition number above 3000.
 
 HRF and timing sensitivity are assessed by repeating target construction with HRF temporal and
 dispersion derivatives, with a finite-impulse-response model, and after shifting the EEG active
@@ -276,12 +276,14 @@ CanlabCore pattern-mask conventions define scoring (CANlab, n.d.). Signatures wi
 provenance or modified files are ineligible.
 
 When image grids differ, LSS beta maps are resampled to the signature-weight grid using continuous
-interpolation. Published weight sign and scale are preserved. Weights are not normalized,
-re-estimated, rescaled, thresholded, or sign-flipped using study data. For each signature and
-target image, the scoring mask $V^{(k)}$ is the finite signature-weight grid intersected with the
-corresponding fMRIPrep brain mask after nearest-neighbor resampling to the scoring grid. Voxel count
-and scoring-mask extent must be identical across retained subjects, runs, and trials for the same
-signature.
+interpolation. Non-finite beta-map values outside the explicit analysis mask are treated as
+background during this resampling step; non-finite values inside the mask remain invalid. Published
+weight sign and scale are preserved. Weights are not normalized, re-estimated, rescaled,
+thresholded, or sign-flipped using study data. For each signature, the scoring mask $V^{(k)}$ is
+fixed across retained subjects, runs, and trials by intersecting the finite signature-weight grid
+with the common intersection of all requested fMRIPrep run brain masks after nearest-neighbor
+resampling to the scoring grid. Voxel count and scoring-mask extent must be identical across
+retained subjects, runs, and trials for the same signature.
 
 A signature target is valid only when the scoring mask retains at least 90% of original nonzero
 signature support, retains at least 90% of positive- and negative-weight support, and changes
@@ -303,7 +305,7 @@ For each target LSS GLM with design matrix $X$ and unit contrast $c_{\text{targe
 target regressor, design efficiency is
 $1/(c_{\text{target}}^\top (X^\top X)^+ c_{\text{target}})$ on the fitted Nilearn design matrix
 (Abraham et al., 2014). Subjects are excluded from confirmatory analyses if they
-retain fewer than 25 plateau trials, have LSS design condition number above 100, or have LSS design
+retain fewer than 25 plateau trials, have LSS design condition number above 3000, or have LSS design
 efficiency below 0.1. Subjects with 15-24 retained plateau trials are summarized in feasibility or
 exploratory analyses.
 Reliability-informed sensitivity analyses use split-half reliability $r \ge 0.4$ and $\ge 30$

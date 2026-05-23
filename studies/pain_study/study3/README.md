@@ -104,7 +104,7 @@ Study 3 includes 16 volunteers from the 60 Study 1 participants, balanced by sex
 8 women. Participants are invited to return to the CERVO research center for a second
 experimental session of approximately 120 min within two weeks of the EEG-fMRI session. They may
 accept or decline this optional session without consequence for Study 1 participation or
-compensation. A separate compensation of $60 is provided for the second visit.
+compensation. A separate compensation of 60$ is provided for the second visit.
 
 Eligibility, questionnaires, handedness criteria, thermode tolerability checks, and EEG
 compatibility criteria match Study 1. Sex-stratified estimates are reported.
@@ -112,8 +112,7 @@ compatibility criteria match Study 1. Sex-stratified estimates are reported.
 ### 4.2 Session Timing
 
 The acquisition order is fixed: participants complete Study 1 EEG-fMRI first and the simulator EEG
-session second. Calendar interval, time of day, thermode site, medication constraints, and caffeine
-constraints are recorded.
+session second. Calendar interval, time of day and thermode site are recorded.
 
 Paired models include elapsed days, cumulative thermal exposure, previous-session mean rating, and
 previous-session maximum-temperature tolerability.

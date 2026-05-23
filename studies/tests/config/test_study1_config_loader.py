@@ -21,6 +21,7 @@ def test_load_study1_config_resolves_default_yaml() -> None:
     assert "study1" in config
     assert config["study1"]["targets"]["names"] == ["NPS", "SIIPS1"]
     assert config["study1"]["features"]["exploratory_feature_families"] == []
+    assert config["study1"]["targets"]["max_design_condition_number"] == 2000.0
 
 
 def test_load_study1_config_defines_unbaselined_temporal_negative_controls() -> None:
@@ -309,13 +310,21 @@ def test_apply_study1_config_defaults_does_not_overwrite_existing_values() -> No
 ###################################################################
 
 
-def test_smoketest_config_disables_nuisance_regression() -> None:
+def test_smoketest_config_uses_available_nuisance_regression_columns() -> None:
     from studies.pain_study.study1.config.loader import load_study1_config
 
     smoketest_path = REPO_ROOT / "studies/pain_study/study1/config/study1_smoketest.yaml"
     config = load_study1_config(config_path=smoketest_path)
 
-    assert config["study1"]["targets"]["nuisance_regression"]["enabled"] is False
+    nuisance = config["study1"]["targets"]["nuisance_regression"]
+    assert nuisance["enabled"] is True
+    assert nuisance["continuous_columns"] == [
+        "block",
+        "onset",
+        "within_block_trial",
+        "residual_ecg_coupling",
+    ]
+    assert nuisance["categorical_columns"] == ["stimulus_temp", "selected_surface"]
 
 
 def test_smoketest_config_uses_low_permutation_count() -> None:

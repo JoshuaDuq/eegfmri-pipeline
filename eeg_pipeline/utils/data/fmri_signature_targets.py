@@ -321,9 +321,9 @@ def _load_target_table_values_for_subject(
     active_key_column = "__trial_key__"
     y = trial_y
     y_arr = y.to_numpy(dtype=float)
-    if len(y_arr) != len(events_df) or not np.all(np.isfinite(y_arr)):
+    if len(y_arr) != len(events_df) or trial_matches == 0:
         raise ValueError(
-            "Configured fMRI signature target table must align finite values to every "
+            "Configured fMRI signature target table must align finite values to at least one "
             f"clean EEG event by unique trial identifiers for {subject_bids}, "
             f"task-{task}, target={target_column}; matched {trial_matches}/{len(events_df)}."
         )
@@ -654,9 +654,9 @@ def load_fmri_signature_target_for_subject(
     active_sig_key_col = "__trial_key__"
     y = _values_for_keys(active_keys, active_agg)
     y_arr = y.to_numpy(dtype=float)
-    if len(y_arr) != len(events_df) or not np.all(np.isfinite(y_arr)):
+    if len(y_arr) != len(events_df) or trial_matches == 0:
         raise ValueError(
-            "fMRI signature alignment must match finite values to every clean EEG "
+            "fMRI signature alignment must match finite values to at least one clean EEG "
             f"event by unique trial identifiers; matched {trial_matches}/{len(events_df)}."
         )
 

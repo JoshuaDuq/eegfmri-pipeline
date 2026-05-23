@@ -58,6 +58,10 @@ def _base_config(root: Path) -> DotConfig:
             json.dumps({"signatures": manifest_entries}),
             encoding="utf-8",
         )
+        nib.save(
+            nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4)),
+            root / "maps" / "common_signature_mask.nii.gz",
+        )
     except ImportError:
         pass
     return DotConfig(
@@ -83,6 +87,7 @@ def _base_config(root: Path) -> DotConfig:
                     "trials_per_block": 11,
                     "contrast_name": "pain_vs_nonpain",
                     "signature_manifest_path": "signature_manifest.yaml",
+                    "signature_scoring_mask_path": "common_signature_mask.nii.gz",
                     "fmriprep_space": "MNI152NLin2009cAsym",
                     "input_source": "fmriprep",
                     "require_fmriprep": True,
@@ -363,7 +368,7 @@ def test_prepare_primary_targets_requires_explicit_task_block_column() -> None:
         root = Path(td)
         cfg = _base_config(root)
         _write_signature_outputs(root)
-        events = _events_frame().drop(columns=["block"])
+        events = _events_frame().drop(columns=["block", "run_id"])
 
         with (
             patch(
@@ -382,6 +387,110 @@ def test_prepare_primary_targets_requires_explicit_task_block_column() -> None:
                     config=cfg,
                     logger=logging.getLogger(__name__),
                 )
+
+
+def test_prepare_primary_targets_derives_protocol_block_from_event_run_id() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        cfg["study1"]["targets"]["trials_per_block"] = 11
+        _write_signature_outputs(root, trial_count=4)
+        events = pd.DataFrame(
+            {
+                "run_id": [1, 1, 2, 2],
+                "trial_number": [1, 2, 12, 13],
+                "pain_binary_coded": [1, 0, 1, 0],
+                "onset": [10.0, 20.0, 30.0, 40.0],
+                "duration": [0.001, 0.001, 0.001, 0.001],
+            }
+        )
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_fmri_signature_target_for_subject",
+                side_effect=[
+                    (
+                        pd.Series([1.0, 3.0, 11.0, 13.0]),
+                        "NPS",
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [1000, 1000, 1000, 1000],
+                                "fmri_scoring_mask_sha256": [NPS_MASK_HASH] * 4,
+                            }
+                        ),
+                    ),
+                    (
+                        pd.Series([2.0, 4.0, 12.0, 14.0]),
+                        "SIIPS1",
+                        pd.DataFrame(
+                            {
+                                "fmri_n_voxels": [800, 800, 800, 800],
+                                "fmri_scoring_mask_sha256": [SIIPS1_MASK_HASH] * 4,
+                            }
+                        ),
+                    ),
+                ],
+            ),
+        ):
+            out_path = prepare_primary_targets(
+                subjects=["0001"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+
+        frame = pd.read_parquet(out_path)
+        assert list(frame["block"]) == [1, 1, 2, 2]
+        assert list(frame["within_block_trial"]) == [1, 2, 1, 2]
+
+
+def test_prepare_primary_targets_passes_common_signature_scoring_mask() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        _write_signature_outputs(root)
+        scoring_mask = object()
+        extraction_calls = []
+
+        def capture_extraction(**kwargs):
+            extraction_calls.append(kwargs)
+            return {"output_dir": "ignored"}
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets._build_common_signature_scoring_mask",
+                return_value=scoring_mask,
+            ),
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                side_effect=capture_extraction,
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=_events_frame(),
+            ),
+        ):
+            prepare_primary_targets(
+                subjects=["0001"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+
+        assert extraction_calls
+        assert extraction_calls[0]["signature_mask_img"] is scoring_mask
 
 
 def test_prepare_primary_targets_writes_wide_primary_table() -> None:

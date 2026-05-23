@@ -135,6 +135,55 @@ def _maybe_resample_to_img(
         ) from exc
 
 
+def _image_grids_match(left_img: Any, right_img: Any) -> bool:
+    if tuple(getattr(left_img, "shape", ())) != tuple(getattr(right_img, "shape", ())):
+        return False
+    import numpy as np  # type: ignore
+
+    return bool(np.allclose(left_img.affine, right_img.affine))
+
+
+def _mask_on_image_grid(*, mask_img: Any, image_img: Any) -> Any:
+    if _image_grids_match(mask_img, image_img):
+        return mask_img
+    return _maybe_resample_to_img(
+        moving_img=mask_img,
+        target_img=image_img,
+        interpolation="nearest",
+    )
+
+
+def _fill_nonfinite_background_for_resampling(*, image_img: Any, mask_img: Optional[Any]) -> Any:
+    import numpy as np  # type: ignore
+
+    data = np.asanyarray(image_img.dataobj, dtype=np.float32)
+    nonfinite = ~np.isfinite(data)
+    if not bool(np.any(nonfinite)):
+        return image_img
+    if mask_img is None:
+        return image_img
+
+    mask_on_image = _mask_on_image_grid(mask_img=mask_img, image_img=image_img)
+    mask = np.asanyarray(mask_on_image.get_fdata(), dtype=float) > 0
+    if mask.shape != data.shape:
+        raise ValueError(
+            "Mask grid mismatch while preparing image for signature resampling: "
+            f"mask_shape={mask.shape}, image_shape={data.shape}."
+        )
+    if bool(np.any(nonfinite & mask)):
+        raise ValueError(
+            "Non-finite image values were found inside the analysis mask before signature "
+            "resampling."
+        )
+
+    nib = _maybe_import_nibabel()
+    if nib is None:
+        raise RuntimeError("Signature expression requires nibabel to prepare masked images.")
+    filled = data.copy()
+    filled[nonfinite] = 0.0
+    return nib.Nifti1Image(filled, image_img.affine, image_img.header)
+
+
 def _flatten_masked_pairs(
     *,
     img_data: Any,
@@ -403,47 +452,22 @@ def compute_signature_expression(
             w_img = nib.load(str(w_path))
             original_w_data = w_img.get_fdata()
             if resampling == "image_to_weights":
-                x_img = img
-                if tuple(getattr(x_img, "shape", ())) != tuple(getattr(w_img, "shape", ())):
+                x_img = _fill_nonfinite_background_for_resampling(
+                    image_img=img,
+                    mask_img=m,
+                )
+                if not _image_grids_match(x_img, w_img):
                     x_img = _maybe_resample_to_img(
                         moving_img=x_img, target_img=w_img, interpolation="continuous"
                     )
-                else:
-                    try:
-                        import numpy as np
-
-                        if not np.allclose(x_img.affine, w_img.affine):
-                            x_img = _maybe_resample_to_img(
-                                moving_img=x_img, target_img=w_img, interpolation="continuous"
-                            )
-                    except Exception:
-                        x_img = _maybe_resample_to_img(
-                            moving_img=x_img, target_img=w_img, interpolation="continuous"
-                        )
 
                 mask_data = None
                 if m is not None:
                     mask_on_ref = m
-                    if tuple(getattr(mask_on_ref, "shape", ())) != tuple(
-                        getattr(w_img, "shape", ())
-                    ):
+                    if not _image_grids_match(mask_on_ref, w_img):
                         mask_on_ref = _maybe_resample_to_img(
                             moving_img=mask_on_ref, target_img=w_img, interpolation="nearest"
                         )
-                    else:
-                        try:
-                            import numpy as np
-
-                            if not np.allclose(mask_on_ref.affine, w_img.affine):
-                                mask_on_ref = _maybe_resample_to_img(
-                                    moving_img=mask_on_ref,
-                                    target_img=w_img,
-                                    interpolation="nearest",
-                                )
-                        except Exception:
-                            mask_on_ref = _maybe_resample_to_img(
-                                moving_img=mask_on_ref, target_img=w_img, interpolation="nearest"
-                            )
                     mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
 
                 img_data = x_img.get_fdata()

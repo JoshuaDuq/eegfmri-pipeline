@@ -490,8 +490,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stopResourceMonitoringSafe()
 		m.EndTime = time.Now()
 		m.ExitCode = msg.ExitCode
-		m.Progress = 1.0
 		if msg.Success {
+			m.Progress = 1.0
 			m.Status = StatusSuccess
 			m.addLog(styles.CheckMark + " Completed successfully")
 		} else {
