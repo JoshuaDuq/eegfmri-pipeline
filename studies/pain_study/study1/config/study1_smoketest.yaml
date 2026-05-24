@@ -87,6 +87,8 @@ study1:
     presets:
       alpha: ["alpha"]
       alpha_beta: ["alpha", "beta"]
+      gamma: ["gamma"]
+      alpha_beta_gamma: ["alpha", "beta", "gamma"]
   outputs:
     root_name: "study1"
 

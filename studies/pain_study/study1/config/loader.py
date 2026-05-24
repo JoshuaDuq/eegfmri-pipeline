@@ -39,10 +39,36 @@ def load_study1_config(config_path: Optional[str | Path] = None) -> dict[str, An
     if not isinstance(parsed, dict):
         raise ValueError(f"Study 1 config must be a YAML mapping: {resolved_path}")
 
-    resolved = resolve_config_paths(parsed, resolved_path)
+    resolved = resolve_config_paths(copy.deepcopy(parsed), resolved_path)
+    _preserve_signature_reference_paths(resolved, parsed)
     _validate_temporal_negative_controls(resolved)
     _validate_feature_benchmark(resolved)
     return resolved
+
+
+def _preserve_signature_reference_paths(
+    resolved: dict[str, Any],
+    raw: dict[str, Any],
+) -> None:
+    raw_targets = raw.get("study1", {}).get("targets", {})
+    resolved_targets = resolved.get("study1", {}).get("targets", {})
+    if not isinstance(raw_targets, dict) or not isinstance(resolved_targets, dict):
+        return
+
+    if "signature_manifest_path" in raw_targets:
+        resolved_targets["signature_manifest_path"] = copy.deepcopy(
+            raw_targets["signature_manifest_path"]
+        )
+
+    raw_provenance = raw_targets.get("signature_provenance")
+    resolved_provenance = resolved_targets.get("signature_provenance")
+    if not isinstance(raw_provenance, dict) or not isinstance(resolved_provenance, dict):
+        return
+
+    for signature_name, raw_spec in raw_provenance.items():
+        resolved_spec = resolved_provenance.get(signature_name)
+        if isinstance(raw_spec, dict) and isinstance(resolved_spec, dict) and "path" in raw_spec:
+            resolved_spec["path"] = copy.deepcopy(raw_spec["path"])
 
 
 def _validate_temporal_negative_controls(config: dict[str, Any]) -> None:

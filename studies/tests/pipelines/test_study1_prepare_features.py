@@ -19,8 +19,7 @@ EXPLORATORY_FAMILIES = [
     "complexity",
     "bursts",
 ]
-WINDOWED_FAMILIES = ["power", "erds", "bursts"]
-STANDARD_FAMILIES = ["spectral", "aperiodic", "ratios", "asymmetry", "complexity"]
+ALL_FAMILIES = ["power", *EXPLORATORY_FAMILIES]
 
 
 def _config(deriv_root: Path) -> DotConfig:
@@ -201,27 +200,15 @@ def test_prepare_study1_features_uses_study1_feature_root_and_full_family_set(tm
             logger=logging.getLogger(__name__),
         )
 
-    assert feature_pipeline.run_batch.call_count == 2
-    first_call = feature_pipeline.run_batch.call_args_list[0]
-    second_call = feature_pipeline.run_batch.call_args_list[1]
+    assert feature_pipeline.run_batch.call_count == 1
+    call = feature_pipeline.run_batch.call_args_list[0]
 
-    assert first_call.kwargs == {
+    assert call.kwargs == {
         "subjects": ["sub-0001", "sub-0002"],
         "task": "pain",
         "fail_fast": True,
         "analysis_mode": "trial_ml_safe",
-        "feature_categories": STANDARD_FAMILIES,
-        "feature_output_root": (
-            tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_trial_ml_safe"
-        ),
-        "save_canonical_trial_table": False,
-    }
-    assert second_call.kwargs == {
-        "subjects": ["sub-0001", "sub-0002"],
-        "task": "pain",
-        "fail_fast": True,
-        "analysis_mode": "trial_ml_safe",
-        "feature_categories": WINDOWED_FAMILIES,
+        "feature_categories": ALL_FAMILIES,
         "feature_output_root": (
             tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_trial_ml_safe"
         ),

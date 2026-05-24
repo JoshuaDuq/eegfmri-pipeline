@@ -60,9 +60,11 @@ class ComplexityParams:
 
 
 def _extract_params(config: Any) -> ComplexityParams:
-    signal_basis = str(
-        get_config_value(config, "feature_engineering.complexity.signal_basis", "filtered")
-    ).strip().lower()
+    signal_basis = (
+        str(get_config_value(config, "feature_engineering.complexity.signal_basis", "filtered"))
+        .strip()
+        .lower()
+    )
     if signal_basis not in {"filtered", "envelope"}:
         raise ValueError(
             "feature_engineering.complexity.signal_basis must be 'filtered' or 'envelope'"
@@ -73,9 +75,13 @@ def _extract_params(config: Any) -> ComplexityParams:
     sampen_order = int(get_config_value(config, "feature_engineering.complexity.sampen_order", 2))
     sampen_r = float(get_config_value(config, "feature_engineering.complexity.sampen_r", 0.2))
     mse_scale_min = int(get_config_value(config, "feature_engineering.complexity.mse_scale_min", 1))
-    mse_scale_max = int(get_config_value(config, "feature_engineering.complexity.mse_scale_max", 20))
+    mse_scale_max = int(
+        get_config_value(config, "feature_engineering.complexity.mse_scale_max", 20)
+    )
     zscore = bool(get_config_value(config, "feature_engineering.complexity.zscore", True))
-    min_segment_sec = float(get_config_value(config, "feature_engineering.complexity.min_segment_sec", 2.0))
+    min_segment_sec = float(
+        get_config_value(config, "feature_engineering.complexity.min_segment_sec", 2.0)
+    )
     min_samples = int(get_config_value(config, "feature_engineering.complexity.min_samples", 200))
 
     if pe_order < 2:
@@ -89,9 +95,7 @@ def _extract_params(config: Any) -> ComplexityParams:
     if mse_scale_min < 1:
         raise ValueError("feature_engineering.complexity.mse_scale_min must be >= 1")
     if mse_scale_max < mse_scale_min:
-        raise ValueError(
-            "feature_engineering.complexity.mse_scale_max must be >= mse_scale_min"
-        )
+        raise ValueError("feature_engineering.complexity.mse_scale_max must be >= mse_scale_min")
     if min_segment_sec <= 0:
         raise ValueError("feature_engineering.complexity.min_segment_sec must be > 0")
     if min_samples < 1:
@@ -241,14 +245,14 @@ def _compute_epoch_complexity(
         basis_data = _pick_basis_array(band_data, params.signal_basis)
         if basis_data.ndim != 3:
             continue
-        
+
         if len(segment_mask) != basis_data.shape[2]:
             continue
-        
+
         # Extract epoch data first, then apply mask (avoids NumPy advanced indexing quirk)
         epoch_data = basis_data[ep_idx]  # (channels, times)
         trace_matrix = epoch_data[:, segment_mask]  # (channels, masked_times)
-        
+
         if trace_matrix.shape[1] < params.min_samples:
             continue
 
@@ -287,15 +291,15 @@ def _compute_epoch_complexity(
                 mse_per_channel[ch_idx, scale_idx] = float(mse_values.get(scale, np.nan))
 
             if "channels" in spatial_modes:
-                record[NamingSchema.build("comp", segment_name, band, "ch", "lzc", channel=ch_name)] = float(
-                    lzc_per_channel[ch_idx]
-                )
-                record[NamingSchema.build("comp", segment_name, band, "ch", "pe", channel=ch_name)] = float(
-                    pe_per_channel[ch_idx]
-                )
-                record[NamingSchema.build("comp", segment_name, band, "ch", "sampen", channel=ch_name)] = float(
-                    sampen_per_channel[ch_idx]
-                )
+                record[
+                    NamingSchema.build("comp", segment_name, band, "ch", "lzc", channel=ch_name)
+                ] = float(lzc_per_channel[ch_idx])
+                record[
+                    NamingSchema.build("comp", segment_name, band, "ch", "pe", channel=ch_name)
+                ] = float(pe_per_channel[ch_idx])
+                record[
+                    NamingSchema.build("comp", segment_name, band, "ch", "sampen", channel=ch_name)
+                ] = float(sampen_per_channel[ch_idx])
                 for scale_idx, scale in enumerate(mse_scales):
                     record[
                         NamingSchema.build(
@@ -312,19 +316,27 @@ def _compute_epoch_complexity(
             for roi_name, idxs in roi_map.items():
                 if not idxs:
                     continue
-                record[NamingSchema.build("comp", segment_name, band, "roi", "lzc", channel=roi_name)] = float(
+                record[
+                    NamingSchema.build("comp", segment_name, band, "roi", "lzc", channel=roi_name)
+                ] = float(
                     _mean_finite_complexity_values(
                         lzc_per_channel[idxs],
                         label=f"segment={segment_name}, band={band}, roi={roi_name}, metric=lzc",
                     )
                 )
-                record[NamingSchema.build("comp", segment_name, band, "roi", "pe", channel=roi_name)] = float(
+                record[
+                    NamingSchema.build("comp", segment_name, band, "roi", "pe", channel=roi_name)
+                ] = float(
                     _mean_finite_complexity_values(
                         pe_per_channel[idxs],
                         label=f"segment={segment_name}, band={band}, roi={roi_name}, metric=pe",
                     )
                 )
-                record[NamingSchema.build("comp", segment_name, band, "roi", "sampen", channel=roi_name)] = float(
+                record[
+                    NamingSchema.build(
+                        "comp", segment_name, band, "roi", "sampen", channel=roi_name
+                    )
+                ] = float(
                     _mean_finite_complexity_values(
                         sampen_per_channel[idxs],
                         label=f"segment={segment_name}, band={band}, roi={roi_name}, metric=sampen",
@@ -368,7 +380,9 @@ def _compute_epoch_complexity(
                 )
             )
             for scale_idx, scale in enumerate(mse_scales):
-                record[NamingSchema.build("comp", segment_name, band, "global", _mse_stat_name(scale))] = float(
+                record[
+                    NamingSchema.build("comp", segment_name, band, "global", _mse_stat_name(scale))
+                ] = float(
                     _mean_finite_complexity_values(
                         mse_per_channel[:, scale_idx],
                         label=(
@@ -409,8 +423,9 @@ def extract_complexity_from_precomputed(
 
     # One record per epoch; merge segments in-place.
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
+    requested_segment = str(getattr(precomputed.windows, "name", "") or "").strip().lower()
     for segment_name, segment_mask in segments.items():
-        if segment_name == "baseline":
+        if segment_name == "baseline" and requested_segment != "baseline":
             continue
 
         # Validate mask length matches data

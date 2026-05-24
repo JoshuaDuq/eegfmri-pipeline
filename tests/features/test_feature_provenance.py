@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import unittest
 
-from eeg_pipeline.domain.features.naming import infer_feature_provenance
+import numpy as np
+
+from eeg_pipeline.domain.features.naming import generate_manifest, infer_feature_provenance
 from tests.pipelines_test_utils import DotConfig
 
 
@@ -70,6 +73,20 @@ class TestFeatureProvenance(unittest.TestCase):
         self.assertTrue(props["cross_trial_dependence"])
         self.assertFalse(props["trialwise_valid"])
         self.assertEqual(out["methods"]["connectivity_phase_estimator"], "across_epochs")
+
+    def test_manifest_serializes_nested_numpy_arrays_in_qc(self):
+        peak_centers = np.empty((1, 2), dtype=object)
+        peak_centers[0, 0] = np.array([9.5, 10.5])
+        peak_centers[0, 1] = np.array([], dtype=float)
+
+        manifest = generate_manifest(
+            feature_columns=["aperiodic_active_alpha_global_peak_height"],
+            config=DotConfig({}),
+            qc={"aperiodic": {"periodic_peak_centers_hz": peak_centers}},
+        )
+
+        encoded = json.dumps(manifest)
+        self.assertIn("periodic_peak_centers_hz", encoded)
 
 
 if __name__ == "__main__":

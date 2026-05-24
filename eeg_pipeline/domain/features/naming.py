@@ -155,7 +155,7 @@ def _make_json_serializable(obj: Any) -> Any:
     if obj is None:
         return None
     if isinstance(obj, np.ndarray):
-        return obj.tolist()
+        return _make_json_serializable(obj.tolist())
     if isinstance(obj, (np.integer, np.floating)):
         return float(obj) if isinstance(obj, np.floating) else int(obj)
     if isinstance(obj, np.bool_):

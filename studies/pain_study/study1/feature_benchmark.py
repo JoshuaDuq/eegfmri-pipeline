@@ -32,7 +32,13 @@ from studies.pain_study.study1.targets import (
 PRIMARY_BAND_PRESETS: dict[str, list[str]] = {
     "alpha": ["alpha"],
     "beta": ["beta"],
+    "gamma": ["gamma"],
+    "delta": ["delta"],
+    "theta": ["theta"],
+    "delta_theta": ["delta", "theta"],
     "alpha_beta": ["alpha", "beta"],
+    "alpha_beta_gamma": ["alpha", "beta", "gamma"],
+    "all_bands": ["delta", "theta", "alpha", "beta", "gamma"],
 }
 PRIMARY_FEATURE_SEGMENTS = ("active",)
 PRIMARY_FEATURE_SCOPES = ("ch",)
@@ -103,9 +109,7 @@ def _feature_benchmark_config(
     if not isinstance(excluded_channels, (list, tuple)):
         raise ValueError("study1.feature_benchmark.excluded_channels must be a list.")
     feature_config["machine_learning.data.excluded_channels"] = [
-        str(channel).strip()
-        for channel in excluded_channels
-        if str(channel).strip()
+        str(channel).strip() for channel in excluded_channels if str(channel).strip()
     ]
     permutation_scheme = str(
         require_config_value(config, "study1.feature_benchmark.permutation_scheme")
@@ -136,9 +140,7 @@ def _feature_benchmark_config(
     )
     feature_config["machine_learning.target_residualization.enabled"] = bool(columns)
     feature_config["machine_learning.target_residualization.columns"] = columns
-    feature_config["machine_learning.target_residualization.strategy"] = (
-        "staged_residual_learning"
-    )
+    feature_config["machine_learning.target_residualization.strategy"] = "staged_residual_learning"
     return feature_config
 
 
@@ -248,6 +250,7 @@ def _run_exploratory_benchmark(
                     feature_input_root=feature_root,
                     feature_bands=None,
                     feature_harmonization=harmonization,
+                    model_names=["elasticnet", "ridge"],
                 )
             )
     return outputs

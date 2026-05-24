@@ -433,7 +433,10 @@ def test_connectivity_subject_granularity_requires_explicit_across_epoch_estimat
 
     monkeypatch.setattr(
         "eeg_pipeline.analysis.features.connectivity.extract_connectivity_from_precomputed",
-        lambda *_args, **_kwargs: (pd.DataFrame({"conn_active_alpha_global_aec": [0.1, 0.1, 0.1]}), ["conn_active_alpha_global_aec"]),
+        lambda *_args, **_kwargs: (
+            pd.DataFrame({"conn_active_alpha_global_aec": [0.1, 0.1, 0.1]}),
+            ["conn_active_alpha_global_aec"],
+        ),
     )
 
     with pytest.raises(ValueError, match="phase_estimator='across_epochs'"):
@@ -486,9 +489,7 @@ def _precomputed_for_segment_strictness() -> PrecomputedData:
                         "min_cycles_at_fmin": 3.0,
                     },
                 },
-                "time_frequency_analysis": {
-                    "bands": {"theta": [4.0, 8.0], "alpha": [8.0, 12.0]}
-                },
+                "time_frequency_analysis": {"bands": {"theta": [4.0, 8.0], "alpha": [8.0, 12.0]}},
             }
         ),
         logger=logging.getLogger("strict-segment-skip"),
@@ -521,9 +522,7 @@ def test_spectral_descriptor_rejects_invalid_psd_method() -> None:
             ranges={"active": (float(epochs.times[0]), float(epochs.times[-1]))},
             times=epochs.times,
         ),
-        config=DotConfig(
-            {"feature_engineering": {"spectral": {"psd_method": "invalid"}}}
-        ),
+        config=DotConfig({"feature_engineering": {"spectral": {"psd_method": "invalid"}}}),
         logger=logging.getLogger("strict-spectral-psd-method"),
         spatial_modes=["global"],
     )
@@ -551,9 +550,7 @@ def test_aperiodic_rejects_invalid_qc_thresholds() -> None:
             ranges={"active": (float(epochs.times[0]), float(epochs.times[-1]))},
             times=epochs.times,
         ),
-        config=DotConfig(
-            {"feature_engineering": {"aperiodic": {"min_segment_sec": float("nan")}}}
-        ),
+        config=DotConfig({"feature_engineering": {"aperiodic": {"min_segment_sec": float("nan")}}}),
         logger=logging.getLogger("strict-aperiodic-min-segment"),
     )
 
@@ -567,9 +564,7 @@ def test_aperiodic_rejects_invalid_qc_thresholds() -> None:
         ch_names=["Cz", "Pz"],
         picks=np.array([0, 1], dtype=int),
         windows=ctx.windows,
-        config=DotConfig(
-            {"feature_engineering": {"aperiodic": {"min_r2": float("nan")}}}
-        ),
+        config=DotConfig({"feature_engineering": {"aperiodic": {"min_r2": float("nan")}}}),
         logger=logging.getLogger("strict-aperiodic-min-r2"),
     )
 
@@ -597,13 +592,7 @@ def test_missing_tfr_roi_selection_raises() -> None:
         restrict_epochs_to_roi(
             epochs,
             "missing",
-            DotConfig(
-                {
-                    "time_frequency_analysis": {
-                        "rois": {"central": ["Cz"]}
-                    }
-                }
-            ),
+            DotConfig({"time_frequency_analysis": {"rois": {"central": ["Cz"]}}}),
             logging.getLogger("strict-tfr-roi"),
         )
 
@@ -681,9 +670,7 @@ def test_connectivity_dynamic_state_count_requires_enough_windows() -> None:
                         "min_segment_sec": 0.1,
                     }
                 },
-                "time_frequency_analysis": {
-                    "bands": {"alpha": [8.0, 12.0]}
-                },
+                "time_frequency_analysis": {"bands": {"alpha": [8.0, 12.0]}},
             }
         ),
         logger=logging.getLogger("strict-dynamic-state-count"),
@@ -698,25 +685,15 @@ def test_connectivity_dynamic_state_count_requires_enough_windows() -> None:
 def test_tfr_config_rejects_invalid_ranges_and_decimation() -> None:
     with pytest.raises(ValueError, match="freq_max"):
         get_tfr_config(
-            DotConfig(
-                {
-                    "time_frequency_analysis": {
-                        "tfr": {"freq_min": 30.0, "freq_max": 10.0}
-                    }
-                }
-            )
+            DotConfig({"time_frequency_analysis": {"tfr": {"freq_min": 30.0, "freq_max": 10.0}}})
         )
 
     with pytest.raises(ValueError, match="n_freqs"):
-        get_tfr_config(
-            DotConfig({"time_frequency_analysis": {"tfr": {"n_freqs": 1}}})
-        )
+        get_tfr_config(DotConfig({"time_frequency_analysis": {"tfr": {"n_freqs": 1}}}))
 
     with pytest.raises(ValueError, match="decim_phase"):
         get_tfr_decim(
-            DotConfig(
-                {"time_frequency_analysis": {"tfr": {"decim_phase": 0}}}
-            ),
+            DotConfig({"time_frequency_analysis": {"tfr": {"decim_phase": 0}}}),
             mode="phase",
         )
 
@@ -754,9 +731,7 @@ def test_precomputed_psd_config_rejects_invalid_line_noise_values() -> None:
             DotConfig(
                 {
                     "preprocessing": {"line_freq": 60.0},
-                    "feature_engineering": {
-                        "spectral": {"line_noise_freqs": ["bad"]}
-                    },
+                    "feature_engineering": {"spectral": {"line_noise_freqs": ["bad"]}},
                 }
             ),
             sfreq=100.0,
@@ -766,13 +741,7 @@ def test_precomputed_psd_config_rejects_invalid_line_noise_values() -> None:
 def test_burst_threshold_percentile_rejects_out_of_range_config() -> None:
     with pytest.raises(ValueError, match="threshold_percentile"):
         _parse_burst_config(
-            DotConfig(
-                {
-                    "feature_engineering": {
-                        "bursts": {"threshold_percentile": 10.0}
-                    }
-                }
-            ),
+            DotConfig({"feature_engineering": {"bursts": {"threshold_percentile": 10.0}}}),
             ["alpha"],
         )
 
@@ -844,6 +813,67 @@ def test_bursts_fail_when_requested_segment_is_too_short() -> None:
         extract_burst_features(ctx, ["alpha"])
 
 
+def test_bursts_extract_requested_baseline_segment() -> None:
+    n_epochs = 2
+    n_times = 120
+    times = np.arange(n_times, dtype=float) / 100.0
+    baseline_mask = np.zeros(n_times, dtype=bool)
+    baseline_mask[:80] = True
+    active_mask = ~baseline_mask
+    envelope = np.ones((n_epochs, 1, n_times), dtype=float)
+    precomputed = PrecomputedData(
+        data=envelope.copy(),
+        times=times,
+        sfreq=100.0,
+        ch_names=["Cz"],
+        picks=np.array([0], dtype=int),
+        windows=TimeWindows(
+            baseline_mask=baseline_mask,
+            active_mask=active_mask,
+            masks={"baseline": baseline_mask, "active": active_mask},
+            ranges={"baseline": (0.0, 0.79), "active": (0.8, 1.19)},
+            times=times,
+            name="baseline",
+        ),
+        band_data={
+            "alpha": BandData(
+                band="alpha",
+                fmin=8.0,
+                fmax=12.0,
+                filtered=envelope.copy(),
+                analytic=envelope.astype(complex),
+                envelope=envelope,
+                phase=np.zeros_like(envelope),
+                power=envelope**2,
+            )
+        },
+        config=DotConfig({}),
+        spatial_modes=["global"],
+    )
+    ctx = SimpleNamespace(
+        precomputed=precomputed,
+        config=DotConfig(
+            {
+                "feature_engineering": {
+                    "bursts": {
+                        "threshold_reference": "trial",
+                        "min_duration_ms": 10.0,
+                        "min_cycles": 1.0,
+                    }
+                }
+            }
+        ),
+        logger=logging.getLogger("strict-burst-baseline"),
+        spatial_modes=["global"],
+    )
+
+    df, cols = extract_burst_features(ctx, ["alpha"])
+
+    expected_col = "bursts_baseline_alpha_global_count"
+    assert expected_col in cols
+    assert expected_col in df.columns
+
+
 def _phase_precomputed_for_short_segment() -> PrecomputedData:
     n_epochs = 3
     n_times = 220
@@ -906,9 +936,7 @@ def _phase_precomputed_for_short_segment() -> PrecomputedData:
                     },
                     "spatial_modes": ["global"],
                 },
-                "time_frequency_analysis": {
-                    "bands": {"theta": [4.0, 8.0], "gamma": [30.0, 80.0]}
-                },
+                "time_frequency_analysis": {"bands": {"theta": [4.0, 8.0], "gamma": [30.0, 80.0]}},
             }
         ),
         logger=logging.getLogger("strict-phase-short-segment"),
@@ -1120,7 +1148,8 @@ def _precomputed_for_partial_strict_segments() -> PrecomputedData:
     analytic_epoch = np.stack(
         [
             (1.0 + 0.2 * np.sin(2.0 * np.pi * times)) * np.exp(1j * 2.0 * np.pi * 10.0 * times),
-            (1.0 + 0.2 * np.cos(2.0 * np.pi * times)) * np.exp(1j * (2.0 * np.pi * 10.0 * times + 0.5)),
+            (1.0 + 0.2 * np.cos(2.0 * np.pi * times))
+            * np.exp(1j * (2.0 * np.pi * 10.0 * times + 0.5)),
         ],
         axis=0,
     )

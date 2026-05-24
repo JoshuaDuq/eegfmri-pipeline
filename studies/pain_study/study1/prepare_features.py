@@ -26,9 +26,6 @@ from studies.pain_study.study1.output_cleanup import (
 )
 
 
-WINDOWED_FEATURE_FAMILIES = {"power", "erds", "bursts"}
-
-
 def _clear_subject_feature_outputs(
     *,
     subjects: list[str],
@@ -49,9 +46,7 @@ def _load_feature_metadata(metadata_path: Path) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid Study 1 feature metadata JSON: {metadata_path}") from exc
     if not isinstance(payload, dict):
-        raise ValueError(
-            f"Study 1 feature metadata must be a JSON object: {metadata_path}"
-        )
+        raise ValueError(f"Study 1 feature metadata must be a JSON object: {metadata_path}")
     return payload
 
 
@@ -64,9 +59,7 @@ def _require_boolean_metadata(
     setting_name: str,
 ) -> None:
     if key not in metadata:
-        raise ValueError(
-            f"Study 1 feature metadata must record {setting_name}: {metadata_path}"
-        )
+        raise ValueError(f"Study 1 feature metadata must record {setting_name}: {metadata_path}")
     actual = bool(metadata[key])
     if actual is not expected:
         raise ValueError(
@@ -208,9 +201,7 @@ def _require_time_window_pair(
     if not (math.isfinite(start) and math.isfinite(end)):
         raise ValueError(f"{config_path} must contain finite numeric bounds. Got {raw_value!r}.")
     if start >= end:
-        raise ValueError(
-            f"{config_path} must satisfy start < end. Got [{start}, {end}]."
-        )
+        raise ValueError(f"{config_path} must satisfy start < end. Got [{start}, {end}].")
     return start, end
 
 
@@ -227,14 +218,6 @@ def _study1_windowed_time_ranges(config: Any) -> list[dict[str, float | str]]:
         {"name": "baseline", "tmin": baseline_start, "tmax": baseline_end},
         {"name": "active", "tmin": active_start, "tmax": active_end},
     ]
-
-
-def _standard_feature_families(feature_families: list[str]) -> list[str]:
-    return [family for family in feature_families if family not in WINDOWED_FEATURE_FAMILIES]
-
-
-def _windowed_feature_families(feature_families: list[str]) -> list[str]:
-    return [family for family in feature_families if family in WINDOWED_FEATURE_FAMILIES]
 
 
 def _run_feature_batch(
@@ -284,11 +267,7 @@ def prepare_study1_features(
     _clear_subject_feature_outputs(subjects=resolved_subjects, config=config)
 
     feature_families = resolve_study1_feature_families(config)
-    standard_families = _standard_feature_families(feature_families)
-    windowed_families = _windowed_feature_families(feature_families)
-    windowed_time_ranges = (
-        _study1_windowed_time_ranges(config) if windowed_families else None
-    )
+    time_ranges = _study1_windowed_time_ranges(config)
     pipeline = FeaturePipeline(config=_study1_feature_config(config))
 
     _run_feature_batch(
@@ -296,20 +275,13 @@ def prepare_study1_features(
         subjects=resolved_subjects,
         task=task,
         feature_root=feature_root,
-        feature_families=standard_families,
-    )
-    _run_feature_batch(
-        pipeline=pipeline,
-        subjects=resolved_subjects,
-        task=task,
-        feature_root=feature_root,
-        feature_families=windowed_families,
-        time_ranges=windowed_time_ranges,
+        feature_families=feature_families,
+        time_ranges=time_ranges,
     )
     removed_windowed = prune_windowed_feature_artifacts(
         feature_root=feature_root,
         subjects=resolved_subjects,
-        feature_families=windowed_families,
+        feature_families=feature_families,
     )
     removed_sidecars = remove_appledouble_sidecars(feature_root)
 
@@ -321,7 +293,9 @@ def prepare_study1_features(
     if removed_windowed:
         logger.info("Pruned %d redundant Study 1 windowed feature artifacts", removed_windowed)
     if removed_sidecars:
-        logger.info("Removed %d AppleDouble sidecars from Study 1 feature outputs", removed_sidecars)
+        logger.info(
+            "Removed %d AppleDouble sidecars from Study 1 feature outputs", removed_sidecars
+        )
     logger.info(
         "Prepared Study 1 trial_ml_safe features for %d subjects at %s",
         len(resolved_subjects),

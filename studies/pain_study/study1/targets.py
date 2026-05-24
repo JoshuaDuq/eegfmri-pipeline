@@ -830,6 +830,155 @@ def _filter_events_by_fmri_availability(
     return filtered_df
 
 
+def _compute_convolved_nuisance_columns(
+    *,
+    subject: str,
+    task: str,
+    deriv_root: Path,
+    events_df: pd.DataFrame,
+    config: Any,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    """Calculate HRF-convolved continuous nuisance columns."""
+    columns = nuisance_source_columns(config) if nuisance_regression_enabled(config) else tuple()
+    supported_hrf_cols = {
+        "hrf_weighted_framewise_displacement",
+        "hrf_weighted_std_dvars",
+        "hrf_weighted_fp1_fp2_high_frequency_power",
+    }
+    convolved_cols = [col for col in columns if col in supported_hrf_cols]
+    if not convolved_cols:
+        return events_df
+
+    events_df = events_df.copy()
+    logger.info(
+        "Subject sub-%s: Calculating HRF-convolved continuous nuisance columns: %s",
+        subject,
+        convolved_cols,
+    )
+
+    from nilearn.glm.first_level.hemodynamic_models import compute_regressor  # type: ignore
+    from fmri_pipeline.utils.bold_discovery import (
+        discover_fmriprep_preproc_bold,
+        get_tr_from_bold,
+    )
+    from fmri_pipeline.analysis.contrast_builder import discover_confounds
+
+    # Find the run ID column
+    from eeg_pipeline.utils.data.fmri_signature_targets import find_block_column
+    run_col = find_block_column(events_df)
+    if run_col is None:
+        raise ValueError("Cannot resolve task run/block column in clean EEG events.")
+
+    run_numbers = pd.to_numeric(run_col, errors="coerce")
+    subject_raw = subject.replace("sub-", "", 1) if subject.startswith("sub-") else subject
+    subject_bids = f"sub-{subject_raw}"
+    space = str(require_config_value(config, "study1.targets.fmriprep_space")).strip()
+    hrf_model = str(get_config_value(config, "study1.targets.hrf_model", "spm")).strip().lower()
+
+    # We will compute the continuous BOLD-derived convolved timeseries for each functional run
+    # and sample them for the trials in the run.
+    run_groups = events_df.groupby(run_numbers)
+
+    # Initialize the convolved columns with NaN
+    for col in convolved_cols:
+        events_df[col] = np.nan
+
+    for run_num, indices in run_groups.groups.items():
+        if pd.isna(run_num):
+            continue
+
+        bold_path = discover_fmriprep_preproc_bold(
+            bids_derivatives=deriv_root,
+            subject=subject_raw,
+            task=task,
+            run_num=int(run_num),
+            space=space,
+        )
+        if bold_path is None or not bold_path.exists():
+            raise FileNotFoundError(
+                f"Missing preprocessed BOLD for sub-{subject_raw}, run-{int(run_num):02d}."
+            )
+
+        tr = float(get_tr_from_bold(bold_path))
+        import nibabel as nib  # type: ignore
+        n_scans = int(nib.load(str(bold_path)).shape[3])
+        frame_times = np.arange(n_scans, dtype=float) * tr
+
+        confounds_path = discover_confounds(
+            bids_derivatives=deriv_root,
+            subject=subject_bids,
+            task=task,
+            run_num=int(run_num),
+        )
+        if confounds_path is None or not confounds_path.exists():
+            raise FileNotFoundError(
+                f"Missing confounds file for sub-{subject_raw}, run-{int(run_num):02d}."
+            )
+
+        confounds_df = pd.read_csv(confounds_path, sep="\t")
+
+        for col in convolved_cols:
+            if col == "hrf_weighted_framewise_displacement":
+                raw_src = "framewise_displacement"
+                if raw_src not in confounds_df.columns:
+                    raise ValueError(f"Confounds TSV missing required column: {raw_src}")
+                raw_values = (
+                    pd.to_numeric(confounds_df[raw_src], errors="coerce")
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                )
+            elif col == "hrf_weighted_std_dvars":
+                raw_src = "std_dvars"
+                if raw_src not in confounds_df.columns:
+                    raise ValueError(f"Confounds TSV missing required column: {raw_src}")
+                raw_values = (
+                    pd.to_numeric(confounds_df[raw_src], errors="coerce")
+                    .fillna(0.0)
+                    .to_numpy(dtype=float)
+                )
+            elif col == "hrf_weighted_fp1_fp2_high_frequency_power":
+                # Reconstruct continuous EEG power confound vector
+                raw_values = np.zeros(n_scans, dtype=float)
+                for idx in indices:
+                    row = events_df.loc[idx]
+                    raw_pow = float(
+                        row.get("peripheral_low_gamma_power",
+                        row.get("fp1_fp2_high_frequency_power", 0.0))
+                    )
+                    onset_idx = int(round(float(row["onset"]) / tr))
+                    dur_idx = int(round(float(row["duration"]) / tr))
+                    raw_values[
+                        max(0, onset_idx) : min(n_scans, onset_idx + max(1, dur_idx))
+                    ] = raw_pow
+            else:
+                raise ValueError(f"Unsupported convolved continuous column: {col}")
+
+            # Convolve using Nilearn's compute_regressor over each trial's HRF weights
+            for idx in indices:
+                row = events_df.loc[idx]
+                onset = float(row["onset"])
+                duration = float(row["duration"])
+
+                exp_condition = np.array([[onset], [duration], [1.0]], dtype=float)
+                regressors, _ = compute_regressor(
+                    exp_condition=exp_condition,
+                    hrf_model=hrf_model,
+                    frame_times=frame_times,
+                    con_id="trial",
+                    oversampling=50,
+                )
+                weights = regressors[:, 0].astype(float, copy=False)
+                weight_sum = float(np.sum(weights))
+                if np.isfinite(weight_sum) and weight_sum > 0:
+                    val = float(np.sum(weights * raw_values) / weight_sum)
+                else:
+                    val = 0.0
+                events_df.at[idx, col] = val
+
+    return events_df
+
+
 def _subject_target_rows(
     *,
     subject: str,
@@ -850,6 +999,14 @@ def _subject_target_rows(
         config=config,
         deriv_root=deriv_root,
         events_df=events_df,
+        logger=logger,
+    )
+    events_df = _compute_convolved_nuisance_columns(
+        subject=subject,
+        task=task,
+        deriv_root=deriv_root,
+        events_df=events_df,
+        config=config,
         logger=logger,
     )
     trial_index = _required_trial_index(events_df)

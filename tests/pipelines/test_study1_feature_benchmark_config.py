@@ -3,7 +3,10 @@ import pandas as pd
 from eeg_pipeline.utils.config.loader import ConfigDict, get_config_value
 from studies.pain_study.study1.cohort import primary_targets_parquet_path
 from studies.pain_study.study1.config import load_study1_config
-from studies.pain_study.study1.feature_benchmark import _feature_benchmark_config
+from studies.pain_study.study1.feature_benchmark import (
+    PRIMARY_BAND_PRESETS,
+    _feature_benchmark_config,
+)
 
 LEVEL2_CONTINUOUS_COLUMNS = [
     "block",
@@ -57,6 +60,19 @@ def test_study1_default_clean_events_qc_matches_artifact_proxy_estimand() -> Non
     assert qc["output_column"] == "fp1_fp2_high_frequency_power"
     assert qc["channels"] == ["Fp1", "Fp2"]
     assert qc["band"] == [70.0, 95.0]
+
+
+def test_study1_power_presets_include_low_and_high_frequency_exploration() -> None:
+    assert PRIMARY_BAND_PRESETS["delta"] == ["delta"]
+    assert PRIMARY_BAND_PRESETS["theta"] == ["theta"]
+    assert PRIMARY_BAND_PRESETS["gamma"] == ["gamma"]
+    assert PRIMARY_BAND_PRESETS["all_bands"] == [
+        "delta",
+        "theta",
+        "alpha",
+        "beta",
+        "gamma",
+    ]
 
 
 def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:

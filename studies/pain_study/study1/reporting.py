@@ -8,14 +8,22 @@ import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
+from eeg_pipeline.infra.paths import find_clean_events_path
 from eeg_pipeline.infra.tsv import write_parquet, write_tsv
 from eeg_pipeline.utils.config.loader import get_config_value
-from studies.pain_study.study1.cohort import study1_output_root
+from studies.pain_study.study1.cohort import (
+    load_primary_target_table,
+    primary_targets_parquet_path,
+    study1_output_root,
+)
 from studies.pain_study.study1.feature_benchmark import PRIMARY_BAND_PRESETS
-from studies.pain_study.study1.targets import PRIMARY_SIGNATURES
-
+from studies.pain_study.study1.targets import (
+    PRIMARY_SIGNATURES,
+    residualization_columns_for_target_table,
+)
 
 FEATURE_MODELS = ("elasticnet", "ridge")
 PRIMARY_GATE_TARGET = "NPS"
@@ -64,6 +72,49 @@ SOURCE_ENTRY_MIN_DELTA_R2_LOWER_CI = 0.005
 SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2 = 0.005
 SOURCE_ENTRY_MIN_TARGET_RELIABILITY = 0.4
 MIN_TARGET_RELIABILITY_TRIALS = 30
+ARTICLE_MODEL_COLUMNS = (
+    "target",
+    "claim_tier",
+    "feature_spec",
+    "model",
+    "mean_r2",
+    "mean_nuisance_r2",
+    "mean_delta_r2",
+    "ci_low_delta_r2",
+    "ci_high_delta_r2",
+    "p_value_delta_r2",
+    "p_value_delta_r2_holm",
+    "n_perm_completed",
+    "n_folds",
+    "n_subjects_included",
+    "primary_prediction_status",
+    "interpretation_flags",
+    "study2_source_entry_status",
+)
+ARTICLE_REQUIRED_TARGET_COLUMNS = (
+    "subject_id",
+    "block",
+    "within_block_trial",
+    "onset",
+    "NPS",
+    "SIIPS1",
+    "hrf_weighted_framewise_displacement",
+    "hrf_weighted_std_dvars",
+    "hrf_weighted_fp1_fp2_high_frequency_power",
+    "residual_ecg_coupling",
+    "stimulus_temp",
+    "selected_surface",
+)
+ARTICLE_REQUIRED_EVENT_COLUMNS = (
+    "run_id",
+    "trial_number",
+    "stimulus_temp",
+    "selected_surface",
+    "pain_binary_coded",
+    "vas_final_coded_rating",
+    "residual_ecg_coupling",
+    "peripheral_low_gamma_power",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -186,12 +237,8 @@ def _interpretation_flags(record: pd.Series) -> str:
     target_reliability = _optional_float(record, "target_split_half_reliability")
     reliability_trials = _optional_float(record, "target_reliability_n_trials")
     if (
-        target_reliability is not None
-        and target_reliability < SOURCE_ENTRY_MIN_TARGET_RELIABILITY
-    ) or (
-        reliability_trials is not None
-        and reliability_trials < MIN_TARGET_RELIABILITY_TRIALS
-    ):
+        target_reliability is not None and target_reliability < SOURCE_ENTRY_MIN_TARGET_RELIABILITY
+    ) or (reliability_trials is not None and reliability_trials < MIN_TARGET_RELIABILITY_TRIALS):
         flags.append("target_reliability_limited")
 
     precision_passed = _optional_bool(record, "precision_flag_passed")
@@ -199,10 +246,7 @@ def _interpretation_flags(record: pd.Series) -> str:
         flags.append("precision_limited")
 
     level2_delta_r2 = _optional_float(record, "level2_mean_delta_r2")
-    if (
-        level2_delta_r2 is not None
-        and level2_delta_r2 < SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2
-    ):
+    if level2_delta_r2 is not None and level2_delta_r2 < SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2:
         flags.append("level2_convergence_limited")
 
     within_subject_delta_r2 = _optional_float(record, "within_subject_centered_delta_r2")
@@ -253,12 +297,10 @@ def _study2_source_entry_status(record: pd.Series) -> str:
     failed = (
         _optional_float(record, "mean_delta_r2") < SOURCE_ENTRY_MIN_DELTA_R2
         or _optional_float(record, "ci_low_delta_r2") <= SOURCE_ENTRY_MIN_DELTA_R2_LOWER_CI
-        or _optional_float(record, "level2_mean_delta_r2")
-        < SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2
+        or _optional_float(record, "level2_mean_delta_r2") < SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2
         or _optional_float(record, "target_split_half_reliability")
         < SOURCE_ENTRY_MIN_TARGET_RELIABILITY
-        or _optional_float(record, "target_reliability_n_trials")
-        < MIN_TARGET_RELIABILITY_TRIALS
+        or _optional_float(record, "target_reliability_n_trials") < MIN_TARGET_RELIABILITY_TRIALS
         or _optional_float(record, "within_subject_centered_delta_r2") <= 0.0
         or _optional_bool(record, "temporal_negative_controls_passed") is False
         or _optional_bool(record, "artifact_censoring_robustness_passed") is False
@@ -274,9 +316,8 @@ def _append_interpretation_columns(frame: pd.DataFrame) -> pd.DataFrame:
         if field not in out.columns:
             out[field] = pd.NA
 
-    feature_primary = (
-        (out["lane"].astype(str) == "feature_benchmark")
-        & (out["analysis_partition"].astype(str) == "primary")
+    feature_primary = (out["lane"].astype(str) == "feature_benchmark") & (
+        out["analysis_partition"].astype(str) == "primary"
     )
     out["analysis_validity_status"] = "not_primary_analysis"
     out.loc[feature_primary, "analysis_validity_status"] = "analysis_valid"
@@ -361,10 +402,7 @@ def _feature_records(config: Any) -> list[dict[str, Any]]:
                     "best_params_by_fold": best_params,
                     "n_unique_best_params": n_unique_best_params,
                     "summary_path": str(summary_path),
-                    **{
-                        field: metrics.get(field)
-                        for field in INTERPRETATION_DIAGNOSTIC_FIELDS
-                    },
+                    **{field: metrics.get(field) for field in INTERPRETATION_DIAGNOSTIC_FIELDS},
                 }
             )
     return records
@@ -516,9 +554,8 @@ def _append_primary_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     out["p_value_r2_holm"] = pd.NA
     out["p_value_delta_r2_holm"] = pd.NA
-    primary_mask = (
-        (out["lane"].astype(str) == "feature_benchmark")
-        & (out["analysis_partition"].astype(str) == "primary")
+    primary_mask = (out["lane"].astype(str) == "feature_benchmark") & (
+        out["analysis_partition"].astype(str) == "primary"
     )
     try:
         from statsmodels.stats.multitest import multipletests
@@ -541,6 +578,450 @@ def _append_primary_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:
             adjusted = multipletests(values, method="holm")[1]
             out.loc[p_values.loc[valid].index, adjusted_column] = adjusted
     return out
+
+
+def _write_article_tables(
+    *,
+    frame: pd.DataFrame,
+    task: str,
+    config: Any,
+    report_root: Path,
+    report_path: Path,
+) -> None:
+    target_table = load_primary_target_table(config)
+    _require_columns(
+        target_table,
+        ARTICLE_REQUIRED_TARGET_COLUMNS,
+        table_name="Study 1 primary target table",
+    )
+    included_subjects = sorted(target_table["subject_id"].astype(str).unique().tolist())
+    if not included_subjects:
+        raise ValueError("Study 1 article tables require at least one included subject.")
+
+    events = _load_article_clean_events(
+        subjects=included_subjects,
+        task=task,
+        config=config,
+    )
+    enriched_targets = _merge_targets_with_clean_events(target_table, events)
+
+    article_root = report_root / "article_tables"
+    model_table = _article_model_results(frame)
+    cohort_table = _article_cohort_summary(target_table, events, enriched_targets)
+    diagnostics_table = _article_target_diagnostics(
+        target_table=target_table,
+        enriched_targets=enriched_targets,
+        config=config,
+    )
+
+    table_paths = {
+        "model_results": _write_article_table(
+            model_table,
+            article_root / "article_model_results",
+        ),
+        "cohort_summary": _write_article_table(
+            cohort_table,
+            article_root / "article_cohort_summary",
+        ),
+        "target_diagnostics": _write_article_table(
+            diagnostics_table,
+            article_root / "article_target_diagnostics",
+        ),
+    }
+    manifest = {
+        "task": task,
+        "source_report": str(report_path),
+        "target_table": str(primary_targets_parquet_path(config)),
+        "included_subjects": included_subjects,
+        "n_subjects": int(len(included_subjects)),
+        "n_trials": int(len(target_table)),
+        "tables": {
+            name: {"tsv": str(paths["tsv"]), "parquet": str(paths["parquet"])}
+            for name, paths in table_paths.items()
+        },
+    }
+    manifest_path = article_root / "article_table_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2, sort_keys=True)
+
+
+def _write_article_table(frame: pd.DataFrame, stem: Path) -> dict[str, Path]:
+    tsv_path = stem.with_suffix(".tsv")
+    parquet_path = stem.with_suffix(".parquet")
+    write_tsv(frame, tsv_path)
+    write_parquet(frame, parquet_path)
+    return {"tsv": tsv_path, "parquet": parquet_path}
+
+
+def _article_model_results(frame: pd.DataFrame) -> pd.DataFrame:
+    _require_columns(frame, ARTICLE_MODEL_COLUMNS, table_name="Study 1 report")
+    rows = frame.loc[
+        (frame["lane"].astype(str) == "feature_benchmark")
+        & (frame["analysis_partition"].astype(str) == "primary"),
+        list(ARTICLE_MODEL_COLUMNS),
+    ].copy()
+    if rows.empty:
+        raise ValueError("Study 1 article model table requires primary feature-benchmark rows.")
+    return rows.sort_values(["target", "feature_spec", "model"], kind="stable").reset_index(
+        drop=True
+    )
+
+
+def _load_article_clean_events(
+    *,
+    subjects: list[str],
+    task: str,
+    config: Any,
+) -> pd.DataFrame:
+    event_frames: list[pd.DataFrame] = []
+    for subject in subjects:
+        event_path = find_clean_events_path(subject, task, config=config)
+        if event_path is None or not event_path.exists():
+            raise FileNotFoundError(
+                "Study 1 article tables require clean EEG events for every included "
+                f"subject. Missing: {subject}, task-{task}."
+            )
+        events = pd.read_csv(event_path, sep="\t")
+        _require_columns(
+            events,
+            ARTICLE_REQUIRED_EVENT_COLUMNS,
+            table_name=f"clean events for {subject}",
+        )
+        events = events.copy()
+        events["subject_id"] = subject
+        events["_block_key"] = _required_integer_series(events, "run_id")
+        events["_within_block_trial_key"] = _required_integer_series(events, "trial_number")
+        event_frames.append(events)
+
+    if not event_frames:
+        raise ValueError("Study 1 article tables require at least one clean events table.")
+    return pd.concat(event_frames, axis=0, ignore_index=True)
+
+
+def _merge_targets_with_clean_events(
+    target_table: pd.DataFrame,
+    events: pd.DataFrame,
+) -> pd.DataFrame:
+    targets = target_table.copy()
+    targets["_block_key"] = _required_integer_series(targets, "block")
+    targets["_within_block_trial_key"] = _required_integer_series(targets, "within_block_trial")
+    event_columns = [
+        "subject_id",
+        "_block_key",
+        "_within_block_trial_key",
+        "pain_binary_coded",
+        "vas_final_coded_rating",
+        "peripheral_low_gamma_power",
+        "stimulus_temp",
+        "selected_surface",
+        "residual_ecg_coupling",
+    ]
+    merged = targets.merge(
+        events[event_columns].rename(
+            columns={
+                "stimulus_temp": "event_stimulus_temp",
+                "selected_surface": "event_selected_surface",
+                "residual_ecg_coupling": "event_residual_ecg_coupling",
+            }
+        ),
+        how="left",
+        on=["subject_id", "_block_key", "_within_block_trial_key"],
+        validate="one_to_one",
+    )
+    if merged["vas_final_coded_rating"].isna().any():
+        missing = merged.loc[
+            merged["vas_final_coded_rating"].isna(),
+            ["subject_id", "block", "within_block_trial"],
+        ]
+        raise ValueError(
+            "Study 1 article tables found target rows without matching clean events:\n"
+            f"{missing.to_string(index=False)}"
+        )
+    return merged.drop(columns=["_block_key", "_within_block_trial_key"])
+
+
+def _article_cohort_summary(
+    target_table: pd.DataFrame,
+    events: pd.DataFrame,
+    enriched_targets: pd.DataFrame,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    subjects = sorted(target_table["subject_id"].astype(str).unique().tolist())
+    for subject in subjects:
+        target_rows = target_table.loc[target_table["subject_id"].astype(str) == subject].copy()
+        event_rows = events.loc[events["subject_id"].astype(str) == subject].copy()
+        enriched_rows = enriched_targets.loc[
+            enriched_targets["subject_id"].astype(str) == subject
+        ].copy()
+        target_keys = set(
+            zip(
+                _required_integer_series(target_rows, "block"),
+                _required_integer_series(target_rows, "within_block_trial"),
+            )
+        )
+        event_keys = set(
+            zip(
+                event_rows["_block_key"].astype(int),
+                event_rows["_within_block_trial_key"].astype(int),
+            )
+        )
+
+        row = {
+            "subject_id": subject,
+            "n_target_trials": int(len(target_rows)),
+            "n_clean_event_trials": int(len(event_rows)),
+            "n_target_event_matches": int(len(target_keys & event_keys)),
+            "n_event_without_target": int(len(event_keys - target_keys)),
+            "n_blocks": int(_numeric_series(target_rows, "block").nunique()),
+            "n_stimulus_temperatures": int(_numeric_series(target_rows, "stimulus_temp").nunique()),
+            "min_stimulus_temp": float(_numeric_series(target_rows, "stimulus_temp").min()),
+            "max_stimulus_temp": float(_numeric_series(target_rows, "stimulus_temp").max()),
+            "mean_framewise_displacement": _mean(
+                target_rows, "hrf_weighted_framewise_displacement"
+            ),
+            "mean_std_dvars": _mean(target_rows, "hrf_weighted_std_dvars"),
+            "mean_residual_ecg_coupling": _mean(target_rows, "residual_ecg_coupling"),
+            "mean_peripheral_low_gamma_power": _mean(
+                enriched_rows,
+                "peripheral_low_gamma_power",
+            ),
+            "mean_vas_rating": _mean(enriched_rows, "vas_final_coded_rating"),
+            "vas_temp_r": _correlation(
+                enriched_rows,
+                "stimulus_temp",
+                "vas_final_coded_rating",
+            ),
+            "vas_high_minus_low_temp": _high_minus_low(
+                enriched_rows,
+                value_column="vas_final_coded_rating",
+            ),
+        }
+        for target_name in PRIMARY_SIGNATURES:
+            row[f"{target_name}_mean"] = _mean(target_rows, target_name)
+            row[f"{target_name}_sd"] = _std(target_rows, target_name)
+            row[f"{target_name}_temp_r"] = _correlation(
+                target_rows,
+                "stimulus_temp",
+                target_name,
+            )
+            row[f"{target_name}_high_minus_low_temp"] = _high_minus_low(
+                target_rows,
+                value_column=target_name,
+            )
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values("subject_id", kind="stable").reset_index(drop=True)
+
+
+def _article_target_diagnostics(
+    *,
+    target_table: pd.DataFrame,
+    enriched_targets: pd.DataFrame,
+    config: Any,
+) -> pd.DataFrame:
+    nuisance_columns = residualization_columns_for_target_table(
+        config,
+        primary_targets_parquet_path(config),
+    )
+    stimulus_surface_columns = _stimulus_surface_design_columns(target_table)
+
+    rows = []
+    for target_name in PRIMARY_SIGNATURES:
+        rows.append(
+            {
+                "target": target_name,
+                "n_trials": int(len(target_table)),
+                "n_subjects": int(target_table["subject_id"].astype(str).nunique()),
+                "mean": _mean(target_table, target_name),
+                "sd": _std(target_table, target_name),
+                "stimulus_temp_r": _correlation(target_table, "stimulus_temp", target_name),
+                "vas_rating_r": _correlation(
+                    enriched_targets,
+                    "vas_final_coded_rating",
+                    target_name,
+                ),
+                "pain_binary_r": _correlation(
+                    enriched_targets,
+                    "pain_binary_coded",
+                    target_name,
+                ),
+                "framewise_displacement_r": _correlation(
+                    target_table,
+                    "hrf_weighted_framewise_displacement",
+                    target_name,
+                ),
+                "std_dvars_r": _correlation(
+                    target_table,
+                    "hrf_weighted_std_dvars",
+                    target_name,
+                ),
+                "residual_ecg_coupling_r": _correlation(
+                    target_table,
+                    "residual_ecg_coupling",
+                    target_name,
+                ),
+                "peripheral_low_gamma_r": _correlation(
+                    enriched_targets,
+                    "peripheral_low_gamma_power",
+                    target_name,
+                ),
+                "stimulus_surface_in_sample_r2": _in_sample_design_r2(
+                    target_table,
+                    target_name,
+                    stimulus_surface_columns,
+                ),
+                "official_nuisance_in_sample_r2": _in_sample_r2(
+                    target_table,
+                    target_name,
+                    nuisance_columns,
+                ),
+                **_split_half_temperature_reliability(target_table, target_name),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _stimulus_surface_design_columns(target_table: pd.DataFrame) -> pd.DataFrame:
+    _require_columns(target_table, ("stimulus_temp", "selected_surface"), table_name="target table")
+    design = pd.get_dummies(
+        target_table[["stimulus_temp", "selected_surface"]].astype(str),
+        drop_first=True,
+        dtype=float,
+    )
+    if design.empty:
+        raise ValueError("Study 1 article diagnostics require stimulus/surface variation.")
+    return design
+
+
+def _split_half_temperature_reliability(
+    target_table: pd.DataFrame,
+    target_name: str,
+) -> dict[str, Any]:
+    _require_columns(
+        target_table,
+        ("subject_id", "block", "stimulus_temp", target_name),
+        table_name="target table",
+    )
+    frame = target_table[["subject_id", "block", "stimulus_temp", target_name]].copy()
+    frame["block_parity"] = np.where(
+        _required_integer_series(frame, "block") % 2 == 0, "even", "odd"
+    )
+    pivot = frame.pivot_table(
+        index=["subject_id", "stimulus_temp"],
+        columns="block_parity",
+        values=target_name,
+        aggfunc="mean",
+    )
+    if "odd" not in pivot.columns or "even" not in pivot.columns:
+        return {
+            "split_half_subject_temperature_r": float("nan"),
+            "split_half_subject_temperature_n_cells": 0,
+        }
+    cells = pivot.dropna(subset=["odd", "even"])
+    return {
+        "split_half_subject_temperature_r": _series_correlation(cells["odd"], cells["even"]),
+        "split_half_subject_temperature_n_cells": int(len(cells)),
+    }
+
+
+def _high_minus_low(frame: pd.DataFrame, *, value_column: str) -> float:
+    _require_columns(frame, ("stimulus_temp", value_column), table_name="article input")
+    values = frame[["stimulus_temp", value_column]].copy()
+    values["stimulus_temp"] = _numeric_series(values, "stimulus_temp")
+    values[value_column] = _numeric_series(values, value_column)
+    by_temp = values.groupby("stimulus_temp", sort=True)[value_column].mean()
+    if len(by_temp) < 2:
+        return float("nan")
+    return float(by_temp.iloc[-1] - by_temp.iloc[0])
+
+
+def _in_sample_r2(frame: pd.DataFrame, target_column: str, predictors: tuple[str, ...]) -> float:
+    _require_columns(frame, (target_column, *predictors), table_name="article diagnostics")
+    y = _numeric_series(frame, target_column).to_numpy(dtype=float)
+    if not predictors:
+        return 0.0
+    x_columns = [_numeric_series(frame, column).to_numpy(dtype=float) for column in predictors]
+    design = np.column_stack([np.ones(len(y), dtype=float), *x_columns])
+    coefficients, *_ = np.linalg.lstsq(design, y, rcond=None)
+    predicted = design @ coefficients
+    ss_res = float(np.sum((y - predicted) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    if ss_tot <= 0.0:
+        return float("nan")
+    return float(1.0 - ss_res / ss_tot)
+
+
+def _in_sample_design_r2(
+    frame: pd.DataFrame,
+    target_column: str,
+    design_frame: pd.DataFrame,
+) -> float:
+    _require_columns(frame, (target_column,), table_name="article diagnostics")
+    if len(frame) != len(design_frame):
+        raise ValueError(
+            "Article diagnostic design matrix row count does not match target table: "
+            f"design={len(design_frame)}, target={len(frame)}."
+        )
+    y = _numeric_series(frame, target_column).to_numpy(dtype=float)
+    design_values = design_frame.apply(pd.to_numeric, errors="coerce")
+    if design_values.isna().any().any():
+        raise ValueError("Article diagnostic design matrix contains non-numeric values.")
+    design = np.column_stack(
+        [
+            np.ones(len(y), dtype=float),
+            design_values.to_numpy(dtype=float),
+        ]
+    )
+    coefficients, *_ = np.linalg.lstsq(design, y, rcond=None)
+    predicted = design @ coefficients
+    ss_res = float(np.sum((y - predicted) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    if ss_tot <= 0.0:
+        return float("nan")
+    return float(1.0 - ss_res / ss_tot)
+
+
+def _correlation(frame: pd.DataFrame, x_column: str, y_column: str) -> float:
+    _require_columns(frame, (x_column, y_column), table_name="article input")
+    return _series_correlation(_numeric_series(frame, x_column), _numeric_series(frame, y_column))
+
+
+def _series_correlation(x: pd.Series, y: pd.Series) -> float:
+    pair = pd.DataFrame({"x": x, "y": y}).dropna()
+    if len(pair) < 3:
+        return float("nan")
+    if pair["x"].nunique() < 2 or pair["y"].nunique() < 2:
+        return float("nan")
+    return float(pair["x"].corr(pair["y"]))
+
+
+def _mean(frame: pd.DataFrame, column: str) -> float:
+    return float(_numeric_series(frame, column).mean())
+
+
+def _std(frame: pd.DataFrame, column: str) -> float:
+    return float(_numeric_series(frame, column).std(ddof=1))
+
+
+def _numeric_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    _require_columns(frame, (column,), table_name="article input")
+    values = pd.to_numeric(frame[column], errors="coerce")
+    if values.isna().any():
+        raise ValueError(f"Article table column '{column}' contains non-numeric values.")
+    return values.astype(float)
+
+
+def _required_integer_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    values = _numeric_series(frame, column)
+    if not np.allclose(values, np.round(values)):
+        raise ValueError(f"Article table column '{column}' must contain integer-valued labels.")
+    return values.round().astype(int)
+
+
+def _require_columns(frame: pd.DataFrame, columns: tuple[str, ...], *, table_name: str) -> None:
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise ValueError(f"{table_name} is missing required article column(s): {missing}.")
 
 
 def write_study1_report(
@@ -591,6 +1072,13 @@ def write_study1_report(
     json_path.parent.mkdir(parents=True, exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as handle:
         json.dump(summary_payload, handle, indent=2)
+    _write_article_tables(
+        frame=frame,
+        task=task,
+        config=config,
+        report_root=report_root,
+        report_path=tsv_path,
+    )
     logger.info("Wrote Study 1 report to %s", tsv_path)
     return tsv_path
 

@@ -74,7 +74,10 @@ class RunQC:
 
 
 def _iter_files(root: Path, pattern: str) -> Iterable[Path]:
-    yield from root.rglob(pattern)
+    for p in root.rglob(pattern):
+        if p.name.startswith("._"):
+            continue
+        yield p
 
 
 def _rename_bold_events_files(fmri_root: Path) -> int:
@@ -122,13 +125,18 @@ def _ensure_phasediff_echo_times(fmri_root: Path) -> int:
     """
     n = 0
     for sub_dir in sorted(fmri_root.glob("sub-*")):
-        if not sub_dir.is_dir():
+        if not sub_dir.is_dir() or sub_dir.name.startswith("._"):
             continue
         fmap_dirs: List[Path] = [sub_dir / "fmap"] if (sub_dir / "fmap").is_dir() else []
-        fmap_dirs.extend(d for d in sub_dir.glob("ses-*/fmap") if d.is_dir())
+        fmap_dirs.extend(
+            d for d in sub_dir.glob("ses-*/fmap")
+            if d.is_dir() and not d.name.startswith("._")
+        )
         for fmap_dir in fmap_dirs:
             all_tes: List[float] = []
             for j in fmap_dir.glob("*.json"):
+                if j.name.startswith("._"):
+                    continue
                 m = _load_json(j)
                 for k in ("EchoTime", "EchoTime1", "EchoTime2"):
                     v = m.get(k)
@@ -139,6 +147,8 @@ def _ensure_phasediff_echo_times(fmri_root: Path) -> int:
                             pass
             all_tes = sorted(set(all_tes))
             for j in fmap_dir.glob("*_phasediff.json"):
+                if j.name.startswith("._"):
+                    continue
                 m = _load_json(j)
                 if "EchoTime1" in m and "EchoTime2" in m:
                     continue
@@ -258,17 +268,14 @@ def _convert_fmri_events_to_scan_timebase(
     """
     Convert fMRI events.tsv onset column from PsychoPy time base to scan time base.
 
-    Idempotent:
-      - If onset_psychopy exists, assumes conversion already done and does nothing.
-      - Otherwise, creates onset_psychopy, psychopy_to_scan_offset_s, and updates onset.
+    If onset_psychopy already exists in fieldnames, it recomputes onset from onset_psychopy
+    to allow adjusting the offset dynamically.
     """
     fieldnames, rows = _read_tsv(fmri_events_path)
     if not rows:
         return
 
-    if "onset_psychopy" in fieldnames:
-        # Already converted earlier.
-        return
+    has_converted = "onset_psychopy" in fieldnames
 
     # Ensure provenance columns exist (append at end for stability)
     if "onset_psychopy" not in fieldnames:
@@ -279,7 +286,10 @@ def _convert_fmri_events_to_scan_timebase(
     parse_failures = 0
     for row in rows:
         try:
-            onset_psy = float(row.get("onset") or "")
+            if has_converted:
+                onset_psy = float(row.get("onset_psychopy") or "")
+            else:
+                onset_psy = float(row.get("onset") or "")
         except (TypeError, ValueError):
             parse_failures += 1
             continue
@@ -581,7 +591,37 @@ def main() -> int:
 
         vol_count, last_vol_onset = _volume_markers_from_eeg_events(eeg_events)
 
-        offset_s = _psychopy_to_scan_offset_s(eeg_events)
+        abs_offset_s = _psychopy_to_scan_offset_s(eeg_events)
+        offset_s = abs_offset_s
+
+        # Detect if fMRI events have relative onsets (e.g. from first_iti_start)
+        _, fmri_rows = _read_tsv(fmri_events)
+        first_fmri_onset = 0.0
+        if fmri_rows:
+            try:
+                if "onset_psychopy" in fmri_rows[0]:
+                    first_fmri_onset = float(fmri_rows[0]["onset_psychopy"])
+                else:
+                    first_fmri_onset = float(fmri_rows[0]["onset"])
+            except (ValueError, TypeError):
+                pass
+
+        # Find first trial ITI start from Trig_therm* rows in EEG events
+        first_iti_start = 0.0
+        _, eeg_rows = _read_tsv(eeg_events)
+        for row in eeg_rows:
+            tt = (row.get("trial_type") or "").strip()
+            if tt.startswith("Trig_therm"):
+                try:
+                    first_iti_start = float(row.get("iti_start_time") or "")
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # If fMRI onsets are relative and we have first ITI start, adjust the offset
+        if first_fmri_onset < 5.0 and first_iti_start > 0.0:
+            offset_s = abs_offset_s - first_iti_start
+
         _convert_fmri_events_to_scan_timebase(fmri_events, offset_s=offset_s)
         n_trials, n_incomplete_eeg, n_incomplete_bold, max_trial_end = _annotate_fmri_events_for_qc(
             fmri_events,
@@ -595,7 +635,7 @@ def main() -> int:
 
         # Write optional derived EEG phase events in scan time base (for analysis convenience).
         phase_out = qc_out / "eeg_phase_events" / f"{sub_label}_task-{task}_run-{run:02d}_events.tsv"
-        _write_eeg_phase_events(eeg_events_path=eeg_events, out_path=phase_out, offset_s=offset_s)
+        _write_eeg_phase_events(eeg_events_path=eeg_events, out_path=phase_out, offset_s=abs_offset_s)
 
         run_qc_rows.append(
             RunQC(

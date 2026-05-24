@@ -89,6 +89,8 @@ _PRECOMPUTE_CATEGORIES = {
     "complexity",
     "bursts",
 }
+_ACTIVE_ONLY_BASELINE_REFERENCED_CATEGORIES = {"erds"}
+_BASELINE_RANGE_NAMES = {"baseline"}
 
 
 def _resolve_time_ranges(explicit_windows: Optional[List[Dict[str, Any]]], tmin: Optional[float], tmax: Optional[float]) -> List[Dict[str, Any]]:
@@ -96,6 +98,22 @@ def _resolve_time_ranges(explicit_windows: Optional[List[Dict[str, Any]]], tmin:
     if explicit_windows:
         return list(explicit_windows)
     return [{"name": None, "tmin": tmin, "tmax": tmax}]
+
+
+def _feature_categories_for_time_range(
+    feature_categories: List[str],
+    range_name: Any,
+) -> List[str]:
+    """Return requested categories that produce outputs for a named time range."""
+    normalized_range = str(range_name or "").strip().lower()
+    if normalized_range not in _BASELINE_RANGE_NAMES:
+        return list(feature_categories)
+
+    return [
+        category
+        for category in feature_categories
+        if str(category).strip().lower() not in _ACTIVE_ONLY_BASELINE_REFERENCED_CATEGORIES
+    ]
 
 
 def _features_required_event_groups(config: Any) -> Optional[List[str]]:
@@ -1147,6 +1165,29 @@ class FeaturePipeline(PipelineBase):
                         tmax,
                     )
 
+                range_feature_categories = _feature_categories_for_time_range(
+                    feature_categories,
+                    name,
+                )
+                skipped_categories = [
+                    category
+                    for category in feature_categories
+                    if category not in range_feature_categories
+                ]
+                if skipped_categories:
+                    self.logger.info(
+                        "Skipping %s for %s; these baseline-referenced features "
+                        "use this range as reference rather than output.",
+                        ", ".join(skipped_categories),
+                        range_info,
+                    )
+                if not range_feature_categories:
+                    self.logger.info(
+                        "Skipping %s; no requested feature categories produce outputs.",
+                        range_info,
+                    )
+                    continue
+
                 spatial_modes = kwargs.get("spatial_modes") or self.config.get(
                     "feature_engineering.spatial_modes", ["roi", "channels", "global"]
                 )
@@ -1161,7 +1202,7 @@ class FeaturePipeline(PipelineBase):
                     fixed_templates=fixed_templates,
                     fixed_template_ch_names=fixed_template_ch_names,
                     fixed_template_labels=fixed_template_labels,
-                    feature_categories=feature_categories,
+                    feature_categories=range_feature_categories,
                     bands=kwargs.get("bands"),
                     spatial_modes=spatial_modes,
                     tmin=tmin,
@@ -1206,7 +1247,7 @@ class FeaturePipeline(PipelineBase):
                 critical_features: List[str] = []
                 if y is not None:
                     critical_features.append("target")
-                if "power" in ctx.feature_categories:
+                if "power" in range_feature_categories:
                     critical_features.extend(["power", "baseline"])
 
                 extra_blocks = _build_extra_blocks(unpacked, features)
@@ -1230,7 +1271,7 @@ class FeaturePipeline(PipelineBase):
                         self.config,
                         critical_features=critical_features,
                         extra_blocks=extra_blocks,
-                        requested_categories=ctx.feature_categories,
+                        requested_categories=range_feature_categories,
                     )
                 except Exception:
                     if not subject_completed():
@@ -1397,7 +1438,7 @@ class FeaturePipeline(PipelineBase):
                     "tmin": ctx.tmin,
                     "tmax": ctx.tmax,
                     "bands": ctx.bands,
-                    "feature_categories": feature_categories,
+                    "feature_categories": range_feature_categories,
                     "n_trials": n_trials_saved,
                     "subject": subject,
                     "task": task,
@@ -1408,7 +1449,7 @@ class FeaturePipeline(PipelineBase):
                     features_dir,
                     suffix,
                     self.logger,
-                    feature_categories,
+                    range_feature_categories,
                     pipeline_config=self.config,
                 )
                 saved_range_count += 1

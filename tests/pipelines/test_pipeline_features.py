@@ -1197,6 +1197,20 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
         self.assertIn("power", constants.FEATURE_CATEGORIES)
         self.assertNotIn("report", constants.BEHAVIOR_COMPUTATIONS)
 
+    def test_feature_categories_for_time_range_omits_erds_on_baseline(self):
+        from eeg_pipeline.pipelines.features import _feature_categories_for_time_range
+
+        requested = ["power", "erds", "bursts"]
+
+        self.assertEqual(
+            _feature_categories_for_time_range(requested, "baseline"),
+            ["power", "bursts"],
+        )
+        self.assertEqual(
+            _feature_categories_for_time_range(requested, "active"),
+            requested,
+        )
+
     def test_feature_pipeline_process_subject_happy_path(self):
         from eeg_pipeline.pipelines.features import FeaturePipeline
 

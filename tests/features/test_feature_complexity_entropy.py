@@ -33,7 +33,7 @@ class TestComplexityEntropyFeatures(unittest.TestCase):
 
         envelope = np.abs(filtered)
         analytic = filtered.astype(np.complex128) + 0.0j
-        power = envelope ** 2
+        power = envelope**2
 
         band_data = {
             "alpha": BandData(
@@ -106,6 +106,20 @@ class TestComplexityEntropyFeatures(unittest.TestCase):
             self.assertIn(col, df.columns)
             self.assertTrue(np.isfinite(np.asarray(df[col], dtype=float)).any(), msg=col)
 
+    def test_extracts_requested_baseline_segment(self):
+        precomputed = self._build_precomputed()
+        precomputed.windows.name = "baseline"
+        precomputed.config["feature_engineering"]["complexity"]["min_segment_sec"] = 0.2
+        precomputed.config["feature_engineering"]["complexity"]["min_samples"] = 50
+        precomputed.config["feature_engineering"]["complexity"]["mse_scale_max"] = 1
+
+        df, cols = extract_complexity_from_precomputed(precomputed, n_jobs=1)
+
+        expected_col = NamingSchema.build("comp", "baseline", "alpha", "global", "sampen")
+        self.assertIn(expected_col, cols)
+        self.assertIn(expected_col, df.columns)
+        self.assertTrue(np.isfinite(np.asarray(df[expected_col], dtype=float)).any())
+
     def test_resting_state_rejects_empty_target_window(self):
         precomputed = self._build_precomputed()
         times = precomputed.times
@@ -138,7 +152,9 @@ class TestComplexityEntropyFeatures(unittest.TestCase):
             }
         )
 
-        with self.assertRaisesRegex(ValueError, "target window 'active' does not contain valid samples"):
+        with self.assertRaisesRegex(
+            ValueError, "target window 'active' does not contain valid samples"
+        ):
             extract_complexity_from_precomputed(precomputed, n_jobs=1)
 
     def test_complexity_global_features_reject_partial_channel_support(self):

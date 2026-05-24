@@ -75,6 +75,21 @@ def test_load_study1_config_resolves_explicit_path() -> None:
     assert config["study1"]["cohort"]["min_subjects"] == 2
 
 
+def test_load_study1_config_preserves_signature_paths_relative_to_signature_dir() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+    targets = config["study1"]["targets"]
+
+    assert targets["signature_manifest_path"] == "signature_manifest.yaml"
+    assert targets["signature_provenance"]["NPS"]["path"] == (
+        "NPS/weights_NSF_grouppred_cvpcr.nii.gz"
+    )
+    assert targets["signature_provenance"]["SIIPS1"]["path"] == (
+        "SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+    )
+
+
 def test_load_study1_config_rejects_missing_file(tmp_path) -> None:
     from studies.pain_study.study1.config.loader import load_study1_config
 

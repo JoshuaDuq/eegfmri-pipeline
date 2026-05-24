@@ -23,7 +23,6 @@ from eeg_pipeline.utils.analysis.spatial import build_roi_map_if_needed
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.config.loader import get_condition_column_candidates
 
-
 _MAD_TO_STD_SCALE = 1.4826
 _MIN_PERCENTILE = 50.0
 _MAX_PERCENTILE = 99.9
@@ -90,20 +89,13 @@ def _extract_burst_metrics(
     valid_durations = durations[meets_min_duration]
 
     peak_amplitudes = [
-        float(np.nanmax(trace[start:end]))
-        for start, end in zip(valid_starts, valid_ends)
+        float(np.nanmax(trace[start:end])) for start, end in zip(valid_starts, valid_ends)
     ]
 
     burst_count = float(len(valid_durations))
-    mean_duration_sec = (
-        float(np.mean(valid_durations) / sfreq) if sfreq > 0 else np.nan
-    )
-    mean_amplitude = (
-        float(np.mean(peak_amplitudes)) if peak_amplitudes else np.nan
-    )
-    burst_rate = (
-        float(burst_count / duration_sec) if has_valid_duration else np.nan
-    )
+    mean_duration_sec = float(np.mean(valid_durations) / sfreq) if sfreq > 0 else np.nan
+    mean_amplitude = float(np.mean(peak_amplitudes)) if peak_amplitudes else np.nan
+    burst_rate = float(burst_count / duration_sec) if has_valid_duration else np.nan
     fraction_above = float(np.mean(above_threshold))
 
     return {
@@ -121,7 +113,7 @@ def _parse_burst_config(
 ) -> Dict[str, Any]:
     """Parse burst detection configuration from context."""
     burst_config = config.get("feature_engineering.bursts", {}) if hasattr(config, "get") else {}
-    
+
     threshold_method = str(burst_config.get("threshold_method", "percentile")).strip().lower()
     valid_methods = {"percentile", "zscore", "mad"}
     if threshold_method not in valid_methods:
@@ -163,9 +155,7 @@ def _parse_burst_config(
 
     min_trials_per_condition = int(burst_config.get("min_trials_per_condition", 10))
     if min_trials_per_condition < 1:
-        raise ValueError(
-            "feature_engineering.bursts.min_trials_per_condition must be >= 1."
-        )
+        raise ValueError("feature_engineering.bursts.min_trials_per_condition must be >= 1.")
 
     return {
         "bands": burst_config.get("bands") or default_bands,
@@ -224,11 +214,7 @@ def _resolve_burst_segment_masks(
     masks = get_segment_masks(times, windows, config)
     if task_is_rest:
         return _valid_analysis_segment_masks(masks)
-    return {
-        name: np.asarray(mask, dtype=bool)
-        for name, mask in masks.items()
-        if mask is not None
-    }
+    return {name: np.asarray(mask, dtype=bool) for name, mask in masks.items() if mask is not None}
 
 
 def _resolve_burst_reference_envelope(
@@ -277,14 +263,14 @@ def _compute_thresholds(
     per_epoch: bool = False,
 ) -> np.ndarray:
     """Compute burst thresholds using specified method.
-    
+
     Args:
         baseline_envelope: Shape (n_epochs, n_channels, n_samples)
         method: One of 'zscore', 'mad', 'percentile'
         threshold_z: Z-score multiplier for zscore/mad methods
         threshold_percentile: Percentile for percentile method
         per_epoch: If True, compute per epoch; if False, compute across all epochs
-    
+
     Returns:
         Thresholds array of shape (n_epochs, n_channels)
     """
@@ -294,7 +280,7 @@ def _compute_thresholds(
     else:
         time_axis = (0, 2)
         reduce_axes = (0, 2)
-    
+
     if method == "zscore":
         mean = np.nanmean(baseline_envelope, axis=reduce_axes)
         std = np.nanstd(baseline_envelope, axis=reduce_axes)
@@ -312,10 +298,12 @@ def _compute_thresholds(
         thresholds = median + (threshold_z * _MAD_TO_STD_SCALE * median_abs_deviation)
     else:
         thresholds = np.nanpercentile(baseline_envelope, q=threshold_percentile, axis=time_axis)
-    
+
     if not per_epoch:
-        thresholds = np.broadcast_to(thresholds[None, :], (baseline_envelope.shape[0], baseline_envelope.shape[1]))
-    
+        thresholds = np.broadcast_to(
+            thresholds[None, :], (baseline_envelope.shape[0], baseline_envelope.shape[1])
+        )
+
     return thresholds
 
 
@@ -370,15 +358,11 @@ def _compute_thresholds_condition(
         )
 
     if not np.isfinite(out).any():
-        raise ValueError(
-            "condition-specific burst thresholds produced no finite thresholds."
-        )
+        raise ValueError("condition-specific burst thresholds produced no finite thresholds.")
 
     missing = ~np.isfinite(out).any(axis=1)
     if np.any(missing):
-        raise ValueError(
-            "condition-specific burst thresholds are missing for one or more epochs."
-        )
+        raise ValueError("condition-specific burst thresholds are missing for one or more epochs.")
 
     return out
 
@@ -429,9 +413,7 @@ def _compute_thresholds_condition_trainmask(
         out[cond_all] = np.broadcast_to(thr_vec[None, :], (int(np.sum(cond_all)), n_channels))
 
     if not np.isfinite(out).any():
-        raise ValueError(
-            "condition-specific burst thresholds produced no finite thresholds."
-        )
+        raise ValueError("condition-specific burst thresholds produced no finite thresholds.")
 
     return out
 
@@ -444,9 +426,7 @@ def _compute_min_samples(
 ) -> int:
     """Compute minimum samples for burst detection from duration and cycle constraints."""
     min_samples_from_duration = (
-        max(1, int(round(min_duration_ms * sfreq / _MS_TO_SECONDS)))
-        if sfreq > 0
-        else 1
+        max(1, int(round(min_duration_ms * sfreq / _MS_TO_SECONDS))) if sfreq > 0 else 1
     )
 
     fmin = float(band_data.fmin)
@@ -482,14 +462,14 @@ def _process_channel_features(
     for channel_index, channel_name in enumerate(channel_names):
         channel_trace = segment_envelope[epoch_index, channel_index]
         channel_threshold = thresholds[epoch_index, channel_index]
-        
+
         metrics = _extract_burst_metrics(
             channel_trace,
             sfreq,
             channel_threshold,
             min_samples,
         )
-        
+
         for statistic, value in metrics.items():
             column_name = NamingSchema.build(
                 "bursts", segment_name, band, "ch", statistic, channel=channel_name
@@ -517,9 +497,9 @@ def _process_roi_features(
         roi_trace = np.nanmean(segment_envelope[epoch_index, channel_indices], axis=0)
         thr_vec = roi_thresholds.get(roi_name)
         roi_threshold = float(thr_vec[epoch_index]) if thr_vec is not None else np.nan
-        
+
         metrics = _extract_burst_metrics(roi_trace, sfreq, roi_threshold, min_samples)
-        
+
         for statistic, value in metrics.items():
             column_name = NamingSchema.build(
                 "bursts", segment_name, band, "roi", statistic, channel=roi_name
@@ -540,13 +520,11 @@ def _process_global_features(
     """Extract burst features for global (all-channel) aggregation."""
     global_trace = np.nanmean(segment_envelope[epoch_index], axis=0)
     global_threshold = float(global_thresholds[epoch_index]) if global_thresholds.size else np.nan
-    
+
     metrics = _extract_burst_metrics(global_trace, sfreq, global_threshold, min_samples)
-    
+
     for statistic, value in metrics.items():
-        column_name = NamingSchema.build(
-            "bursts", segment_name, band, "global", statistic
-        )
+        column_name = NamingSchema.build("bursts", segment_name, band, "global", statistic)
         record[column_name] = float(value)
 
 
@@ -584,8 +562,7 @@ def _compute_aggregate_thresholds(
     if threshold_reference == "condition":
         if condition_labels is None:
             raise ValueError(
-                "condition-specific burst thresholds require condition labels "
-                "aligned to epochs."
+                "condition-specific burst thresholds require condition labels " "aligned to epochs."
             )
 
         if train_mask is not None:
@@ -610,7 +587,9 @@ def _compute_aggregate_thresholds(
         return thr[:, 0]
 
     # subject-level (default)
-    thresholds_src = baseline_envelope_agg[train_mask] if train_mask is not None else baseline_envelope_agg
+    thresholds_src = (
+        baseline_envelope_agg[train_mask] if train_mask is not None else baseline_envelope_agg
+    )
     thr_train = _compute_thresholds(
         thresholds_src,
         method=threshold_method,
@@ -651,7 +630,12 @@ def extract_burst_features(
         config,
         ctx.logger,
     )
-    segment_names = [name for name in segment_masks.keys() if name != "baseline"]
+    requested_segment = str(getattr(precomputed.windows, "name", "") or "").strip().lower()
+    segment_names = [
+        name
+        for name in segment_masks.keys()
+        if name != "baseline" or requested_segment == "baseline"
+    ]
     if not segment_names:
         return pd.DataFrame(), []
 
@@ -668,7 +652,11 @@ def extract_burst_features(
 
     threshold_method = str(burst_config["threshold_method"])
     threshold_reference = str(burst_config.get("threshold_reference", "trial")).strip().lower()
-    if analysis_mode == "trial_ml_safe" and threshold_reference in {"subject", "condition"} and train_mask is None:
+    if (
+        analysis_mode == "trial_ml_safe"
+        and threshold_reference in {"subject", "condition"}
+        and train_mask is None
+    ):
         raise ValueError(
             "Bursts: trial_ml_safe mode with threshold_reference="
             f"'{threshold_reference}' requires a valid train_mask. "
@@ -725,7 +713,9 @@ def extract_burst_features(
                     min_trials_per_condition=burst_config.get("min_trials_per_condition", 10),
                 )
         else:
-            thresholds_src = baseline_envelope[train_mask] if train_mask is not None else baseline_envelope
+            thresholds_src = (
+                baseline_envelope[train_mask] if train_mask is not None else baseline_envelope
+            )
             thresholds_train = _compute_thresholds(
                 thresholds_src,
                 method=threshold_method,
@@ -737,14 +727,20 @@ def extract_burst_features(
                 np.broadcast_to(thresholds_train[0][None, :], (n_epochs, thresholds_train.shape[1]))
                 if thresholds_train.size
                 else np.full((n_epochs, baseline_envelope.shape[1]), np.nan)
-                )
+            )
 
         # Calibrate ROI/global thresholds on the aggregate baseline trace itself
         # (do not average per-channel thresholds).
         global_thresholds = np.array([], dtype=float)
         if "global" in spatial_modes:
-            baseline_global = np.nanmean(baseline_envelope, axis=1, keepdims=True)  # (epochs, 1, time)
-            condition_labels = _extract_condition_labels(ctx, n_epochs) if threshold_reference == "condition" else None
+            baseline_global = np.nanmean(
+                baseline_envelope, axis=1, keepdims=True
+            )  # (epochs, 1, time)
+            condition_labels = (
+                _extract_condition_labels(ctx, n_epochs)
+                if threshold_reference == "condition"
+                else None
+            )
             global_thresholds = _compute_aggregate_thresholds(
                 baseline_global,
                 threshold_reference=threshold_reference,
@@ -758,11 +754,17 @@ def extract_burst_features(
 
         roi_thresholds: Dict[str, np.ndarray] = {}
         if "roi" in spatial_modes and roi_map:
-            condition_labels = _extract_condition_labels(ctx, n_epochs) if threshold_reference == "condition" else None
+            condition_labels = (
+                _extract_condition_labels(ctx, n_epochs)
+                if threshold_reference == "condition"
+                else None
+            )
             for roi_name, idx in roi_map.items():
                 if not idx:
                     continue
-                baseline_roi = np.nanmean(baseline_envelope[:, idx, :], axis=1, keepdims=True)  # (epochs, 1, time)
+                baseline_roi = np.nanmean(
+                    baseline_envelope[:, idx, :], axis=1, keepdims=True
+                )  # (epochs, 1, time)
                 roi_thresholds[roi_name] = _compute_aggregate_thresholds(
                     baseline_roi,
                     threshold_reference=threshold_reference,

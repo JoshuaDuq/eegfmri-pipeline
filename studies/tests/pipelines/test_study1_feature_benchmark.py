@@ -261,7 +261,10 @@ def test_study1_prepared_power_features_must_not_claim_primary_erp_subtraction(
 
 
 def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> None:
-    from studies.pain_study.study1.feature_benchmark import run_feature_benchmark
+    from studies.pain_study.study1.feature_benchmark import (
+        PRIMARY_BAND_PRESETS,
+        run_feature_benchmark,
+    )
 
     cfg = _config(tmp_path)
     _write_primary_targets(cfg)
@@ -288,8 +291,9 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
             logger=logging.getLogger(__name__),
         )
 
-    assert len(outputs) == 10
-    assert len(captured_calls) == 10
+    expected_calls = 2 * (len(PRIMARY_BAND_PRESETS) + len(EXPLORATORY_FAMILIES))
+    assert len(outputs) == expected_calls
+    assert len(captured_calls) == expected_calls
     first_call = captured_calls[0]
     assert first_call["subjects"] == ["sub-0001", "sub-0002"]
     assert first_call["target"] == "fmri_signature"
@@ -332,6 +336,7 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
     )
     assert exploratory_call["feature_families"] == ["spectral"]
     assert exploratory_call["feature_bands"] is None
+    assert exploratory_call["model_names"] == ["elasticnet", "ridge"]
 
 
 def test_feature_benchmark_config_requires_permutation_scheme(tmp_path) -> None:
@@ -346,7 +351,10 @@ def test_feature_benchmark_config_requires_permutation_scheme(tmp_path) -> None:
 
 
 def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path) -> None:
-    from studies.pain_study.study1.feature_benchmark import run_feature_benchmark
+    from studies.pain_study.study1.feature_benchmark import (
+        PRIMARY_BAND_PRESETS,
+        run_feature_benchmark,
+    )
 
     cfg = _config(tmp_path)
     cfg["study1"]["features"]["exploratory_feature_families"] = []
@@ -375,7 +383,7 @@ def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path
             logger=logging.getLogger(__name__),
         )
 
-    assert len(captured_calls) == 6
+    assert len(captured_calls) == 2 * len(PRIMARY_BAND_PRESETS)
     assert captured_calls[0]["config"].get("machine_learning.fmri_signature.target_column") == "NPS"
     assert (
         captured_calls[0]["config"].get("machine_learning.target_residualization.enabled") is True
