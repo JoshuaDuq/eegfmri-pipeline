@@ -45,6 +45,13 @@ MNE-Python, Nilearn, NumPy, SciPy, pandas, and scikit-learn.
 - fMRI preprocessing, GLM analysis, and EEG–fMRI integration workflows
 - Scriptable CLI commands and guided terminal UI workflows
 
+## Study-Specific Guides
+
+- [Study 1 run guide](studies/pain_study/study1/RUN_GUIDE.md) for rerunning the
+  trial-wise EEG-to-fMRI pain-signature workflow and locating article-ready outputs
+- [Study 1 protocol README](studies/pain_study/study1/README.md) for the scientific
+  rationale, estimands, preprocessing assumptions, and interpretation framework
+
 ## Explore the Documentation
 
 The Sphinx site is where the project opens up:

@@ -1,5 +1,10 @@
 # Study 1 - EEG Prediction of Trial-Wise fMRI Pain-Signature Expression
 
+For operational reruns, use the Study 1 run guide: [RUN_GUIDE.md](RUN_GUIDE.md).
+The run guide contains the copy-paste Kingston command block, smoke-test command, required
+outputs, and full-picture report tables. This README documents the scientific rationale,
+estimands, preprocessing assumptions, and interpretation framework.
+
 ## 1. Problem Statement
 
 Pain responses vary among individuals exposed to the same nociceptive stimulus (Coghill et al.,
@@ -17,15 +22,16 @@ intensity.
 
 ## 2. Objectives
 
-The primary objective is to test whether plateau-window EEG spectral power predicts
-trial-wise NPS expression during simultaneous EEG-fMRI thermal stimulation beyond
-measured stimulus, acquisition, and physiological nuisance structure. The primary estimand is
-subject-held-out incremental prediction. Secondary objectives apply
-the same framework to SIIPS1 and to stimulus- and acquisition-controlled residualized targets.
+The primary objective is to test whether plateau-window EEG spectral power across delta, theta,
+alpha, beta, and gamma bands predicts trial-wise NPS expression during simultaneous EEG-fMRI
+thermal stimulation beyond measured stimulus, acquisition, and physiological nuisance structure.
+The primary estimand is subject-held-out incremental prediction. Secondary objectives apply the
+same framework to SIIPS1 and to stimulus- and acquisition-controlled residualized targets.
 
-The prespecified primary cell is NPS prediction with ElasticNet using alpha+beta
-individual-channel spectral power. Secondary cells are reported as convergent or divergent evidence
-after the primary inference.
+The prespecified primary gate remains NPS prediction with ElasticNet using alpha+beta
+individual-channel spectral power. The required frequency audit additionally evaluates delta,
+theta, gamma, low-frequency composites, gamma-containing composites, and all-band models as
+secondary spectral tests after the primary inference.
 
 ## 3. Hypotheses and Confirmatory Estimands
 
@@ -42,17 +48,26 @@ $$
 \Delta R^2_{\text{LOSO}} = \frac{1}{S}\sum_{s=1}^{S} \Delta R_s^2.
 $$
 
-The primary cell supports the hypothesis when $\Delta R^2_{\text{LOSO}} > 0$ and the one-sided
+The primary gate supports the hypothesis when $\Delta R^2_{\text{LOSO}} > 0$ and the one-sided
 upper-tail permutation p-value is ≤ 0.05. Effect magnitude and bootstrap confidence intervals are
 reported with the primary p-value.
 
+The secondary spectral hypothesis is that prediction of pain-signature expression may be
+distributed across multiple physiologically plausible oscillatory regimes, including gamma-band
+power. Gamma effects are interpreted cautiously because scalp gamma can reflect nociceptive
+processing, salience or aversion, facial or cranial muscle activity, scanner residuals, or other
+high-frequency artifacts. A gamma-containing model therefore supports a neural pain-signature
+interpretation only when the result survives the prespecified nuisance design, Fp1/Fp2 exclusion,
+artifact diagnostics, and sensitivity checks.
+
 Secondary confirmatory analyses evaluate the full 2 targets (NPS, SIIPS1) × 2 linear models
-(ElasticNet, Ridge) × 3 frequency presets (alpha, beta, alpha+beta) grid on the
-individual-channel spectral-power matrix. Holm correction (Holm, 1979) is applied separately to
-the secondary raw-target prediction family and the Level 2 residualized-target convergence family.
-ROI-level and global-average feature matrices are spatial-resolution sensitivities. Gamma,
-unadjusted Level 1 prediction, subjective-rating residualization, Random Forest, deep regression,
-and alternative designs are exploratory.
+(ElasticNet, Ridge) × 9 frequency presets (delta, theta, alpha, beta, gamma, delta+theta,
+alpha+beta, alpha+beta+gamma, all bands) grid on the individual-channel spectral-power matrix.
+Holm correction (Holm, 1979) is applied separately to the secondary raw-target prediction family
+and the Level 2 residualized-target convergence family. ROI-level and global-average feature
+matrices are spatial-resolution sensitivities. Unadjusted Level 1 prediction, subjective-rating
+residualization, Random Forest, deep regression, exploratory feature families, and alternative
+designs are exploratory.
 
 ## 4. Study Design and Data Scope
 
@@ -207,14 +222,15 @@ EEG preprocessing is performed independently within each subject before cross-va
 
 A −0.2 to 0.0 s pre-stimulus voltage baseline removes DC offset before ERP and amplitude-based
 analyses. For time-frequency decompositions, the primary log-ratio baseline is −5.0 to −0.01 s,
-chosen for stable alpha-band estimates under Morlet cycle requirements. Sensitivity baselines are
-−0.2 to −0.01 s and −7.0 to −5.5 s.
+chosen for stable Morlet estimates across the required frequency presets. Sensitivity baselines
+are −0.2 to −0.01 s and −7.0 to −5.5 s.
 The early pre-cue baseline requires event-log confirmation that no cue occurred in that window.
 
-Neural oscillations are operationalized as alpha (8.0–12.9 Hz), beta (13.0–30.0 Hz), and gamma
-(30.1–80.0 Hz). Confirmatory frequency presets are alpha, beta, and alpha+beta. Gamma and
-gamma-containing composites are exploratory. The gamma band excludes a ± 1.0 Hz notch around
-60 Hz due to line-noise removal.
+Neural oscillations are operationalized as delta (1.0–3.9 Hz), theta (4.0–7.9 Hz), alpha
+(8.0–12.9 Hz), beta (13.0–30.0 Hz), and gamma (30.1–80.0 Hz). The primary gate uses the
+alpha+beta preset. The required secondary frequency audit includes delta, theta, alpha, beta,
+gamma, delta+theta, alpha+beta, alpha+beta+gamma, and all-band presets. The gamma band excludes a
+± 1.0 Hz notch around 60 Hz due to line-noise removal.
 
 ### 5.3 Fp1/Fp2 Frontal High-Frequency Artifact Proxy
 
@@ -333,9 +349,10 @@ extraction is fold-owned and provenance records the training-fold template.
 
 Spectral power is log-ratio baseline-corrected using the primary baseline and averaged within
 3.0–10.5 s. Each retained trial contributes one power value per channel and band. The primary
-confirmatory matrix uses active-window individual-channel log-ratio columns only. ROI-level and
-global-average matrices are spatial-resolution sensitivities. All confirmatory feature matrices
-exclude Fp1 and Fp2. Matrices retaining Fp1/Fp2 are exploratory artifact-sensitivity analyses.
+feature family uses active-window individual-channel log-ratio columns only, evaluated across the
+required frequency presets. ROI-level and global-average matrices are spatial-resolution
+sensitivities. All confirmatory feature matrices exclude Fp1 and Fp2. Matrices retaining Fp1/Fp2
+are exploratory artifact-sensitivity analyses.
 
 The ROI feature matrix uses fixed, non-overlapping scalp groups resolved from normalized extended
 10-20 channel names before model fitting. Fp1 and Fp2 are excluded. ROI inclusion requires at
@@ -385,6 +402,11 @@ individual-channel cell. The nuisance-only model uses unpenalized ordinary least
 same rank-stable nuisance design in every fold. If the nuisance-only design becomes rank deficient,
 the affected cell is ineligible for confirmatory interpretation.
 
+The full required benchmark repeats the same nuisance-only versus nuisance-plus-EEG comparison for
+delta, theta, alpha, beta, gamma, delta+theta, alpha+beta, alpha+beta+gamma, and all-band presets.
+These frequency tests establish whether prediction is specific to the alpha+beta gate or better
+explained by broader low-frequency, gamma-containing, or cross-band information.
+
 The nuisance-plus-EEG estimator is staged residual learning rather than a joint penalized
 regression. The nuisance component is unpenalized ordinary least squares fit on the raw target
 scale. Within each fold, the nuisance model, residual-target transformation, feature
@@ -395,10 +417,11 @@ residual scale and then added to the held-out raw-scale nuisance prediction befo
 
 ### 9.2 Feature-Based Models
 
-A nested LOSO framework is used. The primary confirmatory model is ElasticNet regression
-(Zou and Hastie, 2005) on individual-channel spectral power. Ridge (Hoerl and Kennard, 1970) is a
-secondary confirmatory linear model that supports Haufe-style forward-pattern sensitivity analyses
-(Haufe et al., 2014). Random Forest is an exploratory nonlinear model (Breiman, 2001).
+A nested LOSO framework is used. The primary gate model is ElasticNet regression
+(Zou and Hastie, 2005) on individual-channel alpha+beta spectral power. ElasticNet and Ridge
+(Hoerl and Kennard, 1970) are repeated across the required frequency audit; Ridge supports
+Haufe-style forward-pattern sensitivity analyses (Haufe et al., 2014). Random Forest is an
+exploratory nonlinear model (Breiman, 2001).
 
 Feature preprocessing is fold-contained: feature statistics, imputation medians, variance
 thresholds, standardization means, and standard deviations are estimated from training subjects

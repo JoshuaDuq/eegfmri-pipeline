@@ -115,6 +115,54 @@ ARTICLE_REQUIRED_EVENT_COLUMNS = (
     "residual_ecg_coupling",
     "peripheral_low_gamma_power",
 )
+FULL_PICTURE_MODEL_COLUMNS = (
+    "lane",
+    "analysis_partition",
+    "target",
+    "claim_tier",
+    "feature_spec",
+    "model",
+    "mean_r2",
+    "mean_nuisance_r2",
+    "mean_delta_r2",
+    "ci_low_delta_r2",
+    "ci_high_delta_r2",
+    "p_value_r2",
+    "p_value_r2_holm",
+    "p_value_delta_r2",
+    "p_value_delta_r2_holm",
+    "n_perm_completed",
+    "n_folds",
+    "n_subjects_included",
+    "primary_prediction_status",
+    "interpretation_flags",
+    "study2_source_entry_status",
+    "summary_path",
+)
+SENSITIVITY_MODEL_COLUMNS = (
+    "analysis_label",
+    "analysis_root",
+    "analysis_partition",
+    "target",
+    "feature_spec",
+    "model",
+    "mean_r2",
+    "overall_r2",
+    "mean_nuisance_r2",
+    "mean_delta_r2",
+    "p_value_r2",
+    "p_value_delta_r2",
+    "n_perm_completed",
+    "n_folds",
+    "summary_path",
+)
+SENSITIVITY_PIVOT_VALUE_COLUMNS = (
+    "mean_r2",
+    "mean_nuisance_r2",
+    "mean_delta_r2",
+    "p_value_r2",
+    "p_value_delta_r2",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -646,12 +694,299 @@ def _write_article_tables(
         json.dump(manifest, handle, indent=2, sort_keys=True)
 
 
+def _write_full_picture_tables(
+    *,
+    frame: pd.DataFrame,
+    config: Any,
+    report_root: Path,
+    report_path: Path,
+) -> None:
+    target_table = load_primary_target_table(config)
+    full_picture_root = report_root / "full_picture"
+    table_paths = {
+        "primary_feature_model_summary": _write_article_table(
+            _primary_feature_model_summary(frame),
+            full_picture_root / "primary_feature_model_summary",
+        ),
+        "model_leaderboard_by_mean_r2": _write_article_table(
+            _model_leaderboard(frame, score_column="mean_r2"),
+            full_picture_root / "model_leaderboard_by_mean_r2",
+        ),
+        "model_leaderboard_by_delta_r2": _write_article_table(
+            _model_leaderboard(frame, score_column="mean_delta_r2"),
+            full_picture_root / "model_leaderboard_by_delta_r2",
+        ),
+        "target_by_stimulus_temp": _write_article_table(
+            _target_by_stimulus_temp(target_table),
+            full_picture_root / "target_by_stimulus_temp",
+        ),
+        "target_by_subject_and_stimulus_temp": _write_article_table(
+            _target_by_subject_and_stimulus_temp(target_table),
+            full_picture_root / "target_by_subject_and_stimulus_temp",
+        ),
+    }
+
+    sensitivity_roots = _configured_sensitivity_output_roots(config)
+    if sensitivity_roots:
+        sensitivity_summary = _configured_sensitivity_model_summary(sensitivity_roots)
+        table_paths["configured_sensitivity_model_summary"] = _write_article_table(
+            sensitivity_summary,
+            full_picture_root / "configured_sensitivity_model_summary",
+        )
+        table_paths["primary_sensitivity_comparison"] = _write_article_table(
+            _primary_sensitivity_comparison(sensitivity_summary),
+            full_picture_root / "primary_sensitivity_comparison",
+        )
+
+    manifest = {
+        "source_report": str(report_path),
+        "target_table": str(primary_targets_parquet_path(config)),
+        "tables": {
+            name: {"tsv": str(paths["tsv"]), "parquet": str(paths["parquet"])}
+            for name, paths in table_paths.items()
+        },
+    }
+    manifest_path = full_picture_root / "full_picture_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2, sort_keys=True)
+
+
 def _write_article_table(frame: pd.DataFrame, stem: Path) -> dict[str, Path]:
     tsv_path = stem.with_suffix(".tsv")
     parquet_path = stem.with_suffix(".parquet")
     write_tsv(frame, tsv_path)
     write_parquet(frame, parquet_path)
     return {"tsv": tsv_path, "parquet": parquet_path}
+
+
+def _primary_feature_model_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    _require_columns(frame, FULL_PICTURE_MODEL_COLUMNS, table_name="Study 1 report")
+    rows = frame.loc[
+        (frame["lane"].astype(str) == "feature_benchmark")
+        & (frame["analysis_partition"].astype(str) == "primary"),
+        list(FULL_PICTURE_MODEL_COLUMNS),
+    ].copy()
+    if rows.empty:
+        raise ValueError("Study 1 full-picture model table requires primary feature rows.")
+    return rows.sort_values(["target", "feature_spec", "model"], kind="stable").reset_index(
+        drop=True
+    )
+
+
+def _model_leaderboard(frame: pd.DataFrame, *, score_column: str) -> pd.DataFrame:
+    _require_columns(frame, FULL_PICTURE_MODEL_COLUMNS, table_name="Study 1 report")
+    if score_column not in frame.columns:
+        raise ValueError(f"Study 1 report is missing leaderboard score column: {score_column}")
+
+    rows = frame.loc[:, list(FULL_PICTURE_MODEL_COLUMNS)].copy()
+    scores = pd.to_numeric(rows[score_column], errors="coerce")
+    rows = rows.loc[scores.notna()].copy()
+    if rows.empty:
+        raise ValueError(f"Study 1 full-picture leaderboard has no finite {score_column} values.")
+
+    rows["_score"] = pd.to_numeric(rows[score_column], errors="raise")
+    rows = rows.sort_values(
+        ["lane", "analysis_partition", "target", "_score"],
+        ascending=[True, True, True, False],
+        kind="stable",
+    )
+    rows["rank_within_target"] = (
+        rows.groupby(["lane", "analysis_partition", "target"], sort=False)["_score"]
+        .rank(method="first", ascending=False)
+        .astype(int)
+    )
+    return rows.drop(columns=["_score"]).reset_index(drop=True)
+
+
+def _target_by_stimulus_temp(target_table: pd.DataFrame) -> pd.DataFrame:
+    _require_columns(
+        target_table,
+        ("subject_id", "stimulus_temp", *PRIMARY_SIGNATURES),
+        table_name="Study 1 primary target table",
+    )
+    rows = _target_table_with_numeric_signatures(target_table)
+    grouped = rows.groupby("stimulus_temp", dropna=False, sort=True)
+    summary = grouped.agg(
+        n_trials=("subject_id", "size"),
+        n_subjects=("subject_id", "nunique"),
+    )
+    for target_name in PRIMARY_SIGNATURES:
+        summary[f"mean_{target_name}"] = grouped[target_name].mean()
+        summary[f"sd_{target_name}"] = grouped[target_name].std(ddof=1)
+    return summary.reset_index()
+
+
+def _target_by_subject_and_stimulus_temp(target_table: pd.DataFrame) -> pd.DataFrame:
+    _require_columns(
+        target_table,
+        ("subject_id", "stimulus_temp", *PRIMARY_SIGNATURES),
+        table_name="Study 1 primary target table",
+    )
+    rows = _target_table_with_numeric_signatures(target_table)
+    grouped = rows.groupby(["subject_id", "stimulus_temp"], dropna=False, sort=True)
+    summary = grouped.agg(n_trials=("subject_id", "size"))
+    for target_name in PRIMARY_SIGNATURES:
+        summary[f"mean_{target_name}"] = grouped[target_name].mean()
+    return summary.reset_index()
+
+
+def _target_table_with_numeric_signatures(target_table: pd.DataFrame) -> pd.DataFrame:
+    rows = target_table[["subject_id", "stimulus_temp", *PRIMARY_SIGNATURES]].copy()
+    rows["subject_id"] = rows["subject_id"].astype(str)
+    rows["stimulus_temp"] = pd.to_numeric(rows["stimulus_temp"], errors="raise")
+    for target_name in PRIMARY_SIGNATURES:
+        rows[target_name] = pd.to_numeric(rows[target_name], errors="raise")
+    return rows
+
+
+def _configured_sensitivity_output_roots(config: Any) -> list[tuple[str, Path]]:
+    raw = get_config_value(config, "study1.reporting.sensitivity_output_roots", [])
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        raise ValueError("study1.reporting.sensitivity_output_roots must be a list.")
+    if not raw:
+        return []
+
+    current_root = study1_output_root(config)
+    roots: list[tuple[str, Path]] = [(current_root.name, current_root)]
+    labels = {current_root.name}
+    root_names = {current_root.name}
+    multimodal_root = current_root.parent
+
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("study1.reporting.sensitivity_output_roots entries must be mappings.")
+        label = str(item.get("label", "")).strip()
+        root_name = str(item.get("root_name", "")).strip()
+        if not label:
+            raise ValueError(
+                "study1.reporting.sensitivity_output_roots entries require a non-empty label."
+            )
+        if not root_name:
+            raise ValueError(
+                "study1.reporting.sensitivity_output_roots entries require a non-empty root_name."
+            )
+        root_path = Path(root_name)
+        if root_path.is_absolute() or root_path.name != root_name:
+            raise ValueError(
+                "study1.reporting.sensitivity_output_roots.root_name must be a directory name, "
+                f"not a path: {root_name!r}."
+            )
+        if label in labels:
+            raise ValueError(f"Duplicate Study 1 sensitivity output label configured: {label!r}.")
+        if root_name in root_names:
+            raise ValueError(
+                f"Duplicate Study 1 sensitivity output root_name configured: {root_name!r}."
+            )
+
+        resolved = multimodal_root / root_name
+        if not resolved.exists():
+            raise FileNotFoundError(
+                "Configured Study 1 sensitivity output root not found: "
+                f"{resolved} (label={label!r})."
+            )
+        labels.add(label)
+        root_names.add(root_name)
+        roots.append((label, resolved))
+    return roots
+
+
+def _configured_sensitivity_model_summary(
+    roots: list[tuple[str, Path]],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for label, root in roots:
+        rows.extend(_sensitivity_model_rows_for_root(label=label, root=root))
+    if not rows:
+        raise FileNotFoundError(
+            "Configured Study 1 sensitivity roots contained no model summaries."
+        )
+    frame = pd.DataFrame(rows)
+    _require_columns(frame, SENSITIVITY_MODEL_COLUMNS, table_name="Study 1 sensitivity summary")
+    return (
+        frame.loc[:, list(SENSITIVITY_MODEL_COLUMNS)]
+        .sort_values(
+            ["analysis_label", "analysis_partition", "target", "feature_spec", "model"],
+            kind="stable",
+        )
+        .reset_index(drop=True)
+    )
+
+
+def _sensitivity_model_rows_for_root(*, label: str, root: Path) -> list[dict[str, Any]]:
+    feature_root = root / "feature_benchmark"
+    if not feature_root.exists():
+        raise FileNotFoundError(
+            f"Study 1 sensitivity root has no feature_benchmark directory: {feature_root}"
+        )
+
+    rows: list[dict[str, Any]] = []
+    pattern = "*/" + "*/" + "*/model_comparison/metrics/model_comparison_summary.json"
+    for summary_path in sorted(feature_root.glob(pattern)):
+        partition, target_name, feature_spec = summary_path.relative_to(feature_root).parts[:3]
+        payload = _read_json(summary_path)
+        for model_name, metrics in payload.items():
+            if not isinstance(metrics, dict):
+                continue
+            if "mean_r2" not in metrics and "mean_mae" not in metrics:
+                continue
+            rows.append(
+                {
+                    "analysis_label": label,
+                    "analysis_root": str(root),
+                    "analysis_partition": partition,
+                    "target": target_name,
+                    "feature_spec": feature_spec,
+                    "model": str(model_name),
+                    "mean_r2": metrics.get("mean_r2"),
+                    "overall_r2": metrics.get("overall_r2"),
+                    "mean_nuisance_r2": metrics.get("mean_nuisance_r2"),
+                    "mean_delta_r2": metrics.get("mean_delta_r2"),
+                    "p_value_r2": metrics.get("p_value_r2"),
+                    "p_value_delta_r2": metrics.get("p_value_delta_r2"),
+                    "n_perm_completed": metrics.get("n_perm_completed"),
+                    "n_folds": metrics.get("n_folds"),
+                    "summary_path": str(summary_path),
+                }
+            )
+    if not rows:
+        raise FileNotFoundError(f"Study 1 sensitivity root contained no model summaries: {root}")
+    return rows
+
+
+def _primary_sensitivity_comparison(sensitivity_summary: pd.DataFrame) -> pd.DataFrame:
+    _require_columns(
+        sensitivity_summary,
+        SENSITIVITY_MODEL_COLUMNS,
+        table_name="Study 1 sensitivity summary",
+    )
+    primary = sensitivity_summary.loc[
+        sensitivity_summary["analysis_partition"].astype(str) == "primary"
+    ].copy()
+    if primary.empty:
+        raise ValueError("Study 1 sensitivity comparison requires primary model rows.")
+
+    pivot = primary.pivot_table(
+        index=["target", "feature_spec", "model"],
+        columns="analysis_label",
+        values=list(SENSITIVITY_PIVOT_VALUE_COLUMNS),
+        aggfunc="first",
+    )
+    pivot.columns = [
+        f"{metric}_{_sensitivity_column_label(label)}" for metric, label in pivot.columns
+    ]
+    return pivot.reset_index()
+
+
+def _sensitivity_column_label(label: Any) -> str:
+    clean = "".join(
+        character if character.isalnum() else "_" for character in str(label).strip()
+    ).strip("_")
+    if not clean:
+        raise ValueError("Study 1 sensitivity labels must contain letters or numbers.")
+    return clean
 
 
 def _article_model_results(frame: pd.DataFrame) -> pd.DataFrame:
@@ -1075,6 +1410,12 @@ def write_study1_report(
     _write_article_tables(
         frame=frame,
         task=task,
+        config=config,
+        report_root=report_root,
+        report_path=tsv_path,
+    )
+    _write_full_picture_tables(
+        frame=frame,
         config=config,
         report_root=report_root,
         report_path=tsv_path,

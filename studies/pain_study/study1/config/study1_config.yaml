@@ -65,6 +65,8 @@ study1:
     circular_shift:
       min_valid_blocks_per_subject: 3
       min_retained_trials_per_subject: 25
+  reporting:
+    sensitivity_output_roots: []
   temporal_negative_controls:
     feature_transform: "raw_log_power"
     feature_baseline_window: null
