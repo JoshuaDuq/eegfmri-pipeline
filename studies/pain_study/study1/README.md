@@ -27,6 +27,8 @@ alpha, beta, and gamma bands predicts trial-wise NPS expression during simultane
 thermal stimulation beyond measured stimulus, acquisition, and physiological nuisance structure.
 The primary estimand is subject-held-out incremental prediction. Secondary objectives apply the
 same framework to SIIPS1 and to stimulus- and acquisition-controlled residualized targets.
+Interpretation of any EEG result is conditional on a preregistered fMRI target-validity gate that
+is evaluated before EEG model interpretation.
 
 The prespecified primary gate remains NPS prediction with ElasticNet using alpha+beta
 individual-channel spectral power. The required frequency audit additionally evaluates delta,
@@ -122,7 +124,9 @@ Censored trials retain their original labels and are not renumbered.
 
 All quality-controlled thermal trials are retained for the primary fMRI-signature prediction
 analysis. Temperature enters the Level 2 nuisance design, and binary pain reports and continuous
-ratings are criterion and sensitivity variables.
+ratings are criterion and sensitivity variables. Because SIIPS1 was developed after removing
+non-painful trials, SIIPS1 analyses include a painful-trials-only scope sensitivity whenever the
+primary target table contains both painful and non-painful thermal trials.
 
 The deterministic first high-temperature trial is modeled by trial onset, within-block trial
 number, and task-block index. Sensitivity analyses repeat the primary incremental model after
@@ -337,6 +341,18 @@ halves contain finite values for every included subject-by-temperature cell. Val
 insufficient retained trials, or inability to generate valid stratified splits qualify biological
 interpretation of the corresponding signature target.
 
+### 6.1 Target-Validity Gate
+
+The fMRI signature targets are validated in the retained Study 1 data before EEG prediction is
+interpreted mechanistically. NPS must show the expected positive relationship with stimulus
+temperature and reported pain. SIIPS1 must show positive association with pain ratings after
+accounting for stimulus temperature and NPS expression. For both targets, split-half reliability is
+reported before EEG feature inspection. If a target fails these checks, EEG prediction of that
+target is reported as a technical prediction result rather than evidence about pain mechanisms.
+
+The report stage writes `reports/full_picture/target_validity_gate.tsv` with each target's
+construct relation, validity flags, reliability readout, and interpretation status.
+
 ## 7. EEG Feature Construction
 
 Spectral power features are extracted with Morlet wavelets (Cohen, 2014) using frequency-adaptive
@@ -534,14 +550,17 @@ Supplementary models predict each nuisance variable and behavioral report variab
 features. Behavioral report variables are the binary pain report and within-scale thermal/pain
 intensity score. P-values are Holm-corrected across supplementary targets.
 
-### 11.2 Temporal Negative Controls
+### 11.2 Temporal Specificity and Anticipatory Controls
 
-Temporal negative controls use the same nuisance-only versus nuisance-plus-EEG
+Temporal control analyses use the same nuisance-only versus nuisance-plus-EEG
 $\Delta R^2_{\text{LOSO}}$ framework. Models trained on EEG features from −5.0 to 0.0 s and
 −0.2 to 0.0 s predict post-stimulus target expression. These controls use raw log-power summaries
 with no TFR baseline correction (`feature_baseline_window: null`).
 
-Negative controls are evaluated separately for NPS and SIIPS1. For each window, the report includes
+For NPS, pre-stimulus prediction is interpreted as a negative-control result for evoked nociceptive
+signature expression. For SIIPS1, pre-stimulus prediction may reflect expectancy or other
+anticipatory top-down pain processes, so it is interpreted as temporal-specificity and anticipatory
+evidence rather than a pure failed negative control. For each target and window, the report includes
 $\Delta R^2_{\text{LOSO}}$, bootstrap confidence intervals, and Holm-corrected p-values.
 
 Wrong-lag windows are ramp-up ($0.0$-$3.0$ s), late ramp-down ($10.5$-$15.0$ s), early-shifted

@@ -349,8 +349,8 @@ COMMON_ARGS+=(
    Deep-regression and exploratory feature-benchmark summaries are included when present, but they
    are not required for the primary Study 1 report.
    The report also writes `reports/full_picture/`, which contains model leaderboards,
-   target-by-temperature summaries, subject-by-temperature summaries, and a manifest. To compare
-   sibling sensitivity runs in the same bundle, set
+   the target-validity gate, target-by-temperature summaries, subject-by-temperature summaries,
+   and a manifest. To compare sibling sensitivity runs in the same bundle, set
    `study1.reporting.sensitivity_output_roots` to a list of `{label, root_name}` entries before
    running `report`.
 

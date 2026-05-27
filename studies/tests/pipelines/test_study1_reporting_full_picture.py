@@ -40,8 +40,12 @@ def _write_primary_target_table(root: Path) -> None:
         [
             _target_row("sub-0001", 1, 1, 45.3, 1.0, 100.0),
             _target_row("sub-0001", 1, 2, 49.3, 5.0, 500.0),
+            _target_row("sub-0001", 2, 1, 45.3, 1.2, 115.0),
+            _target_row("sub-0001", 2, 2, 49.3, 5.2, 515.0),
             _target_row("sub-0002", 1, 1, 45.3, 2.0, 200.0),
             _target_row("sub-0002", 1, 2, 49.3, 6.0, 600.0),
+            _target_row("sub-0002", 2, 1, 45.3, 2.2, 215.0),
+            _target_row("sub-0002", 2, 2, 49.3, 6.2, 615.0),
         ]
     )
     target_dir = root / "targets"
@@ -87,10 +91,13 @@ def _write_clean_events(config: DotConfig) -> None:
     for subject_id in ("sub-0001", "sub-0002"):
         event_dir = deriv_root / "preprocessed" / "eeg" / subject_id / "eeg"
         event_dir.mkdir(parents=True, exist_ok=True)
+        subject_rating_offset = 0.0 if subject_id == "sub-0001" else 20.0
         events = pd.DataFrame(
             [
-                _event_row(1, 1, 45.3, 0, 110.0),
-                _event_row(1, 2, 49.3, 1, 170.0),
+                _event_row(1, 1, 45.3, 0, 110.0 + subject_rating_offset),
+                _event_row(1, 2, 49.3, 1, 170.0 + subject_rating_offset),
+                _event_row(2, 1, 45.3, 0, 112.0 + subject_rating_offset),
+                _event_row(2, 2, 49.3, 1, 172.0 + subject_rating_offset),
             ]
         )
         events.to_csv(
@@ -220,7 +227,16 @@ def test_report_writes_full_picture_bundle(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(reporting, "PRIMARY_BAND_PRESETS", {"alpha": ["alpha"]})
 
     report_path = reporting.write_study1_report(task="pain", config=cfg)
+    report = pd.read_csv(report_path, sep="\t")
     full_picture_root = report_path.parent / "full_picture"
+
+    temporal_interpretations = dict(
+        zip(report["target"], report["temporal_control_interpretation"])
+    )
+    assert temporal_interpretations == {
+        "NPS": "negative_control_for_evoked_nociceptive_expression",
+        "SIIPS1": "temporal_specificity_or_anticipatory_control",
+    }
 
     assert (full_picture_root / "full_picture_manifest.json").exists()
     assert (full_picture_root / "primary_feature_model_summary.tsv").exists()
@@ -228,11 +244,22 @@ def test_report_writes_full_picture_bundle(tmp_path, monkeypatch) -> None:
     assert (full_picture_root / "model_leaderboard_by_delta_r2.tsv").exists()
     assert (full_picture_root / "target_by_stimulus_temp.tsv").exists()
     assert (full_picture_root / "target_by_subject_and_stimulus_temp.tsv").exists()
+    assert (full_picture_root / "target_validity_gate.tsv").exists()
 
     by_temp = pd.read_csv(full_picture_root / "target_by_stimulus_temp.tsv", sep="\t")
     assert by_temp["stimulus_temp"].tolist() == [45.3, 49.3]
-    assert by_temp["mean_NPS"].tolist() == [1.5, 5.5]
-    assert by_temp["mean_SIIPS1"].tolist() == [150.0, 550.0]
+    assert by_temp["mean_NPS"].tolist() == [1.6, 5.6]
+    assert by_temp["mean_SIIPS1"].tolist() == [157.5, 557.5]
+
+    validity = pd.read_csv(full_picture_root / "target_validity_gate.tsv", sep="\t")
+    assert set(validity["target"]) == {"NPS", "SIIPS1"}
+    assert set(validity["target_interpretation_status"]) == {"mechanistic_interpretation_supported"}
+    nps = validity.loc[validity["target"] == "NPS"].iloc[0]
+    assert nps["expected_construct_relation"] == "temperature_and_rating"
+    siips1 = validity.loc[validity["target"] == "SIIPS1"].iloc[0]
+    assert siips1["expected_construct_relation"] == "rating_beyond_temperature_and_nps"
+    assert siips1["siips1_rating_beyond_temperature_nps_r"] > 0.0
+    assert siips1["scope_sensitivity"] == "painful_trials_only_required"
 
 
 def test_report_compares_configured_sensitivity_roots(tmp_path, monkeypatch) -> None:

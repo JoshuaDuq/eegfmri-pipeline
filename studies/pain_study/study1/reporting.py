@@ -72,6 +72,7 @@ SOURCE_ENTRY_MIN_DELTA_R2_LOWER_CI = 0.005
 SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2 = 0.005
 SOURCE_ENTRY_MIN_TARGET_RELIABILITY = 0.4
 MIN_TARGET_RELIABILITY_TRIALS = 30
+MIN_TARGET_VALIDITY_RELIABILITY_CELLS = 3
 ARTICLE_MODEL_COLUMNS = (
     "target",
     "claim_tier",
@@ -88,6 +89,7 @@ ARTICLE_MODEL_COLUMNS = (
     "n_folds",
     "n_subjects_included",
     "primary_prediction_status",
+    "temporal_control_interpretation",
     "interpretation_flags",
     "study2_source_entry_status",
 )
@@ -135,6 +137,7 @@ FULL_PICTURE_MODEL_COLUMNS = (
     "n_folds",
     "n_subjects_included",
     "primary_prediction_status",
+    "temporal_control_interpretation",
     "interpretation_flags",
     "study2_source_entry_status",
     "summary_path",
@@ -358,6 +361,17 @@ def _study2_source_entry_status(record: pd.Series) -> str:
     return "source_interpretation_confirmatory"
 
 
+def _temporal_control_interpretation(record: pd.Series) -> str:
+    if str(record.get("lane", "")) != "feature_benchmark":
+        return "not_applicable"
+    target_name = str(record.get("target", ""))
+    if target_name == "NPS":
+        return "negative_control_for_evoked_nociceptive_expression"
+    if target_name == "SIIPS1":
+        return "temporal_specificity_or_anticipatory_control"
+    return "not_applicable"
+
+
 def _append_interpretation_columns(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     for field in INTERPRETATION_DIAGNOSTIC_FIELDS:
@@ -370,6 +384,10 @@ def _append_interpretation_columns(frame: pd.DataFrame) -> pd.DataFrame:
     out["analysis_validity_status"] = "not_primary_analysis"
     out.loc[feature_primary, "analysis_validity_status"] = "analysis_valid"
     out["primary_prediction_status"] = out.apply(_primary_prediction_status, axis=1)
+    out["temporal_control_interpretation"] = out.apply(
+        _temporal_control_interpretation,
+        axis=1,
+    )
     out["missing_interpretation_diagnostics"] = out.apply(
         _missing_interpretation_diagnostics,
         axis=1,
@@ -697,11 +715,24 @@ def _write_article_tables(
 def _write_full_picture_tables(
     *,
     frame: pd.DataFrame,
+    task: str,
     config: Any,
     report_root: Path,
     report_path: Path,
 ) -> None:
     target_table = load_primary_target_table(config)
+    included_subjects = sorted(target_table["subject_id"].astype(str).unique().tolist())
+    events = _load_article_clean_events(
+        subjects=included_subjects,
+        task=task,
+        config=config,
+    )
+    enriched_targets = _merge_targets_with_clean_events(target_table, events)
+    target_diagnostics = _article_target_diagnostics(
+        target_table=target_table,
+        enriched_targets=enriched_targets,
+        config=config,
+    )
     full_picture_root = report_root / "full_picture"
     table_paths = {
         "primary_feature_model_summary": _write_article_table(
@@ -723,6 +754,13 @@ def _write_full_picture_tables(
         "target_by_subject_and_stimulus_temp": _write_article_table(
             _target_by_subject_and_stimulus_temp(target_table),
             full_picture_root / "target_by_subject_and_stimulus_temp",
+        ),
+        "target_validity_gate": _write_article_table(
+            _target_validity_gate(
+                diagnostics=target_diagnostics,
+                enriched_targets=enriched_targets,
+            ),
+            full_picture_root / "target_validity_gate",
         ),
     }
 
@@ -1180,6 +1218,16 @@ def _article_target_diagnostics(
                     "pain_binary_coded",
                     target_name,
                 ),
+                "siips1_rating_beyond_temperature_nps_r": (
+                    _partial_correlation(
+                        enriched_targets,
+                        x_column="SIIPS1",
+                        y_column="vas_final_coded_rating",
+                        covariate_columns=("stimulus_temp", "NPS"),
+                    )
+                    if target_name == "SIIPS1"
+                    else float("nan")
+                ),
                 "framewise_displacement_r": _correlation(
                     target_table,
                     "hrf_weighted_framewise_displacement",
@@ -1214,6 +1262,115 @@ def _article_target_diagnostics(
             }
         )
     return pd.DataFrame(rows)
+
+
+def _target_validity_gate(
+    *,
+    diagnostics: pd.DataFrame,
+    enriched_targets: pd.DataFrame,
+) -> pd.DataFrame:
+    required_columns = (
+        "target",
+        "n_trials",
+        "n_subjects",
+        "stimulus_temp_r",
+        "vas_rating_r",
+        "pain_binary_r",
+        "siips1_rating_beyond_temperature_nps_r",
+        "split_half_subject_temperature_r",
+        "split_half_subject_temperature_n_cells",
+    )
+    _require_columns(
+        diagnostics,
+        required_columns,
+        table_name="Study 1 target diagnostics",
+    )
+    _require_columns(
+        enriched_targets,
+        ("pain_binary_coded",),
+        table_name="Study 1 target-validity input",
+    )
+
+    has_nonpainful_trials = (_numeric_series(enriched_targets, "pain_binary_coded") < 1.0).any()
+    rows: list[dict[str, Any]] = []
+    for _, diagnostic in diagnostics.sort_values("target", kind="stable").iterrows():
+        target_name = str(diagnostic["target"])
+        expected_relation = _expected_target_construct_relation(target_name)
+        flags = _target_validity_flags(diagnostic)
+        rows.append(
+            {
+                "target": target_name,
+                "target_interpretation_status": (
+                    "mechanistic_interpretation_supported"
+                    if not flags
+                    else "technical_prediction_only"
+                ),
+                "expected_construct_relation": expected_relation,
+                "validity_flags": _join_labels(flags),
+                "scope_sensitivity": _target_scope_sensitivity(
+                    target_name,
+                    has_nonpainful_trials=bool(has_nonpainful_trials),
+                ),
+                "n_trials": int(diagnostic["n_trials"]),
+                "n_subjects": int(diagnostic["n_subjects"]),
+                "stimulus_temp_r": diagnostic["stimulus_temp_r"],
+                "vas_rating_r": diagnostic["vas_rating_r"],
+                "pain_binary_r": diagnostic["pain_binary_r"],
+                "siips1_rating_beyond_temperature_nps_r": diagnostic[
+                    "siips1_rating_beyond_temperature_nps_r"
+                ],
+                "split_half_subject_temperature_r": diagnostic["split_half_subject_temperature_r"],
+                "split_half_subject_temperature_n_cells": int(
+                    diagnostic["split_half_subject_temperature_n_cells"]
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _expected_target_construct_relation(target_name: str) -> str:
+    if target_name == "NPS":
+        return "temperature_and_rating"
+    if target_name == "SIIPS1":
+        return "rating_beyond_temperature_and_nps"
+    raise ValueError(f"Unsupported Study 1 signature target for validity gate: {target_name}")
+
+
+def _target_scope_sensitivity(target_name: str, *, has_nonpainful_trials: bool) -> str:
+    if target_name == "SIIPS1" and has_nonpainful_trials:
+        return "painful_trials_only_required"
+    return "not_required"
+
+
+def _target_validity_flags(diagnostic: pd.Series) -> list[str]:
+    target_name = str(diagnostic["target"])
+    flags: list[str] = []
+    reliability = _optional_float(diagnostic, "split_half_subject_temperature_r")
+    reliability_cells = _optional_float(diagnostic, "split_half_subject_temperature_n_cells")
+    if reliability is None or reliability < SOURCE_ENTRY_MIN_TARGET_RELIABILITY:
+        flags.append("target_reliability_limited")
+    if reliability_cells is None or reliability_cells < MIN_TARGET_VALIDITY_RELIABILITY_CELLS:
+        flags.append("target_reliability_cells_limited")
+
+    if target_name == "NPS":
+        stimulus_temp_r = _optional_float(diagnostic, "stimulus_temp_r")
+        vas_rating_r = _optional_float(diagnostic, "vas_rating_r")
+        if stimulus_temp_r is None or stimulus_temp_r <= 0.0:
+            flags.append("nps_temperature_relation_absent")
+        if vas_rating_r is None or vas_rating_r <= 0.0:
+            flags.append("nps_rating_relation_absent")
+        return flags
+
+    if target_name == "SIIPS1":
+        residual_rating_r = _optional_float(
+            diagnostic,
+            "siips1_rating_beyond_temperature_nps_r",
+        )
+        if residual_rating_r is None or residual_rating_r <= 0.0:
+            flags.append("siips1_residual_rating_relation_absent")
+        return flags
+
+    raise ValueError(f"Unsupported Study 1 signature target for validity gate: {target_name}")
 
 
 def _stimulus_surface_design_columns(target_table: pd.DataFrame) -> pd.DataFrame:
@@ -1321,6 +1478,42 @@ def _correlation(frame: pd.DataFrame, x_column: str, y_column: str) -> float:
     return _series_correlation(_numeric_series(frame, x_column), _numeric_series(frame, y_column))
 
 
+def _partial_correlation(
+    frame: pd.DataFrame,
+    *,
+    x_column: str,
+    y_column: str,
+    covariate_columns: tuple[str, ...],
+) -> float:
+    _require_columns(
+        frame,
+        (x_column, y_column, *covariate_columns),
+        table_name="article input",
+    )
+    if not covariate_columns:
+        raise ValueError("Study 1 partial correlation requires at least one covariate.")
+
+    x = _numeric_series(frame, x_column).to_numpy(dtype=float)
+    y = _numeric_series(frame, y_column).to_numpy(dtype=float)
+    covariates = [
+        _numeric_series(frame, column).to_numpy(dtype=float) for column in covariate_columns
+    ]
+    design = np.column_stack([np.ones(len(frame), dtype=float), *covariates])
+    if np.linalg.matrix_rank(design) < design.shape[1]:
+        raise ValueError(
+            "Study 1 partial correlation design is rank deficient for "
+            f"{x_column}, {y_column}, covariates={covariate_columns}."
+        )
+    x_residual = _least_squares_residual(x, design)
+    y_residual = _least_squares_residual(y, design)
+    return _series_correlation(pd.Series(x_residual), pd.Series(y_residual))
+
+
+def _least_squares_residual(values: np.ndarray, design: np.ndarray) -> np.ndarray:
+    coefficients, *_ = np.linalg.lstsq(design, values, rcond=None)
+    return values - design @ coefficients
+
+
 def _series_correlation(x: pd.Series, y: pd.Series) -> float:
     pair = pd.DataFrame({"x": x, "y": y}).dropna()
     if len(pair) < 3:
@@ -1416,6 +1609,7 @@ def write_study1_report(
     )
     _write_full_picture_tables(
         frame=frame,
+        task=task,
         config=config,
         report_root=report_root,
         report_path=tsv_path,
