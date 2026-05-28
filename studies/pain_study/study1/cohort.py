@@ -38,8 +38,16 @@ def study1_feature_root(config: Any) -> Path:
     return study1_output_root(config) / "features_trial_ml_safe"
 
 
+def study1_temporal_control_feature_root(config: Any) -> Path:
+    return study1_output_root(config) / "features_temporal_controls"
+
+
 def study1_feature_subject_root(config: Any, subject_id: str) -> Path:
     return study1_feature_root(config) / _normalize_subject(subject_id)
+
+
+def study1_temporal_control_feature_subject_root(config: Any, subject_id: str) -> Path:
+    return study1_temporal_control_feature_root(config) / _normalize_subject(subject_id)
 
 
 def study1_feature_family_dir(
@@ -51,6 +59,22 @@ def study1_feature_family_dir(
     if not family_name:
         raise ValueError("Feature family names must be non-empty.")
     return study1_feature_subject_root(config, subject_id) / "eeg" / "features" / family_name
+
+
+def study1_temporal_control_feature_family_dir(
+    config: Any,
+    subject_id: str,
+    family: str,
+) -> Path:
+    family_name = str(family).strip()
+    if not family_name:
+        raise ValueError("Feature family names must be non-empty.")
+    return (
+        study1_temporal_control_feature_subject_root(config, subject_id)
+        / "eeg"
+        / "features"
+        / family_name
+    )
 
 
 def study1_feature_table_path(
@@ -67,6 +91,20 @@ def study1_feature_table_path(
     )
 
 
+def study1_temporal_control_feature_table_path(
+    config: Any,
+    subject_id: str,
+    family: str,
+) -> Path:
+    family_name = str(family).strip()
+    if not family_name:
+        raise ValueError("Feature family names must be non-empty.")
+    return (
+        study1_temporal_control_feature_family_dir(config, subject_id, family_name)
+        / f"features_{family_name}.parquet"
+    )
+
+
 def study1_feature_metadata_path(
     config: Any,
     subject_id: str,
@@ -74,6 +112,18 @@ def study1_feature_metadata_path(
 ) -> Path:
     return (
         study1_feature_family_dir(config, subject_id, family)
+        / "metadata"
+        / "extraction_config.json"
+    )
+
+
+def study1_temporal_control_feature_metadata_path(
+    config: Any,
+    subject_id: str,
+    family: str,
+) -> Path:
+    return (
+        study1_temporal_control_feature_family_dir(config, subject_id, family)
         / "metadata"
         / "extraction_config.json"
     )
@@ -196,5 +246,10 @@ __all__ = [
     "study1_feature_subject_root",
     "study1_feature_table_path",
     "study1_output_root",
+    "study1_temporal_control_feature_family_dir",
+    "study1_temporal_control_feature_metadata_path",
+    "study1_temporal_control_feature_root",
+    "study1_temporal_control_feature_subject_root",
+    "study1_temporal_control_feature_table_path",
     "subject_target_rows",
 ]

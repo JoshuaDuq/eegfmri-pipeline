@@ -21,7 +21,7 @@ def test_load_study1_config_resolves_default_yaml() -> None:
     assert "study1" in config
     assert config["study1"]["targets"]["names"] == ["NPS", "SIIPS1"]
     assert config["study1"]["features"]["exploratory_feature_families"] == []
-    assert config["study1"]["targets"]["max_design_condition_number"] == 2000.0
+    assert config["study1"]["targets"]["max_design_condition_number"] == 3000.0
 
 
 def test_load_study1_config_defines_unbaselined_temporal_negative_controls() -> None:
@@ -56,6 +56,16 @@ def test_load_study1_config_defines_prespecified_permutation_controls() -> None:
         "min_valid_blocks_per_subject": 3,
         "min_retained_trials_per_subject": 25,
     }
+
+
+def test_load_study1_config_includes_gamma_deep_regression_presets() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+    presets = config["study1"]["deep_regression"]["presets"]
+
+    assert presets["gamma"] == ["gamma"]
+    assert presets["alpha_beta_gamma"] == ["alpha", "beta", "gamma"]
 
 
 def test_load_study1_config_uses_readme_bootstrap_iterations() -> None:
@@ -127,6 +137,29 @@ def test_load_study1_config_rejects_baselined_temporal_negative_controls(tmp_pat
     )
 
     with pytest.raises(ValueError, match="raw_log_power"):
+        load_study1_config(config_path=bad_config)
+
+
+def test_load_study1_config_requires_explicit_null_temporal_control_baseline(tmp_path) -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    bad_config = tmp_path / "missing_temporal_baseline.yaml"
+    bad_config.write_text(
+        yaml.dump(
+            {
+                "study1": {
+                    "temporal_negative_controls": {
+                        "feature_transform": "raw_log_power",
+                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                        "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="feature_baseline_window"):
         load_study1_config(config_path=bad_config)
 
 

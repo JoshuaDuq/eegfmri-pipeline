@@ -16,28 +16,41 @@ from studies.pain_study.study1.cohort import (
     resolve_primary_subjects,
     study1_feature_root,
     study1_output_root,
+    study1_temporal_control_feature_root,
 )
 from studies.pain_study.study1.feature_spec import (
     PRIMARY_FEATURE_FAMILY,
     resolve_exploratory_feature_families,
 )
 from studies.pain_study.study1.output_cleanup import remove_appledouble_sidecars
-from studies.pain_study.study1.prepare_features import require_prepared_study1_features
+from studies.pain_study.study1.prepare_features import (
+    require_prepared_study1_features,
+    require_prepared_study1_temporal_control_features,
+)
 from studies.pain_study.study1.targets import (
     PRIMARY_SIGNATURES,
     nuisance_regression_enabled,
     residualization_columns_for_target_table,
+)
+from studies.pain_study.study1.temporal_controls import (
+    TEMPORAL_CONTROL_BANDS,
+    TEMPORAL_CONTROL_FEATURE_STATS,
+    TEMPORAL_CONTROL_PARTITION,
+    resolve_temporal_control_windows,
+    temporal_control_feature_spec,
 )
 
 PRIMARY_BAND_PRESETS: dict[str, list[str]] = {
     "alpha": ["alpha"],
     "beta": ["beta"],
     "gamma": ["gamma"],
+    "alpha_beta": ["alpha", "beta"],
+    "alpha_beta_gamma": ["alpha", "beta", "gamma"],
+}
+EXPLORATORY_BAND_PRESETS: dict[str, list[str]] = {
     "delta": ["delta"],
     "theta": ["theta"],
     "delta_theta": ["delta", "theta"],
-    "alpha_beta": ["alpha", "beta"],
-    "alpha_beta_gamma": ["alpha", "beta", "gamma"],
     "all_bands": ["delta", "theta", "alpha", "beta", "gamma"],
 }
 PRIMARY_FEATURE_SEGMENTS = ("active",)
@@ -256,6 +269,114 @@ def _run_exploratory_benchmark(
     return outputs
 
 
+def _run_exploratory_band_presets(
+    *,
+    subjects: list[str],
+    task: str,
+    config: Any,
+    logger: logging.Logger,
+) -> list[Path]:
+    deriv_root = resolve_eeg_deriv_root(config)
+    feature_root = study1_feature_root(config)
+    n_perm = _require_permutation_inference(config)
+    inner_splits = int(get_config_value(config, "study1.feature_benchmark.inner_splits", 5))
+    outer_jobs = int(get_config_value(config, "study1.feature_benchmark.outer_jobs", 1))
+    harmonization = str(
+        get_config_value(config, "study1.feature_benchmark.feature_harmonization", "intersection")
+    ).strip()
+
+    outputs: list[Path] = []
+    for target_name in PRIMARY_SIGNATURES:
+        target_config = _feature_benchmark_config(config, target_name=target_name)
+        for preset_name, preset_bands in EXPLORATORY_BAND_PRESETS.items():
+            results_root = _feature_results_root(
+                config,
+                partition="exploratory",
+                target_name=target_name,
+                feature_spec=preset_name,
+            )
+            outputs.append(
+                run_model_comparison_ml(
+                    subjects=subjects,
+                    task=task,
+                    deriv_root=deriv_root,
+                    config=target_config,
+                    n_perm=n_perm,
+                    inner_splits=inner_splits,
+                    outer_jobs=outer_jobs,
+                    rng_seed=_rng_seed(config),
+                    results_root=results_root,
+                    logger=logger,
+                    target="fmri_signature",
+                    feature_families=[PRIMARY_FEATURE_FAMILY],
+                    feature_input_root=feature_root,
+                    feature_bands=list(preset_bands),
+                    feature_segments=list(PRIMARY_FEATURE_SEGMENTS),
+                    feature_scopes=list(PRIMARY_FEATURE_SCOPES),
+                    feature_stats=list(PRIMARY_FEATURE_STATS),
+                    feature_harmonization=harmonization,
+                    model_names=["elasticnet", "ridge"],
+                )
+            )
+    return outputs
+
+
+def _run_temporal_control_presets(
+    *,
+    subjects: list[str],
+    task: str,
+    config: Any,
+    logger: logging.Logger,
+) -> list[Path]:
+    temporal_windows = resolve_temporal_control_windows(config)
+    if not temporal_windows:
+        return []
+
+    deriv_root = resolve_eeg_deriv_root(config)
+    feature_root = study1_temporal_control_feature_root(config)
+    n_perm = _require_permutation_inference(config)
+    inner_splits = int(get_config_value(config, "study1.feature_benchmark.inner_splits", 5))
+    outer_jobs = int(get_config_value(config, "study1.feature_benchmark.outer_jobs", 1))
+    harmonization = str(
+        get_config_value(config, "study1.feature_benchmark.feature_harmonization", "intersection")
+    ).strip()
+
+    outputs: list[Path] = []
+    for target_name in PRIMARY_SIGNATURES:
+        target_config = _feature_benchmark_config(config, target_name=target_name)
+        for temporal_window in temporal_windows:
+            results_root = _feature_results_root(
+                config,
+                partition=TEMPORAL_CONTROL_PARTITION,
+                target_name=target_name,
+                feature_spec=temporal_control_feature_spec(temporal_window.name),
+            )
+            outputs.append(
+                run_model_comparison_ml(
+                    subjects=subjects,
+                    task=task,
+                    deriv_root=deriv_root,
+                    config=target_config,
+                    n_perm=n_perm,
+                    inner_splits=inner_splits,
+                    outer_jobs=outer_jobs,
+                    rng_seed=_rng_seed(config),
+                    results_root=results_root,
+                    logger=logger,
+                    target="fmri_signature",
+                    feature_families=[PRIMARY_FEATURE_FAMILY],
+                    feature_input_root=feature_root,
+                    feature_bands=list(TEMPORAL_CONTROL_BANDS),
+                    feature_segments=[temporal_window.name],
+                    feature_scopes=list(PRIMARY_FEATURE_SCOPES),
+                    feature_stats=list(TEMPORAL_CONTROL_FEATURE_STATS),
+                    feature_harmonization=harmonization,
+                    model_names=["elasticnet", "ridge"],
+                )
+            )
+    return outputs
+
+
 def run_feature_benchmark(
     *,
     subjects: list[str],
@@ -283,6 +404,10 @@ def run_feature_benchmark(
         subjects=resolved_subjects,
         config=config,
     )
+    require_prepared_study1_temporal_control_features(
+        subjects=resolved_subjects,
+        config=config,
+    )
 
     benchmark_root = study1_output_root(config) / "feature_benchmark"
     try:
@@ -300,6 +425,22 @@ def run_feature_benchmark(
                 logger=logger,
             )
         )
+        outputs.extend(
+            _run_exploratory_band_presets(
+                subjects=resolved_subjects,
+                task=task,
+                config=config,
+                logger=logger,
+            )
+        )
+        outputs.extend(
+            _run_temporal_control_presets(
+                subjects=resolved_subjects,
+                task=task,
+                config=config,
+                logger=logger,
+            )
+        )
     finally:
         removed_sidecars = remove_appledouble_sidecars(benchmark_root)
         if removed_sidecars:
@@ -310,4 +451,8 @@ def run_feature_benchmark(
     return outputs
 
 
-__all__ = ["PRIMARY_BAND_PRESETS", "run_feature_benchmark"]
+__all__ = [
+    "EXPLORATORY_BAND_PRESETS",
+    "PRIMARY_BAND_PRESETS",
+    "run_feature_benchmark",
+]

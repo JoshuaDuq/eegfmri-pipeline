@@ -245,8 +245,9 @@ testing. Missing provenance, invalid signature support, unstable LSS designs, or
 trials should be fixed at the derivative or event-log level rather than compensated for downstream.
 
 The final report interprets results in this order: analysis validity, the prespecified `NPS` /
-`alpha_beta` / `elasticnet` primary cell, interpretation diagnostics, and secondary/exploratory
-analyses. Secondary benchmark cells and exploratory models are reported after the primary cell.
+`alpha_beta_gamma` / `elasticnet` primary cell, interpretation diagnostics, and
+secondary/exploratory analyses. Secondary benchmark cells and exploratory models are reported after
+the primary cell.
 
 ### Pipeline Stages
 
@@ -282,9 +283,12 @@ Run stages in this order.
 
    ```text
    $STUDY1_ROOT/features_trial_ml_safe/sub-*/eeg/features/power/features_power.parquet
+   $STUDY1_ROOT/features_temporal_controls/sub-*/eeg/features/power/features_power.parquet
    ```
 
-   Exploratory families produce additional per-family tables only when explicitly enabled.
+   The temporal-control table contains unbaselined alpha, beta, and gamma log-power features for
+   the configured pre-stimulus and wrong-lag windows. Exploratory families produce additional
+   per-family tables only when explicitly enabled.
 
 3. Run the feature benchmark:
 
@@ -301,12 +305,20 @@ Run stages in this order.
    $STUDY1_ROOT/feature_benchmark/primary/<target>/<preset>/model_comparison/
    ```
 
+   Temporal-control cells write the same summary under:
+
+   ```text
+   $STUDY1_ROOT/feature_benchmark/temporal_control/<target>/temporal_<window>/model_comparison/
+   ```
+
    Required benchmark targets are `NPS` and `SIIPS1`. The report validates the full primary
-   benchmark preset set: `delta`, `theta`, `alpha`, `beta`, `gamma`, `delta_theta`,
-   `alpha_beta`, `alpha_beta_gamma`, and `all_bands`. The prespecified inferential primary cell
-   remains `NPS` / `alpha_beta` / `elasticnet`; the other required cells provide the broader
-   full-picture frequency audit. The benchmark filters predictors to active-window,
-   individual-channel, log-ratio power columns and excludes Fp1/Fp2.
+   benchmark preset set: `alpha`, `beta`, `gamma`, `alpha_beta`, and `alpha_beta_gamma`. The
+   prespecified inferential primary cell is `NPS` / `alpha_beta_gamma` / `elasticnet`; the other
+   required cells provide the alpha/beta/gamma frequency audit. Delta, theta, delta+theta, and
+   all-band models are written under the exploratory partition. The benchmark filters predictors
+   to active-window, individual-channel, log-ratio power columns and excludes Fp1/Fp2. The
+   temporal-control benchmark uses individual-channel alpha, beta, and gamma raw log-power columns
+   from the temporal-control feature root.
 
 Exploratory feature families are disabled in the default Study 1 configs. Enable them explicitly
 when they are part of the planned run:
@@ -346,6 +358,7 @@ COMMON_ARGS+=(
    protocol audit fields: confidence intervals, valid permutation counts, invalid permutation
    attempts, subject-selection counts, fold-level best hyperparameters, analysis-validity status,
    primary prediction status, interpretation diagnostics, and interpretation flags.
+   Temporal-control feature-benchmark summaries are included with separate Holm-corrected p-values.
    Deep-regression and exploratory feature-benchmark summaries are included when present, but they
    are not required for the primary Study 1 report.
    The report also writes `reports/full_picture/`, which contains model leaderboards,

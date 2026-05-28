@@ -76,6 +76,29 @@ def test_prune_windowed_removes_active_and_baseline_artifacts(tmp_path) -> None:
     assert not (erds_dir / "metadata" / "extraction_config_baseline.json").exists()
 
 
+def test_prune_windowed_removes_configured_window_suffixes(tmp_path) -> None:
+    family_dir = tmp_path / "sub-0001" / "eeg" / "features" / "power"
+    metadata_dir = family_dir / "metadata"
+    metadata_dir.mkdir(parents=True)
+    (family_dir / "features_power.parquet").write_text("main", encoding="utf-8")
+    (family_dir / "features_power_prestimulus_wide.parquet").write_text("dup", encoding="utf-8")
+    (metadata_dir / "features_power_prestimulus_wide.json").write_text("{}", encoding="utf-8")
+    (metadata_dir / "extraction_config_prestimulus_wide.json").write_text("{}", encoding="utf-8")
+
+    removed = prune_windowed_feature_artifacts(
+        feature_root=tmp_path,
+        subjects=["sub-0001"],
+        feature_families=["power"],
+        range_suffixes=["prestimulus_wide"],
+    )
+
+    assert removed == 3
+    assert (family_dir / "features_power.parquet").exists()
+    assert not (family_dir / "features_power_prestimulus_wide.parquet").exists()
+    assert not (metadata_dir / "features_power_prestimulus_wide.json").exists()
+    assert not (metadata_dir / "extraction_config_prestimulus_wide.json").exists()
+
+
 def test_prune_windowed_skips_missing_families(tmp_path) -> None:
     removed = prune_windowed_feature_artifacts(
         feature_root=tmp_path,

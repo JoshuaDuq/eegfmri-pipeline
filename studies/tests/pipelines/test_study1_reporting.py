@@ -9,9 +9,11 @@ from studies.tests.test_support import DotConfig
 
 
 def _config(root: Path) -> DotConfig:
+    deriv_root = str(root / "derivatives")
     return DotConfig(
         {
-            "paths": {"deriv_root": str(root / "derivatives")},
+            "deriv_root": deriv_root,
+            "paths": {"deriv_root": deriv_root},
             "study1": {
                 "outputs": {"root_name": "study1"},
                 "targets": {"names": ["NPS", "SIIPS1"]},
@@ -20,6 +22,8 @@ def _config(root: Path) -> DotConfig:
                         "alpha": ["alpha"],
                         "beta": ["beta"],
                         "alpha_beta": ["alpha", "beta"],
+                        "gamma": ["gamma"],
+                        "alpha_beta_gamma": ["alpha", "beta", "gamma"],
                     }
                 },
             },
@@ -34,6 +38,7 @@ def _write_feature_summary(
     *,
     partition: str = "primary",
 ) -> None:
+    _write_article_inputs(root)
     feature_summary = (
         root
         / "feature_benchmark"
@@ -104,6 +109,80 @@ def _write_feature_summary(
     ).to_csv(feature_summary / "model_comparison.tsv", sep="\t", index=False)
 
 
+def _write_article_inputs(root: Path) -> None:
+    target_dir = root / "targets"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            _target_row("sub-0001", 1, 1, 45.3, 1.0, 100.0),
+            _target_row("sub-0001", 1, 2, 49.3, 5.0, 500.0),
+            _target_row("sub-0002", 1, 1, 45.3, 2.0, 200.0),
+            _target_row("sub-0002", 1, 2, 49.3, 6.0, 600.0),
+        ]
+    ).to_parquet(target_dir / "primary_targets.parquet", index=False)
+
+    deriv_root = root.parents[2]
+    for subject_id in ("sub-0001", "sub-0002"):
+        event_dir = deriv_root / "preprocessed" / "eeg" / subject_id / "eeg"
+        event_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(
+            [
+                _event_row(1, 1, 45.3, 0, 110.0),
+                _event_row(1, 2, 49.3, 1, 170.0),
+            ]
+        ).to_csv(
+            event_dir / f"{subject_id}_task-pain_proc-clean_events.tsv",
+            sep="\t",
+            index=False,
+        )
+
+
+def _target_row(
+    subject_id: str,
+    block: int,
+    within_block_trial: int,
+    stimulus_temp: float,
+    nps: float,
+    siips1: float,
+) -> dict[str, object]:
+    return {
+        "subject_id": subject_id,
+        "task": "pain",
+        "block": block,
+        "trial_index": within_block_trial,
+        "within_block_trial": within_block_trial,
+        "onset": float(within_block_trial),
+        "duration": 1.0,
+        "NPS": nps,
+        "SIIPS1": siips1,
+        "hrf_weighted_framewise_displacement": 0.01,
+        "hrf_weighted_std_dvars": 0.02,
+        "hrf_weighted_fp1_fp2_high_frequency_power": 0.03,
+        "residual_ecg_coupling": 0.04,
+        "stimulus_temp": stimulus_temp,
+        "selected_surface": 1,
+    }
+
+
+def _event_row(
+    run_id: int,
+    trial_number: int,
+    stimulus_temp: float,
+    pain_binary: int,
+    rating: float,
+) -> dict[str, object]:
+    return {
+        "run_id": run_id,
+        "trial_number": trial_number,
+        "stimulus_temp": stimulus_temp,
+        "selected_surface": 1,
+        "pain_binary_coded": pain_binary,
+        "vas_final_coded_rating": rating,
+        "residual_ecg_coupling": 0.04,
+        "peripheral_low_gamma_power": 0.05,
+    }
+
+
 def _write_deep_summary(root: Path, target: str, preset: str) -> None:
     deep_summary = root / "deep_regression" / target / preset
     deep_summary.mkdir(parents=True, exist_ok=True)
@@ -124,7 +203,7 @@ def test_write_study1_report_aggregates_feature_and_deep_summaries(tmp_path) -> 
     root = Path(cfg.get("paths.deriv_root")) / "group" / "multimodal" / "study1"
 
     for target in ("NPS", "SIIPS1"):
-        for feature_spec in ("alpha", "beta", "alpha_beta"):
+        for feature_spec in ("alpha", "beta", "gamma", "alpha_beta", "alpha_beta_gamma"):
             _write_feature_summary(root, target, feature_spec)
             _write_deep_summary(root, target, feature_spec)
 
@@ -133,7 +212,7 @@ def test_write_study1_report_aggregates_feature_and_deep_summaries(tmp_path) -> 
     report_path = write_study1_report(task="pain", config=cfg)
     report = pd.read_csv(report_path, sep="\t")
 
-    assert len(report) == 20
+    assert len(report) == 32
     assert set(report["lane"]) == {"feature_benchmark", "deep_regression"}
     assert set(report["analysis_partition"]) == {"primary", "exploratory"}
     assert set(report["claim_tier"]) == {
@@ -141,13 +220,13 @@ def test_write_study1_report_aggregates_feature_and_deep_summaries(tmp_path) -> 
         "secondary_confirmatory",
         "exploratory",
     }
-    assert set(report["feature_spec"]) == {"alpha", "beta", "alpha_beta", "spectral"}
+    assert set(report["feature_spec"]) == {"alpha", "beta", "gamma", "alpha_beta", "alpha_beta_gamma", "spectral"}
     assert "mean_delta_r2" in report.columns
     assert "p_value_delta_r2" in report.columns
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"]
     assert len(primary_gate) == 1
     assert primary_gate.iloc[0]["target"] == "NPS"
-    assert primary_gate.iloc[0]["feature_spec"] == "alpha_beta"
+    assert primary_gate.iloc[0]["feature_spec"] == "alpha_beta_gamma"
     assert primary_gate.iloc[0]["model"] == "elasticnet"
     primary_feature_models = set(
         report.loc[

@@ -18,21 +18,30 @@ from studies.pain_study.study1.cohort import (
     study1_feature_root,
     study1_feature_subject_root,
     study1_feature_table_path,
+    study1_temporal_control_feature_metadata_path,
+    study1_temporal_control_feature_root,
+    study1_temporal_control_feature_subject_root,
+    study1_temporal_control_feature_table_path,
 )
 from studies.pain_study.study1.feature_spec import resolve_study1_feature_families
 from studies.pain_study.study1.output_cleanup import (
     prune_windowed_feature_artifacts,
     remove_appledouble_sidecars,
 )
+from studies.pain_study.study1.temporal_controls import temporal_control_time_ranges
 
 
 def _clear_subject_feature_outputs(
     *,
     subjects: list[str],
     config: Any,
+    temporal_controls: bool = False,
 ) -> None:
     for subject_id in subjects:
-        subject_root = study1_feature_subject_root(config, subject_id)
+        if temporal_controls:
+            subject_root = study1_temporal_control_feature_subject_root(config, subject_id)
+        else:
+            subject_root = study1_feature_subject_root(config, subject_id)
         if subject_root.exists():
             try:
                 shutil.rmtree(subject_root)
@@ -170,6 +179,42 @@ def require_prepared_study1_features(
         )
 
 
+def require_prepared_study1_temporal_control_features(
+    *,
+    subjects: list[str],
+    config: Any,
+) -> None:
+    if not temporal_control_time_ranges(config):
+        return
+
+    missing_paths: list[Path] = []
+    for subject_id in subjects:
+        feature_path = study1_temporal_control_feature_table_path(config, subject_id, "power")
+        metadata_path = study1_temporal_control_feature_metadata_path(
+            config,
+            subject_id,
+            "power",
+        )
+        if not feature_path.exists():
+            missing_paths.append(feature_path)
+            continue
+        if not metadata_path.exists():
+            missing_paths.append(metadata_path)
+            continue
+        _validate_prepared_feature_metadata(
+            family="power",
+            metadata_path=metadata_path,
+        )
+
+    if missing_paths:
+        raise FileNotFoundError(
+            "Study 1 temporal-control features are missing or incomplete. "
+            "Run 'signature-prediction prepare-features' first. "
+            "Missing paths: "
+            f"{missing_paths}"
+        )
+
+
 def _study1_feature_config(config: Any) -> Any:
     feature_config = ConfigDict(deepcopy(dict(config)))
     feature_config["feature_engineering.analysis_mode"] = "trial_ml_safe"
@@ -178,6 +223,13 @@ def _study1_feature_config(config: Any) -> Any:
     feature_config["feature_engineering.aperiodic.subtract_evoked"] = False
     feature_config["feature_engineering.bands.use_iaf"] = False
     feature_config["feature_engineering.bursts.threshold_reference"] = "trial"
+    return feature_config
+
+
+def _study1_temporal_control_feature_config(config: Any) -> Any:
+    feature_config = _study1_feature_config(config)
+    feature_config["feature_engineering.power.require_baseline"] = False
+    feature_config["feature_engineering.compute_change_scores"] = False
     return feature_config
 
 
@@ -265,6 +317,11 @@ def prepare_study1_features(
     feature_root.mkdir(parents=True, exist_ok=True)
 
     _clear_subject_feature_outputs(subjects=resolved_subjects, config=config)
+    _clear_subject_feature_outputs(
+        subjects=resolved_subjects,
+        config=config,
+        temporal_controls=True,
+    )
 
     feature_families = resolve_study1_feature_families(config)
     time_ranges = _study1_windowed_time_ranges(config)
@@ -278,6 +335,30 @@ def prepare_study1_features(
         feature_families=feature_families,
         time_ranges=time_ranges,
     )
+
+    temporal_ranges = temporal_control_time_ranges(config)
+    removed_temporal_windowed = 0
+    removed_temporal_sidecars = 0
+    if temporal_ranges:
+        temporal_feature_root = study1_temporal_control_feature_root(config)
+        temporal_feature_root.mkdir(parents=True, exist_ok=True)
+        temporal_pipeline = FeaturePipeline(config=_study1_temporal_control_feature_config(config))
+        _run_feature_batch(
+            pipeline=temporal_pipeline,
+            subjects=resolved_subjects,
+            task=task,
+            feature_root=temporal_feature_root,
+            feature_families=["power"],
+            time_ranges=temporal_ranges,
+        )
+        removed_temporal_windowed = prune_windowed_feature_artifacts(
+            feature_root=temporal_feature_root,
+            subjects=resolved_subjects,
+            feature_families=["power"],
+            range_suffixes=[str(time_range["name"]) for time_range in temporal_ranges],
+        )
+        removed_temporal_sidecars = remove_appledouble_sidecars(temporal_feature_root)
+
     removed_windowed = prune_windowed_feature_artifacts(
         feature_root=feature_root,
         subjects=resolved_subjects,
@@ -290,11 +371,25 @@ def prepare_study1_features(
         config=config,
         feature_families=feature_families,
     )
+    require_prepared_study1_temporal_control_features(
+        subjects=resolved_subjects,
+        config=config,
+    )
     if removed_windowed:
         logger.info("Pruned %d redundant Study 1 windowed feature artifacts", removed_windowed)
+    if removed_temporal_windowed:
+        logger.info(
+            "Pruned %d redundant Study 1 temporal-control feature artifacts",
+            removed_temporal_windowed,
+        )
     if removed_sidecars:
         logger.info(
             "Removed %d AppleDouble sidecars from Study 1 feature outputs", removed_sidecars
+        )
+    if removed_temporal_sidecars:
+        logger.info(
+            "Removed %d AppleDouble sidecars from Study 1 temporal-control outputs",
+            removed_temporal_sidecars,
         )
     logger.info(
         "Prepared Study 1 trial_ml_safe features for %d subjects at %s",
@@ -304,4 +399,8 @@ def prepare_study1_features(
     return feature_root
 
 
-__all__ = ["prepare_study1_features", "require_prepared_study1_features"]
+__all__ = [
+    "prepare_study1_features",
+    "require_prepared_study1_features",
+    "require_prepared_study1_temporal_control_features",
+]

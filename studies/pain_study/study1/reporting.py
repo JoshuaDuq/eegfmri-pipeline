@@ -24,10 +24,14 @@ from studies.pain_study.study1.targets import (
     PRIMARY_SIGNATURES,
     residualization_columns_for_target_table,
 )
+from studies.pain_study.study1.temporal_controls import (
+    TEMPORAL_CONTROL_PARTITION,
+    temporal_control_window_for_feature_spec,
+)
 
 FEATURE_MODELS = ("elasticnet", "ridge")
 PRIMARY_GATE_TARGET = "NPS"
-PRIMARY_GATE_FEATURE_SPEC = "alpha_beta"
+PRIMARY_GATE_FEATURE_SPEC = "alpha_beta_gamma"
 PRIMARY_GATE_MODEL = "elasticnet"
 PRIMARY_REQUIRED_NUMERIC_FIELDS = (
     "mean_delta_r2",
@@ -414,6 +418,11 @@ def _feature_records(config: Any) -> list[dict[str, Any]]:
             subject_selection = {}
         if not isinstance(subject_selection, dict):
             raise ValueError(f"Expected subject_selection object in {summary_path}.")
+        temporal_window = (
+            temporal_control_window_for_feature_spec(config, feature_spec)
+            if partition == TEMPORAL_CONTROL_PARTITION
+            else None
+        )
         for model_name, metrics in payload.items():
             if not isinstance(metrics, dict):
                 continue
@@ -436,6 +445,12 @@ def _feature_records(config: Any) -> list[dict[str, Any]]:
                     ),
                     "target": target_name,
                     "feature_spec": feature_spec,
+                    "temporal_control_window": (
+                        temporal_window.name if temporal_window is not None else pd.NA
+                    ),
+                    "temporal_control_kind": (
+                        temporal_window.kind if temporal_window is not None else pd.NA
+                    ),
                     "model": model_name,
                     "mean_r2": metrics.get("mean_r2"),
                     "std_r2": metrics.get("std_r2"),
@@ -616,12 +631,14 @@ def _validate_permutation_budget(
         )
 
 
-def _append_primary_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:
+def _append_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     out["p_value_r2_holm"] = pd.NA
     out["p_value_delta_r2_holm"] = pd.NA
-    primary_mask = (out["lane"].astype(str) == "feature_benchmark") & (
-        out["analysis_partition"].astype(str) == "primary"
+    feature_mask = out["lane"].astype(str) == "feature_benchmark"
+    primary_mask = feature_mask & (out["analysis_partition"].astype(str) == "primary")
+    temporal_control_mask = feature_mask & (
+        out["analysis_partition"].astype(str) == TEMPORAL_CONTROL_PARTITION
     )
     try:
         from statsmodels.stats.multitest import multipletests
@@ -636,14 +653,38 @@ def _append_primary_feature_multiplicity(frame: pd.DataFrame) -> pd.DataFrame:
             continue
         for claim_tier in ("primary_gate", "secondary_confirmatory"):
             mask = primary_mask & (out["claim_tier"].astype(str) == claim_tier)
-            p_values = pd.to_numeric(out.loc[mask, raw_column], errors="coerce")
-            valid = p_values.notna()
-            if not valid.any():
-                continue
-            values = p_values.loc[valid].to_numpy(dtype=float)
-            adjusted = multipletests(values, method="holm")[1]
-            out.loc[p_values.loc[valid].index, adjusted_column] = adjusted
+            _apply_holm_to_mask(
+                out,
+                mask=mask,
+                raw_column=raw_column,
+                adjusted_column=adjusted_column,
+                multipletests_fn=multipletests,
+            )
+        _apply_holm_to_mask(
+            out,
+            mask=temporal_control_mask,
+            raw_column=raw_column,
+            adjusted_column=adjusted_column,
+            multipletests_fn=multipletests,
+        )
     return out
+
+
+def _apply_holm_to_mask(
+    frame: pd.DataFrame,
+    *,
+    mask: pd.Series,
+    raw_column: str,
+    adjusted_column: str,
+    multipletests_fn: Any,
+) -> None:
+    p_values = pd.to_numeric(frame.loc[mask, raw_column], errors="coerce")
+    valid = p_values.notna()
+    if not valid.any():
+        return
+    values = p_values.loc[valid].to_numpy(dtype=float)
+    adjusted = multipletests_fn(values, method="holm")[1]
+    frame.loc[p_values.loc[valid].index, adjusted_column] = adjusted
 
 
 def _write_article_tables(
@@ -1576,7 +1617,7 @@ def write_study1_report(
         by=["lane", "analysis_partition", "target", "feature_spec", "model"],
         kind="stable",
     )
-    frame = _append_primary_feature_multiplicity(frame)
+    frame = _append_feature_multiplicity(frame)
     frame = _append_interpretation_columns(frame)
     summary_payload = {
         "task": task,

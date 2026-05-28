@@ -44,6 +44,18 @@ def _config(deriv_root: Path) -> DotConfig:
                 "features": {
                     "exploratory_feature_families": list(EXPLORATORY_FAMILIES),
                 },
+                "temporal_negative_controls": {
+                    "feature_transform": "raw_log_power",
+                    "feature_baseline_window": None,
+                    "windows": {
+                        "prestimulus_wide": [-5.0, 0.0],
+                        "immediate_prestimulus": [-0.2, 0.0],
+                    },
+                    "wrong_lag_windows": {
+                        "ramp_up": [0.0, 3.0],
+                        "late_ramp_down": [10.5, 15.0],
+                    },
+                },
             },
         }
     )
@@ -132,6 +144,20 @@ def _write_power_active_feature_output(
     )
 
 
+def _write_temporal_power_feature_output(
+    feature_root: Path,
+    subject_id: str,
+) -> None:
+    _write_feature_output(feature_root, subject_id, "power")
+    family_dir = feature_root / subject_id / "eeg" / "features" / "power"
+    pd.DataFrame(
+        {"trial_id": [1], "power_prestimulus_wide_alpha_ch_Cz_log10raw": [1.0]}
+    ).to_parquet(
+        family_dir / "features_power.parquet",
+        index=False,
+    )
+
+
 def _write_all_prepared_outputs(
     feature_root: Path, subjects: list[str], families: list[str]
 ) -> None:
@@ -200,8 +226,9 @@ def test_prepare_study1_features_uses_study1_feature_root_and_full_family_set(tm
             logger=logging.getLogger(__name__),
         )
 
-    assert feature_pipeline.run_batch.call_count == 1
+    assert feature_pipeline.run_batch.call_count == 2
     call = feature_pipeline.run_batch.call_args_list[0]
+    temporal_call = feature_pipeline.run_batch.call_args_list[1]
 
     assert call.kwargs == {
         "subjects": ["sub-0001", "sub-0002"],
@@ -218,6 +245,16 @@ def test_prepare_study1_features_uses_study1_feature_root_and_full_family_set(tm
             {"name": "active", "tmin": 3.0, "tmax": 10.5},
         ],
     }
+    assert temporal_call.kwargs["feature_categories"] == ["power"]
+    assert temporal_call.kwargs["feature_output_root"] == (
+        tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_temporal_controls"
+    )
+    assert temporal_call.kwargs["time_ranges"] == [
+        {"name": "prestimulus_wide", "tmin": -5.0, "tmax": 0.0},
+        {"name": "immediate_prestimulus", "tmin": -0.2, "tmax": 0.0},
+        {"name": "ramp_up", "tmin": 0.0, "tmax": 3.0},
+        {"name": "late_ramp_down", "tmin": 10.5, "tmax": 15.0},
+    ]
 
 
 def test_prepare_study1_features_extracts_primary_power_on_active_window(tmp_path) -> None:
@@ -247,12 +284,59 @@ def test_prepare_study1_features_extracts_primary_power_on_active_window(tmp_pat
             logger=logging.getLogger(__name__),
         )
 
-    feature_pipeline.run_batch.assert_called_once()
-    assert feature_pipeline.run_batch.call_args.kwargs["feature_categories"] == ["power"]
-    assert feature_pipeline.run_batch.call_args.kwargs["time_ranges"] == [
+    assert feature_pipeline.run_batch.call_count == 2
+    primary_call = feature_pipeline.run_batch.call_args_list[0]
+    assert primary_call.kwargs["feature_categories"] == ["power"]
+    assert primary_call.kwargs["time_ranges"] == [
         {"name": "baseline", "tmin": -5.0, "tmax": -0.01},
         {"name": "active", "tmin": 3.0, "tmax": 10.5},
     ]
+
+
+def test_prepare_study1_features_extracts_temporal_control_raw_power_windows(tmp_path) -> None:
+    from studies.pain_study.study1.prepare_features import prepare_study1_features
+
+    cfg = _config(tmp_path / "derivatives")
+    cfg["study1"]["features"]["exploratory_feature_families"] = []
+    _write_primary_targets(cfg)
+
+    with patch(
+        "studies.pain_study.study1.prepare_features.FeaturePipeline"
+    ) as feature_pipeline_cls:
+        primary_pipeline = feature_pipeline_cls.return_value
+
+        def _write_outputs(**kwargs) -> list[dict]:
+            feature_root = Path(kwargs["feature_output_root"])
+            for subject_id in kwargs["subjects"]:
+                if feature_root.name == "features_trial_ml_safe":
+                    _write_power_active_feature_output(feature_root, subject_id)
+                else:
+                    _write_temporal_power_feature_output(feature_root, subject_id)
+            return []
+
+        primary_pipeline.run_batch.side_effect = _write_outputs
+
+        prepare_study1_features(
+            subjects=["0001", "0002"],
+            task="pain",
+            config=cfg,
+            logger=logging.getLogger(__name__),
+        )
+
+    assert primary_pipeline.run_batch.call_count == 2
+    temporal_call = primary_pipeline.run_batch.call_args_list[1]
+    assert temporal_call.kwargs["feature_categories"] == ["power"]
+    assert temporal_call.kwargs["feature_output_root"] == (
+        tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_temporal_controls"
+    )
+    assert temporal_call.kwargs["time_ranges"] == [
+        {"name": "prestimulus_wide", "tmin": -5.0, "tmax": 0.0},
+        {"name": "immediate_prestimulus", "tmin": -0.2, "tmax": 0.0},
+        {"name": "ramp_up", "tmin": 0.0, "tmax": 3.0},
+        {"name": "late_ramp_down", "tmin": 10.5, "tmax": 15.0},
+    ]
+    temporal_config = feature_pipeline_cls.call_args.kwargs["config"]
+    assert temporal_config.get("feature_engineering.power.require_baseline") is False
 
 
 def test_signature_prediction_runner_dispatches_prepare_features(tmp_path) -> None:

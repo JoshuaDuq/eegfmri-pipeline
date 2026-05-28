@@ -1248,7 +1248,9 @@ class FeaturePipeline(PipelineBase):
                 if y is not None:
                     critical_features.append("target")
                 if "power" in range_feature_categories:
-                    critical_features.extend(["power", "baseline"])
+                    critical_features.append("power")
+                    if bool(self.config.get("feature_engineering.power.require_baseline", True)):
+                        critical_features.append("baseline")
 
                 extra_blocks = _build_extra_blocks(unpacked, features)
                 try:

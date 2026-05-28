@@ -4,9 +4,11 @@ from eeg_pipeline.utils.config.loader import ConfigDict, get_config_value
 from studies.pain_study.study1.cohort import primary_targets_parquet_path
 from studies.pain_study.study1.config import load_study1_config
 from studies.pain_study.study1.feature_benchmark import (
+    EXPLORATORY_BAND_PRESETS,
     PRIMARY_BAND_PRESETS,
     _feature_benchmark_config,
 )
+from studies.pain_study.study1.reporting import PRIMARY_GATE_FEATURE_SPEC
 
 LEVEL2_CONTINUOUS_COLUMNS = [
     "block",
@@ -62,11 +64,24 @@ def test_study1_default_clean_events_qc_matches_artifact_proxy_estimand() -> Non
     assert qc["band"] == [70.0, 95.0]
 
 
-def test_study1_power_presets_include_low_and_high_frequency_exploration() -> None:
-    assert PRIMARY_BAND_PRESETS["delta"] == ["delta"]
-    assert PRIMARY_BAND_PRESETS["theta"] == ["theta"]
+def test_study1_primary_gate_uses_alpha_beta_gamma() -> None:
+    assert PRIMARY_GATE_FEATURE_SPEC == "alpha_beta_gamma"
+    assert PRIMARY_BAND_PRESETS["alpha_beta_gamma"] == ["alpha", "beta", "gamma"]
+
+
+def test_study1_primary_power_presets_exclude_low_frequency_exploration() -> None:
+    assert "delta" not in PRIMARY_BAND_PRESETS
+    assert "theta" not in PRIMARY_BAND_PRESETS
+    assert "delta_theta" not in PRIMARY_BAND_PRESETS
+    assert "all_bands" not in PRIMARY_BAND_PRESETS
+
+
+def test_study1_exploratory_power_presets_keep_low_frequency_audit() -> None:
+    assert EXPLORATORY_BAND_PRESETS["delta"] == ["delta"]
+    assert EXPLORATORY_BAND_PRESETS["theta"] == ["theta"]
+    assert EXPLORATORY_BAND_PRESETS["delta_theta"] == ["delta", "theta"]
     assert PRIMARY_BAND_PRESETS["gamma"] == ["gamma"]
-    assert PRIMARY_BAND_PRESETS["all_bands"] == [
+    assert EXPLORATORY_BAND_PRESETS["all_bands"] == [
         "delta",
         "theta",
         "alpha",

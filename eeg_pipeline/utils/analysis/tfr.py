@@ -515,7 +515,8 @@ def compute_tfr_for_subject(
     tfr_computed: Optional[mne.time_frequency.EpochsTFR] = None,
     baseline_window: Optional[Tuple[float, float]] = None,
     power_bands: Optional[Dict[str, Tuple[float, float]]] = None,
-) -> Tuple[mne.time_frequency.EpochsTFR, pd.DataFrame, List[str], float, float]:
+    extract_baseline_power: bool = True,
+) -> Tuple[mne.time_frequency.EpochsTFR, pd.DataFrame, List[str], Optional[float], Optional[float]]:
     freq_min, freq_max, n_freqs, n_cycles_factor, _tfr_decim, tfr_picks = get_tfr_config(config)
 
     freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
@@ -535,6 +536,9 @@ def compute_tfr_for_subject(
         )
 
     tfr.metadata = aligned_events.copy()
+
+    if not extract_baseline_power:
+        return tfr, pd.DataFrame(), [], None, None
 
     times = np.asarray(tfr.times)
     tfr_analysis = config.get("time_frequency_analysis", {})

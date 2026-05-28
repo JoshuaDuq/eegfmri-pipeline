@@ -97,6 +97,52 @@ def _write_prepared_feature(config: DotConfig, subject_id: str, family: str) -> 
     _write_prepared_feature_rows(config, subject_id, family, n_trials=2)
 
 
+def _write_prepared_temporal_power_features(
+    config: DotConfig,
+    subject_id: str,
+    *,
+    n_trials: int = 2,
+) -> None:
+    feature_dir = (
+        Path(config.get("paths.deriv_root"))
+        / "group"
+        / "multimodal"
+        / "study1"
+        / "features_temporal_controls"
+        / subject_id
+        / "eeg"
+        / "features"
+        / "power"
+    )
+    metadata_dir = feature_dir / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    trial_ids = np.arange(1, n_trials + 1, dtype=int)
+    feature_values = trial_ids.astype(float)
+    pd.DataFrame(
+        {
+            "trial_id": trial_ids,
+            "power_prestimulus_wide_alpha_ch_Cz_log10raw": feature_values,
+            "power_prestimulus_wide_beta_ch_Cz_log10raw": feature_values + 0.1,
+            "power_prestimulus_wide_gamma_ch_Cz_log10raw": feature_values + 0.2,
+            "power_ramp_up_alpha_ch_Cz_log10raw": feature_values + 0.3,
+            "power_ramp_up_beta_ch_Cz_log10raw": feature_values + 0.4,
+            "power_ramp_up_gamma_ch_Cz_log10raw": feature_values + 0.5,
+        }
+    ).to_parquet(feature_dir / "features_power.parquet", index=False)
+    metadata = {
+        "analysis_mode": "trial_ml_safe",
+        "power_subtract_evoked": False,
+        "precomputed_subtract_evoked": False,
+        "aperiodic_subtract_evoked": False,
+        "bands_use_iaf": False,
+        "bursts_threshold_reference": "trial",
+    }
+    (metadata_dir / "extraction_config.json").write_text(
+        json.dumps(metadata) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _write_prepared_feature_rows(
     config: DotConfig,
     subject_id: str,
@@ -262,6 +308,7 @@ def test_study1_prepared_power_features_must_not_claim_primary_erp_subtraction(
 
 def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> None:
     from studies.pain_study.study1.feature_benchmark import (
+        EXPLORATORY_BAND_PRESETS,
         PRIMARY_BAND_PRESETS,
         run_feature_benchmark,
     )
@@ -291,7 +338,9 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
             logger=logging.getLogger(__name__),
         )
 
-    expected_calls = 2 * (len(PRIMARY_BAND_PRESETS) + len(EXPLORATORY_FAMILIES))
+    expected_calls = 2 * (
+        len(PRIMARY_BAND_PRESETS) + len(EXPLORATORY_BAND_PRESETS) + len(EXPLORATORY_FAMILIES)
+    )
     assert len(outputs) == expected_calls
     assert len(captured_calls) == expected_calls
     first_call = captured_calls[0]
@@ -337,6 +386,14 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
     assert exploratory_call["feature_families"] == ["spectral"]
     assert exploratory_call["feature_bands"] is None
     assert exploratory_call["model_names"] == ["elasticnet", "ridge"]
+    exploratory_delta_call = next(
+        call
+        for call in captured_calls
+        if call["results_root"].parts[-4:]
+        == ("feature_benchmark", "exploratory", "NPS", "delta")
+    )
+    assert exploratory_delta_call["feature_families"] == ["power"]
+    assert exploratory_delta_call["feature_bands"] == ["delta"]
 
 
 def test_feature_benchmark_config_requires_permutation_scheme(tmp_path) -> None:
@@ -352,6 +409,7 @@ def test_feature_benchmark_config_requires_permutation_scheme(tmp_path) -> None:
 
 def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path) -> None:
     from studies.pain_study.study1.feature_benchmark import (
+        EXPLORATORY_BAND_PRESETS,
         PRIMARY_BAND_PRESETS,
         run_feature_benchmark,
     )
@@ -383,7 +441,8 @@ def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path
             logger=logging.getLogger(__name__),
         )
 
-    assert len(captured_calls) == 2 * len(PRIMARY_BAND_PRESETS)
+    expected_calls = 2 * (len(PRIMARY_BAND_PRESETS) + len(EXPLORATORY_BAND_PRESETS))
+    assert len(captured_calls) == expected_calls
     assert captured_calls[0]["config"].get("machine_learning.fmri_signature.target_column") == "NPS"
     assert (
         captured_calls[0]["config"].get("machine_learning.target_residualization.enabled") is True
@@ -397,6 +456,56 @@ def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path
         "block",
         "onset",
     ]
+
+
+def test_run_feature_benchmark_adds_temporal_control_windows(tmp_path) -> None:
+    from studies.pain_study.study1.feature_benchmark import run_feature_benchmark
+
+    cfg = _config(tmp_path)
+    cfg["study1"]["features"]["exploratory_feature_families"] = []
+    cfg["study1"]["temporal_negative_controls"] = {
+        "feature_transform": "raw_log_power",
+        "feature_baseline_window": None,
+        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+        "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+    }
+    _write_primary_targets(cfg)
+    for subject_id in ("sub-0001", "sub-0002"):
+        _write_prepared_power_features(cfg, subject_id)
+        _write_prepared_temporal_power_features(cfg, subject_id)
+    captured_calls: list[dict] = []
+
+    def _capture(**kwargs):
+        captured_calls.append(kwargs)
+        return Path(kwargs["results_root"]) / "model_comparison"
+
+    with patch(
+        "studies.pain_study.study1.feature_benchmark.run_model_comparison_ml",
+        side_effect=_capture,
+    ):
+        run_feature_benchmark(
+            subjects=["0001", "0002"],
+            task="pain",
+            config=cfg,
+            logger=logging.getLogger(__name__),
+        )
+
+    prestimulus_call = next(
+        call
+        for call in captured_calls
+        if call["results_root"].parts[-4:]
+        == ("feature_benchmark", "temporal_control", "NPS", "temporal_prestimulus_wide")
+    )
+    assert prestimulus_call["feature_input_root"] == (
+        tmp_path / "derivatives" / "group" / "multimodal" / "study1"
+        / "features_temporal_controls"
+    )
+    assert prestimulus_call["feature_families"] == ["power"]
+    assert prestimulus_call["feature_bands"] == ["alpha", "beta", "gamma"]
+    assert prestimulus_call["feature_segments"] == ["prestimulus_wide"]
+    assert prestimulus_call["feature_scopes"] == ["ch"]
+    assert prestimulus_call["feature_stats"] == ["log10raw"]
+    assert prestimulus_call["model_names"] == ["elasticnet", "ridge"]
 
 
 def test_run_feature_benchmark_uses_grouped_inner_cv_with_four_subjects(tmp_path) -> None:
@@ -434,6 +543,7 @@ def test_run_feature_benchmark_uses_grouped_inner_cv_with_four_subjects(tmp_path
     with (
         patch.object(feature_benchmark, "PRIMARY_SIGNATURES", ("NPS",)),
         patch.object(feature_benchmark, "PRIMARY_BAND_PRESETS", {"alpha": ["alpha"]}),
+        patch.object(feature_benchmark, "EXPLORATORY_BAND_PRESETS", {}),
     ):
         outputs = feature_benchmark.run_feature_benchmark(
             subjects=subjects,

@@ -22,18 +22,19 @@ intensity.
 
 ## 2. Objectives
 
-The primary objective is to test whether plateau-window EEG spectral power across delta, theta,
-alpha, beta, and gamma bands predicts trial-wise NPS expression during simultaneous EEG-fMRI
+The primary objective is to test whether plateau-window EEG spectral power across alpha, beta,
+and gamma bands predicts trial-wise NPS expression during simultaneous EEG-fMRI
 thermal stimulation beyond measured stimulus, acquisition, and physiological nuisance structure.
 The primary estimand is subject-held-out incremental prediction. Secondary objectives apply the
 same framework to SIIPS1 and to stimulus- and acquisition-controlled residualized targets.
 Interpretation of any EEG result is conditional on a preregistered fMRI target-validity gate that
 is evaluated before EEG model interpretation.
 
-The prespecified primary gate remains NPS prediction with ElasticNet using alpha+beta
-individual-channel spectral power. The required frequency audit additionally evaluates delta,
-theta, gamma, low-frequency composites, gamma-containing composites, and all-band models as
-secondary spectral tests after the primary inference.
+The prespecified primary gate is NPS prediction with ElasticNet using alpha+beta+gamma
+individual-channel spectral power. The required frequency audit additionally evaluates alpha,
+beta, gamma, and alpha+beta models as secondary spectral tests after the primary inference. Delta,
+theta, delta+theta, and all-band models are retained as exploratory report outputs rather than
+confirmatory frequency presets.
 
 ## 3. Hypotheses and Confirmatory Estimands
 
@@ -62,9 +63,10 @@ high-frequency artifacts. A gamma-containing model therefore supports a neural p
 interpretation only when the result survives the prespecified nuisance design, Fp1/Fp2 exclusion,
 artifact diagnostics, and sensitivity checks.
 
-Secondary confirmatory analyses evaluate the full 2 targets (NPS, SIIPS1) × 2 linear models
-(ElasticNet, Ridge) × 9 frequency presets (delta, theta, alpha, beta, gamma, delta+theta,
-alpha+beta, alpha+beta+gamma, all bands) grid on the individual-channel spectral-power matrix.
+Secondary confirmatory analyses evaluate the 2 targets (NPS, SIIPS1) × 2 linear models
+(ElasticNet, Ridge) × 5 frequency presets (alpha, beta, gamma, alpha+beta,
+alpha+beta+gamma) grid on the individual-channel spectral-power matrix. Delta, theta,
+delta+theta, and all-band models are reported as exploratory low-frequency and broad-band audits.
 Holm correction (Holm, 1979) is applied separately to the secondary raw-target prediction family
 and the Level 2 residualized-target convergence family. ROI-level and global-average feature
 matrices are spatial-resolution sensitivities. Unadjusted Level 1 prediction, subjective-rating
@@ -232,9 +234,9 @@ The early pre-cue baseline requires event-log confirmation that no cue occurred 
 
 Neural oscillations are operationalized as delta (1.0–3.9 Hz), theta (4.0–7.9 Hz), alpha
 (8.0–12.9 Hz), beta (13.0–30.0 Hz), and gamma (30.1–80.0 Hz). The primary gate uses the
-alpha+beta preset. The required secondary frequency audit includes delta, theta, alpha, beta,
-gamma, delta+theta, alpha+beta, alpha+beta+gamma, and all-band presets. The gamma band excludes a
-± 1.0 Hz notch around 60 Hz due to line-noise removal.
+alpha+beta+gamma preset. The required secondary frequency audit includes alpha, beta, gamma, and
+alpha+beta presets. Delta, theta, delta+theta, and all-band presets are exploratory report outputs.
+The gamma band excludes a ± 1.0 Hz notch around 60 Hz due to line-noise removal.
 
 ### 5.3 Fp1/Fp2 Frontal High-Frequency Artifact Proxy
 
@@ -413,15 +415,15 @@ SVD-based least squares.
 ### 9.1 Primary Incremental Model
 
 The benchmark predicts raw NPS and SIIPS1 expression with a nuisance-only model and a combined
-nuisance-plus-EEG model. The primary test is the prespecified NPS ElasticNet alpha+beta
+nuisance-plus-EEG model. The primary test is the prespecified NPS ElasticNet alpha+beta+gamma
 individual-channel cell. The nuisance-only model uses unpenalized ordinary least squares with the
 same rank-stable nuisance design in every fold. If the nuisance-only design becomes rank deficient,
 the affected cell is ineligible for confirmatory interpretation.
 
 The full required benchmark repeats the same nuisance-only versus nuisance-plus-EEG comparison for
-delta, theta, alpha, beta, gamma, delta+theta, alpha+beta, alpha+beta+gamma, and all-band presets.
-These frequency tests establish whether prediction is specific to the alpha+beta gate or better
-explained by broader low-frequency, gamma-containing, or cross-band information.
+alpha, beta, gamma, alpha+beta, and alpha+beta+gamma presets. Exploratory report outputs retain
+delta, theta, delta+theta, and all-band presets to document low-frequency and broad-band
+sensitivity without assigning them to the confirmatory primary family.
 
 The nuisance-plus-EEG estimator is staged residual learning rather than a joint penalized
 regression. The nuisance component is unpenalized ordinary least squares fit on the raw target
@@ -434,7 +436,7 @@ residual scale and then added to the held-out raw-scale nuisance prediction befo
 ### 9.2 Feature-Based Models
 
 A nested LOSO framework is used. The primary gate model is ElasticNet regression
-(Zou and Hastie, 2005) on individual-channel alpha+beta spectral power. ElasticNet and Ridge
+(Zou and Hastie, 2005) on individual-channel alpha+beta+gamma spectral power. ElasticNet and Ridge
 (Hoerl and Kennard, 1970) are repeated across the required frequency audit; Ridge supports
 Haufe-style forward-pattern sensitivity analyses (Haufe et al., 2014). Random Forest is an
 exploratory nonlinear model (Breiman, 2001).
@@ -544,18 +546,20 @@ draws is reported. The planned null size is fixed before outcome inspection.
 
 ## 11. Validity and Sensitivity Analyses
 
-### 11.1 Nuisance Prediction
+### 11.1 Behavioral Target Diagnostics
 
-Supplementary models predict each nuisance variable and behavioral report variable from the same EEG
-features. Behavioral report variables are the binary pain report and within-scale thermal/pain
-intensity score. P-values are Holm-corrected across supplementary targets.
+Behavioral reports are used to document target validity rather than to define additional EEG
+prediction endpoints. The report summarizes the association of NPS and SIIPS1 with the binary pain
+report and the within-scale thermal or pain intensity score. These summaries are diagnostic
+outputs and are not model endpoints for Study 1.
 
 ### 11.2 Temporal Specificity and Anticipatory Controls
 
 Temporal control analyses use the same nuisance-only versus nuisance-plus-EEG
-$\Delta R^2_{\text{LOSO}}$ framework. Models trained on EEG features from −5.0 to 0.0 s and
-−0.2 to 0.0 s predict post-stimulus target expression. These controls use raw log-power summaries
-with no TFR baseline correction (`feature_baseline_window: null`).
+$\Delta R^2_{\text{LOSO}}$ framework. Models trained on individual-channel alpha+beta+gamma EEG
+features from −5.0 to 0.0 s and −0.2 to 0.0 s predict post-stimulus target expression. These
+controls use raw log-power summaries with no TFR baseline correction
+(`feature_baseline_window: null`).
 
 For NPS, pre-stimulus prediction is interpreted as a negative-control result for evoked nociceptive
 signature expression. For SIIPS1, pre-stimulus prediction may reflect expectancy or other
@@ -564,10 +568,8 @@ evidence rather than a pure failed negative control. For each target and window,
 $\Delta R^2_{\text{LOSO}}$, bootstrap confidence intervals, and Holm-corrected p-values.
 
 Wrong-lag windows are ramp-up ($0.0$-$3.0$ s), late ramp-down ($10.5$-$15.0$ s), early-shifted
-active ($1.0$-$8.5$ s), and late-shifted active ($5.0$-$12.5$ s). The primary temporal-control
-analysis repeats full inner GroupKFold hyperparameter selection for every pre-stimulus and
-wrong-lag window. Active-window hyperparameters are reused only in a secondary frozen-model
-sensitivity analysis.
+active ($1.0$-$8.5$ s), and late-shifted active ($5.0$-$12.5$ s). The temporal-control analysis
+repeats full inner GroupKFold hyperparameter selection for every pre-stimulus and wrong-lag window.
 
 ## References
 

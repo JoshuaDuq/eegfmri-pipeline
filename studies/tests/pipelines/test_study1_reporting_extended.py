@@ -12,9 +12,11 @@ from studies.tests.test_support import DotConfig
 
 
 def _config(root: Path) -> DotConfig:
+    deriv_root = str(root / "derivatives")
     return DotConfig(
         {
-            "paths": {"deriv_root": str(root / "derivatives")},
+            "deriv_root": deriv_root,
+            "paths": {"deriv_root": deriv_root},
             "study1": {
                 "outputs": {"root_name": "study1"},
                 "targets": {"names": ["NPS", "SIIPS1"]},
@@ -22,11 +24,19 @@ def _config(root: Path) -> DotConfig:
                     "n_perm": 5000,
                     "max_invalid_permutation_fraction": 0.20,
                 },
+                "temporal_negative_controls": {
+                    "feature_transform": "raw_log_power",
+                    "feature_baseline_window": None,
+                    "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                    "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+                },
                 "deep_regression": {
                     "presets": {
                         "alpha": ["alpha"],
                         "beta": ["beta"],
                         "alpha_beta": ["alpha", "beta"],
+                        "gamma": ["gamma"],
+                        "alpha_beta_gamma": ["alpha", "beta", "gamma"],
                     }
                 },
             },
@@ -49,6 +59,7 @@ def _write_feature_summary(
     write_fold_table: bool = True,
     diagnostics: dict[str, object] | None = None,
 ) -> None:
+    _write_article_inputs(root)
     feature_summary = (
         root / "feature_benchmark" / partition / target / feature_spec
         / "model_comparison" / "metrics"
@@ -134,6 +145,80 @@ def _write_feature_summary(
         ).to_csv(feature_summary / "model_comparison.tsv", sep="\t", index=False)
 
 
+def _write_article_inputs(root: Path) -> None:
+    target_dir = root / "targets"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            _target_row("sub-0001", 1, 1, 45.3, 1.0, 100.0),
+            _target_row("sub-0001", 1, 2, 49.3, 5.0, 500.0),
+            _target_row("sub-0002", 1, 1, 45.3, 2.0, 200.0),
+            _target_row("sub-0002", 1, 2, 49.3, 6.0, 600.0),
+        ]
+    ).to_parquet(target_dir / "primary_targets.parquet", index=False)
+
+    deriv_root = root.parents[2]
+    for subject_id in ("sub-0001", "sub-0002"):
+        event_dir = deriv_root / "preprocessed" / "eeg" / subject_id / "eeg"
+        event_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(
+            [
+                _event_row(1, 1, 45.3, 0, 110.0),
+                _event_row(1, 2, 49.3, 1, 170.0),
+            ]
+        ).to_csv(
+            event_dir / f"{subject_id}_task-pain_proc-clean_events.tsv",
+            sep="\t",
+            index=False,
+        )
+
+
+def _target_row(
+    subject_id: str,
+    block: int,
+    within_block_trial: int,
+    stimulus_temp: float,
+    nps: float,
+    siips1: float,
+) -> dict[str, object]:
+    return {
+        "subject_id": subject_id,
+        "task": "pain",
+        "block": block,
+        "trial_index": within_block_trial,
+        "within_block_trial": within_block_trial,
+        "onset": float(within_block_trial),
+        "duration": 1.0,
+        "NPS": nps,
+        "SIIPS1": siips1,
+        "hrf_weighted_framewise_displacement": 0.01,
+        "hrf_weighted_std_dvars": 0.02,
+        "hrf_weighted_fp1_fp2_high_frequency_power": 0.03,
+        "residual_ecg_coupling": 0.04,
+        "stimulus_temp": stimulus_temp,
+        "selected_surface": 1,
+    }
+
+
+def _event_row(
+    run_id: int,
+    trial_number: int,
+    stimulus_temp: float,
+    pain_binary: int,
+    rating: float,
+) -> dict[str, object]:
+    return {
+        "run_id": run_id,
+        "trial_number": trial_number,
+        "stimulus_temp": stimulus_temp,
+        "selected_surface": 1,
+        "pain_binary_coded": pain_binary,
+        "vas_final_coded_rating": rating,
+        "residual_ecg_coupling": 0.04,
+        "peripheral_low_gamma_power": 0.05,
+    }
+
+
 def _write_deep_summary(root: Path, target: str, preset: str) -> None:
     deep_summary = root / "deep_regression" / target / preset
     deep_summary.mkdir(parents=True, exist_ok=True)
@@ -149,7 +234,7 @@ def _write_deep_summary(root: Path, target: str, preset: str) -> None:
 
 def _write_complete_outputs(root: Path, config: DotConfig) -> None:
     for target in ("NPS", "SIIPS1"):
-        for feature_spec in ("alpha", "beta", "alpha_beta"):
+        for feature_spec in ("alpha", "beta", "gamma", "alpha_beta", "alpha_beta_gamma"):
             _write_feature_summary(root, target, feature_spec)
             _write_deep_summary(root, target, feature_spec)
 
@@ -243,9 +328,9 @@ def test_report_separates_primary_gate_from_secondary_confirmatory_grid(tmp_path
     secondary = report.loc[report["claim_tier"] == "secondary_confirmatory"]
 
     assert len(primary_gate) == 1
-    assert len(secondary) == 11
+    assert len(secondary) == 19
     assert primary_gate.iloc[0]["target"] == "NPS"
-    assert primary_gate.iloc[0]["feature_spec"] == "alpha_beta"
+    assert primary_gate.iloc[0]["feature_spec"] == "alpha_beta_gamma"
     assert primary_gate.iloc[0]["model"] == "elasticnet"
     assert primary_gate.iloc[0]["p_value_delta_r2_holm"] == pytest.approx(
         primary_gate.iloc[0]["p_value_delta_r2"]
@@ -262,7 +347,7 @@ def test_report_rejects_missing_primary_delta_p_values(tmp_path) -> None:
     cfg = _config(tmp_path)
     root = _study1_root(cfg)
     for target in ("NPS", "SIIPS1"):
-        for feature_spec in ("alpha", "beta", "alpha_beta"):
+        for feature_spec in ("alpha", "beta", "gamma", "alpha_beta", "alpha_beta_gamma"):
             _write_feature_summary(root, target, feature_spec, p_value_delta_r2=None)
 
     with pytest.raises(ValueError, match="p_value_delta_r2"):
@@ -358,7 +443,7 @@ def test_report_marks_failed_diagnostics_without_invalidating_primary_prediction
         "artifact_censoring_robustness_passed": False,
     }
     for target in ("NPS", "SIIPS1"):
-        for feature_spec in ("alpha", "beta", "alpha_beta"):
+        for feature_spec in ("alpha", "beta", "gamma", "alpha_beta", "alpha_beta_gamma"):
             _write_feature_summary(
                 root,
                 target,
@@ -396,7 +481,7 @@ def test_report_requires_reliability_trial_count_for_source_entry(tmp_path) -> N
         "artifact_censoring_robustness_passed": True,
     }
     for target in ("NPS", "SIIPS1"):
-        for feature_spec in ("alpha", "beta", "alpha_beta"):
+        for feature_spec in ("alpha", "beta", "gamma", "alpha_beta", "alpha_beta_gamma"):
             _write_feature_summary(root, target, feature_spec, diagnostics=diagnostics)
 
     report_path = write_study1_report(task="pain", config=cfg)
@@ -459,14 +544,14 @@ def test_report_does_not_require_deep_regression_outputs(tmp_path) -> None:
     root = _study1_root(cfg)
 
     for target in ("NPS", "SIIPS1"):
-        for feature_spec in ("alpha", "beta", "alpha_beta"):
+        for feature_spec in ("alpha", "beta", "gamma", "alpha_beta", "alpha_beta_gamma"):
             _write_feature_summary(root, target, feature_spec)
 
     report_path = write_study1_report(task="pain", config=cfg)
     report = pd.read_csv(report_path, sep="\t")
 
     assert set(report["lane"]) == {"feature_benchmark"}
-    assert len(report) == 12
+    assert len(report) == 20
 
 
 ###################################################################
@@ -491,3 +576,30 @@ def test_report_includes_exploratory_records(tmp_path) -> None:
     exploratory = report.loc[report["analysis_partition"] == "exploratory"]
     assert len(exploratory) >= 2
     assert set(exploratory["feature_spec"]) == {"spectral"}
+
+
+def test_report_includes_temporal_control_metadata_and_holm_values(tmp_path) -> None:
+    from studies.pain_study.study1.reporting import write_study1_report
+
+    cfg = _config(tmp_path)
+    root = _study1_root(cfg)
+    _write_complete_outputs(root, cfg)
+    for target in ("NPS", "SIIPS1"):
+        for feature_spec in ("temporal_prestimulus_wide", "temporal_ramp_up"):
+            _write_feature_summary(
+                root,
+                target,
+                feature_spec,
+                partition="temporal_control",
+                p_value_delta_r2=0.02,
+            )
+
+    report_path = write_study1_report(task="pain", config=cfg)
+    report = pd.read_csv(report_path, sep="\t")
+    temporal = report.loc[report["analysis_partition"] == "temporal_control"]
+
+    assert not temporal.empty
+    assert set(temporal["claim_tier"]) == {"exploratory"}
+    assert set(temporal["temporal_control_window"]) == {"prestimulus_wide", "ramp_up"}
+    assert set(temporal["temporal_control_kind"]) == {"prestimulus", "wrong_lag"}
+    assert pd.to_numeric(temporal["p_value_delta_r2_holm"], errors="coerce").notna().all()

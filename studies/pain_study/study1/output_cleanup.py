@@ -30,8 +30,13 @@ def prune_windowed_feature_artifacts(
     feature_root: Path,
     subjects: Iterable[str],
     feature_families: Iterable[str],
+    range_suffixes: Iterable[str] = WINDOWED_RANGE_SUFFIXES,
 ) -> int:
     """Remove redundant per-range Study 1 artifacts once merged canonical files exist."""
+    suffixes = tuple(str(suffix).strip() for suffix in range_suffixes)
+    if any(not suffix for suffix in suffixes):
+        raise ValueError("Window suffixes must be non-empty.")
+
     removed = 0
     for subject_id in subjects:
         subject_label = str(subject_id).strip()
@@ -44,7 +49,7 @@ def prune_windowed_feature_artifacts(
 
             family_dir = feature_root / subject_label / "eeg" / "features" / family_name
             metadata_dir = family_dir / "metadata"
-            for suffix in WINDOWED_RANGE_SUFFIXES:
+            for suffix in suffixes:
                 candidates = (
                     family_dir / f"features_{family_name}_{suffix}.parquet",
                     metadata_dir / f"features_{family_name}_{suffix}.json",

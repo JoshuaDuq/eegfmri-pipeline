@@ -88,7 +88,10 @@ def _validate_temporal_negative_controls(config: dict[str, Any]) -> None:
             f"{TEMPORAL_NEGATIVE_CONTROL_TRANSFORM!r} so temporal negative controls use "
             "raw, unbaselined log-power features."
         )
-    if temporal_config.get("feature_baseline_window") is not None:
+    if (
+        "feature_baseline_window" not in temporal_config
+        or temporal_config.get("feature_baseline_window") is not None
+    ):
         raise ValueError(
             "study1.temporal_negative_controls.feature_baseline_window must be null; "
             "temporal negative controls cannot reuse the active-window TFR baseline."

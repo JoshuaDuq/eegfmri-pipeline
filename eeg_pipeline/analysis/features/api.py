@@ -528,6 +528,9 @@ def _compute_tfr_for_features(
         if np.isfinite(baseline_start) and np.isfinite(baseline_end):
             baseline_override = (float(baseline_start), float(baseline_end))
 
+    extract_baseline_power = bool(
+        ctx.config.get("feature_engineering.power.require_baseline", True)
+    )
     tfr, baseline_df, baseline_cols, baseline_start, baseline_end = compute_tfr_for_subject(
         epochs_for_power_tfr,
         ctx.aligned_events,
@@ -539,6 +542,7 @@ def _compute_tfr_for_features(
         tfr_computed=tfr_power,
         baseline_window=baseline_override,
         power_bands=getattr(ctx, "frequency_bands", None),
+        extract_baseline_power=extract_baseline_power,
     )
 
     if tfr is None:
