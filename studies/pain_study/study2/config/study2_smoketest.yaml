@@ -4,12 +4,13 @@ study2:
       target: "NPS"
       model: "elasticnet"
       feature_family: "power"
-      frequency_preset: "alpha_beta"
+      frequency_preset: "alpha_beta_gamma"
       feature_resolution: "individual_channel"
       residualization_level: 2
       contribution_bands:
         - "alpha"
         - "beta"
+        - "gamma"
     study1_gates:
       max_holm_p: 0.05
       min_delta_r2: 0.02
@@ -23,10 +24,14 @@ study2:
   contributions:
     subject_column: "subject_id"
     trial_column: "trial_id"
+    combined_column: "eta_combined"
+    combined_standardized_column: "eta_combined_z"
     alpha_column: "eta_alpha"
     beta_column: "eta_beta"
+    gamma_column: "eta_gamma"
     alpha_standardized_column: "eta_alpha_z"
     beta_standardized_column: "eta_beta_z"
+    gamma_standardized_column: "eta_gamma_z"
   source_stage:
     min_source_valid_subjects: 2
     min_feasibility_subjects: 2
@@ -81,9 +86,6 @@ study2:
     immediate_baseline_s:
       - -0.2
       - -0.01
-    early_precue_baseline_s:
-      - -7.0
-      - -5.5
     active_plateau_window_s:
       - 3.0
       - 10.5
@@ -95,6 +97,7 @@ study2:
     sensitivity_snr:
       - 1.0
       - 5.0
+    report_point_spread_fwhm: true
   source_model_qc:
     min_valid_eeg_channel_location_fraction: 0.90
     max_mean_coregistration_error_mm: 5.0
@@ -103,38 +106,26 @@ study2:
     sensor_template_abs_r_threshold: 0.80
     source_artifact_map_abs_r_threshold: 0.50
     holm_alpha: 0.05
+    gamma_requires_artifact_survival: true
   directional_consistency:
     min_true_target_spatial_r: 0.20
     min_cluster_same_sign_fraction: 0.60
   source_inference:
-    calibration_null_fwer_interval:
-      - 0.025
-      - 0.075
-    max_r015_ci_half_width: 0.10
-    min_r015_cluster_recovery: 0.80
     primary_cluster_forming_p: 0.01
     sensitivity_cluster_forming_p:
       - 0.001
-      - 0.05
   permutations:
     target_retrained_valid_draws: 10
-    extended_valid_draws: 20
-    full_selection_sensitivity_draws: 5
     max_invalid_draw_fraction: 0.20
     compute_budget_hours: 72
-    extension_cluster_p_threshold: 0.10
-    extension_null_threshold_margin: 0.10
   spatial_comparison:
     min_meaningful_eeg_fmri_abs_r: 0.15
     brainsmash_surrogates: 10
-    spin_rotations: 20
-  criterion_overlap:
+    fmri_smoothing_kernel_source: "median_point_spread_fwhm"
+  behavioral_convergence:
     min_rated_trials: 8
     min_permutation_valid_blocks: 1
     permutations: 10
-    holm_alpha: 0.05
-    min_adjusted_pain_class_variance_fraction: 0.10
-    min_adjusted_pain_class_subjects: 2
   reporting:
     bca_bootstrap_resamples: 100
   robustness:

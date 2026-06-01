@@ -1,6 +1,17 @@
 study1:
   cohort:
     min_subjects: 30
+  reference_power:
+    primary_window: [-5.0, -0.01]
+    sensitivity_windows:
+      prestimulus_2s: [-2.0, -0.01]
+      immediate_prestimulus: [-0.2, -0.01]
+    unnormalized_active_power:
+      feature_transform: "raw_log_power"
+      feature_baseline_window: null
+      active_window: [3.0, 10.5]
+      reference_window: [-5.0, -0.01]
+      reference_power_covariate: true
   features:
     exploratory_feature_families: []
   targets:
@@ -12,6 +23,7 @@ study1:
     trials_per_block: 11
     names: ["NPS", "SIIPS1"]
     signature_manifest_path: "signature_manifest.yaml"
+    signature_scoring_mask_path: "tpl-MNI152NLin2009cAsym_res-02_desc-brain_mask.nii.gz"
     signature_provenance:
       NPS:
         path: "NPS/weights_NSF_grouppred_cvpcr.nii.gz"
@@ -34,12 +46,12 @@ study1:
     drift_model: "cosine"
     high_pass_hz: 0.008
     low_pass_hz: null
-    smoothing_fwhm: null
+    smoothing_fwhm: 6.0
     min_signature_support_fraction: 0.90
     max_signature_weight_mass_change_fraction: 0.10
     max_design_condition_number: 3000.0
     min_target_design_efficiency: 0.1
-    confounds_strategy: "motion24+wmcsf+fd+compcor"
+    confounds_strategy: "motion24"
     lss_other_regressors: "all"
     nuisance_regression:
       enabled: true
@@ -71,8 +83,8 @@ study1:
     feature_transform: "raw_log_power"
     feature_baseline_window: null
     windows:
-      prestimulus_wide: [-5.0, 0.0]
-      immediate_prestimulus: [-0.2, 0.0]
+      prestimulus_wide: [-5.0, -0.01]
+      immediate_prestimulus: [-0.2, -0.01]
     wrong_lag_windows:
       ramp_up: [0.0, 3.0]
       late_ramp_down: [10.5, 15.0]
@@ -98,6 +110,10 @@ study1:
       alpha_beta_gamma: ["alpha", "beta", "gamma"]
   outputs:
     root_name: "study1"
+
+time_frequency_analysis:
+  baseline_window: [-5.0, -0.01]
+  active_window: [3.0, 10.5]
 
 machine_learning:
   evaluation:

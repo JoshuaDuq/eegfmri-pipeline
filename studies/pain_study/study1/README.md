@@ -228,9 +228,12 @@ EEG preprocessing is performed independently within each subject before cross-va
 
 A −0.2 to 0.0 s pre-stimulus voltage baseline removes DC offset before ERP and amplitude-based
 analyses. For time-frequency decompositions, the primary log-ratio baseline is −5.0 to −0.01 s,
-chosen for stable Morlet estimates across the required frequency presets. Sensitivity baselines
-are −0.2 to −0.01 s and −7.0 to −5.5 s.
-The early pre-cue baseline requires event-log confirmation that no cue occurred in that window.
+chosen to estimate plateau power relative to the oscillatory state preceding the trial rather than
+relative to a neutral-brain interval. Because pre-stimulus oscillations may contribute to
+subsequent pain perception, reference-window sensitivity analyses repeat feature extraction with
+shorter pre-stimulus baselines of −2.0 to −0.01 s and −0.2 to −0.01 s. A separate
+sensitivity uses unnormalized active-window log power with −5.0 to −0.01 s reference power
+retained as a covariate.
 
 Neural oscillations are operationalized as delta (1.0–3.9 Hz), theta (4.0–7.9 Hz), alpha
 (8.0–12.9 Hz), beta (13.0–30.0 Hz), and gamma (30.1–80.0 Hz). The primary gate uses the
@@ -275,12 +278,15 @@ Other eligible plateau trials in the same acquisition run are modeled with the p
 response epochs are modeled as non-plateau nuisance events when timing is available.
 
 Primary LSS models use a canonical SPM hemodynamic response function (Friston et al., 1998), cosine
-drift model, and 0.008 Hz high-pass filter without spatial smoothing. The denoising design includes
-the 24-parameter rigid-body motion expansion, white-matter and CSF signals, framewise displacement,
-CompCor regressors (Behzadi et al., 2007), and fMRIPrep motion-outlier regressors (Esteban et al.,
-2019). Trials with framewise displacement > 0.5 mm or standardized DVARS robust $z > 3$ are
-ineligible as target trials, but their thermal-event timing remains in the nuisance-event design
-when valid.
+drift model, and 0.008 Hz high-pass filter. BOLD is spatially smoothed with a 6 mm FWHM Gaussian
+kernel before single-trial estimation, matching the spatial scale at which the NPS and SIIPS1
+weights were developed (Wager et al., 2013; Woo et al., 2017). First-level nuisance regression
+uses only the 24-parameter rigid-body motion expansion (Friston et al., 1996), consistent with
+signature-development pipelines and avoiding WM/CSF/CompCor regression that can attenuate
+subcortical signature support (PAG, thalamus, nucleus accumbens). fMRIPrep motion-outlier spike
+regressors are included when present (Esteban et al., 2019). Trials with framewise displacement
+> 0.5 mm or standardized DVARS robust $z > 3$ are ineligible as target trials, but their thermal-event
+timing remains in the nuisance-event design when valid.
 A target GLM is ineligible if the target regressor is absent, duplicate-labeled, nonestimable, or
 pushes the design condition number above 3000.
 
@@ -290,6 +296,9 @@ window by ± 2.0 s. Direction, magnitude, and inferential changes are reported r
 primary model.
 
 NPS and SIIPS1 maps are registered to MNI152NLin2009cAsym space (Fonov et al., 2009, 2011).
+Published weights were trained in SPM MNI152 space; resampling to fMRIPrep's asymmetric template
+introduces minor expected misregistration (typically 1–2 mm) that is standard for CANlab signature
+application on fMRIPrep data.
 Signature assets are `NPS/weights_NSF_grouppred_cvpcr.nii.gz` and
 `SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz`, resolved relative to the signature-map root.
 SIIPS1 provenance is anchored to the CANlab Neuroimaging_Pattern_Masks repository. NPS provenance is
@@ -302,19 +311,26 @@ interpolation. Non-finite beta-map values outside the explicit analysis mask are
 background during this resampling step; non-finite values inside the mask remain invalid. Published
 weight sign and scale are preserved. Weights are not normalized, re-estimated, rescaled,
 thresholded, or sign-flipped using study data. For each signature, the scoring mask $V^{(k)}$ is
-fixed across retained subjects, runs, and trials by intersecting the finite signature-weight grid
-with the common intersection of all requested fMRIPrep run brain masks after nearest-neighbor
-resampling to the scoring grid. Voxel count and scoring-mask extent must be identical across
-retained subjects, runs, and trials for the same signature.
+fixed a priori by intersecting the finite signature-weight grid with a standard
+MNI152NLin2009cAsym brain mask (`study1.targets.signature_scoring_mask_path`) after
+nearest-neighbor resampling to the scoring grid. This mask is configured up front and is therefore
+required: the scored extent is defined independently of the analyzed sample, so it cannot drift as
+subjects are added and a single truncated field of view cannot shrink the scored extent for the whole
+cohort. Sample-derived scoring masks are not supported. The reference mask is materialized with
+`studies/pain_study/scripts/build_apriori_scoring_mask.py`, which fetches the TemplateFlow brain mask
+and verifies signature coverage (NPS 0.998, SIIPS1 0.957 of nonzero support retained). Voxel count
+and scoring-mask extent are identical across retained subjects, runs, and trials for the same
+signature.
 
 A signature target is valid only when the scoring mask retains at least 90% of original nonzero
 signature support, retains at least 90% of positive- and negative-weight support, and changes
 positive or negative total absolute weight mass by no more than 10% after resampling.
 Sensitivity analyses use the canonical signature grid.
 
-Primary LSS beta maps are not smoothed, z-scored, or trial-normalized before scoring. A fixed 4 mm
-FWHM smoothing sensitivity repeats signature scoring after target-map construction. Signature
-expression is:
+LSS beta maps are not z-scored or trial-normalized before scoring. Signature expression is a
+within-subject relative index: absolute dot-product values are not compared to published NPS/SIIPS1
+classification thresholds or across signatures (different native voxel grids). Robustness repeats
+target construction with unsmoothed BOLD and with 8 mm FWHM smoothing. Signature expression is:
 
 $$
 y_{s,i}^{(k)} = \sum_{v \in V^{(k)}} \beta_{s,i}(v) \, M_k(v),
@@ -355,6 +371,44 @@ target is reported as a technical prediction result rather than evidence about p
 The report stage writes `reports/full_picture/target_validity_gate.tsv` with each target's
 construct relation, validity flags, reliability readout, and interpretation status.
 
+### 6.2 Interpretation Diagnostics: Computed Gates and Sensitivity Analyses
+
+Interpretation diagnostics fall into two classes. The report computes the first class
+automatically and treats the second class as sensitivity analyses reported on the final cohort
+rather than automated pass/fail gates on the primary prediction.
+
+Computed automatically by the report:
+
+- **Primary prediction gate.** $\Delta R^2_{\text{LOSO}} > 0$ with a one-sided permutation
+  p-value ≤ 0.05, Holm-corrected within the confirmatory family.
+- **Target-validity gate.** NPS relations with stimulus temperature and reported pain, the SIIPS1
+  residual relation, and split-half reliability from 1,000 stratified within-cell splits with
+  Spearman-Brown correction.
+- **Residual-target attainability and noise ceiling.** The fraction of target variance remaining
+  after the Level-2 nuisance design (`residual_target_variance_fraction`, one minus the in-sample
+  nuisance $R^2$) is reported per target. Together with the condition-level split-half reliability
+  above, it bounds the staged-residual prediction gain a priori: a low residual fraction or low
+  reliability caps the achievable $\Delta R^2$, so a null EEG result under either condition is
+  uninformative rather than evidence of absence. Single-trial signature expression has no repeated
+  measurement, so its reliability is estimated at the reproducible condition level rather than per
+  trial.
+- **Temporal negative controls.** Derived per target and model from the pre-stimulus and wrong-lag
+  control cells. A primary cell passes when no control window shows significant positive
+  incremental prediction, Holm-corrected over the temporal-control family. Targets without
+  evaluable control cells leave the diagnostic missing rather than passing.
+
+Reported as sensitivity analyses (not automated gates on the primary prediction):
+artifact-censoring robustness, HRF and timing, baseline-window, FWHM smoothing, first-exposure,
+within-subject centered $\Delta R^2$, and Level-2 incremental magnitude. The primary artifact
+control is the prespecified Level 2 nuisance design (Fp1/Fp2 exclusion plus HRF-weighted framewise
+displacement, standardized DVARS, Fp1/Fp2 high-frequency artifact power, and residual ECG
+coupling); censoring-based robustness is a confirmatory sensitivity run on the final cohort.
+
+A primary-gate target enters Study 2 source-level interpretation as confirmatory only when the
+primary prediction is positive, the computed gates pass, and the sensitivity analyses are complete
+and support the primary result. Until the sensitivity diagnostics are available, the report marks
+source entry as not-yet-evaluated rather than confirmatory; this conservative status is intentional.
+
 ## 7. EEG Feature Construction
 
 Spectral power features are extracted with Morlet wavelets (Cohen, 2014) using frequency-adaptive
@@ -365,12 +419,15 @@ subjects, while a fold-level template would require CV-owned signal extraction a
 feature matrices. ERP-subtracted power is eligible only as a separate sensitivity analysis when
 extraction is fold-owned and provenance records the training-fold template.
 
-Spectral power is log-ratio baseline-corrected using the primary baseline and averaged within
-3.0–10.5 s. Each retained trial contributes one power value per channel and band. The primary
-feature family uses active-window individual-channel log-ratio columns only, evaluated across the
-required frequency presets. ROI-level and global-average matrices are spatial-resolution
-sensitivities. All confirmatory feature matrices exclude Fp1 and Fp2. Matrices retaining Fp1/Fp2
-are exploratory artifact-sensitivity analyses.
+Spectral power is log-ratio baseline-corrected using the primary pre-stimulus reference window and
+averaged within 3.0–10.5 s. Each retained trial contributes one power value per channel and band.
+The primary feature family uses active-window individual-channel log-ratio columns only, evaluated
+across the required frequency presets. ROI-level and global-average matrices are spatial-resolution
+sensitivities. Reference-window sensitivity runs repeat the same extraction with −2.0 to −0.01 s
+and −0.2 to −0.01 s baselines. A non-normalized sensitivity uses active-window raw log power and
+includes the corresponding −5.0 to −0.01 s reference power as a covariate. All confirmatory
+feature matrices exclude Fp1 and Fp2. Matrices retaining Fp1/Fp2 are exploratory
+artifact-sensitivity analyses.
 
 The ROI feature matrix uses fixed, non-overlapping scalp groups resolved from normalized extended
 10-20 channel names before model fitting. Fp1 and Fp2 are excluded. ROI inclusion requires at
@@ -557,8 +614,8 @@ outputs and are not model endpoints for Study 1.
 
 Temporal control analyses use the same nuisance-only versus nuisance-plus-EEG
 $\Delta R^2_{\text{LOSO}}$ framework. Models trained on individual-channel alpha+beta+gamma EEG
-features from −5.0 to 0.0 s and −0.2 to 0.0 s predict post-stimulus target expression. These
-controls use raw log-power summaries with no TFR baseline correction
+features from −5.0 to −0.01 s and −0.2 to −0.01 s predict post-stimulus target expression.
+These controls use raw log-power summaries with no TFR baseline correction
 (`feature_baseline_window: null`).
 
 For NPS, pre-stimulus prediction is interpreted as a negative-control result for evoked nociceptive
@@ -570,6 +627,23 @@ $\Delta R^2_{\text{LOSO}}$, bootstrap confidence intervals, and Holm-corrected p
 Wrong-lag windows are ramp-up ($0.0$-$3.0$ s), late ramp-down ($10.5$-$15.0$ s), early-shifted
 active ($1.0$-$8.5$ s), and late-shifted active ($5.0$-$12.5$ s). The temporal-control analysis
 repeats full inner GroupKFold hyperparameter selection for every pre-stimulus and wrong-lag window.
+
+From these cells the report derives a per-target, per-model temporal-control verdict and applies it
+to the matching primary feature cells: the control passes when no pre-stimulus or wrong-lag window
+shows significant positive incremental prediction over the temporal-control family.
+
+### 11.3 Reference-Power Sensitivity
+
+The primary baseline is not interpreted as neural neutrality. It estimates plateau power relative
+to the immediately preceding oscillatory context. The reference-window sensitivity family therefore
+reruns the Study 1 feature extraction and benchmark with −2.0 to −0.01 s and −0.2 to −0.01 s
+baselines, preserving the same active plateau window, feature families, target construction,
+folding, nuisance residualization, and permutation scheme.
+
+The raw-active-power sensitivity disables baseline normalization for the active 3.0–10.5 s plateau
+power features and includes −5.0 to −0.01 s reference power as a covariate. This analysis asks
+whether predictive value depends on the ratio transform itself or remains when active power and
+pre-stimulus oscillatory state are modeled separately.
 
 ## References
 

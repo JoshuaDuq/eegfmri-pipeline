@@ -122,7 +122,7 @@ def _event_row(
         "pain_binary_coded": pain_binary,
         "vas_final_coded_rating": rating,
         "residual_ecg_coupling": 0.04,
-        "peripheral_low_gamma_power": 0.05,
+        "fp1_fp2_high_frequency_power": 0.05,
     }
 
 

@@ -35,11 +35,13 @@ def test_compute_band_contribution_scores_decomposes_linear_predictor_by_band() 
     assert contributions.columns.tolist() == [
         "subject_id",
         "trial_id",
+        "eta_combined",
         "eta_alpha",
         "eta_beta",
     ]
     np.testing.assert_allclose(contributions["eta_alpha"], [-2.5, -4.0])
     np.testing.assert_allclose(contributions["eta_beta"], [4.0, 10.0])
+    np.testing.assert_allclose(contributions["eta_combined"], [1.5, 6.0])
 
 
 def test_compute_band_contribution_scores_requires_each_requested_band() -> None:

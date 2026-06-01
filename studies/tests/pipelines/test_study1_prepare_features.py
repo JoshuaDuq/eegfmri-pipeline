@@ -41,6 +41,20 @@ def _config(deriv_root: Path) -> DotConfig:
                 "outputs": {"root_name": "study1"},
                 "cohort": {"min_subjects": 2},
                 "targets": {"names": ["NPS", "SIIPS1"]},
+                "reference_power": {
+                    "primary_window": [-5.0, -0.01],
+                    "sensitivity_windows": {
+                        "prestimulus_2s": [-2.0, -0.01],
+                        "immediate_prestimulus": [-0.2, -0.01],
+                    },
+                    "unnormalized_active_power": {
+                        "feature_transform": "raw_log_power",
+                        "feature_baseline_window": None,
+                        "active_window": [3.0, 10.5],
+                        "reference_window": [-5.0, -0.01],
+                        "reference_power_covariate": True,
+                    },
+                },
                 "features": {
                     "exploratory_feature_families": list(EXPLORATORY_FAMILIES),
                 },
@@ -48,8 +62,8 @@ def _config(deriv_root: Path) -> DotConfig:
                     "feature_transform": "raw_log_power",
                     "feature_baseline_window": None,
                     "windows": {
-                        "prestimulus_wide": [-5.0, 0.0],
-                        "immediate_prestimulus": [-0.2, 0.0],
+                        "prestimulus_wide": [-5.0, -0.01],
+                        "immediate_prestimulus": [-0.2, -0.01],
                     },
                     "wrong_lag_windows": {
                         "ramp_up": [0.0, 3.0],
@@ -250,8 +264,8 @@ def test_prepare_study1_features_uses_study1_feature_root_and_full_family_set(tm
         tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_temporal_controls"
     )
     assert temporal_call.kwargs["time_ranges"] == [
-        {"name": "prestimulus_wide", "tmin": -5.0, "tmax": 0.0},
-        {"name": "immediate_prestimulus", "tmin": -0.2, "tmax": 0.0},
+        {"name": "prestimulus_wide", "tmin": -5.0, "tmax": -0.01},
+        {"name": "immediate_prestimulus", "tmin": -0.2, "tmax": -0.01},
         {"name": "ramp_up", "tmin": 0.0, "tmax": 3.0},
         {"name": "late_ramp_down", "tmin": 10.5, "tmax": 15.0},
     ]
@@ -330,8 +344,8 @@ def test_prepare_study1_features_extracts_temporal_control_raw_power_windows(tmp
         tmp_path / "derivatives" / "group" / "multimodal" / "study1" / "features_temporal_controls"
     )
     assert temporal_call.kwargs["time_ranges"] == [
-        {"name": "prestimulus_wide", "tmin": -5.0, "tmax": 0.0},
-        {"name": "immediate_prestimulus", "tmin": -0.2, "tmax": 0.0},
+        {"name": "prestimulus_wide", "tmin": -5.0, "tmax": -0.01},
+        {"name": "immediate_prestimulus", "tmin": -0.2, "tmax": -0.01},
         {"name": "ramp_up", "tmin": 0.0, "tmax": 3.0},
         {"name": "late_ramp_down", "tmin": 10.5, "tmax": 15.0},
     ]

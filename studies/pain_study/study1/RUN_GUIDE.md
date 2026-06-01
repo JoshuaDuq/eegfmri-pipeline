@@ -90,9 +90,12 @@ previous runs:
 
 ```bash
 SENSITIVITY_OUTPUT_ROOTS='[
-  {"label":"no_stimulus_temp_control","root_name":"study1_no_stimulus_intensity_20260524"},
-  {"label":"raw_target","root_name":"study1_raw_targets_20260524"},
-  {"label":"stimulus_temp_prediction","root_name":"study1_stimulus_temp_prediction_20260524"}
+  {"label":"reference_minus2s","root_name":"study1_reference_minus2s_20260524"},
+  {"label":"reference_minus0p2s","root_name":"study1_reference_minus0p2s_20260524"},
+  {
+    "label":"raw_active_reference_covariate",
+    "root_name":"study1_raw_active_reference_covariate_20260524"
+  }
 ]'
 
 COMMON_ARGS+=(
@@ -289,6 +292,13 @@ Run stages in this order.
    The temporal-control table contains unbaselined alpha, beta, and gamma log-power features for
    the configured pre-stimulus and wrong-lag windows. Exploratory families produce additional
    per-family tables only when explicitly enabled.
+
+   The primary reference window is `-5.0` to `-0.01` s. Reference-window sensitivity runs should
+   rerun `prepare-features` and `feature-benchmark` under separate `study1.outputs.root_name`
+   values after setting `time_frequency_analysis.baseline_window` to `[-2.0, -0.01]` or
+   `[-0.2, -0.01]`. The raw-active-power sensitivity is a separate sibling run with active
+   log-power features left unnormalized and `-5.0` to `-0.01` s reference power included as a
+   covariate.
 
 3. Run the feature benchmark:
 

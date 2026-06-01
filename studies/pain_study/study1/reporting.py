@@ -70,6 +70,8 @@ SOURCE_ENTRY_DIAGNOSTIC_FIELDS = (
     "temporal_negative_controls_passed",
     "artifact_censoring_robustness_passed",
 )
+SPLIT_HALF_RELIABILITY_N_SPLITS = 1000
+SPLIT_HALF_RELIABILITY_SEED = 42
 PRIMARY_P_VALUE_ALPHA = 0.05
 SOURCE_ENTRY_MIN_DELTA_R2 = 0.02
 SOURCE_ENTRY_MIN_DELTA_R2_LOWER_CI = 0.005
@@ -119,7 +121,7 @@ ARTICLE_REQUIRED_EVENT_COLUMNS = (
     "pain_binary_coded",
     "vas_final_coded_rating",
     "residual_ecg_coupling",
-    "peripheral_low_gamma_power",
+    "fp1_fp2_high_frequency_power",
 )
 FULL_PICTURE_MODEL_COLUMNS = (
     "lane",
@@ -376,11 +378,65 @@ def _temporal_control_interpretation(record: pd.Series) -> str:
     return "not_applicable"
 
 
+def _temporal_controls_verdict(control_rows: pd.DataFrame) -> bool | None:
+    """Pass when no temporal-control window predicts the post-stimulus target.
+
+    A pre-stimulus or wrong-lag window that shows significant positive
+    incremental prediction (Holm-corrected over the temporal-control family)
+    breaks evoked specificity and fails the control. Returns None when controls
+    are absent or any control cell lacks the statistics needed to evaluate it,
+    so the diagnostic stays missing rather than silently passing.
+    """
+    if control_rows.empty:
+        return None
+    for _, row in control_rows.iterrows():
+        delta_r2 = _optional_float(row, "mean_delta_r2")
+        p_holm = _optional_float(row, "p_value_delta_r2_holm")
+        if delta_r2 is None or p_holm is None:
+            return None
+        if delta_r2 > 0.0 and p_holm <= PRIMARY_P_VALUE_ALPHA:
+            return False
+    return True
+
+
+def _derive_temporal_negative_controls(frame: pd.DataFrame) -> pd.Series:
+    """Derive the temporal-control pass for each primary feature-benchmark cell.
+
+    Temporal specificity is a property of the (target, model) pair, so the
+    verdict from the matching pre-stimulus and wrong-lag control cells is
+    applied to every primary feature cell sharing that target and model.
+    """
+    lane = frame["lane"].astype(str)
+    partition = frame["analysis_partition"].astype(str)
+    target = frame["target"].astype(str)
+    model = frame["model"].astype(str)
+    is_control = (lane == "feature_benchmark") & (partition == TEMPORAL_CONTROL_PARTITION)
+    is_primary = (lane == "feature_benchmark") & (partition == "primary")
+
+    controls = frame.loc[is_control]
+    verdicts = pd.Series(pd.NA, index=frame.index, dtype="object")
+    for idx in frame.index[is_primary]:
+        matching = controls.loc[
+            (controls["target"].astype(str) == target.at[idx])
+            & (controls["model"].astype(str) == model.at[idx])
+        ]
+        verdict = _temporal_controls_verdict(matching)
+        if verdict is not None:
+            verdicts.at[idx] = verdict
+    return verdicts
+
+
 def _append_interpretation_columns(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     for field in INTERPRETATION_DIAGNOSTIC_FIELDS:
         if field not in out.columns:
             out[field] = pd.NA
+
+    derived_temporal = _derive_temporal_negative_controls(out)
+    existing_temporal = out["temporal_negative_controls_passed"].astype(object)
+    out["temporal_negative_controls_passed"] = existing_temporal.where(
+        derived_temporal.isna(), derived_temporal
+    )
 
     feature_primary = (out["lane"].astype(str) == "feature_benchmark") & (
         out["analysis_partition"].astype(str) == "primary"
@@ -1126,7 +1182,7 @@ def _merge_targets_with_clean_events(
         "_within_block_trial_key",
         "pain_binary_coded",
         "vas_final_coded_rating",
-        "peripheral_low_gamma_power",
+        "fp1_fp2_high_frequency_power",
         "stimulus_temp",
         "selected_surface",
         "residual_ecg_coupling",
@@ -1196,9 +1252,9 @@ def _article_cohort_summary(
             ),
             "mean_std_dvars": _mean(target_rows, "hrf_weighted_std_dvars"),
             "mean_residual_ecg_coupling": _mean(target_rows, "residual_ecg_coupling"),
-            "mean_peripheral_low_gamma_power": _mean(
+            "mean_fp1_fp2_high_frequency_power": _mean(
                 enriched_rows,
-                "peripheral_low_gamma_power",
+                "fp1_fp2_high_frequency_power",
             ),
             "mean_vas_rating": _mean(enriched_rows, "vas_final_coded_rating"),
             "vas_temp_r": _correlation(
@@ -1241,6 +1297,7 @@ def _article_target_diagnostics(
 
     rows = []
     for target_name in PRIMARY_SIGNATURES:
+        nuisance_in_sample_r2 = _in_sample_r2(target_table, target_name, nuisance_columns)
         rows.append(
             {
                 "target": target_name,
@@ -1284,9 +1341,9 @@ def _article_target_diagnostics(
                     "residual_ecg_coupling",
                     target_name,
                 ),
-                "peripheral_low_gamma_r": _correlation(
+                "fp1_fp2_high_frequency_r": _correlation(
                     enriched_targets,
-                    "peripheral_low_gamma_power",
+                    "fp1_fp2_high_frequency_power",
                     target_name,
                 ),
                 "stimulus_surface_in_sample_r2": _in_sample_design_r2(
@@ -1294,10 +1351,9 @@ def _article_target_diagnostics(
                     target_name,
                     stimulus_surface_columns,
                 ),
-                "official_nuisance_in_sample_r2": _in_sample_r2(
-                    target_table,
-                    target_name,
-                    nuisance_columns,
+                "official_nuisance_in_sample_r2": nuisance_in_sample_r2,
+                "residual_target_variance_fraction": _residual_variance_fraction(
+                    nuisance_in_sample_r2
                 ),
                 **_split_half_temperature_reliability(target_table, target_name),
             }
@@ -1364,6 +1420,10 @@ def _target_validity_gate(
                 "split_half_subject_temperature_n_cells": int(
                     diagnostic["split_half_subject_temperature_n_cells"]
                 ),
+                "residual_target_variance_fraction": _optional_float(
+                    diagnostic,
+                    "residual_target_variance_fraction",
+                ),
             }
         )
     return pd.DataFrame(rows)
@@ -1426,34 +1486,78 @@ def _stimulus_surface_design_columns(target_table: pd.DataFrame) -> pd.DataFrame
     return design
 
 
+def _residual_variance_fraction(in_sample_r2: float) -> float:
+    """Fraction of target variance remaining after Level-2 nuisance residualization.
+
+    This is the share of variance the EEG residual model can still explain. Values near
+    zero mean the nuisance design already accounts for the target, so the staged-residual
+    prediction gain is bounded a priori and a null EEG result is uninformative.
+    """
+    if not np.isfinite(in_sample_r2):
+        return float("nan")
+    return float(np.clip(1.0 - in_sample_r2, 0.0, 1.0))
+
+
+def _spearman_brown_corrected(r_value: float) -> float:
+    if not np.isfinite(r_value) or r_value <= -1.0:
+        return float("nan")
+    return (2.0 * r_value) / (1.0 + r_value)
+
+
 def _split_half_temperature_reliability(
     target_table: pd.DataFrame,
     target_name: str,
+    *,
+    n_splits: int = SPLIT_HALF_RELIABILITY_N_SPLITS,
+    seed: int = SPLIT_HALF_RELIABILITY_SEED,
 ) -> dict[str, Any]:
+    """Split-half reliability stratified within subject and stimulus temperature.
+
+    Implements README section 6. For each of ``n_splits`` random partitions, every
+    subject-by-temperature cell with at least two trials contributes the mean of half A
+    and half B; the per-split statistic is the Spearman-Brown-corrected Pearson
+    correlation across cells, and the reported value is the median across valid splits.
+    """
     _require_columns(
         target_table,
-        ("subject_id", "block", "stimulus_temp", target_name),
+        ("subject_id", "stimulus_temp", target_name),
         table_name="target table",
     )
-    frame = target_table[["subject_id", "block", "stimulus_temp", target_name]].copy()
-    frame["block_parity"] = np.where(
-        _required_integer_series(frame, "block") % 2 == 0, "even", "odd"
-    )
-    pivot = frame.pivot_table(
-        index=["subject_id", "stimulus_temp"],
-        columns="block_parity",
-        values=target_name,
-        aggfunc="mean",
-    )
-    if "odd" not in pivot.columns or "even" not in pivot.columns:
+    frame = target_table[["subject_id", "stimulus_temp", target_name]].copy()
+    frame[target_name] = _numeric_series(frame, target_name)
+
+    splittable = [
+        cell[target_name].to_numpy(dtype=float)
+        for _, cell in frame.groupby(["subject_id", "stimulus_temp"], sort=True)
+        if len(cell) >= 2
+    ]
+    n_cells = len(splittable)
+    if n_cells < 2:
         return {
             "split_half_subject_temperature_r": float("nan"),
-            "split_half_subject_temperature_n_cells": 0,
+            "split_half_subject_temperature_n_cells": n_cells,
         }
-    cells = pivot.dropna(subset=["odd", "even"])
+
+    rng = np.random.default_rng(seed)
+    corrected: list[float] = []
+    for _ in range(n_splits):
+        half_a = np.empty(n_cells, dtype=float)
+        half_b = np.empty(n_cells, dtype=float)
+        for cell_idx, values in enumerate(splittable):
+            order = rng.permutation(values.size)
+            half = values.size // 2
+            half_a[cell_idx] = values[order[:half]].mean()
+            half_b[cell_idx] = values[order[half : 2 * half]].mean()
+        sb = _spearman_brown_corrected(
+            _series_correlation(pd.Series(half_a), pd.Series(half_b))
+        )
+        if np.isfinite(sb):
+            corrected.append(sb)
+
+    reliability = float(np.median(corrected)) if corrected else float("nan")
     return {
-        "split_half_subject_temperature_r": _series_correlation(cells["odd"], cells["even"]),
-        "split_half_subject_temperature_n_cells": int(len(cells)),
+        "split_half_subject_temperature_r": reliability,
+        "split_half_subject_temperature_n_cells": n_cells,
     }
 
 

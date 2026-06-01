@@ -12,11 +12,13 @@ def test_assert_confirmatory_pipeline_ready_surfaces_unimplemented_protocol_comp
         assert_confirmatory_pipeline_ready()
 
     message = str(excinfo.value)
-    assert "source-stage precision and calibration simulation" in message
-    assert "true-target and prediction-error diagnostic maps" in message
+    assert "sLORETA source-power extraction" in message
+    assert "source-resolution point-spread report" in message
+    assert "true-target directional-consistency map" in message
     assert "artifact and robustness interpretation gates" in message
     assert "target-retrained source permutations" in message
     assert "group-level cluster inference" in message
-    assert "directional-consistency gating" in message
+    assert "band-unique specificity inference" in message
     assert "BrainSMASH spatial comparison" in message
-    assert "cross-validated criterion overlap" in message
+    assert "behavioral convergence analysis" in message
+    assert "bootstrap reporting intervals" in message

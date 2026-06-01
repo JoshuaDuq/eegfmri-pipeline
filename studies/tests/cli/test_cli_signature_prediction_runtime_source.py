@@ -49,6 +49,17 @@ def test_run_signature_prediction_loads_study_yaml_into_runtime_config(
 study1:
   targets:
     contrast_name: "custom_contrast"
+  reference_power:
+    primary_window: [-5.0, -0.01]
+    sensitivity_windows:
+      prestimulus_2s: [-2.0, -0.01]
+      immediate_prestimulus: [-0.2, -0.01]
+    unnormalized_active_power:
+      feature_transform: "raw_log_power"
+      feature_baseline_window: null
+      active_window: [3.0, 10.5]
+      reference_window: [-5.0, -0.01]
+      reference_power_covariate: true
   feature_benchmark:
     n_perm: 1
     permutation_scheme: "within_subject"
@@ -57,9 +68,12 @@ study1:
     feature_transform: "raw_log_power"
     feature_baseline_window: null
     windows:
-      prestimulus: [-1.0, 0.0]
+      prestimulus: [-1.0, -0.01]
     wrong_lag_windows:
       active: [1.0, 2.0]
+time_frequency_analysis:
+  baseline_window: [-5.0, -0.01]
+  active_window: [3.0, 10.5]
 """.strip()
         + "\n",
         encoding="utf-8",

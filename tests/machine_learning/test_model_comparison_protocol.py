@@ -194,6 +194,31 @@ def test_feature_metadata_filter_excludes_prespecified_channels() -> None:
     ]
 
 
+def test_feature_metadata_filter_accepts_underscore_segments() -> None:
+    from eeg_pipeline.utils.data.machine_learning import filter_feature_columns_by_metadata
+
+    columns = [
+        "power_prestimulus_wide_alpha_ch_Cz_log10raw",
+        "power_immediate_prestimulus_alpha_ch_Cz_log10raw",
+        "power_late_ramp_down_gamma_ch_Pz_log10raw",
+        "power_prestimulus_wide_delta_ch_Cz_log10raw",
+    ]
+
+    kept = filter_feature_columns_by_metadata(
+        columns,
+        bands=["alpha", "gamma"],
+        segments=["prestimulus_wide", "late_ramp_down"],
+        scopes=["ch"],
+        stats=["log10raw"],
+        excluded_channels=None,
+    )
+
+    assert kept == [
+        "power_prestimulus_wide_alpha_ch_Cz_log10raw",
+        "power_late_ramp_down_gamma_ch_Pz_log10raw",
+    ]
+
+
 def test_reproducibility_info_records_full_config_and_input_hashes(tmp_path: Path) -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import write_reproducibility_info
 

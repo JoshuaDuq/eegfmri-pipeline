@@ -10,10 +10,20 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     assert cell["target"] == "NPS"
     assert cell["model"] == "elasticnet"
     assert cell["feature_family"] == "power"
-    assert cell["frequency_preset"] == "alpha_beta"
+    assert cell["frequency_preset"] == "alpha_beta_gamma"
     assert cell["feature_resolution"] == "individual_channel"
     assert cell["residualization_level"] == 2
-    assert cell["contribution_bands"] == ["alpha", "beta"]
+    assert cell["contribution_bands"] == ["alpha", "beta", "gamma"]
+
+    contributions = config["study2"]["contributions"]
+    assert contributions["combined_column"] == "eta_combined"
+    assert contributions["combined_standardized_column"] == "eta_combined_z"
+    assert contributions["alpha_column"] == "eta_alpha"
+    assert contributions["beta_column"] == "eta_beta"
+    assert contributions["gamma_column"] == "eta_gamma"
+    assert contributions["alpha_standardized_column"] == "eta_alpha_z"
+    assert contributions["beta_standardized_column"] == "eta_beta_z"
+    assert contributions["gamma_standardized_column"] == "eta_gamma_z"
 
     gates = config["study2"]["confirmatory"]["study1_gates"]
     assert gates["max_holm_p"] == 0.05
@@ -61,12 +71,13 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     assert source_modeling["rank_excluded_channels"] == ["Fp1", "Fp2"]
     assert source_modeling["noise_covariance_baseline_s"] == [-5.0, -0.01]
     assert source_modeling["immediate_baseline_s"] == [-0.2, -0.01]
-    assert source_modeling["early_precue_baseline_s"] == [-7.0, -5.5]
+    assert "early_precue_baseline_s" not in source_modeling
     assert source_modeling["active_plateau_window_s"] == [3.0, 10.5]
     assert source_modeling["regularization"]["snr"] == 3.0
     assert source_modeling["regularization"]["loose_orientation"] == 0.2
     assert source_modeling["regularization"]["depth_weighting"] == 0.8
     assert source_modeling["sensitivity_snr"] == [1.0, 5.0]
+    assert source_modeling["report_point_spread_fwhm"] is True
 
     source_qc = config["study2"]["source_model_qc"]
     assert source_qc["min_valid_eeg_channel_location_fraction"] == 0.90
@@ -77,39 +88,34 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     assert artifact_controls["sensor_template_abs_r_threshold"] == 0.80
     assert artifact_controls["source_artifact_map_abs_r_threshold"] == 0.50
     assert artifact_controls["holm_alpha"] == 0.05
+    assert artifact_controls["gamma_requires_artifact_survival"] is True
 
     directional = config["study2"]["directional_consistency"]
     assert directional["min_true_target_spatial_r"] == 0.20
     assert directional["min_cluster_same_sign_fraction"] == 0.60
 
     source_inference = config["study2"]["source_inference"]
-    assert source_inference["calibration_null_fwer_interval"] == [0.025, 0.075]
-    assert source_inference["max_r015_ci_half_width"] == 0.10
-    assert source_inference["min_r015_cluster_recovery"] == 0.80
+    assert "calibration_null_fwer_interval" not in source_inference
     assert source_inference["primary_cluster_forming_p"] == 0.01
-    assert source_inference["sensitivity_cluster_forming_p"] == [0.001, 0.05]
+    assert source_inference["sensitivity_cluster_forming_p"] == [0.001]
 
     permutations = config["study2"]["permutations"]
     assert permutations["target_retrained_valid_draws"] == 1000
-    assert permutations["extended_valid_draws"] == 5000
-    assert permutations["full_selection_sensitivity_draws"] == 250
     assert permutations["max_invalid_draw_fraction"] == 0.20
     assert permutations["compute_budget_hours"] == 72
-    assert permutations["extension_cluster_p_threshold"] == 0.10
-    assert permutations["extension_null_threshold_margin"] == 0.10
+    assert "extended_valid_draws" not in permutations
+    assert "full_selection_sensitivity_draws" not in permutations
 
     spatial = config["study2"]["spatial_comparison"]
     assert spatial["min_meaningful_eeg_fmri_abs_r"] == 0.15
     assert spatial["brainsmash_surrogates"] == 5000
-    assert spatial["spin_rotations"] == 10000
+    assert spatial["fmri_smoothing_kernel_source"] == "median_point_spread_fwhm"
+    assert "spin_rotations" not in spatial
 
-    criterion = config["study2"]["criterion_overlap"]
-    assert criterion["min_rated_trials"] == 25
-    assert criterion["min_permutation_valid_blocks"] == 3
-    assert criterion["permutations"] == 5000
-    assert criterion["holm_alpha"] == 0.05
-    assert criterion["min_adjusted_pain_class_variance_fraction"] == 0.10
-    assert criterion["min_adjusted_pain_class_subjects"] == 30
+    behavioral = config["study2"]["behavioral_convergence"]
+    assert behavioral["min_rated_trials"] == 25
+    assert behavioral["min_permutation_valid_blocks"] == 3
+    assert behavioral["permutations"] == 5000
 
     reporting = config["study2"]["reporting"]
     assert reporting["bca_bootstrap_resamples"] == 10000

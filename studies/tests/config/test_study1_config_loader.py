@@ -8,6 +8,26 @@ import yaml
 from studies.tests.test_support import REPO_ROOT
 
 
+REFERENCE_POWER = {
+    "primary_window": [-5.0, -0.01],
+    "sensitivity_windows": {
+        "prestimulus_2s": [-2.0, -0.01],
+        "immediate_prestimulus": [-0.2, -0.01],
+    },
+    "unnormalized_active_power": {
+        "feature_transform": "raw_log_power",
+        "feature_baseline_window": None,
+        "active_window": [3.0, 10.5],
+        "reference_window": [-5.0, -0.01],
+        "reference_power_covariate": True,
+    },
+}
+TIME_FREQUENCY = {
+    "baseline_window": [-5.0, -0.01],
+    "active_window": [3.0, 10.5],
+}
+
+
 ###################################################################
 # load_study1_config
 ###################################################################
@@ -33,14 +53,35 @@ def test_load_study1_config_defines_unbaselined_temporal_negative_controls() -> 
     assert temporal["feature_transform"] == "raw_log_power"
     assert temporal["feature_baseline_window"] is None
     assert temporal["windows"] == {
-        "prestimulus_wide": [-5.0, 0.0],
-        "immediate_prestimulus": [-0.2, 0.0],
+        "prestimulus_wide": [-5.0, -0.01],
+        "immediate_prestimulus": [-0.2, -0.01],
     }
     assert temporal["wrong_lag_windows"] == {
         "ramp_up": [0.0, 3.0],
         "late_ramp_down": [10.5, 15.0],
         "early_shifted_active": [1.0, 8.5],
         "late_shifted_active": [5.0, 12.5],
+    }
+
+
+def test_load_study1_config_defines_reference_power_sensitivity_plan() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+    reference = config["study1"]["reference_power"]
+
+    assert config["time_frequency_analysis"]["baseline_window"] == [-5.0, -0.01]
+    assert reference["primary_window"] == [-5.0, -0.01]
+    assert reference["sensitivity_windows"] == {
+        "prestimulus_2s": [-2.0, -0.01],
+        "immediate_prestimulus": [-0.2, -0.01],
+    }
+    assert reference["unnormalized_active_power"] == {
+        "feature_transform": "raw_log_power",
+        "feature_baseline_window": None,
+        "active_window": [3.0, 10.5],
+        "reference_window": [-5.0, -0.01],
+        "reference_power_covariate": True,
     }
 
 
@@ -128,7 +169,7 @@ def test_load_study1_config_rejects_baselined_temporal_negative_controls(tmp_pat
                     "temporal_negative_controls": {
                         "feature_transform": "logratio",
                         "feature_baseline_window": [-5.0, -0.01],
-                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                        "windows": {"prestimulus_wide": [-5.0, -0.01]},
                     }
                 }
             }
@@ -150,7 +191,7 @@ def test_load_study1_config_requires_explicit_null_temporal_control_baseline(tmp
                 "study1": {
                     "temporal_negative_controls": {
                         "feature_transform": "raw_log_power",
-                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                        "windows": {"prestimulus_wide": [-5.0, -0.01]},
                         "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
                     }
                 }
@@ -209,7 +250,7 @@ def test_load_study1_config_rejects_missing_wrong_lag_temporal_controls(tmp_path
                     "temporal_negative_controls": {
                         "feature_transform": "raw_log_power",
                         "feature_baseline_window": None,
-                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                        "windows": {"prestimulus_wide": [-5.0, -0.01]},
                     }
                 }
             }
@@ -240,10 +281,12 @@ def test_load_study1_config_rejects_missing_permutation_scheme(tmp_path) -> None
                     "temporal_negative_controls": {
                         "feature_transform": "raw_log_power",
                         "feature_baseline_window": None,
-                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                        "windows": {"prestimulus_wide": [-5.0, -0.01]},
                         "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
                     },
-                }
+                    "reference_power": REFERENCE_POWER,
+                },
+                "time_frequency_analysis": TIME_FREQUENCY,
             }
         ),
         encoding="utf-8",
@@ -277,10 +320,12 @@ def test_load_study1_config_uses_env_var_override(tmp_path, monkeypatch) -> None
                     "temporal_negative_controls": {
                         "feature_transform": "raw_log_power",
                         "feature_baseline_window": None,
-                        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                        "windows": {"prestimulus_wide": [-5.0, -0.01]},
                         "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
                     },
-                }
+                    "reference_power": REFERENCE_POWER,
+                },
+                "time_frequency_analysis": TIME_FREQUENCY,
             }
         ),
         encoding="utf-8",
@@ -306,6 +351,18 @@ def test_merge_non_null_skips_none_values() -> None:
     assert base["key"] == "original"
     assert base["nested"]["a"] == 1
     assert base["nested"]["b"] == 2
+
+
+def test_merge_non_null_preserves_missing_explicit_none_values() -> None:
+    from studies.pain_study.study1.config.loader import _merge_non_null
+
+    base: dict = {}
+    _merge_non_null(
+        base,
+        {"study1": {"temporal_negative_controls": {"feature_baseline_window": None}}},
+    )
+
+    assert base["study1"]["temporal_negative_controls"]["feature_baseline_window"] is None
 
 
 def test_merge_non_null_creates_nested_dicts() -> None:

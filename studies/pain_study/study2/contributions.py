@@ -16,8 +16,14 @@ def compute_band_contribution_scores(
     bands: tuple[str, ...],
     subject_ids: tuple[str, ...] | list[str] | np.ndarray | None = None,
     trial_ids: tuple[int, ...] | list[int] | np.ndarray | None = None,
+    combined_column: str = "eta_combined",
 ) -> pd.DataFrame:
-    """Decompose a frozen linear predictor into band-specific contribution scores."""
+    """Compute the combined NPS-predictive score and its band-specific decomposition.
+
+    The combined score is the full frozen linear predictor (the primary Study 2
+    score). The band columns decompose that predictor and support the secondary
+    mutually-adjusted contribution analysis.
+    """
     X_arr = np.asarray(X, dtype=float)
     coefficient_arr = np.asarray(coefficients, dtype=float)
     _validate_linear_contribution_inputs(
@@ -39,6 +45,7 @@ def compute_band_contribution_scores(
             raise ValueError("trial_ids must have one value per row of X.")
         output["trial_id"] = trial_arr
 
+    output[combined_column] = X_arr @ coefficient_arr
     feature_bands = tuple(_feature_band(feature_name) for feature_name in feature_names)
     for band in bands:
         band_name = str(band).strip()

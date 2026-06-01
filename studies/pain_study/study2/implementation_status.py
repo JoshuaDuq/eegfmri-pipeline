@@ -44,12 +44,12 @@ STUDY2_IMPLEMENTATION_COMPONENTS = (
         module="",
     ),
     Study2ImplementationComponent(
-        name="source-stage precision and calibration simulation",
+        name="source-resolution point-spread report",
         implemented=False,
         module="",
     ),
     Study2ImplementationComponent(
-        name="true-target and prediction-error diagnostic maps",
+        name="true-target directional-consistency map",
         implemented=False,
         module="",
     ),
@@ -69,7 +69,7 @@ STUDY2_IMPLEMENTATION_COMPONENTS = (
         module="",
     ),
     Study2ImplementationComponent(
-        name="directional-consistency gating",
+        name="band-unique specificity inference",
         implemented=False,
         module="",
     ),
@@ -79,7 +79,7 @@ STUDY2_IMPLEMENTATION_COMPONENTS = (
         module="",
     ),
     Study2ImplementationComponent(
-        name="cross-validated criterion overlap",
+        name="behavioral convergence analysis",
         implemented=False,
         module="",
     ),

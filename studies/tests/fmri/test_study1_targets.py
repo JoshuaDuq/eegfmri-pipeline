@@ -493,6 +493,13 @@ def test_prepare_primary_targets_passes_common_signature_scoring_mask() -> None:
         assert extraction_calls[0]["signature_mask_img"] is scoring_mask
 
 
+def test_build_common_signature_scoring_mask_requires_configured_mask() -> None:
+    from studies.pain_study.study1.targets import _build_common_signature_scoring_mask
+
+    with pytest.raises(ValueError, match="signature_scoring_mask_path"):
+        _build_common_signature_scoring_mask(config=DotConfig({"study1": {"targets": {}}}))
+
+
 def test_prepare_primary_targets_writes_wide_primary_table() -> None:
     from studies.pain_study.study1.targets import prepare_primary_targets
 

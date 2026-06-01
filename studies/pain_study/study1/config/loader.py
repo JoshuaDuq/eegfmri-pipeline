@@ -42,6 +42,7 @@ def load_study1_config(config_path: Optional[str | Path] = None) -> dict[str, An
     resolved = resolve_config_paths(copy.deepcopy(parsed), resolved_path)
     _preserve_signature_reference_paths(resolved, parsed)
     _validate_temporal_negative_controls(resolved)
+    _validate_reference_power(resolved)
     _validate_feature_benchmark(resolved)
     return resolved
 
@@ -118,6 +119,89 @@ def _validate_temporal_negative_controls(config: dict[str, Any]) -> None:
         )
 
 
+def _validate_reference_power(config: dict[str, Any]) -> None:
+    study1_config = config.get("study1")
+    if not isinstance(study1_config, dict):
+        return
+    if "reference_power" not in study1_config:
+        raise ValueError("study1.reference_power must be configured.")
+
+    reference_config = study1_config["reference_power"]
+    if not isinstance(reference_config, dict):
+        raise ValueError("study1.reference_power must be a mapping.")
+    time_frequency = config.get("time_frequency_analysis")
+    if not isinstance(time_frequency, dict):
+        raise ValueError("time_frequency_analysis must be a mapping.")
+
+    primary_window = _validate_prestimulus_window(
+        reference_config.get("primary_window"),
+        field_name="study1.reference_power.primary_window",
+    )
+    configured_baseline = _validate_prestimulus_window(
+        time_frequency.get("baseline_window"),
+        field_name="time_frequency_analysis.baseline_window",
+    )
+    if configured_baseline != primary_window:
+        raise ValueError(
+            "time_frequency_analysis.baseline_window must match "
+            "study1.reference_power.primary_window."
+        )
+
+    sensitivity_windows = reference_config.get("sensitivity_windows")
+    if not isinstance(sensitivity_windows, dict) or not sensitivity_windows:
+        raise ValueError("study1.reference_power.sensitivity_windows must be a non-empty mapping.")
+    for name, window in sensitivity_windows.items():
+        _validate_prestimulus_window(
+            window,
+            field_name=f"study1.reference_power.sensitivity_windows.{name}",
+        )
+
+    unnormalized = reference_config.get("unnormalized_active_power")
+    if not isinstance(unnormalized, dict):
+        raise ValueError("study1.reference_power.unnormalized_active_power must be a mapping.")
+    transform = str(unnormalized.get("feature_transform", "")).strip()
+    if transform != TEMPORAL_NEGATIVE_CONTROL_TRANSFORM:
+        raise ValueError(
+            "study1.reference_power.unnormalized_active_power.feature_transform must be "
+            f"{TEMPORAL_NEGATIVE_CONTROL_TRANSFORM!r}."
+        )
+    if (
+        "feature_baseline_window" not in unnormalized
+        or unnormalized.get("feature_baseline_window") is not None
+    ):
+        raise ValueError(
+            "study1.reference_power.unnormalized_active_power.feature_baseline_window "
+            "must be null."
+        )
+    active_window = _validate_time_window(
+        unnormalized.get("active_window"),
+        field_name="study1.reference_power.unnormalized_active_power.active_window",
+    )
+    configured_active = _validate_time_window(
+        time_frequency.get("active_window"),
+        field_name="time_frequency_analysis.active_window",
+    )
+    if active_window != configured_active:
+        raise ValueError(
+            "study1.reference_power.unnormalized_active_power.active_window must match "
+            "time_frequency_analysis.active_window."
+        )
+    reference_window = _validate_prestimulus_window(
+        unnormalized.get("reference_window"),
+        field_name="study1.reference_power.unnormalized_active_power.reference_window",
+    )
+    if reference_window != primary_window:
+        raise ValueError(
+            "study1.reference_power.unnormalized_active_power.reference_window must match "
+            "study1.reference_power.primary_window."
+        )
+    if unnormalized.get("reference_power_covariate") is not True:
+        raise ValueError(
+            "study1.reference_power.unnormalized_active_power.reference_power_covariate "
+            "must be true."
+        )
+
+
 def _validate_time_window(value: Any, *, field_name: str) -> tuple[float, float]:
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         raise ValueError(f"{field_name} must be a two-value [start, end] window.")
@@ -133,10 +217,11 @@ def _validate_time_window(value: Any, *, field_name: str) -> tuple[float, float]
     return start, end
 
 
-def _validate_prestimulus_window(value: Any, *, field_name: str) -> None:
-    _start, end = _validate_time_window(value, field_name=field_name)
+def _validate_prestimulus_window(value: Any, *, field_name: str) -> tuple[float, float]:
+    start, end = _validate_time_window(value, field_name=field_name)
     if end > 0.0:
         raise ValueError(f"{field_name} must be a pre-stimulus window ending at or before 0 s.")
+    return start, end
 
 
 def _validate_feature_benchmark(config: dict[str, Any]) -> None:
@@ -193,6 +278,8 @@ def _validate_fraction(value: Any, *, field_name: str) -> float:
 def _merge_non_null(base: dict[str, Any], extra: dict[str, Any]) -> None:
     for key, value in extra.items():
         if value is None:
+            if key not in base:
+                base[key] = None
             continue
         if isinstance(value, dict):
             existing = base.get(key)

@@ -317,18 +317,14 @@ def load_band_tensor_matrix(
             channels=common_channels,
             logger=logger,
         )
-        valid_mask = np.isfinite(y)
-        if not np.all(valid_mask):
-            dropped = int((~valid_mask).sum())
-            if logger is not None:
-                logger.warning(
-                    "Dropping %d trials with non-finite targets for deep regression on %s",
-                    dropped,
-                    subject_id,
-                )
-            tensors = tensors[valid_mask]
-            y = y[valid_mask]
-            aligned_events = aligned_events.loc[valid_mask].reset_index(drop=True)
+        if not np.all(np.isfinite(y)):
+            n_invalid = int((~np.isfinite(y)).sum())
+            raise ValueError(
+                f"Study 1 deep regression requires finite aligned targets for every trial; "
+                f"found {n_invalid} non-finite '{resolved_target}' target(s) for {subject_id}. "
+                "Non-finite targets indicate an EEG/fMRI alignment or preparation error and are "
+                "not dropped."
+            )
         if tensors.shape[0] != len(y):
             raise ValueError(
                 f"Band tensor/target length mismatch for {subject_id}: tensors={tensors.shape[0]}, targets={len(y)}."

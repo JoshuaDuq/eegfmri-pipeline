@@ -75,8 +75,11 @@ def test_write_study1_report_writes_article_tables(tmp_path: Path) -> None:
         "vas_rating_r",
         "stimulus_surface_in_sample_r2",
         "official_nuisance_in_sample_r2",
+        "residual_target_variance_fraction",
         "split_half_subject_temperature_r",
     }.issubset(diagnostics_table.columns)
+    residual_variance = diagnostics_table["residual_target_variance_fraction"]
+    assert ((residual_variance >= 0.0) & (residual_variance <= 1.0)).all()
 
     with open(manifest_path, encoding="utf-8") as handle:
         manifest = json.load(handle)
@@ -141,7 +144,7 @@ def _write_clean_events(deriv_root: Path, subjects: list[str]) -> None:
                     "pain_binary_coded": float(temp >= 48.0),
                     "vas_final_coded_rating": float(subject_idx + temp),
                     "residual_ecg_coupling": 0.001 * trial_idx,
-                    "peripheral_low_gamma_power": 1e-12 * trial_idx,
+                    "fp1_fp2_high_frequency_power": 1e-12 * trial_idx,
                 }
             )
         event_dir = deriv_root / "preprocessed" / "eeg" / subject / "eeg"

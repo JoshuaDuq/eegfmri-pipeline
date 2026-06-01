@@ -1,10 +1,16 @@
-"""Study 2 source-stage subject eligibility checks."""
+"""Study 2 source-stage subject eligibility checks.
+
+The primary path associates per-band source power with the single combined
+NPS-predictive score, adjusting only for the Study 1 Level 2 nuisance design.
+The secondary band-unique path mutually adjusts each band's contribution score
+against the other bands and gates on the resulting collinearity.
+"""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -20,6 +26,11 @@ RAW_LEVEL2_ARTIFACT_COLUMNS = {
     "fp1_fp2_high_frequency_power": "hrf_weighted_fp1_fp2_high_frequency_power",
 }
 PERMUTATION_STRUCTURE_COLUMNS = ("block", "trial_index")
+BAND_STANDARDIZED_COLUMN_KEYS = {
+    "alpha": ("study2.contributions.alpha_standardized_column", "eta_alpha_z"),
+    "beta": ("study2.contributions.beta_standardized_column", "eta_beta_z"),
+    "gamma": ("study2.contributions.gamma_standardized_column", "eta_gamma_z"),
+}
 
 
 @dataclass(frozen=True)
@@ -32,7 +43,7 @@ class SourceStageSubjectQC:
     design_rank: int
     residual_degrees_of_freedom: int
     condition_number: float
-    opposite_band_vif: float
+    max_adjacent_band_vif: float
     reason: str
 
 
@@ -50,11 +61,81 @@ class SourceStageCohortQC:
     reason: str
 
 
-def evaluate_source_stage_cohort(
+def evaluate_source_stage_subject(
+    frame: pd.DataFrame,
+    *,
+    config: Any,
+) -> SourceStageSubjectQC:
+    """Evaluate primary source-stage eligibility against the combined score."""
+    return _evaluate_source_stage_subject(
+        frame,
+        config=config,
+        band_label="combined",
+        target_column=_combined_score_column(config),
+        adjustment_columns=(),
+    )
+
+
+def evaluate_band_unique_source_stage_subject(
     frame: pd.DataFrame,
     *,
     band: str,
     config: Any,
+) -> SourceStageSubjectQC:
+    """Evaluate secondary band-unique eligibility with mutual band adjustment."""
+    band_name = str(band).strip().lower()
+    return _evaluate_source_stage_subject(
+        frame,
+        config=config,
+        band_label=band_name,
+        target_column=_band_standardized_column(config, band_name),
+        adjustment_columns=_band_adjustment_columns(config, band_name),
+    )
+
+
+def evaluate_source_stage_cohort(
+    frame: pd.DataFrame,
+    *,
+    config: Any,
+) -> tuple[pd.DataFrame, SourceStageCohortQC]:
+    """Aggregate primary source-stage eligibility across the cohort."""
+    return _evaluate_source_stage_cohort(
+        frame,
+        config=config,
+        band_label="combined",
+        subject_evaluator=lambda subject_frame: evaluate_source_stage_subject(
+            subject_frame,
+            config=config,
+        ),
+    )
+
+
+def evaluate_band_unique_source_stage_cohort(
+    frame: pd.DataFrame,
+    *,
+    band: str,
+    config: Any,
+) -> tuple[pd.DataFrame, SourceStageCohortQC]:
+    """Aggregate secondary band-unique eligibility across the cohort."""
+    band_name = str(band).strip().lower()
+    return _evaluate_source_stage_cohort(
+        frame,
+        config=config,
+        band_label=band_name,
+        subject_evaluator=lambda subject_frame: evaluate_band_unique_source_stage_subject(
+            subject_frame,
+            band=band_name,
+            config=config,
+        ),
+    )
+
+
+def _evaluate_source_stage_cohort(
+    frame: pd.DataFrame,
+    *,
+    config: Any,
+    band_label: str,
+    subject_evaluator: Callable[[pd.DataFrame], SourceStageSubjectQC],
 ) -> tuple[pd.DataFrame, SourceStageCohortQC]:
     subject_column = str(
         get_config_value(config, "study2.contributions.subject_column", "subject_id")
@@ -62,11 +143,7 @@ def evaluate_source_stage_cohort(
     _require_columns(frame, (subject_column,))
     qc_records: list[dict[str, Any]] = []
     for subject_id, subject_frame in frame.groupby(subject_column, sort=True):
-        qc = evaluate_source_stage_subject(
-            subject_frame.reset_index(drop=True),
-            band=band,
-            config=config,
-        )
+        qc = subject_evaluator(subject_frame.reset_index(drop=True))
         qc_records.append(
             {
                 "subject_id": str(subject_id),
@@ -77,7 +154,7 @@ def evaluate_source_stage_cohort(
                 "design_rank": qc.design_rank,
                 "residual_degrees_of_freedom": qc.residual_degrees_of_freedom,
                 "condition_number": qc.condition_number,
-                "opposite_band_vif": qc.opposite_band_vif,
+                "max_adjacent_band_vif": qc.max_adjacent_band_vif,
                 "reason": qc.reason,
             }
         )
@@ -123,7 +200,7 @@ def evaluate_source_stage_cohort(
         )
 
     status = SourceStageCohortQC(
-        band=str(band).strip().lower(),
+        band=str(band_label).strip().lower(),
         confirmatory_eligible=confirmatory_eligible,
         feasibility_eligible=feasibility_eligible,
         n_subjects=n_subjects,
@@ -151,18 +228,19 @@ def _collinearity_failure_fraction(qc_frame: pd.DataFrame) -> float:
 
 def _collinearity_failure_mask(qc_frame: pd.DataFrame) -> pd.Series:
     return qc_frame["reason"].astype(str).str.contains(
-        "condition number|contribution design|opposite-band VIF",
+        "condition number|contribution design|adjacent-band VIF",
         regex=True,
     )
 
 
-def evaluate_source_stage_subject(
+def _evaluate_source_stage_subject(
     frame: pd.DataFrame,
     *,
-    band: str,
     config: Any,
+    band_label: str,
+    target_column: str,
+    adjustment_columns: tuple[str, ...],
 ) -> SourceStageSubjectQC:
-    """Evaluate README-defined source-stage eligibility for one subject and band."""
     subject_column = str(
         get_config_value(config, "study2.contributions.subject_column", "subject_id")
     )
@@ -174,20 +252,17 @@ def evaluate_source_stage_subject(
             f"got {subject_ids}."
         )
     subject_id = subject_ids[0]
-    band_name = str(band).strip().lower()
-    target_column = _band_contribution_column(config, band_name)
-    opposite_column = _opposite_band_column(config, band_name)
 
     required_columns = _source_stage_required_columns(
         config,
         target_column=target_column,
-        opposite_column=opposite_column,
+        adjustment_columns=adjustment_columns,
     )
     missing = [column for column in required_columns if column not in frame.columns]
     if missing:
         return _ineligible_qc(
             subject_id=subject_id,
-            band=band_name,
+            band=band_label,
             reason=f"Missing source-stage columns: {missing}.",
         )
 
@@ -203,7 +278,7 @@ def evaluate_source_stage_subject(
     if valid_blocks < min_blocks or retained_trials < min_trials:
         return _ineligible_qc(
             subject_id=subject_id,
-            band=band_name,
+            band=band_label,
             retained_trials=retained_trials,
             valid_blocks=valid_blocks,
             reason=(
@@ -215,18 +290,15 @@ def evaluate_source_stage_subject(
     design, design_columns = _build_source_stage_design(
         valid_frame,
         config=config,
-        opposite_column=opposite_column,
+        adjustment_columns=adjustment_columns,
     )
-    target_values = _source_stage_contribution_values(
-        valid_frame,
-        column=target_column,
-    )
+    target_values = _source_stage_contribution_values(valid_frame, column=target_column)
     rank, condition_number, rank_reason = _rank_and_condition_number(design)
     residual_degrees_of_freedom = retained_trials - rank
     if rank_reason:
         return _ineligible_qc(
             subject_id=subject_id,
-            band=band_name,
+            band=band_label,
             retained_trials=retained_trials,
             valid_blocks=valid_blocks,
             design_rank=rank,
@@ -244,7 +316,7 @@ def evaluate_source_stage_subject(
     if contribution_rank_reason:
         return _ineligible_qc(
             subject_id=subject_id,
-            band=band_name,
+            band=band_label,
             retained_trials=retained_trials,
             valid_blocks=valid_blocks,
             design_rank=rank,
@@ -259,7 +331,7 @@ def evaluate_source_stage_subject(
     if residual_degrees_of_freedom < min_residual_df:
         return _ineligible_qc(
             subject_id=subject_id,
-            band=band_name,
+            band=band_label,
             retained_trials=retained_trials,
             valid_blocks=valid_blocks,
             design_rank=rank,
@@ -277,7 +349,7 @@ def evaluate_source_stage_subject(
     if contribution_condition_number > max_condition_number:
         return _ineligible_qc(
             subject_id=subject_id,
-            band=band_name,
+            band=band_label,
             retained_trials=retained_trials,
             valid_blocks=valid_blocks,
             design_rank=rank,
@@ -289,38 +361,42 @@ def evaluate_source_stage_subject(
             ),
         )
 
-    opposite_band_vif = _opposite_band_vif(
-        design,
-        design_columns=design_columns,
-        opposite_column=opposite_column,
-    )
-    max_vif = float(get_config_value(config, "study2.source_stage.max_opposite_band_vif", 5))
-    if opposite_band_vif > max_vif:
-        return _ineligible_qc(
-            subject_id=subject_id,
-            band=band_name,
-            retained_trials=retained_trials,
-            valid_blocks=valid_blocks,
-            design_rank=rank,
-            residual_degrees_of_freedom=residual_degrees_of_freedom,
-            condition_number=condition_number,
-            opposite_band_vif=opposite_band_vif,
-            reason=(
-                "Source-stage opposite-band VIF exceeds threshold: "
-                f"opposite_band_vif={opposite_band_vif:.6g}."
-            ),
+    max_adjacent_band_vif = float("nan")
+    if adjustment_columns:
+        max_adjacent_band_vif = _max_adjacent_band_vif(
+            design,
+            design_columns=design_columns,
+            adjustment_columns=adjustment_columns,
         )
+        max_vif = float(
+            get_config_value(config, "study2.source_stage.max_opposite_band_vif", 5)
+        )
+        if max_adjacent_band_vif > max_vif:
+            return _ineligible_qc(
+                subject_id=subject_id,
+                band=band_label,
+                retained_trials=retained_trials,
+                valid_blocks=valid_blocks,
+                design_rank=rank,
+                residual_degrees_of_freedom=residual_degrees_of_freedom,
+                condition_number=contribution_condition_number,
+                max_adjacent_band_vif=max_adjacent_band_vif,
+                reason=(
+                    "Source-stage adjacent-band VIF exceeds threshold: "
+                    f"max_adjacent_band_vif={max_adjacent_band_vif:.6g}."
+                ),
+            )
 
     return SourceStageSubjectQC(
         subject_id=subject_id,
-        band=band_name,
+        band=band_label,
         eligible=True,
         retained_trials=retained_trials,
         valid_blocks=valid_blocks,
         design_rank=rank,
         residual_degrees_of_freedom=residual_degrees_of_freedom,
         condition_number=contribution_condition_number,
-        opposite_band_vif=opposite_band_vif,
+        max_adjacent_band_vif=max_adjacent_band_vif,
         reason="",
     )
 
@@ -329,56 +405,61 @@ def _source_stage_required_columns(
     config: Any,
     *,
     target_column: str,
-    opposite_column: str,
+    adjustment_columns: tuple[str, ...],
 ) -> tuple[str, ...]:
     columns = (
         *PERMUTATION_STRUCTURE_COLUMNS,
         *_source_stage_continuous_columns(config),
         *_source_stage_categorical_columns(config),
         target_column,
-        opposite_column,
+        *adjustment_columns,
     )
     return tuple(dict.fromkeys(columns))
 
 
-def _band_contribution_column(config: Any, band: str) -> str:
-    if band == "alpha":
-        return str(
-            get_config_value(
-                config,
-                "study2.contributions.alpha_standardized_column",
-                "eta_alpha_z",
-            )
+def _combined_score_column(config: Any) -> str:
+    return str(
+        get_config_value(
+            config,
+            "study2.contributions.combined_standardized_column",
+            "eta_combined_z",
         )
-    if band == "beta":
-        return str(
-            get_config_value(
-                config,
-                "study2.contributions.beta_standardized_column",
-                "eta_beta_z",
-            )
-        )
-    raise ValueError("Study 2 source-stage band must be 'alpha' or 'beta'.")
+    )
 
 
-def _opposite_band_column(config: Any, band: str) -> str:
-    if band == "alpha":
-        return str(
-            get_config_value(
-                config,
-                "study2.contributions.beta_standardized_column",
-                "eta_beta_z",
-            )
+def _band_standardized_column(config: Any, band: str) -> str:
+    entry = BAND_STANDARDIZED_COLUMN_KEYS.get(band)
+    if entry is None:
+        raise ValueError(
+            "Study 2 source-stage band must be 'alpha', 'beta', or 'gamma'."
         )
-    if band == "beta":
-        return str(
-            get_config_value(
-                config,
-                "study2.contributions.alpha_standardized_column",
-                "eta_alpha_z",
-            )
+    config_key, default_column = entry
+    return str(get_config_value(config, config_key, default_column))
+
+
+def _contribution_bands(config: Any) -> tuple[str, ...]:
+    raw_bands = get_config_value(
+        config,
+        "study2.confirmatory.study1_cell.contribution_bands",
+        [],
+    )
+    bands = _required_string_tuple(
+        raw_bands,
+        field_name="study2.confirmatory.study1_cell.contribution_bands",
+    )
+    return tuple(band.lower() for band in bands)
+
+
+def _band_adjustment_columns(config: Any, band: str) -> tuple[str, ...]:
+    bands = _contribution_bands(config)
+    if band not in bands:
+        raise ValueError(
+            f"Study 2 source-stage band '{band}' is not in the configured "
+            f"contribution bands {bands}."
         )
-    raise ValueError("Study 2 source-stage band must be 'alpha' or 'beta'.")
+    return tuple(
+        _band_standardized_column(config, other) for other in bands if other != band
+    )
 
 
 def _permutation_valid_source_blocks(frame: pd.DataFrame) -> pd.DataFrame:
@@ -408,7 +489,7 @@ def _build_source_stage_design(
     frame: pd.DataFrame,
     *,
     config: Any,
-    opposite_column: str,
+    adjustment_columns: tuple[str, ...],
 ) -> tuple[np.ndarray, list[str]]:
     design_parts: list[pd.DataFrame] = []
     continuous_columns = _source_stage_continuous_columns(config)
@@ -430,13 +511,14 @@ def _build_source_stage_design(
             )
         )
 
-    opposite_values = pd.to_numeric(frame[opposite_column], errors="coerce")
-    if opposite_values.isna().any():
-        raise ValueError(
-            "Source-stage opposite-band contribution "
-            f"'{opposite_column}' contains non-finite values."
-        )
-    design_parts.append(pd.DataFrame({opposite_column: opposite_values.to_numpy(dtype=float)}))
+    for column in adjustment_columns:
+        values = pd.to_numeric(frame[column], errors="coerce")
+        if values.isna().any():
+            raise ValueError(
+                f"Source-stage adjacent-band contribution '{column}' "
+                "contains non-finite values."
+            )
+        design_parts.append(pd.DataFrame({column: values.to_numpy(dtype=float)}))
 
     design_frame = pd.concat(design_parts, axis=1)
     return design_frame.to_numpy(dtype=float), list(design_frame.columns)
@@ -623,15 +705,27 @@ def _rank_and_condition_number(
     return rank, condition_number, ""
 
 
-def _opposite_band_vif(
+def _max_adjacent_band_vif(
     design: np.ndarray,
     *,
     design_columns: list[str],
-    opposite_column: str,
+    adjustment_columns: tuple[str, ...],
 ) -> float:
-    opposite_index = design_columns.index(opposite_column)
-    target = design[:, opposite_index]
-    other_columns = np.delete(design, opposite_index, axis=1)
+    return max(
+        _single_column_vif(design, design_columns=design_columns, column=column)
+        for column in adjustment_columns
+    )
+
+
+def _single_column_vif(
+    design: np.ndarray,
+    *,
+    design_columns: list[str],
+    column: str,
+) -> float:
+    column_index = design_columns.index(column)
+    target = design[:, column_index]
+    other_columns = np.delete(design, column_index, axis=1)
     predictors = np.column_stack([np.ones(len(target), dtype=float), other_columns])
     coefficients, *_ = np.linalg.lstsq(predictors, target, rcond=None)
     prediction = predictors @ coefficients
@@ -662,7 +756,7 @@ def _ineligible_qc(
     design_rank: int = 0,
     residual_degrees_of_freedom: int = 0,
     condition_number: float = float("nan"),
-    opposite_band_vif: float = float("nan"),
+    max_adjacent_band_vif: float = float("nan"),
 ) -> SourceStageSubjectQC:
     return SourceStageSubjectQC(
         subject_id=subject_id,
@@ -673,7 +767,7 @@ def _ineligible_qc(
         design_rank=design_rank,
         residual_degrees_of_freedom=residual_degrees_of_freedom,
         condition_number=condition_number,
-        opposite_band_vif=opposite_band_vif,
+        max_adjacent_band_vif=max_adjacent_band_vif,
         reason=reason,
     )
 
@@ -681,6 +775,8 @@ def _ineligible_qc(
 __all__ = [
     "SourceStageCohortQC",
     "SourceStageSubjectQC",
+    "evaluate_band_unique_source_stage_cohort",
+    "evaluate_band_unique_source_stage_subject",
     "evaluate_source_stage_cohort",
     "evaluate_source_stage_subject",
 ]

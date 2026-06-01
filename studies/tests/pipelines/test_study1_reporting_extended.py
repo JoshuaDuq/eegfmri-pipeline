@@ -27,7 +27,7 @@ def _config(root: Path) -> DotConfig:
                 "temporal_negative_controls": {
                     "feature_transform": "raw_log_power",
                     "feature_baseline_window": None,
-                    "windows": {"prestimulus_wide": [-5.0, 0.0]},
+                    "windows": {"prestimulus_wide": [-5.0, -0.01]},
                     "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
                 },
                 "deep_regression": {
@@ -215,7 +215,7 @@ def _event_row(
         "pain_binary_coded": pain_binary,
         "vas_final_coded_rating": rating,
         "residual_ecg_coupling": 0.04,
-        "peripheral_low_gamma_power": 0.05,
+        "fp1_fp2_high_frequency_power": 0.05,
     }
 
 
@@ -603,3 +603,53 @@ def test_report_includes_temporal_control_metadata_and_holm_values(tmp_path) -> 
     assert set(temporal["temporal_control_window"]) == {"prestimulus_wide", "ramp_up"}
     assert set(temporal["temporal_control_kind"]) == {"prestimulus", "wrong_lag"}
     assert pd.to_numeric(temporal["p_value_delta_r2_holm"], errors="coerce").notna().all()
+
+
+def test_report_derives_temporal_negative_controls_pass(tmp_path) -> None:
+    from studies.pain_study.study1.reporting import write_study1_report
+
+    cfg = _config(tmp_path)
+    root = _study1_root(cfg)
+    _write_complete_outputs(root, cfg)
+    for target in ("NPS", "SIIPS1"):
+        for feature_spec in ("temporal_prestimulus_wide", "temporal_ramp_up"):
+            _write_feature_summary(
+                root,
+                target,
+                feature_spec,
+                partition="temporal_control",
+                p_value_delta_r2=0.9,
+            )
+
+    report_path = write_study1_report(task="pain", config=cfg)
+    report = pd.read_csv(report_path, sep="\t")
+    primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
+
+    assert primary_gate["temporal_negative_controls_passed"]
+    missing = set(str(primary_gate["missing_interpretation_diagnostics"]).split(";"))
+    assert "temporal_negative_controls_passed" not in missing
+
+
+def test_report_derives_temporal_negative_controls_failure(tmp_path) -> None:
+    from studies.pain_study.study1.reporting import write_study1_report
+
+    cfg = _config(tmp_path)
+    root = _study1_root(cfg)
+    _write_complete_outputs(root, cfg)
+    for target in ("NPS", "SIIPS1"):
+        for feature_spec in ("temporal_prestimulus_wide", "temporal_ramp_up"):
+            _write_feature_summary(
+                root,
+                target,
+                feature_spec,
+                partition="temporal_control",
+                p_value_delta_r2=0.0001,
+            )
+
+    report_path = write_study1_report(task="pain", config=cfg)
+    report = pd.read_csv(report_path, sep="\t")
+    primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
+
+    assert not primary_gate["temporal_negative_controls_passed"]
+    flags = set(str(primary_gate["interpretation_flags"]).split(";"))
+    assert "temporal_specificity_limited" in flags

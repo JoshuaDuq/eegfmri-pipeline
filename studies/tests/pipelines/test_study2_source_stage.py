@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,7 +15,8 @@ def _source_stage_frame(
     *,
     n_blocks: int = 6,
     trials_per_block: int = 11,
-    collinear_opposite_band: bool = False,
+    collinear_combined_score: bool = False,
+    collinear_adjacent_band: bool = False,
     collinear_target_band: bool = False,
 ) -> pd.DataFrame:
     rng = np.random.default_rng(11)
@@ -38,39 +41,41 @@ def _source_stage_frame(
                     "selected_surface": SELECTED_SURFACES[
                         trial_offset % len(SELECTED_SURFACES)
                     ],
+                    "eta_combined_z": float(rng.normal()),
                     "eta_alpha_z": float(rng.normal()),
                     "eta_beta_z": float(rng.normal()),
+                    "eta_gamma_z": float(rng.normal()),
                 }
             )
     frame = pd.DataFrame(rows)
-    if collinear_opposite_band:
-        centered = frame["onset"] - frame["onset"].mean()
-        onset_z = centered / centered.std(ddof=0)
+    centered = frame["onset"] - frame["onset"].mean()
+    onset_z = centered / centered.std(ddof=0)
+    if collinear_combined_score:
+        frame["eta_combined_z"] = onset_z
+    if collinear_adjacent_band:
         frame["eta_beta_z"] = 0.90 * onset_z + 0.10 * rng.normal(size=len(frame))
     if collinear_target_band:
-        centered = frame["onset"] - frame["onset"].mean()
-        frame["eta_alpha_z"] = centered / centered.std(ddof=0)
+        frame["eta_alpha_z"] = onset_z
     return frame
 
 
-def test_evaluate_source_stage_subject_accepts_valid_readme_design() -> None:
+def test_evaluate_source_stage_subject_accepts_valid_combined_score_design() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
 
     qc = evaluate_source_stage_subject(
         _source_stage_frame(),
-        band="alpha",
         config=load_study2_config(),
     )
 
     assert qc.eligible is True
     assert qc.subject_id == "sub-0001"
-    assert qc.band == "alpha"
+    assert qc.band == "combined"
     assert qc.retained_trials == 66
     assert qc.valid_blocks == 6
     assert qc.residual_degrees_of_freedom >= 15
     assert qc.condition_number <= 100
-    assert qc.opposite_band_vif <= 5
+    assert math.isnan(qc.max_adjacent_band_vif)
     assert qc.reason == ""
 
 
@@ -81,11 +86,7 @@ def test_evaluate_source_stage_subject_uses_fixed_categorical_levels() -> None:
     frame = _source_stage_frame()
     frame = frame[frame["selected_surface"] != 5].reset_index(drop=True)
 
-    qc = evaluate_source_stage_subject(
-        frame,
-        band="alpha",
-        config=load_study2_config(),
-    )
+    qc = evaluate_source_stage_subject(frame, config=load_study2_config())
 
     assert qc.eligible is False
     assert "rank deficient" in qc.reason
@@ -106,11 +107,7 @@ def test_evaluate_source_stage_subject_rejects_raw_level2_artifact_columns() -> 
     ]
 
     with pytest.raises(ValueError, match="HRF-weighted"):
-        evaluate_source_stage_subject(
-            _source_stage_frame(),
-            band="alpha",
-            config=config,
-        )
+        evaluate_source_stage_subject(_source_stage_frame(), config=config)
 
 
 def test_evaluate_source_stage_subject_rejects_too_few_valid_blocks() -> None:
@@ -119,7 +116,6 @@ def test_evaluate_source_stage_subject_rejects_too_few_valid_blocks() -> None:
 
     qc = evaluate_source_stage_subject(
         _source_stage_frame(n_blocks=2),
-        band="alpha",
         config=load_study2_config(),
     )
 
@@ -128,49 +124,29 @@ def test_evaluate_source_stage_subject_rejects_too_few_valid_blocks() -> None:
     assert "valid_blocks=2" in qc.reason
 
 
-def test_evaluate_source_stage_subject_rejects_high_opposite_band_vif() -> None:
+def test_evaluate_source_stage_subject_requires_combined_score_column() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
 
-    qc = evaluate_source_stage_subject(
-        _source_stage_frame(collinear_opposite_band=True),
-        band="alpha",
-        config=load_study2_config(),
-    )
+    frame = _source_stage_frame().drop(columns=["eta_combined_z"])
+
+    qc = evaluate_source_stage_subject(frame, config=load_study2_config())
 
     assert qc.eligible is False
-    assert qc.opposite_band_vif > 5
-    assert "opposite-band VIF" in qc.reason
+    assert "eta_combined_z" in qc.reason
 
 
-def test_evaluate_source_stage_subject_rejects_collinear_target_band_score() -> None:
+def test_evaluate_source_stage_subject_rejects_collinear_combined_score() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
 
     qc = evaluate_source_stage_subject(
-        _source_stage_frame(collinear_target_band=True),
-        band="alpha",
+        _source_stage_frame(collinear_combined_score=True),
         config=load_study2_config(),
     )
 
     assert qc.eligible is False
     assert "contribution design" in qc.reason
-
-
-def test_evaluate_source_stage_subject_requires_target_band_score() -> None:
-    from studies.pain_study.study2.config import load_study2_config
-    from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
-
-    frame = _source_stage_frame().drop(columns=["eta_alpha_z"])
-
-    qc = evaluate_source_stage_subject(
-        frame,
-        band="alpha",
-        config=load_study2_config(),
-    )
-
-    assert qc.eligible is False
-    assert "eta_alpha_z" in qc.reason
 
 
 def test_evaluate_source_stage_subject_requires_one_subject() -> None:
@@ -186,11 +162,58 @@ def test_evaluate_source_stage_subject_requires_one_subject() -> None:
     )
 
     with pytest.raises(ValueError, match="exactly one subject"):
-        evaluate_source_stage_subject(
-            frame,
-            band="alpha",
-            config=load_study2_config(),
-        )
+        evaluate_source_stage_subject(frame, config=load_study2_config())
+
+
+def test_evaluate_band_unique_source_stage_subject_accepts_valid_design() -> None:
+    from studies.pain_study.study2.config import load_study2_config
+    from studies.pain_study.study2.source_stage import (
+        evaluate_band_unique_source_stage_subject,
+    )
+
+    qc = evaluate_band_unique_source_stage_subject(
+        _source_stage_frame(),
+        band="alpha",
+        config=load_study2_config(),
+    )
+
+    assert qc.eligible is True
+    assert qc.band == "alpha"
+    assert qc.max_adjacent_band_vif <= 5
+    assert qc.reason == ""
+
+
+def test_evaluate_band_unique_source_stage_subject_rejects_high_adjacent_band_vif() -> None:
+    from studies.pain_study.study2.config import load_study2_config
+    from studies.pain_study.study2.source_stage import (
+        evaluate_band_unique_source_stage_subject,
+    )
+
+    qc = evaluate_band_unique_source_stage_subject(
+        _source_stage_frame(collinear_adjacent_band=True),
+        band="alpha",
+        config=load_study2_config(),
+    )
+
+    assert qc.eligible is False
+    assert qc.max_adjacent_band_vif > 5
+    assert "adjacent-band VIF" in qc.reason
+
+
+def test_evaluate_band_unique_source_stage_subject_rejects_collinear_target_band() -> None:
+    from studies.pain_study.study2.config import load_study2_config
+    from studies.pain_study.study2.source_stage import (
+        evaluate_band_unique_source_stage_subject,
+    )
+
+    qc = evaluate_band_unique_source_stage_subject(
+        _source_stage_frame(collinear_target_band=True),
+        band="alpha",
+        config=load_study2_config(),
+    )
+
+    assert qc.eligible is False
+    assert "contribution design" in qc.reason
 
 
 def test_evaluate_source_stage_cohort_accepts_enough_source_valid_subjects() -> None:
@@ -208,9 +231,10 @@ def test_evaluate_source_stage_cohort_accepts_enough_source_valid_subjects() -> 
         ignore_index=True,
     )
 
-    qc, status = evaluate_source_stage_cohort(frame, band="alpha", config=config)
+    qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, True]
+    assert status.band == "combined"
     assert status.confirmatory_eligible is True
     assert status.n_source_valid_subjects == 2
     assert status.reason == ""
@@ -231,7 +255,7 @@ def test_evaluate_source_stage_cohort_downgrades_for_too_few_valid_subjects() ->
         ignore_index=True,
     )
 
-    qc, status = evaluate_source_stage_cohort(frame, band="alpha", config=config)
+    qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, False]
     assert status.confirmatory_eligible is False
@@ -257,7 +281,7 @@ def test_evaluate_source_stage_cohort_marks_feasibility_limited_tier() -> None:
         ignore_index=True,
     )
 
-    qc, status = evaluate_source_stage_cohort(frame, band="alpha", config=config)
+    qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, True]
     assert status.confirmatory_eligible is False
@@ -277,12 +301,12 @@ def test_evaluate_source_stage_cohort_downgrades_for_collinearity_failure_fracti
         [
             _source_stage_frame().assign(subject_id="sub-0001"),
             _source_stage_frame().assign(subject_id="sub-0002"),
-            _source_stage_frame(collinear_opposite_band=True).assign(subject_id="sub-0003"),
+            _source_stage_frame(collinear_combined_score=True).assign(subject_id="sub-0003"),
         ],
         ignore_index=True,
     )
 
-    qc, status = evaluate_source_stage_cohort(frame, band="alpha", config=config)
+    qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, True, False]
     assert status.confirmatory_eligible is False
@@ -302,14 +326,14 @@ def test_evaluate_source_stage_cohort_collinearity_fraction_uses_otherwise_valid
         [
             _source_stage_frame().assign(subject_id="sub-0001"),
             _source_stage_frame().assign(subject_id="sub-0002"),
-            _source_stage_frame(collinear_opposite_band=True).assign(subject_id="sub-0003"),
+            _source_stage_frame(collinear_combined_score=True).assign(subject_id="sub-0003"),
             _source_stage_frame(n_blocks=1, trials_per_block=7).assign(subject_id="sub-0004"),
             _source_stage_frame(n_blocks=1, trials_per_block=7).assign(subject_id="sub-0005"),
         ],
         ignore_index=True,
     )
 
-    qc, status = evaluate_source_stage_cohort(frame, band="alpha", config=config)
+    qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, True, False, False, False]
     assert status.confirmatory_eligible is False
@@ -318,9 +342,11 @@ def test_evaluate_source_stage_cohort_collinearity_fraction_uses_otherwise_valid
     assert "collinearity failure fraction" in status.reason
 
 
-def test_evaluate_source_stage_cohort_counts_target_score_collinearity_failures() -> None:
+def test_evaluate_band_unique_source_stage_cohort_counts_adjacent_band_failures() -> None:
     from studies.pain_study.study2.config import load_study2_config
-    from studies.pain_study.study2.source_stage import evaluate_source_stage_cohort
+    from studies.pain_study.study2.source_stage import (
+        evaluate_band_unique_source_stage_cohort,
+    )
 
     config = load_study2_config(
         "studies/pain_study/study2/config/study2_smoketest.yaml"
@@ -329,15 +355,15 @@ def test_evaluate_source_stage_cohort_counts_target_score_collinearity_failures(
         [
             _source_stage_frame().assign(subject_id="sub-0001"),
             _source_stage_frame().assign(subject_id="sub-0002"),
-            _source_stage_frame(collinear_target_band=True).assign(subject_id="sub-0003"),
-            _source_stage_frame(n_blocks=1, trials_per_block=7).assign(subject_id="sub-0004"),
+            _source_stage_frame(collinear_adjacent_band=True).assign(subject_id="sub-0003"),
         ],
         ignore_index=True,
     )
 
-    qc, status = evaluate_source_stage_cohort(frame, band="alpha", config=config)
+    qc, status = evaluate_band_unique_source_stage_cohort(frame, band="alpha", config=config)
 
-    assert qc["eligible"].tolist() == [True, True, False, False]
+    assert qc["eligible"].tolist() == [True, True, False]
+    assert status.band == "alpha"
     assert status.confirmatory_eligible is False
     assert status.collinearity_failure_fraction == pytest.approx(1 / 3)
     assert "collinearity failure fraction" in status.reason

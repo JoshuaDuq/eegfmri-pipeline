@@ -285,6 +285,9 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         ev_dir = tmp / "sub-0001" / "eeg"
         ev_dir.mkdir(parents=True, exist_ok=True)
+        (ev_dir / "._sub-0001_task-task_run-01_events.tsv").write_bytes(
+            b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X metadata"
+        )
         ev = ev_dir / "sub-0001_task-task_run-01_events.tsv"
         ev.write_text(
             "trial_type\tonset\nTrig_thermHot\t0\nVolume\t1\nTrig_thermWarm\t2\n",

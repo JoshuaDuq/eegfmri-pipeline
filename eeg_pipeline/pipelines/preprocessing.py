@@ -40,6 +40,10 @@ STEP_EPOCHS = "epochs"
 STEP_STATS = "stats"
 
 
+def _is_events_tsv(path: Path) -> bool:
+    return path.is_file() and path.name.endswith("_events.tsv") and not path.name.startswith("._")
+
+
 class PreprocessingPipeline(PipelineBase):
     """Pipeline for EEG preprocessing.
 
@@ -1143,13 +1147,13 @@ class PreprocessingPipeline(PipelineBase):
             events_files = sorted(
                 path
                 for path in self.bids_root.rglob("*_events.tsv")
-                if path.is_file() and "eeg" in path.parts
+                if _is_events_tsv(path) and "eeg" in path.parts
             )
         else:
             candidate_paths = sorted(
                 path
                 for path in self.bids_root.rglob(f"*_task-{task}*_events.tsv")
-                if path.is_file() and "eeg" in path.parts
+                if _is_events_tsv(path) and "eeg" in path.parts
             )
             events_files = [
                 path

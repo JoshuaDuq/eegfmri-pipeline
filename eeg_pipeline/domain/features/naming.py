@@ -66,7 +66,7 @@ class NamingSchema:
     KNOWN_STATS = frozenset({
         # Single-token stats
         "lzc", "pe", "mean", "std", "percent", "db", "slope", "auc", "ptp",
-        "index", "logdiff",
+        "index", "logdiff", "log10raw",
         "logratio", "bandwidth", "entropy", "geff", "clust", "smallworld",
         # Compound stats (checked by joining from the end)
         "peak_latency", "peak_freq", "peak_power", "peak_ratio", "peak_residual",
@@ -77,6 +77,23 @@ class NamingSchema:
         "percent_mean", "percent_std", "db_mean", "db_std",
         "logratio_mean", "logratio_std", "latency_diff", "logdiff_activation",
         "power_ratio", "log_ratio",
+    })
+
+    KNOWN_BANDS = frozenset({
+        "broadband",
+        "delta",
+        "theta",
+        "alpha",
+        "beta",
+        "gamma",
+        "low_beta",
+        "high_beta",
+        "low_gamma",
+        "high_gamma",
+        "delta_theta",
+        "alpha_beta",
+        "alpha_beta_gamma",
+        "theta_gamma",
     })
 
     @classmethod
@@ -97,6 +114,19 @@ class NamingSchema:
             return parts[-1], 1
         return "", 0
 
+    @classmethod
+    def _split_segment_and_band(cls, parts: list[str]) -> tuple[str, str] | None:
+        """Split tokens between group and scope into segment and band."""
+        if len(parts) < 2:
+            return None
+
+        for band_start in range(len(parts) - 1, 0, -1):
+            band = "_".join(parts[band_start:])
+            if band in cls.KNOWN_BANDS:
+                return "_".join(parts[:band_start]), band
+
+        return parts[0], "_".join(parts[1:])
+
     @staticmethod
     def parse(name: str) -> dict:
         parts = name.split("_")
@@ -113,9 +143,12 @@ class NamingSchema:
         if scope_idx is None:
             return {"valid": False}
 
+        split = NamingSchema._split_segment_and_band(parts[1:scope_idx])
+        if split is None:
+            return {"valid": False}
+
         group = parts[0]
-        segment = parts[1]
-        band = "_".join(parts[2:scope_idx])
+        segment, band = split
         scope = parts[scope_idx]
 
         result = {

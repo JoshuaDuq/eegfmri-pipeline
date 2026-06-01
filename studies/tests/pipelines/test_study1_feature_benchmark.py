@@ -466,7 +466,7 @@ def test_run_feature_benchmark_adds_temporal_control_windows(tmp_path) -> None:
     cfg["study1"]["temporal_negative_controls"] = {
         "feature_transform": "raw_log_power",
         "feature_baseline_window": None,
-        "windows": {"prestimulus_wide": [-5.0, 0.0]},
+        "windows": {"prestimulus_wide": [-5.0, -0.01]},
         "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
     }
     _write_primary_targets(cfg)
