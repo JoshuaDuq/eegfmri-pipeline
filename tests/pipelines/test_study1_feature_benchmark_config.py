@@ -6,7 +6,7 @@ from studies.pain_study.study1.config import load_study1_config
 from studies.pain_study.study1.feature_benchmark import (
     EXPLORATORY_BAND_PRESETS,
     PRIMARY_BAND_PRESETS,
-    _feature_benchmark_config,
+    feature_benchmark_config,
 )
 from studies.pain_study.study1.reporting import PRIMARY_GATE_FEATURE_SPEC
 
@@ -115,7 +115,7 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
         }
     ).to_parquet(target_table_path)
 
-    feature_config = _feature_benchmark_config(config, target_name="NPS")
+    feature_config = feature_benchmark_config(config, target_name="NPS")
 
     assert (
         get_config_value(

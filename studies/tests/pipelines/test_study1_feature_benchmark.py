@@ -398,13 +398,13 @@ def test_run_feature_benchmark_uses_study1_prepared_feature_root(tmp_path) -> No
 
 def test_feature_benchmark_config_requires_permutation_scheme(tmp_path) -> None:
     from eeg_pipeline.utils.config.loader import ConfigError
-    from studies.pain_study.study1.feature_benchmark import _feature_benchmark_config
+    from studies.pain_study.study1.feature_benchmark import feature_benchmark_config
 
     cfg = _config(tmp_path)
     cfg["study1"]["feature_benchmark"].pop("permutation_scheme")
 
     with pytest.raises(ConfigError, match="permutation_scheme"):
-        _feature_benchmark_config(cfg, target_name="NPS")
+        feature_benchmark_config(cfg, target_name="NPS")
 
 
 def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path) -> None:
@@ -676,7 +676,7 @@ def test_model_comparison_permutation_refits_full_pipeline_for_subject_mean_r2()
             ],
         ),
         patch(
-            "eeg_pipeline.analysis.machine_learning.orchestration._model_comparison_cv_predictions",
+            "eeg_pipeline.analysis.machine_learning.orchestration.model_comparison_cv_predictions",
             side_effect=_capture_cv,
         ),
     ):
@@ -735,7 +735,7 @@ def test_model_comparison_permutation_resamples_until_requested_valid_draws() ->
             ],
         ) as generate_permutation,
         patch(
-            "eeg_pipeline.analysis.machine_learning.orchestration._model_comparison_cv_predictions",
+            "eeg_pipeline.analysis.machine_learning.orchestration.model_comparison_cv_predictions",
             side_effect=_capture_cv,
         ) as refit_cv,
     ):
@@ -771,7 +771,7 @@ def test_model_comparison_permutation_resamples_until_requested_valid_draws() ->
 
 def test_model_comparison_staged_residual_learning_scores_raw_incremental_prediction() -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import (
-        _model_comparison_cv_predictions,
+        model_comparison_cv_predictions,
     )
 
     nuisance = np.tile(np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=float), 2)
@@ -784,7 +784,7 @@ def test_model_comparison_staged_residual_learning_scores_raw_incremental_predic
         (np.array([5, 6, 7, 8, 9]), np.array([0, 1, 2, 3, 4])),
     ]
 
-    y_true, y_pred, records = _model_comparison_cv_predictions(
+    y_true, y_pred, records = model_comparison_cv_predictions(
         model_name="linear",
         pipe=LinearRegression(),
         param_grid={},
@@ -819,9 +819,61 @@ def test_model_comparison_staged_residual_learning_scores_raw_incremental_predic
     assert all(record["r2_nuisance"] < record["r2"] for record in records)
 
 
+def test_model_comparison_fixed_params_skips_inner_cv_and_refits_frozen_params(monkeypatch) -> None:
+    from sklearn.base import BaseEstimator, RegressorMixin
+
+    from eeg_pipeline.analysis.machine_learning import orchestration
+    from eeg_pipeline.analysis.machine_learning.orchestration import (
+        model_comparison_cv_predictions,
+    )
+
+    class _ConstantRegressor(BaseEstimator, RegressorMixin):
+        def __init__(self, alpha: float = 0.0) -> None:
+            self.alpha = alpha
+
+        def fit(self, X, y):
+            self.fitted_alpha_ = self.alpha
+            return self
+
+        def predict(self, X):
+            return np.full(len(X), self.alpha, dtype=float)
+
+    def _fail_inner_cv(**_kwargs):
+        raise AssertionError("inner CV must be skipped when fixed_params is provided")
+
+    monkeypatch.setattr(orchestration, "_fit_subject_weighted_inner_cv_estimator", _fail_inner_cv)
+
+    y = np.arange(6, dtype=float)
+    groups = np.array(["sub-0001"] * 3 + ["sub-0002"] * 3, dtype=object)
+    meta = pd.DataFrame({"nuisance": y})
+    outer_folds = [(np.array([0, 1, 2]), np.array([3, 4, 5]))]
+
+    _y_true, y_pred, records = model_comparison_cv_predictions(
+        model_name="constant",
+        pipe=_ConstantRegressor(),
+        param_grid={},
+        X=np.zeros((6, 1), dtype=float),
+        y=y,
+        groups=groups,
+        meta=meta,
+        outer_folds=outer_folds,
+        inner_splits=2,
+        outer_jobs=1,
+        config=DotConfig({"machine_learning": {}}),
+        harmonization_mode="none",
+        covariates=None,
+        target_residualization_columns=(),
+        collect_records=True,
+        fixed_params={"alpha": 0.5},
+    )
+
+    assert records[0]["best_params"] == str({"alpha": 0.5})
+    assert np.allclose(y_pred[outer_folds[0][1]], 0.5)
+
+
 def test_model_comparison_staged_residual_learning_scores_raw_nuisance_model() -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import (
-        _model_comparison_cv_predictions,
+        model_comparison_cv_predictions,
     )
 
     nuisance = np.array([0.0, 1.0, 2.0, 3.0, 0.0, 1.0, 2.0, 3.0], dtype=float)
@@ -836,7 +888,7 @@ def test_model_comparison_staged_residual_learning_scores_raw_nuisance_model() -
         (np.array([4, 5, 6, 7]), np.array([0, 1, 2, 3])),
     ]
 
-    _y_true, _y_pred, records = _model_comparison_cv_predictions(
+    _y_true, _y_pred, records = model_comparison_cv_predictions(
         model_name="linear",
         pipe=LinearRegression(),
         param_grid={},
@@ -919,7 +971,7 @@ def test_model_comparison_summary_reports_staged_incremental_delta_r2(tmp_path) 
         patch.object(orchestration, "export_subject_selection_report", return_value={}),
         patch.object(
             orchestration,
-            "_model_comparison_cv_predictions",
+            "model_comparison_cv_predictions",
             return_value=(
                 np.arange(4, dtype=float),
                 np.arange(4, dtype=float),
@@ -964,7 +1016,7 @@ def test_model_comparison_summary_reports_staged_incremental_delta_r2(tmp_path) 
 
 def test_staged_permutation_reconstructs_raw_targets_from_shifted_residuals() -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import (
-        _reconstruct_staged_permutation_target_for_fold,
+        reconstruct_staged_permutation_target_for_fold,
     )
     from eeg_pipeline.analysis.machine_learning.target_residualization import FoldNuisanceFit
 
@@ -1001,7 +1053,7 @@ def test_staged_permutation_reconstructs_raw_targets_from_shifted_residuals() ->
             side_effect=_shift_residuals,
         ),
     ):
-        y_perm = _reconstruct_staged_permutation_target_for_fold(
+        y_perm = reconstruct_staged_permutation_target_for_fold(
             y=y,
             groups=groups,
             meta=meta,
@@ -1051,12 +1103,12 @@ def test_model_comparison_permutation_reconstructs_staged_targets_per_outer_fold
     with (
         patch.object(
             orchestration,
-            "_reconstruct_staged_permutation_target_for_fold",
+            "reconstruct_staged_permutation_target_for_fold",
             side_effect=reconstructed_targets,
         ) as reconstruct,
         patch.object(
             orchestration,
-            "_model_comparison_cv_predictions",
+            "model_comparison_cv_predictions",
             side_effect=_capture_cv,
         ),
     ):
@@ -1165,7 +1217,7 @@ def test_circular_shift_within_run_preserves_subject_block_label_sets() -> None:
 
 def test_circular_shift_trial_structure_filter_excludes_invalid_blocks_and_subjects() -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import (
-        _filter_circular_shift_permutation_rows,
+        filter_circular_shift_permutation_rows,
     )
 
     rows: list[dict[str, object]] = []
@@ -1190,7 +1242,7 @@ def test_circular_shift_trial_structure_filter_excludes_invalid_blocks_and_subje
     meta = frame[["block", "trial_index"]].copy()
 
     X_filtered, y_filtered, groups_filtered, meta_filtered = (
-        _filter_circular_shift_permutation_rows(
+        filter_circular_shift_permutation_rows(
             X=X,
             y=y,
             groups=groups,

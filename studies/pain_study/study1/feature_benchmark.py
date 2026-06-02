@@ -62,7 +62,7 @@ def _rng_seed(config: Any) -> int:
     return int(get_config_value(config, "project.random_state", 42))
 
 
-def _feature_results_root(
+def feature_results_root(
     config: Any,
     *,
     partition: str,
@@ -72,7 +72,7 @@ def _feature_results_root(
     return study1_output_root(config) / "feature_benchmark" / partition / target_name / feature_spec
 
 
-def _feature_benchmark_config(
+def feature_benchmark_config(
     config: Any,
     *,
     target_name: str,
@@ -182,9 +182,9 @@ def _run_primary_presets(
 
     outputs: list[Path] = []
     for target_name in PRIMARY_SIGNATURES:
-        target_config = _feature_benchmark_config(config, target_name=target_name)
+        target_config = feature_benchmark_config(config, target_name=target_name)
         for preset_name, preset_bands in PRIMARY_BAND_PRESETS.items():
-            results_root = _feature_results_root(
+            results_root = feature_results_root(
                 config,
                 partition="primary",
                 target_name=target_name,
@@ -238,9 +238,9 @@ def _run_exploratory_benchmark(
 
     outputs: list[Path] = []
     for target_name in PRIMARY_SIGNATURES:
-        target_config = _feature_benchmark_config(config, target_name=target_name)
+        target_config = feature_benchmark_config(config, target_name=target_name)
         for family in exploratory_families:
-            results_root = _feature_results_root(
+            results_root = feature_results_root(
                 config,
                 partition="exploratory",
                 target_name=target_name,
@@ -287,9 +287,9 @@ def _run_exploratory_band_presets(
 
     outputs: list[Path] = []
     for target_name in PRIMARY_SIGNATURES:
-        target_config = _feature_benchmark_config(config, target_name=target_name)
+        target_config = feature_benchmark_config(config, target_name=target_name)
         for preset_name, preset_bands in EXPLORATORY_BAND_PRESETS.items():
-            results_root = _feature_results_root(
+            results_root = feature_results_root(
                 config,
                 partition="exploratory",
                 target_name=target_name,
@@ -343,9 +343,9 @@ def _run_temporal_control_presets(
 
     outputs: list[Path] = []
     for target_name in PRIMARY_SIGNATURES:
-        target_config = _feature_benchmark_config(config, target_name=target_name)
+        target_config = feature_benchmark_config(config, target_name=target_name)
         for temporal_window in temporal_windows:
-            results_root = _feature_results_root(
+            results_root = feature_results_root(
                 config,
                 partition=TEMPORAL_CONTROL_PARTITION,
                 target_name=target_name,

@@ -448,7 +448,7 @@ def _setup_forward_model(
     return fwd, src, bem
 
 
-def _setup_surface_forward_model_configured(
+def setup_surface_forward_model_configured(
     info: Any,
     *,
     subject: str,
@@ -2657,7 +2657,7 @@ def extract_source_localization_features(
             bem_path = bem_path or resolved_bem
 
         if src_cfg.subjects_dir is not None and trans_path is not None and bem_path is not None:
-            fwd, src = _setup_surface_forward_model_configured(
+            fwd, src = setup_surface_forward_model_configured(
                 epochs.info,
                 subject=src_cfg.subject,
                 subjects_dir=str(src_cfg.subjects_dir),
@@ -3152,7 +3152,7 @@ def extract_source_connectivity_features(
             bem_path = bem_path or resolved_bem
 
         if src_cfg.subjects_dir is not None and trans_path is not None and bem_path is not None:
-            fwd, src = _setup_surface_forward_model_configured(
+            fwd, src = setup_surface_forward_model_configured(
                 epochs.info,
                 subject=src_cfg.subject,
                 subjects_dir=str(src_cfg.subjects_dir),

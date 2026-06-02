@@ -1,0 +1,142 @@
+"""Artifact and robustness interpretation gates for Study 2."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from studies.pain_study.study2.statistics import holm_q_values
+from studies.pain_study.study2.validation import (
+    finite_number,
+    require_config_bool,
+    require_config_float,
+)
+
+
+@dataclass(frozen=True)
+class ArtifactControlQC:
+    band: str
+    contaminated: bool
+    interpretation: str
+    failed_gates: tuple[str, ...]
+    expression_q_values: dict[str, float]
+
+
+@dataclass(frozen=True)
+class RobustnessQC:
+    passed: bool
+    failed_gates: tuple[str, ...]
+
+
+def evaluate_artifact_controls(
+    *,
+    band: str,
+    sensor_template_abs_r: Mapping[str, object],
+    source_artifact_map_abs_r: Mapping[str, object],
+    expression_p_values: Mapping[str, object],
+    config: Any,
+) -> ArtifactControlQC:
+    band_name = str(band).strip().lower()
+    if not band_name:
+        raise ValueError("Study 2 artifact-controls band must be non-empty.")
+
+    sensor_threshold = require_config_float(
+        config,
+        "study2.artifact_controls.sensor_template_abs_r_threshold",
+    )
+    source_threshold = require_config_float(
+        config,
+        "study2.artifact_controls.source_artifact_map_abs_r_threshold",
+    )
+    alpha = require_config_float(config, "study2.artifact_controls.holm_alpha")
+    gamma_requires_survival = require_config_bool(
+        config,
+        "study2.artifact_controls.gamma_requires_artifact_survival",
+    )
+
+    sensor_values = _finite_mapping(sensor_template_abs_r, name="sensor artifact templates")
+    source_values = _finite_mapping(source_artifact_map_abs_r, name="source artifact maps")
+    expression_q_values = holm_q_values(expression_p_values)
+
+    failed: list[str] = []
+    if sensor_values and max(sensor_values.values()) > sensor_threshold:
+        failed.append("sensor_artifact_template")
+    if source_values and max(source_values.values()) > source_threshold:
+        failed.append("source_artifact_template")
+    if expression_q_values and min(expression_q_values.values()) <= alpha:
+        failed.append("artifact_expression")
+
+    contaminated = bool(failed)
+    interpretation = "confirmatory_interpretable"
+    if contaminated:
+        interpretation = "artifact_contaminated"
+    if band_name == "gamma" and contaminated and gamma_requires_survival:
+        interpretation = "exploratory_artifact_contaminated"
+
+    return ArtifactControlQC(
+        band=band_name,
+        contaminated=contaminated,
+        interpretation=interpretation,
+        failed_gates=tuple(failed),
+        expression_q_values=expression_q_values,
+    )
+
+
+def evaluate_robustness_summary(
+    *,
+    significance_retained: bool,
+    sign_retained: bool,
+    unthresholded_spatial_r: float,
+    cluster_dice: float,
+    centroid_displacement_mm: float,
+    config: Any,
+) -> RobustnessQC:
+    if not isinstance(significance_retained, bool):
+        raise TypeError("Study 2 robustness significance_retained must be boolean.")
+    if not isinstance(sign_retained, bool):
+        raise TypeError("Study 2 robustness sign_retained must be boolean.")
+
+    min_spatial_r = require_config_float(config, "study2.robustness.min_unthresholded_spatial_r")
+    min_dice = require_config_float(config, "study2.robustness.min_cluster_dice")
+    max_displacement = require_config_float(config, "study2.robustness.max_centroid_displacement_mm")
+    spatial_r = _finite_float(unthresholded_spatial_r, "unthresholded_spatial_r")
+    dice = _finite_float(cluster_dice, "cluster_dice")
+    displacement = _finite_float(centroid_displacement_mm, "centroid_displacement_mm")
+
+    failed: list[str] = []
+    if not significance_retained:
+        failed.append("significance_retained")
+    if not sign_retained:
+        failed.append("sign_retained")
+    if spatial_r < min_spatial_r:
+        failed.append("unthresholded_spatial_r")
+    if dice < min_dice:
+        failed.append("cluster_dice")
+    if displacement > max_displacement:
+        failed.append("centroid_displacement")
+    return RobustnessQC(passed=not failed, failed_gates=tuple(failed))
+
+
+def _finite_mapping(values: Mapping[str, object], *, name: str) -> dict[str, float]:
+    if not isinstance(values, Mapping):
+        raise TypeError(f"Study 2 {name} must be a mapping.")
+    parsed: dict[str, float] = {}
+    for key, value in values.items():
+        number = _finite_float(value, f"{name}.{key}")
+        if number < 0.0:
+            raise ValueError(f"Study 2 {name} values must be non-negative.")
+        parsed[str(key)] = number
+    return parsed
+
+
+def _finite_float(value: object, name: str) -> float:
+    return finite_number(value, name)
+
+
+__all__ = [
+    "ArtifactControlQC",
+    "RobustnessQC",
+    "evaluate_artifact_controls",
+    "evaluate_robustness_summary",
+]

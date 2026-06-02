@@ -41,6 +41,10 @@ def test_pain_study_package_layout_and_metadata() -> None:
         entry_points["signature-prediction"]
         == "studies.pain_study.cli.command_registry:signature_prediction_command"
     )
+    assert (
+        entry_points["source-interpretation"]
+        == "studies.pain_study.cli.command_registry:source_interpretation_command"
+    )
     assert package_data["studies.pain_study"] == ["scripts/config/*.yaml"]
     assert package_data["studies.pain_study.study1"] == [
         "config/*.yaml",

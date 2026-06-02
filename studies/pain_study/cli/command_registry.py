@@ -24,3 +24,17 @@ def signature_prediction_command():
         setup=setup_signature_prediction,
         run=run_signature_prediction,
     )
+
+
+def source_interpretation_command():
+    from eeg_pipeline.cli.commands import Command
+    from studies.pain_study.cli.source_interpretation import (
+        run_source_interpretation,
+        setup_source_interpretation,
+    )
+
+    return Command(
+        name="source-interpretation",
+        setup=setup_source_interpretation,
+        run=run_source_interpretation,
+    )

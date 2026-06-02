@@ -59,6 +59,31 @@ def test_compute_source_power_association_map_rejects_rank_deficient_design() ->
         )
 
 
+def test_compute_source_power_association_map_uses_scale_invariant_design_rank() -> None:
+    from studies.pain_study.study2.association import compute_source_power_association_map
+
+    nuisance = np.linspace(-1.0, 1.0, 40)
+    tiny_independent_covariate = 1e-16 * np.sin(np.linspace(0.0, 2.0 * np.pi, 40))
+    score_signal = np.cos(np.linspace(0.0, 4.0 * np.pi, 40))
+    design = np.column_stack([nuisance, tiny_independent_covariate])
+    source_power = np.column_stack(
+        [
+            score_signal + 0.25 * nuisance,
+            -score_signal + 0.25 * nuisance,
+        ]
+    )
+
+    result = compute_source_power_association_map(
+        source_power=source_power,
+        score=score_signal + 0.10 * nuisance,
+        design=design,
+    )
+
+    assert np.isfinite(result.partial_r).all()
+    assert result.partial_r[0] > 0.99
+    assert result.partial_r[1] < -0.99
+
+
 def test_compute_source_power_association_map_validates_shapes() -> None:
     from studies.pain_study.study2.association import compute_source_power_association_map
 

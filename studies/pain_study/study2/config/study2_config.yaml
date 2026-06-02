@@ -77,9 +77,19 @@ study2:
     primary_power_estimand: "total_power"
     erp_subtracted_power: "sensitivity_only"
     primary_inverse_method: "sLORETA"
+    source_space_spacing: "oct6"
+    forward_mindist_mm: 5.0
     rank_excluded_channels:
       - "Fp1"
       - "Fp2"
+    frequency_bands:
+      alpha: [8.0, 12.9]
+      beta: [13.0, 30.0]
+      gamma: [30.1, 80.0]
+    anatomy:
+      subjects_dir: null
+      trans_path_template: null
+      bem_path_template: null
     noise_covariance_baseline_s:
       - -5.0
       - -0.01
@@ -112,6 +122,7 @@ study2:
     min_cluster_same_sign_fraction: 0.60
   source_inference:
     primary_cluster_forming_p: 0.01
+    family_alpha: 0.05
     sensitivity_cluster_forming_p:
       - 0.001
   permutations:
@@ -123,6 +134,9 @@ study2:
     brainsmash_surrogates: 5000
     fmri_smoothing_kernel_source: "median_point_spread_fwhm"
   behavioral_convergence:
+    expression_column: null
+    rating_column: null
+    design_columns: null
     min_rated_trials: 25
     min_permutation_valid_blocks: 3
     permutations: 5000

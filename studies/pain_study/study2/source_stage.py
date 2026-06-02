@@ -19,7 +19,6 @@ from eeg_pipeline.analysis.machine_learning.circular_shift import admissible_cir
 from eeg_pipeline.utils.config.loader import get_config_value
 from studies.pain_study.study1.targets import _categorical_level_column
 
-
 RAW_LEVEL2_ARTIFACT_COLUMNS = {
     "framewise_displacement": "hrf_weighted_framewise_displacement",
     "std_dvars": "hrf_weighted_std_dvars",
@@ -59,6 +58,15 @@ class SourceStageCohortQC:
     collinearity_failure_fraction: float
     max_collinearity_failure_fraction: float
     reason: str
+
+
+@dataclass(frozen=True)
+class SourceStageAssociationInputs:
+    qc: SourceStageSubjectQC
+    retained_row_indices: np.ndarray
+    score: np.ndarray
+    design: np.ndarray
+    design_columns: tuple[str, ...]
 
 
 def evaluate_source_stage_subject(
@@ -127,6 +135,42 @@ def evaluate_band_unique_source_stage_cohort(
             band=band_name,
             config=config,
         ),
+    )
+
+
+def prepare_source_stage_association_inputs(
+    frame: pd.DataFrame,
+    *,
+    config: Any,
+) -> SourceStageAssociationInputs:
+    """Prepare retained trials, score, and nuisance design for the primary map."""
+    return _prepare_source_stage_association_inputs(
+        frame,
+        config=config,
+        qc=evaluate_source_stage_subject(frame, config=config),
+        target_column=_combined_score_column(config),
+        adjustment_columns=(),
+    )
+
+
+def prepare_band_unique_source_stage_association_inputs(
+    frame: pd.DataFrame,
+    *,
+    band: str,
+    config: Any,
+) -> SourceStageAssociationInputs:
+    """Prepare retained trials and design for a band-unique source map."""
+    band_name = str(band).strip().lower()
+    return _prepare_source_stage_association_inputs(
+        frame,
+        config=config,
+        qc=evaluate_band_unique_source_stage_subject(
+            frame,
+            band=band_name,
+            config=config,
+        ),
+        target_column=_band_standardized_column(config, band_name),
+        adjustment_columns=_band_adjustment_columns(config, band_name),
     )
 
 
@@ -227,9 +271,13 @@ def _collinearity_failure_fraction(qc_frame: pd.DataFrame) -> float:
 
 
 def _collinearity_failure_mask(qc_frame: pd.DataFrame) -> pd.Series:
-    return qc_frame["reason"].astype(str).str.contains(
-        "condition number|contribution design|adjacent-band VIF",
-        regex=True,
+    return (
+        qc_frame["reason"]
+        .astype(str)
+        .str.contains(
+            "condition number|contribution design|adjacent-band VIF",
+            regex=True,
+        )
     )
 
 
@@ -248,8 +296,7 @@ def _evaluate_source_stage_subject(
     subject_ids = sorted({str(value) for value in frame[subject_column].astype(str)})
     if len(subject_ids) != 1:
         raise ValueError(
-            "Study 2 source-stage subject QC expects exactly one subject, "
-            f"got {subject_ids}."
+            "Study 2 source-stage subject QC expects exactly one subject, " f"got {subject_ids}."
         )
     subject_id = subject_ids[0]
 
@@ -368,9 +415,7 @@ def _evaluate_source_stage_subject(
             design_columns=design_columns,
             adjustment_columns=adjustment_columns,
         )
-        max_vif = float(
-            get_config_value(config, "study2.source_stage.max_opposite_band_vif", 5)
-        )
+        max_vif = float(get_config_value(config, "study2.source_stage.max_opposite_band_vif", 5))
         if max_adjacent_band_vif > max_vif:
             return _ineligible_qc(
                 subject_id=subject_id,
@@ -398,6 +443,45 @@ def _evaluate_source_stage_subject(
         condition_number=contribution_condition_number,
         max_adjacent_band_vif=max_adjacent_band_vif,
         reason="",
+    )
+
+
+def _prepare_source_stage_association_inputs(
+    frame: pd.DataFrame,
+    *,
+    config: Any,
+    qc: SourceStageSubjectQC,
+    target_column: str,
+    adjustment_columns: tuple[str, ...],
+) -> SourceStageAssociationInputs:
+    if not qc.eligible:
+        return _empty_source_stage_association_inputs(qc)
+
+    valid_frame, retained_row_indices = _permutation_valid_source_blocks_with_rows(frame)
+    design, design_columns = _build_source_stage_design(
+        valid_frame,
+        config=config,
+        adjustment_columns=adjustment_columns,
+    )
+    score = _source_stage_contribution_values(valid_frame, column=target_column)
+    return SourceStageAssociationInputs(
+        qc=qc,
+        retained_row_indices=retained_row_indices,
+        score=score,
+        design=design,
+        design_columns=tuple(design_columns),
+    )
+
+
+def _empty_source_stage_association_inputs(
+    qc: SourceStageSubjectQC,
+) -> SourceStageAssociationInputs:
+    return SourceStageAssociationInputs(
+        qc=qc,
+        retained_row_indices=np.empty(0, dtype=int),
+        score=np.empty(0, dtype=float),
+        design=np.empty((0, 0), dtype=float),
+        design_columns=(),
     )
 
 
@@ -430,9 +514,7 @@ def _combined_score_column(config: Any) -> str:
 def _band_standardized_column(config: Any, band: str) -> str:
     entry = BAND_STANDARDIZED_COLUMN_KEYS.get(band)
     if entry is None:
-        raise ValueError(
-            "Study 2 source-stage band must be 'alpha', 'beta', or 'gamma'."
-        )
+        raise ValueError("Study 2 source-stage band must be 'alpha', 'beta', or 'gamma'.")
     config_key, default_column = entry
     return str(get_config_value(config, config_key, default_column))
 
@@ -457,9 +539,21 @@ def _band_adjustment_columns(config: Any, band: str) -> tuple[str, ...]:
             f"Study 2 source-stage band '{band}' is not in the configured "
             f"contribution bands {bands}."
         )
-    return tuple(
-        _band_standardized_column(config, other) for other in bands if other != band
-    )
+    return tuple(_band_standardized_column(config, other) for other in bands if other != band)
+
+
+def _permutation_valid_source_blocks_with_rows(
+    frame: pd.DataFrame,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    row_index_column = "__source_stage_row_index"
+    if row_index_column in frame.columns:
+        raise ValueError(f"Study 2 source-stage table uses reserved column '{row_index_column}'.")
+
+    working = frame.reset_index(drop=True).copy()
+    working[row_index_column] = np.arange(len(working), dtype=int)
+    valid_frame = _permutation_valid_source_blocks(working)
+    retained_row_indices = valid_frame.pop(row_index_column).to_numpy(dtype=int)
+    return valid_frame, retained_row_indices
 
 
 def _permutation_valid_source_blocks(frame: pd.DataFrame) -> pd.DataFrame:
@@ -515,8 +609,7 @@ def _build_source_stage_design(
         values = pd.to_numeric(frame[column], errors="coerce")
         if values.isna().any():
             raise ValueError(
-                f"Source-stage adjacent-band contribution '{column}' "
-                "contains non-finite values."
+                f"Source-stage adjacent-band contribution '{column}' " "contains non-finite values."
             )
         design_parts.append(pd.DataFrame({column: values.to_numpy(dtype=float)}))
 
@@ -527,9 +620,7 @@ def _build_source_stage_design(
 def _source_stage_contribution_values(frame: pd.DataFrame, *, column: str) -> np.ndarray:
     values = pd.to_numeric(frame[column], errors="coerce")
     if values.isna().any():
-        raise ValueError(
-            f"Source-stage contribution column '{column}' contains non-finite values."
-        )
+        raise ValueError(f"Source-stage contribution column '{column}' contains non-finite values.")
     return values.to_numpy(dtype=float)
 
 
@@ -624,8 +715,7 @@ def _fixed_categorical_levels(config: Any, *, column: str) -> tuple[Any, ...]:
     )
     if not isinstance(raw_levels, (list, tuple)):
         raise ValueError(
-            "Study 2 source-stage fixed categorical levels must be configured for "
-            f"'{column}'."
+            "Study 2 source-stage fixed categorical levels must be configured for " f"'{column}'."
         )
     levels = tuple(raw_levels)
     if len(levels) < 2:
@@ -773,10 +863,13 @@ def _ineligible_qc(
 
 
 __all__ = [
+    "SourceStageAssociationInputs",
     "SourceStageCohortQC",
     "SourceStageSubjectQC",
     "evaluate_band_unique_source_stage_cohort",
     "evaluate_band_unique_source_stage_subject",
     "evaluate_source_stage_cohort",
     "evaluate_source_stage_subject",
+    "prepare_band_unique_source_stage_association_inputs",
+    "prepare_source_stage_association_inputs",
 ]

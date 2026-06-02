@@ -144,6 +144,9 @@ eeg_pipeline/data/derivatives/**
 *.mat
 *.edf
 *.bdf
+*.tar
+*.tar.gz
+fmriprep_preprocessed_fmri.tar
 
 ### Secrets ###
 eeg_pipeline/licenses/license_*.txt

@@ -78,22 +78,34 @@ def _validate_inputs(source_power: np.ndarray, score: np.ndarray, design: np.nda
 
 
 def _validate_design_full_rank(design: np.ndarray) -> None:
-    predictors = _with_intercept(design)
+    predictors = _scaled_predictors(design)
     rank = int(np.linalg.matrix_rank(predictors))
     if rank < predictors.shape[1]:
         raise ValueError("Study 2 source-stage design must have full column rank.")
 
 
 def _residualize_vector(values: np.ndarray, design: np.ndarray) -> np.ndarray:
-    predictors = _with_intercept(design)
+    predictors = _scaled_predictors(design)
     coefficients, *_ = np.linalg.lstsq(predictors, values, rcond=None)
     return values - predictors @ coefficients
 
 
 def _residualize_matrix(values: np.ndarray, design: np.ndarray) -> np.ndarray:
-    predictors = _with_intercept(design)
+    predictors = _scaled_predictors(design)
     coefficients, *_ = np.linalg.lstsq(predictors, values, rcond=None)
     return values - predictors @ coefficients
+
+
+def _scaled_predictors(design: np.ndarray) -> np.ndarray:
+    return _with_intercept(_scale_design_columns(design))
+
+
+def _scale_design_columns(design: np.ndarray) -> np.ndarray:
+    centered = design - np.mean(design, axis=0, keepdims=True)
+    column_norms = np.linalg.norm(centered, axis=0)
+    if np.any(column_norms <= 0.0):
+        raise ValueError("Study 2 source-stage design must have full column rank.")
+    return centered / column_norms
 
 
 def _with_intercept(design: np.ndarray) -> np.ndarray:

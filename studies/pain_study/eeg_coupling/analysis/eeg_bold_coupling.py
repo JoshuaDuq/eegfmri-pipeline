@@ -18,7 +18,7 @@ from nilearn.surface import PolyData, PolyMesh, SurfaceImage, vol_to_surf
 from scipy.signal import hilbert
 from scipy.spatial import cKDTree
 
-from eeg_pipeline.analysis.features.source_localization import _setup_surface_forward_model_configured
+from eeg_pipeline.analysis.features.source_localization import setup_surface_forward_model_configured
 from studies.pain_study.eeg_coupling.analysis.eeg_bold_nuisance import (
     CouplingNuisanceConfig,
     apply_trial_censoring,
@@ -1209,7 +1209,7 @@ def _resolve_subject_source_model(
         raise ValueError(
             f"Missing subject-specific trans/BEM for {subject_bids}."
         )
-    return _setup_surface_forward_model_configured(
+    return setup_surface_forward_model_configured(
         info=epochs.info,
         subject=subject_bids,
         subjects_dir=str(coupling_cfg.eeg.subjects_dir),

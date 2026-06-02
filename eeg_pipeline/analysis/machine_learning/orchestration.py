@@ -466,7 +466,7 @@ def _resolve_target_residualization_strategy(config: Any) -> str:
     return strategy
 
 
-def _filter_circular_shift_permutation_rows(
+def filter_circular_shift_permutation_rows(
     *,
     X: np.ndarray,
     y: np.ndarray,
@@ -3360,7 +3360,7 @@ def _fit_subject_weighted_inner_cv_estimator(
     return best_estimator
 
 
-def _model_comparison_cv_predictions(
+def model_comparison_cv_predictions(
     *,
     model_name: str,
     pipe: Pipeline,
@@ -3377,7 +3377,15 @@ def _model_comparison_cv_predictions(
     covariates: Optional[List[str]],
     target_residualization_columns: Tuple[str, ...],
     collect_records: bool,
+    fixed_params: Optional[Dict[str, Any]] = None,
 ) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
+    """Cross-validated staged-residual predictions.
+
+    When ``fixed_params`` is given, inner cross-validation is skipped and the
+    estimator is refit with those frozen hyperparameters. Study 2's
+    target-retrained null relies on this to reuse the frozen Study 1 model
+    rather than reselecting hyperparameters per permutation draw.
+    """
     y_pred = np.zeros(len(y))
     y_true_eval = np.zeros(len(y))
     records: list[dict[str, Any]] = []
@@ -3466,7 +3474,13 @@ def _model_comparison_cv_predictions(
             n_covariates=n_covs,
         )
 
-        if len(np.unique(groups_train)) >= 2:
+        if fixed_params is not None:
+            estimator = clone(current_pipe)
+            estimator.set_params(**fixed_params)
+            estimator.fit(X_train, y_train)
+            fold_pred = estimator.predict(X_test)
+            best_params_repr = str(fixed_params)
+        elif len(np.unique(groups_train)) >= 2:
             estimator = _fit_subject_weighted_inner_cv_estimator(
                 base_estimator=current_pipe,
                 param_grid=current_param_grid,
@@ -3545,7 +3559,7 @@ def _model_comparison_cv_predictions(
     return y_true_eval, y_pred, records
 
 
-def _reconstruct_staged_permutation_target_for_fold(
+def reconstruct_staged_permutation_target_for_fold(
     *,
     y: np.ndarray,
     groups: np.ndarray,
@@ -3679,7 +3693,7 @@ def _model_comparison_permutation_p_value(
             fold_scores: list[float] = []
             effective_permutation = True
             for train_idx, test_idx in outer_folds:
-                y_perm = _reconstruct_staged_permutation_target_for_fold(
+                y_perm = reconstruct_staged_permutation_target_for_fold(
                     y=y,
                     groups=groups,
                     meta=meta,
@@ -3708,7 +3722,7 @@ def _model_comparison_permutation_p_value(
                     effective_permutation = False
                     break
 
-                _y_true_perm, _y_pred_perm, records = _model_comparison_cv_predictions(
+                _y_true_perm, _y_pred_perm, records = model_comparison_cv_predictions(
                     model_name=model_name,
                     pipe=pipe,
                     param_grid=param_grid,
@@ -3749,7 +3763,7 @@ def _model_comparison_permutation_p_value(
         )
         if not effective:
             continue
-        y_true_perm, y_pred_perm, _records = _model_comparison_cv_predictions(
+        y_true_perm, y_pred_perm, _records = model_comparison_cv_predictions(
             model_name=model_name,
             pipe=pipe,
             param_grid=param_grid,
@@ -3857,7 +3871,7 @@ def run_model_comparison_ml(
         context="Model comparison",
     )
     target_residualization_columns = configured_target_residualization_columns(config)
-    X, y, groups, meta = _filter_circular_shift_permutation_rows(
+    X, y, groups, meta = filter_circular_shift_permutation_rows(
         X=X,
         y=y,
         groups=groups,
@@ -3921,7 +3935,7 @@ def run_model_comparison_ml(
         pipe = model_spec["pipe"]
         param_grid = _resolve_param_grid_aliases(pipe, model_spec["param_grid"])
 
-        y_true_eval, y_pred, model_records = _model_comparison_cv_predictions(
+        y_true_eval, y_pred, model_records = model_comparison_cv_predictions(
             model_name=model_name,
             pipe=pipe,
             param_grid=param_grid,

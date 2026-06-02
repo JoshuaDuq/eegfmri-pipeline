@@ -7,6 +7,7 @@ dependencies = ["eeg-pipeline"]
 [project.entry-points."eeg_pipeline.cli_commands"]
 coupling = "studies.pain_study.cli.command_registry:coupling_command"
 signature-prediction = "studies.pain_study.cli.command_registry:signature_prediction_command"
+source-interpretation = "studies.pain_study.cli.command_registry:source_interpretation_command"
 
 [tool.setuptools.packages.find]
 where = [".."]

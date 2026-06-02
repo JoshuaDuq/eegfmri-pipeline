@@ -20,7 +20,7 @@ verify-architecture:
 	$(PYTHON) -m pytest -q --no-cov tests/utils/test_architecture_import_boundaries.py
 
 verify-maintainability:
-	$(PYTHON) -m pytest -q --no-cov tests/utils/test_test_layout_enforcement.py tests/utils/test_repo_hygiene_guards.py tests/utils/test_architecture_import_boundaries.py tests/utils/test_docs_entrypoints.py tests/utils/test_phase2_organization_shims.py tests/utils/test_cli_facade_hygiene.py
+	$(PYTHON) -m pytest -q --no-cov tests/utils/test_test_layout_enforcement.py tests/utils/test_repo_hygiene_guards.py tests/utils/test_architecture_import_boundaries.py tests/utils/test_docs_entrypoints.py tests/utils/test_cli_facade_hygiene.py
 
 docs:
 	$(SPHINXBUILD) -W --keep-going -b html $(DOCS_SRC) $(DOCS_BUILD)

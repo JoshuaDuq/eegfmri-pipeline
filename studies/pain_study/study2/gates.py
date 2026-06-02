@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
+
+import numpy as np
+import pandas as pd
 
 from eeg_pipeline.utils.config.loader import get_config_value
 from studies.pain_study.study2.validation import (
@@ -21,6 +25,55 @@ class Study1ConfirmatoryGateQC:
     confirmatory_eligible: bool
     failed_gates: tuple[str, ...]
     reason: str
+
+
+STUDY1_REPORT_REQUIRED_COLUMNS = (
+    "analysis_partition",
+    "target",
+    "feature_spec",
+    "model",
+    "mean_delta_r2",
+    "ci_low_delta_r2",
+    "p_value_delta_r2_holm",
+    "temporal_negative_controls_passed",
+)
+
+
+def load_study1_confirmatory_row(
+    report_path: Path,
+    *,
+    config: Any,
+) -> dict[str, object]:
+    """Select the single Study 1 primary confirmatory-cell row from a report."""
+    if not report_path.is_file():
+        raise FileNotFoundError(f"Missing Study 1 report: {report_path}")
+    report = pd.read_csv(report_path, sep="\t")
+    missing = [column for column in STUDY1_REPORT_REQUIRED_COLUMNS if column not in report.columns]
+    if missing:
+        raise ValueError(f"Study 1 report is missing columns: {missing}.")
+
+    cell = get_config_value(config, "study2.confirmatory.study1_cell", None)
+    if not isinstance(cell, Mapping):
+        raise ValueError("Study 2 config is missing study1_cell mapping.")
+
+    mask = (
+        (report["analysis_partition"].astype(str) == "primary")
+        & (report["target"].astype(str) == str(cell["target"]))
+        & (report["feature_spec"].astype(str) == str(cell["frequency_preset"]))
+        & (report["model"].astype(str) == str(cell["model"]))
+    )
+    matches = report.loc[mask]
+    if len(matches) != 1:
+        raise ValueError(
+            "Study 2 expected exactly one Study 1 confirmatory row, "
+            f"found {len(matches)}."
+        )
+
+    metrics = matches.iloc[0].to_dict()
+    for key, value in list(metrics.items()):
+        if isinstance(value, np.bool_):
+            metrics[key] = bool(value)
+    return metrics
 
 
 def _optional_config_float(config: Any, key: str) -> float | None:
@@ -149,4 +202,5 @@ def evaluate_study1_confirmatory_gates(
 __all__ = [
     "Study1ConfirmatoryGateQC",
     "evaluate_study1_confirmatory_gates",
+    "load_study1_confirmatory_row",
 ]
