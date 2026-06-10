@@ -40,7 +40,12 @@ def test_load_study1_config_resolves_default_yaml() -> None:
 
     assert "study1" in config
     assert config["study1"]["targets"]["names"] == ["NPS", "SIIPS1"]
-    assert config["study1"]["features"]["exploratory_feature_families"] == []
+    assert config["study1"]["features"]["exploratory_feature_families"] == [
+        "aperiodic",
+        "erds",
+        "spectral",
+        "bursts",
+    ]
     assert config["study1"]["targets"]["max_design_condition_number"] == 3000.0
 
 
@@ -58,9 +63,11 @@ def test_load_study1_config_defines_unbaselined_temporal_negative_controls() -> 
     }
     assert temporal["wrong_lag_windows"] == {
         "ramp_up": [0.0, 3.0],
-        "late_ramp_down": [10.5, 15.0],
-        "early_shifted_active": [1.0, 8.5],
-        "late_shifted_active": [5.0, 12.5],
+    }
+    assert temporal["plateau_windows"] == {
+        "early_plateau": [3.0, 5.5],
+        "mid_plateau": [5.5, 8.0],
+        "late_plateau": [8.0, 10.5],
     }
 
 
@@ -262,6 +269,78 @@ def test_load_study1_config_rejects_missing_wrong_lag_temporal_controls(tmp_path
         load_study1_config(config_path=bad_config)
 
 
+def test_load_study1_config_rejects_wrong_lag_after_plateau_starts(tmp_path) -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    bad_config = tmp_path / "wrong_lag_after_plateau.yaml"
+    bad_config.write_text(
+        yaml.dump(
+            {
+                "study1": {
+                    "feature_benchmark": {
+                        "n_perm": 5000,
+                        "permutation_scheme": "circular_shift_within_run",
+                        "max_invalid_permutation_fraction": 0.20,
+                        "circular_shift": {
+                            "min_valid_blocks_per_subject": 3,
+                            "min_retained_trials_per_subject": 25,
+                        },
+                    },
+                    "temporal_negative_controls": {
+                        "feature_transform": "raw_log_power",
+                        "feature_baseline_window": None,
+                        "windows": {"prestimulus_wide": [-5.0, -0.01]},
+                        "wrong_lag_windows": {"late_ramp_down": [10.5, 15.0]},
+                        "plateau_windows": {"early_plateau": [3.0, 5.5]},
+                    },
+                    "reference_power": REFERENCE_POWER,
+                },
+                "time_frequency_analysis": TIME_FREQUENCY,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="before the plateau starts"):
+        load_study1_config(config_path=bad_config)
+
+
+def test_load_study1_config_rejects_plateau_window_that_reaches_ramp_down(tmp_path) -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    bad_config = tmp_path / "plateau_reaches_ramp_down.yaml"
+    bad_config.write_text(
+        yaml.dump(
+            {
+                "study1": {
+                    "feature_benchmark": {
+                        "n_perm": 5000,
+                        "permutation_scheme": "circular_shift_within_run",
+                        "max_invalid_permutation_fraction": 0.20,
+                        "circular_shift": {
+                            "min_valid_blocks_per_subject": 3,
+                            "min_retained_trials_per_subject": 25,
+                        },
+                    },
+                    "temporal_negative_controls": {
+                        "feature_transform": "raw_log_power",
+                        "feature_baseline_window": None,
+                        "windows": {"prestimulus_wide": [-5.0, -0.01]},
+                        "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+                        "plateau_windows": {"late_shifted_active": [5.0, 12.5]},
+                    },
+                    "reference_power": REFERENCE_POWER,
+                },
+                "time_frequency_analysis": TIME_FREQUENCY,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="within the plateau"):
+        load_study1_config(config_path=bad_config)
+
+
 def test_load_study1_config_rejects_missing_permutation_scheme(tmp_path) -> None:
     from studies.pain_study.study1.config.loader import load_study1_config
 
@@ -283,6 +362,7 @@ def test_load_study1_config_rejects_missing_permutation_scheme(tmp_path) -> None
                         "feature_baseline_window": None,
                         "windows": {"prestimulus_wide": [-5.0, -0.01]},
                         "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+                        "plateau_windows": {"early_plateau": [3.0, 5.5]},
                     },
                     "reference_power": REFERENCE_POWER,
                 },
@@ -322,6 +402,7 @@ def test_load_study1_config_uses_env_var_override(tmp_path, monkeypatch) -> None
                         "feature_baseline_window": None,
                         "windows": {"prestimulus_wide": [-5.0, -0.01]},
                         "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+                        "plateau_windows": {"early_plateau": [3.0, 5.5]},
                     },
                     "reference_power": REFERENCE_POWER,
                 },
@@ -415,7 +496,7 @@ def test_apply_study1_config_defaults_does_not_overwrite_existing_values() -> No
 ###################################################################
 
 
-def test_smoketest_config_uses_available_nuisance_regression_columns() -> None:
+def test_smoketest_config_uses_article_required_nuisance_regression_columns() -> None:
     from studies.pain_study.study1.config.loader import load_study1_config
 
     smoketest_path = REPO_ROOT / "studies/pain_study/study1/config/study1_smoketest.yaml"
@@ -427,6 +508,9 @@ def test_smoketest_config_uses_available_nuisance_regression_columns() -> None:
         "block",
         "onset",
         "within_block_trial",
+        "hrf_weighted_framewise_displacement",
+        "hrf_weighted_std_dvars",
+        "hrf_weighted_fp1_fp2_high_frequency_power",
         "residual_ecg_coupling",
     ]
     assert nuisance["categorical_columns"] == ["stimulus_temp", "selected_surface"]

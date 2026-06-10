@@ -43,10 +43,12 @@ from studies.pain_study.study2.source_maps import (
 )
 from studies.pain_study.study2.source_model_qc import evaluate_source_model_qc
 from studies.pain_study.study2.source_power import (
+    apply_source_morph,
     apply_sloreta_inverse,
     build_surface_forward_model,
     compute_baseline_noise_covariance,
     compute_sloreta_hilbert_logratio_power,
+    make_surface_source_morph,
     make_sloreta_inverse_operator,
 )
 from studies.pain_study.study2.study1_context import (
@@ -165,6 +167,14 @@ def run_source_power(context: "Study2StageContext") -> None:
     depth = get_config_value(config, "study2.source_modeling.regularization.depth_weighting", None)
     spacing = str(get_config_value(config, "study2.source_modeling.source_space_spacing", "oct6"))
     mindist_mm = get_config_value(config, "study2.source_modeling.forward_mindist_mm", None)
+    common_subject = _required_config_string(
+        config,
+        "study2.source_modeling.common_subject",
+    )
+    common_spacing = _required_config_string(
+        config,
+        "study2.source_modeling.common_source_space_spacing",
+    )
 
     for subject_id in context.subjects:
         anatomy = _resolve_anatomy(config, subject_id=subject_id)
@@ -187,6 +197,7 @@ def run_source_power(context: "Study2StageContext") -> None:
             depth=depth,
         )
 
+        source_morph = None
         for band, (low, high) in band_ranges.items():
             band_epochs = epochs.copy().filter(low, high, verbose=False)
             stcs = apply_sloreta_inverse(
@@ -195,8 +206,17 @@ def run_source_power(context: "Study2StageContext") -> None:
                 snr=snr,
                 pick_ori="normal",
             )
+            if source_morph is None:
+                source_morph = make_surface_source_morph(
+                    reference_stc=stcs[0],
+                    subject_from=subject_id,
+                    subject_to=common_subject,
+                    subjects_dir=str(anatomy.subjects_dir),
+                    spacing=common_spacing,
+                )
+            morphed_stcs = apply_source_morph(stcs, morph=source_morph)
             extraction = compute_sloreta_hilbert_logratio_power(
-                stcs=stcs,
+                stcs=morphed_stcs,
                 times=np.asarray(epochs.times, dtype=float),
                 baseline_window_s=baseline_window,
                 active_window_s=active_window,
@@ -211,9 +231,9 @@ def run_source_power(context: "Study2StageContext") -> None:
                 extraction.n_trials,
                 extraction.n_vertices,
             )
-            del band_epochs, stcs, extraction
+            del band_epochs, stcs, morphed_stcs, extraction
             gc.collect()
-        del forward, noise_cov, inverse_operator, epochs
+        del forward, noise_cov, inverse_operator, source_morph, epochs
         gc.collect()
 
 
@@ -688,13 +708,20 @@ def _study1_capable_config(config: Any) -> Any:
 
     The Study 2 CLI applies only Study 2 defaults, but the target-retrained null
     rebuilds the Study 1 model. Study 1 defaults are merged onto a copy without
-    overwriting the runtime paths (``_merge_non_null`` only fills/merges).
+    overwriting the runtime paths (``_merge_non_null`` only fills/merges). The
+    Study 2-selected Study 1 output root is then mirrored into the Study 1
+    namespace because Study 1 helper functions read ``study1.outputs.root_name``.
     """
     from eeg_pipeline.utils.config.loader import ConfigDict
     from studies.pain_study.study1.config.loader import apply_study1_config_defaults
 
     merged = ConfigDict(copy.deepcopy(dict(config)))
     apply_study1_config_defaults(merged)
+    study1_root_name = _required_config_string(
+        merged,
+        "study2.inputs.study1_root_name",
+    )
+    merged.setdefault("study1", {}).setdefault("outputs", {})["root_name"] = study1_root_name
     return merged
 
 
@@ -717,7 +744,7 @@ def target_permutations_required_inputs(context: "Study2StageContext") -> tuple[
     config = context.config
     required = [
         paths.source_stage_frame_path(config),
-        study1_model_comparison_path(config),
+        study1_model_comparison_path(_study1_capable_config(config)),
     ]
     for subject_id in context.subjects:
         for band in _contribution_bands(config):

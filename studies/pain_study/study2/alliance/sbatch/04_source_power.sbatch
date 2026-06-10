@@ -3,13 +3,11 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=80G
-#SBATCH --time=12:00:00
-#SBATCH --output=studies/pain_study/study2/alliance/logs/slurm/%x_%A_%a.out
+#SBATCH --time=06:00:00
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$1")" && pwd)"
 # shellcheck source=../lib/study2_alliance_common.sh
 source "${SCRIPT_DIR}/lib/study2_alliance_common.sh"
 
@@ -17,7 +15,9 @@ study2_load_env "$@"
 study2_activate_python
 
 subject="$(study2_subject_from_array)"
-subject_label="${subject#sub-}"
+exec > "${STUDY2_LOG_ROOT}/s2_source_power_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.out" 2> "${STUDY2_LOG_ROOT}/s2_source_power_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.err"
+
+subject_label="${subject}"
 mapfile -t overrides < <(study2_runtime_overrides)
 
 python -m eeg_pipeline.cli.main source-interpretation source-power \

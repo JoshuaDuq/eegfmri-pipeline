@@ -3,9 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=64G
-#SBATCH --time=12:00:00
-#SBATCH --output=studies/pain_study/study2/alliance/logs/slurm/%x_%j.out
+#SBATCH --time=06:00:00
 
 set -euo pipefail
 
@@ -16,7 +14,7 @@ fi
 
 env_file="$1"
 stage="$2"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${env_file}")" && pwd)"
 # shellcheck source=../lib/study2_alliance_common.sh
 source "${SCRIPT_DIR}/lib/study2_alliance_common.sh"
 

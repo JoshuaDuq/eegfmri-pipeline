@@ -13,6 +13,8 @@ TEMPORAL_CONTROL_FEATURE_PREFIX = "temporal_"
 TEMPORAL_CONTROL_FEATURE_STATS = ("log10raw",)
 TEMPORAL_CONTROL_PARTITION = "temporal_control"
 TEMPORAL_CONTROL_TRANSFORM = "raw_log_power"
+TEMPORAL_NEGATIVE_CONTROL_KINDS = frozenset({"prestimulus", "wrong_lag"})
+TEMPORAL_PLATEAU_SENSITIVITY_KIND = "plateau_sensitivity"
 
 
 @dataclass(frozen=True)
@@ -51,17 +53,20 @@ def resolve_temporal_control_windows(config: Any) -> tuple[TemporalControlWindow
             "study1.temporal_negative_controls.feature_baseline_window must be null."
         )
 
+    plateau_start, plateau_end = _active_plateau_window(config)
     windows: list[TemporalControlWindow] = []
     seen_names: set[str] = set()
-    for kind, key in (
+    window_groups = (
         ("prestimulus", "windows"),
         ("wrong_lag", "wrong_lag_windows"),
-    ):
-        raw_windows = temporal_config.get(key, {})
-        if raw_windows is None:
-            raw_windows = {}
-        if not isinstance(raw_windows, dict):
-            raise ValueError(f"study1.temporal_negative_controls.{key} must be a mapping.")
+        (TEMPORAL_PLATEAU_SENSITIVITY_KIND, "plateau_windows"),
+    )
+    for kind, key in window_groups:
+        raw_windows = temporal_config.get(key)
+        if not isinstance(raw_windows, dict) or not raw_windows:
+            raise ValueError(
+                f"study1.temporal_negative_controls.{key} must be a non-empty mapping."
+            )
         for raw_name, raw_window in raw_windows.items():
             name = str(raw_name).strip()
             if not name:
@@ -71,6 +76,17 @@ def resolve_temporal_control_windows(config: Any) -> tuple[TemporalControlWindow
             start, end = _time_window(raw_window, field_name=f"{key}.{name}")
             if kind == "prestimulus" and end > 0.0:
                 raise ValueError(f"Pre-stimulus temporal-control window {name!r} must end at 0 s.")
+            if kind == "wrong_lag" and (start < 0.0 or end > plateau_start):
+                raise ValueError(
+                    f"Wrong-lag temporal-control window {name!r} must start at or after "
+                    "stimulus onset and end before the plateau starts."
+                )
+            if kind == TEMPORAL_PLATEAU_SENSITIVITY_KIND and (
+                start < plateau_start or end > plateau_end
+            ):
+                raise ValueError(
+                    f"Plateau sensitivity window {name!r} must be contained within the plateau."
+                )
             windows.append(TemporalControlWindow(name=name, kind=kind, start=start, end=end))
             seen_names.add(name)
     return tuple(windows)
@@ -116,9 +132,18 @@ def _time_window(value: Any, *, field_name: str) -> tuple[float, float]:
     return start, end
 
 
+def _active_plateau_window(config: Any) -> tuple[float, float]:
+    return _time_window(
+        get_config_value(config, "time_frequency_analysis.active_window", None),
+        field_name="time_frequency_analysis.active_window",
+    )
+
+
 __all__ = [
     "TEMPORAL_CONTROL_BANDS",
     "TEMPORAL_CONTROL_FEATURE_STATS",
+    "TEMPORAL_NEGATIVE_CONTROL_KINDS",
+    "TEMPORAL_PLATEAU_SENSITIVITY_KIND",
     "TEMPORAL_CONTROL_PARTITION",
     "TemporalControlWindow",
     "resolve_temporal_control_windows",

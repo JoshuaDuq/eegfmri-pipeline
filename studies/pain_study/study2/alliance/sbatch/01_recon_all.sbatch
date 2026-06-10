@@ -3,13 +3,11 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=2-00:00:00
-#SBATCH --output=studies/pain_study/study2/alliance/logs/slurm/%x_%A_%a.out
+#SBATCH --time=23:00:00
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$1")" && pwd)"
 # shellcheck source=../lib/study2_alliance_common.sh
 source "${SCRIPT_DIR}/lib/study2_alliance_common.sh"
 
@@ -17,6 +15,8 @@ study2_load_env "$@"
 study2_load_modules
 
 subject="$(study2_subject_from_array)"
+exec > "${STUDY2_LOG_ROOT}/s2_recon_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.out" 2> "${STUDY2_LOG_ROOT}/s2_recon_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.err"
+
 t1_path="${STUDY2_BIDS_MRI_ROOT}/${subject}/anat/${subject}_T1w.nii.gz"
 study2_assert_path "${t1_path}"
 study2_assert_path "${STUDY2_FS_LICENSE}"

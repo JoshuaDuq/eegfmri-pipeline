@@ -52,7 +52,7 @@ def _prepare_confounds_for_first_level_model(
 
     prepared = confounds.copy()
     for column in prepared.columns:
-        column_values = prepared[column].to_numpy(dtype=float)
+        column_values = prepared[column].to_numpy(dtype=float).copy()
         missing_rows = ~np.isfinite(column_values)
         if not missing_rows.any():
             continue

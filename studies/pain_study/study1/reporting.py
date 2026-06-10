@@ -25,6 +25,8 @@ from studies.pain_study.study1.targets import (
     residualization_columns_for_target_table,
 )
 from studies.pain_study.study1.temporal_controls import (
+    TEMPORAL_NEGATIVE_CONTROL_KINDS,
+    TEMPORAL_PLATEAU_SENSITIVITY_KIND,
     TEMPORAL_CONTROL_PARTITION,
     temporal_control_window_for_feature_spec,
 )
@@ -370,6 +372,11 @@ def _study2_source_entry_status(record: pd.Series) -> str:
 def _temporal_control_interpretation(record: pd.Series) -> str:
     if str(record.get("lane", "")) != "feature_benchmark":
         return "not_applicable"
+    if (
+        str(record.get("analysis_partition", "")) == TEMPORAL_CONTROL_PARTITION
+        and str(record.get("temporal_control_kind", "")) == TEMPORAL_PLATEAU_SENSITIVITY_KIND
+    ):
+        return "plateau_response_sensitivity"
     target_name = str(record.get("target", ""))
     if target_name == "NPS":
         return "negative_control_for_evoked_nociceptive_expression"
@@ -379,13 +386,15 @@ def _temporal_control_interpretation(record: pd.Series) -> str:
 
 
 def _temporal_controls_verdict(control_rows: pd.DataFrame) -> bool | None:
-    """Pass when no temporal-control window predicts the post-stimulus target.
+    """Pass when no negative-control window predicts the post-stimulus target.
 
-    A pre-stimulus or wrong-lag window that shows significant positive
-    incremental prediction (Holm-corrected over the temporal-control family)
-    breaks evoked specificity and fails the control. Returns None when controls
-    are absent or any control cell lacks the statistics needed to evaluate it,
-    so the diagnostic stays missing rather than silently passing.
+    A pre-stimulus or pre-plateau wrong-lag window that shows significant
+    positive incremental prediction (Holm-corrected over the temporal-control
+    family) breaks evoked specificity and fails the control. Plateau sensitivity
+    windows are expected response-period analyses, not negative controls.
+    Returns None when controls are absent or any negative-control cell lacks the
+    statistics needed to evaluate it, so the diagnostic stays missing rather than
+    silently passing.
     """
     if control_rows.empty:
         return None
@@ -413,7 +422,10 @@ def _derive_temporal_negative_controls(frame: pd.DataFrame) -> pd.Series:
     is_control = (lane == "feature_benchmark") & (partition == TEMPORAL_CONTROL_PARTITION)
     is_primary = (lane == "feature_benchmark") & (partition == "primary")
 
-    controls = frame.loc[is_control]
+    negative_control = frame["temporal_control_kind"].astype(str).isin(
+        TEMPORAL_NEGATIVE_CONTROL_KINDS
+    )
+    controls = frame.loc[is_control & negative_control]
     verdicts = pd.Series(pd.NA, index=frame.index, dtype="object")
     for idx in frame.index[is_primary]:
         matching = controls.loc[

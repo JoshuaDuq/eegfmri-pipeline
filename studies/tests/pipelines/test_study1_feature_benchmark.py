@@ -20,6 +20,7 @@ def _config(root: Path) -> DotConfig:
         {
             "paths": {"deriv_root": str(root / "derivatives")},
             "project": {"random_state": 7},
+            "time_frequency_analysis": {"active_window": [3.0, 10.5]},
             "study1": {
                 "outputs": {"root_name": "study1"},
                 "cohort": {"min_subjects": 2},
@@ -468,6 +469,7 @@ def test_run_feature_benchmark_adds_temporal_control_windows(tmp_path) -> None:
         "feature_baseline_window": None,
         "windows": {"prestimulus_wide": [-5.0, -0.01]},
         "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+        "plateau_windows": {"early_plateau": [3.0, 5.5]},
     }
     _write_primary_targets(cfg)
     for subject_id in ("sub-0001", "sub-0002"):
@@ -506,6 +508,13 @@ def test_run_feature_benchmark_adds_temporal_control_windows(tmp_path) -> None:
     assert prestimulus_call["feature_scopes"] == ["ch"]
     assert prestimulus_call["feature_stats"] == ["log10raw"]
     assert prestimulus_call["model_names"] == ["elasticnet", "ridge"]
+    plateau_call = next(
+        call
+        for call in captured_calls
+        if call["results_root"].parts[-4:]
+        == ("feature_benchmark", "temporal_control", "NPS", "temporal_early_plateau")
+    )
+    assert plateau_call["feature_segments"] == ["early_plateau"]
 
 
 def test_run_feature_benchmark_uses_grouped_inner_cv_with_four_subjects(tmp_path) -> None:

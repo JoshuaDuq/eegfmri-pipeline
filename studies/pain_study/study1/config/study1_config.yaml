@@ -13,7 +13,11 @@ study1:
       reference_window: [-5.0, -0.01]
       reference_power_covariate: true
   features:
-    exploratory_feature_families: []
+    exploratory_feature_families:
+      - "aperiodic"
+      - "erds"
+      - "spectral"
+      - "bursts"
   targets:
     contrast_name: "pain_vs_nonpain"
     metric: "dot"
@@ -87,9 +91,10 @@ study1:
       immediate_prestimulus: [-0.2, -0.01]
     wrong_lag_windows:
       ramp_up: [0.0, 3.0]
-      late_ramp_down: [10.5, 15.0]
-      early_shifted_active: [1.0, 8.5]
-      late_shifted_active: [5.0, 12.5]
+    plateau_windows:
+      early_plateau: [3.0, 5.5]
+      mid_plateau: [5.5, 8.0]
+      late_plateau: [8.0, 10.5]
   deep_regression:
     time_window: [3.0, 10.5]
     n_epochs: 25

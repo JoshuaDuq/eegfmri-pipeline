@@ -77,9 +77,17 @@ study2:
     primary_power_estimand: "total_power"
     erp_subtracted_power: "sensitivity_only"
     primary_inverse_method: "sLORETA"
+    source_space_spacing: "oct6"
+    common_subject: "fsaverage"
+    common_source_space_spacing: "oct6"
+    forward_mindist_mm: 5.0
     rank_excluded_channels:
       - "Fp1"
       - "Fp2"
+    frequency_bands:
+      alpha: [8.0, 12.9]
+      beta: [13.0, 30.0]
+      gamma: [30.1, 80.0]
     noise_covariance_baseline_s:
       - -5.0
       - -0.01

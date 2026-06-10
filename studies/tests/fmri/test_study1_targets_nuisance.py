@@ -106,6 +106,33 @@ def test_nuisance_source_columns_rejects_raw_artifact_columns_for_level2() -> No
 
 
 ###################################################################
+# _confound_timeseries
+###################################################################
+
+
+def test_confound_timeseries_handles_read_only_column_arrays(monkeypatch) -> None:
+    from studies.pain_study.study1.targets import _confound_timeseries
+
+    confounds = pd.DataFrame({"framewise_displacement": [None, 0.1, 0.2]})
+    original_to_numpy = pd.Series.to_numpy
+
+    def read_only_to_numpy(series, *args, **kwargs):
+        values = original_to_numpy(series, *args, **kwargs)
+        values.setflags(write=False)
+        return values
+
+    monkeypatch.setattr(pd.Series, "to_numpy", read_only_to_numpy)
+
+    values = _confound_timeseries(
+        confounds,
+        "framewise_displacement",
+        n_scans=3,
+    )
+
+    assert values.tolist() == [0.0, 0.1, 0.2]
+
+
+###################################################################
 # _ordered_categorical_levels
 ###################################################################
 

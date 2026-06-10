@@ -67,7 +67,11 @@ def _config(deriv_root: Path) -> DotConfig:
                     },
                     "wrong_lag_windows": {
                         "ramp_up": [0.0, 3.0],
-                        "late_ramp_down": [10.5, 15.0],
+                    },
+                    "plateau_windows": {
+                        "early_plateau": [3.0, 5.5],
+                        "mid_plateau": [5.5, 8.0],
+                        "late_plateau": [8.0, 10.5],
                     },
                 },
             },
@@ -267,7 +271,9 @@ def test_prepare_study1_features_uses_study1_feature_root_and_full_family_set(tm
         {"name": "prestimulus_wide", "tmin": -5.0, "tmax": -0.01},
         {"name": "immediate_prestimulus", "tmin": -0.2, "tmax": -0.01},
         {"name": "ramp_up", "tmin": 0.0, "tmax": 3.0},
-        {"name": "late_ramp_down", "tmin": 10.5, "tmax": 15.0},
+        {"name": "early_plateau", "tmin": 3.0, "tmax": 5.5},
+        {"name": "mid_plateau", "tmin": 5.5, "tmax": 8.0},
+        {"name": "late_plateau", "tmin": 8.0, "tmax": 10.5},
     ]
 
 
@@ -347,7 +353,9 @@ def test_prepare_study1_features_extracts_temporal_control_raw_power_windows(tmp
         {"name": "prestimulus_wide", "tmin": -5.0, "tmax": -0.01},
         {"name": "immediate_prestimulus", "tmin": -0.2, "tmax": -0.01},
         {"name": "ramp_up", "tmin": 0.0, "tmax": 3.0},
-        {"name": "late_ramp_down", "tmin": 10.5, "tmax": 15.0},
+        {"name": "early_plateau", "tmin": 3.0, "tmax": 5.5},
+        {"name": "mid_plateau", "tmin": 5.5, "tmax": 8.0},
+        {"name": "late_plateau", "tmin": 8.0, "tmax": 10.5},
     ]
     temporal_config = feature_pipeline_cls.call_args.kwargs["config"]
     assert temporal_config.get("feature_engineering.power.require_baseline") is False

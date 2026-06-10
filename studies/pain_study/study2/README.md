@@ -23,16 +23,19 @@ Because scalp EEG cannot resolve the deep insular, thalamic, and brainstem gener
 the NPS, these maps characterize the *cortical EEG correlates* of the NPS-predictive component, not
 the signature's generators. Source claims are framed accordingly throughout.
 
-An eligibility gate evaluated on the Study 1 cell selects between two prespecified paths, both of
-which are executed and reported. The cell is confirmatory-eligible when it shows a predictive gain
+An eligibility gate evaluated on the Study 1 cell selects between confirmatory and exploratory
+source interpretation. The cell is confirmatory-eligible when it shows a predictive gain
 $\Delta R^2_{\mathrm{LOSO}} \ge 0.02$, a confidence-interval lower bound $\ge 0.005$, a
-Holm-corrected $p \le 0.05$, a Level 2 gain $\ge 0.005$, a positive within-subject gain, satisfied
-temporal negative controls, satisfied artifact-censoring robustness, and a split-half reliability
-$\ge 0.4$ on at least 30 trials. When the gate passes, the source family is interpreted
-confirmatorily; when it fails, the identical maps are reported on the exploratory-source path. A
-Study 1 cell that does not clear the gate is itself a reported outcome — evidence that
-plateau-window EEG does not add NPS information beyond the prespecified nuisance structure — and does
-not invalidate the source analysis as an exploratory characterization.
+Holm-corrected $p \le 0.05$, a staged nuisance-adjusted sensitivity gain $\ge 0.005$, a positive
+within-subject gain, satisfied temporal negative controls, satisfied artifact-censoring robustness,
+and a split-half reliability $\ge 0.4$ on at least 30 trials. Missing diagnostic fields do not pass
+this gate; they keep source interpretation non-confirmatory until the corresponding Study 1
+sensitivity outputs are available.
+When the gate passes, the source family is interpreted confirmatorily; when it fails, the identical
+maps are reported on the exploratory-source path. A Study 1 cell that does not clear the gate is
+itself a reported outcome — evidence that plateau-window EEG does not add NPS information beyond the
+prespecified nuisance structure — and does not invalidate the source analysis as an exploratory
+characterization.
 
 ## 2. Frozen Model and Prediction-Derived Score
 

@@ -1,9 +1,23 @@
 # Study 1 - Run Guide
 
 This guide runs the Study 1 signature-prediction workflow from prepared EEG/fMRI derivatives.
-Commands assume the private `studies` package has registered the `signature-prediction` command
-through the `eeg_pipeline.cli_commands` entry-point group. Confirm that registration before running
-Study 1:
+Study 1 does not run fMRIPrep itself. It expects the task fMRI BIDS data, cleaned EEG/event
+derivatives, external signature maps, a fixed a-priori scoring mask, and fMRIPrep preprocessed BOLD
+outputs to already be present in the configured roots.
+
+Run the workflow in this order:
+
+1. Install the private `studies` package so `eeg-pipeline` exposes `signature-prediction`.
+2. Upload or verify external signature assets: `NPS`, `SIIPS1`, `signature_manifest.yaml`, and the
+   fixed MNI scoring mask.
+3. Run fMRIPrep for the Study 1 fMRI subjects if preprocessed BOLD files are missing.
+4. Run the Study 1 stages: `prepare-targets`, `prepare-features`, `feature-benchmark`, then
+   `report`.
+
+The command list must include `signature-prediction`. If it does not, install the private studies
+package that exposes `studies.pain_study.cli.command_registry:signature_prediction_command`.
+
+Confirm local registration before running Study 1 on Kingston:
 
 ```bash
 cd /Users/joduq24/Desktop/EEG_fMRI_Pipeline
@@ -13,8 +27,225 @@ PYTHON=".venv/bin/python"
 "$EEG_PIPELINE" --help
 ```
 
-The command list must include `signature-prediction`. If it does not, install the private studies
-package that exposes `studies.pain_study.cli.command_registry:signature_prediction_command`.
+## Trillium End-to-End Order
+
+Run Study 1 on Trillium only after the narrow upload has placed the required fMRI BIDS, EEG BIDS,
+and cleaned derivatives under `/project/def-mpcoll/joshduq`. The Trillium commands use:
+
+```text
+/project/def-mpcoll/joshduq/bids/eeg
+/project/def-mpcoll/joshduq/bids/fmri
+/project/def-mpcoll/joshduq/derivatives
+/project/def-mpcoll/joshduq/external
+```
+
+From a local Mac terminal, upload the external signature assets if they are missing on Trillium:
+
+```bash
+ssh joshduq@trillium.alliancecan.ca \
+  'mkdir -p /project/def-mpcoll/joshduq/external/NPS /project/def-mpcoll/joshduq/external/SIIPS1'
+
+rsync -avh \
+  /Volumes/KINGSTON/EEG_fMRI_data/external/signature_manifest.yaml \
+  joshduq@trillium.alliancecan.ca:/project/def-mpcoll/joshduq/external/
+
+rsync -avh \
+  /Volumes/KINGSTON/EEG_fMRI_data/external/tpl-MNI152NLin2009cAsym_res-02_desc-brain_mask.nii.gz \
+  joshduq@trillium.alliancecan.ca:/project/def-mpcoll/joshduq/external/
+
+rsync -avh \
+  /Volumes/KINGSTON/EEG_fMRI_data/external/NPS/weights_NSF_grouppred_cvpcr.nii.gz \
+  joshduq@trillium.alliancecan.ca:/project/def-mpcoll/joshduq/external/NPS/
+
+rsync -avh \
+  /Volumes/KINGSTON/EEG_fMRI_data/external/SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz \
+  joshduq@trillium.alliancecan.ca:/project/def-mpcoll/joshduq/external/SIIPS1/
+```
+
+fMRIPrep also requires the FreeSurfer license. Upload it from the Mac before submitting fMRIPrep:
+
+```bash
+ssh joshduq@trillium.alliancecan.ca 'mkdir -p /project/def-mpcoll/joshduq/licenses'
+
+rsync -avh \
+  /Users/joduq24/license.txt \
+  joshduq@trillium.alliancecan.ca:/project/def-mpcoll/joshduq/licenses/license.txt
+```
+
+On Trillium, prepare the Python environment and private Study 1 command:
+
+```bash
+cd /project/def-mpcoll/joshduq/EEG_fMRI_Pipeline
+
+source local_workflows/alliance_canada/alliance_env.sh
+
+module load StdEnv/2023
+module load python/3.11
+module load gcc
+module load arrow
+
+if [[ ! -d "$EEG_PIPELINE_VENV" ]]; then
+  python -m venv "$EEG_PIPELINE_VENV"
+fi
+
+source "$EEG_PIPELINE_VENV/bin/activate"
+
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev,ml]"
+python -m pip install -e ./studies
+
+eeg-pipeline --help
+```
+
+The help output must include `signature-prediction`.
+
+Before running Study 1, verify fMRIPrep outputs exist:
+
+```bash
+find /project/def-mpcoll/joshduq/derivatives/preprocessed/fmri/fmriprep \
+  -type f \
+  -name '*task-thermalactive*desc-preproc_bold.nii.gz' \
+  | head
+```
+
+If that command prints no files, submit fMRIPrep first:
+
+```bash
+cd /project/def-mpcoll/joshduq/EEG_fMRI_Pipeline
+
+bash local_workflows/alliance_canada/setup_python_and_container.sh
+
+cd /project/def-mpcoll/joshduq/EEG_fMRI_Pipeline/local_workflows/alliance_canada
+
+JOB_ID="$(bash submit_fmriprep_array.sh | tail -n 1)"
+if [[ -z "$JOB_ID" ]]; then
+  echo "fMRIPrep submission did not return a Slurm job id." >&2
+  exit 1
+fi
+
+echo "Submitted fMRIPrep job: $JOB_ID"
+
+squeue -j "$JOB_ID"
+```
+
+The submit wrapper is Trillium-specific: it writes Slurm logs to
+`/scratch/joshduq/fmriprep_logs`, writes fMRIPrep outputs under
+`/scratch/joshduq/derivatives`, uses `/scratch/joshduq/templateflow` for TemplateFlow, requests
+less than 24 hours, does not pass `--mem`, and passes `--skip-bids-validation` because the narrow
+task upload omits non-Study-1 rest BOLD files referenced by some fieldmap `IntendedFor` metadata.
+Do not submit fMRIPrep with logs under the project repository or with an explicit memory request on
+Trillium.
+
+When the job leaves `squeue`, require `COMPLETED` before continuing:
+
+```bash
+sacct -j "$JOB_ID" --format=JobID,JobName%30,State,Elapsed,MaxRSS
+```
+
+After all array tasks are `COMPLETED`, copy the fMRIPrep outputs from scratch back to the project
+derivatives root from the Trillium login node. The wrapper writes subject folders directly under
+the scratch fMRI output root; downstream Study 1 discovery expects them under the project-side
+`fmriprep` directory:
+
+```bash
+mkdir -p /project/def-mpcoll/joshduq/derivatives/preprocessed/fmri/fmriprep
+
+rsync -avh --delete \
+  /scratch/joshduq/derivatives/preprocessed/fmri/ \
+  /project/def-mpcoll/joshduq/derivatives/preprocessed/fmri/fmriprep/
+```
+
+Then run the Study 1 smoke test on Trillium through Slurm. Compute nodes can read the project
+inputs but must write Study 1 outputs on scratch, so expose the EEG inputs in the scratch
+derivatives root and submit the script from scratch. Use the full uploaded EEG Study 1 cohort:
+`sub-0000`, `sub-0001`, `sub-0003`, and `sub-0005`. This requires valid fMRIPrep
+`desc-preproc_bold.nii.gz` outputs for those same four subjects.
+
+```bash
+mkdir -p /scratch/joshduq/derivatives/preprocessed
+ln -sfn \
+  /project/def-mpcoll/joshduq/derivatives/preprocessed/eeg \
+  /scratch/joshduq/derivatives/preprocessed/eeg
+
+cat > /scratch/joshduq/run_study1_smoke.sh <<'EOF'
+set -euo pipefail
+
+cd /project/def-mpcoll/joshduq/EEG_fMRI_Pipeline
+
+source local_workflows/alliance_canada/alliance_env.sh
+
+module load StdEnv/2023
+module load python/3.11
+module load gcc
+module load arrow
+
+export NUMBA_CACHE_DIR="/scratch/joshduq/study1_numba_cache"
+mkdir -p "$NUMBA_CACHE_DIR"
+
+source "$EEG_PIPELINE_VENV/bin/activate"
+
+EEG_PIPELINE="$EEG_PIPELINE_VENV/bin/eeg-pipeline"
+
+STUDY1_CONFIG="studies/pain_study/study1/config/study1_smoketest.yaml"
+STUDY1_RUN_ID="study1_smoke_$(date +%Y%m%d_%H%M%S)"
+
+TASK="thermalactive"
+SIGNATURE_DIR="/project/def-mpcoll/joshduq/external"
+NPS_MAP="NPS/weights_NSF_grouppred_cvpcr.nii.gz"
+SIIPS1_MAP="SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
+SIGNATURE_MANIFEST="signature_manifest.yaml"
+SIGNATURE_MASK="tpl-MNI152NLin2009cAsym_res-02_desc-brain_mask.nii.gz"
+SIGNATURE_MAPS_JSON='[{"name":"NPS","path":"NPS/weights_NSF_grouppred_cvpcr.nii.gz"},{"name":"SIIPS1","path":"SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"}]'
+
+SUBJECT_ARGS=(--subject 0000 --subject 0001 --subject 0003 --subject 0005)
+
+COMMON_ARGS=(
+  --task "$TASK"
+  --study1-config "$STUDY1_CONFIG"
+  --bids-root "$BIDS_EEG_ROOT"
+  --bids-fmri-root "$BIDS_FMRI_ROOT"
+  --deriv-root "$FMRIPREP_DERIV_ROOT"
+  --set "paths.signature_dir=$SIGNATURE_DIR"
+  --set "paths.signature_maps=$SIGNATURE_MAPS_JSON"
+  --set "study1.targets.signature_manifest_path=$SIGNATURE_MANIFEST"
+  --set "study1.targets.signature_provenance.NPS.path=$NPS_MAP"
+  --set "study1.targets.signature_provenance.SIIPS1.path=$SIIPS1_MAP"
+  --set "study1.targets.signature_scoring_mask_path=$SIGNATURE_MASK"
+  --set "study1.cohort.min_subjects=4"
+  --set "study1.outputs.root_name=$STUDY1_RUN_ID"
+)
+
+"$EEG_PIPELINE" signature-prediction prepare-targets "${SUBJECT_ARGS[@]}" "${COMMON_ARGS[@]}"
+"$EEG_PIPELINE" signature-prediction prepare-features "${SUBJECT_ARGS[@]}" "${COMMON_ARGS[@]}"
+"$EEG_PIPELINE" signature-prediction feature-benchmark "${SUBJECT_ARGS[@]}" "${COMMON_ARGS[@]}"
+"$EEG_PIPELINE" signature-prediction report "${SUBJECT_ARGS[@]}" "${COMMON_ARGS[@]}"
+
+echo "$FMRIPREP_DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID"
+EOF
+
+chmod +x /scratch/joshduq/run_study1_smoke.sh
+mkdir -p /scratch/joshduq/study1_logs
+
+JOB_ID="$(
+  sbatch --parsable \
+    --account=def-mpcoll \
+    --time=06:00:00 \
+    --cpus-per-task=16 \
+    --output=/scratch/joshduq/study1_logs/study1_smoke_%j.out \
+    --error=/scratch/joshduq/study1_logs/study1_smoke_%j.err \
+    --wrap="bash /scratch/joshduq/run_study1_smoke.sh"
+)"
+
+echo "Submitted Study 1 smoke job: $JOB_ID"
+squeue -j "$JOB_ID"
+```
+
+For a formal Trillium rerun, edit only the two config lines in that script:
+
+```bash
+STUDY1_CONFIG="studies/pain_study/study1/config/study1_config.yaml"
+STUDY1_RUN_ID="study1_$(date +%Y%m%d_%H%M%S)"
+```
 
 ## Copy-Paste Run
 
@@ -39,6 +270,7 @@ TASK="thermalactive"
 NPS_MAP="NPS/weights_NSF_grouppred_cvpcr.nii.gz"
 SIIPS1_MAP="SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
 SIGNATURE_MANIFEST="signature_manifest.yaml"
+SIGNATURE_MASK="tpl-MNI152NLin2009cAsym_res-02_desc-brain_mask.nii.gz"
 SIGNATURE_MAPS_JSON='[
   {"name":"NPS","path":"NPS/weights_NSF_grouppred_cvpcr.nii.gz"},
   {"name":"SIIPS1","path":"SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"}
@@ -56,6 +288,7 @@ COMMON_ARGS=(
   --set "study1.targets.signature_manifest_path=$SIGNATURE_MANIFEST"
   --set "study1.targets.signature_provenance.NPS.path=$NPS_MAP"
   --set "study1.targets.signature_provenance.SIIPS1.path=$SIIPS1_MAP"
+  --set "study1.targets.signature_scoring_mask_path=$SIGNATURE_MASK"
   --set "study1.outputs.root_name=$STUDY1_RUN_ID"
 )
 
@@ -144,6 +377,7 @@ TASK="thermalactive"
 NPS_MAP="NPS/weights_NSF_grouppred_cvpcr.nii.gz"
 SIIPS1_MAP="SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
 SIGNATURE_MANIFEST="signature_manifest.yaml"
+SIGNATURE_MASK="tpl-MNI152NLin2009cAsym_res-02_desc-brain_mask.nii.gz"
 SIGNATURE_MAPS_JSON='[
   {"name":"NPS","path":"NPS/weights_NSF_grouppred_cvpcr.nii.gz"},
   {"name":"SIIPS1","path":"SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"}
@@ -167,6 +401,7 @@ COMMON_ARGS=(
   --set "study1.targets.signature_manifest_path=$SIGNATURE_MANIFEST"
   --set "study1.targets.signature_provenance.NPS.path=$NPS_MAP"
   --set "study1.targets.signature_provenance.SIIPS1.path=$SIIPS1_MAP"
+  --set "study1.targets.signature_scoring_mask_path=$SIGNATURE_MASK"
 )
 ```
 
@@ -189,10 +424,12 @@ HRF-weighted artifact columns
 artifact proxy remains `fp1_fp2_high_frequency_power`; it is an upstream input to the HRF-weighted
 covariate and artifact-censoring audits, not the Level 2 nuisance column.
 
-The smoke-test config uses the nuisance columns available in the current cleaned Kingston events:
-`block`, `onset`, `within_block_trial`, `residual_ecg_coupling`, `stimulus_temp`, and
-`selected_surface`. This keeps the smoke report structurally identical to the production
-incremental benchmark while avoiding production-only HRF-weighted artifact prerequisites.
+The smoke-test config uses the same Level 2 nuisance columns required by the report article tables:
+`block`, `onset`, `within_block_trial`, `hrf_weighted_framewise_displacement`,
+`hrf_weighted_std_dvars`, `hrf_weighted_fp1_fp2_high_frequency_power`,
+`residual_ecg_coupling`, `stimulus_temp`, and `selected_surface`. This keeps the smoke run
+scientifically aligned with the production estimand while reducing permutation counts and training
+duration.
 
 For a formal rerun, prefer a new output root rather than mixing outputs from different configs or
 dates:
@@ -290,7 +527,9 @@ Run stages in this order.
    ```
 
    The temporal-control table contains unbaselined alpha, beta, and gamma log-power features for
-   the configured pre-stimulus and wrong-lag windows. Exploratory families produce additional
+   the configured pre-stimulus negative-control windows, the pre-plateau ramp-up wrong-lag window,
+   and early/mid/late plateau-sensitivity windows. Plateau-sensitivity windows are constrained to
+   `3.0` to `10.5` s and do not include ramp-down. Exploratory families produce additional
    per-family tables only when explicitly enabled.
 
    The primary reference window is `-5.0` to `-0.01` s. Reference-window sensitivity runs should
@@ -328,24 +567,19 @@ Run stages in this order.
    all-band models are written under the exploratory partition. The benchmark filters predictors
    to active-window, individual-channel, log-ratio power columns and excludes Fp1/Fp2. The
    temporal-control benchmark uses individual-channel alpha, beta, and gamma raw log-power columns
-   from the temporal-control feature root.
+   from the temporal-control feature root. Only the pre-stimulus and pre-plateau wrong-lag rows feed
+   the `temporal_negative_controls_passed` verdict; plateau rows are response-period sensitivity
+   analyses.
 
-Exploratory feature families are disabled in the default Study 1 configs. Enable them explicitly
-when they are part of the planned run:
+The default Study 1 config enables the theoretically prioritized exploratory feature families:
 
-```bash
-EXPLORATORY_FEATURE_FAMILIES='[
-  "spectral",
+```text
+[
   "aperiodic",
   "erds",
-  "ratios",
-  "asymmetry",
+  "spectral",
   "bursts"
-]'
-
-COMMON_ARGS+=(
-  --set "study1.features.exploratory_feature_families=$EXPLORATORY_FEATURE_FAMILIES"
-)
+]
 ```
 
 4. Run exploratory deep regression only when the thesis report should include that lane:
@@ -396,6 +630,7 @@ TASK="thermalactive"
 NPS_MAP="NPS/weights_NSF_grouppred_cvpcr.nii.gz"
 SIIPS1_MAP="SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"
 SIGNATURE_MANIFEST="signature_manifest.yaml"
+SIGNATURE_MASK="tpl-MNI152NLin2009cAsym_res-02_desc-brain_mask.nii.gz"
 SIGNATURE_MAPS_JSON='[
   {"name":"NPS","path":"NPS/weights_NSF_grouppred_cvpcr.nii.gz"},
   {"name":"SIIPS1","path":"SIIPS1/nonnoc_v11_4_137subjmap_weighted_mean.nii.gz"}
@@ -413,6 +648,7 @@ COMMON_ARGS=(
   --set "study1.targets.signature_manifest_path=$SIGNATURE_MANIFEST"
   --set "study1.targets.signature_provenance.NPS.path=$NPS_MAP"
   --set "study1.targets.signature_provenance.SIIPS1.path=$SIIPS1_MAP"
+  --set "study1.targets.signature_scoring_mask_path=$SIGNATURE_MASK"
   "${SMOKE_EXTRA_ARGS[@]}"
   --set "study1.outputs.root_name=$STUDY1_RUN_ID"
 )

@@ -161,3 +161,36 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
         "Fp1",
         "Fp2",
     ]
+
+
+def test_feature_benchmark_siips1_residualization_includes_nps(tmp_path) -> None:
+    config = ConfigDict(load_study1_config())
+    config["paths"] = {"deriv_root": str(tmp_path / "derivatives")}
+    target_table_path = primary_targets_parquet_path(config)
+    target_table_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "subject_id": ["sub-0001", "sub-0001"],
+            "NPS": [1.0, 2.0],
+            "SIIPS1": [2.0, 3.0],
+            "block": [1, 1],
+            "onset": [10.0, 20.0],
+            "trial_index": [1, 2],
+            "within_block_trial": [1, 2],
+            "hrf_weighted_framewise_displacement": [0.1, 0.2],
+            "hrf_weighted_std_dvars": [0.5, 0.6],
+            "hrf_weighted_fp1_fp2_high_frequency_power": [1.1, 1.2],
+            "residual_ecg_coupling": [0.01, 0.02],
+            "stimulus_temp": [44.0, 46.0],
+            "selected_surface": [1.0, 2.0],
+            "stimulus_temp_level_46_0": [0.0, 1.0],
+            "selected_surface_level_2_0": [0.0, 1.0],
+        }
+    ).to_parquet(target_table_path)
+
+    feature_config = feature_benchmark_config(config, target_name="SIIPS1")
+
+    assert (
+        get_config_value(feature_config, "machine_learning.target_residualization.columns", None)
+        == [*LEVEL2_COLUMNS, "NPS"]
+    )

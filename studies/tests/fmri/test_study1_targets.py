@@ -13,8 +13,8 @@ import pytest
 
 from studies.tests.test_support import DotConfig
 
-NPS_MASK_HASH = "0" * 64
-SIIPS1_MASK_HASH = "1" * 64
+NPS_MASK_HASH = "a" * 64
+SIIPS1_MASK_HASH = "b" * 64
 
 
 def _base_config(root: Path) -> DotConfig:
@@ -536,6 +536,47 @@ def test_prepare_primary_targets_writes_wide_primary_table() -> None:
             SIIPS1_MASK_HASH,
             SIIPS1_MASK_HASH,
         ]
+
+
+def test_prepare_primary_targets_excludes_events_outside_configured_contrast() -> None:
+    from studies.pain_study.study1.targets import prepare_primary_targets
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        cfg = _base_config(root)
+        _write_signature_outputs(root, trial_count=3)
+        events = pd.DataFrame(
+            {
+                "block": [1, 1, 1],
+                "run_id": [1, 1, 1],
+                "trial_number": [1, 2, 3],
+                "pain_binary_coded": [1, -1, 0],
+                "onset": [22.150, 40.0, 65.084],
+                "duration": [0.001, 0.001, 0.001],
+            }
+        )
+
+        with (
+            patch(
+                "studies.pain_study.study1.targets.run_trial_signature_extraction_for_subject",
+                return_value={"output_dir": "ignored"},
+            ),
+            patch(
+                "studies.pain_study.study1.targets.load_events_df",
+                return_value=events,
+            ),
+        ):
+            out_path = prepare_primary_targets(
+                subjects=["0001"],
+                task="pain",
+                config=cfg,
+                logger=logging.getLogger(__name__),
+            )
+
+        frame = pd.read_parquet(out_path)
+        assert list(frame["trial_index"]) == [1, 3]
+        assert list(frame["NPS"]) == [1.1, 1.3]
+        assert list(frame["SIIPS1"]) == [2.1, 2.3]
 
 
 def test_prepare_primary_targets_aligns_signatures_by_acquisition_run_not_task_block() -> None:

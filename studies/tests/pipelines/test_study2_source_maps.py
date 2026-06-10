@@ -147,6 +147,40 @@ def test_compute_cohort_source_association_maps_stacks_eligible_subject_maps() -
     assert result.partial_r_maps[:, 1].max() < -0.95
 
 
+def test_compute_cohort_source_association_maps_aligns_source_power_by_trial_id() -> None:
+    from studies.pain_study.study2.config import load_study2_config
+    from studies.pain_study.study2.source_maps import (
+        compute_cohort_source_association_maps,
+    )
+
+    full_frame = _source_stage_frame().assign(
+        subject_id="sub-0001",
+        trial_id=np.arange(1, 67),
+    )
+    retained_frame = (
+        full_frame.loc[~full_frame["trial_id"].isin([4, 8, 12])]
+        .copy()
+        .reset_index(drop=True)
+    )
+    source_power = np.zeros((len(full_frame), 3), dtype=float)
+    retained_rows = retained_frame["trial_id"].to_numpy(dtype=int) - 1
+    source_power[retained_rows, :] = _source_power_from_column(
+        retained_frame["eta_combined_z"].to_numpy(dtype=float)
+    )
+
+    result = compute_cohort_source_association_maps(
+        retained_frame,
+        {"sub-0001": source_power},
+        band="alpha",
+        config=load_study2_config(),
+    )
+
+    assert result.subject_ids == ("sub-0001",)
+    assert result.partial_r_maps.shape == (1, 3)
+    assert result.partial_r_maps[0, 0] > 0.95
+    assert result.partial_r_maps[0, 1] < -0.95
+
+
 def test_compute_band_unique_cohort_source_association_maps_uses_band_scores() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_maps import (

@@ -17,6 +17,7 @@ def _config(root: Path) -> DotConfig:
         {
             "deriv_root": deriv_root,
             "paths": {"deriv_root": deriv_root},
+            "time_frequency_analysis": {"active_window": [3.0, 10.5]},
             "study1": {
                 "outputs": {"root_name": "study1"},
                 "targets": {"names": ["NPS", "SIIPS1"]},
@@ -29,6 +30,7 @@ def _config(root: Path) -> DotConfig:
                     "feature_baseline_window": None,
                     "windows": {"prestimulus_wide": [-5.0, -0.01]},
                     "wrong_lag_windows": {"ramp_up": [0.0, 3.0]},
+                    "plateau_windows": {"early_plateau": [3.0, 5.5]},
                 },
                 "deep_regression": {
                     "presets": {
@@ -585,7 +587,11 @@ def test_report_includes_temporal_control_metadata_and_holm_values(tmp_path) -> 
     root = _study1_root(cfg)
     _write_complete_outputs(root, cfg)
     for target in ("NPS", "SIIPS1"):
-        for feature_spec in ("temporal_prestimulus_wide", "temporal_ramp_up"):
+        for feature_spec in (
+            "temporal_prestimulus_wide",
+            "temporal_ramp_up",
+            "temporal_early_plateau",
+        ):
             _write_feature_summary(
                 root,
                 target,
@@ -600,8 +606,16 @@ def test_report_includes_temporal_control_metadata_and_holm_values(tmp_path) -> 
 
     assert not temporal.empty
     assert set(temporal["claim_tier"]) == {"exploratory"}
-    assert set(temporal["temporal_control_window"]) == {"prestimulus_wide", "ramp_up"}
-    assert set(temporal["temporal_control_kind"]) == {"prestimulus", "wrong_lag"}
+    assert set(temporal["temporal_control_window"]) == {
+        "prestimulus_wide",
+        "ramp_up",
+        "early_plateau",
+    }
+    assert set(temporal["temporal_control_kind"]) == {
+        "prestimulus",
+        "wrong_lag",
+        "plateau_sensitivity",
+    }
     assert pd.to_numeric(temporal["p_value_delta_r2_holm"], errors="coerce").notna().all()
 
 
@@ -653,3 +667,35 @@ def test_report_derives_temporal_negative_controls_failure(tmp_path) -> None:
     assert not primary_gate["temporal_negative_controls_passed"]
     flags = set(str(primary_gate["interpretation_flags"]).split(";"))
     assert "temporal_specificity_limited" in flags
+
+
+def test_report_ignores_plateau_sensitivity_for_temporal_negative_control_pass(tmp_path) -> None:
+    from studies.pain_study.study1.reporting import write_study1_report
+
+    cfg = _config(tmp_path)
+    root = _study1_root(cfg)
+    _write_complete_outputs(root, cfg)
+    for target in ("NPS", "SIIPS1"):
+        for feature_spec in ("temporal_prestimulus_wide", "temporal_ramp_up"):
+            _write_feature_summary(
+                root,
+                target,
+                feature_spec,
+                partition="temporal_control",
+                p_value_delta_r2=0.9,
+            )
+        _write_feature_summary(
+            root,
+            target,
+            "temporal_early_plateau",
+            partition="temporal_control",
+            p_value_delta_r2=0.0001,
+        )
+
+    report_path = write_study1_report(task="pain", config=cfg)
+    report = pd.read_csv(report_path, sep="\t")
+    primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
+
+    assert primary_gate["temporal_negative_controls_passed"]
+    flags = set(str(primary_gate["interpretation_flags"]).split(";"))
+    assert "temporal_specificity_limited" not in flags

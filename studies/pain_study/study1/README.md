@@ -26,7 +26,7 @@ The primary objective is to test whether plateau-window EEG spectral power acros
 and gamma bands predicts trial-wise NPS expression during simultaneous EEG-fMRI
 thermal stimulation beyond measured stimulus, acquisition, and physiological nuisance structure.
 The primary estimand is subject-held-out incremental prediction. Secondary objectives apply the
-same framework to SIIPS1 and to stimulus- and acquisition-controlled residualized targets.
+same staged incremental framework to SIIPS1, with NPS included in the SIIPS1 nuisance branch.
 Interpretation of any EEG result is conditional on a preregistered fMRI target-validity gate that
 is evaluated before EEG model interpretation.
 
@@ -67,11 +67,10 @@ Secondary confirmatory analyses evaluate the 2 targets (NPS, SIIPS1) × 2 linear
 (ElasticNet, Ridge) × 5 frequency presets (alpha, beta, gamma, alpha+beta,
 alpha+beta+gamma) grid on the individual-channel spectral-power matrix. Delta, theta,
 delta+theta, and all-band models are reported as exploratory low-frequency and broad-band audits.
-Holm correction (Holm, 1979) is applied separately to the secondary raw-target prediction family
-and the Level 2 residualized-target convergence family. ROI-level and global-average feature
-matrices are spatial-resolution sensitivities. Unadjusted Level 1 prediction, subjective-rating
-residualization, Random Forest, deep regression, exploratory feature families, and alternative
-designs are exploratory.
+The single primary gate is not corrected across this secondary grid. Holm correction (Holm, 1979)
+is applied to the secondary raw-target prediction family. ROI-level and global-average feature
+matrices, subjective-rating residualization, Random Forest, deep regression, exploratory feature
+families, and alternative designs are exploratory.
 
 ## 4. Study Design and Data Scope
 
@@ -197,9 +196,10 @@ The data are then downsampled from 5,000 Hz to 1,000 Hz and low-pass filtered (1
 
 Cardioballistic artifacts are subsequently removed in a two-step procedure (Allen et al., 1998).
 R-peaks are automatically detected from the ECG channel (45–80 bpm permitted range, 0.6 coherence
-threshold). Pulse-artifact templates are computed over 21 cardiac intervals (the current interval
-high-pass-filtered epochs. ICA spatial weights are then applied to the 0.1-100 Hz continuous
-analysis data. ICLabel (Pion-Tonachini et al., 2019) is used for component classification.
+threshold). Pulse-artifact templates are computed over 21 cardiac intervals and applied before
+export to MNE-Python. ICA is fit on preliminary 1.0 Hz high-pass-filtered epochs. ICA spatial
+weights are then applied to the 0.1-100 Hz continuous analysis data. ICLabel
+(Pion-Tonachini et al., 2019) is used for component classification.
 Components are rejected when their predicted probability exceeds 0.8 for any non-brain category
 other than "other."
 
@@ -380,12 +380,14 @@ rather than automated pass/fail gates on the primary prediction.
 Computed automatically by the report:
 
 - **Primary prediction gate.** $\Delta R^2_{\text{LOSO}} > 0$ with a one-sided permutation
-  p-value ≤ 0.05, Holm-corrected within the confirmatory family.
+  p-value ≤ 0.05 for the single prespecified primary cell. The report includes a Holm-adjusted
+  primary-gate field for schema consistency, but this field equals the raw primary p-value because
+  the primary family contains one test.
 - **Target-validity gate.** NPS relations with stimulus temperature and reported pain, the SIIPS1
   residual relation, and split-half reliability from 1,000 stratified within-cell splits with
   Spearman-Brown correction.
 - **Residual-target attainability and noise ceiling.** The fraction of target variance remaining
-  after the Level-2 nuisance design (`residual_target_variance_fraction`, one minus the in-sample
+  after the primary nuisance design (`residual_target_variance_fraction`, one minus the in-sample
   nuisance $R^2$) is reported per target. Together with the condition-level split-half reliability
   above, it bounds the staged-residual prediction gain a priori: a low residual fraction or low
   reliability caps the achievable $\Delta R^2$, so a null EEG result under either condition is
@@ -393,14 +395,18 @@ Computed automatically by the report:
   measurement, so its reliability is estimated at the reproducible condition level rather than per
   trial.
 - **Temporal negative controls.** Derived per target and model from the pre-stimulus and wrong-lag
-  control cells. A primary cell passes when no control window shows significant positive
-  incremental prediction, Holm-corrected over the temporal-control family. Targets without
-  evaluable control cells leave the diagnostic missing rather than passing.
+  control cells. Wrong-lag controls are constrained to the pre-plateau ramp-up interval so they do
+  not include the held-temperature plateau or ramp-down. A primary cell passes when no negative
+  control window shows significant positive incremental prediction, Holm-corrected over the
+  temporal-control family. Targets without evaluable control cells leave the diagnostic missing
+  rather than passing.
 
-Reported as sensitivity analyses (not automated gates on the primary prediction):
+Reported as sensitivity analyses and required before confirmatory Study 2 source interpretation:
 artifact-censoring robustness, HRF and timing, baseline-window, FWHM smoothing, first-exposure,
-within-subject centered $\Delta R^2$, and Level-2 incremental magnitude. The primary artifact
-control is the prespecified Level 2 nuisance design (Fp1/Fp2 exclusion plus HRF-weighted framewise
+within-subject centered $\Delta R^2$, and staged nuisance-adjusted incremental magnitude. Missing
+diagnostics are not treated as passing values; they keep Study 2 source entry in a not-evaluated or
+exploratory state until the corresponding sensitivity outputs are available. The primary artifact
+control is the prespecified nuisance design (Fp1/Fp2 exclusion plus HRF-weighted framewise
 displacement, standardized DVARS, Fp1/Fp2 high-frequency artifact power, and residual ECG
 coupling); censoring-based robustness is a confirmatory sensitivity run on the final cohort.
 
@@ -439,33 +445,33 @@ model; Donoghue et al., 2020), event-related desynchronization/synchronization, 
 hemispheric alpha asymmetry, nonlinear complexity, and oscillatory burst statistics. Each family is
 reported and Holm-corrected across tested target-model-frequency cells.
 
-## 8. Nuisance Structure and Residualization Levels
+## 8. Nuisance Structure and Residualization
 
-**Level 1 - Raw expression.** Models predict full NPS/SIIPS1 dot-product expression.
-
-**Level 2 - Stimulus- and acquisition-controlled expression.** Targets are residualized against an
-intercept, stimulus temperature, task-block index, trial onset time, within-block trial number,
-selected thermode surface, HRF-weighted framewise displacement, HRF-weighted standardized DVARS,
+The primary benchmark predicts raw NPS/SIIPS1 dot-product expression with staged nuisance control.
+The nuisance branch residualizes targets against an intercept, stimulus temperature, task-block
+index, trial onset time, within-block trial number, selected thermode surface, HRF-weighted
+framewise displacement, HRF-weighted standardized DVARS,
 HRF-weighted Fp1/Fp2 high-frequency artifact power, and residual ECG coupling from the dedicated
 ECG channel. Stimulus temperature and selected thermode surface enter as categorical regressors. A
 continuous nonlinear temperature basis is retained only as a sensitivity analysis. Binary pain
-condition is excluded.
+condition is excluded. For SIIPS1, NPS expression is additionally included in the nuisance branch so
+the incremental EEG term estimates SIIPS1 prediction beyond NPS.
 
-Level 2 tests whether EEG predicts fMRI signature expression beyond prespecified stimulus and
-acquisition structure.
+This staged estimator tests whether EEG predicts fMRI signature expression beyond prespecified
+stimulus and acquisition structure.
 
-**Level 3 - Rating-residualized sensitivity.** The Level 2 design is augmented with the binary pain
-report and within-scale thermal/pain intensity score, not the raw discontinuous 0 to 200 displayed
-rating. This level is interpreted as a construct-attenuation sensitivity analysis.
+Rating-residualized sensitivity analyses augment this nuisance design with the binary pain report
+and within-scale thermal/pain intensity score, not the raw discontinuous 0 to 200 displayed rating.
+These analyses are construct-attenuation sensitivities rather than part of the primary benchmark.
 
-The primary Level 2 design is fixed across LOSO folds. Before SVD fitting, rank is checked from the
+The primary nuisance design is fixed across LOSO folds. Before SVD fitting, rank is checked from the
 centered and scaled training-fold nuisance matrix. The design is full rank only when every
-non-intercept singular value satisfies $\sigma_j / \sigma_{\max} \ge 10^{-10}$. Cells with
-rank-deficient Level 2 designs in any outer training fold are ineligible for confirmatory
-interpretation. The continuous nonlinear temperature basis remains a sensitivity analysis.
+non-intercept singular value satisfies $\sigma_j / \sigma_{\max} \ge 10^{-10}$. Cells with a
+rank-deficient nuisance design in any outer training fold are ineligible for confirmatory
+interpretation.
 
-Within each level, nuisance coefficients are estimated exclusively on training subjects using
-SVD-based least squares.
+Within the staged estimator, nuisance coefficients are estimated exclusively on training subjects
+using SVD-based least squares.
 
 ## 9. Predictive Modeling
 
@@ -624,9 +630,12 @@ anticipatory top-down pain processes, so it is interpreted as temporal-specifici
 evidence rather than a pure failed negative control. For each target and window, the report includes
 $\Delta R^2_{\text{LOSO}}$, bootstrap confidence intervals, and Holm-corrected p-values.
 
-Wrong-lag windows are ramp-up ($0.0$-$3.0$ s), late ramp-down ($10.5$-$15.0$ s), early-shifted
-active ($1.0$-$8.5$ s), and late-shifted active ($5.0$-$12.5$ s). The temporal-control analysis
-repeats full inner GroupKFold hyperparameter selection for every pre-stimulus and wrong-lag window.
+The wrong-lag window is ramp-up ($0.0$-$3.0$ s), before the held-temperature plateau begins. Plateau
+sensitivity windows split the 7.5 s hold into early ($3.0$-$5.5$ s), mid ($5.5$-$8.0$ s), and late
+($8.0$-$10.5$ s) intervals. These plateau windows are response-period sensitivity analyses, not
+negative controls, and they are constrained to end at the plateau boundary so they do not include
+ramp-down. The temporal-control analysis repeats full inner GroupKFold hyperparameter selection for
+every configured pre-stimulus, wrong-lag, and plateau-sensitivity window.
 
 From these cells the report derives a per-target, per-model temporal-control verdict and applies it
 to the matching primary feature cells: the control passes when no pre-stimulus or wrong-lag window

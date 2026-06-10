@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -79,6 +80,80 @@ def test_sloreta_hilbert_logratio_power_processes_vertex_chunks(monkeypatch) -> 
     assert all(shape[0] == 2 for shape in hilbert_shapes)
     assert all(shape[1] <= 2 for shape in hilbert_shapes)
     assert all(shape[2] == times.size for shape in hilbert_shapes)
+
+
+def test_make_surface_source_morph_uses_configured_common_space(monkeypatch) -> None:
+    from studies.pain_study.study2 import source_power
+
+    calls: list[tuple[str, object]] = []
+    morphed_stc = SimpleNamespace(data=np.zeros((4, 3), dtype=float))
+
+    class FakeMorph:
+        def apply(self, stc):
+            calls.append(("apply", stc))
+            return morphed_stc
+
+    def fake_setup_source_space(subject, *, spacing, subjects_dir, add_dist, verbose):
+        calls.append(("setup", subject, spacing, subjects_dir, add_dist, verbose))
+        return "fsaverage-oct6-src"
+
+    def fake_compute_source_morph(
+        src,
+        *,
+        subject_from,
+        subject_to,
+        subjects_dir,
+        spacing,
+        src_to,
+        verbose,
+    ):
+        calls.append(
+            (
+                "morph",
+                src,
+                subject_from,
+                subject_to,
+                subjects_dir,
+                spacing,
+                src_to,
+                verbose,
+            )
+        )
+        return FakeMorph()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mne",
+        SimpleNamespace(
+            setup_source_space=fake_setup_source_space,
+            compute_source_morph=fake_compute_source_morph,
+        ),
+    )
+
+    morph = source_power.make_surface_source_morph(
+        reference_stc=SimpleNamespace(data=np.ones((2, 3), dtype=float)),
+        subject_from="sub-0001",
+        subject_to="fsaverage",
+        subjects_dir="/tmp/subjects",
+        spacing="oct6",
+    )
+    output = source_power.apply_source_morph(
+        [SimpleNamespace(data=np.ones((2, 3), dtype=float))],
+        morph=morph,
+    )
+
+    assert output == [morphed_stc]
+    assert calls[0] == ("setup", "fsaverage", "oct6", "/tmp/subjects", False, False)
+    assert calls[1][0] == "morph"
+    assert calls[1][2:] == (
+        "sub-0001",
+        "fsaverage",
+        "/tmp/subjects",
+        None,
+        "fsaverage-oct6-src",
+        False,
+    )
+    assert calls[2][0] == "apply"
 
 
 def test_sloreta_hilbert_logratio_power_rejects_missing_window_samples() -> None:

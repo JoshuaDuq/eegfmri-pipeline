@@ -30,7 +30,7 @@ from studies.pain_study.study1.prepare_features import (
 from studies.pain_study.study1.targets import (
     PRIMARY_SIGNATURES,
     nuisance_regression_enabled,
-    residualization_columns_for_target_table,
+    target_residualization_columns_for_target_table,
 )
 from studies.pain_study.study1.temporal_controls import (
     TEMPORAL_CONTROL_BANDS,
@@ -143,9 +143,10 @@ def feature_benchmark_config(
     )
     columns = (
         list(
-            residualization_columns_for_target_table(
+            target_residualization_columns_for_target_table(
                 config,
                 primary_targets_parquet_path(config),
+                target_name=target_name,
             )
         )
         if nuisance_regression_enabled(config)

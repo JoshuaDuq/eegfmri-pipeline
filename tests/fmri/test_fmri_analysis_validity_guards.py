@@ -1433,6 +1433,34 @@ def test_prepare_confounds_standardizes_retained_volumes_and_fills_censored_only
     np.testing.assert_allclose(prepared.iloc[0].to_numpy(dtype=float), [0.0, 0.0])
 
 
+def test_prepare_confounds_handles_read_only_column_arrays(monkeypatch) -> None:
+    confounds = pd.DataFrame(
+        {
+            "motion": [None, 2.0, 4.0, 6.0],
+            "rotation_power2": [None, 1e-8, 2e-8, 3e-8],
+        }
+    )
+    original_to_numpy = pd.Series.to_numpy
+
+    def read_only_to_numpy(series, *args, **kwargs):
+        values = original_to_numpy(series, *args, **kwargs)
+        values.setflags(write=False)
+        return values
+
+    monkeypatch.setattr(pd.Series, "to_numpy", read_only_to_numpy)
+
+    prepared = _prepare_confounds_for_first_level_model(
+        confounds,
+        sample_mask=np.array([1, 2, 3], dtype=int),
+    )
+
+    assert prepared is not None
+    retained = prepared.iloc[[1, 2, 3]]
+    np.testing.assert_allclose(retained.mean(axis=0).to_numpy(dtype=float), [0.0, 0.0], atol=1e-12)
+    np.testing.assert_allclose(retained.std(axis=0, ddof=0).to_numpy(dtype=float), [1.0, 1.0])
+    np.testing.assert_allclose(prepared.iloc[0].to_numpy(dtype=float), [0.0, 0.0])
+
+
 def test_trial_signature_config_rejects_invalid_method() -> None:
     cfg = TrialSignatureExtractionConfig(
         input_source="fmriprep",

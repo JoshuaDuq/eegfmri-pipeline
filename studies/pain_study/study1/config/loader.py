@@ -112,10 +112,26 @@ def _validate_temporal_negative_controls(config: dict[str, Any]) -> None:
         raise ValueError(
             "study1.temporal_negative_controls.wrong_lag_windows must be a non-empty mapping."
         )
+
+    plateau_start, plateau_end = _active_plateau_window(config)
     for name, window in wrong_lag_windows.items():
-        _validate_time_window(
+        _validate_pre_plateau_window(
             window,
             field_name=f"study1.temporal_negative_controls.wrong_lag_windows.{name}",
+            plateau_start=plateau_start,
+        )
+
+    plateau_windows = temporal_config.get("plateau_windows")
+    if not isinstance(plateau_windows, dict) or not plateau_windows:
+        raise ValueError(
+            "study1.temporal_negative_controls.plateau_windows must be a non-empty mapping."
+        )
+    for name, window in plateau_windows.items():
+        _validate_plateau_window(
+            window,
+            field_name=f"study1.temporal_negative_controls.plateau_windows.{name}",
+            plateau_start=plateau_start,
+            plateau_end=plateau_end,
         )
 
 
@@ -221,6 +237,43 @@ def _validate_prestimulus_window(value: Any, *, field_name: str) -> tuple[float,
     start, end = _validate_time_window(value, field_name=field_name)
     if end > 0.0:
         raise ValueError(f"{field_name} must be a pre-stimulus window ending at or before 0 s.")
+    return start, end
+
+
+def _active_plateau_window(config: dict[str, Any]) -> tuple[float, float]:
+    time_frequency = config.get("time_frequency_analysis")
+    if not isinstance(time_frequency, dict):
+        raise ValueError("time_frequency_analysis must be a mapping.")
+    return _validate_time_window(
+        time_frequency.get("active_window"),
+        field_name="time_frequency_analysis.active_window",
+    )
+
+
+def _validate_pre_plateau_window(
+    value: Any,
+    *,
+    field_name: str,
+    plateau_start: float,
+) -> tuple[float, float]:
+    start, end = _validate_time_window(value, field_name=field_name)
+    if start < 0.0 or end > plateau_start:
+        raise ValueError(
+            f"{field_name} must start at or after stimulus onset and end before the plateau starts."
+        )
+    return start, end
+
+
+def _validate_plateau_window(
+    value: Any,
+    *,
+    field_name: str,
+    plateau_start: float,
+    plateau_end: float,
+) -> tuple[float, float]:
+    start, end = _validate_time_window(value, field_name=field_name)
+    if start < plateau_start or end > plateau_end:
+        raise ValueError(f"{field_name} must be contained within the plateau.")
     return start, end
 
 

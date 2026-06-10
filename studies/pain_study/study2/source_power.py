@@ -140,6 +140,53 @@ def apply_sloreta_inverse(
     return list(stcs)
 
 
+def make_surface_source_morph(
+    *,
+    reference_stc: Any,
+    subject_from: str,
+    subject_to: str,
+    subjects_dir: str,
+    spacing: str,
+) -> Any:
+    """Build a surface morph into the configured common source space."""
+    subject_from_label = _non_empty_string(subject_from, name="subject_from")
+    subject_to_label = _non_empty_string(subject_to, name="subject_to")
+    subjects_dir_path = _non_empty_string(subjects_dir, name="subjects_dir")
+    spacing_name = _non_empty_string(spacing, name="source morph spacing")
+
+    import mne
+
+    target_source_space = mne.setup_source_space(
+        subject_to_label,
+        spacing=spacing_name,
+        subjects_dir=subjects_dir_path,
+        add_dist=False,
+        verbose=False,
+    )
+    return mne.compute_source_morph(
+        reference_stc,
+        subject_from=subject_from_label,
+        subject_to=subject_to_label,
+        subjects_dir=subjects_dir_path,
+        spacing=None,
+        src_to=target_source_space,
+        verbose=False,
+    )
+
+
+def apply_source_morph(
+    stcs: list[Any] | tuple[Any, ...],
+    *,
+    morph: Any,
+) -> list[Any]:
+    """Apply a precomputed surface morph to every trial source estimate."""
+    if not stcs:
+        raise ValueError("Study 2 source morph requires at least one STC.")
+    if morph is None:
+        raise ValueError("Study 2 source morph requires a morph object.")
+    return [morph.apply(stc) for stc in stcs]
+
+
 def compute_sloreta_source_estimates(
     *,
     epochs: Any,
@@ -246,6 +293,13 @@ def _positive_integer(value: object, *, name: str) -> int:
     return value
 
 
+def _non_empty_string(value: object, *, name: str) -> str:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        raise ValueError(f"Study 2 {name} must be a non-empty string.")
+    return text
+
+
 def _validate_stc_data(
     stcs: list[Any] | tuple[Any, ...],
     *,
@@ -296,10 +350,12 @@ def _compute_chunked_logratio_power(
 
 __all__ = [
     "SourcePowerExtraction",
+    "apply_source_morph",
     "apply_sloreta_inverse",
     "build_surface_forward_model",
     "compute_baseline_noise_covariance",
     "compute_sloreta_hilbert_logratio_power",
     "compute_sloreta_source_estimates",
+    "make_surface_source_morph",
     "make_sloreta_inverse_operator",
 ]

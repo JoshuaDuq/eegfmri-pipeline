@@ -703,7 +703,10 @@ def _build_fixed_categorical_design(
     dummies = pd.DataFrame(index=frame.index)
     for level in levels[1:]:
         dummy_column = _categorical_level_column(column, level)
-        dummies[dummy_column] = _level_membership(values, level).astype(float)
+        membership = _level_membership(values, level)
+        if not np.any(membership):
+            continue
+        dummies[dummy_column] = membership.astype(float)
     return dummies.reset_index(drop=True)
 
 

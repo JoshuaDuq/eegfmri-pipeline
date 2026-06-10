@@ -115,6 +115,37 @@ def test_run_gate_writes_ineligible_decision_with_failed_gates(tmp_path: Path) -
     assert payload["failed_gates"] == ["significant_positive_delta_r2"]
 
 
+def test_study1_capable_config_uses_study2_study1_root_name(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config["study2"]["inputs"] = {"study1_root_name": "study1_custom"}
+
+    merged = stages._study1_capable_config(config)
+
+    assert merged["study1"]["outputs"]["root_name"] == "study1_custom"
+    assert (
+        tmp_path / "group" / "multimodal" / "study1_custom"
+        in study1_model_comparison_path(merged).parents
+    )
+
+
+def test_target_permutations_required_inputs_use_study2_study1_root_name(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config["study2"]["inputs"] = {"study1_root_name": "study1_custom"}
+
+    required = target_permutations_required_inputs(_context(config, subjects=()))
+
+    assert (
+        tmp_path
+        / "group"
+        / "multimodal"
+        / "study1_custom"
+        / "feature_benchmark"
+        in required[1].parents
+    )
+
+
 def _with_anatomy(config: dict, subjects_dir: Path) -> dict:
     config["study2"]["source_modeling"]["anatomy"] = {
         "subjects_dir": str(subjects_dir),
@@ -158,6 +189,8 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
     monkeypatch.setattr(stages, "compute_baseline_noise_covariance", lambda *a, **k: object())
     monkeypatch.setattr(stages, "make_sloreta_inverse_operator", lambda **k: object())
     monkeypatch.setattr(stages, "apply_sloreta_inverse", lambda **k: stcs)
+    monkeypatch.setattr(stages, "make_surface_source_morph", lambda **k: object())
+    monkeypatch.setattr(stages, "apply_source_morph", lambda stcs, **k: stcs)
 
     run_source_power(_context(config, subjects=("sub-0000",)))
 
@@ -197,6 +230,7 @@ def test_run_source_stage_writes_band_maps_and_qc(tmp_path: Path) -> None:
 
 def test_target_permutations_required_inputs_lists_frame_power_and_model(tmp_path: Path) -> None:
     config = _config(tmp_path)
+    config["study2"]["inputs"] = {"study1_root_name": "study1"}
     subjects = ("sub-0001", "sub-0002")
 
     required = target_permutations_required_inputs(_context(config, subjects=subjects))
@@ -213,6 +247,7 @@ def test_target_permutations_required_inputs_lists_frame_power_and_model(tmp_pat
 
 def test_run_target_permutations_writes_null_maps_per_band(tmp_path: Path, monkeypatch) -> None:
     config = _config(tmp_path)
+    config["study2"]["inputs"] = {"study1_root_name": "study1"}
     frame = _cohort_source_stage_frame()
     paths.source_stage_dir(config).mkdir(parents=True, exist_ok=True)
     frame.to_csv(paths.source_stage_frame_path(config), sep="\t", index=False)

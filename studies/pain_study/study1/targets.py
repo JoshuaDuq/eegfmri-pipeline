@@ -28,6 +28,9 @@ from fmri_pipeline.analysis.trial_signatures import (
 from fmri_pipeline.utils.signature_paths import discover_signature_root_and_specs
 
 PRIMARY_SIGNATURES = ("NPS", "SIIPS1")
+TARGET_SPECIFIC_NUISANCE_COLUMNS = {
+    "SIIPS1": ("NPS",),
+}
 RAW_LEVEL2_ARTIFACT_COLUMNS = {
     "framewise_displacement": "hrf_weighted_framewise_displacement",
     "std_dvars": "hrf_weighted_std_dvars",
@@ -439,6 +442,44 @@ def residualization_columns_for_target_table(config: Any, table_path: Path) -> t
     return resolve_residualization_columns(frame=target_table, config=config)
 
 
+def target_residualization_columns_for_target_table(
+    config: Any,
+    table_path: Path,
+    *,
+    target_name: str,
+) -> tuple[str, ...]:
+    target_table = pd.read_parquet(table_path)
+    return resolve_target_residualization_columns(
+        frame=target_table,
+        config=config,
+        target_name=target_name,
+    )
+
+
+def resolve_target_residualization_columns(
+    *,
+    frame: pd.DataFrame,
+    config: Any,
+    target_name: str,
+) -> tuple[str, ...]:
+    columns = list(resolve_residualization_columns(frame=frame, config=config))
+    target = str(target_name).strip()
+    if target not in PRIMARY_SIGNATURES:
+        raise ValueError(f"Unsupported Study 1 target for residualization: {target_name!r}.")
+
+    for column in TARGET_SPECIFIC_NUISANCE_COLUMNS.get(target, ()):
+        if column not in frame.columns:
+            raise ValueError(
+                f"Study 1 target-specific nuisance column '{column}' is missing for {target}."
+            )
+        if column in columns:
+            raise ValueError(
+                f"Study 1 target-specific nuisance column '{column}' is duplicated for {target}."
+            )
+        columns.append(column)
+    return tuple(columns)
+
+
 def resolve_residualization_columns(*, frame: pd.DataFrame, config: Any) -> tuple[str, ...]:
     if not nuisance_regression_enabled(config):
         return tuple()
@@ -645,6 +686,59 @@ def _required_task_block(events_df: pd.DataFrame) -> pd.Series:
     return block
 
 
+def _condition_value_mask(series: pd.Series, configured_value: Any) -> pd.Series:
+    numeric_series = pd.to_numeric(series, errors="coerce")
+    try:
+        numeric_value = float(configured_value)
+    except (TypeError, ValueError):
+        numeric_value = np.nan
+    if np.isfinite(numeric_value):
+        return numeric_series == numeric_value
+    return series.astype(str).str.strip() == str(configured_value).strip()
+
+
+def _filter_events_to_configured_contrast(
+    *,
+    events_df: pd.DataFrame,
+    config: Any,
+    subject: str,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    condition_column = str(
+        require_config_value(config, "study1.targets.condition_a_column")
+    ).strip()
+    if not condition_column:
+        raise ValueError("study1.targets.condition_a_column must be a non-empty string.")
+    if condition_column not in events_df.columns:
+        raise ValueError(
+            f"Study 1 target preparation requires condition column '{condition_column}' "
+            "in clean EEG events."
+        )
+
+    condition_a = require_config_value(config, "study1.targets.condition_a_value")
+    condition_b = require_config_value(config, "study1.targets.condition_b_value")
+    keep = _condition_value_mask(events_df[condition_column], condition_a)
+    keep = keep | _condition_value_mask(events_df[condition_column], condition_b)
+    if not keep.any():
+        raise ValueError(
+            f"Study 1 target preparation found no clean EEG events matching "
+            f"{condition_column} values {condition_a!r} or {condition_b!r} for sub-{subject}."
+        )
+
+    excluded = int((~keep).sum())
+    if excluded:
+        logger.info(
+            "Subject sub-%s: Excluding %d clean EEG event(s) outside configured "
+            "Study 1 contrast %s in {%r, %r}.",
+            subject,
+            excluded,
+            condition_column,
+            condition_a,
+            condition_b,
+        )
+    return events_df.loc[keep].copy().reset_index(drop=True)
+
+
 def _parse_acquisition_run(series: pd.Series, *, column: str) -> pd.Series:
     numeric = pd.to_numeric(series, errors="coerce")
     if numeric.notna().all():
@@ -695,7 +789,7 @@ def _confound_timeseries(
     """
     if column not in confounds_df.columns:
         raise ValueError(f"Confounds TSV missing required column: {column}")
-    values = pd.to_numeric(confounds_df[column], errors="coerce").to_numpy(dtype=float)
+    values = pd.to_numeric(confounds_df[column], errors="coerce").to_numpy(dtype=float).copy()
     if values.size != n_scans:
         raise ValueError(
             f"Confounds column '{column}' has {values.size} rows but BOLD has {n_scans} volumes."
@@ -869,6 +963,12 @@ def _subject_target_rows(
             f"Clean events.tsv not found (or empty) for sub-{subject}, task-{task}."
         )
     events_df = events_df.reset_index(drop=True)
+    events_df = _filter_events_to_configured_contrast(
+        events_df=events_df,
+        config=config,
+        subject=subject,
+        logger=logger,
+    )
     events_df = _compute_convolved_nuisance_columns(
         subject=subject,
         task=task,
@@ -1101,4 +1201,6 @@ __all__ = [
     "prepare_primary_targets",
     "residualization_columns_for_target_table",
     "resolve_residualization_columns",
+    "resolve_target_residualization_columns",
+    "target_residualization_columns_for_target_table",
 ]

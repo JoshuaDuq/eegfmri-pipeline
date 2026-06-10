@@ -79,7 +79,7 @@ def test_evaluate_source_stage_subject_accepts_valid_combined_score_design() -> 
     assert qc.reason == ""
 
 
-def test_evaluate_source_stage_subject_uses_fixed_categorical_levels() -> None:
+def test_evaluate_source_stage_subject_omits_unobserved_fixed_levels() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
 
@@ -88,8 +88,8 @@ def test_evaluate_source_stage_subject_uses_fixed_categorical_levels() -> None:
 
     qc = evaluate_source_stage_subject(frame, config=load_study2_config())
 
-    assert qc.eligible is False
-    assert "rank deficient" in qc.reason
+    assert qc.eligible is True
+    assert qc.reason == ""
 
 
 def test_evaluate_source_stage_subject_rejects_raw_level2_artifact_columns() -> None:

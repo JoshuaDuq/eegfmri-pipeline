@@ -78,6 +78,8 @@ study2:
     erp_subtracted_power: "sensitivity_only"
     primary_inverse_method: "sLORETA"
     source_space_spacing: "oct6"
+    common_subject: "fsaverage"
+    common_source_space_spacing: "oct6"
     forward_mindist_mm: 5.0
     rank_excluded_channels:
       - "Fp1"

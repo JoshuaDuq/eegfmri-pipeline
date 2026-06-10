@@ -71,6 +71,8 @@ study1:
       prestimulus: [-1.0, -0.01]
     wrong_lag_windows:
       active: [1.0, 2.0]
+    plateau_windows:
+      early_plateau: [3.0, 5.5]
 time_frequency_analysis:
   baseline_window: [-5.0, -0.01]
   active_window: [3.0, 10.5]
