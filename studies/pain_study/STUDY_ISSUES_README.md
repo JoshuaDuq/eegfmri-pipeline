@@ -20,6 +20,21 @@ Follow-up:
 
 ## Issues
 
+### 2026-06-14 - `sub-0003` - Run 3 Used Wrong Temperature/Surface Sequence
+
+Study/stage: Study 1 and Study 2 trial eligibility.
+
+Issue: Run 3 was acquired with the run 1 sequence of stimulus temperatures and
+selected thermode surfaces instead of the intended run 3 sequence.
+
+Decision: Exclude run 3 for `sub-0003` from analyses that depend on the
+predefined run-specific temperature/surface order.
+
+Follow-up: Keep the run-level exclusion documented when regenerating Study 1 or
+Study 2 derivatives. Do not treat run 3 as a valid run 3 sequence unless a
+future written analysis plan explicitly defines a separate sensitivity analysis
+for duplicated sequence runs.
+
 ### 2026-06-09 - `sub-0000` - Invalid Study 2 BEM Surfaces
 
 Study/stage: Study 2 source localization, BEM/trans generation.

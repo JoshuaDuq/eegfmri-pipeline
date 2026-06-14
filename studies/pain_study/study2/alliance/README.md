@@ -123,9 +123,9 @@ The wrapper submits job arrays and dependencies in the correct order. It passes
 the Alliance account via `sbatch --account`, so `#SBATCH --account` is not
 hard-coded inside the scripts.
 
-`target-permutations` is submitted with a 72-hour walltime override because the
-configured null uses 1,000 valid target-retrained draws. After the first cohort
-run, use `sacct` `MaxRSS` and `Elapsed` to tune memory and walltime requests.
+`target-permutations` is submitted through Slurm with the walltime set in the
+wrapper. Keep it below the Trillium 24-hour compute limit. After the first
+cohort run, use `sacct` `MaxRSS` and `Elapsed` to tune walltime requests.
 
 ## Monitor and Audit
 
