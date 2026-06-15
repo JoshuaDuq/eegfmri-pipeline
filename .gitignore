@@ -91,7 +91,16 @@ output.json
 columns_sample.txt
 
 ### Local workflow state ###
-local_workflows/
+local_workflows/*
+!local_workflows/alliance_canada/
+local_workflows/alliance_canada/*
+!local_workflows/alliance_canada/alliance_env.sh
+!local_workflows/alliance_canada/build_upload_manifest.py
+!local_workflows/alliance_canada/fetch_fmriprep_outputs.sh
+!local_workflows/alliance_canada/fmriprep_array.sbatch
+!local_workflows/alliance_canada/prune_upload_root.py
+!local_workflows/alliance_canada/setup_python_and_container.sh
+!local_workflows/alliance_canada/submit_fmriprep_array.sh
 
 ### R ###
 .Rhistory

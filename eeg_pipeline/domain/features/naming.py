@@ -90,9 +90,13 @@ class NamingSchema:
         "high_beta",
         "low_gamma",
         "high_gamma",
+        "delta_alpha",
         "delta_theta",
         "alpha_beta",
         "alpha_beta_gamma",
+        "alpha_gamma",
+        "theta_alpha",
+        "theta_beta",
         "theta_gamma",
     })
 
@@ -120,7 +124,7 @@ class NamingSchema:
         if len(parts) < 2:
             return None
 
-        for band_start in range(len(parts) - 1, 0, -1):
+        for band_start in range(1, len(parts)):
             band = "_".join(parts[band_start:])
             if band in cls.KNOWN_BANDS:
                 return "_".join(parts[:band_start]), band
