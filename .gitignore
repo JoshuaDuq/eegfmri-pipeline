@@ -11,6 +11,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!studies/pain_study/study2/alliance/lib/
+!studies/pain_study/study2/alliance/lib/study2_alliance_common.sh
 lib64/
 parts/
 sdist/

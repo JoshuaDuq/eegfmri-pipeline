@@ -47,6 +47,25 @@ def test_study2_runtime_overrides_emit_parseable_path_templates():
     )
 
 
+def test_study2_runtime_overrides_require_subjects_dir():
+    script = f"""
+        set -euo pipefail
+        source "{ALLIANCE_ROOT / "lib" / "study2_alliance_common.sh"}"
+        STUDY1_OUTPUT_ROOT_NAME=study1
+        STUDY2_OUTPUT_ROOT_NAME=study2
+        study2_runtime_overrides
+    """
+    result = subprocess.run(
+        ["bash", "-lc", script],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr == "Missing required environment variable: STUDY2_SUBJECTS_DIR\n"
+
+
 def test_study2_alliance_defaults_match_bem_valid_oct6_source_space():
     alliance_env = REPO_ROOT / "local_workflows" / "alliance_canada" / "alliance_env.sh"
     env_example = ALLIANCE_ROOT / "study2_alliance.env.example"
@@ -85,6 +104,23 @@ def test_study2_subject_cli_args_preserve_bids_subject_labels(tmp_path):
         "--subject",
         "sub-0003",
     ]
+
+
+def test_study2_subject_cli_args_require_subjects_file():
+    script = f"""
+        set -euo pipefail
+        source "{ALLIANCE_ROOT / "lib" / "study2_alliance_common.sh"}"
+        study2_subject_cli_args
+    """
+    result = subprocess.run(
+        ["bash", "-lc", script],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr == "Missing required environment variable: STUDY2_SUBJECTS_FILE\n"
 
 
 def test_study2_adjacency_writes_to_runtime_output_root():

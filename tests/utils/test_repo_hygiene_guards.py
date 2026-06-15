@@ -43,6 +43,10 @@ REMOVED_WORKTREE_PATHS = (
     "paradigm-specific-scripts",
 )
 
+REQUIRED_SOURCE_CONTROL_PATHS = (
+    "studies/pain_study/study2/alliance/lib/study2_alliance_common.sh",
+)
+
 
 def _tracked_files() -> list[str]:
     proc = subprocess.run(
@@ -98,6 +102,24 @@ def test_removed_legacy_worktree_paths_do_not_exist() -> None:
         "Legacy pain-study worktree paths must not exist. "
         "Do not keep study-specific worktrees in the public repository.\n"
         f"Found: {present}"
+    )
+
+
+def test_required_source_control_paths_are_not_ignored() -> None:
+    ignored_paths = []
+    for path in REQUIRED_SOURCE_CONTROL_PATHS:
+        proc = subprocess.run(
+            ["git", "check-ignore", "-q", path],
+            cwd=str(REPO_ROOT),
+            check=False,
+        )
+        if proc.returncode == 0:
+            ignored_paths.append(path)
+
+    assert not ignored_paths, (
+        "Required source-control paths must not be ignored. "
+        "CI checks out only tracked, non-ignored project files.\n"
+        f"Found: {ignored_paths}"
     )
 
 
