@@ -11,7 +11,7 @@ def _target_frame() -> pd.DataFrame:
     for subject_id in ("sub-0001", "sub-0002"):
         blocks = (1, 2, 3, 4, 5, 6) if subject_id == "sub-0001" else (1, 2, 3, 5, 6)
         for block in blocks:
-            for trial in (1, 2, 3, 4, 5):
+            for trial in range(1, 12):
                 rows.append(
                     {
                         "subject_id": subject_id,
@@ -29,8 +29,8 @@ def _target_frame() -> pd.DataFrame:
                         "hrf_weighted_std_dvars": 1.0,
                         "hrf_weighted_fp1_fp2_high_frequency_power": 0.1,
                         "residual_ecg_coupling": 0.2,
-                        "stimulus_temp": 44.3 + trial,
-                        "selected_surface": trial,
+                        "stimulus_temp": 44.3 + ((trial - 1) % 5) + 1,
+                        "selected_surface": ((trial - 1) % 5) + 1,
                     }
                 )
     return pd.DataFrame(rows)
@@ -152,6 +152,7 @@ def test_subject_qc_summary_writes_machine_and_human_readable_outputs(tmp_path: 
     rows = {row["subject_id"]: row for row in summary.subject_rows}
     assert rows["sub-0001"]["study1_flag"] == "PASS"
     assert rows["sub-0001"]["study1_missing_runs"] == ""
+    assert rows["sub-0001"]["study1_incomplete_runs"] == ""
     assert rows["sub-0001"]["study1_stimulus_temperatures"] == 5
     assert rows["sub-0001"]["study1_selected_surfaces"] == 5
     assert rows["sub-0001"]["temporal_flag"] == "PASS"
@@ -227,3 +228,15 @@ def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
 
     assert summary.subject_rows[0]["study2_flag"] == "FAIL"
     assert "Source-stage QC differs across bands" in summary.subject_rows[0]["study2_note"]
+
+
+def test_incomplete_run_summary_uses_design_trial_count() -> None:
+    from studies.pain_study.scripts.study_subject_qc_summary import (
+        incomplete_run_summary,
+    )
+
+    uniformly_truncated_runs = pd.Series([run for run in range(1, 7) for _ in range(5)])
+
+    assert incomplete_run_summary(uniformly_truncated_runs) == (
+        "1:5, 2:5, 3:5, 4:5, 5:5, 6:5"
+    )

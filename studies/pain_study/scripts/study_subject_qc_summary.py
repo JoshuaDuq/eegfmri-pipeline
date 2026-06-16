@@ -24,6 +24,7 @@ TEMPORAL_WINDOWS = (
 TEMPORAL_MODELS = ("elasticnet", "ridge")
 SOURCE_BANDS = ("alpha", "beta", "gamma")
 EXPECTED_STUDY1_RUNS = tuple(range(1, 7))
+EXPECTED_STUDY1_TRIALS_PER_RUN = 11
 
 
 @dataclass(frozen=True)
@@ -694,11 +695,10 @@ def incomplete_run_summary(values: pd.Series) -> str:
     counts = values.value_counts().sort_index()
     if counts.empty:
         return ""
-    max_count = int(counts.max())
     incomplete = [
         f"{int(run)}:{int(count)}"
         for run, count in counts.items()
-        if int(count) < max_count
+        if int(count) < EXPECTED_STUDY1_TRIALS_PER_RUN
     ]
     return ", ".join(incomplete)
 
