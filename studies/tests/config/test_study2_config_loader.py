@@ -88,7 +88,6 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     assert artifact_controls["sensor_template_abs_r_threshold"] == 0.80
     assert artifact_controls["source_artifact_map_abs_r_threshold"] == 0.50
     assert artifact_controls["holm_alpha"] == 0.05
-    assert artifact_controls["gamma_requires_artifact_survival"] is True
 
     directional = config["study2"]["directional_consistency"]
     assert directional["min_true_target_spatial_r"] == 0.20

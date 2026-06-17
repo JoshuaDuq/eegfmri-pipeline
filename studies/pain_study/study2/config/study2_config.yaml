@@ -118,7 +118,6 @@ study2:
     sensor_template_abs_r_threshold: 0.80
     source_artifact_map_abs_r_threshold: 0.50
     holm_alpha: 0.05
-    gamma_requires_artifact_survival: true
   directional_consistency:
     min_true_target_spatial_r: 0.20
     min_cluster_same_sign_fraction: 0.60

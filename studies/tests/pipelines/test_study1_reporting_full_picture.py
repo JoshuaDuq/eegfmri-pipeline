@@ -230,13 +230,7 @@ def test_report_writes_full_picture_bundle(tmp_path, monkeypatch) -> None:
     report = pd.read_csv(report_path, sep="\t")
     full_picture_root = report_path.parent / "full_picture"
 
-    temporal_interpretations = dict(
-        zip(report["target"], report["temporal_control_interpretation"])
-    )
-    assert temporal_interpretations == {
-        "NPS": "negative_control_for_evoked_nociceptive_expression",
-        "SIIPS1": "temporal_specificity_or_anticipatory_control",
-    }
+    assert "temporal_control_interpretation" not in report.columns
 
     assert (full_picture_root / "full_picture_manifest.json").exists()
     assert (full_picture_root / "primary_feature_model_summary.tsv").exists()
@@ -244,22 +238,21 @@ def test_report_writes_full_picture_bundle(tmp_path, monkeypatch) -> None:
     assert (full_picture_root / "model_leaderboard_by_delta_r2.tsv").exists()
     assert (full_picture_root / "target_by_stimulus_temp.tsv").exists()
     assert (full_picture_root / "target_by_subject_and_stimulus_temp.tsv").exists()
-    assert (full_picture_root / "target_validity_gate.tsv").exists()
+    assert (full_picture_root / "target_qc_metrics.tsv").exists()
 
     by_temp = pd.read_csv(full_picture_root / "target_by_stimulus_temp.tsv", sep="\t")
     assert by_temp["stimulus_temp"].tolist() == [45.3, 49.3]
     assert by_temp["mean_NPS"].tolist() == [1.6, 5.6]
     assert by_temp["mean_SIIPS1"].tolist() == [157.5, 557.5]
 
-    validity = pd.read_csv(full_picture_root / "target_validity_gate.tsv", sep="\t")
-    assert set(validity["target"]) == {"NPS", "SIIPS1"}
-    assert set(validity["target_interpretation_status"]) == {"mechanistic_interpretation_supported"}
-    nps = validity.loc[validity["target"] == "NPS"].iloc[0]
-    assert nps["expected_construct_relation"] == "temperature_and_rating"
-    siips1 = validity.loc[validity["target"] == "SIIPS1"].iloc[0]
-    assert siips1["expected_construct_relation"] == "rating_beyond_temperature_and_nps"
+    target_qc = pd.read_csv(full_picture_root / "target_qc_metrics.tsv", sep="\t")
+    assert set(target_qc["target"]) == {"NPS", "SIIPS1"}
+    assert "target_interpretation" not in target_qc.columns
+    assert "validity_limitations" not in target_qc.columns
+    assert "expected_construct_relation" not in target_qc.columns
+    assert "scope_sensitivity" not in target_qc.columns
+    siips1 = target_qc.loc[target_qc["target"] == "SIIPS1"].iloc[0]
     assert siips1["siips1_rating_beyond_temperature_nps_r"] > 0.0
-    assert siips1["scope_sensitivity"] == "painful_trials_only_required"
 
 
 def test_report_compares_configured_sensitivity_roots(tmp_path, monkeypatch) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from studies.pain_study.study2.config import load_study2_config
-from studies.pain_study.study2.gates import evaluate_study1_confirmatory_gates
+from studies.pain_study.study2.gates import evaluate_study1_confirmatory_criteria
 
 
 def _passing_study1_metrics() -> dict[str, object]:
@@ -23,11 +23,10 @@ def _passing_study1_metrics() -> dict[str, object]:
 def test_study2_confirmatory_gates_accept_study1_report_metrics() -> None:
     config = load_study2_config()
 
-    qc = evaluate_study1_confirmatory_gates(_passing_study1_metrics(), config)
+    qc = evaluate_study1_confirmatory_criteria(_passing_study1_metrics(), config)
 
-    assert qc.confirmatory_eligible is True
-    assert qc.failed_gates == ()
-    assert qc.reason == "all Study 1 gates passed"
+    assert qc.confirmatory_criteria_met is True
+    assert qc.unmet_criteria == ()
 
 
 def test_study2_confirmatory_gates_report_failed_required_prediction_gate() -> None:
@@ -39,11 +38,10 @@ def test_study2_confirmatory_gates_report_failed_required_prediction_gate() -> N
         }
     )
 
-    qc = evaluate_study1_confirmatory_gates(metrics, config)
+    qc = evaluate_study1_confirmatory_criteria(metrics, config)
 
-    assert qc.confirmatory_eligible is False
-    assert qc.failed_gates == ("significant_positive_delta_r2",)
-    assert qc.reason == "failed Study 1 gates: significant_positive_delta_r2"
+    assert qc.confirmatory_criteria_met is False
+    assert qc.unmet_criteria == ("significant_positive_delta_r2",)
 
 
 def test_study2_confirmatory_gates_require_configured_level2_metric() -> None:
@@ -52,7 +50,7 @@ def test_study2_confirmatory_gates_require_configured_level2_metric() -> None:
     del metrics["level2_mean_delta_r2"]
 
     with pytest.raises(ValueError, match="level2_mean_delta_r2"):
-        evaluate_study1_confirmatory_gates(metrics, config)
+        evaluate_study1_confirmatory_criteria(metrics, config)
 
 
 def test_study2_confirmatory_gates_require_configured_boolean_control_flags() -> None:
@@ -61,7 +59,7 @@ def test_study2_confirmatory_gates_require_configured_boolean_control_flags() ->
     metrics["temporal_negative_controls_passed"] = 1
 
     with pytest.raises(TypeError, match="temporal_negative_controls_passed"):
-        evaluate_study1_confirmatory_gates(metrics, config)
+        evaluate_study1_confirmatory_criteria(metrics, config)
 
 
 def test_study2_confirmatory_gates_require_configured_lower_ci_metric() -> None:
@@ -70,7 +68,7 @@ def test_study2_confirmatory_gates_require_configured_lower_ci_metric() -> None:
     del metrics["ci_low_delta_r2"]
 
     with pytest.raises(ValueError, match="ci_low_delta_r2"):
-        evaluate_study1_confirmatory_gates(metrics, config)
+        evaluate_study1_confirmatory_criteria(metrics, config)
 
 
 def test_study2_confirmatory_gates_report_target_reliability_failure() -> None:
@@ -78,10 +76,10 @@ def test_study2_confirmatory_gates_report_target_reliability_failure() -> None:
     metrics = _passing_study1_metrics()
     metrics["target_split_half_reliability"] = 0.39
 
-    qc = evaluate_study1_confirmatory_gates(metrics, config)
+    qc = evaluate_study1_confirmatory_criteria(metrics, config)
 
-    assert qc.confirmatory_eligible is False
-    assert qc.failed_gates == ("target_split_half_reliability",)
+    assert qc.confirmatory_criteria_met is False
+    assert qc.unmet_criteria == ("target_split_half_reliability",)
 
 
 def test_study2_confirmatory_gates_require_reliability_trial_count() -> None:
@@ -90,7 +88,7 @@ def test_study2_confirmatory_gates_require_reliability_trial_count() -> None:
     del metrics["target_reliability_n_trials"]
 
     with pytest.raises(ValueError, match="target_reliability_n_trials"):
-        evaluate_study1_confirmatory_gates(metrics, config)
+        evaluate_study1_confirmatory_criteria(metrics, config)
 
 
 def test_study2_confirmatory_gates_report_reliability_trial_count_failure() -> None:
@@ -98,7 +96,7 @@ def test_study2_confirmatory_gates_report_reliability_trial_count_failure() -> N
     metrics = _passing_study1_metrics()
     metrics["target_reliability_n_trials"] = 29
 
-    qc = evaluate_study1_confirmatory_gates(metrics, config)
+    qc = evaluate_study1_confirmatory_criteria(metrics, config)
 
-    assert qc.confirmatory_eligible is False
-    assert qc.failed_gates == ("target_reliability_n_trials",)
+    assert qc.confirmatory_criteria_met is False
+    assert qc.unmet_criteria == ("target_reliability_n_trials",)

@@ -19,8 +19,8 @@ The workflow submits these stages:
    digitization points.
 3. Dense source-space adjacency for the Study 2 cluster test.
 4. Per-subject sLORETA source-power extraction for alpha, beta, and gamma.
-5. Study 2 gate, source-stage association maps, target-retrained null maps, and
-   source-family inference.
+5. Study 2 confirmatory criteria, source-stage association maps,
+   target-retrained null maps, and source-family inference.
 
 The scripts fail if required inputs are missing. They do not create identity
 transforms or silently substitute anatomy.

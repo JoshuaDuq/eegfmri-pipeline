@@ -49,8 +49,13 @@ def test_write_study1_report_writes_article_tables(tmp_path: Path) -> None:
         "model",
         "mean_delta_r2",
         "p_value_delta_r2_holm",
-        "primary_prediction_status",
     }.issubset(model_table.columns)
+    assert not {
+        "primary_prediction_interpretation",
+        "temporal_control_interpretation",
+        "interpretation_limitations",
+        "study2_source_entry_interpretation",
+    }.intersection(model_table.columns)
     assert len(model_table) == len(PRIMARY_SIGNATURES) * len(PRIMARY_BAND_PRESETS) * len(
         FEATURE_MODELS
     )

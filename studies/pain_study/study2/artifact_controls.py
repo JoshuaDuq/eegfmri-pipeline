@@ -1,4 +1,4 @@
-"""Artifact and robustness interpretation gates for Study 2."""
+"""Artifact and robustness criteria for Study 2."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from typing import Any
 from studies.pain_study.study2.statistics import holm_q_values
 from studies.pain_study.study2.validation import (
     finite_number,
-    require_config_bool,
     require_config_float,
 )
 
@@ -17,16 +16,15 @@ from studies.pain_study.study2.validation import (
 @dataclass(frozen=True)
 class ArtifactControlQC:
     band: str
-    contaminated: bool
-    interpretation: str
-    failed_gates: tuple[str, ...]
+    artifact_control_criteria_met: bool
+    unmet_criteria: tuple[str, ...]
     expression_q_values: dict[str, float]
 
 
 @dataclass(frozen=True)
 class RobustnessQC:
-    passed: bool
-    failed_gates: tuple[str, ...]
+    robustness_criteria_met: bool
+    unmet_criteria: tuple[str, ...]
 
 
 def evaluate_artifact_controls(
@@ -50,35 +48,22 @@ def evaluate_artifact_controls(
         "study2.artifact_controls.source_artifact_map_abs_r_threshold",
     )
     alpha = require_config_float(config, "study2.artifact_controls.holm_alpha")
-    gamma_requires_survival = require_config_bool(
-        config,
-        "study2.artifact_controls.gamma_requires_artifact_survival",
-    )
-
     sensor_values = _finite_mapping(sensor_template_abs_r, name="sensor artifact templates")
     source_values = _finite_mapping(source_artifact_map_abs_r, name="source artifact maps")
     expression_q_values = holm_q_values(expression_p_values)
 
-    failed: list[str] = []
+    unmet_criteria: list[str] = []
     if sensor_values and max(sensor_values.values()) > sensor_threshold:
-        failed.append("sensor_artifact_template")
+        unmet_criteria.append("sensor_artifact_template")
     if source_values and max(source_values.values()) > source_threshold:
-        failed.append("source_artifact_template")
+        unmet_criteria.append("source_artifact_template")
     if expression_q_values and min(expression_q_values.values()) <= alpha:
-        failed.append("artifact_expression")
-
-    contaminated = bool(failed)
-    interpretation = "confirmatory_interpretable"
-    if contaminated:
-        interpretation = "artifact_contaminated"
-    if band_name == "gamma" and contaminated and gamma_requires_survival:
-        interpretation = "exploratory_artifact_contaminated"
+        unmet_criteria.append("artifact_expression")
 
     return ArtifactControlQC(
         band=band_name,
-        contaminated=contaminated,
-        interpretation=interpretation,
-        failed_gates=tuple(failed),
+        artifact_control_criteria_met=not unmet_criteria,
+        unmet_criteria=tuple(unmet_criteria),
         expression_q_values=expression_q_values,
     )
 
@@ -104,18 +89,21 @@ def evaluate_robustness_summary(
     dice = _finite_float(cluster_dice, "cluster_dice")
     displacement = _finite_float(centroid_displacement_mm, "centroid_displacement_mm")
 
-    failed: list[str] = []
+    unmet_criteria: list[str] = []
     if not significance_retained:
-        failed.append("significance_retained")
+        unmet_criteria.append("significance_retained")
     if not sign_retained:
-        failed.append("sign_retained")
+        unmet_criteria.append("sign_retained")
     if spatial_r < min_spatial_r:
-        failed.append("unthresholded_spatial_r")
+        unmet_criteria.append("unthresholded_spatial_r")
     if dice < min_dice:
-        failed.append("cluster_dice")
+        unmet_criteria.append("cluster_dice")
     if displacement > max_displacement:
-        failed.append("centroid_displacement")
-    return RobustnessQC(passed=not failed, failed_gates=tuple(failed))
+        unmet_criteria.append("centroid_displacement")
+    return RobustnessQC(
+        robustness_criteria_met=not unmet_criteria,
+        unmet_criteria=tuple(unmet_criteria),
+    )
 
 
 def _finite_mapping(values: Mapping[str, object], *, name: str) -> dict[str, float]:

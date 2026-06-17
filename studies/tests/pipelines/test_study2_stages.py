@@ -92,27 +92,27 @@ def _write_study1_report(config: dict, *, overrides: dict[str, object]) -> None:
     pd.DataFrame([row]).to_csv(report_path, sep="\t", index=False)
 
 
-def test_run_gate_writes_eligible_decision(tmp_path: Path) -> None:
+def test_run_gate_writes_confirmatory_criteria(tmp_path: Path) -> None:
     config = _config(tmp_path)
     _write_study1_report(config, overrides={})
 
     run_gate(_context(config, subjects=()))
 
     payload = json.loads(paths.gate_qc_path(config).read_text())
-    assert payload["confirmatory_eligible"] is True
-    assert payload["failed_gates"] == []
-    assert payload["reason"] == "all Study 1 gates passed"
+    assert set(payload) == {"confirmatory_criteria_met", "unmet_criteria"}
+    assert payload["confirmatory_criteria_met"] is True
+    assert payload["unmet_criteria"] == []
 
 
-def test_run_gate_writes_ineligible_decision_with_failed_gates(tmp_path: Path) -> None:
+def test_run_gate_writes_unmet_confirmatory_criteria(tmp_path: Path) -> None:
     config = _config(tmp_path)
     _write_study1_report(config, overrides={"p_value_delta_r2_holm": 0.5})
 
     run_gate(_context(config, subjects=()))
 
     payload = json.loads(paths.gate_qc_path(config).read_text())
-    assert payload["confirmatory_eligible"] is False
-    assert payload["failed_gates"] == ["significant_positive_delta_r2"]
+    assert payload["confirmatory_criteria_met"] is False
+    assert payload["unmet_criteria"] == ["significant_positive_delta_r2"]
 
 
 def test_study1_capable_config_uses_study2_study1_root_name(tmp_path: Path) -> None:
@@ -346,7 +346,7 @@ def test_run_haufe_writes_sensor_pattern_outputs(tmp_path: Path) -> None:
     assert summary[["n_observations", "n_features"]].iloc[0].tolist() == [4, 2]
 
 
-def test_run_source_model_qc_writes_subject_decisions(tmp_path: Path) -> None:
+def test_run_source_model_qc_writes_subject_criteria(tmp_path: Path) -> None:
     config = _config(tmp_path)
     paths.source_model_dir(config).mkdir(parents=True)
     pd.DataFrame(
@@ -387,9 +387,17 @@ def test_run_source_model_qc_writes_subject_decisions(tmp_path: Path) -> None:
     run_source_model_qc(_context(config, subjects=()))
 
     qc = pd.read_csv(paths.source_model_qc_path(config), sep="\t")
+    assert qc.columns.tolist() == [
+        "subject_id",
+        "source_model_criteria_met",
+        "valid_eeg_channel_location_fraction",
+        "mean_coregistration_error_mm",
+        "max_coregistration_error_mm",
+        "unmet_criteria",
+    ]
     assert qc["subject_id"].tolist() == ["sub-0001", "sub-0002"]
-    assert qc["eligible"].tolist() == [True, False]
-    assert "valid_eeg_channel_locations" in qc.loc[1, "failed_criteria"]
+    assert qc["source_model_criteria_met"].tolist() == [True, False]
+    assert "valid_eeg_channel_locations" in qc.loc[1, "unmet_criteria"]
 
 
 def test_run_point_spread_writes_resolution_summary(tmp_path: Path) -> None:
@@ -427,11 +435,18 @@ def test_run_directional_consistency_writes_band_summary(tmp_path: Path) -> None
     run_directional_consistency(_context(config, subjects=()))
 
     summary = pd.read_csv(paths.directional_consistency_summary_path(config), sep="\t")
+    assert summary.columns.tolist() == [
+        "band",
+        "spatial_r",
+        "same_sign_fraction",
+        "directional_criteria_met",
+        "unmet_criteria",
+    ]
     assert summary["band"].tolist() == ["alpha", "beta", "gamma"]
-    assert summary["passed"].tolist() == [True, True, True]
+    assert summary["directional_criteria_met"].tolist() == [True, True, True]
 
 
-def test_run_artifact_controls_writes_interpretation_summary(tmp_path: Path) -> None:
+def test_run_artifact_controls_writes_criteria_summary(tmp_path: Path) -> None:
     config = _config(tmp_path)
     paths.diagnostics_dir(config).mkdir(parents=True)
     pd.DataFrame(
@@ -460,12 +475,19 @@ def test_run_artifact_controls_writes_interpretation_summary(tmp_path: Path) -> 
     run_artifact_controls(_context(config, subjects=()))
 
     summary = pd.read_csv(paths.artifact_controls_summary_path(config), sep="\t")
+    assert summary.columns.tolist() == [
+        "band",
+        "artifact_control_criteria_met",
+        "unmet_criteria",
+        "expression_q_values",
+    ]
     assert summary.loc[0, "band"] == "gamma"
-    assert summary.loc[0, "contaminated"] is True or bool(summary.loc[0, "contaminated"])
-    assert summary.loc[0, "interpretation"] == "exploratory_artifact_contaminated"
+    assert bool(summary.loc[0, "artifact_control_criteria_met"]) is False
+    assert "source_artifact_template" in summary.loc[0, "unmet_criteria"]
+    assert "artifact_expression" in summary.loc[0, "unmet_criteria"]
 
 
-def test_run_robustness_writes_pass_fail_summary(tmp_path: Path) -> None:
+def test_run_robustness_writes_criteria_summary(tmp_path: Path) -> None:
     config = _config(tmp_path)
     paths.diagnostics_dir(config).mkdir(parents=True)
     pd.DataFrame(
@@ -488,8 +510,13 @@ def test_run_robustness_writes_pass_fail_summary(tmp_path: Path) -> None:
     run_robustness(_context(config, subjects=()))
 
     summary = pd.read_csv(paths.robustness_summary_path(config), sep="\t")
+    assert summary.columns.tolist() == [
+        "band",
+        "robustness_criteria_met",
+        "unmet_criteria",
+    ]
     assert summary.loc[0, "band"] == "alpha"
-    assert bool(summary.loc[0, "passed"]) is True
+    assert bool(summary.loc[0, "robustness_criteria_met"]) is True
 
 
 def test_run_spatial_correspondence_writes_band_results(tmp_path: Path) -> None:

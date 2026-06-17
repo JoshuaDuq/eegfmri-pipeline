@@ -1,4 +1,4 @@
-"""Study 2 source-interpretation orchestration entrypoint.
+"""Study 2 source-space analysis orchestration entrypoint.
 
 A declarative stage table is the single source of truth for both single-stage
 runs and the ``all`` sequence. Before each stage the runner verifies that the
@@ -138,7 +138,7 @@ STUDY2_STAGES: tuple[Study2Stage, ...] = (
 
 
 class Study2Runner:
-    """Stage dispatcher for Study 2 source interpretation."""
+    """Stage dispatcher for Study 2 source-space analyses."""
 
     def __init__(
         self,

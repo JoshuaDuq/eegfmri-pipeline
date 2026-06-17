@@ -1,4 +1,4 @@
-"""Study 2 source-model fixed exclusion rules."""
+"""Study 2 source-model fixed QC criteria."""
 
 from __future__ import annotations
 
@@ -15,12 +15,11 @@ from studies.pain_study.study2.validation import (
 @dataclass(frozen=True)
 class SourceModelQC:
     subject_id: str
-    eligible: bool
+    source_model_criteria_met: bool
     valid_eeg_channel_location_fraction: float
     mean_coregistration_error_mm: float
     max_coregistration_error_mm: float
-    failed_gates: tuple[str, ...]
-    reason: str
+    unmet_criteria: tuple[str, ...]
 
 
 def evaluate_source_model_qc(
@@ -82,37 +81,36 @@ def evaluate_source_model_qc(
         max_coreg_error=max_coreg_error,
     )
 
-    failed_gates: list[str] = []
+    unmet_criteria: list[str] = []
     if not freesurfer_passed:
-        failed_gates.append("freesurfer_visual_qc")
+        unmet_criteria.append("freesurfer_visual_qc")
     if not bem_succeeded:
-        failed_gates.append("boundary_element_model")
+        unmet_criteria.append("boundary_element_model")
     if not has_measured_electrodes:
-        failed_gates.append("subject_specific_electrode_positions")
+        unmet_criteria.append("subject_specific_electrode_positions")
     if uses_template_electrodes:
-        failed_gates.append("template_electrode_coordinates")
+        unmet_criteria.append("template_electrode_coordinates")
     if valid_location_fraction < min_location_fraction:
-        failed_gates.append("valid_eeg_channel_locations")
+        unmet_criteria.append("valid_eeg_channel_locations")
     if mean_coreg_error > max_mean_error:
-        failed_gates.append("mean_coregistration_error")
+        unmet_criteria.append("mean_coregistration_error")
     if max_coreg_error > max_error:
-        failed_gates.append("max_coregistration_error")
+        unmet_criteria.append("max_coregistration_error")
     if not forward_solution_valid:
-        failed_gates.append("forward_solution")
+        unmet_criteria.append("forward_solution")
     if forward_rank_deficient:
-        failed_gates.append("forward_solution_rank")
+        unmet_criteria.append("forward_solution_rank")
     if not morph_succeeded:
-        failed_gates.append("morph_to_fsaverage")
+        unmet_criteria.append("morph_to_fsaverage")
 
-    failed = tuple(failed_gates)
+    unmet = tuple(unmet_criteria)
     return SourceModelQC(
         subject_id=subject_label,
-        eligible=not failed,
+        source_model_criteria_met=not unmet,
         valid_eeg_channel_location_fraction=valid_location_fraction,
         mean_coregistration_error_mm=mean_coreg_error,
         max_coregistration_error_mm=max_coreg_error,
-        failed_gates=failed,
-        reason="" if not failed else f"failed source-model QC gates: {', '.join(failed)}",
+        unmet_criteria=unmet,
     )
 
 

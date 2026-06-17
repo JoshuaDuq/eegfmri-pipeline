@@ -359,31 +359,23 @@ halves contain finite values for every included subject-by-temperature cell. Val
 insufficient retained trials, or inability to generate valid stratified splits qualify biological
 interpretation of the corresponding signature target.
 
-### 6.1 Target-Validity Gate
+### 6.1 Target QC Metrics
 
-The fMRI signature targets are validated in the retained Study 1 data before EEG prediction is
-interpreted mechanistically. NPS must show the expected positive relationship with stimulus
-temperature and reported pain. SIIPS1 must show positive association with pain ratings after
-accounting for stimulus temperature and NPS expression. For both targets, split-half reliability is
-reported before EEG feature inspection. If a target fails these checks, EEG prediction of that
-target is reported as a technical prediction result rather than evidence about pain mechanisms.
+The report writes retained Study 1 target metrics before EEG feature inspection. For both
+targets, the table includes retained-trial counts, subject counts, stimulus-temperature
+correlations, pain-rating correlations, and split-half reliability values.
 
-The report stage writes `reports/full_picture/target_validity_gate.tsv` with each target's
-construct relation, validity flags, reliability readout, and interpretation status.
+The report stage writes `reports/full_picture/target_qc_metrics.tsv`.
 
-### 6.2 Interpretation Diagnostics: Computed Gates and Sensitivity Analyses
+### 6.2 Reported QC Metrics and Sensitivity Analyses
 
-Interpretation diagnostics fall into two classes. The report computes the first class
-automatically and treats the second class as sensitivity analyses reported on the final cohort
-rather than automated pass/fail gates on the primary prediction.
+The report records the following metrics without deriving automatic interpretation columns:
 
-Computed automatically by the report:
-
-- **Primary prediction gate.** $\Delta R^2_{\text{LOSO}} > 0$ with a one-sided permutation
-  p-value ≤ 0.05 for the single prespecified primary cell. The report includes a Holm-adjusted
+- **Primary prediction metrics.** $\Delta R^2_{\text{LOSO}}$ and the one-sided permutation
+  p-value for the single prespecified primary cell. The report includes a Holm-adjusted
   primary-gate field for schema consistency, but this field equals the raw primary p-value because
   the primary family contains one test.
-- **Target-validity gate.** NPS relations with stimulus temperature and reported pain, the SIIPS1
+- **Target QC metrics.** NPS relations with stimulus temperature and reported pain, the SIIPS1
   residual relation, and split-half reliability from 1,000 stratified within-cell splits with
   Spearman-Brown correction.
 - **Residual-target attainability and noise ceiling.** The fraction of target variance remaining
@@ -394,26 +386,16 @@ Computed automatically by the report:
   uninformative rather than evidence of absence. Single-trial signature expression has no repeated
   measurement, so its reliability is estimated at the reproducible condition level rather than per
   trial.
-- **Temporal negative controls.** Derived per target and model from the pre-stimulus and wrong-lag
-  control cells. Wrong-lag controls are constrained to the pre-plateau ramp-up interval so they do
-  not include the held-temperature plateau or ramp-down. A primary cell passes when no negative
-  control window shows significant positive incremental prediction, Holm-corrected over the
-  temporal-control family. Targets without evaluable control cells leave the diagnostic missing
-  rather than passing.
+- **Temporal negative controls.** Reported per target and model from the pre-stimulus and
+  wrong-lag control cells. Wrong-lag controls are constrained to the pre-plateau ramp-up interval
+  so they do not include the held-temperature plateau or ramp-down.
 
-Reported as sensitivity analyses and required before confirmatory Study 2 source interpretation:
+Reported as sensitivity analyses:
 artifact-censoring robustness, HRF and timing, baseline-window, FWHM smoothing, first-exposure,
-within-subject centered $\Delta R^2$, and staged nuisance-adjusted incremental magnitude. Missing
-diagnostics are not treated as passing values; they keep Study 2 source entry in a not-evaluated or
-exploratory state until the corresponding sensitivity outputs are available. The primary artifact
+within-subject centered $\Delta R^2$, and staged nuisance-adjusted incremental magnitude. The primary artifact
 control is the prespecified nuisance design (Fp1/Fp2 exclusion plus HRF-weighted framewise
 displacement, standardized DVARS, Fp1/Fp2 high-frequency artifact power, and residual ECG
 coupling); censoring-based robustness is a confirmatory sensitivity run on the final cohort.
-
-A primary-gate target enters Study 2 source-level interpretation as confirmatory only when the
-primary prediction is positive, the computed gates pass, and the sensitivity analyses are complete
-and support the primary result. Until the sensitivity diagnostics are available, the report marks
-source entry as not-yet-evaluated rather than confirmatory; this conservative status is intentional.
 
 ## 7. EEG Feature Construction
 
@@ -636,10 +618,6 @@ sensitivity windows split the 7.5 s hold into early ($3.0$-$5.5$ s), mid ($5.5$-
 negative controls, and they are constrained to end at the plateau boundary so they do not include
 ramp-down. The temporal-control analysis repeats full inner GroupKFold hyperparameter selection for
 every configured pre-stimulus, wrong-lag, and plateau-sensitivity window.
-
-From these cells the report derives a per-target, per-model temporal-control verdict and applies it
-to the matching primary feature cells: the control passes when no pre-stimulus or wrong-lag window
-shows significant positive incremental prediction over the temporal-control family.
 
 ### 11.3 Reference-Power Sensitivity
 

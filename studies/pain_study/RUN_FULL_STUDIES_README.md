@@ -16,8 +16,8 @@ Study 1 predicts trialwise fMRI pain-signature expression from EEG features.
 Study 2 tests source-space EEG associations using the Study 1 prediction-derived
 score.
 
-Study 2 depends on Study 1. Do not start Study 2 interpretation until the Study
-1 report exists.
+Study 2 depends on Study 1. Do not start Study 2 until the Study 1 report
+exists.
 
 ## Current Subjects
 
@@ -530,7 +530,7 @@ cat "$STUDY2_ROOT/inference/source_family_summary.tsv"
 
 After Study 1 and Study 2 have finished, generate the subject-level QC package.
 This writes machine-readable TSV files and a Markdown summary. It does not write
-group-level p values, clusters, or interpretation.
+group-level p values, clusters, or automatic interpretation labels.
 
 ```bash
 cd /project/def-mpcoll/joshduq/EEG_fMRI_Pipeline
@@ -570,6 +570,7 @@ Expected files:
 
 - `subject_qc_summary.tsv`
 - `subject_temporal_qc.tsv`
+- `subject_timing_alignment_qc.tsv`
 - `signature_mask_qc.tsv`
 - `qc_completeness.tsv`
 - `subject_qc_summary.md`
@@ -611,16 +612,16 @@ cat "$STUDY2_ROOT/inference/source_family_summary.tsv"
 cat "$STUDY2_ROOT/source_stage/qc_alpha.tsv"
 ```
 
-## Interpretation Rules
+## QC Checklist
 
-Before interpreting:
+Before reporting results:
 
 1. Every Slurm job in the chain must be `COMPLETED` with `ExitCode 0:0`.
 2. Study 1 report rows must show the intended `n_perm_completed`.
 3. Study 2 `source_family_summary.tsv` must show the intended `n_permutations`.
 4. Smoke runs are only path and dependency checks.
-5. If the Study 1 primary gate does not pass, Study 2 source interpretation is
-   exploratory even when source maps exist.
+5. Study 2 `gate/gate_qc.json` must be checked for `confirmatory_criteria_met`
+   and `unmet_criteria`.
 6. If Study 2 has fewer than the intended source-valid subjects, report the
    source-stage QC table and do not overinterpret source localization.
 

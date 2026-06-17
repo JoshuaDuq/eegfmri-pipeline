@@ -14,7 +14,7 @@ def test_real_data_smoke_requires_explicit_gate_override(tmp_path: Path) -> None
 
     derivatives_root = _write_smoke_derivatives(tmp_path)
 
-    with pytest.raises(RuntimeError, match="failed Study 1 gates"):
+    with pytest.raises(RuntimeError, match="unmet Study 1 criteria"):
         run_real_data_smoke(
             derivatives_root=derivatives_root,
             output_dir=tmp_path / "outputs",
@@ -43,9 +43,9 @@ def test_real_data_smoke_runs_with_recorded_gate_override(tmp_path: Path) -> Non
 
     summary = pd.read_json(result.summary_path, typ="series")
     assert summary["gate_override_applied"] is True
-    assert "significant_positive_delta_r2" in summary["study1_failed_gates"]
-    assert "practical_effect_delta_r2" in summary["study1_failed_gates"]
-    assert "practical_effect_lower_ci" in summary["study1_failed_gates"]
+    assert "significant_positive_delta_r2" in summary["study1_unmet_criteria"]
+    assert "practical_effect_delta_r2" in summary["study1_unmet_criteria"]
+    assert "practical_effect_lower_ci" in summary["study1_unmet_criteria"]
 
     family_summary = pd.read_csv(result.family_summary_path, sep="\t")
     assert family_summary["band"].tolist() == ["alpha", "beta", "gamma"]

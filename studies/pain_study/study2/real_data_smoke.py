@@ -20,7 +20,7 @@ import pandas as pd
 from eeg_pipeline.utils.config.loader import get_config_value
 from studies.pain_study.study2.config import load_study2_config
 from studies.pain_study.study2.gates import (
-    evaluate_study1_confirmatory_gates,
+    evaluate_study1_confirmatory_criteria,
     load_study1_confirmatory_row,
 )
 from studies.pain_study.study2.source_family import (
@@ -79,9 +79,10 @@ def run_real_data_smoke(
     targets_path = derivatives_path / PRIMARY_TARGETS_RELATIVE_PATH
 
     study1_row = load_study1_confirmatory_row(report_path, config=config)
-    study1_gate_qc = evaluate_study1_confirmatory_gates(study1_row, config)
-    if not study1_gate_qc.confirmatory_eligible and not force_gate_override:
-        raise RuntimeError(study1_gate_qc.reason)
+    study1_gate_qc = evaluate_study1_confirmatory_criteria(study1_row, config)
+    if not study1_gate_qc.confirmatory_criteria_met and not force_gate_override:
+        unmet_criteria = ", ".join(study1_gate_qc.unmet_criteria)
+        raise RuntimeError(f"unmet Study 1 criteria: {unmet_criteria}")
 
     targets = _load_primary_targets(targets_path)
     requested_subject_ids = _requested_subject_ids(targets, max_subjects=max_subjects)
@@ -482,11 +483,11 @@ def _write_summary(
         "output_dir": str(output_dir),
         "study1_report_path": str(report_path),
         "primary_targets_path": str(targets_path),
-        "study1_gate_confirmatory_eligible": study1_gate_qc.confirmatory_eligible,
-        "study1_failed_gates": list(study1_gate_qc.failed_gates),
+        "study1_confirmatory_criteria_met": study1_gate_qc.confirmatory_criteria_met,
+        "study1_unmet_criteria": list(study1_gate_qc.unmet_criteria),
         "gate_override_requested": force_gate_override,
         "gate_override_applied": bool(
-            force_gate_override and not study1_gate_qc.confirmatory_eligible
+            force_gate_override and not study1_gate_qc.confirmatory_criteria_met
         ),
         "source_localization_input_status": (
             "no_precomputed_source_maps_found; "

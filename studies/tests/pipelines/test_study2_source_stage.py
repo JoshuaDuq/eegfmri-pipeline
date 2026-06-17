@@ -235,9 +235,9 @@ def test_evaluate_source_stage_cohort_accepts_enough_source_valid_subjects() -> 
 
     assert qc["eligible"].tolist() == [True, True]
     assert status.band == "combined"
-    assert status.confirmatory_eligible is True
+    assert status.confirmatory_cohort_criteria_met is True
     assert status.n_source_valid_subjects == 2
-    assert status.reason == ""
+    assert status.unmet_criteria == ()
 
 
 def test_evaluate_source_stage_cohort_downgrades_for_too_few_valid_subjects() -> None:
@@ -258,10 +258,10 @@ def test_evaluate_source_stage_cohort_downgrades_for_too_few_valid_subjects() ->
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, False]
-    assert status.confirmatory_eligible is False
-    assert status.feasibility_eligible is False
+    assert status.confirmatory_cohort_criteria_met is False
+    assert status.feasibility_cohort_criteria_met is False
     assert status.n_source_valid_subjects == 1
-    assert "fewer than 2" in status.reason
+    assert status.unmet_criteria == ("min_feasibility_subjects",)
 
 
 def test_evaluate_source_stage_cohort_marks_feasibility_limited_tier() -> None:
@@ -284,10 +284,10 @@ def test_evaluate_source_stage_cohort_marks_feasibility_limited_tier() -> None:
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, True]
-    assert status.confirmatory_eligible is False
-    assert status.feasibility_eligible is True
+    assert status.confirmatory_cohort_criteria_met is False
+    assert status.feasibility_cohort_criteria_met is True
     assert status.n_source_valid_subjects == 2
-    assert "fewer than 3 confirmatory source-valid subjects" in status.reason
+    assert status.unmet_criteria == ("min_source_valid_subjects",)
 
 
 def test_evaluate_source_stage_cohort_downgrades_for_collinearity_failure_fraction() -> None:
@@ -309,10 +309,10 @@ def test_evaluate_source_stage_cohort_downgrades_for_collinearity_failure_fracti
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, True, False]
-    assert status.confirmatory_eligible is False
+    assert status.confirmatory_cohort_criteria_met is False
     assert status.n_source_valid_subjects == 2
     assert status.collinearity_failure_fraction == pytest.approx(1 / 3)
-    assert "collinearity failure fraction" in status.reason
+    assert status.unmet_criteria == ("max_collinearity_failure_fraction",)
 
 
 def test_evaluate_source_stage_cohort_collinearity_fraction_uses_otherwise_valid_subjects() -> None:
@@ -336,10 +336,10 @@ def test_evaluate_source_stage_cohort_collinearity_fraction_uses_otherwise_valid
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
     assert qc["eligible"].tolist() == [True, True, False, False, False]
-    assert status.confirmatory_eligible is False
+    assert status.confirmatory_cohort_criteria_met is False
     assert status.n_source_valid_subjects == 2
     assert status.collinearity_failure_fraction == pytest.approx(1 / 3)
-    assert "collinearity failure fraction" in status.reason
+    assert status.unmet_criteria == ("max_collinearity_failure_fraction",)
 
 
 def test_evaluate_band_unique_source_stage_cohort_counts_adjacent_band_failures() -> None:
@@ -364,6 +364,6 @@ def test_evaluate_band_unique_source_stage_cohort_counts_adjacent_band_failures(
 
     assert qc["eligible"].tolist() == [True, True, False]
     assert status.band == "alpha"
-    assert status.confirmatory_eligible is False
+    assert status.confirmatory_cohort_criteria_met is False
     assert status.collinearity_failure_fraction == pytest.approx(1 / 3)
-    assert "collinearity failure fraction" in status.reason
+    assert status.unmet_criteria == ("max_collinearity_failure_fraction",)

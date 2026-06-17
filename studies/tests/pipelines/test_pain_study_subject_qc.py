@@ -114,6 +114,41 @@ def _source_qc_frame() -> pd.DataFrame:
     )
 
 
+def _timing_alignment_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "subject_id": "sub-0001",
+                "n_target_trials": 66,
+                "n_fmri_plateau_events": 66,
+                "n_lss_plateau_trials": 66,
+                "n_unmatched_target_trials": 0,
+                "n_missing_fmri_plateau_events": 0,
+                "n_invalid_fmri_plateau_events": 0,
+                "n_missing_lss_plateau_trials": 0,
+                "n_invalid_lss_plateau_trials": 0,
+                "n_missing_temporal_feature_rows": 0,
+                "max_abs_fmri_plateau_start_delta_s": 0.003,
+                "max_abs_lss_plateau_start_delta_s": 0.003,
+            },
+            {
+                "subject_id": "sub-0002",
+                "n_target_trials": 55,
+                "n_fmri_plateau_events": 55,
+                "n_lss_plateau_trials": 54,
+                "n_unmatched_target_trials": 0,
+                "n_missing_fmri_plateau_events": 0,
+                "n_invalid_fmri_plateau_events": 0,
+                "n_missing_lss_plateau_trials": 1,
+                "n_invalid_lss_plateau_trials": 1,
+                "n_missing_temporal_feature_rows": 0,
+                "max_abs_fmri_plateau_start_delta_s": 0.004,
+                "max_abs_lss_plateau_start_delta_s": 0.004,
+            },
+        ]
+    )
+
+
 def test_subject_qc_summary_writes_machine_and_human_readable_outputs(tmp_path: Path) -> None:
     from studies.pain_study.scripts.study_subject_qc_summary import (
         SourcePowerShape,
@@ -128,6 +163,7 @@ def test_subject_qc_summary_writes_machine_and_human_readable_outputs(tmp_path: 
         primary_model=_model_frame(),
         gamma_model=_model_frame(),
         temporal_models=_temporal_frames(),
+        timing_alignment=_timing_alignment_frame(),
         study2_source_qc={"alpha": _source_qc_frame()},
         study2_source_input=pd.DataFrame(
             [
@@ -150,23 +186,28 @@ def test_subject_qc_summary_writes_machine_and_human_readable_outputs(tmp_path: 
     summary = build_subject_qc(inputs)
 
     rows = {row["subject_id"]: row for row in summary.subject_rows}
-    assert rows["sub-0001"]["study1_flag"] == "PASS"
     assert rows["sub-0001"]["study1_missing_runs"] == ""
     assert rows["sub-0001"]["study1_incomplete_runs"] == ""
     assert rows["sub-0001"]["study1_stimulus_temperatures"] == 5
     assert rows["sub-0001"]["study1_selected_surfaces"] == 5
-    assert rows["sub-0001"]["temporal_flag"] == "PASS"
-    assert rows["sub-0001"]["study2_flag"] == "PASS"
-    assert rows["sub-0002"]["study1_flag"] == "WARNING"
     assert rows["sub-0002"]["study1_missing_runs"] == "4"
-    assert rows["sub-0002"]["temporal_flag"] == "WARNING"
-    assert rows["sub-0002"]["study2_flag"] == "FAIL"
-    assert rows["sub-0003"]["study1_flag"] == "FAIL"
+    assert not {
+        "overall_classification",
+        "study1_classification",
+        "study1_note",
+        "timing_alignment_classification",
+        "timing_alignment_note",
+        "temporal_classification",
+        "temporal_note",
+        "study2_classification",
+        "study2_note",
+    }.intersection(rows["sub-0001"])
     assert len(summary.temporal_rows) == 6
+    assert len(summary.timing_alignment_rows) == 3
     assert len(summary.completeness_rows) == 4
     assert any(
         row["qc_category"] == "eeg_fmri_alignment_residuals"
-        and row["availability"] == "NOT_RECORDED"
+        and row["availability"] == "recorded"
         for row in summary.completeness_rows
     )
 
@@ -174,13 +215,18 @@ def test_subject_qc_summary_writes_machine_and_human_readable_outputs(tmp_path: 
 
     subject_tsv = tmp_path / "subject_qc_summary.tsv"
     temporal_tsv = tmp_path / "subject_temporal_qc.tsv"
+    timing_tsv = tmp_path / "subject_timing_alignment_qc.tsv"
     completeness_tsv = tmp_path / "qc_completeness.tsv"
     markdown = tmp_path / "subject_qc_summary.md"
     assert subject_tsv.exists()
     assert temporal_tsv.exists()
+    assert timing_tsv.exists()
     assert completeness_tsv.exists()
     assert markdown.exists()
-    assert "sub-0001" in markdown.read_text()
+    markdown_text = markdown.read_text()
+    assert "sub-0001" in markdown_text
+    assert "Timing Alignment QC" in markdown_text
+    assert "classification" not in markdown_text
 
 
 def test_subject_qc_summary_rejects_missing_required_columns() -> None:
@@ -201,7 +247,7 @@ def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
 
     beta_qc = _source_qc_frame().copy()
     beta_qc.loc[beta_qc["subject_id"] == "sub-0001", "eligible"] = False
-    beta_qc.loc[beta_qc["subject_id"] == "sub-0001", "reason"] = "beta failed"
+    beta_qc.loc[beta_qc["subject_id"] == "sub-0001", "reason"] = "beta exclusion"
 
     inputs = SubjectQcInputs(
         subjects=("sub-0001",),
@@ -209,6 +255,7 @@ def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
         primary_model=_model_frame(),
         gamma_model=_model_frame(),
         temporal_models=_temporal_frames(),
+        timing_alignment=_timing_alignment_frame(),
         study2_source_qc={"alpha": _source_qc_frame(), "beta": beta_qc},
         study2_source_input=pd.DataFrame(
             [
@@ -226,8 +273,10 @@ def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
 
     summary = build_subject_qc(inputs)
 
-    assert summary.subject_rows[0]["study2_flag"] == "FAIL"
-    assert "Source-stage QC differs across bands" in summary.subject_rows[0]["study2_note"]
+    row = summary.subject_rows[0]
+    assert "study2_classification" not in row
+    assert "study2_note" not in row
+    assert row["study2_qc_bands_consistent"] is False
 
 
 def test_incomplete_run_summary_uses_design_trial_count() -> None:

@@ -1,4 +1,4 @@
-"""Filesystem layout for Study 2 source-interpretation artifacts.
+"""Filesystem layout for Study 2 source-space analysis artifacts.
 
 Stages hand off through these paths: each stage reads upstream artifacts and
 writes its own, so the layout is the single contract between stages and the

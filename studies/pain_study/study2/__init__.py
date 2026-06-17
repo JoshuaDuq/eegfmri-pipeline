@@ -1,4 +1,4 @@
-"""Study 2: source interpretation of NPS-predictive EEG activity."""
+"""Study 2: source-space analyses of NPS-predictive EEG activity."""
 
 from studies.pain_study.study2.association import (
     SourcePowerAssociationMap,
@@ -23,8 +23,8 @@ from studies.pain_study.study2.directional_consistency import (
     evaluate_directional_consistency,
 )
 from studies.pain_study.study2.gates import (
-    Study1ConfirmatoryGateQC,
-    evaluate_study1_confirmatory_gates,
+    Study1ConfirmatoryCriteriaQC,
+    evaluate_study1_confirmatory_criteria,
 )
 from studies.pain_study.study2.haufe import (
     HaufePattern,
@@ -115,7 +115,7 @@ __all__ = [
     "SourceCluster",
     "SourceModelQC",
     "SpatialCorrespondenceResult",
-    "Study1ConfirmatoryGateQC",
+    "Study1ConfirmatoryCriteriaQC",
     "Study2ImplementationComponent",
     "SubjectSourceAssociationResult",
     "SourceStageAssociationInputs",
@@ -140,7 +140,7 @@ __all__ = [
     "evaluate_artifact_controls",
     "evaluate_robustness_summary",
     "evaluate_directional_consistency",
-    "evaluate_study1_confirmatory_gates",
+    "evaluate_study1_confirmatory_criteria",
     "evaluate_source_model_qc",
     "evaluate_band_unique_source_stage_cohort",
     "evaluate_band_unique_source_stage_subject",

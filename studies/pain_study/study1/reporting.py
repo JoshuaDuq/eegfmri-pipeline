@@ -26,7 +26,6 @@ from studies.pain_study.study1.targets import (
 )
 from studies.pain_study.study1.temporal_controls import (
     TEMPORAL_NEGATIVE_CONTROL_KINDS,
-    TEMPORAL_PLATEAU_SENSITIVITY_KIND,
     TEMPORAL_CONTROL_PARTITION,
     temporal_control_window_for_feature_spec,
 )
@@ -64,23 +63,9 @@ INTERPRETATION_DIAGNOSTIC_FIELDS = (
     "baseline_robustness_passed",
     "smoothing_robustness_passed",
 )
-SOURCE_ENTRY_DIAGNOSTIC_FIELDS = (
-    "target_split_half_reliability",
-    "target_reliability_n_trials",
-    "level2_mean_delta_r2",
-    "within_subject_centered_delta_r2",
-    "temporal_negative_controls_passed",
-    "artifact_censoring_robustness_passed",
-)
 SPLIT_HALF_RELIABILITY_N_SPLITS = 1000
 SPLIT_HALF_RELIABILITY_SEED = 42
 PRIMARY_P_VALUE_ALPHA = 0.05
-SOURCE_ENTRY_MIN_DELTA_R2 = 0.02
-SOURCE_ENTRY_MIN_DELTA_R2_LOWER_CI = 0.005
-SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2 = 0.005
-SOURCE_ENTRY_MIN_TARGET_RELIABILITY = 0.4
-MIN_TARGET_RELIABILITY_TRIALS = 30
-MIN_TARGET_VALIDITY_RELIABILITY_CELLS = 3
 ARTICLE_MODEL_COLUMNS = (
     "target",
     "claim_tier",
@@ -96,10 +81,6 @@ ARTICLE_MODEL_COLUMNS = (
     "n_perm_completed",
     "n_folds",
     "n_subjects_included",
-    "primary_prediction_status",
-    "temporal_control_interpretation",
-    "interpretation_flags",
-    "study2_source_entry_status",
 )
 ARTICLE_REQUIRED_TARGET_COLUMNS = (
     "subject_id",
@@ -144,10 +125,6 @@ FULL_PICTURE_MODEL_COLUMNS = (
     "n_perm_completed",
     "n_folds",
     "n_subjects_included",
-    "primary_prediction_status",
-    "temporal_control_interpretation",
-    "interpretation_flags",
-    "study2_source_entry_status",
     "summary_path",
 )
 SENSITIVITY_MODEL_COLUMNS = (
@@ -255,146 +232,14 @@ def _optional_float(record: pd.Series, field: str) -> float | None:
     return float(numeric)
 
 
-def _optional_bool(record: pd.Series, field: str) -> bool | None:
-    value = record.get(field)
-    if _is_missing(value):
-        return None
-    if isinstance(value, bool):
-        return value
-    raise TypeError(f"Study 1 report diagnostic field '{field}' must be boolean.")
-
-
-def _primary_prediction_status(record: pd.Series) -> str:
-    if str(record.get("claim_tier", "")) != "primary_gate":
-        return "not_primary_gate"
-
-    delta_r2 = _optional_float(record, "mean_delta_r2")
-    p_value = _optional_float(record, "p_value_delta_r2_holm")
-    if delta_r2 is None or p_value is None:
-        return "primary_prediction_not_evaluated"
-    if delta_r2 > 0.0 and p_value <= PRIMARY_P_VALUE_ALPHA:
-        return "primary_prediction_positive"
-    return "primary_prediction_not_supported"
-
-
-def _missing_interpretation_diagnostics(record: pd.Series) -> str:
-    if str(record.get("lane", "")) != "feature_benchmark":
-        return "not_applicable"
-    missing = [
-        field
-        for field in INTERPRETATION_DIAGNOSTIC_FIELDS
-        if field not in record.index or _is_missing(record.get(field))
-    ]
-    return _join_labels(missing)
-
-
-def _interpretation_flags(record: pd.Series) -> str:
-    if str(record.get("lane", "")) != "feature_benchmark":
-        return "not_applicable"
-
-    flags: list[str] = []
-    target_reliability = _optional_float(record, "target_split_half_reliability")
-    reliability_trials = _optional_float(record, "target_reliability_n_trials")
-    if (
-        target_reliability is not None and target_reliability < SOURCE_ENTRY_MIN_TARGET_RELIABILITY
-    ) or (reliability_trials is not None and reliability_trials < MIN_TARGET_RELIABILITY_TRIALS):
-        flags.append("target_reliability_limited")
-
-    precision_passed = _optional_bool(record, "precision_flag_passed")
-    if precision_passed is False:
-        flags.append("precision_limited")
-
-    level2_delta_r2 = _optional_float(record, "level2_mean_delta_r2")
-    if level2_delta_r2 is not None and level2_delta_r2 < SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2:
-        flags.append("level2_convergence_limited")
-
-    within_subject_delta_r2 = _optional_float(record, "within_subject_centered_delta_r2")
-    if within_subject_delta_r2 is not None and within_subject_delta_r2 <= 0.0:
-        flags.append("within_subject_tracking_limited")
-
-    temporal_passed = _optional_bool(record, "temporal_negative_controls_passed")
-    if temporal_passed is False:
-        flags.append("temporal_specificity_limited")
-
-    artifact_passed = _optional_bool(record, "artifact_censoring_robustness_passed")
-    if artifact_passed is False:
-        flags.append("artifact_robustness_limited")
-
-    robustness_fields = (
-        ("hrf_timing_robustness_passed", "hrf_timing_robustness_limited"),
-        ("first_exposure_robustness_passed", "first_exposure_robustness_limited"),
-        ("baseline_robustness_passed", "baseline_robustness_limited"),
-        ("smoothing_robustness_passed", "smoothing_robustness_limited"),
-    )
-    for field, flag in robustness_fields:
-        passed = _optional_bool(record, field)
-        if passed is False:
-            flags.append(flag)
-
-    return _join_labels(flags)
-
-
-def _study2_source_entry_status(record: pd.Series) -> str:
-    if str(record.get("claim_tier", "")) != "primary_gate":
-        return "not_primary_gate"
-    if _primary_prediction_status(record) != "primary_prediction_positive":
-        return "source_interpretation_exploratory"
-
-    required_fields = (
-        "mean_delta_r2",
-        "ci_low_delta_r2",
-        *SOURCE_ENTRY_DIAGNOSTIC_FIELDS,
-    )
-    missing = [
-        field
-        for field in required_fields
-        if field not in record.index or _is_missing(record.get(field))
-    ]
-    if missing:
-        return "source_entry_not_evaluated"
-
-    failed = (
-        _optional_float(record, "mean_delta_r2") < SOURCE_ENTRY_MIN_DELTA_R2
-        or _optional_float(record, "ci_low_delta_r2") <= SOURCE_ENTRY_MIN_DELTA_R2_LOWER_CI
-        or _optional_float(record, "level2_mean_delta_r2") < SOURCE_ENTRY_MIN_LEVEL2_DELTA_R2
-        or _optional_float(record, "target_split_half_reliability")
-        < SOURCE_ENTRY_MIN_TARGET_RELIABILITY
-        or _optional_float(record, "target_reliability_n_trials") < MIN_TARGET_RELIABILITY_TRIALS
-        or _optional_float(record, "within_subject_centered_delta_r2") <= 0.0
-        or _optional_bool(record, "temporal_negative_controls_passed") is False
-        or _optional_bool(record, "artifact_censoring_robustness_passed") is False
-    )
-    if failed:
-        return "source_interpretation_exploratory"
-    return "source_interpretation_confirmatory"
-
-
-def _temporal_control_interpretation(record: pd.Series) -> str:
-    if str(record.get("lane", "")) != "feature_benchmark":
-        return "not_applicable"
-    if (
-        str(record.get("analysis_partition", "")) == TEMPORAL_CONTROL_PARTITION
-        and str(record.get("temporal_control_kind", "")) == TEMPORAL_PLATEAU_SENSITIVITY_KIND
-    ):
-        return "plateau_response_sensitivity"
-    target_name = str(record.get("target", ""))
-    if target_name == "NPS":
-        return "negative_control_for_evoked_nociceptive_expression"
-    if target_name == "SIIPS1":
-        return "temporal_specificity_or_anticipatory_control"
-    return "not_applicable"
-
-
-def _temporal_controls_verdict(control_rows: pd.DataFrame) -> bool | None:
-    """Pass when no negative-control window predicts the post-stimulus target.
+def _temporal_controls_criterion_met(control_rows: pd.DataFrame) -> bool | None:
+    """Return whether negative-control windows predict the post-stimulus target.
 
     A pre-stimulus or pre-plateau wrong-lag window that shows significant
-    positive incremental prediction (Holm-corrected over the temporal-control
-    family) breaks evoked specificity and fails the control. Plateau sensitivity
-    windows are expected response-period analyses, not negative controls.
-    Returns None when controls are absent or any negative-control cell lacks the
-    statistics needed to evaluate it, so the diagnostic stays missing rather than
-    silently passing.
+    positive incremental prediction returns False. Plateau sensitivity windows
+    are response-period analyses, not negative controls. Returns None when
+    controls are absent or any negative-control cell lacks the statistics needed
+    to evaluate it.
     """
     if control_rows.empty:
         return None
@@ -412,8 +257,8 @@ def _derive_temporal_negative_controls(frame: pd.DataFrame) -> pd.Series:
     """Derive the temporal-control pass for each primary feature-benchmark cell.
 
     Temporal specificity is a property of the (target, model) pair, so the
-    verdict from the matching pre-stimulus and wrong-lag control cells is
-    applied to every primary feature cell sharing that target and model.
+    criterion value from the matching pre-stimulus and wrong-lag control cells
+    is applied to every primary feature cell sharing that target and model.
     """
     lane = frame["lane"].astype(str)
     partition = frame["analysis_partition"].astype(str)
@@ -426,19 +271,19 @@ def _derive_temporal_negative_controls(frame: pd.DataFrame) -> pd.Series:
         TEMPORAL_NEGATIVE_CONTROL_KINDS
     )
     controls = frame.loc[is_control & negative_control]
-    verdicts = pd.Series(pd.NA, index=frame.index, dtype="object")
+    criterion_values = pd.Series(pd.NA, index=frame.index, dtype="object")
     for idx in frame.index[is_primary]:
         matching = controls.loc[
             (controls["target"].astype(str) == target.at[idx])
             & (controls["model"].astype(str) == model.at[idx])
         ]
-        verdict = _temporal_controls_verdict(matching)
-        if verdict is not None:
-            verdicts.at[idx] = verdict
-    return verdicts
+        criterion_met = _temporal_controls_criterion_met(matching)
+        if criterion_met is not None:
+            criterion_values.at[idx] = criterion_met
+    return criterion_values
 
 
-def _append_interpretation_columns(frame: pd.DataFrame) -> pd.DataFrame:
+def _append_derived_qc_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     for field in INTERPRETATION_DIAGNOSTIC_FIELDS:
         if field not in out.columns:
@@ -449,23 +294,6 @@ def _append_interpretation_columns(frame: pd.DataFrame) -> pd.DataFrame:
     out["temporal_negative_controls_passed"] = existing_temporal.where(
         derived_temporal.isna(), derived_temporal
     )
-
-    feature_primary = (out["lane"].astype(str) == "feature_benchmark") & (
-        out["analysis_partition"].astype(str) == "primary"
-    )
-    out["analysis_validity_status"] = "not_primary_analysis"
-    out.loc[feature_primary, "analysis_validity_status"] = "analysis_valid"
-    out["primary_prediction_status"] = out.apply(_primary_prediction_status, axis=1)
-    out["temporal_control_interpretation"] = out.apply(
-        _temporal_control_interpretation,
-        axis=1,
-    )
-    out["missing_interpretation_diagnostics"] = out.apply(
-        _missing_interpretation_diagnostics,
-        axis=1,
-    )
-    out["interpretation_flags"] = out.apply(_interpretation_flags, axis=1)
-    out["study2_source_entry_status"] = out.apply(_study2_source_entry_status, axis=1)
     return out
 
 
@@ -864,12 +692,11 @@ def _write_full_picture_tables(
             _target_by_subject_and_stimulus_temp(target_table),
             full_picture_root / "target_by_subject_and_stimulus_temp",
         ),
-        "target_validity_gate": _write_article_table(
-            _target_validity_gate(
+        "target_qc_metrics": _write_article_table(
+            _target_qc_metrics(
                 diagnostics=target_diagnostics,
-                enriched_targets=enriched_targets,
             ),
-            full_picture_root / "target_validity_gate",
+            full_picture_root / "target_qc_metrics",
         ),
     }
 
@@ -1373,10 +1200,9 @@ def _article_target_diagnostics(
     return pd.DataFrame(rows)
 
 
-def _target_validity_gate(
+def _target_qc_metrics(
     *,
     diagnostics: pd.DataFrame,
-    enriched_targets: pd.DataFrame,
 ) -> pd.DataFrame:
     required_columns = (
         "target",
@@ -1394,32 +1220,12 @@ def _target_validity_gate(
         required_columns,
         table_name="Study 1 target diagnostics",
     )
-    _require_columns(
-        enriched_targets,
-        ("pain_binary_coded",),
-        table_name="Study 1 target-validity input",
-    )
-
-    has_nonpainful_trials = (_numeric_series(enriched_targets, "pain_binary_coded") < 1.0).any()
     rows: list[dict[str, Any]] = []
     for _, diagnostic in diagnostics.sort_values("target", kind="stable").iterrows():
         target_name = str(diagnostic["target"])
-        expected_relation = _expected_target_construct_relation(target_name)
-        flags = _target_validity_flags(diagnostic)
         rows.append(
             {
                 "target": target_name,
-                "target_interpretation_status": (
-                    "mechanistic_interpretation_supported"
-                    if not flags
-                    else "technical_prediction_only"
-                ),
-                "expected_construct_relation": expected_relation,
-                "validity_flags": _join_labels(flags),
-                "scope_sensitivity": _target_scope_sensitivity(
-                    target_name,
-                    has_nonpainful_trials=bool(has_nonpainful_trials),
-                ),
                 "n_trials": int(diagnostic["n_trials"]),
                 "n_subjects": int(diagnostic["n_subjects"]),
                 "stimulus_temp_r": diagnostic["stimulus_temp_r"],
@@ -1439,51 +1245,6 @@ def _target_validity_gate(
             }
         )
     return pd.DataFrame(rows)
-
-
-def _expected_target_construct_relation(target_name: str) -> str:
-    if target_name == "NPS":
-        return "temperature_and_rating"
-    if target_name == "SIIPS1":
-        return "rating_beyond_temperature_and_nps"
-    raise ValueError(f"Unsupported Study 1 signature target for validity gate: {target_name}")
-
-
-def _target_scope_sensitivity(target_name: str, *, has_nonpainful_trials: bool) -> str:
-    if target_name == "SIIPS1" and has_nonpainful_trials:
-        return "painful_trials_only_required"
-    return "not_required"
-
-
-def _target_validity_flags(diagnostic: pd.Series) -> list[str]:
-    target_name = str(diagnostic["target"])
-    flags: list[str] = []
-    reliability = _optional_float(diagnostic, "split_half_subject_temperature_r")
-    reliability_cells = _optional_float(diagnostic, "split_half_subject_temperature_n_cells")
-    if reliability is None or reliability < SOURCE_ENTRY_MIN_TARGET_RELIABILITY:
-        flags.append("target_reliability_limited")
-    if reliability_cells is None or reliability_cells < MIN_TARGET_VALIDITY_RELIABILITY_CELLS:
-        flags.append("target_reliability_cells_limited")
-
-    if target_name == "NPS":
-        stimulus_temp_r = _optional_float(diagnostic, "stimulus_temp_r")
-        vas_rating_r = _optional_float(diagnostic, "vas_rating_r")
-        if stimulus_temp_r is None or stimulus_temp_r <= 0.0:
-            flags.append("nps_temperature_relation_absent")
-        if vas_rating_r is None or vas_rating_r <= 0.0:
-            flags.append("nps_rating_relation_absent")
-        return flags
-
-    if target_name == "SIIPS1":
-        residual_rating_r = _optional_float(
-            diagnostic,
-            "siips1_rating_beyond_temperature_nps_r",
-        )
-        if residual_rating_r is None or residual_rating_r <= 0.0:
-            flags.append("siips1_residual_rating_relation_absent")
-        return flags
-
-    raise ValueError(f"Unsupported Study 1 signature target for validity gate: {target_name}")
 
 
 def _stimulus_surface_design_columns(target_table: pd.DataFrame) -> pd.DataFrame:
@@ -1734,18 +1495,12 @@ def write_study1_report(
         kind="stable",
     )
     frame = _append_feature_multiplicity(frame)
-    frame = _append_interpretation_columns(frame)
+    frame = _append_derived_qc_metrics(frame)
     summary_payload = {
         "task": task,
         "n_records": int(len(frame)),
         "lanes": sorted(set(frame["lane"].astype(str).tolist())),
         "claim_tiers": sorted(set(frame["claim_tier"].astype(str).tolist())),
-        "primary_prediction_statuses": sorted(
-            set(frame["primary_prediction_status"].astype(str).tolist())
-        ),
-        "study2_source_entry_statuses": sorted(
-            set(frame["study2_source_entry_status"].astype(str).tolist())
-        ),
         "targets": sorted(set(frame["target"].astype(str).tolist())),
     }
 

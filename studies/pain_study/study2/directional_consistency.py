@@ -1,4 +1,4 @@
-"""Directional-consistency gates for Study 2 source maps."""
+"""Directional-consistency criteria for Study 2 source maps."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from studies.pain_study.study2.validation import require_config_float
 class DirectionalConsistencyQC:
     spatial_r: float
     same_sign_fraction: float
-    passed: bool
-    failed_gates: tuple[str, ...]
+    directional_criteria_met: bool
+    unmet_criteria: tuple[str, ...]
 
 
 def evaluate_directional_consistency(
@@ -42,16 +42,16 @@ def evaluate_directional_consistency(
     spatial_r = pearson_r(prediction, target, name="directional consistency")
     same_sign_fraction = float(np.mean(np.sign(prediction[mask]) == np.sign(target[mask])))
 
-    failed: list[str] = []
+    unmet_criteria: list[str] = []
     if spatial_r < min_spatial_r:
-        failed.append("true_target_spatial_r")
+        unmet_criteria.append("true_target_spatial_r")
     if same_sign_fraction < min_same_sign:
-        failed.append("cluster_same_sign_fraction")
+        unmet_criteria.append("cluster_same_sign_fraction")
     return DirectionalConsistencyQC(
         spatial_r=spatial_r,
         same_sign_fraction=same_sign_fraction,
-        passed=not failed,
-        failed_gates=tuple(failed),
+        directional_criteria_met=not unmet_criteria,
+        unmet_criteria=tuple(unmet_criteria),
     )
 
 

@@ -1,9 +1,9 @@
-"""Study 2 source-stage subject eligibility checks.
+"""Study 2 source-stage subject inclusion checks.
 
 The primary path associates per-band source power with the single combined
 NPS-predictive score, adjusting only for the Study 1 Level 2 nuisance design.
 The secondary band-unique path mutually adjusts each band's contribution score
-against the other bands and gates on the resulting collinearity.
+against the other bands and reports the resulting collinearity criteria.
 """
 
 from __future__ import annotations
@@ -49,15 +49,15 @@ class SourceStageSubjectQC:
 @dataclass(frozen=True)
 class SourceStageCohortQC:
     band: str
-    confirmatory_eligible: bool
-    feasibility_eligible: bool
+    confirmatory_cohort_criteria_met: bool
+    feasibility_cohort_criteria_met: bool
     n_subjects: int
     n_source_valid_subjects: int
     min_source_valid_subjects: int
     min_feasibility_subjects: int
     collinearity_failure_fraction: float
     max_collinearity_failure_fraction: float
-    reason: str
+    unmet_criteria: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -221,39 +221,30 @@ def _evaluate_source_stage_cohort(
     )
     collinearity_failure_fraction = _collinearity_failure_fraction(qc_frame)
 
-    reason = ""
-    feasibility_eligible = n_source_valid_subjects >= min_feasibility_subjects
-    confirmatory_eligible = feasibility_eligible
-    if not feasibility_eligible:
-        confirmatory_eligible = False
-        reason = (
-            f"Study 2 source-stage cohort has fewer than {min_feasibility_subjects} "
-            f"feasibility source-valid subjects: {n_source_valid_subjects}."
-        )
+    unmet_criteria: list[str] = []
+    feasibility_criteria_met = n_source_valid_subjects >= min_feasibility_subjects
+    confirmatory_criteria_met = feasibility_criteria_met
+    if not feasibility_criteria_met:
+        confirmatory_criteria_met = False
+        unmet_criteria.append("min_feasibility_subjects")
     elif n_source_valid_subjects < min_source_valid_subjects:
-        confirmatory_eligible = False
-        reason = (
-            f"Study 2 source-stage cohort has fewer than {min_source_valid_subjects} "
-            f"confirmatory source-valid subjects: {n_source_valid_subjects}."
-        )
+        confirmatory_criteria_met = False
+        unmet_criteria.append("min_source_valid_subjects")
     elif collinearity_failure_fraction > max_collinearity_failure_fraction:
-        confirmatory_eligible = False
-        reason = (
-            "Study 2 source-stage collinearity failure fraction exceeds threshold: "
-            f"{collinearity_failure_fraction:.6g}."
-        )
+        confirmatory_criteria_met = False
+        unmet_criteria.append("max_collinearity_failure_fraction")
 
     status = SourceStageCohortQC(
         band=str(band_label).strip().lower(),
-        confirmatory_eligible=confirmatory_eligible,
-        feasibility_eligible=feasibility_eligible,
+        confirmatory_cohort_criteria_met=confirmatory_criteria_met,
+        feasibility_cohort_criteria_met=feasibility_criteria_met,
         n_subjects=n_subjects,
         n_source_valid_subjects=n_source_valid_subjects,
         min_source_valid_subjects=min_source_valid_subjects,
         min_feasibility_subjects=min_feasibility_subjects,
         collinearity_failure_fraction=collinearity_failure_fraction,
         max_collinearity_failure_fraction=max_collinearity_failure_fraction,
-        reason=reason,
+        unmet_criteria=tuple(unmet_criteria),
     )
     return qc_frame, status
 

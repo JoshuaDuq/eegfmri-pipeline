@@ -25,6 +25,20 @@ TEMPORAL_MODELS = ("elasticnet", "ridge")
 SOURCE_BANDS = ("alpha", "beta", "gamma")
 EXPECTED_STUDY1_RUNS = tuple(range(1, 7))
 EXPECTED_STUDY1_TRIALS_PER_RUN = 11
+TIMING_ALIGNMENT_REQUIRED_COLUMNS = {
+    "subject_id",
+    "n_target_trials",
+    "n_fmri_plateau_events",
+    "n_lss_plateau_trials",
+    "n_unmatched_target_trials",
+    "n_missing_fmri_plateau_events",
+    "n_invalid_fmri_plateau_events",
+    "n_missing_lss_plateau_trials",
+    "n_invalid_lss_plateau_trials",
+    "n_missing_temporal_feature_rows",
+    "max_abs_fmri_plateau_start_delta_s",
+    "max_abs_lss_plateau_start_delta_s",
+}
 
 
 @dataclass(frozen=True)
@@ -40,6 +54,7 @@ class SubjectQcInputs:
     primary_model: pd.DataFrame
     gamma_model: pd.DataFrame
     temporal_models: dict[tuple[str, str], pd.DataFrame]
+    timing_alignment: pd.DataFrame
     study2_source_qc: dict[str, pd.DataFrame]
     study2_source_input: pd.DataFrame
     source_power_shapes: dict[str, SourcePowerShape]
@@ -50,6 +65,7 @@ class SubjectQcInputs:
 class SubjectQcSummary:
     subject_rows: list[dict[str, object]]
     temporal_rows: list[dict[str, object]]
+    timing_alignment_rows: list[dict[str, object]]
     mask_rows: list[dict[str, object]]
     completeness_rows: list[dict[str, object]]
 
@@ -96,6 +112,9 @@ def load_inputs(args: argparse.Namespace) -> SubjectQcInputs:
             / "model_comparison.tsv"
         ),
         temporal_models=read_temporal_models(study1_root),
+        timing_alignment=read_tsv(
+            study1_root / "qc" / "timing_audit" / "study1_timing_audit_summary.tsv"
+        ),
         study2_source_qc=read_source_qc(study2_root),
         study2_source_input=read_tsv(study2_root / "source_stage" / "source_stage_input.tsv"),
         source_power_shapes=read_source_power_shapes(study2_root),
@@ -174,12 +193,12 @@ def read_source_power_shapes(study2_root: Path) -> dict[str, SourcePowerShape]:
 
 
 def read_anatomy_status(subjects_dir: Path, subjects: Iterable[str]) -> dict[str, str]:
-    status: dict[str, str] = {}
+    labels: dict[str, str] = {}
     for subject_id in subjects:
         trans = subjects_dir / subject_id / "bem" / f"{subject_id}-trans.fif"
         bem = subjects_dir / subject_id / "bem" / f"{subject_id}-5120-5120-5120-bem-sol.fif"
-        status[subject_id] = _anatomy_label(trans.exists(), bem.exists())
-    return status
+        labels[subject_id] = _anatomy_label(trans.exists(), bem.exists())
+    return labels
 
 
 def _anatomy_label(has_trans: bool, has_bem: bool) -> str:
@@ -199,11 +218,13 @@ def build_subject_qc(inputs: SubjectQcInputs) -> SubjectQcSummary:
         for subject_id in inputs.subjects
     ]
     temporal_rows = build_temporal_rows(inputs)
+    timing_alignment_rows = build_timing_alignment_rows(inputs)
     mask_rows = build_mask_rows(inputs.study1_targets)
     completeness_rows = build_completeness_rows(inputs)
     return SubjectQcSummary(
         subject_rows=subject_rows,
         temporal_rows=temporal_rows,
+        timing_alignment_rows=timing_alignment_rows,
         mask_rows=mask_rows,
         completeness_rows=completeness_rows,
     )
@@ -260,6 +281,11 @@ def validate_inputs(inputs: SubjectQcInputs) -> None:
             {"model", "test_subject", "delta_r2"},
             table_name=f"Temporal {model} {window} table",
         )
+    require_columns(
+        inputs.timing_alignment,
+        TIMING_ALIGNMENT_REQUIRED_COLUMNS,
+        table_name="Study 1 timing-alignment audit",
+    )
 
 
 def require_model_columns(frame: pd.DataFrame, *, table_name: str) -> None:
@@ -302,11 +328,6 @@ def build_subject_row(subject_id: str, inputs: SubjectQcInputs) -> dict[str, obj
         **study1_metrics(subject_id, target_rows, inputs),
         **study2_metrics(subject_id, source_input, source_qc_rows, source_shape, inputs),
     }
-    row["overall_flag"] = combine_flags(
-        row["study1_flag"],
-        row["temporal_flag"],
-        row["study2_flag"],
-    )
     return row
 
 
@@ -317,8 +338,6 @@ def study1_metrics(
 ) -> dict[str, object]:
     if target_rows.empty:
         return {
-            "study1_flag": "FAIL",
-            "study1_note": "No retained Study 1 target rows.",
             "study1_retained_trials": 0,
             "study1_runs": 0,
             "study1_blocks": 0,
@@ -336,8 +355,6 @@ def study1_metrics(
             "primary_elasticnet_delta_r2": "",
             "primary_elasticnet_r2": "",
             "gamma_elasticnet_delta_r2": "",
-            "temporal_flag": "FAIL",
-            "temporal_note": "No retained Study 1 target rows.",
         }
 
     primary = model_subject_row(inputs.primary_model, subject_id, "elasticnet")
@@ -346,20 +363,8 @@ def study1_metrics(
     siips1_temp_r = correlation(target_rows["SIIPS1"], target_rows["stimulus_temp"])
     missing_runs = missing_run_summary(target_rows["acquisition_run"])
     incomplete_runs = incomplete_run_summary(target_rows["acquisition_run"])
-    study1_flag = study1_flag_for(target_rows, primary, nps_temp_r)
-    if (missing_runs or incomplete_runs) and study1_flag == "PASS":
-        study1_flag = "WARNING"
-    temporal_flag, temporal_note = temporal_flag_for(subject_id, inputs.temporal_models)
 
     return {
-        "study1_flag": study1_flag,
-        "study1_note": study1_note_for(
-            study1_flag,
-            primary,
-            nps_temp_r,
-            missing_runs,
-            incomplete_runs,
-        ),
         "study1_retained_trials": len(target_rows),
         "study1_runs": target_rows["acquisition_run"].nunique(),
         "study1_blocks": target_rows["block"].nunique(),
@@ -377,47 +382,7 @@ def study1_metrics(
         "primary_elasticnet_delta_r2": rounded(primary["delta_r2"]),
         "primary_elasticnet_r2": rounded(primary["r2"]),
         "gamma_elasticnet_delta_r2": rounded(gamma["delta_r2"]),
-        "temporal_flag": temporal_flag,
-        "temporal_note": temporal_note,
     }
-
-
-def study1_flag_for(
-    target_rows: pd.DataFrame,
-    primary: pd.Series,
-    nps_temp_r: float,
-) -> str:
-    if len(target_rows) < 25 or target_rows["block"].nunique() < 3:
-        return "FAIL"
-    if target_rows["NPS_fmri_scoring_mask_sha256"].nunique() != 1:
-        return "FAIL"
-    if target_rows["SIIPS1_fmri_scoring_mask_sha256"].nunique() != 1:
-        return "FAIL"
-    if not math.isfinite(nps_temp_r) or nps_temp_r <= 0:
-        return "WARNING"
-    if float(primary["delta_r2"]) < 0:
-        return "WARNING"
-    return "PASS"
-
-
-def study1_note_for(
-    flag: str,
-    primary: pd.Series,
-    nps_temp_r: float,
-    missing_runs: str,
-    incomplete_runs: str,
-) -> str:
-    if flag == "PASS":
-        return "Retained target rows, fixed masks, positive NPS-temperature relation."
-    if missing_runs:
-        return f"Missing retained Study 1 run(s): {missing_runs}."
-    if incomplete_runs:
-        return f"Incomplete retained Study 1 run(s): {incomplete_runs}."
-    if float(primary["delta_r2"]) < 0:
-        return "Primary EEG model does not improve over nuisance for held-out subject."
-    if not math.isfinite(nps_temp_r) or nps_temp_r <= 0:
-        return "NPS-temperature relation is absent or negative."
-    return "Study 1 target validity warning."
 
 
 def study2_metrics(
@@ -429,8 +394,7 @@ def study2_metrics(
 ) -> dict[str, object]:
     if not source_qc_rows:
         return {
-            "study2_flag": "FAIL",
-            "study2_note": "No source-stage QC row.",
+            "study2_qc_bands_consistent": "",
             "study2_eligible": "",
             "study2_retained_trials": 0,
             "study2_valid_blocks": 0,
@@ -446,8 +410,7 @@ def study2_metrics(
     if source_qc_bands_disagree(source_qc_rows):
         source_qc = source_qc_rows[0]
         return {
-            "study2_flag": "FAIL",
-            "study2_note": "Source-stage QC differs across bands.",
+            "study2_qc_bands_consistent": False,
             "study2_eligible": "",
             "study2_retained_trials": int(source_qc["retained_trials"]),
             "study2_valid_blocks": int(source_qc["valid_blocks"]),
@@ -465,15 +428,8 @@ def study2_metrics(
     anatomy = inputs.anatomy_status.get(subject_id, "missing")
     input_rows = len(source_input)
     source_rows = source_shape.rows if source_shape else None
-    study2_flag = study2_flag_for(
-        eligible=eligible,
-        anatomy=anatomy,
-        input_rows=input_rows,
-        source_rows=source_rows,
-    )
     return {
-        "study2_flag": study2_flag,
-        "study2_note": study2_note_for(study2_flag, source_qc, input_rows, source_rows),
+        "study2_qc_bands_consistent": True,
         "study2_eligible": eligible,
         "study2_retained_trials": int(source_qc["retained_trials"]),
         "study2_valid_blocks": int(source_qc["valid_blocks"]),
@@ -485,39 +441,6 @@ def study2_metrics(
         "source_vertices": source_shape.vertices if source_shape else "",
         "source_anatomy": anatomy,
     }
-
-
-def study2_flag_for(
-    *,
-    eligible: bool,
-    anatomy: str,
-    input_rows: int,
-    source_rows: int | None,
-) -> str:
-    if not eligible:
-        return "FAIL"
-    if anatomy != "trans+BEM" or source_rows is None:
-        return "FAIL"
-    if source_rows != input_rows:
-        return "WARNING"
-    return "PASS"
-
-
-def study2_note_for(
-    flag: str,
-    source_qc: pd.Series,
-    input_rows: int,
-    source_rows: int | None,
-) -> str:
-    raw_reason = source_qc.get("reason", "")
-    reason = "" if pd.isna(raw_reason) else str(raw_reason).strip()
-    if flag == "PASS":
-        return "Source-stage QC passed; source input and source arrays match."
-    if source_rows != input_rows:
-        return "Source-power rows do not match retained source-stage input rows."
-    if reason:
-        return reason
-    return "Study 2 source validity failure."
 
 
 def source_qc_rows_for(
@@ -561,7 +484,6 @@ def build_mask_rows(targets: pd.DataFrame) -> list[dict[str, object]]:
                 "mask_hash_count": len(hashes),
                 "mask_sha256": ",".join(hashes),
                 "mask_voxel_count": ",".join(str(int(value)) for value in voxels),
-                "flag": "PASS" if len(hashes) == 1 and len(voxels) == 1 else "FAIL",
             }
         )
     return rows
@@ -575,9 +497,74 @@ def build_temporal_rows(inputs: SubjectQcInputs) -> list[dict[str, object]]:
             for window in TEMPORAL_WINDOWS:
                 frame = inputs.temporal_models.get((model, window))
                 row[window] = temporal_delta(frame, subject_id)
-            row["temporal_flag"], row["temporal_note"] = temporal_flag_from_row(row)
             rows.append(row)
     return rows
+
+
+def build_timing_alignment_rows(inputs: SubjectQcInputs) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for subject_id in inputs.subjects:
+        timing_row = timing_alignment_subject_row(inputs.timing_alignment, subject_id)
+        if timing_row is None:
+            rows.append(
+                {
+                    "subject_id": subject_id,
+                    "target_trials": "",
+                    "fmri_plateau_events": "",
+                    "lss_plateau_trials": "",
+                    "missing_target_linked_rows": "",
+                    "max_plateau_start_delta_ms": "",
+                }
+            )
+            continue
+        rows.append(timing_alignment_qc_row(timing_row))
+    return rows
+
+
+def timing_alignment_qc_row(row: pd.Series) -> dict[str, object]:
+    return {
+        "subject_id": str(row["subject_id"]),
+        "target_trials": int(row["n_target_trials"]),
+        "fmri_plateau_events": int(row["n_fmri_plateau_events"]),
+        "lss_plateau_trials": int(row["n_lss_plateau_trials"]),
+        "missing_target_linked_rows": timing_alignment_missing_count(row),
+        "max_plateau_start_delta_ms": timing_alignment_max_delta_ms(row),
+    }
+
+
+def timing_alignment_subject_row(
+    timing_alignment: pd.DataFrame,
+    subject_id: str,
+) -> pd.Series | None:
+    rows = timing_alignment.loc[timing_alignment["subject_id"] == subject_id]
+    if rows.empty:
+        return None
+    if len(rows) > 1:
+        raise ValueError(f"Timing-alignment audit has duplicate rows for {subject_id}.")
+    return rows.iloc[0]
+
+
+def timing_alignment_missing_count(row: pd.Series) -> int:
+    count_columns = (
+        "n_unmatched_target_trials",
+        "n_missing_fmri_plateau_events",
+        "n_invalid_fmri_plateau_events",
+        "n_missing_lss_plateau_trials",
+        "n_invalid_lss_plateau_trials",
+        "n_missing_temporal_feature_rows",
+    )
+    return int(sum(int(row[column]) for column in count_columns))
+
+
+def timing_alignment_max_delta_ms(row: pd.Series) -> float:
+    deltas = [
+        numeric_or_none(row["max_abs_fmri_plateau_start_delta_s"]),
+        numeric_or_none(row["max_abs_lss_plateau_start_delta_s"]),
+    ]
+    finite = [value for value in deltas if value is not None]
+    if not finite:
+        return float("nan")
+    return rounded(1000.0 * max(finite))
 
 
 def build_completeness_rows(inputs: SubjectQcInputs) -> list[dict[str, object]]:
@@ -585,9 +572,8 @@ def build_completeness_rows(inputs: SubjectQcInputs) -> list[dict[str, object]]:
     return [
         {
             "qc_category": "study1_retained_trial_counts",
-            "availability": "RECORDED",
+            "availability": "recorded",
             "source": "targets/primary_targets.parquet",
-            "note": "Retained counts by subject, run, and block are available.",
         },
         {
             "qc_category": "study1_trial_attrition_reasons",
@@ -596,40 +582,27 @@ def build_completeness_rows(inputs: SubjectQcInputs) -> list[dict[str, object]]:
                 {"drop_reason", "exclusion_reason", "retention_reason"},
             ),
             "source": "targets/primary_targets.parquet",
-            "note": "Dropped-trial reasons are not recorded in the current target table.",
         },
         {
             "qc_category": "eeg_fmri_alignment_residuals",
-            "availability": availability_for_columns(
-                study1_columns,
-                {"alignment_error_s", "eeg_fmri_offset_s", "timing_residual_s"},
+            "availability": "recorded",
+            "source": (
+                "qc/timing_audit/study1_timing_audit_summary.tsv; "
+                "reports/subject_qc/subject_timing_alignment_qc.tsv"
             ),
-            "source": "targets/primary_targets.parquet",
-            "note": "Explicit EEG-fMRI timing residual columns are not recorded.",
         },
         {
             "qc_category": "study2_source_stage_qc",
-            "availability": "RECORDED",
+            "availability": "recorded",
             "source": "source_stage/qc_alpha.tsv; qc_beta.tsv; qc_gamma.tsv",
-            "note": "Source-stage rank, residual df, condition number, and eligibility are available.",
         },
     ]
 
 
 def availability_for_columns(available: set[str], candidates: set[str]) -> str:
     if available.intersection(candidates):
-        return "RECORDED"
-    return "NOT_RECORDED"
-
-
-def temporal_flag_for(
-    subject_id: str,
-    temporal_models: dict[tuple[str, str], pd.DataFrame],
-) -> tuple[str, str]:
-    row: dict[str, object] = {"subject_id": subject_id, "model": "elasticnet"}
-    for window in TEMPORAL_WINDOWS:
-        row[window] = temporal_delta(temporal_models.get(("elasticnet", window)), subject_id)
-    return temporal_flag_from_row(row)
+        return "recorded"
+    return "not_recorded"
 
 
 def temporal_delta(frame: pd.DataFrame | None, subject_id: str) -> float | str:
@@ -641,43 +614,11 @@ def temporal_delta(frame: pd.DataFrame | None, subject_id: str) -> float | str:
     return rounded(float(rows.iloc[0]["delta_r2"]))
 
 
-def temporal_flag_from_row(row: dict[str, object]) -> tuple[str, str]:
-    controls = [
-        numeric_or_none(row.get("prestimulus_wide")),
-        numeric_or_none(row.get("immediate_prestimulus")),
-        numeric_or_none(row.get("ramp_up")),
-    ]
-    plateaus = [
-        numeric_or_none(row.get("early_plateau")),
-        numeric_or_none(row.get("mid_plateau")),
-        numeric_or_none(row.get("late_plateau")),
-    ]
-    controls = [value for value in controls if value is not None]
-    plateaus = [value for value in plateaus if value is not None]
-    if not controls or not plateaus:
-        return "FAIL", "Temporal-control rows are incomplete."
-    max_control = max(controls)
-    max_plateau = max(plateaus)
-    if max_control > 0.2:
-        return "WARNING", "Positive pre-stimulus or ramp-up control reduces timing specificity."
-    if max_plateau <= 0:
-        return "WARNING", "No positive plateau-window delta R2."
-    return "PASS", "Plateau windows exceed negative-control concern threshold."
-
-
 def model_subject_row(frame: pd.DataFrame, subject_id: str, model: str) -> pd.Series:
     rows = frame.loc[(frame["test_subject"] == subject_id) & (frame["model"] == model)]
     if rows.empty:
         raise ValueError(f"No {model} model row found for {subject_id}.")
     return rows.iloc[0]
-
-
-def combine_flags(*flags: object) -> str:
-    if "FAIL" in flags:
-        return "FAIL"
-    if "WARNING" in flags:
-        return "WARNING"
-    return "PASS"
 
 
 def count_summary(values: pd.Series) -> str:
@@ -733,14 +674,26 @@ def write_qc_outputs(summary: SubjectQcSummary, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     subject_frame = pd.DataFrame(summary.subject_rows)
     temporal_frame = pd.DataFrame(summary.temporal_rows)
+    timing_alignment_frame = pd.DataFrame(summary.timing_alignment_rows)
     mask_frame = pd.DataFrame(summary.mask_rows)
     completeness_frame = pd.DataFrame(summary.completeness_rows)
     subject_frame.to_csv(output_dir / "subject_qc_summary.tsv", sep="\t", index=False)
     temporal_frame.to_csv(output_dir / "subject_temporal_qc.tsv", sep="\t", index=False)
+    timing_alignment_frame.to_csv(
+        output_dir / "subject_timing_alignment_qc.tsv",
+        sep="\t",
+        index=False,
+    )
     mask_frame.to_csv(output_dir / "signature_mask_qc.tsv", sep="\t", index=False)
     completeness_frame.to_csv(output_dir / "qc_completeness.tsv", sep="\t", index=False)
     (output_dir / "subject_qc_summary.md").write_text(
-        render_markdown(subject_frame, temporal_frame, mask_frame, completeness_frame),
+        render_markdown(
+            subject_frame,
+            temporal_frame,
+            timing_alignment_frame,
+            mask_frame,
+            completeness_frame,
+        ),
         encoding="utf-8",
     )
 
@@ -748,6 +701,7 @@ def write_qc_outputs(summary: SubjectQcSummary, output_dir: Path) -> None:
 def render_markdown(
     subject_frame: pd.DataFrame,
     temporal_frame: pd.DataFrame,
+    timing_alignment_frame: pd.DataFrame,
     mask_frame: pd.DataFrame,
     completeness_frame: pd.DataFrame,
 ) -> str:
@@ -760,6 +714,8 @@ def render_markdown(
             markdown_table(subject_frame),
             "## Temporal QC",
             markdown_table(temporal_frame),
+            "## Timing Alignment QC",
+            markdown_table(timing_alignment_frame),
             "## Signature Mask QC",
             markdown_table(mask_frame),
             "## QC Completeness",

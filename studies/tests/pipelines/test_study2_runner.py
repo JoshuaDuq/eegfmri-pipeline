@@ -1,4 +1,4 @@
-"""Tests for the Study 2 source-interpretation stage dispatcher."""
+"""Tests for the Study 2 source-space stage dispatcher."""
 
 from __future__ import annotations
 

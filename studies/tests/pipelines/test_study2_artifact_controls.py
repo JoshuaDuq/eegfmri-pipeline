@@ -5,7 +5,7 @@ import pytest
 from studies.pain_study.study2.config import load_study2_config
 
 
-def test_artifact_controls_relabel_contaminated_gamma_as_exploratory() -> None:
+def test_artifact_controls_report_unmet_criteria() -> None:
     from studies.pain_study.study2.artifact_controls import evaluate_artifact_controls
 
     qc = evaluate_artifact_controls(
@@ -16,10 +16,9 @@ def test_artifact_controls_relabel_contaminated_gamma_as_exploratory() -> None:
         config=load_study2_config(),
     )
 
-    assert qc.contaminated is True
-    assert qc.interpretation == "exploratory_artifact_contaminated"
+    assert qc.artifact_control_criteria_met is False
     assert qc.expression_q_values["dvars"] == pytest.approx(0.02)
-    assert qc.failed_gates == ("source_artifact_template", "artifact_expression")
+    assert qc.unmet_criteria == ("source_artifact_template", "artifact_expression")
 
 
 def test_robustness_summary_uses_configured_thresholds() -> None:
@@ -42,10 +41,10 @@ def test_robustness_summary_uses_configured_thresholds() -> None:
         config=load_study2_config(),
     )
 
-    assert passing.passed is True
-    assert passing.failed_gates == ()
-    assert failing.passed is False
-    assert failing.failed_gates == (
+    assert passing.robustness_criteria_met is True
+    assert passing.unmet_criteria == ()
+    assert failing.robustness_criteria_met is False
+    assert failing.unmet_criteria == (
         "unthresholded_spatial_r",
         "cluster_dice",
         "centroid_displacement",

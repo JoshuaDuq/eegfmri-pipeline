@@ -31,9 +31,8 @@ def test_source_model_qc_accepts_readme_aligned_subject() -> None:
     )
 
     assert qc.subject_id == "sub-01"
-    assert qc.eligible is True
-    assert qc.failed_gates == ()
-    assert qc.reason == ""
+    assert qc.source_model_criteria_met is True
+    assert qc.unmet_criteria == ()
 
 
 def test_source_model_qc_reports_fixed_readme_exclusion_rules() -> None:
@@ -57,8 +56,8 @@ def test_source_model_qc_reports_fixed_readme_exclusion_rules() -> None:
         config=config,
     )
 
-    assert qc.eligible is False
-    assert qc.failed_gates == (
+    assert qc.source_model_criteria_met is False
+    assert qc.unmet_criteria == (
         "freesurfer_visual_qc",
         "template_electrode_coordinates",
         "valid_eeg_channel_locations",
@@ -66,12 +65,6 @@ def test_source_model_qc_reports_fixed_readme_exclusion_rules() -> None:
         "max_coregistration_error",
         "forward_solution_rank",
         "morph_to_fsaverage",
-    )
-    assert qc.reason == (
-        "failed source-model QC gates: freesurfer_visual_qc, "
-        "template_electrode_coordinates, valid_eeg_channel_locations, "
-        "mean_coregistration_error, max_coregistration_error, forward_solution_rank, "
-        "morph_to_fsaverage"
     )
 
 

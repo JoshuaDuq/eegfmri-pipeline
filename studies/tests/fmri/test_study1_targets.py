@@ -818,6 +818,7 @@ def test_prepare_primary_targets_expands_categorical_temperature_nuisance() -> N
                 "block": [1, 1, 1, 1],
                 "run_id": [1, 1, 1, 1],
                 "trial_number": [1, 2, 3, 4],
+                "pain_binary_coded": [1, 0, 1, 0],
                 "stimulus_temp": [44.0, 46.0, 44.0, 47.0],
                 "onset": [10.0, 20.0, 30.0, 40.0],
                 "duration": [0.5, 0.5, 0.5, 0.5],

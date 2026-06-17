@@ -14,7 +14,7 @@ class Study2ImplementationComponent:
 
 STUDY2_IMPLEMENTATION_COMPONENTS = (
     Study2ImplementationComponent(
-        name="Study 1 confirmatory gates",
+        name="Study 1 confirmatory criteria",
         implemented=True,
         module="studies.pain_study.study2.gates",
     ),
@@ -59,7 +59,7 @@ STUDY2_IMPLEMENTATION_COMPONENTS = (
         module="studies.pain_study.study2.directional_consistency",
     ),
     Study2ImplementationComponent(
-        name="artifact and robustness interpretation gates",
+        name="artifact and robustness criteria",
         implemented=True,
         module="studies.pain_study.study2.artifact_controls",
     ),

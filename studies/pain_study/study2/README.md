@@ -1,4 +1,4 @@
-# Study 2 - Source Interpretation of NPS-Predictive EEG Activity
+# Study 2 - Source-Space Analysis of NPS-Predictive EEG Activity
 
 ## 1. Problem Statement and Predesignated Study 1 Cell
 
@@ -6,36 +6,30 @@ Study 1 tests whether plateau-window EEG spectral power predicts trial-wise fMRI
 expression beyond prespecified nuisance structure. Study 2 maps the cortical source-power patterns
 associated with the prespecified NPS-predictive EEG component. Because multivariate decoder weights
 are backward-model coefficients whose amplitude does not read directly as a neural contribution,
-source interpretation uses Haufe-transformed sensor patterns and source-space association maps
+the analysis uses Haufe-transformed sensor patterns and source-space association maps
 (Haufe et al., 2014).
 
-The interpretation target is restricted a priori to the Study 1 primary cell: NPS prediction by
+The analysis target is restricted a priori to the Study 1 primary cell: NPS prediction by
 ElasticNet from individual-channel spectral power of the alpha, beta, and gamma bands, residualized
 at Level 2. The primary analysis uses the out-of-sample EEG prediction of the NPS residual as a
 single combined prediction-derived score and associates each band's source power with that score.
 The primary source family comprises three full-plateau source maps, $A_\alpha$, $A_\beta$, and
-$A_\gamma$. Consistent with Study 1, gamma is included in the primary family, but its interpretation
-as a neural signal remains conditional on surviving the artifact diagnostics, because high-frequency
-EEG recorded during simultaneous fMRI is sensitive to muscular, oculomotor, and gradient
-contamination.
+$A_\gamma$. Consistent with Study 1, gamma is included in the primary family, and its artifact
+diagnostics are reported explicitly because high-frequency EEG recorded during simultaneous fMRI is
+sensitive to muscular, oculomotor, and gradient contamination.
 
 Because scalp EEG cannot resolve the deep insular, thalamic, and brainstem generators that dominate
 the NPS, these maps characterize the *cortical EEG correlates* of the NPS-predictive component, not
 the signature's generators. Source claims are framed accordingly throughout.
 
-An eligibility gate evaluated on the Study 1 cell selects between confirmatory and exploratory
-source interpretation. The cell is confirmatory-eligible when it shows a predictive gain
+Prespecified Study 1 criteria are evaluated for the selected primary cell before Study 2 inference is
+summarized. The criteria are met when the cell shows a predictive gain
 $\Delta R^2_{\mathrm{LOSO}} \ge 0.02$, a confidence-interval lower bound $\ge 0.005$, a
 Holm-corrected $p \le 0.05$, a staged nuisance-adjusted sensitivity gain $\ge 0.005$, a positive
 within-subject gain, satisfied temporal negative controls, satisfied artifact-censoring robustness,
 and a split-half reliability $\ge 0.4$ on at least 30 trials. Missing diagnostic fields do not pass
-this gate; they keep source interpretation non-confirmatory until the corresponding Study 1
-sensitivity outputs are available.
-When the gate passes, the source family is interpreted confirmatorily; when it fails, the identical
-maps are reported on the exploratory-source path. A Study 1 cell that does not clear the gate is
-itself a reported outcome — evidence that plateau-window EEG does not add NPS information beyond the
-prespecified nuisance structure — and does not invalidate the source analysis as an exploratory
-characterization.
+these criteria. The output records `confirmatory_criteria_met` and `unmet_criteria`; it does not
+assign an automatic interpretation label to the Study 2 maps.
 
 ## 2. Frozen Model and Prediction-Derived Score
 
@@ -53,9 +47,9 @@ equivalently the sum of the band-specific contributions $\eta_\alpha$, $\eta_\be
 $\eta_\gamma$. The band-specific contributions are retained for the secondary mutually adjusted
 analysis (Section 10).
 
-## 3. Sensor-Level Interpretation
+## 3. Sensor-Level Pattern Estimation
 
-Sensor-level linear feature patterns are interpreted with the Haufe transformation, which converts a
+Sensor-level linear feature patterns are estimated with the Haufe transformation, which converts a
 backward weight vector into a directly readable activation pattern (Haufe et al., 2014). For the
 primary ElasticNet model, the pattern is computed within each outer fold from training-fold
 statistics,
@@ -119,9 +113,9 @@ consistency of the contribution pattern with the target-associated pattern.
 
 These maps reflect the cortical topography of the model's spectral-power inputs and may partly
 recapitulate canonical band-power topography (e.g., posterior alpha, sensorimotor beta) rather than
-pain-specific cortical structure. The interpretation is therefore restricted to "cortical EEG
-correlates of the NPS-predictive component"; the true-target directional-consistency map and the
-artifact diagnostics (Section 9) guard against reading a generic spectral pattern as pain-specific.
+pain-specific cortical structure. The reported estimand is therefore the cortical EEG correlate of
+the NPS-predictive component; the true-target directional-consistency map and the artifact
+diagnostics (Section 9) provide the corresponding specificity checks.
 
 Circular-shift permutations use the six 11-trial task blocks as exchangeability units, matching
 Study 1. A subject is excluded from source analyses when fewer than three permutation-valid blocks,
@@ -220,13 +214,11 @@ are not imputed. A positive significant coefficient supports intensity convergen
 
 For each sensor and source map, trial-wise expression is regressed against framewise displacement,
 DVARS, cardiac phase, scanner-frequency residual power, and Fp1/Fp2 high-frequency power, within
-subject and then at the group level with Holm correction. A map is reported as contaminated when its
-absolute spatial correlation with an artifact template exceeds 0.80 at the sensor level or 0.50 in
-source space, or when its expression significantly covaries with an artifact metric. These diagnostics
-are decisive for gamma: with `gamma_requires_artifact_survival` enabled, a gamma source map is
-relabeled as an exploratory association whenever it fails any artifact control, and is interpreted as
-a neural signal only when it survives all of them. This is a structural gate on the output, not a
-narrative caveat.
+subject and then at the group level with Holm correction. The artifact-control summary reports
+`artifact_control_criteria_met`, `unmet_criteria`, and Holm-adjusted expression q-values. Criteria
+are unmet when the absolute spatial correlation with an artifact template exceeds 0.80 at the sensor
+level or 0.50 in source space, or when expression significantly covaries with an artifact metric.
+The summary does not relabel maps as neural, exploratory, or contaminated.
 
 The primary analyses are repeated after trial censoring with the Study 1 thresholds: a trial is
 censored when framewise displacement exceeds 0.5 mm, the robust z of DVARS, Fp1/Fp2 power, or scanner

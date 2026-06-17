@@ -28,7 +28,7 @@ from studies.pain_study.study2.artifact_controls import (
 from studies.pain_study.study2.behavioral_convergence import compute_behavioral_convergence
 from studies.pain_study.study2.directional_consistency import evaluate_directional_consistency
 from studies.pain_study.study2.gates import (
-    evaluate_study1_confirmatory_gates,
+    evaluate_study1_confirmatory_criteria,
     load_study1_confirmatory_row,
 )
 from studies.pain_study.study2.haufe import compute_haufe_pattern
@@ -242,28 +242,27 @@ def gate_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
 
 
 def run_gate(context: "Study2StageContext") -> None:
-    """Evaluate Study 1 confirmatory gates and persist the eligibility decision."""
+    """Evaluate Study 1 confirmatory criteria and persist the QC metrics."""
     config = context.config
     metrics = load_study1_confirmatory_row(
         paths.study1_report_path(config),
         config=config,
     )
-    qc = evaluate_study1_confirmatory_gates(metrics, config)
+    qc = evaluate_study1_confirmatory_criteria(metrics, config)
 
     gate_path = paths.gate_qc_path(config)
     gate_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "confirmatory_eligible": qc.confirmatory_eligible,
-        "failed_gates": list(qc.failed_gates),
-        "reason": qc.reason,
+        "confirmatory_criteria_met": qc.confirmatory_criteria_met,
+        "unmet_criteria": list(qc.unmet_criteria),
     }
     with open(gate_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
     context.logger.info(
-        "Study 2 gate: confirmatory_eligible=%s (%s)",
-        qc.confirmatory_eligible,
-        qc.reason,
+        "Study 2 confirmatory criteria met: %s; unmet criteria: %s",
+        qc.confirmatory_criteria_met,
+        ",".join(qc.unmet_criteria),
     )
 
 
@@ -312,12 +311,11 @@ def run_source_model_qc(context: "Study2StageContext") -> None:
         records.append(
             {
                 "subject_id": qc.subject_id,
-                "eligible": qc.eligible,
+                "source_model_criteria_met": qc.source_model_criteria_met,
                 "valid_eeg_channel_location_fraction": qc.valid_eeg_channel_location_fraction,
                 "mean_coregistration_error_mm": qc.mean_coregistration_error_mm,
                 "max_coregistration_error_mm": qc.max_coregistration_error_mm,
-                "failed_criteria": ";".join(qc.failed_gates),
-                "reason": qc.reason,
+                "unmet_criteria": ";".join(qc.unmet_criteria),
             }
         )
 
@@ -467,8 +465,8 @@ def run_directional_consistency(context: "Study2StageContext") -> None:
                 "band": band,
                 "spatial_r": qc.spatial_r,
                 "same_sign_fraction": qc.same_sign_fraction,
-                "passed": qc.passed,
-                "failed_criteria": ";".join(qc.failed_gates),
+                "directional_criteria_met": qc.directional_criteria_met,
+                "unmet_criteria": ";".join(qc.unmet_criteria),
             }
         )
     paths.diagnostics_dir(config).mkdir(parents=True, exist_ok=True)
@@ -484,7 +482,7 @@ def artifact_controls_required_inputs(context: "Study2StageContext") -> tuple[Pa
 
 
 def run_artifact_controls(context: "Study2StageContext") -> None:
-    """Evaluate artifact interpretation controls from precomputed metrics."""
+    """Evaluate artifact-control criteria from precomputed metrics."""
     config = context.config
     metrics = pd.read_csv(paths.artifact_metrics_path(config), sep="\t")
     _require_columns(
@@ -520,9 +518,8 @@ def run_artifact_controls(context: "Study2StageContext") -> None:
         records.append(
             {
                 "band": qc.band,
-                "contaminated": qc.contaminated,
-                "interpretation": qc.interpretation,
-                "failed_criteria": ";".join(qc.failed_gates),
+                "artifact_control_criteria_met": qc.artifact_control_criteria_met,
+                "unmet_criteria": ";".join(qc.unmet_criteria),
                 "expression_q_values": _format_mapping(qc.expression_q_values),
             }
         )
@@ -569,8 +566,8 @@ def run_robustness(context: "Study2StageContext") -> None:
         records.append(
             {
                 "band": str(row["band"]),
-                "passed": qc.passed,
-                "failed_criteria": ";".join(qc.failed_gates),
+                "robustness_criteria_met": qc.robustness_criteria_met,
+                "unmet_criteria": ";".join(qc.unmet_criteria),
             }
         )
 

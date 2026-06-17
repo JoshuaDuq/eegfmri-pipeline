@@ -430,7 +430,7 @@ def test_report_includes_protocol_audit_fields(tmp_path) -> None:
     assert "{'model__alpha': 0.1}" in primary["best_params_by_fold"]
 
 
-def test_report_marks_failed_diagnostics_without_invalidating_primary_prediction(tmp_path) -> None:
+def test_report_keeps_diagnostic_metrics_without_auto_interpretation(tmp_path) -> None:
     from studies.pain_study.study1.reporting import write_study1_report
 
     cfg = _config(tmp_path)
@@ -457,16 +457,17 @@ def test_report_marks_failed_diagnostics_without_invalidating_primary_prediction
     report = pd.read_csv(report_path, sep="\t")
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
-    assert primary_gate["analysis_validity_status"] == "analysis_valid"
-    assert primary_gate["primary_prediction_status"] == "primary_prediction_positive"
-    assert primary_gate["study2_source_entry_status"] == "source_interpretation_exploratory"
-    flags = set(str(primary_gate["interpretation_flags"]).split(";"))
-    assert "target_reliability_limited" in flags
-    assert "precision_limited" in flags
-    assert "level2_convergence_limited" in flags
-    assert "within_subject_tracking_limited" in flags
-    assert "temporal_specificity_limited" in flags
-    assert "artifact_robustness_limited" in flags
+    assert primary_gate["target_split_half_reliability"] == 0.31
+    assert primary_gate["target_reliability_n_trials"] == 28
+    assert bool(primary_gate["precision_flag_passed"]) is False
+    assert bool(primary_gate["temporal_negative_controls_passed"]) is False
+    assert bool(primary_gate["artifact_censoring_robustness_passed"]) is False
+    assert not {
+        "analysis_validity_classification",
+        "primary_prediction_interpretation",
+        "study2_source_entry_interpretation",
+        "interpretation_limitations",
+    }.intersection(report.columns)
 
 
 def test_report_requires_reliability_trial_count_for_source_entry(tmp_path) -> None:
@@ -490,9 +491,9 @@ def test_report_requires_reliability_trial_count_for_source_entry(tmp_path) -> N
     report = pd.read_csv(report_path, sep="\t")
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
-    assert primary_gate["study2_source_entry_status"] == "source_interpretation_exploratory"
-    flags = set(str(primary_gate["interpretation_flags"]).split(";"))
-    assert "target_reliability_limited" in flags
+    assert primary_gate["target_reliability_n_trials"] == 29
+    assert "study2_source_entry_interpretation" not in report.columns
+    assert "interpretation_limitations" not in report.columns
 
 
 def test_report_marks_missing_diagnostics_as_not_evaluated_not_invalid(tmp_path) -> None:
@@ -506,11 +507,11 @@ def test_report_marks_missing_diagnostics_as_not_evaluated_not_invalid(tmp_path)
     report = pd.read_csv(report_path, sep="\t")
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
-    assert primary_gate["analysis_validity_status"] == "analysis_valid"
-    assert primary_gate["study2_source_entry_status"] == "source_entry_not_evaluated"
-    missing = set(str(primary_gate["missing_interpretation_diagnostics"]).split(";"))
-    assert "target_split_half_reliability" in missing
-    assert "temporal_negative_controls_passed" in missing
+    assert pd.isna(primary_gate["target_split_half_reliability"])
+    assert pd.isna(primary_gate["target_reliability_n_trials"])
+    assert "analysis_validity_classification" not in report.columns
+    assert "study2_source_entry_interpretation" not in report.columns
+    assert "missing_interpretation_diagnostics" not in report.columns
 
 
 def test_report_holm_correction_inflates_p_values(tmp_path) -> None:
@@ -640,8 +641,7 @@ def test_report_derives_temporal_negative_controls_pass(tmp_path) -> None:
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
     assert primary_gate["temporal_negative_controls_passed"]
-    missing = set(str(primary_gate["missing_interpretation_diagnostics"]).split(";"))
-    assert "temporal_negative_controls_passed" not in missing
+    assert "missing_interpretation_diagnostics" not in report.columns
 
 
 def test_report_derives_temporal_negative_controls_failure(tmp_path) -> None:
@@ -665,8 +665,7 @@ def test_report_derives_temporal_negative_controls_failure(tmp_path) -> None:
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
     assert not primary_gate["temporal_negative_controls_passed"]
-    flags = set(str(primary_gate["interpretation_flags"]).split(";"))
-    assert "temporal_specificity_limited" in flags
+    assert "interpretation_limitations" not in report.columns
 
 
 def test_report_ignores_plateau_sensitivity_for_temporal_negative_control_pass(tmp_path) -> None:
@@ -697,5 +696,4 @@ def test_report_ignores_plateau_sensitivity_for_temporal_negative_control_pass(t
     primary_gate = report.loc[report["claim_tier"] == "primary_gate"].iloc[0]
 
     assert primary_gate["temporal_negative_controls_passed"]
-    flags = set(str(primary_gate["interpretation_flags"]).split(";"))
-    assert "temporal_specificity_limited" not in flags
+    assert "interpretation_limitations" not in report.columns
