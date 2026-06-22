@@ -27,10 +27,39 @@ def require_config_float(config: Any, key: str) -> float:
     return finite_number(value, key)
 
 
+def require_config_int(config: Any, key: str) -> int:
+    value = get_config_value(config, key, _MISSING)
+    if value is _MISSING:
+        raise ValueError(f"Study 2 config is missing required value: {key}.")
+    if isinstance(value, bool):
+        raise TypeError(f"Study 2 config value must be an integer: {key}.")
+    number = finite_number(value, key)
+    if not number.is_integer():
+        raise ValueError(f"Study 2 config value must be an integer: {key}.")
+    return int(number)
+
+
 def require_config_probability(config: Any, key: str) -> float:
     value = require_config_float(config, key)
     if value <= 0.0 or value > 1.0:
         raise ValueError(f"Study 2 config value must be in (0, 1]: {key}.")
+    return value
+
+
+def require_config_string(config: Any, key: str) -> str:
+    value = get_config_value(config, key, _MISSING)
+    if value is _MISSING:
+        raise ValueError(f"Study 2 config is missing required value: {key}.")
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        raise ValueError(f"Study 2 config value must be a non-empty string: {key}.")
+    return text
+
+
+def require_config_value(config: Any, key: str) -> Any:
+    value = get_config_value(config, key, _MISSING)
+    if value is _MISSING:
+        raise ValueError(f"Study 2 config is missing required value: {key}.")
     return value
 
 
@@ -76,7 +105,10 @@ __all__ = [
     "require_bool_metric",
     "require_config_bool",
     "require_config_float",
+    "require_config_int",
     "require_config_probability",
+    "require_config_string",
+    "require_config_value",
     "require_finite_metric",
     "require_probability_metric",
 ]

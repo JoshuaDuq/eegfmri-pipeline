@@ -12,12 +12,11 @@ import gc
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from studies.pain_study.study2 import paths
@@ -42,6 +41,7 @@ from studies.pain_study.study2.source_maps import (
     compute_cohort_source_association_maps,
 )
 from studies.pain_study.study2.source_model_qc import evaluate_source_model_qc
+from studies.pain_study.study2.source_stage_design import contribution_bands
 from studies.pain_study.study2.source_power import (
     apply_source_morph,
     apply_sloreta_inverse,
@@ -56,29 +56,31 @@ from studies.pain_study.study2.study1_context import (
     study1_model_comparison_path,
 )
 from studies.pain_study.study2.spatial_comparison import compute_spatial_correspondence
+from studies.pain_study.study2.table_io import (
+    format_mapping,
+    metric_mapping,
+    parse_bool,
+    require_columns,
+    require_npz_keys,
+)
 from studies.pain_study.study2.target_retrained_null import build_target_retrained_null_maps
+from studies.pain_study.study2.validation import (
+    require_config_float,
+    require_config_int,
+    require_config_string,
+    require_config_value,
+)
 
 if TYPE_CHECKING:
     from studies.pain_study.study2.runner import Study2StageContext
 
 
-def _contribution_bands(config: Any) -> tuple[str, ...]:
-    bands = get_config_value(
-        config,
-        "study2.confirmatory.study1_cell.contribution_bands",
-        ["alpha", "beta", "gamma"],
-    )
-    if not isinstance(bands, (list, tuple)) or not bands:
-        raise ValueError("study2.confirmatory.study1_cell.contribution_bands must be non-empty.")
-    return tuple(str(band).strip().lower() for band in bands)
-
-
 def _band_frequency_ranges(config: Any) -> dict[str, tuple[float, float]]:
-    bands = get_config_value(config, "study2.source_modeling.frequency_bands", None)
+    bands = require_config_value(config, "study2.source_modeling.frequency_bands")
     if not isinstance(bands, Mapping):
         raise ValueError("study2.source_modeling.frequency_bands must be a mapping.")
     ranges: dict[str, tuple[float, float]] = {}
-    for band in _contribution_bands(config):
+    for band in contribution_bands(config):
         bounds = bands.get(band)
         if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
             raise ValueError(f"study2.source_modeling.frequency_bands.{band} must be [low, high].")
@@ -90,7 +92,7 @@ def _band_frequency_ranges(config: Any) -> dict[str, tuple[float, float]]:
 
 
 def _time_window(config: Any, key: str) -> tuple[float, float]:
-    window = get_config_value(config, key, None)
+    window = require_config_value(config, key)
     if not isinstance(window, (list, tuple)) or len(window) != 2:
         raise ValueError(f"{key} must be a [start, stop] window.")
     return float(window[0]), float(window[1])
@@ -104,18 +106,18 @@ class _AnatomyPaths:
 
 
 def _resolve_anatomy(config: Any, *, subject_id: str) -> _AnatomyPaths:
-    subjects_dir = get_config_value(config, "study2.source_modeling.anatomy.subjects_dir", None)
-    trans_template = get_config_value(
-        config, "study2.source_modeling.anatomy.trans_path_template", None
+    subjects_dir = require_config_string(
+        config,
+        "study2.source_modeling.anatomy.subjects_dir",
     )
-    bem_template = get_config_value(
-        config, "study2.source_modeling.anatomy.bem_path_template", None
+    trans_template = require_config_string(
+        config,
+        "study2.source_modeling.anatomy.trans_path_template",
     )
-    if not subjects_dir or not trans_template or not bem_template:
-        raise ValueError(
-            "Study 2 source-power requires study2.source_modeling.anatomy.subjects_dir, "
-            "trans_path_template, and bem_path_template to be configured."
-        )
+    bem_template = require_config_string(
+        config,
+        "study2.source_modeling.anatomy.bem_path_template",
+    )
     substitutions = {"subjects_dir": str(subjects_dir), "subject": subject_id}
     return _AnatomyPaths(
         subjects_dir=Path(str(subjects_dir)),
@@ -139,7 +141,7 @@ def _load_subject_epochs(config: Any, *, subject_id: str, task: str, logger: Any
         )
     excluded = [
         str(channel)
-        for channel in get_config_value(config, "study2.source_modeling.rank_excluded_channels", [])
+        for channel in require_config_value(config, "study2.source_modeling.rank_excluded_channels")
     ]
     present = [channel for channel in excluded if channel in epochs.ch_names]
     if present:
@@ -162,11 +164,17 @@ def run_source_power(context: "Study2StageContext") -> None:
     band_ranges = _band_frequency_ranges(config)
     baseline_window = _time_window(config, "study2.source_modeling.noise_covariance_baseline_s")
     active_window = _time_window(config, "study2.source_modeling.active_plateau_window_s")
-    snr = get_config_value(config, "study2.source_modeling.regularization.snr", None)
-    loose = get_config_value(config, "study2.source_modeling.regularization.loose_orientation", None)
-    depth = get_config_value(config, "study2.source_modeling.regularization.depth_weighting", None)
-    spacing = str(get_config_value(config, "study2.source_modeling.source_space_spacing", "oct6"))
-    mindist_mm = get_config_value(config, "study2.source_modeling.forward_mindist_mm", None)
+    snr = require_config_float(config, "study2.source_modeling.regularization.snr")
+    loose = require_config_float(
+        config,
+        "study2.source_modeling.regularization.loose_orientation",
+    )
+    depth = require_config_float(
+        config,
+        "study2.source_modeling.regularization.depth_weighting",
+    )
+    spacing = require_config_string(config, "study2.source_modeling.source_space_spacing")
+    mindist_mm = require_config_float(config, "study2.source_modeling.forward_mindist_mm")
     common_subject = _required_config_string(
         config,
         "study2.source_modeling.common_subject",
@@ -224,6 +232,30 @@ def run_source_power(context: "Study2StageContext") -> None:
             power_path = paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             power_path.parent.mkdir(parents=True, exist_ok=True)
             np.save(power_path, extraction.power_logratio)
+            metadata_path = paths.subject_source_power_metadata_path(
+                config,
+                subject_id=subject_id,
+                band=band,
+            )
+            metadata_payload = {
+                "subject_id": subject_id,
+                "band": band,
+                "frequency_hz": [low, high],
+                "baseline_window_s": list(extraction.baseline_window_s),
+                "active_window_s": list(extraction.active_window_s),
+                "source_space_spacing": spacing,
+                "common_subject": common_subject,
+                "common_source_space_spacing": common_spacing,
+                "inverse_method": "sLORETA",
+                "snr": float(snr),
+                "loose_orientation": float(loose),
+                "depth_weighting": float(depth),
+                "n_trials": extraction.n_trials,
+                "n_vertices": extraction.n_vertices,
+            }
+            with open(metadata_path, "w", encoding="utf-8") as handle:
+                json.dump(metadata_payload, handle, indent=2, sort_keys=True)
+                handle.write("\n")
             context.logger.info(
                 "Study 2 source-power %s %s: %d trials x %d vertices.",
                 subject_id,
@@ -274,7 +306,7 @@ def run_haufe(context: "Study2StageContext") -> None:
     """Compute the Haufe sensor pattern from a persisted training-fold design."""
     config = context.config
     with np.load(paths.haufe_input_path(config)) as payload:
-        _require_npz_keys(payload, ("X_train", "coefficients"))
+        require_npz_keys(payload, ("X_train", "coefficients"))
         result = compute_haufe_pattern(
             payload["X_train"],
             payload["coefficients"],
@@ -302,7 +334,7 @@ def run_source_model_qc(context: "Study2StageContext") -> None:
     """Evaluate source-model reconstruction metrics for each subject."""
     config = context.config
     metrics = pd.read_csv(paths.source_model_metrics_path(config), sep="\t")
-    _require_columns(metrics, ("subject_id",), name="Study 2 source-model metrics")
+    require_columns(metrics, ("subject_id",), name="Study 2 source-model metrics")
 
     records = []
     for row in metrics.to_dict("records"):
@@ -358,87 +390,104 @@ def run_point_spread(context: "Study2StageContext") -> None:
     ).to_csv(paths.point_spread_summary_path(config), sep="\t", index=False)
 
 
-def source_stage_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
+def _source_map_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
     config = context.config
     required = [paths.source_stage_frame_path(config)]
     for subject_id in context.subjects:
-        for band in _contribution_bands(config):
+        for band in contribution_bands(config):
             required.append(
                 paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             )
     return tuple(required)
 
 
-def run_source_stage(context: "Study2StageContext") -> None:
-    """Compute per-subject and cohort source-power association maps per band."""
+def _run_source_map_family(
+    context: "Study2StageContext",
+    *,
+    compute_maps: Callable[..., Any],
+    fisher_z_path: Callable[..., Path],
+    partial_r_path: Callable[..., Path],
+    qc_path: Callable[..., Path],
+    log_label: str,
+) -> None:
     config = context.config
     frame = pd.read_csv(paths.source_stage_frame_path(config), sep="\t")
-    output_dir = paths.source_stage_dir(config)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    for band in _contribution_bands(config):
-        source_power_by_subject = {
-            subject_id: np.load(
-                paths.subject_source_power_path(config, subject_id=subject_id, band=band)
-            )
-            for subject_id in context.subjects
-        }
-        result = compute_cohort_source_association_maps(
+    for band in contribution_bands(config):
+        result = compute_maps(
             frame,
-            source_power_by_subject,
+            _source_power_by_subject(config, subjects=context.subjects, band=band),
             band=band,
             config=config,
         )
-        np.save(paths.source_stage_fisher_z_path(config, band=band), result.fisher_z_maps)
-        np.save(output_dir / f"partial_r_{band}.npy", result.partial_r_maps)
-        result.qc.to_csv(output_dir / f"qc_{band}.tsv", sep="\t", index=False)
+        fisher_path = fisher_z_path(config, band=band)
+        partial_path = partial_r_path(config, band=band)
+        qc_output_path = qc_path(config, band=band)
+        fisher_path.parent.mkdir(parents=True, exist_ok=True)
+        partial_path.parent.mkdir(parents=True, exist_ok=True)
+        qc_output_path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(fisher_path, result.fisher_z_maps)
+        np.save(partial_path, result.partial_r_maps)
+        result.qc.to_csv(qc_output_path, sep="\t", index=False)
         context.logger.info(
-            "Study 2 source-stage %s: %d source-valid subjects.",
+            "Study 2 %s %s: %d source-valid subjects.",
+            log_label,
             band,
             len(result.subject_ids),
         )
 
 
+def _source_power_by_subject(
+    config: Any,
+    *,
+    subjects: tuple[str, ...],
+    band: str,
+) -> dict[str, np.ndarray]:
+    return {
+        subject_id: np.load(
+            paths.subject_source_power_path(config, subject_id=subject_id, band=band)
+        )
+        for subject_id in subjects
+    }
+
+
+def source_stage_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
+    return _source_map_required_inputs(context)
+
+
+def run_source_stage(context: "Study2StageContext") -> None:
+    """Compute per-subject and cohort source-power association maps per band."""
+    _run_source_map_family(
+        context,
+        compute_maps=compute_cohort_source_association_maps,
+        fisher_z_path=paths.source_stage_fisher_z_path,
+        partial_r_path=lambda config, *, band: paths.source_stage_dir(config)
+        / f"partial_r_{band}.npy",
+        qc_path=lambda config, *, band: paths.source_stage_dir(config) / f"qc_{band}.tsv",
+        log_label="source-stage",
+    )
+
+
 def band_unique_stage_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
-    config = context.config
-    required = [paths.source_stage_frame_path(config)]
-    for subject_id in context.subjects:
-        for band in _contribution_bands(config):
-            required.append(
-                paths.subject_source_power_path(config, subject_id=subject_id, band=band)
-            )
-    return tuple(required)
+    return _source_map_required_inputs(context)
 
 
 def run_band_unique_stage(context: "Study2StageContext") -> None:
     """Compute secondary band-unique source-power association maps."""
-    config = context.config
-    frame = pd.read_csv(paths.source_stage_frame_path(config), sep="\t")
-    output_dir = paths.band_unique_dir(config)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for band in _contribution_bands(config):
-        source_power_by_subject = {
-            subject_id: np.load(
-                paths.subject_source_power_path(config, subject_id=subject_id, band=band)
-            )
-            for subject_id in context.subjects
-        }
-        result = compute_band_unique_cohort_source_association_maps(
-            frame,
-            source_power_by_subject,
-            band=band,
-            config=config,
-        )
-        np.save(paths.band_unique_fisher_z_path(config, band=band), result.fisher_z_maps)
-        np.save(paths.band_unique_partial_r_path(config, band=band), result.partial_r_maps)
-        result.qc.to_csv(paths.band_unique_qc_path(config, band=band), sep="\t", index=False)
+    _run_source_map_family(
+        context,
+        compute_maps=compute_band_unique_cohort_source_association_maps,
+        fisher_z_path=paths.band_unique_fisher_z_path,
+        partial_r_path=paths.band_unique_partial_r_path,
+        qc_path=paths.band_unique_qc_path,
+        log_label="band-unique source-stage",
+    )
 
 
 def directional_consistency_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
     config = context.config
     required: list[Path] = []
-    for band in _contribution_bands(config):
+    for band in contribution_bands(config):
         required.extend(
             [
                 paths.directional_prediction_map_path(config, band=band),
@@ -453,7 +502,7 @@ def run_directional_consistency(context: "Study2StageContext") -> None:
     """Evaluate prediction-map consistency with true-target source maps."""
     config = context.config
     records = []
-    for band in _contribution_bands(config):
+    for band in contribution_bands(config):
         qc = evaluate_directional_consistency(
             prediction_map=np.load(paths.directional_prediction_map_path(config, band=band)),
             target_map=np.load(paths.directional_target_map_path(config, band=band)),
@@ -485,7 +534,7 @@ def run_artifact_controls(context: "Study2StageContext") -> None:
     """Evaluate artifact-control criteria from precomputed metrics."""
     config = context.config
     metrics = pd.read_csv(paths.artifact_metrics_path(config), sep="\t")
-    _require_columns(
+    require_columns(
         metrics,
         (
             "band",
@@ -501,15 +550,15 @@ def run_artifact_controls(context: "Study2StageContext") -> None:
     for band, band_frame in metrics.groupby("band", sort=True):
         qc = evaluate_artifact_controls(
             band=str(band),
-            sensor_template_abs_r=_metric_mapping(
+            sensor_template_abs_r=metric_mapping(
                 band_frame,
                 value_column="sensor_template_abs_r",
             ),
-            source_artifact_map_abs_r=_metric_mapping(
+            source_artifact_map_abs_r=metric_mapping(
                 band_frame,
                 value_column="source_artifact_map_abs_r",
             ),
-            expression_p_values=_metric_mapping(
+            expression_p_values=metric_mapping(
                 band_frame,
                 value_column="expression_p_value",
             ),
@@ -520,7 +569,7 @@ def run_artifact_controls(context: "Study2StageContext") -> None:
                 "band": qc.band,
                 "artifact_control_criteria_met": qc.artifact_control_criteria_met,
                 "unmet_criteria": ";".join(qc.unmet_criteria),
-                "expression_q_values": _format_mapping(qc.expression_q_values),
+                "expression_q_values": format_mapping(qc.expression_q_values),
             }
         )
 
@@ -540,7 +589,7 @@ def run_robustness(context: "Study2StageContext") -> None:
     """Evaluate robustness summaries from precomputed censoring metrics."""
     config = context.config
     metrics = pd.read_csv(paths.robustness_metrics_path(config), sep="\t")
-    _require_columns(
+    require_columns(
         metrics,
         (
             "band",
@@ -556,8 +605,8 @@ def run_robustness(context: "Study2StageContext") -> None:
     records = []
     for row in metrics.to_dict("records"):
         qc = evaluate_robustness_summary(
-            significance_retained=_bool_value(row["significance_retained"]),
-            sign_retained=_bool_value(row["sign_retained"]),
+            significance_retained=parse_bool(row["significance_retained"]),
+            sign_retained=parse_bool(row["sign_retained"]),
             unthresholded_spatial_r=float(row["unthresholded_spatial_r"]),
             cluster_dice=float(row["cluster_dice"]),
             centroid_displacement_mm=float(row["centroid_displacement_mm"]),
@@ -582,7 +631,7 @@ def run_robustness(context: "Study2StageContext") -> None:
 def spatial_correspondence_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
     config = context.config
     required: list[Path] = [paths.spatial_mask_path(config)]
-    for band in _contribution_bands(config):
+    for band in contribution_bands(config):
         required.extend(
             [
                 paths.spatial_eeg_map_path(config, band=band),
@@ -598,7 +647,7 @@ def run_spatial_correspondence(context: "Study2StageContext") -> None:
     config = context.config
     mask = np.load(paths.spatial_mask_path(config))
     records = []
-    for band in _contribution_bands(config):
+    for band in contribution_bands(config):
         result = compute_spatial_correspondence(
             eeg_map=np.load(paths.spatial_eeg_map_path(config, band=band)),
             fmri_map=np.load(paths.spatial_fmri_map_path(config, band=band)),
@@ -648,7 +697,7 @@ def run_behavioral_convergence(context: "Study2StageContext") -> None:
         rating_column=rating_column,
         design_columns=design_columns,
         config=config,
-        random_state=int(get_config_value(config, "project.random_state", 42)),
+        random_state=require_config_int(config, "project.random_state"),
     )
     paths.behavioral_dir(config).mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -665,7 +714,7 @@ def run_behavioral_convergence(context: "Study2StageContext") -> None:
 def band_unique_inference_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
     config = context.config
     required = [paths.source_adjacency_path(config)]
-    for band in _contribution_bands(config):
+    for band in contribution_bands(config):
         required.append(paths.band_unique_fisher_z_path(config, band=band))
         required.append(paths.band_unique_null_maps_path(config, band=band))
     return tuple(required)
@@ -674,7 +723,7 @@ def band_unique_inference_required_inputs(context: "Study2StageContext") -> tupl
 def run_band_unique_inference(context: "Study2StageContext") -> None:
     """Run the secondary band-unique source-family cluster test."""
     config = context.config
-    bands = _contribution_bands(config)
+    bands = contribution_bands(config)
     adjacency = np.load(paths.source_adjacency_path(config))
     observed_maps = {
         band: np.load(paths.band_unique_fisher_z_path(config, band=band)) for band in bands
@@ -686,10 +735,11 @@ def run_band_unique_inference(context: "Study2StageContext") -> None:
         observed_maps_by_band=observed_maps,
         null_maps_by_band=null_maps,
         adjacency=adjacency,
-        cluster_forming_p=get_config_value(
-            config, "study2.source_inference.primary_cluster_forming_p", None
+        cluster_forming_p=require_config_float(
+            config,
+            "study2.source_inference.primary_cluster_forming_p",
         ),
-        alpha=get_config_value(config, "study2.source_inference.family_alpha", 0.05),
+        alpha=require_config_float(config, "study2.source_inference.family_alpha"),
     )
 
     paths.band_unique_dir(config).mkdir(parents=True, exist_ok=True)
@@ -722,13 +772,13 @@ def _study1_capable_config(config: Any) -> Any:
     return merged
 
 
-def _observed_eligible_subject_ids(
+def _observed_source_stage_subject_ids(
     frame: pd.DataFrame,
     source_power_by_band: Mapping[str, Mapping[str, np.ndarray]],
     bands: tuple[str, ...],
     config: Any,
 ) -> tuple[str, ...]:
-    """Eligible cohort from the observed combined score (band-independent)."""
+    """Source-stage subject set from the observed combined score."""
     return compute_cohort_source_association_maps(
         frame,
         source_power_by_band[bands[0]],
@@ -744,7 +794,7 @@ def target_permutations_required_inputs(context: "Study2StageContext") -> tuple[
         study1_model_comparison_path(_study1_capable_config(config)),
     ]
     for subject_id in context.subjects:
-        for band in _contribution_bands(config):
+        for band in contribution_bands(config):
             required.append(
                 paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             )
@@ -754,7 +804,7 @@ def target_permutations_required_inputs(context: "Study2StageContext") -> tuple[
 def run_target_permutations(context: "Study2StageContext") -> None:
     """Build the target-retrained null source maps per band (README Section 6)."""
     config = context.config
-    bands = _contribution_bands(config)
+    bands = contribution_bands(config)
     frame = pd.read_csv(paths.source_stage_frame_path(config), sep="\t")
     source_power_by_band = {
         band: {
@@ -771,7 +821,7 @@ def run_target_permutations(context: "Study2StageContext") -> None:
         config=_study1_capable_config(config),
         logger=context.logger,
     )
-    expected_subject_ids = _observed_eligible_subject_ids(
+    expected_subject_ids = _observed_source_stage_subject_ids(
         frame, source_power_by_band, bands, config
     )
 
@@ -781,13 +831,15 @@ def run_target_permutations(context: "Study2StageContext") -> None:
         score_frame_template=frame,
         bands=bands,
         expected_subject_ids=expected_subject_ids,
-        n_valid_draws=int(
-            get_config_value(config, "study2.permutations.target_retrained_valid_draws", None)
+        n_valid_draws=require_config_int(
+            config,
+            "study2.permutations.target_retrained_valid_draws",
         ),
-        max_invalid_fraction=float(
-            get_config_value(config, "study2.permutations.max_invalid_draw_fraction", None)
+        max_invalid_fraction=require_config_float(
+            config,
+            "study2.permutations.max_invalid_draw_fraction",
         ),
-        random_state=int(get_config_value(config, "project.random_state", 42)),
+        random_state=require_config_int(config, "project.random_state"),
     )
 
     for band in bands:
@@ -805,7 +857,7 @@ def run_target_permutations(context: "Study2StageContext") -> None:
 def inference_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
     config = context.config
     required = [paths.source_adjacency_path(config)]
-    for band in _contribution_bands(config):
+    for band in contribution_bands(config):
         required.append(paths.source_stage_fisher_z_path(config, band=band))
         required.append(paths.null_source_maps_path(config, band=band))
     return tuple(required)
@@ -814,7 +866,7 @@ def inference_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]
 def run_inference(context: "Study2StageContext") -> None:
     """Run the primary source-family cluster test (README Section 6)."""
     config = context.config
-    bands = _contribution_bands(config)
+    bands = contribution_bands(config)
     adjacency = np.load(paths.source_adjacency_path(config))
     observed_maps = {
         band: np.load(paths.source_stage_fisher_z_path(config, band=band)) for band in bands
@@ -826,10 +878,11 @@ def run_inference(context: "Study2StageContext") -> None:
         observed_maps_by_band=observed_maps,
         null_maps_by_band=null_maps,
         adjacency=adjacency,
-        cluster_forming_p=get_config_value(
-            config, "study2.source_inference.primary_cluster_forming_p", None
+        cluster_forming_p=require_config_float(
+            config,
+            "study2.source_inference.primary_cluster_forming_p",
         ),
-        alpha=get_config_value(config, "study2.source_inference.family_alpha", 0.05),
+        alpha=require_config_float(config, "study2.source_inference.family_alpha"),
     )
 
     summary = summarize_source_family(result)
@@ -843,58 +896,17 @@ def run_inference(context: "Study2StageContext") -> None:
     )
 
 
-def _require_npz_keys(payload: Any, keys: tuple[str, ...]) -> None:
-    missing = [key for key in keys if key not in payload.files]
-    if missing:
-        raise ValueError(f"Study 2 NPZ input is missing arrays: {missing}.")
-
-
-def _require_columns(frame: pd.DataFrame, columns: tuple[str, ...], *, name: str) -> None:
-    missing = [column for column in columns if column not in frame.columns]
-    if missing:
-        raise ValueError(f"{name} is missing columns: {missing}.")
-
-
-def _metric_mapping(frame: pd.DataFrame, *, value_column: str) -> dict[str, float]:
-    values: dict[str, float] = {}
-    for row in frame.to_dict("records"):
-        value = row[value_column]
-        if pd.isna(value):
-            continue
-        values[str(row["metric"])] = float(value)
-    return values
-
-
-def _format_mapping(values: Mapping[str, float]) -> str:
-    return ";".join(f"{key}={values[key]:.12g}" for key in sorted(values))
-
-
-def _bool_value(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, np.bool_):
-        return bool(value)
-    text = str(value).strip().lower()
-    if text == "true":
-        return True
-    if text == "false":
-        return False
-    raise ValueError(f"Expected boolean value, got {value!r}.")
-
-
 def _required_config_string(config: Any, key: str) -> str:
-    value = get_config_value(config, key, None)
-    text = str(value).strip() if value is not None else ""
-    if not text:
-        raise ValueError(f"{key} must be configured.")
-    return text
+    return require_config_string(config, key)
 
 
 def _required_config_string_tuple(config: Any, key: str) -> tuple[str, ...]:
-    value = get_config_value(config, key, None)
+    value = require_config_value(config, key)
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"{key} must be a list of column names.")
-    parsed = tuple(str(item).strip() for item in value if str(item).strip())
+    parsed = tuple(str(item).strip() for item in value)
+    if any(not item for item in parsed):
+        raise ValueError(f"{key} must not contain empty column names.")
     if not parsed:
         raise ValueError(f"{key} must contain at least one column name.")
     if len(parsed) != len(set(parsed)):

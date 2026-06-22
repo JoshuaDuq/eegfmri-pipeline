@@ -26,13 +26,13 @@ from eeg_pipeline.analysis.machine_learning.orchestration import (
     model_comparison_cv_predictions,
     reconstruct_staged_permutation_target_for_fold,
 )
-from eeg_pipeline.utils.config.loader import get_config_value
 from studies.pain_study.study2.source_maps import compute_cohort_source_association_maps
 from studies.pain_study.study2.target_permutations import (
     InvalidPermutationDraw,
     TargetRetrainedSourcePermutationResult,
     run_target_retrained_source_permutations,
 )
+from studies.pain_study.study2.validation import require_config_string
 
 OuterFold = tuple[np.ndarray, np.ndarray]
 
@@ -76,14 +76,14 @@ def build_target_retrained_null_maps(
 ) -> tuple[dict[str, np.ndarray], TargetRetrainedSourcePermutationResult]:
     """Produce per-band null association maps for the source-family cluster test.
 
-    ``expected_subject_ids`` is the observed eligible cohort. A draw in which any
-    of those subjects becomes source-stage ineligible (degenerate permuted score)
-    is rejected and resampled, matching README Section 6. Returns one
+    ``expected_subject_ids`` is the observed source-stage subject set. A draw in which
+    that set changes because the permuted score violates source-stage criteria is
+    rejected and resampled, matching README Section 6. Returns one
     ``(n_draws, n_subjects, n_vertices)`` array per band plus the accounting result.
     """
     _validate_bands(bands, source_power_by_band)
     if not expected_subject_ids:
-        raise ValueError("Study 2 null requires a non-empty observed eligible cohort.")
+        raise ValueError("Study 2 null requires a non-empty observed source-stage cohort.")
     permute_target, fit_predict_score, compute_source_maps = _null_callables(
         context=context,
         source_power_by_band=source_power_by_band,
@@ -145,7 +145,7 @@ def _null_callables(
             )
             if result.subject_ids != expected_subject_ids:
                 raise InvalidPermutationDraw(
-                    "Study 2 null draw changed the eligible cohort for band "
+                    "Study 2 null draw changed the observed source-stage cohort for band "
                     f"'{band}': expected {expected_subject_ids}, got {result.subject_ids}."
                 )
             band_maps.append(result.fisher_z_maps)
@@ -253,13 +253,7 @@ def _validate_bands(
 
 
 def _combined_score_column(config: Any) -> str:
-    return str(
-        get_config_value(
-            config,
-            "study2.contributions.combined_standardized_column",
-            "eta_combined_z",
-        )
-    )
+    return require_config_string(config, "study2.contributions.combined_standardized_column")
 
 
 __all__ = [

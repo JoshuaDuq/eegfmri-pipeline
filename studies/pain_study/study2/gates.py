@@ -9,12 +9,12 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_value
 from studies.pain_study.study2.validation import (
     finite_number,
     require_bool_metric,
     require_config_bool,
     require_config_probability,
+    require_config_value,
     require_finite_metric,
     require_probability_metric,
 )
@@ -51,7 +51,7 @@ def load_study1_confirmatory_row(
     if missing:
         raise ValueError(f"Study 1 report is missing columns: {missing}.")
 
-    cell = get_config_value(config, "study2.confirmatory.study1_cell", None)
+    cell = require_config_value(config, "study2.confirmatory.study1_cell")
     if not isinstance(cell, Mapping):
         raise ValueError("Study 2 config is missing study1_cell mapping.")
 
@@ -76,7 +76,7 @@ def load_study1_confirmatory_row(
 
 
 def _optional_config_float(config: Any, key: str) -> float | None:
-    value = get_config_value(config, key, None)
+    value = require_config_value(config, key)
     if value is None:
         return None
     return finite_number(value, key)
@@ -169,18 +169,18 @@ def evaluate_study1_confirmatory_criteria(
         if within_subject_delta_r2 <= 0.0:
             unmet_criteria.append("positive_within_subject_delta_r2")
     if require_temporal_controls:
-        temporal_controls_passed = require_bool_metric(
+        temporal_controls_criteria_met = require_bool_metric(
             metrics,
             "temporal_negative_controls_passed",
         )
-        if not temporal_controls_passed:
+        if not temporal_controls_criteria_met:
             unmet_criteria.append("temporal_negative_controls")
     if require_artifact_robustness:
-        artifact_robustness_passed = require_bool_metric(
+        artifact_robustness_criteria_met = require_bool_metric(
             metrics,
             "artifact_censoring_robustness_passed",
         )
-        if not artifact_robustness_passed:
+        if not artifact_robustness_criteria_met:
             unmet_criteria.append("artifact_censoring_robustness")
 
     unmet = tuple(unmet_criteria)

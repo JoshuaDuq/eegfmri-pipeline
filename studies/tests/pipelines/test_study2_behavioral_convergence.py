@@ -43,7 +43,10 @@ def test_behavioral_convergence_computes_subject_slopes_and_permutation_p_value(
     assert result.n_subjects == 2
     assert result.mean_beta > 0.95
     assert 0.0 < result.p_value <= 1.0
-    assert result.subject_results["eligible"].tolist() == [True, True]
+    assert result.subject_results["behavioral_convergence_criteria_met"].tolist() == [
+        True,
+        True,
+    ]
 
 
 def test_behavioral_convergence_excludes_zero_variance_rating_subjects() -> None:
@@ -62,5 +65,8 @@ def test_behavioral_convergence_excludes_zero_variance_rating_subjects() -> None
     )
 
     assert result.n_subjects == 1
-    assert result.subject_results["eligible"].tolist() == [True, False]
-    assert "rating variance" in result.subject_results.loc[1, "reason"]
+    assert result.subject_results["behavioral_convergence_criteria_met"].tolist() == [
+        True,
+        False,
+    ]
+    assert result.subject_results.loc[1, "unmet_criteria"] == "zero_residual_variance_rating"

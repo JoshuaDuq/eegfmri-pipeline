@@ -53,7 +53,7 @@ def evaluate_source_model_qc(
         max_error=max_error,
     )
 
-    freesurfer_passed = require_bool_metric(metrics, "freesurfer_visual_qc_passed")
+    freesurfer_visual_qc_met = require_bool_metric(metrics, "freesurfer_visual_qc_passed")
     bem_succeeded = require_bool_metric(metrics, "bem_succeeded")
     has_measured_electrodes = require_bool_metric(
         metrics,
@@ -82,7 +82,7 @@ def evaluate_source_model_qc(
     )
 
     unmet_criteria: list[str] = []
-    if not freesurfer_passed:
+    if not freesurfer_visual_qc_met:
         unmet_criteria.append("freesurfer_visual_qc")
     if not bem_succeeded:
         unmet_criteria.append("boundary_element_model")

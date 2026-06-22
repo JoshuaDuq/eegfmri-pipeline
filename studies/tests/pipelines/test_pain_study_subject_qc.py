@@ -91,24 +91,24 @@ def _source_qc_frame() -> pd.DataFrame:
             {
                 "subject_id": "sub-0001",
                 "band": "combined",
-                "eligible": True,
+                "source_stage_criteria_met": True,
                 "retained_trials": 6,
                 "valid_blocks": 3,
                 "design_rank": 4,
                 "residual_degrees_of_freedom": 2,
                 "condition_number": 10.0,
-                "reason": "",
+                "unmet_criteria": "",
             },
             {
                 "subject_id": "sub-0002",
                 "band": "combined",
-                "eligible": False,
+                "source_stage_criteria_met": False,
                 "retained_trials": 6,
                 "valid_blocks": 3,
                 "design_rank": 2,
                 "residual_degrees_of_freedom": 0,
                 "condition_number": float("inf"),
-                "reason": "rank deficient",
+                "unmet_criteria": "source_stage_design_rank",
             },
         ]
     )
@@ -246,8 +246,8 @@ def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
     )
 
     beta_qc = _source_qc_frame().copy()
-    beta_qc.loc[beta_qc["subject_id"] == "sub-0001", "eligible"] = False
-    beta_qc.loc[beta_qc["subject_id"] == "sub-0001", "reason"] = "beta exclusion"
+    beta_qc.loc[beta_qc["subject_id"] == "sub-0001", "source_stage_criteria_met"] = False
+    beta_qc.loc[beta_qc["subject_id"] == "sub-0001", "unmet_criteria"] = "beta_criterion"
 
     inputs = SubjectQcInputs(
         subjects=("sub-0001",),

@@ -38,9 +38,9 @@ recipe, outer folds, target transformation, and fold-specific hyperparameters ar
 in Study 1 before any source-map construction. For each held-out subject, the frozen incremental
 model generates one EEG prediction of the NPS residual per retained plateau trial, denoted
 $\hat{r}_{\mathrm{EEG},\mathrm{test}}^{\mathrm{NPS}}$. This score is centered and scaled to unit
-variance within the held-out subject; a zero-variance score is ineligible. The primary analysis uses
-this single combined score rather than a per-band decomposition, which avoids the collinearity
-between spectral contributions of one decoder.
+variance within the held-out subject; a zero-variance score does not meet the source-stage criteria.
+The primary analysis uses this single combined score rather than a per-band decomposition, which
+avoids the collinearity between spectral contributions of one decoder.
 
 The combined score is the frozen linear predictor in the transformed residual-target space,
 equivalently the sum of the band-specific contributions $\eta_\alpha$, $\eta_\beta$, and
@@ -238,8 +238,10 @@ The predictor is decomposed into the frozen alpha, beta, and gamma contribution 
 band's source power is associated with its own contribution score while adjusting for the other
 bands' contribution scores. A subject is excluded from a band-unique map when the maximum
 adjacent-band variance inflation factor exceeds 5 or the contribution design condition number exceeds
-100, preserving numerical stability of the decomposition. The band-unique maps use the same
-target-retrained null and cluster test as the primary family, and their band-level p-values are
+100, preserving numerical stability of the decomposition. Band-unique inference is run only when
+band-unique target-retrained null maps have been generated explicitly for the same mutually adjusted
+estimand; it is not part of the default `all` sequence. When those nulls are supplied, the
+band-unique maps use the same cluster test as the primary family, and their band-level p-values are
 Holm-corrected as a distinct band-specificity family. A band that is significant in the primary
 family but not in the band-unique family is reported as reflecting shared rather than band-specific
 prediction structure.

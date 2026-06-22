@@ -99,11 +99,15 @@ def test_standardize_contribution_scores_within_subject_and_excludes_zero_varian
     assert np.mean(standardized["eta_beta_z"]) == pytest.approx(0.0)
     assert np.std(standardized["eta_beta_z"], ddof=0) == pytest.approx(1.0)
     assert qc.to_dict("records") == [
-        {"subject_id": "sub-0001", "eligible": True, "reason": ""},
+        {
+            "subject_id": "sub-0001",
+            "contribution_criteria_met": True,
+            "unmet_criteria": "",
+        },
         {
             "subject_id": "sub-0002",
-            "eligible": False,
-            "reason": "Zero-variance contribution score: eta_alpha.",
+            "contribution_criteria_met": False,
+            "unmet_criteria": "zero_variance_score:eta_alpha",
         },
     ]
 

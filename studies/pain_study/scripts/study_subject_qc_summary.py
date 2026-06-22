@@ -265,13 +265,13 @@ def validate_inputs(inputs: SubjectQcInputs) -> None:
             frame,
             {
                 "subject_id",
-                "eligible",
+                "source_stage_criteria_met",
                 "retained_trials",
                 "valid_blocks",
                 "design_rank",
                 "residual_degrees_of_freedom",
                 "condition_number",
-                "reason",
+                "unmet_criteria",
             },
             table_name=f"Study 2 {band} QC table",
         )
@@ -395,7 +395,7 @@ def study2_metrics(
     if not source_qc_rows:
         return {
             "study2_qc_bands_consistent": "",
-            "study2_eligible": "",
+            "study2_source_stage_criteria_met": "",
             "study2_retained_trials": 0,
             "study2_valid_blocks": 0,
             "study2_design_rank": "",
@@ -411,7 +411,7 @@ def study2_metrics(
         source_qc = source_qc_rows[0]
         return {
             "study2_qc_bands_consistent": False,
-            "study2_eligible": "",
+            "study2_source_stage_criteria_met": "",
             "study2_retained_trials": int(source_qc["retained_trials"]),
             "study2_valid_blocks": int(source_qc["valid_blocks"]),
             "study2_design_rank": int(source_qc["design_rank"]),
@@ -424,13 +424,13 @@ def study2_metrics(
         }
 
     source_qc = source_qc_rows[0]
-    eligible = bool(source_qc["eligible"])
+    source_stage_criteria_met = bool(source_qc["source_stage_criteria_met"])
     anatomy = inputs.anatomy_status.get(subject_id, "missing")
     input_rows = len(source_input)
     source_rows = source_shape.rows if source_shape else None
     return {
         "study2_qc_bands_consistent": True,
-        "study2_eligible": eligible,
+        "study2_source_stage_criteria_met": source_stage_criteria_met,
         "study2_retained_trials": int(source_qc["retained_trials"]),
         "study2_valid_blocks": int(source_qc["valid_blocks"]),
         "study2_design_rank": int(source_qc["design_rank"]),
@@ -462,7 +462,7 @@ def source_qc_bands_disagree(rows: list[pd.Series]) -> bool:
     if len(rows) <= 1:
         return False
     fields = (
-        "eligible",
+        "source_stage_criteria_met",
         "retained_trials",
         "valid_blocks",
         "design_rank",

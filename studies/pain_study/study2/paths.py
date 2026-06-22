@@ -10,21 +10,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
+from studies.pain_study.study2.validation import require_config_string
 
 
 def study2_output_root(config: Any) -> Path:
-    root_name = str(get_config_value(config, "study2.outputs.root_name", "study2")).strip()
-    if not root_name:
-        raise ValueError("study2.outputs.root_name must be a non-empty string.")
+    root_name = require_config_string(config, "study2.outputs.root_name")
     return resolve_eeg_deriv_root(config) / "group" / "multimodal" / root_name
 
 
 def study1_report_path(config: Any) -> Path:
-    root_name = str(get_config_value(config, "study2.inputs.study1_root_name", "study1")).strip()
-    if not root_name:
-        raise ValueError("study2.inputs.study1_root_name must be a non-empty string.")
+    root_name = require_config_string(config, "study2.inputs.study1_root_name")
     return (
         resolve_eeg_deriv_root(config)
         / "group"
@@ -53,6 +49,16 @@ def source_stage_frame_path(config: Any) -> Path:
 
 def subject_source_power_path(config: Any, *, subject_id: str, band: str) -> Path:
     return study2_output_root(config) / subject_id / "eeg" / "source" / f"source_power_{band}.npy"
+
+
+def subject_source_power_metadata_path(config: Any, *, subject_id: str, band: str) -> Path:
+    return (
+        study2_output_root(config)
+        / subject_id
+        / "eeg"
+        / "source"
+        / f"source_power_{band}.json"
+    )
 
 
 def source_stage_fisher_z_path(config: Any, *, band: str) -> Path:
@@ -268,4 +274,5 @@ __all__ = [
     "study1_report_path",
     "study2_output_root",
     "subject_source_power_path",
+    "subject_source_power_metadata_path",
 ]

@@ -1,4 +1,11 @@
+project:
+  random_state: 42
+
 study2:
+  inputs:
+    study1_root_name: "study1"
+  outputs:
+    root_name: "study2_smoketest"
   confirmatory:
     study1_cell:
       target: "NPS"

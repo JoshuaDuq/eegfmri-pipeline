@@ -64,6 +64,7 @@ class Study2Stage:
     name: str
     run: Callable[[Study2StageContext], None]
     required_inputs: Callable[[Study2StageContext], tuple[Path, ...]]
+    run_by_default: bool = True
 
 
 STUDY2_STAGES: tuple[Study2Stage, ...] = (
@@ -108,6 +109,7 @@ STUDY2_STAGES: tuple[Study2Stage, ...] = (
         name="band-unique-inference",
         run=run_band_unique_inference,
         required_inputs=band_unique_inference_required_inputs,
+        run_by_default=False,
     ),
     Study2Stage(
         name="directional-consistency",
@@ -159,6 +161,8 @@ class Study2Runner:
         )
         if mode == "all":
             for stage in self.stages:
+                if not stage.run_by_default:
+                    continue
                 self._run_stage(stage, context)
             return
         self._run_stage(self._stage_by_name(mode), context)

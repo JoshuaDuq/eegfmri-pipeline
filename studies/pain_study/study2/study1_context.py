@@ -29,7 +29,6 @@ from eeg_pipeline.analysis.machine_learning.pipelines import (
 from eeg_pipeline.analysis.machine_learning.target_residualization import (
     configured_target_residualization_columns,
 )
-from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 from eeg_pipeline.utils.data.machine_learning import load_active_matrix
 from studies.pain_study.study1.cohort import study1_feature_root
@@ -47,6 +46,7 @@ from studies.pain_study.study1.reporting import (
     PRIMARY_GATE_TARGET,
 )
 from studies.pain_study.study2.target_retrained_null import OuterFold, Study1ModelContext
+from studies.pain_study.study2.validation import require_config_int, require_config_string
 
 ELASTICNET_MODEL_NAME = "elasticnet"
 
@@ -73,13 +73,12 @@ def load_study1_model_context(
 
     deriv_root = resolve_eeg_deriv_root(config)
     feature_root = study1_feature_root(config)
-    harmonization = str(
-        get_config_value(
-            config, "study1.feature_benchmark.feature_harmonization", "intersection"
-        )
-    ).strip()
-    inner_splits = int(get_config_value(config, "study1.feature_benchmark.inner_splits", 5))
-    rng_seed = int(get_config_value(config, "project.random_state", 42))
+    harmonization = require_config_string(
+        config,
+        "study1.feature_benchmark.feature_harmonization",
+    )
+    inner_splits = require_config_int(config, "study1.feature_benchmark.inner_splits")
+    rng_seed = require_config_int(config, "project.random_state")
 
     X, y, groups, _feature_names, meta = load_active_matrix(
         subjects,
@@ -116,9 +115,10 @@ def load_study1_model_context(
         groups=groups,
     )
     blocks, trial_indices = _block_and_trial_indices(meta)
-    scheme = str(
-        get_config_value(feature_config, "machine_learning.cv.permutation_scheme", "within_subject")
-    ).strip().lower()
+    scheme = require_config_string(
+        feature_config,
+        "machine_learning.cv.permutation_scheme",
+    ).lower()
 
     return Study1ModelContext(
         X=X,

@@ -19,7 +19,7 @@ def test_prepare_source_stage_association_inputs_preserves_trial_row_indices() -
         config=load_study2_config(),
     )
 
-    assert inputs.qc.eligible is True
+    assert inputs.qc.source_stage_criteria_met is True
     assert inputs.retained_row_indices.tolist() == list(range(len(frame)))
     assert inputs.score.shape == (len(frame),)
     assert inputs.design.shape[0] == len(frame)
@@ -46,7 +46,7 @@ def test_compute_subject_source_association_map_uses_combined_score_design() -> 
     assert result.subject_id == "sub-0001"
     assert result.source_band == "alpha"
     assert result.qc.band == "combined"
-    assert result.qc.eligible is True
+    assert result.qc.source_stage_criteria_met is True
     assert result.association is not None
     assert result.association.partial_r.shape == (3,)
     assert result.association.valid_vertices.tolist() == [True, True, False]
@@ -73,13 +73,13 @@ def test_compute_band_unique_subject_source_association_map_adjusts_other_bands(
 
     assert result.source_band == "alpha"
     assert result.qc.band == "alpha"
-    assert result.qc.eligible is True
+    assert result.qc.source_stage_criteria_met is True
     assert result.association is not None
     assert result.association.partial_r[0] > 0.95
     assert result.association.partial_r[1] < -0.95
 
 
-def test_compute_subject_source_association_map_returns_qc_without_map_when_ineligible() -> None:
+def test_compute_subject_source_association_map_returns_qc_without_map_when_criteria_unmet() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_maps import (
         compute_subject_source_association_map,
@@ -95,9 +95,12 @@ def test_compute_subject_source_association_map_returns_qc_without_map_when_inel
         config=load_study2_config(),
     )
 
-    assert result.qc.eligible is False
+    assert result.qc.source_stage_criteria_met is False
     assert result.association is None
-    assert "valid_blocks=2" in result.qc.reason
+    assert result.qc.unmet_criteria == (
+        "min_valid_blocks_per_subject",
+        "min_retained_trials_per_subject",
+    )
 
 
 def test_compute_subject_source_association_map_rejects_misaligned_source_power() -> None:
@@ -118,7 +121,7 @@ def test_compute_subject_source_association_map_rejects_misaligned_source_power(
         )
 
 
-def test_compute_cohort_source_association_maps_stacks_eligible_subject_maps() -> None:
+def test_compute_cohort_source_association_maps_stacks_source_stage_subject_maps() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_maps import (
         compute_cohort_source_association_maps,
@@ -142,7 +145,7 @@ def test_compute_cohort_source_association_maps_stacks_eligible_subject_maps() -
     assert result.fisher_z_maps.shape == (2, 3)
     assert result.partial_r_maps.shape == (2, 3)
     assert result.qc["subject_id"].tolist() == ["sub-0001", "sub-0002", "sub-0003"]
-    assert result.qc["eligible"].tolist() == [True, True, False]
+    assert result.qc["source_stage_criteria_met"].tolist() == [True, True, False]
     assert result.partial_r_maps[:, 0].min() > 0.95
     assert result.partial_r_maps[:, 1].max() < -0.95
 
@@ -181,13 +184,31 @@ def test_compute_cohort_source_association_maps_aligns_source_power_by_trial_id(
     assert result.partial_r_maps[0, 1] < -0.95
 
 
+def test_compute_cohort_source_association_maps_requires_trial_id() -> None:
+    from studies.pain_study.study2.config import load_study2_config
+    from studies.pain_study.study2.source_maps import (
+        compute_cohort_source_association_maps,
+    )
+
+    frame = _cohort_source_stage_frame(include_subject_with_unmet_criteria=False)
+    source_power_by_subject = _source_power_by_subject(frame, column="eta_combined_z")
+
+    with pytest.raises(ValueError, match="missing required trial column"):
+        compute_cohort_source_association_maps(
+            frame.drop(columns=["trial_id"]),
+            source_power_by_subject,
+            band="alpha",
+            config=load_study2_config(),
+        )
+
+
 def test_compute_band_unique_cohort_source_association_maps_uses_band_scores() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_maps import (
         compute_band_unique_cohort_source_association_maps,
     )
 
-    frame = _cohort_source_stage_frame(include_ineligible=False)
+    frame = _cohort_source_stage_frame(include_subject_with_unmet_criteria=False)
     source_power_by_subject = _source_power_by_subject(frame, column="eta_alpha_z")
 
     result = compute_band_unique_cohort_source_association_maps(
@@ -210,7 +231,7 @@ def test_compute_cohort_source_association_maps_requires_source_power_per_subjec
         compute_cohort_source_association_maps,
     )
 
-    frame = _cohort_source_stage_frame(include_ineligible=False)
+    frame = _cohort_source_stage_frame(include_subject_with_unmet_criteria=False)
     source_power_by_subject = {
         "sub-0001": _source_power_from_column(
             frame.loc[frame["subject_id"] == "sub-0001", "eta_combined_z"].to_numpy(dtype=float)
@@ -237,12 +258,12 @@ def _source_power_from_column(score: np.ndarray) -> np.ndarray:
     )
 
 
-def _cohort_source_stage_frame(*, include_ineligible: bool = True):
+def _cohort_source_stage_frame(*, include_subject_with_unmet_criteria: bool = True):
     frames = [
         _source_stage_frame().assign(subject_id="sub-0001"),
         _source_stage_frame().assign(subject_id="sub-0002"),
     ]
-    if include_ineligible:
+    if include_subject_with_unmet_criteria:
         frames.append(_source_stage_frame(n_blocks=2).assign(subject_id="sub-0003"))
     return pd.concat(frames, ignore_index=True)
 

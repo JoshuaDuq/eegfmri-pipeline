@@ -21,8 +21,9 @@ source "${LOCAL_ENV}"
 required_vars=(
     RORQUAL_HOST
     RORQUAL_SSH_CONTROL_PATH
-    DERIV_ROOT
+    FMRIPREP_DERIV_ROOT
     FMRIPREP_OUTPUT_SPACES
+    FMRIPREP_TASK_ID
     LOCAL_BIDS_FMRI_ROOT
     LOCAL_FMRIPREP_OUTPUT_ROOT
 )
@@ -41,8 +42,8 @@ if ! ssh -S "${RORQUAL_SSH_CONTROL_PATH}" -O check "${RORQUAL_HOST}" 2>/dev/null
     exit 1
 fi
 
-remote_output_root="${DERIV_ROOT}/preprocessed/fmri"
-remote_archive="$(dirname "${DERIV_ROOT}")/fmriprep_preprocessed_fmri.tar"
+remote_output_root="${FMRIPREP_DERIV_ROOT}/preprocessed/fmri"
+remote_archive="$(dirname "${FMRIPREP_DERIV_ROOT}")/fmriprep_preprocessed_fmri.tar"
 local_derivatives_root="$(dirname "$(dirname "${LOCAL_FMRIPREP_OUTPUT_ROOT}")")"
 local_archive="${local_derivatives_root}/fmriprep_preprocessed_fmri.tar"
 local_fmriprep_root="${LOCAL_FMRIPREP_OUTPUT_ROOT}/fmriprep"
@@ -114,10 +115,10 @@ verify_subject_outputs() {
     fi
 
     shopt -s nullglob
-    local raw_bold_files=("${raw_func_dir}"/*_bold.nii.gz)
+    local raw_bold_files=("${raw_func_dir}"/*_task-"${FMRIPREP_TASK_ID}"_*_bold.nii.gz)
     shopt -u nullglob
     if [[ "${#raw_bold_files[@]}" -lt 1 ]]; then
-        echo "No raw BOLD files found for ${subject_label}: ${raw_func_dir}" >&2
+        echo "No task-${FMRIPREP_TASK_ID} BOLD files found for ${subject_label}: ${raw_func_dir}" >&2
         exit 1
     fi
 

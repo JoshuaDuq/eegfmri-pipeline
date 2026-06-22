@@ -73,16 +73,16 @@ def standardize_contribution_scores(
     qc_records: list[dict[str, object]] = []
     for subject_id, subject_frame in frame.groupby(subject_column, sort=True):
         subject_copy = subject_frame.copy()
-        ineligible_reason = _ineligible_subject_reason(
+        unmet_criteria = _unmet_subject_criteria(
             subject_copy,
             score_columns=score_columns,
         )
-        if ineligible_reason:
+        if unmet_criteria:
             qc_records.append(
                 {
                     "subject_id": str(subject_id),
-                    "eligible": False,
-                    "reason": ineligible_reason,
+                    "contribution_criteria_met": False,
+                    "unmet_criteria": ";".join(unmet_criteria),
                 }
             )
             continue
@@ -96,8 +96,8 @@ def standardize_contribution_scores(
         qc_records.append(
             {
                 "subject_id": str(subject_id),
-                "eligible": True,
-                "reason": "",
+                "contribution_criteria_met": True,
+                "unmet_criteria": "",
             }
         )
 
@@ -108,7 +108,10 @@ def standardize_contribution_scores(
         for column in score_columns:
             standardized[f"{column}_z"] = pd.Series(dtype=float)
 
-    qc = pd.DataFrame(qc_records, columns=["subject_id", "eligible", "reason"])
+    qc = pd.DataFrame(
+        qc_records,
+        columns=["subject_id", "contribution_criteria_met", "unmet_criteria"],
+    )
     return standardized.reset_index(drop=True), qc
 
 
@@ -156,18 +159,18 @@ def _feature_band(feature_name: str) -> str:
     return str(parsed["band"])
 
 
-def _ineligible_subject_reason(
+def _unmet_subject_criteria(
     frame: pd.DataFrame,
     *,
     score_columns: tuple[str, ...],
-) -> str:
+) -> tuple[str, ...]:
     for column in score_columns:
         values = pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
         if not np.all(np.isfinite(values)):
             raise ValueError(f"Study 2 contribution score '{column}' contains non-finite values.")
         if float(np.std(values, ddof=0)) <= 0.0:
-            return f"Zero-variance contribution score: {column}."
-    return ""
+            return (f"zero_variance_score:{column}",)
+    return ()
 
 
 __all__ = [

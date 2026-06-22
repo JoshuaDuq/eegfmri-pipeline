@@ -8,7 +8,6 @@ from typing import Any, Mapping, Protocol
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_value
 from studies.pain_study.study2.association import (
     SourcePowerAssociationMap,
     compute_source_power_association_map,
@@ -19,6 +18,7 @@ from studies.pain_study.study2.source_stage import (
     prepare_band_unique_source_stage_association_inputs,
     prepare_source_stage_association_inputs,
 )
+from studies.pain_study.study2.validation import require_config_string
 
 
 @dataclass(frozen=True)
@@ -96,7 +96,7 @@ def compute_cohort_source_association_maps(
     band: str,
     config: Any,
 ) -> CohortSourceAssociationResult:
-    """Compute primary source association maps for each eligible cohort subject."""
+    """Compute primary source association maps for each source-valid cohort subject."""
     source_band = _normalized_band(band)
     return _compute_cohort_source_association_maps(
         frame,
@@ -114,7 +114,7 @@ def compute_band_unique_cohort_source_association_maps(
     band: str,
     config: Any,
 ) -> CohortSourceAssociationResult:
-    """Compute band-unique source association maps for each eligible subject."""
+    """Compute band-unique source association maps for each source-valid subject."""
     source_band = _normalized_band(band)
     return _compute_cohort_source_association_maps(
         frame,
@@ -131,7 +131,7 @@ def _compute_prepared_source_association(
     inputs: SourceStageAssociationInputs,
     source_band: str,
 ) -> SubjectSourceAssociationResult:
-    if not inputs.qc.eligible:
+    if not inputs.qc.source_stage_criteria_met:
         return SubjectSourceAssociationResult(
             subject_id=inputs.qc.subject_id,
             source_band=source_band,
@@ -227,11 +227,11 @@ def _align_source_power_to_frame(
     if source_arr.ndim != 2:
         raise ValueError(f"Study 2 source_power must be 2D, got shape {source_arr.shape}.")
 
-    trial_column = str(
-        get_config_value(config, "study2.contributions.trial_column", "trial_id")
-    )
+    trial_column = require_config_string(config, "study2.contributions.trial_column")
     if trial_column not in frame.columns:
-        return _validate_source_power(source_arr, n_trials=len(frame))
+        raise ValueError(
+            f"Study 2 source-stage frame is missing required trial column '{trial_column}'."
+        )
 
     trial_ids = _source_power_trial_indices(frame[trial_column], n_source_rows=source_arr.shape[0])
     return _validate_source_power(source_arr[trial_ids, :], n_trials=len(frame))
@@ -333,19 +333,19 @@ def _qc_record(qc: SourceStageSubjectQC) -> dict[str, Any]:
     return {
         "subject_id": qc.subject_id,
         "band": qc.band,
-        "eligible": qc.eligible,
+        "source_stage_criteria_met": qc.source_stage_criteria_met,
         "retained_trials": qc.retained_trials,
         "valid_blocks": qc.valid_blocks,
         "design_rank": qc.design_rank,
         "residual_degrees_of_freedom": qc.residual_degrees_of_freedom,
         "condition_number": qc.condition_number,
         "max_adjacent_band_vif": qc.max_adjacent_band_vif,
-        "reason": qc.reason,
+        "unmet_criteria": ";".join(qc.unmet_criteria),
     }
 
 
 def _subject_column(config: Any) -> str:
-    return str(get_config_value(config, "study2.contributions.subject_column", "subject_id"))
+    return require_config_string(config, "study2.contributions.subject_column")
 
 
 def _normalized_band(band: str) -> str:

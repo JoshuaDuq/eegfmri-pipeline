@@ -45,6 +45,24 @@ def test_runner_all_runs_every_stage_in_table_order(tmp_path: Path) -> None:
     assert calls == ["gate", "source-stage"]
 
 
+def test_runner_all_skips_nondefault_stage(tmp_path: Path) -> None:
+    calls: list[str] = []
+    stages = (
+        _recording_stage("gate", calls),
+        Study2Stage(
+            name="band-unique-inference",
+            run=lambda context: calls.append("band-unique-inference"),
+            required_inputs=lambda context: (),
+            run_by_default=False,
+        ),
+    )
+    runner = Study2Runner(config=_config(tmp_path), stages=stages)
+
+    runner.run(mode="all", subjects=["sub-0000"], task="pain")
+
+    assert calls == ["gate"]
+
+
 def test_runner_rejects_unknown_mode(tmp_path: Path) -> None:
     runner = Study2Runner(config=_config(tmp_path), stages=(_recording_stage("gate", []),))
 
@@ -81,3 +99,10 @@ def test_default_stage_table_modes_are_unique_and_nonempty() -> None:
 
     assert names, "Study 2 stage table must not be empty."
     assert len(names) == len(set(names)), "Study 2 stage names must be unique."
+
+
+def test_default_band_unique_inference_is_explicit_only() -> None:
+    stages = {stage.name: stage for stage in STUDY2_STAGES}
+
+    assert "band-unique-inference" in stages
+    assert stages["band-unique-inference"].run_by_default is False

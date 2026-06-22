@@ -24,8 +24,9 @@ def _write_workflow_config(workflow_dir: Path, tmp_path: Path) -> tuple[Path, Pa
     (workflow_dir / "alliance_env.sh").write_text(
         "\n".join(
             [
-                f'export DERIV_ROOT="{remote_derivatives}"',
+                f'export FMRIPREP_DERIV_ROOT="{remote_derivatives}"',
                 'export FMRIPREP_OUTPUT_SPACES="MNI152NLin2009cAsym T1w"',
+                'export FMRIPREP_TASK_ID="thermalactive"',
             ]
         ),
         encoding="utf-8",
@@ -97,22 +98,23 @@ cp "$src" "$dest"
 
 def _write_minimal_fmriprep_output(remote_derivatives: Path, local_bids_root: Path) -> None:
     raw_func = local_bids_root / "sub-0001" / "func"
-    raw_bold = raw_func / "sub-0001_task-rest_run-01_bold.nii.gz"
-    raw_bold.write_text("raw", encoding="utf-8")
+    for task in ("thermalactive", "rest"):
+        raw_bold = raw_func / f"sub-0001_task-{task}_run-01_bold.nii.gz"
+        raw_bold.write_text("raw", encoding="utf-8")
 
     remote_root = remote_derivatives / "preprocessed" / "fmri"
     subject_func = remote_root / "sub-0001" / "func"
     subject_func.mkdir(parents=True)
     for space in ["MNI152NLin2009cAsym", "T1w"]:
-        (subject_func / f"sub-0001_task-rest_run-01_space-{space}_desc-preproc_bold.nii.gz").write_text(
+        (subject_func / f"sub-0001_task-thermalactive_run-01_space-{space}_desc-preproc_bold.nii.gz").write_text(
             "bold",
             encoding="utf-8",
         )
-        (subject_func / f"sub-0001_task-rest_run-01_space-{space}_desc-brain_mask.nii.gz").write_text(
+        (subject_func / f"sub-0001_task-thermalactive_run-01_space-{space}_desc-brain_mask.nii.gz").write_text(
             "mask",
             encoding="utf-8",
         )
-    (subject_func / "sub-0001_task-rest_run-01_desc-confounds_timeseries.tsv").write_text(
+    (subject_func / "sub-0001_task-thermalactive_run-01_desc-confounds_timeseries.tsv").write_text(
         "confound\n",
         encoding="utf-8",
     )

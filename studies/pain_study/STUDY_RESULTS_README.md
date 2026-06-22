@@ -113,22 +113,22 @@ fMRI BIDS plateau events, LSS plateau trials, and temporal-feature rows.
 
 Values come from `source_stage/qc_{alpha,beta,gamma}.tsv`,
 `source_stage/source_stage_input.tsv`, and `sub-*/eeg/source/source_power_*.npy`.
-Per-subject QC fields are identical across bands when eligible.
+Per-subject QC fields are identical across bands for the primary combined-score source-stage run.
 
 | Term | Definition |
 | --- | --- |
-| Source-stage eligible | `eligible` value from the source-stage QC table. |
+| Source-stage criteria met | `source_stage_criteria_met` value from the source-stage QC table. |
 | Retained trials | Row count after `_permutation_valid_source_blocks()` filtering (Study 1 circular-shift QC criteria). |
-| Valid blocks | Distinct `block` values in that retained trial set. Requires ≥ 3 valid blocks and ≥ 25 retained trials for eligibility. |
+| Valid blocks | Distinct `block` values in that retained trial set. Requires ≥ 3 valid blocks and ≥ 25 retained trials for the source-stage criteria. |
 | Design rank | Rank of the source-stage nuisance design matrix (continuous nuisance covariates plus categorical dummies for `block`, `stimulus_temp`, `selected_surface`). Must be full rank. |
-| Residual df | `retained_trials − design_rank`. Must be ≥ 15 for eligibility. |
+| Residual df | `retained_trials − design_rank`. Must be ≥ 15 for the source-stage criteria. |
 | Condition number | Condition number of the contribution-stability design (nuisance design augmented with the band contribution target), evaluated on mean-centered, column-normalized columns. Must be ≤ 100 (`study2.source_stage.max_condition_number`). |
 | Source-stage input rows | Row count for the subject in `source_stage/source_stage_input.tsv`. |
 | Source-power rows | First dimension of `source_power_{alpha,beta,gamma}.npy` for the subject. |
 | Source vertices | Second dimension of `source_power_{alpha,beta,gamma}.npy` (cortical source locations). |
 | Anatomy files found | Whether `{subject}-trans.fif` and `{subject}-5120-5120-5120-bem-sol.fif` exist under the FreeSurfer subjects directory (`trans+BEM`, `trans_only`, `BEM_only`, or `missing`). |
 | BEM surface issue | Manual issue entry when watershed BEM surfaces are anatomically invalid. |
-| Rank deficient | Source-stage QC `reason` indicates the contribution design is rank deficient (`eligible == false`). |
+| Rank deficient | Source-stage QC `unmet_criteria` includes `source_stage_design_rank` or `contribution_design_rank` (`source_stage_criteria_met == false`). |
 
 ## Run Provenance
 
@@ -284,7 +284,7 @@ Ridge temporal delta R2:
 
 These values come from source-stage QC and source-array outputs.
 
-| Subject | Source-stage eligible | Retained trials | Valid blocks | Design rank | Residual df | Condition number |
+| Subject | Source-stage criteria met | Retained trials | Valid blocks | Design rank | Residual df | Condition number |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | `sub-0000` | -- | -- | -- | -- | -- | -- |
 | `sub-0001` | false | 65 | 6 | 21 | 44 | inf |

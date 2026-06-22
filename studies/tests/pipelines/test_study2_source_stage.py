@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -28,6 +29,7 @@ def _source_stage_frame(
                 {
                     "subject_id": "sub-0001",
                     "block": block,
+                    "trial_id": trial_offset + 1,
                     "trial_index": trial_index,
                     "trial_index_within_block": trial_index,
                     "onset": float(rng.normal()),
@@ -68,7 +70,7 @@ def test_evaluate_source_stage_subject_accepts_valid_combined_score_design() -> 
         config=load_study2_config(),
     )
 
-    assert qc.eligible is True
+    assert qc.source_stage_criteria_met is True
     assert qc.subject_id == "sub-0001"
     assert qc.band == "combined"
     assert qc.retained_trials == 66
@@ -76,7 +78,7 @@ def test_evaluate_source_stage_subject_accepts_valid_combined_score_design() -> 
     assert qc.residual_degrees_of_freedom >= 15
     assert qc.condition_number <= 100
     assert math.isnan(qc.max_adjacent_band_vif)
-    assert qc.reason == ""
+    assert qc.unmet_criteria == ()
 
 
 def test_evaluate_source_stage_subject_omits_unobserved_fixed_levels() -> None:
@@ -88,8 +90,8 @@ def test_evaluate_source_stage_subject_omits_unobserved_fixed_levels() -> None:
 
     qc = evaluate_source_stage_subject(frame, config=load_study2_config())
 
-    assert qc.eligible is True
-    assert qc.reason == ""
+    assert qc.source_stage_criteria_met is True
+    assert qc.unmet_criteria == ()
 
 
 def test_evaluate_source_stage_subject_rejects_raw_level2_artifact_columns() -> None:
@@ -110,6 +112,28 @@ def test_evaluate_source_stage_subject_rejects_raw_level2_artifact_columns() -> 
         evaluate_source_stage_subject(_source_stage_frame(), config=config)
 
 
+def test_evaluate_source_stage_subject_requires_configured_thresholds() -> None:
+    from studies.pain_study.study2.config import load_study2_config
+    from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
+
+    config = load_study2_config()
+    del config["study2"]["source_stage"]["min_retained_trials_per_subject"]
+
+    with pytest.raises(ValueError, match="min_retained_trials_per_subject"):
+        evaluate_source_stage_subject(_source_stage_frame(), config=config)
+
+
+def test_source_stage_design_columns_are_required_config() -> None:
+    from studies.pain_study.study2.config import load_study2_config
+    from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
+
+    config = load_study2_config()
+    del config["study2"]["source_stage"]["continuous_columns"]
+
+    with pytest.raises(ValueError, match="continuous_columns"):
+        evaluate_source_stage_subject(_source_stage_frame(), config=config)
+
+
 def test_evaluate_source_stage_subject_rejects_too_few_valid_blocks() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
@@ -119,9 +143,12 @@ def test_evaluate_source_stage_subject_rejects_too_few_valid_blocks() -> None:
         config=load_study2_config(),
     )
 
-    assert qc.eligible is False
+    assert qc.source_stage_criteria_met is False
     assert qc.valid_blocks == 2
-    assert "valid_blocks=2" in qc.reason
+    assert qc.unmet_criteria == (
+        "min_valid_blocks_per_subject",
+        "min_retained_trials_per_subject",
+    )
 
 
 def test_evaluate_source_stage_subject_requires_combined_score_column() -> None:
@@ -130,10 +157,8 @@ def test_evaluate_source_stage_subject_requires_combined_score_column() -> None:
 
     frame = _source_stage_frame().drop(columns=["eta_combined_z"])
 
-    qc = evaluate_source_stage_subject(frame, config=load_study2_config())
-
-    assert qc.eligible is False
-    assert "eta_combined_z" in qc.reason
+    with pytest.raises(ValueError, match="missing columns"):
+        evaluate_source_stage_subject(frame, config=load_study2_config())
 
 
 def test_evaluate_source_stage_subject_rejects_collinear_combined_score() -> None:
@@ -145,8 +170,8 @@ def test_evaluate_source_stage_subject_rejects_collinear_combined_score() -> Non
         config=load_study2_config(),
     )
 
-    assert qc.eligible is False
-    assert "contribution design" in qc.reason
+    assert qc.source_stage_criteria_met is False
+    assert qc.unmet_criteria == ("contribution_design_rank",)
 
 
 def test_evaluate_source_stage_subject_requires_one_subject() -> None:
@@ -177,10 +202,10 @@ def test_evaluate_band_unique_source_stage_subject_accepts_valid_design() -> Non
         config=load_study2_config(),
     )
 
-    assert qc.eligible is True
+    assert qc.source_stage_criteria_met is True
     assert qc.band == "alpha"
     assert qc.max_adjacent_band_vif <= 5
-    assert qc.reason == ""
+    assert qc.unmet_criteria == ()
 
 
 def test_evaluate_band_unique_source_stage_subject_rejects_high_adjacent_band_vif() -> None:
@@ -189,15 +214,18 @@ def test_evaluate_band_unique_source_stage_subject_rejects_high_adjacent_band_vi
         evaluate_band_unique_source_stage_subject,
     )
 
-    qc = evaluate_band_unique_source_stage_subject(
-        _source_stage_frame(collinear_adjacent_band=True),
-        band="alpha",
-        config=load_study2_config(),
-    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        qc = evaluate_band_unique_source_stage_subject(
+            _source_stage_frame(collinear_adjacent_band=True),
+            band="alpha",
+            config=load_study2_config(),
+        )
 
-    assert qc.eligible is False
+    assert qc.source_stage_criteria_met is False
     assert qc.max_adjacent_band_vif > 5
-    assert "adjacent-band VIF" in qc.reason
+    assert qc.unmet_criteria == ("max_adjacent_band_vif",)
+    assert not any(issubclass(item.category, RuntimeWarning) for item in caught)
 
 
 def test_evaluate_band_unique_source_stage_subject_rejects_collinear_target_band() -> None:
@@ -212,8 +240,8 @@ def test_evaluate_band_unique_source_stage_subject_rejects_collinear_target_band
         config=load_study2_config(),
     )
 
-    assert qc.eligible is False
-    assert "contribution design" in qc.reason
+    assert qc.source_stage_criteria_met is False
+    assert qc.unmet_criteria == ("contribution_design_rank",)
 
 
 def test_evaluate_source_stage_cohort_accepts_enough_source_valid_subjects() -> None:
@@ -233,7 +261,7 @@ def test_evaluate_source_stage_cohort_accepts_enough_source_valid_subjects() -> 
 
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
-    assert qc["eligible"].tolist() == [True, True]
+    assert qc["source_stage_criteria_met"].tolist() == [True, True]
     assert status.band == "combined"
     assert status.confirmatory_cohort_criteria_met is True
     assert status.n_source_valid_subjects == 2
@@ -257,7 +285,7 @@ def test_evaluate_source_stage_cohort_downgrades_for_too_few_valid_subjects() ->
 
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
-    assert qc["eligible"].tolist() == [True, False]
+    assert qc["source_stage_criteria_met"].tolist() == [True, False]
     assert status.confirmatory_cohort_criteria_met is False
     assert status.feasibility_cohort_criteria_met is False
     assert status.n_source_valid_subjects == 1
@@ -283,7 +311,7 @@ def test_evaluate_source_stage_cohort_marks_feasibility_limited_tier() -> None:
 
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
-    assert qc["eligible"].tolist() == [True, True]
+    assert qc["source_stage_criteria_met"].tolist() == [True, True]
     assert status.confirmatory_cohort_criteria_met is False
     assert status.feasibility_cohort_criteria_met is True
     assert status.n_source_valid_subjects == 2
@@ -308,7 +336,7 @@ def test_evaluate_source_stage_cohort_downgrades_for_collinearity_failure_fracti
 
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
-    assert qc["eligible"].tolist() == [True, True, False]
+    assert qc["source_stage_criteria_met"].tolist() == [True, True, False]
     assert status.confirmatory_cohort_criteria_met is False
     assert status.n_source_valid_subjects == 2
     assert status.collinearity_failure_fraction == pytest.approx(1 / 3)
@@ -335,7 +363,7 @@ def test_evaluate_source_stage_cohort_collinearity_fraction_uses_otherwise_valid
 
     qc, status = evaluate_source_stage_cohort(frame, config=config)
 
-    assert qc["eligible"].tolist() == [True, True, False, False, False]
+    assert qc["source_stage_criteria_met"].tolist() == [True, True, False, False, False]
     assert status.confirmatory_cohort_criteria_met is False
     assert status.n_source_valid_subjects == 2
     assert status.collinearity_failure_fraction == pytest.approx(1 / 3)
@@ -362,7 +390,7 @@ def test_evaluate_band_unique_source_stage_cohort_counts_adjacent_band_failures(
 
     qc, status = evaluate_band_unique_source_stage_cohort(frame, band="alpha", config=config)
 
-    assert qc["eligible"].tolist() == [True, True, False]
+    assert qc["source_stage_criteria_met"].tolist() == [True, True, False]
     assert status.band == "alpha"
     assert status.confirmatory_cohort_criteria_met is False
     assert status.collinearity_failure_fraction == pytest.approx(1 / 3)

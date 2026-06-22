@@ -8,8 +8,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import get_config_value
 from studies.pain_study.study2.statistics import plus_one_p_value, standardized_residual
+from studies.pain_study.study2.validation import require_config_int
 
 
 @dataclass(frozen=True)
@@ -38,17 +38,21 @@ def compute_behavioral_convergence(
         (subject_column, block_column, expression_column, rating_column, *design_columns),
     )
     permutation_count = _permutation_count(config, n_permutations)
-    min_trials = int(get_config_value(config, "study2.behavioral_convergence.min_rated_trials", 25))
-    min_blocks = int(
-        get_config_value(config, "study2.behavioral_convergence.min_permutation_valid_blocks", 3)
+    min_trials = require_config_int(
+        config,
+        "study2.behavioral_convergence.min_rated_trials",
+    )
+    min_blocks = require_config_int(
+        config,
+        "study2.behavioral_convergence.min_permutation_valid_blocks",
     )
 
     subject_records: list[dict[str, object]] = []
-    eligible_frames: list[pd.DataFrame] = []
+    criteria_met_frames: list[pd.DataFrame] = []
     observed_betas: list[float] = []
     for subject_id, subject_frame in frame.groupby(subject_column, sort=True):
         subject_copy = subject_frame.reset_index(drop=True).copy()
-        qc_reason = _subject_qc_reason(
+        unmet_criteria = _unmet_subject_criteria(
             subject_copy,
             block_column=block_column,
             expression_column=expression_column,
@@ -57,13 +61,13 @@ def compute_behavioral_convergence(
             min_trials=min_trials,
             min_blocks=min_blocks,
         )
-        if qc_reason:
+        if unmet_criteria:
             subject_records.append(
                 {
                     "subject_id": str(subject_id),
-                    "eligible": False,
+                    "behavioral_convergence_criteria_met": False,
                     "beta": np.nan,
-                    "reason": qc_reason,
+                    "unmet_criteria": ";".join(unmet_criteria),
                 }
             )
             continue
@@ -75,18 +79,20 @@ def compute_behavioral_convergence(
             design_columns=design_columns,
         )
         observed_betas.append(beta)
-        eligible_frames.append(subject_copy)
+        criteria_met_frames.append(subject_copy)
         subject_records.append(
             {
                 "subject_id": str(subject_id),
-                "eligible": True,
+                "behavioral_convergence_criteria_met": True,
                 "beta": beta,
-                "reason": "",
+                "unmet_criteria": "",
             }
         )
 
     if not observed_betas:
-        raise ValueError("Study 2 behavioral convergence has no eligible subjects.")
+        raise ValueError(
+            "Study 2 behavioral convergence has no subjects meeting the configured criteria."
+        )
 
     observed = float(np.mean(observed_betas))
     rng = np.random.default_rng(random_state)
@@ -105,7 +111,7 @@ def compute_behavioral_convergence(
                         rating_column=rating_column,
                         design_columns=design_columns,
                     )
-                    for subject_frame in eligible_frames
+                    for subject_frame in criteria_met_frames
                 ]
             )
             for _ in range(permutation_count)
@@ -119,7 +125,12 @@ def compute_behavioral_convergence(
         null_distribution=null_distribution,
         subject_results=pd.DataFrame(
             subject_records,
-            columns=["subject_id", "eligible", "beta", "reason"],
+            columns=[
+                "subject_id",
+                "behavioral_convergence_criteria_met",
+                "beta",
+                "unmet_criteria",
+            ],
         ),
         n_subjects=len(observed_betas),
     )
@@ -129,7 +140,7 @@ def _permutation_count(config: Any, n_permutations: int | None) -> int:
     value = (
         n_permutations
         if n_permutations is not None
-        else get_config_value(config, "study2.behavioral_convergence.permutations", None)
+        else require_config_int(config, "study2.behavioral_convergence.permutations")
     )
     if value is None:
         raise ValueError("Study 2 behavioral convergence permutation count is missing.")
@@ -144,7 +155,7 @@ def _permutation_count(config: Any, n_permutations: int | None) -> int:
     return count
 
 
-def _subject_qc_reason(
+def _unmet_subject_criteria(
     frame: pd.DataFrame,
     *,
     block_column: str,
@@ -153,25 +164,25 @@ def _subject_qc_reason(
     design_columns: tuple[str, ...],
     min_trials: int,
     min_blocks: int,
-) -> str:
+) -> tuple[str, ...]:
     numeric_columns = (expression_column, rating_column, *design_columns)
     numeric = frame.loc[:, numeric_columns].apply(pd.to_numeric, errors="coerce")
     if numeric.isna().any().any():
         raise ValueError("Study 2 behavioral convergence contains non-finite numeric values.")
     if len(frame) < min_trials:
-        return f"fewer than {min_trials} rated trials"
+        return ("min_rated_trials",)
     if frame[block_column].nunique() < min_blocks:
-        return f"fewer than {min_blocks} permutation-valid blocks"
+        return ("min_valid_blocks",)
     if float(np.std(numeric[rating_column].to_numpy(dtype=float), ddof=0)) <= 0.0:
-        return "zero rating variance"
+        return ("zero_variance_rating",)
     if float(np.std(numeric[expression_column].to_numpy(dtype=float), ddof=0)) <= 0.0:
-        return "zero expression variance"
+        return ("zero_variance_expression",)
     design = numeric.loc[:, design_columns].to_numpy(dtype=float)
     if _residual_std(numeric[rating_column].to_numpy(dtype=float), design) <= 1.0e-12:
-        return "zero rating variance after nuisance adjustment"
+        return ("zero_residual_variance_rating",)
     if _residual_std(numeric[expression_column].to_numpy(dtype=float), design) <= 1.0e-12:
-        return "zero expression variance after nuisance adjustment"
-    return ""
+        return ("zero_residual_variance_expression",)
+    return ()
 
 
 def _subject_beta(

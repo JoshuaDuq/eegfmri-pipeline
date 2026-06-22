@@ -1,4 +1,4 @@
-# Study 3 - EEG-Only MRI Simulator Validation of Thermal/Pain-Related EEG Features
+# Study 3 - Paired EEG Comparison of MRI and Simulator Thermal-Pain Sessions
 
 ## 1. Problem Statement
 
@@ -8,60 +8,63 @@ acquisition provides spatially defined targets, but EEG recorded in the MRI envi
 scanner-gradient, cardioballistic, acoustic, vibration, posture, movement, and high-frequency muscle
 artifact structure after preprocessing (Allen et al., 1998, 2000; Muthukumaraswamy, 2013).
 
-Study 3 adds an EEG-only MRI-simulator session to test whether the Study 1 EEG feature expression
-replicates under matched posture, task timing, scanner acoustics, thermal stimulation, and rating
-demands without MRI acquisition. The simulator session contributes EEG, behavioral ratings, and
-artifact covariates.
+Study 3 adds an EEG-only MRI-simulator session to estimate how the acquisition environment changes
+thermal/pain-related EEG activity. The same participants complete matched task sequences during
+simultaneous EEG-fMRI and simulator EEG, allowing direct within-participant comparisons of spectral
+power, behavioral ratings, and artifact structure without fitting or applying a machine-learning
+model.
 
 ## 2. Objectives
 
-The primary objective is to test whether the frozen Study 1 NPS ElasticNet alpha+beta
-individual-channel spectral-power expression is associated with within-scale thermal/pain intensity
-during EEG-only MRI-simulator acquisition after accounting for stimulus temperature.
+The primary objective is to estimate paired differences in plateau-window, baseline-corrected
+whole-scalp alpha, beta, and gamma power between simultaneous EEG-fMRI and simulator EEG during
+matched thermal-stimulation trials.
 
 Secondary objectives are to:
 
-1. Compare EEG-fMRI and simulator-session EEG feature expression within the same participants.
-2. Test alpha and beta contribution scores separately.
+1. Compare channel-level spectral-power patterns across acquisition environments.
+2. Compare behavioral thermal/pain responses across sessions.
 3. Estimate repetition, habituation, and sensitization effects.
-4. Compare behavioral thermal/pain responses across sessions.
+4. Test within-session associations of spectral power with temperature and ratings.
 5. Characterize resting-state EEG and artifact structure across acquisition environments.
 
-Study 3 uses the Study 1 primary cell, frequency bands, preprocessing recipe, active window,
-baseline window, feature mask, and model weights without refitting.
+Study 3 reuses Study 1 task definitions, fixed frequency bands, preprocessing principles, active
+window, and baseline window to support paired measurement. It does not use Study 1 model weights,
+feature masks, prediction scores, or other machine-learning outputs. Study 2 outputs are outside the
+Study 3 design. With 10 participants, all analyses are framed as pilot feasibility and effect-size
+estimation rather than confirmatory validation.
 
 ## 3. Hypotheses and Estimands
 
-### 3.1 Primary Hypothesis
+### 3.1 Primary Estimands
 
-The primary hypothesis is that frozen Study 1 EEG feature expression is positively associated with
-temperature-adjusted within-scale thermal/pain intensity during the simulator session.
+The primary analysis estimates whether baseline-corrected spectral power differs between the two
+acquisition environments. It does not specify a directional hypothesis.
 
-For participant $s$ and trial $t$, the simulator-session feature-expression score is:
-
-$$
-\eta_{s,t}^{\mathrm{sim}} = X_{s,t}^{\mathrm{sim}} W_{\mathrm{Study1}, -s}.
-$$
-
-$X_{s,t}^{\mathrm{sim}}$ is the simulator alpha+beta spectral-power feature vector processed with
-the Study 1 feature recipe. $W_{\mathrm{Study1}, -s}$ is the corresponding Study 1 outer-fold
-model trained without participant $s$.
-
-The primary estimand is the subject-weighted mean temperature-adjusted thermal/pain association:
+For participant $s$, matched trial $t$, and frequency band $b$, the paired trial difference is:
 
 $$
-\bar{\beta}_{\mathrm{sim}} =
-\frac{1}{S}\sum_{s=1}^{S}\beta_{s,\mathrm{sim}}.
+D_{s,t,b} = P_{s,t,b}^{\mathrm{sim}} - P_{s,t,b}^{\mathrm{fmri}}.
 $$
 
-$\beta_{s,\mathrm{sim}}$ is the within-participant slope relating
-$\eta_{s,t}^{\mathrm{sim}}$ to within-scale thermal/pain intensity after adjustment for ordered
-temperature and the primary nuisance design. The predicted direction follows the frozen
-transformed-space Study 1 linear predictor: larger $\eta$ means stronger NPS-predictive EEG
-expression.
+$P_{s,t,b}$ is the mean log-ratio power across the participant's channels that are valid in both
+sessions, excluding Fp1 and Fp2. The participant-level difference is the mean across matched,
+retained trials:
 
-Group inference uses a one-sided subject-level sign-flip test. The standardized mean slope, 95%
-bootstrap confidence interval, and p-value are reported. The planned sample is $S = 16$.
+$$
+\bar{D}_{s,b} = \frac{1}{T_s}\sum_{t=1}^{T_s}D_{s,t,b}.
+$$
+
+The primary estimand for each of alpha, beta, and gamma is the subject-weighted mean paired
+difference:
+
+$$
+\bar{D}_b = \frac{1}{S}\sum_{s=1}^{S}\bar{D}_{s,b}.
+$$
+
+The primary report includes the paired difference, standardized paired effect size, 95% bootstrap
+confidence interval, and an exact two-sided subject-level sign-flip p-value. The three band-level
+p-values are Holm-corrected and treated as supportive evidence. The planned sample is $S = 10$.
 
 ### 3.2 Behavioral Criteria
 
@@ -79,43 +82,32 @@ Temperature-only effects are interpreted as nociceptive-dose sensitivity.
 
 ### 3.3 Cross-Session Concordance
 
-The same frozen feature-expression score is computed for the EEG-fMRI and simulator sessions.
-Paired analyses estimate:
-
-$$
-\Delta\beta_s = \beta_{s,\mathrm{sim}} - \beta_{s,\mathrm{fmri}},
-$$
-
-and
-
-$$
-\rho_{\mathrm{paired}} =
-\mathrm{corr}(\beta_{s,\mathrm{sim}}, \beta_{s,\mathrm{fmri}}).
-$$
-
-Cross-session concordance describes whether the EEG feature has similar thermal/pain associations
-with and without MRI acquisition.
+Secondary paired analyses estimate band-wise cross-session concordance across matched trials and
+participants. Channel-level maps describe whether the spatial distribution of alpha, beta, and
+gamma power is similar with and without MRI acquisition. These estimates are descriptive because
+the pilot sample is too small for stable participant-level correlation inference.
 
 ## 4. Study Design
 
 ### 4.1 Participants
 
-Study 3 includes 16 volunteers from the 60 Study 1 participants, balanced by sex: 8 men and
-8 women. Participants are invited to return to the CERVO research center for a second
-experimental session of approximately 120 min within two weeks of the EEG-fMRI session. They may
-accept or decline this optional session without consequence for Study 1 participation or
-compensation. A separate compensation of 60$ is provided for the second visit.
+Study 3 includes 10 volunteers from the 60 Study 1 participants, balanced by sex: 5 men and
+5 women. Participants are invited to return to the CERVO research center for a second experimental
+session of approximately 120 min during the week following their EEG-fMRI session. They may accept
+or decline this optional session without consequence for Study 1 participation or compensation. A
+separate compensation of 60$ is provided for the second visit.
 
 Eligibility, questionnaires, handedness criteria, thermode tolerability checks, and EEG
-compatibility criteria match Study 1. Sex-stratified estimates are reported.
+compatibility criteria match Study 1. Sex-stratified summaries are descriptive.
 
 ### 4.2 Session Timing
 
-The acquisition order is fixed: participants complete Study 1 EEG-fMRI first and the simulator EEG
-session second. Calendar interval, time of day and thermode site are recorded.
-
-Paired models include elapsed days, cumulative thermal exposure, previous-session mean rating, and
-previous-session maximum-temperature tolerability.
+The acquisition order is fixed: participants complete Study 1 EEG-fMRI first and return during the
+following week for the simulator EEG session. Elapsed days, time of day, and thermode site are
+recorded. Cross-session differences therefore estimate MRI-environment plus repeat-exposure/order
+effects, not a randomized pure environment contrast. Elapsed time and prior-session thermal
+exposure are described but are not added as between-participant covariates to the primary analysis
+because the pilot sample cannot support that adjustment reliably.
 
 ### 4.3 MRI Simulator Setup
 
@@ -124,7 +116,8 @@ scanner. The simulator reproduces the physical MRI environment without magnetic 
 image acquisition. The setup includes the bore, scanner table, head-coil mirror, visual display,
 thermode placement, and supine posture used in Study 1.
 
-The response interface is replaced by a programmable VAYDEER keyboard with two functional keys.
+The physical response device is replaced by a programmable VAYDEER keyboard with two functional
+keys, while the rating task, scale definitions, and response mapping match Study 1.
 Scanner-acoustic recordings from the Study 1 EEG-fMRI acquisitions are replayed through two
 speakers positioned on the left and right sides of the bore. Playback follows the corresponding
 acquisition phase. Sound level is calibrated at the head position and logged. Hearing protection
@@ -133,6 +126,8 @@ matches the EEG-fMRI session.
 The simulator session includes resting-state EEG, thermal stimulation, subjective ratings, and task
 EEG. MRI-specific procedures and outputs are absent: anatomical MRI, resting-state fMRI, field maps,
 EPI sequences, volume triggers, scanner-gradient correction, fMRI motion, DVARS, NPS, and SIIPS1.
+The simulator reproduces posture and acoustics, but it does not reproduce magnetic-field exposure,
+scanner-gradient electromagnetic artifacts, table vibration, or true scan-trigger timing.
 
 ## 5. Thermal Pain Protocol
 
@@ -150,19 +145,22 @@ The active EEG analysis window is the thermal plateau from 3.0 to 10.5 s after s
 Trial identity is defined by participant ID, session, block, trial index, temperature, thermode
 surface, and original event order.
 
-Implausible behavioral trials are excluded before EEG-feature analyses: ratings outside the logged
+Implausible behavioral trials are excluded before band-power analyses: ratings outside the logged
 response scale or ratings of 0 ("no sensation") at temperatures >= 47.3 °C.
 
 ## 6. EEG Acquisition and Preprocessing
 
 The simulator session uses the same EEG montage, acquisition hardware family, recording filters,
-sampling-rate target, impedance targets, ECG recording, thermode, and rating interface as the
-EEG-fMRI session. Passive Ag/AgCl electrodes follow the extended 10-20 system (Jasper, 1958). ECG
-supports cardiac artifact quantification and ICA review. Behavioral responses are collected with
+sampling-rate target, impedance targets, ECG recording, thermode, rating task, and response mapping
+as the EEG-fMRI session. Passive Ag/AgCl electrodes follow the extended 10-20 system (Jasper, 1958).
+ECG supports cardiac artifact quantification and ICA review. Behavioral responses are collected with
 the VAYDEER two-key device.
 
 Simulator preprocessing mirrors the Study 1 EEG steps for task EEG. MRI-gradient correction and
 MRI-volume-locked cardioballistic template subtraction are omitted.
+Because EEG-fMRI requires artifact-correction steps that are absent from simulator EEG, paired
+differences reflect the acquisition environment and its required preprocessing rather than a pure
+difference in neural activity.
 
 The preprocessing sequence is:
 
@@ -175,81 +173,77 @@ The preprocessing sequence is:
 7. Extract epochs from -7.0 to 15.0 s relative to stimulus onset.
 8. Apply autoreject in local mode using the Study 1 candidate interpolation grid.
 
-Preprocessing is blind to ratings, temperature effects, fMRI targets, and feature-expression
-outcomes.
+Preprocessing thresholds are fixed before cross-session comparisons and applied without reference
+to ratings, temperature effects, or band-power differences.
 
-## 7. Feature Construction
+## 7. Band-Power Construction
 
-Feature construction uses the Study 1 individual-channel spectral-power recipe. For each retained
-trial, power is summarized over the plateau window, baseline-corrected as a log-ratio, and assembled
-into the frozen feature matrix.
+Band-power construction uses the same spectral definitions in both sessions. For each retained
+trial and channel, power is summarized over the plateau window and baseline-corrected as a
+log-ratio. The primary whole-scalp summary is the mean across channels that are valid in both
+sessions for that participant, excluding Fp1 and Fp2.
 
-Fixed feature definitions:
+Primary comparisons require a matched trial in both sessions using participant ID, block, trial
+index, temperature, thermode surface, and original event order. If either member fails behavioral
+or EEG quality control, the pair is excluded from the primary comparison and retained only in the
+session-specific quality-control report.
+
+Fixed band definitions:
 
 1. Alpha: 8.0-12.9 Hz.
 2. Beta: 13.0-30.0 Hz.
-3. Alpha+beta: the frozen Study 1 primary feature preset.
+3. Gamma: 30.1-80.0 Hz with the Study 1 line-noise exclusion.
 
-Gamma is exploratory. Fp1 and Fp2 high-frequency power are retained as artifact covariates and
-excluded from the predictive feature matrix.
-
-Simulator features are compared with the Study 1 training-fold distribution using feature-mask
-agreement, fold-owned scaling parameters, robust feature $z$-scores, and PCA-space distance with
-Ledoit-Wolf shrinkage covariance. These diagnostics describe whether the frozen Study 1 model is
-being applied to comparable EEG feature distributions.
+Alpha, beta, and gamma are analyzed as three separate prespecified measures; they are not combined
+by fitted weights. Gamma interpretation remains contingent on high-frequency artifact diagnostics.
+Fp1 and Fp2 high-frequency power are retained as artifact measures and excluded from the primary
+whole-scalp summary. Channel-level band-power maps are secondary and use no data-driven feature
+selection.
 
 ## 8. Statistical Analysis
 
-### 8.1 Primary Model
+### 8.1 Primary Paired Analysis
 
-All continuous non-intercept regressors are centered and scaled within participant. The primary
-trial-level simulator model is:
+The primary analysis follows the estimands in Section 3.1. Trial-level simulator-minus-EEG-fMRI
+differences are averaged within participant before group analysis, so participants rather than
+trials define the inferential sample. Alpha, beta, and gamma are analyzed separately.
 
-$$
-\eta_{s,t}^{\mathrm{sim}} =
-\alpha_s + \beta_{s,\mathrm{rating}} R_{s,t} + \beta_{s,\mathrm{temp}} T_{s,t}
-+ N_{s,t}^{\mathrm{primary}}\gamma_s + \epsilon_{s,t}.
-$$
-
-$R_{s,t}$ is within-scale thermal/pain intensity. $T_{s,t}$ is ordered temperature.
-$N_{s,t}^{\mathrm{primary}}$ contains task-block intercepts, thermode surface, trial index within
-block, cumulative exposure count, Fp1/Fp2 high-frequency artifact power, ECG-derived cardiac
-metrics, ocular artifact metrics, muscle artifact metrics, and retained bad-channel or
-interpolation counts.
-
-Subject-level slopes are estimated first. Group inference is performed on subject-level slopes with
-a one-sided sign-flip test. The primary report includes the p-value, standardized mean slope, and
-95% bootstrap confidence interval.
+For each band, the report includes the participant-level differences, subject-weighted mean paired
+difference, standardized paired effect size, and 95% participant-bootstrap confidence interval. An
+exact two-sided subject-level sign-flip test provides a supportive p-value. Holm correction is
+applied across the three band-level tests. Raw and corrected p-values are reported regardless of
+threshold crossing.
 
 ### 8.2 Secondary Models
 
 Secondary analyses estimate:
 
-1. Ordered-temperature association.
-2. Binary pain-report association.
-3. Painful-trials-only intensity association.
-4. Alpha and beta contribution-score associations.
-5. Paired EEG-fMRI versus simulator slope differences.
-6. Channel-pattern concordance across sessions.
-7. Resting-state alpha, beta, gamma, aperiodic slope, line-noise, ECG, and frontal high-frequency
+1. Paired differences in within-scale thermal/pain intensity, binary pain report, and
+   painful-trials-only intensity.
+2. Within-session associations of each band with ordered temperature and thermal/pain intensity.
+3. Paired EEG-fMRI versus simulator differences in those within-session slopes.
+4. Channel-level band-power differences and spatial concordance across sessions.
+5. Repetition, habituation, sensitization, and trial-history effects.
+6. Resting-state alpha, beta, gamma, aperiodic slope, line-noise, ECG, and frontal high-frequency
    metrics.
 
-Secondary families are Holm-corrected within family. Exploratory models are reported separately.
+Secondary analyses emphasize effect sizes and uncertainty. Any secondary p-values are
+Holm-corrected within their stated outcome family. Sex-specific summaries are descriptive; no sex
+interaction test is planned with five participants per sex.
 
 ### 8.3 Robustness Analyses
 
-Robustness analyses repeat the primary model after:
+Robustness analyses repeat the primary paired comparisons after:
 
 1. Excluding the first deterministic high-temperature trial.
 2. Excluding the first task block.
-3. Adding previous-trial temperature and signed temperature change.
-4. Adding elapsed-time terms.
-5. Censoring high-artifact trials.
-6. Using immediate and early pre-cue baselines.
-7. Equalizing retained trial counts across sessions.
+3. Matching on previous-trial temperature and signed temperature change.
+4. Censoring trial pairs when either session has high artifact burden.
+5. Using immediate and early pre-cue baselines.
+6. Replacing the channel mean with the channel median.
 
-Temporal negative controls repeat the primary model in pre-stimulus, immediate pre-stimulus,
-ramp-up, and return-to-baseline windows.
+Temporal negative controls repeat the primary paired comparison in pre-stimulus, immediate
+pre-stimulus, ramp-up, and return-to-baseline windows.
 
 ## 9. Artifact Checks
 
@@ -287,10 +281,6 @@ Keator, D., Li, X., Michael, Z., Maumet, C., Nichols, B. N., Nichols, T. E., Pel
 ... Poldrack, R. A. (2016). The brain imaging data structure, a format for organizing and
 describing outputs of neuroimaging experiments. Scientific Data, 3, 160044.
 doi.org/10.1038/sdata.2016.44
-
-Haufe, S., Meinecke, F., Görgen, K., Dähne, S., Haynes, J.-D., Blankertz, B., & Bießmann, F.
-(2014). On the interpretation of weight vectors of linear models in multivariate neuroimaging.
-NeuroImage, 87, 96-110. doi.org/10.1016/j.neuroimage.2013.10.067
 
 Holm, S. (1979). A simple sequentially rejective multiple test procedure. Scandinavian Journal of
 Statistics, 6(2), 65-70.

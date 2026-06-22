@@ -70,6 +70,22 @@ def _context(config: dict, subjects: tuple[str, ...]) -> Study2StageContext:
     )
 
 
+def test_study2_paths_require_configured_output_root(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    del config["study2"]["outputs"]["root_name"]
+
+    with pytest.raises(ValueError, match="study2.outputs.root_name"):
+        paths.study2_output_root(config)
+
+
+def test_study2_paths_require_configured_study1_root(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    del config["study2"]["inputs"]["study1_root_name"]
+
+    with pytest.raises(ValueError, match="study2.inputs.study1_root_name"):
+        paths.study1_report_path(config)
+
+
 def _write_study1_report(config: dict, *, overrides: dict[str, object]) -> None:
     row = {
         "analysis_partition": "primary",
@@ -198,6 +214,22 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
         power = np.load(paths.subject_source_power_path(config, subject_id="sub-0000", band=band))
         assert power.shape == (4, 3)
         assert np.all(np.isfinite(power))
+        metadata = json.loads(
+            paths.subject_source_power_metadata_path(
+                config,
+                subject_id="sub-0000",
+                band=band,
+            ).read_text()
+        )
+        assert metadata["subject_id"] == "sub-0000"
+        assert metadata["band"] == band
+        assert metadata["frequency_hz"] == list(config["study2"]["source_modeling"]["frequency_bands"][band])
+        assert metadata["baseline_window_s"] == [-5.0, -0.01]
+        assert metadata["active_window_s"] == [3.0, 10.5]
+        assert metadata["common_subject"] == "fsaverage"
+        assert metadata["common_source_space_spacing"] == "oct6"
+        assert metadata["n_trials"] == 4
+        assert metadata["n_vertices"] == 3
 
 
 def test_run_source_stage_writes_band_maps_and_qc(tmp_path: Path) -> None:
@@ -225,7 +257,7 @@ def test_run_source_stage_writes_band_maps_and_qc(tmp_path: Path) -> None:
         qc = pd.read_csv(source_stage_dir / f"qc_{band}.tsv", sep="\t")
         assert fisher.shape == (2, 3)
         assert partial.shape == (2, 3)
-        assert qc["eligible"].tolist() == [True, True, False]
+        assert qc["source_stage_criteria_met"].tolist() == [True, True, False]
 
 
 def test_target_permutations_required_inputs_lists_frame_power_and_model(tmp_path: Path) -> None:
@@ -271,7 +303,9 @@ def test_run_target_permutations_writes_null_maps_per_band(tmp_path: Path, monke
 
     monkeypatch.setattr(stages, "load_study1_model_context", lambda **k: SimpleNamespace())
     monkeypatch.setattr(
-        stages, "_observed_eligible_subject_ids", lambda *a, **k: ("sub-0001", "sub-0002")
+        stages,
+        "_observed_source_stage_subject_ids",
+        lambda *a, **k: ("sub-0001", "sub-0002"),
     )
     monkeypatch.setattr(stages, "build_target_retrained_null_maps", fake_build)
 
@@ -572,6 +606,17 @@ def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:
     summary = pd.read_csv(paths.behavioral_convergence_summary_path(config), sep="\t")
     assert summary.loc[0, "n_subjects"] == 2
     assert summary.loc[0, "mean_beta"] > 0.0
+
+
+def test_required_config_string_tuple_rejects_empty_column_names() -> None:
+    config = load_study2_config()
+    config["study2"]["behavioral_convergence"]["design_columns"] = ["onset", ""]
+
+    with pytest.raises(ValueError, match="empty column names"):
+        stages._required_config_string_tuple(
+            config,
+            "study2.behavioral_convergence.design_columns",
+        )
 
 
 def test_run_band_unique_stage_and_inference_write_outputs(tmp_path: Path) -> None:

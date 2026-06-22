@@ -87,13 +87,15 @@ def _validate_design_full_rank(design: np.ndarray) -> None:
 def _residualize_vector(values: np.ndarray, design: np.ndarray) -> np.ndarray:
     predictors = _scaled_predictors(design)
     coefficients, *_ = np.linalg.lstsq(predictors, values, rcond=None)
-    return values - predictors @ coefficients
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        return values - predictors @ coefficients
 
 
 def _residualize_matrix(values: np.ndarray, design: np.ndarray) -> np.ndarray:
     predictors = _scaled_predictors(design)
     coefficients, *_ = np.linalg.lstsq(predictors, values, rcond=None)
-    return values - predictors @ coefficients
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        return values - predictors @ coefficients
 
 
 def _scaled_predictors(design: np.ndarray) -> np.ndarray:
