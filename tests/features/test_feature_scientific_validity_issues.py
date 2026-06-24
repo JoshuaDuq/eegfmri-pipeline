@@ -24,11 +24,70 @@ from eeg_pipeline.analysis.features.spectral import (
     _resolve_line_noise_freqs,
     _robust_aperiodic_fit,
     compute_peak_frequency,
+    compute_spectral_bandwidth,
+    compute_spectral_center,
+    compute_spectral_edge,
+    compute_spectral_entropy,
 )
 from tests.pipelines_test_utils import DotConfig
 
 
 class TestScientificValidityIssues(unittest.TestCase):
+    def test_spectral_entropy_normalizes_over_finite_bins(self):
+        value = compute_spectral_entropy(
+            np.array([1.0, np.nan, 1.0]),
+            np.array([8.0, 9.0, 10.0]),
+            8.0,
+            10.0,
+        )
+
+        self.assertAlmostEqual(value, 1.0, places=12)
+
+    def test_spectral_edge_rejects_invalid_percentile(self):
+        psd = np.ones(3, dtype=float)
+        freqs = np.array([8.0, 9.0, 10.0])
+
+        for percentile in (0.0, 1.1, np.nan):
+            with self.subTest(percentile=percentile):
+                with self.assertRaisesRegex(ValueError, "percentile"):
+                    compute_spectral_edge(psd, freqs, 8.0, 10.0, percentile)
+
+    def test_spectral_descriptors_reject_shape_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "same one-dimensional shape"):
+            compute_spectral_center(
+                np.ones(2, dtype=float),
+                np.array([8.0, 9.0, 10.0]),
+                8.0,
+                10.0,
+            )
+
+    def test_spectral_descriptors_reject_non_increasing_frequencies(self):
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            compute_spectral_bandwidth(
+                np.ones(3, dtype=float),
+                np.array([8.0, 10.0, 9.0]),
+                8.0,
+                10.0,
+            )
+
+    def test_spectral_descriptors_reject_negative_psd(self):
+        with self.assertRaisesRegex(ValueError, "nonnegative"):
+            compute_spectral_entropy(
+                np.array([1.0, -0.5, 1.0]),
+                np.array([8.0, 9.0, 10.0]),
+                8.0,
+                10.0,
+            )
+
+    def test_spectral_descriptors_reject_reversed_frequency_range(self):
+        with self.assertRaisesRegex(ValueError, "fmax must be greater"):
+            compute_spectral_center(
+                np.ones(3, dtype=float),
+                np.array([8.0, 9.0, 10.0]),
+                10.0,
+                8.0,
+            )
+
     def test_erp_peak_to_peak_uses_absolute_magnitude(self):
         neg_vals = np.array([[1.2, 0.4]], dtype=float)
         pos_vals = np.array([[0.5, 0.1]], dtype=float)

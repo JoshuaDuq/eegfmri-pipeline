@@ -1353,6 +1353,54 @@ def compute_peak_frequency(
     return peak_freq, peak_power, peak_ratio, peak_residual
 
 
+def _spectral_descriptor_band(
+    psd: np.ndarray,
+    freqs: np.ndarray,
+    fmin: float,
+    fmax: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Validate a spectrum and return finite samples in the requested band."""
+    psd_array = np.asarray(psd, dtype=float)
+    frequency_array = np.asarray(freqs, dtype=float)
+    if (
+        psd_array.ndim != 1
+        or frequency_array.ndim != 1
+        or psd_array.shape != frequency_array.shape
+    ):
+        raise ValueError(
+            "Spectral descriptor psd and freqs must have the same one-dimensional shape."
+        )
+    if not np.all(np.isfinite(frequency_array)):
+        raise ValueError("Spectral descriptor frequencies must be finite.")
+    if len(frequency_array) > 1 and np.any(np.diff(frequency_array) <= 0):
+        raise ValueError("Spectral descriptor frequencies must be strictly increasing.")
+    if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
+        raise ValueError("Spectral descriptor fmax must be greater than finite fmin.")
+
+    observed_psd = psd_array[~np.isnan(psd_array)]
+    if not np.all(np.isfinite(observed_psd)):
+        raise ValueError("Spectral descriptor PSD values must be finite or NaN.")
+    if np.any(observed_psd < 0):
+        raise ValueError("Spectral descriptor PSD values must be nonnegative.")
+
+    band_mask = (frequency_array >= fmin) & (frequency_array <= fmax)
+    finite_mask = band_mask & np.isfinite(psd_array)
+    if not np.any(finite_mask):
+        empty = np.array([], dtype=float)
+        return empty, empty, empty
+
+    bin_widths = (
+        np.gradient(frequency_array)
+        if len(frequency_array) > 1
+        else np.ones_like(frequency_array)
+    )
+    return (
+        psd_array[finite_mask],
+        frequency_array[finite_mask],
+        bin_widths[finite_mask],
+    )
+
+
 def compute_spectral_center(
     psd: np.ndarray,
     freqs: np.ndarray,
@@ -1365,15 +1413,11 @@ def compute_spectral_center(
     Uses Δf weighting for non-uniform frequency grids (e.g., log-spaced).
     Formula: Σ(f * P * Δf) / Σ(P * Δf)
     """
-    mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(mask):
+    psd_band, freqs_band, df = _spectral_descriptor_band(
+        psd, freqs, fmin, fmax
+    )
+    if psd_band.size == 0:
         return np.nan
-    
-    psd_band = psd[mask]
-    freqs_band = freqs[mask]
-    
-    # Compute frequency bin widths for proper weighting
-    df = np.gradient(freqs_band) if len(freqs_band) > 1 else np.ones_like(freqs_band)
     mass = psd_band * df
     
     total_mass = np.nansum(mass)
@@ -1395,15 +1439,11 @@ def compute_spectral_bandwidth(
     
     Uses Δf weighting for non-uniform frequency grids.
     """
-    mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(mask):
+    psd_band, freqs_band, df = _spectral_descriptor_band(
+        psd, freqs, fmin, fmax
+    )
+    if psd_band.size == 0:
         return np.nan
-    
-    psd_band = psd[mask]
-    freqs_band = freqs[mask]
-    
-    # Compute frequency bin widths for proper weighting
-    df = np.gradient(freqs_band) if len(freqs_band) > 1 else np.ones_like(freqs_band)
     mass = psd_band * df
     
     total_mass = np.nansum(mass)
@@ -1434,15 +1474,14 @@ def compute_spectral_edge(
     percentile : float
         Cumulative power threshold (default 0.95 = 95%)
     """
-    mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(mask):
+    if not np.isfinite(percentile) or percentile <= 0 or percentile > 1:
+        raise ValueError("Spectral edge percentile must satisfy 0 < percentile <= 1.")
+
+    psd_band, freqs_band, df = _spectral_descriptor_band(
+        psd, freqs, fmin, fmax
+    )
+    if psd_band.size == 0:
         return np.nan
-    
-    psd_band = psd[mask]
-    freqs_band = freqs[mask]
-    
-    # Compute frequency bin widths for proper weighting
-    df = np.gradient(freqs_band) if len(freqs_band) > 1 else np.ones_like(freqs_band)
     mass = psd_band * df
     
     total_mass = np.nansum(mass)
@@ -1467,33 +1506,24 @@ def compute_spectral_entropy(
     
     Uses Δf weighting for non-uniform frequency grids.
     """
-    mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(mask):
+    psd_band, _freqs_band, df = _spectral_descriptor_band(
+        psd, freqs, fmin, fmax
+    )
+    if psd_band.size == 0:
         return np.nan
-
-    psd_band = psd[mask]
-    freqs_band = freqs[mask]
-    if len(psd_band) == 0 or np.all(np.isnan(psd_band)):
-        return np.nan
-
-    psd_band = np.maximum(psd_band, 0)
-    
-    # Compute frequency bin widths for proper weighting
-    df = np.gradient(freqs_band) if len(freqs_band) > 1 else np.ones_like(freqs_band)
     mass = psd_band * df
     
     total_mass = np.nansum(mass)
     if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
 
-    probs = mass / total_mass
-    probs = probs[np.isfinite(probs) & (probs > 0)]
-    if probs.size == 0:
+    probabilities = mass / total_mass
+    positive_probabilities = probabilities[probabilities > 0]
+    if positive_probabilities.size == 0:
         return np.nan
 
-    entropy = -np.sum(probs * np.log(probs))
-    # Normalize by the total number of valid frequency bins in the band
-    norm = np.log(float(len(freqs_band)))
+    entropy = -np.sum(positive_probabilities * np.log(positive_probabilities))
+    norm = np.log(float(len(probabilities)))
     if norm > 0:
         entropy /= norm
     return float(entropy)
