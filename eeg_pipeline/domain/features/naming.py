@@ -15,7 +15,7 @@ Provides:
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -263,7 +263,7 @@ def generate_manifest(
     )
 
     return {
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "subject": subject,
         "task": task,
         "n_features": len(features),

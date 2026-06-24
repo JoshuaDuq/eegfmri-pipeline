@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Collection, Iterable, List, Set, Union
 
@@ -100,6 +101,11 @@ def _empty_feature_availability() -> dict:
     }
 
 
+def _utc_timestamp(timestamp: float) -> str:
+    """Format a POSIX timestamp as an ISO 8601 UTC string."""
+    return datetime.fromtimestamp(timestamp, UTC).isoformat().replace("+00:00", "Z")
+
+
 def detect_feature_inventory(features_dir: Union[str, Path]) -> dict:
     """Detect feature availability and available bands for a subject."""
     return {
@@ -110,8 +116,6 @@ def detect_feature_inventory(features_dir: Union[str, Path]) -> dict:
 
 def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     """Detect available feature categories, bands, and computations with modification timestamps."""
-    from datetime import datetime
-    
     features_path = Path(features_dir)
     result = {
         "features": {},
@@ -153,8 +157,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                         break
         
         if found_file:
-            mtime_utc = datetime.utcfromtimestamp(found_file.stat().st_mtime)
-            mtime_str = mtime_utc.isoformat() + "Z"
+            mtime_str = _utc_timestamp(found_file.stat().st_mtime)
             
             result["features"][category] = {
                 "available": True,
@@ -230,8 +233,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                     break
         
         if found_file:
-            mtime_utc = datetime.utcfromtimestamp(found_file.stat().st_mtime)
-            mtime_str = mtime_utc.isoformat() + "Z"
+            mtime_str = _utc_timestamp(found_file.stat().st_mtime)
             result["computations"][comp] = {
                 "available": True,
                 "last_modified": mtime_str,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+import warnings
 
 import numpy as np
 
@@ -10,6 +11,13 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class TestFeatureProvenance(unittest.TestCase):
+    def test_manifest_timestamp_uses_supported_utc_api(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            manifest = generate_manifest(feature_columns=[])
+
+        self.assertTrue(manifest["created_at"].endswith("Z"))
+
     def test_microstates_subject_fitted_templates_mark_non_iid(self):
         col = "microstates_active_broadband_global_coverage_state1"
         out = infer_feature_provenance(

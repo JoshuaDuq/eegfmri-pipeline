@@ -1,9 +1,38 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 from eeg_pipeline.cli.commands import info_helpers
+from eeg_pipeline.cli.commands import base_feature_availability
 from eeg_pipeline.cli.commands.base_feature_availability import _empty_feature_availability
+
+
+def test_feature_availability_timestamps_use_supported_utc_api(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    features_dir = tmp_path / "features"
+    feature_path = features_dir / "power" / "features_power.parquet"
+    feature_path.parent.mkdir(parents=True)
+    feature_path.touch()
+
+    computation_path = tmp_path / "stats" / "trial_table" / "all" / "trials_all.tsv"
+    computation_path.parent.mkdir(parents=True)
+    computation_path.touch()
+
+    monkeypatch.setattr(
+        base_feature_availability,
+        "_read_parquet_columns_only",
+        lambda _path: [],
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        availability = base_feature_availability.detect_feature_availability(features_dir)
+
+    assert availability["features"]["power"]["last_modified"].endswith("Z")
+    assert availability["computations"]["trial_table"]["last_modified"].endswith("Z")
 
 
 def test_build_subject_status_json_uses_window_summary_helper(
