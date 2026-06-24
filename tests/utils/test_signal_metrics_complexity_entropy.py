@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -12,6 +13,13 @@ from eeg_pipeline.utils.analysis.signal_metrics import (
 
 
 class TestSignalMetricsComplexityEntropy(unittest.TestCase):
+    def test_sample_entropy_surfaces_estimator_errors(self):
+        signal = np.linspace(-1.0, 1.0, 100, dtype=float)
+
+        with patch("antropy.sample_entropy", side_effect=RuntimeError("entropy boom")):
+            with self.assertRaisesRegex(RuntimeError, "entropy boom"):
+                compute_sample_entropy(signal, order=2, r=0.2)
+
     def test_lempel_ziv_complexity_matches_reference_for_simple_binary_sequences(self):
         constant = np.zeros(8, dtype=float)
         alternating = np.array([0, 1, 0, 1, 0, 1, 0, 1], dtype=float)

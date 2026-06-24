@@ -108,33 +108,6 @@ def compute_permutation_entropy(
     return float(entropy)
 
 
-def _sample_entropy_fallback(x: np.ndarray, order: int, tolerance: float) -> float:
-    """Fallback sample entropy implementation when antropy is unavailable."""
-    x = np.asarray(x, dtype=float)
-    x = x[np.isfinite(x)]
-    if x.size < order + 2:
-        return np.nan
-
-    embedded_m = _embed_time_series(x, order=order, delay=1)
-    embedded_m1 = _embed_time_series(x, order=order + 1, delay=1)
-    if embedded_m.size == 0 or embedded_m1.size == 0:
-        return np.nan
-
-    def _count_matches(vectors: np.ndarray) -> int:
-        n = vectors.shape[0]
-        count = 0
-        for i in range(n - 1):
-            dmax = np.max(np.abs(vectors[i + 1 :] - vectors[i]), axis=1)
-            count += int(np.sum(dmax <= tolerance))
-        return count
-
-    b_count = _count_matches(embedded_m)
-    a_count = _count_matches(embedded_m1)
-    if b_count <= 0 or a_count <= 0:
-        return np.nan
-    return float(-np.log(a_count / b_count))
-
-
 def compute_sample_entropy(
     x: np.ndarray,
     order: int = 2,
@@ -154,15 +127,15 @@ def compute_sample_entropy(
     if not np.isfinite(tolerance) or tolerance <= 0:
         tolerance = max(float(np.finfo(float).eps), float(r) * float(np.nanstd(x)))
 
-    try:
-        from antropy import sample_entropy as _antropy_sample_entropy
+    from antropy import sample_entropy as _antropy_sample_entropy
 
-        value = _antropy_sample_entropy(x, order=int(order), tolerance=tolerance, metric="chebyshev")
-        return float(value) if np.isfinite(value) else np.nan
-    except ImportError:
-        return _sample_entropy_fallback(x, order=int(order), tolerance=tolerance)
-    except Exception:
-        return _sample_entropy_fallback(x, order=int(order), tolerance=tolerance)
+    value = _antropy_sample_entropy(
+        x,
+        order=int(order),
+        tolerance=tolerance,
+        metric="chebyshev",
+    )
+    return float(value) if np.isfinite(value) else np.nan
 
 
 def _coarse_grain(x: np.ndarray, scale: int) -> np.ndarray:
