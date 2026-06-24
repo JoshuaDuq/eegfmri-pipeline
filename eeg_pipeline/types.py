@@ -233,13 +233,96 @@ class PrecomputedData:
     feature_family: Optional[str] = None
     spatial_transform: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        """Validate axis contracts shared by all feature extractors."""
+        self.data = np.asarray(self.data)
+        self.times = np.asarray(self.times, dtype=float)
+        self.picks = np.asarray(self.picks)
+
+        if self.data.ndim != 3:
+            raise ValueError(
+                "PrecomputedData.data must have shape (epochs, channels, times); "
+                f"got {self.data.shape}."
+            )
+
+        n_epochs, n_channels, n_times = self.data.shape
+        if self.times.ndim != 1 or len(self.times) != n_times:
+            raise ValueError(
+                f"PrecomputedData times length ({len(self.times)}) does not match "
+                f"data time axis ({n_times})."
+            )
+        if not np.all(np.isfinite(self.times)):
+            raise ValueError("PrecomputedData.times must contain only finite values.")
+        if len(self.times) > 1 and np.any(np.diff(self.times) <= 0):
+            raise ValueError("PrecomputedData.times must be strictly increasing.")
+        if not np.isfinite(self.sfreq) or float(self.sfreq) <= 0:
+            raise ValueError("PrecomputedData.sfreq must be a positive finite number.")
+        if len(self.ch_names) != n_channels:
+            raise ValueError(
+                f"PrecomputedData channel names ({len(self.ch_names)}) do not match "
+                f"data channels ({n_channels})."
+            )
+        if self.picks.ndim != 1 or len(self.picks) != n_channels:
+            raise ValueError(
+                f"PrecomputedData picks ({len(self.picks)}) do not match "
+                f"data channels ({n_channels})."
+            )
+
+        self._validate_trial_metadata(n_epochs)
+        self._validate_window_masks(n_times)
+
+    def _validate_trial_metadata(self, n_epochs: int) -> None:
+        """Require optional trial metadata to align with the epoch axis."""
+        if self.metadata is not None and len(self.metadata) != n_epochs:
+            raise ValueError(
+                f"PrecomputedData metadata rows ({len(self.metadata)}) do not match "
+                f"data epochs ({n_epochs})."
+            )
+        if self.condition_labels is not None and len(self.condition_labels) != n_epochs:
+            raise ValueError(
+                "PrecomputedData condition_labels length "
+                f"({len(self.condition_labels)}) does not match data epochs ({n_epochs})."
+            )
+        if self.train_mask is not None and len(self.train_mask) != n_epochs:
+            raise ValueError(
+                f"PrecomputedData train_mask length ({len(self.train_mask)}) does not "
+                f"match data epochs ({n_epochs})."
+            )
+
+    def _validate_window_masks(self, n_times: int) -> None:
+        """Require stored time-window masks to align with the time axis."""
+        if self.windows is None:
+            return
+
+        masks = dict(self.windows.masks)
+        if self.windows.baseline_mask is not None:
+            masks.setdefault("baseline", self.windows.baseline_mask)
+        if self.windows.active_mask is not None:
+            masks.setdefault("active", self.windows.active_mask)
+
+        for name, mask in masks.items():
+            mask_array = np.asarray(mask)
+            if mask_array.ndim != 1 or len(mask_array) != n_times:
+                raise ValueError(
+                    f"PrecomputedData window mask '{name}' length ({len(mask_array)}) "
+                    f"does not match data time axis ({n_times})."
+                )
+
     def crop(self, tmin: float, tmax: float) -> PrecomputedData:
         """Create a new PrecomputedData object cropped to the time range."""
         from eeg_pipeline.utils.analysis.tfr import time_mask
 
+        if not np.isfinite(tmin) or not np.isfinite(tmax):
+            raise ValueError("PrecomputedData crop bounds must be finite.")
+        if tmax <= tmin:
+            raise ValueError("PrecomputedData crop tmax must be greater than tmin.")
+
         mask = time_mask(self.times, tmin, tmax)
         if not np.any(mask):
-            return self
+            raise ValueError(
+                f"Requested crop [{tmin}, {tmax}] does not overlap precomputed times "
+                f"[{self.times[0]}, {self.times[-1]}]."
+            )
 
         tmin_idx, tmax_idx = self._get_crop_indices(mask)
         new_times = self.times[mask]
@@ -306,18 +389,15 @@ class PrecomputedData:
         explicit_windows = self._extract_explicit_windows()
         window_name = self.windows.name if self.windows is not None else None
 
-        try:
-            spec = TimeWindowSpec(
-                times=new_times,
-                config=self.config,
-                sampling_rate=self.sfreq,
-                logger=self.logger,
-                name=window_name,
-                explicit_windows=explicit_windows,
-            )
-            return time_windows_from_spec(spec, logger=self.logger, strict=False)
-        except (ValueError, TypeError, KeyError):
-            return None
+        spec = TimeWindowSpec(
+            times=new_times,
+            config=self.config,
+            sampling_rate=self.sfreq,
+            logger=self.logger,
+            name=window_name,
+            explicit_windows=explicit_windows,
+        )
+        return time_windows_from_spec(spec, logger=self.logger, strict=True)
 
     def _extract_explicit_windows(self) -> Optional[List[Dict[str, Any]]]:
         """Extract explicit window ranges from existing windows."""
