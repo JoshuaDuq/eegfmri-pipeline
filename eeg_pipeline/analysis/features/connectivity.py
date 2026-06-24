@@ -1750,10 +1750,9 @@ def extract_connectivity_from_precomputed(
     measures_cfg = conn_cfg.measures
     measures = {str(m).strip().lower() for m in measures_cfg}
     unknown = measures - supported_measures
-    if unknown and logger is not None:
-        logger.warning(
-            "Connectivity: unsupported measures %s; ignoring.",
-            ",".join(sorted(unknown)),
+    if unknown:
+        raise ValueError(
+            "Connectivity: unsupported measures: " + ", ".join(sorted(unknown))
         )
     measures = measures & supported_measures
     enable_wpli = "wpli" in measures
@@ -2027,26 +2026,16 @@ def extract_connectivity_from_precomputed(
                 con = _run(method, use_average=use_across_epochs)
                 con_data = np.asarray(con.get_data())
         except ValueError as e:
-            # User-facing requirement: warn and continue (do not crash the pipeline).
-            #
-            # We only suppress the known MNE Morlet constraint error. Other ValueErrors
-            # still surface (misconfiguration, shape mismatches, etc.).
             if _is_wavelet_longer_than_signal_error(e):
-                if logger is not None:
-                    seg_n_times = int(seg_data.shape[-1])
-                    seg_sec = float(seg_n_times) / sfreq if sfreq > 0 else np.nan
-                    logger.warning(
-                        "Connectivity: skipped %s for segment=%s band=%s (%.3fs; %d samples @ %.1f Hz): "
-                        "Morlet wavelet longer than signal. Increase segment duration / raise fmin / or set a smaller "
-                        "feature_engineering.connectivity.n_cycles.",
-                        method,
-                        seg_name,
-                        band,
-                        seg_sec,
-                        seg_n_times,
-                        float(sfreq),
-                    )
-                return pd.DataFrame()
+                seg_n_times = int(seg_data.shape[-1])
+                seg_sec = float(seg_n_times) / sfreq if sfreq > 0 else np.nan
+                raise ValueError(
+                    "Connectivity estimator failed because the Morlet wavelet is longer "
+                    f"than the selected segment: method={method}, segment={seg_name}, "
+                    f"band={band}, duration={seg_sec:.3f}s, samples={seg_n_times}, "
+                    f"sfreq={float(sfreq):.1f}Hz. Increase segment duration, raise fmin, "
+                    "or reduce feature_engineering.connectivity.n_cycles."
+                ) from e
             raise
 
         # Handle across_epochs mode: broadcast single result to all epochs

@@ -83,6 +83,61 @@ def _make_precomputed(*, transform: str, family: str) -> PrecomputedData:
 
 
 class TestConnectivityValidityGuards(unittest.TestCase):
+    def test_precomputed_connectivity_rejects_unknown_measures(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "connectivity": {
+                        "measures": ["unknown"],
+                        "min_segment_sec": 0.0,
+                    }
+                }
+            }
+        )
+        precomputed = _make_precomputed(transform="csd", family="connectivity")
+
+        with self.assertRaisesRegex(ValueError, "unsupported measures.*unknown"):
+            extract_connectivity_from_precomputed(
+                precomputed,
+                bands=["alpha"],
+                config=config,
+                logger=logging.getLogger("test-connectivity-unknown-measure"),
+            )
+
+    def test_precomputed_connectivity_surfaces_wavelet_length_failure(self):
+        config = DotConfig(
+            {
+                "feature_engineering": {
+                    "connectivity": {
+                        "measures": ["wpli"],
+                        "granularity": "trial",
+                        "phase_estimator": "within_epoch",
+                        "output_level": "global_only",
+                        "enable_graph_metrics": False,
+                        "min_segment_sec": 0.0,
+                        "n_cycles": 2.0,
+                    },
+                    "parallel": {"n_jobs_connectivity": 1},
+                }
+            }
+        )
+        precomputed = _make_precomputed(transform="csd", family="connectivity")
+
+        with patch(
+            "eeg_pipeline.analysis.features.connectivity.spectral_connectivity_time",
+            side_effect=ValueError("At least one of the wavelets is longer than the signal."),
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "method=wpli.*segment=full.*band=alpha",
+            ):
+                extract_connectivity_from_precomputed(
+                    precomputed,
+                    bands=["alpha"],
+                    config=config,
+                    logger=logging.getLogger("test-connectivity-wavelet-failure"),
+                )
+
     def test_phase_connectivity_requires_spatial_transform_by_default(self):
         config = DotConfig(
             {
