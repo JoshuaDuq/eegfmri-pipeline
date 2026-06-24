@@ -291,14 +291,10 @@ def _apply_drop_mask(
     mask_length = len(drop_mask)
 
     if block_length != mask_length:
-        logger.warning(
-            "Length mismatch for %s: block has %d rows but mask has %d. "
-            "Skipping mask application to avoid misalignment.",
-            block_name,
-            block_length,
-            mask_length,
+        raise ValueError(
+            f"Length mismatch for {block_name}: block has {block_length} rows but "
+            f"mask has {mask_length}."
         )
-        return block
 
     masked_block = block.loc[drop_mask].reset_index(drop=True)
     return _copy_attrs(masked_block, block)
@@ -427,6 +423,27 @@ def align_feature_dataframes(
     Dict[str, Any],
 ]:
     """Align feature blocks and target vector while preserving valid trials."""
+    raw_registry: Dict[str, pd.DataFrame] = {}
+    raw_lengths: Dict[str, int] = {}
+    _register_all_blocks(
+        pow_df,
+        baseline_df,
+        conn_df,
+        aper_df,
+        y,
+        extra_blocks,
+        raw_registry,
+        raw_lengths,
+    )
+    nonzero_lengths = {length for length in raw_lengths.values() if length > 0}
+    if len(nonzero_lengths) > 1:
+        validate_feature_block_lengths(
+            raw_lengths,
+            logger,
+            critical_features=critical_features,
+            requested_categories=requested_categories,
+        )
+
     block_lengths = [
         _get_block_length(pow_df),
         _get_block_length(baseline_df),

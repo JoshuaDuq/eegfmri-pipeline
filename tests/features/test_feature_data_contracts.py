@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from eeg_pipeline.analysis.features.results import ExtractionResult, FeatureSet
 from eeg_pipeline.types import PrecomputedData, TimeWindows
+from eeg_pipeline.utils.data.feature_alignment import attach_feature_alignment_columns
 
 
 def _valid_precomputed(**overrides: object) -> PrecomputedData:
@@ -106,3 +108,84 @@ def test_precomputed_crop_rejects_reversed_range() -> None:
 
     with pytest.raises(ValueError, match="tmax must be greater"):
         precomputed.crop(0.04, 0.01)
+
+
+def test_feature_set_rejects_declared_column_mismatch() -> None:
+    dataframe = pd.DataFrame({"power": [1.0, 2.0]})
+
+    with pytest.raises(ValueError, match="declared columns"):
+        FeatureSet(dataframe, ["different"], "power")
+
+
+def test_feature_set_rejects_duplicate_dataframe_columns() -> None:
+    dataframe = pd.DataFrame([[1.0, 2.0]], columns=["power", "power"])
+
+    with pytest.raises(ValueError, match="duplicate columns"):
+        FeatureSet(dataframe, ["power", "power"], "power")
+
+
+def test_extraction_result_rejects_misaligned_feature_indices() -> None:
+    result = ExtractionResult(
+        features={
+            "power": FeatureSet(
+                pd.DataFrame({"power": [1.0, 2.0]}),
+                ["power"],
+                "power",
+            ),
+            "quality": FeatureSet(
+                pd.DataFrame({"quality": [3.0, 4.0]}, index=[1, 2]),
+                ["quality"],
+                "quality",
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="row index"):
+        result.get_combined_df()
+
+
+def test_extraction_result_rejects_duplicate_columns_across_groups() -> None:
+    result = ExtractionResult(
+        features={
+            "power": FeatureSet(pd.DataFrame({"value": [1.0]}), ["value"], "power"),
+            "quality": FeatureSet(pd.DataFrame({"value": [2.0]}), ["value"], "quality"),
+        }
+    )
+
+    with pytest.raises(ValueError, match="duplicate feature columns"):
+        result.get_combined_df()
+
+
+def test_extraction_result_rejects_condition_length_mismatch() -> None:
+    result = ExtractionResult(
+        features={
+            "power": FeatureSet(
+                pd.DataFrame({"power": [1.0, 2.0]}),
+                ["power"],
+                "power",
+            )
+        },
+        condition=np.array(["pain"], dtype=object),
+    )
+
+    with pytest.raises(ValueError, match="condition length"):
+        result.get_combined_df()
+
+
+def test_attach_alignment_columns_rejects_row_mismatch() -> None:
+    features = pd.DataFrame({"power": [1.0, 2.0]})
+    events = pd.DataFrame({"trial_id": [1, 2, 3]})
+
+    with pytest.raises(ValueError, match="row count mismatch"):
+        attach_feature_alignment_columns(features, events)
+
+
+@pytest.mark.parametrize("trial_ids", [[1, 1], [1, np.nan]])
+def test_attach_alignment_columns_rejects_invalid_trial_ids(
+    trial_ids: list[float],
+) -> None:
+    features = pd.DataFrame({"power": [1.0, 2.0]})
+    events = pd.DataFrame({"trial_id": trial_ids})
+
+    with pytest.raises(ValueError, match="non-null and unique"):
+        attach_feature_alignment_columns(features, events)

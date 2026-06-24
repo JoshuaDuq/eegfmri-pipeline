@@ -45,6 +45,24 @@ class FeatureSet:
     columns: List[str]
     name: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.df, pd.DataFrame):
+            raise TypeError(
+                f"FeatureSet '{self.name}' df must be a pandas DataFrame; "
+                f"got {type(self.df).__name__}."
+            )
+        duplicate_columns = self.df.columns[self.df.columns.duplicated()].tolist()
+        if duplicate_columns:
+            raise ValueError(
+                f"FeatureSet '{self.name}' has duplicate columns: {duplicate_columns}."
+            )
+        dataframe_columns = list(self.df.columns)
+        if list(self.columns) != dataframe_columns:
+            raise ValueError(
+                f"FeatureSet '{self.name}' declared columns do not match its dataframe: "
+                f"declared={list(self.columns)}, dataframe={dataframe_columns}."
+            )
+
 
 @dataclass
 class ExtractionResult:
@@ -83,11 +101,7 @@ class ExtractionResult:
         pd.DataFrame
             Combined features with one row per epoch.
         """
-        non_empty_dfs = [
-            feature_set.df
-            for feature_set in self.features.values()
-            if not feature_set.df.empty
-        ]
+        non_empty_dfs = self._validated_feature_frames()
         
         if not non_empty_dfs:
             return pd.DataFrame()
@@ -95,6 +109,7 @@ class ExtractionResult:
         combined = pd.concat(non_empty_dfs, axis=1)
         
         if include_condition and self.condition is not None:
+            self._validate_condition_length(len(combined))
             combined.insert(0, CONDITION_COLUMN_NAME, self.condition)
         
         return self._reorder_columns(combined)
@@ -130,9 +145,46 @@ class ExtractionResult:
         df = feature_set.df.copy()
         
         if include_condition and self.condition is not None:
+            self._validate_condition_length(len(df))
             df.insert(0, CONDITION_COLUMN_NAME, self.condition)
         
         return df
+
+    def _validated_feature_frames(self) -> List[pd.DataFrame]:
+        """Return nonempty feature frames after validating their shared row contract."""
+        frames = [
+            feature_set.df
+            for feature_set in self.features.values()
+            if not feature_set.df.empty
+        ]
+        if not frames:
+            return []
+
+        reference = frames[0]
+        seen_columns: set[str] = set()
+        for frame in frames:
+            if len(frame) != len(reference):
+                raise ValueError(
+                    "Feature groups have inconsistent row counts: "
+                    f"expected {len(reference)}, got {len(frame)}."
+                )
+            if not frame.index.equals(reference.index):
+                raise ValueError("Feature groups must share the same row index before assembly.")
+            duplicate_columns = seen_columns.intersection(map(str, frame.columns))
+            if duplicate_columns:
+                raise ValueError(
+                    "Feature groups contain duplicate feature columns: "
+                    f"{sorted(duplicate_columns)}."
+                )
+            seen_columns.update(map(str, frame.columns))
+        return frames
+
+    def _validate_condition_length(self, n_rows: int) -> None:
+        if self.condition is not None and len(self.condition) != n_rows:
+            raise ValueError(
+                f"ExtractionResult condition length ({len(self.condition)}) does not "
+                f"match feature rows ({n_rows})."
+            )
     
     def get_all_columns(self) -> List[str]:
         """

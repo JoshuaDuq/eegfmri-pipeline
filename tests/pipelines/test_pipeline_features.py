@@ -412,11 +412,8 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
 
             window_a = pd.DataFrame({"trial_id": [2, 4], "alpha": [20.0, 40.0]})
             window_b = pd.DataFrame({"trial_id": [1, 4], "beta": [10.0, 400.0]})
-            merged_by_trial = _merge_dataframes([window_a, window_b])
-            self.assertEqual(merged_by_trial["trial_id"].tolist(), [1, 2, 4])
-            self.assertTrue(np.isnan(merged_by_trial.loc[0, "alpha"]))
-            self.assertEqual(merged_by_trial.loc[1, "alpha"], 20.0)
-            self.assertEqual(merged_by_trial.loc[2, "beta"], 400.0)
+            with self.assertRaisesRegex(ValueError, "same trial_id values"):
+                _merge_dataframes([window_a, window_b])
 
             logger = Mock()
             self.assertIsNone(
@@ -2279,8 +2276,8 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
         _accumulate_features(acc, unpacked, features, aligned)
         self.assertGreaterEqual(len(acc["power"]), 1)
 
-        merged = _merge_dataframes([df_a, df_a, df_b])
-        self.assertEqual(list(merged.columns), ["a", "b"])
+        with self.assertRaisesRegex(ValueError, "duplicate feature columns"):
+            _merge_dataframes([df_a, df_a, df_b])
         self.assertEqual(_get_df_cols(df_a), 1)
         self.assertEqual(_get_df_cols(pd.DataFrame()), 0)
 
@@ -2292,6 +2289,25 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
         qc = _build_feature_qc(SimpleNamespace(aper_qc={"x": 1}), ctx)
         self.assertIn("aperiodic", qc)
         self.assertIn("precomputed_intermediates", qc)
+
+    def test_merge_dataframes_rejects_ambiguous_trial_alignment(self):
+        from eeg_pipeline.pipelines.features import _merge_dataframes
+
+        with self.assertRaisesRegex(ValueError, "either all or none"):
+            _merge_dataframes(
+                [
+                    pd.DataFrame({"trial_id": [1, 2], "a": [10.0, 20.0]}),
+                    pd.DataFrame({"b": [30.0, 40.0]}),
+                ]
+            )
+
+        with self.assertRaisesRegex(ValueError, "same trial_id values"):
+            _merge_dataframes(
+                [
+                    pd.DataFrame({"trial_id": [1, 2], "a": [10.0, 20.0]}),
+                    pd.DataFrame({"trial_id": [1, 3], "b": [30.0, 40.0]}),
+                ]
+            )
 
     def test_pac_trials_alignment_round_trip(self):
         from eeg_pipeline.pipelines.features import _build_extra_blocks, _update_from_aligned_extra

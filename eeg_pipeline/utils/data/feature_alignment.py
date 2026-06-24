@@ -33,7 +33,9 @@ def attach_feature_alignment_columns(
     if events_df is None or df is None or df.empty:
         return df
     if len(df) != len(events_df):
-        return df
+        raise ValueError(
+            f"Feature/event row count mismatch: features={len(df)}, events={len(events_df)}."
+        )
 
     if TRIAL_ID_COLUMN not in events_df.columns:
         raise ValueError(
@@ -41,8 +43,11 @@ def attach_feature_alignment_columns(
             "Re-run preprocessing to regenerate clean events with the current contract."
         )
 
-    out = df.copy()
     event_series = events_df[TRIAL_ID_COLUMN].reset_index(drop=True)
+    if event_series.isna().any() or event_series.duplicated().any():
+        raise ValueError("Aligned events trial_id values must be non-null and unique.")
+
+    out = df.copy()
     if TRIAL_ID_COLUMN in out.columns:
         current = out[TRIAL_ID_COLUMN].reset_index(drop=True)
         if not current.equals(event_series):

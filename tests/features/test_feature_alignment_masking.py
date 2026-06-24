@@ -13,6 +13,24 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class TestFeatureAlignmentMasking(unittest.TestCase):
+    def test_mismatched_blocks_fail_before_finite_masking(self):
+        pow_df = pd.DataFrame({"power": [0.1, 0.2, 0.3]})
+        baseline_df = pd.DataFrame({"baseline": [1.0, 1.0]})
+
+        with self.assertRaisesRegex(ValueError, "mismatched trial counts"):
+            align_feature_dataframes(
+                pow_df=pow_df,
+                baseline_df=baseline_df,
+                conn_df=None,
+                aper_df=None,
+                y=None,
+                aligned_events=pd.DataFrame({"trial": [1, 2, 3]}),
+                features_dir=Path(tempfile.mkdtemp()),
+                logger=logging.getLogger("test-feature-alignment-mismatch"),
+                config=DotConfig({}),
+                requested_categories=["power"],
+            )
+
     def test_drop_mask_accounts_for_extra_blocks(self):
         pow_df = pd.DataFrame(
             {"power_active_alpha_global_logratio_mean": [0.1, 0.2, 0.3]}

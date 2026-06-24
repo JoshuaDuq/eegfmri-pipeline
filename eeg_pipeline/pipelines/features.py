@@ -607,10 +607,32 @@ def _count_saved_range_columns(
 
 
 def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
-    """Merge DataFrames by concatenating columns, avoiding duplicates."""
+    """Merge feature DataFrames after validating row and column identity."""
     valid_dfs = [df for df in dfs if df is not None and not df.empty]
     if not valid_dfs:
         return None
+
+    trial_id_presence = [TRIAL_ID_COLUMN in df.columns for df in valid_dfs]
+    if any(trial_id_presence) and not all(trial_id_presence):
+        raise ValueError(
+            "Feature tables must either all or none contain trial_id before merging."
+        )
+
+    seen_payload_columns: set[str] = set()
+    for df in valid_dfs:
+        if df.columns.duplicated().any():
+            duplicates = df.columns[df.columns.duplicated()].tolist()
+            raise ValueError(f"Feature table contains duplicate feature columns: {duplicates}.")
+        payload_columns = {
+            str(column) for column in df.columns if column != TRIAL_ID_COLUMN
+        }
+        duplicates = seen_payload_columns.intersection(payload_columns)
+        if duplicates:
+            raise ValueError(
+                f"Feature tables contain duplicate feature columns: {sorted(duplicates)}."
+            )
+        seen_payload_columns.update(payload_columns)
+
     if len(valid_dfs) == 1:
         return valid_dfs[0]
 
@@ -621,21 +643,36 @@ def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
             if attrs.get(key) != common_attrs[key]:
                 common_attrs.pop(key, None)
 
-    if all(TRIAL_ID_COLUMN in df.columns for df in valid_dfs):
+    if all(trial_id_presence):
         indexed_dfs: List[pd.DataFrame] = []
+        reference_trial_ids = set(valid_dfs[0][TRIAL_ID_COLUMN].tolist())
         for df in valid_dfs:
-            if df[TRIAL_ID_COLUMN].duplicated().any():
+            trial_ids = df[TRIAL_ID_COLUMN]
+            if trial_ids.isna().any() or trial_ids.duplicated().any():
                 raise ValueError(
-                    "Cannot merge feature tables with duplicate trial_id values."
+                    "Cannot merge feature tables with null or duplicate trial_id values."
+                )
+            if set(trial_ids.tolist()) != reference_trial_ids:
+                raise ValueError(
+                    "Feature tables must contain the same trial_id values before merging."
                 )
             indexed_dfs.append(df.set_index(TRIAL_ID_COLUMN, drop=True))
 
         merged = pd.concat(indexed_dfs, axis=1, sort=False)
         merged = merged.sort_index(kind="stable").reset_index()
     else:
+        reference = valid_dfs[0]
+        for df in valid_dfs[1:]:
+            if len(df) != len(reference):
+                raise ValueError(
+                    "Feature tables without trial_id must have identical row counts."
+                )
+            if not df.index.equals(reference.index):
+                raise ValueError(
+                    "Feature tables without trial_id must have identical row indexes."
+                )
         merged = pd.concat(valid_dfs, axis=1)
 
-    merged = merged.loc[:, ~merged.columns.duplicated(keep="first")]
     if common_attrs:
         merged.attrs.update(common_attrs)
     return merged
