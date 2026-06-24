@@ -16,6 +16,68 @@ from tests.pipelines_test_utils import DotConfig
 
 
 class TestPacSurrogates(unittest.TestCase):
+    def test_trial_shuffle_does_not_also_circularly_shift_donor_amplitude(self):
+        class _TrialShuffleGenerator:
+            @staticmethod
+            def permutation(_n_epochs):
+                return np.array([1, 0], dtype=int)
+
+            @staticmethod
+            def integers(*_args, **_kwargs):
+                raise AssertionError("trial_shuffle must not draw a circular shift")
+
+        phase = np.ones((2, 4), dtype=np.complex128)
+        amplitudes = np.array(
+            [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]],
+            dtype=float,
+        )
+
+        surrogates = _compute_pac_surrogates(
+            phase,
+            amplitudes,
+            n_surrogates=1,
+            normalize=False,
+            epsilon=1e-12,
+            n_times=4,
+            rng=_TrialShuffleGenerator(),
+            surrogate_method="trial_shuffle",
+        )
+
+        np.testing.assert_allclose(surrogates[:, 0], np.array([6.5, 2.5]))
+
+    def test_normalized_pac_is_nan_when_amplitude_mass_is_zero(self):
+        data = np.zeros((1, 1, 2, 8), dtype=np.complex128)
+
+        values = _compute_pac_for_channel_band_pair(
+            data,
+            channel_idx=0,
+            phase_freqs=np.array([6.0]),
+            amp_freqs=np.array([40.0]),
+            phase_indices=np.array([0]),
+            amp_indices=np.array([1]),
+            phase_band_range=(4.0, 8.0),
+            amp_band_range=(30.0, 50.0),
+            normalize=True,
+            epsilon=1e-12,
+            n_times=8,
+        )
+
+        self.assertTrue(np.isnan(values[0]))
+
+    def test_normalized_pac_surrogates_are_nan_when_amplitude_mass_is_zero(self):
+        surrogates = _compute_pac_surrogates(
+            np.ones((1, 4), dtype=np.complex128),
+            np.zeros((1, 4), dtype=float),
+            n_surrogates=2,
+            normalize=True,
+            epsilon=1e-12,
+            n_times=4,
+            rng=np.random.default_rng(3),
+            surrogate_method="circular_shift",
+        )
+
+        self.assertTrue(np.isnan(surrogates).all())
+
     def test_pac_without_normalization_is_not_rescaled_by_window_length(self):
         data = np.ones((1, 1, 2, 4), dtype=np.complex128)
         values = _compute_pac_for_channel_band_pair(

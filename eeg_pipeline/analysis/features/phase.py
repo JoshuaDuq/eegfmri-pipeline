@@ -1100,12 +1100,15 @@ def _compute_pac_surrogates(
                         continue
 
                     shifted_amplitude = np.asarray(amp_source, dtype=float)
-                    if n_times > 2:
+                    if method == "circular_shift" and n_times > 2:
                         shift = int(rng.integers(1, n_times - 1))
                         shifted_amplitude = np.roll(shifted_amplitude, shift)
 
                     if normalize:
-                        denominator = np.nansum(shifted_amplitude) + epsilon
+                        amplitude_sum = float(np.nansum(shifted_amplitude))
+                        if not np.isfinite(amplitude_sum) or amplitude_sum <= epsilon:
+                            continue
+                        denominator = amplitude_sum + epsilon
                         numerator = np.nansum(shifted_amplitude * epoch_phase)
                     else:
                         denominator = 1.0
@@ -1128,12 +1131,15 @@ def _compute_pac_surrogates(
                     continue
 
                 shifted_amplitude = np.asarray(amp_source, dtype=float)
-                if n_times > 2:
+                if method == "circular_shift" and n_times > 2:
                     shift = int(rng.integers(1, n_times - 1))
                     shifted_amplitude = np.roll(shifted_amplitude, shift)
 
                 if normalize:
-                    denominator = np.nansum(shifted_amplitude) + epsilon
+                    amplitude_sum = float(np.nansum(shifted_amplitude))
+                    if not np.isfinite(amplitude_sum) or amplitude_sum <= epsilon:
+                        continue
+                    denominator = amplitude_sum + epsilon
                     numerator = np.nansum(shifted_amplitude * epoch_phase)
                 else:
                     denominator = 1.0
@@ -1581,8 +1587,14 @@ def _compute_pac_for_channel_band_pair(
     mean_amplitude = np.nanmean(amplitudes, axis=1)  # (epochs, times)
     
     if normalize:
-        denominator = np.nansum(mean_amplitude, axis=1) + epsilon
+        amplitude_sum = np.nansum(mean_amplitude, axis=1)
         numerator = np.nansum(mean_amplitude * mean_phase_vector, axis=1)
+        pac_values = np.full(amplitude_sum.shape, np.nan, dtype=float)
+        valid_amplitude = np.isfinite(amplitude_sum) & (amplitude_sum > epsilon)
+        pac_values[valid_amplitude] = np.abs(
+            numerator[valid_amplitude] / (amplitude_sum[valid_amplitude] + epsilon)
+        )
+        return pac_values
     else:
         denominator = 1.0
         numerator = np.nanmean(mean_amplitude * mean_phase_vector, axis=1)
