@@ -69,6 +69,7 @@ agents.md
 .agents/skills/
 skills-lock.json
 .codex/
+.worktrees/
 .aider*
 .continue/
 .copilot/
