@@ -26,7 +26,12 @@ from eeg_pipeline.analysis.features.spectral import (
     extract_spectral_features,
 )
 from eeg_pipeline.analysis.features.erp import extract_erp_features
-from eeg_pipeline.analysis.features.quality import extract_quality_features
+from eeg_pipeline.analysis.features.quality import (
+    _compute_psd,
+    _compute_spectral_metrics,
+    _get_line_noise_parameters,
+    extract_quality_features,
+)
 from eeg_pipeline.analysis.features.precomputed.extras import (
     extract_asymmetry_from_precomputed,
     extract_band_ratios_from_precomputed,
@@ -119,6 +124,86 @@ class _StcStub:
 
 
 class TestScientificValidityGuards(unittest.TestCase):
+    def test_quality_rejects_overlap_equal_to_segment_length(self):
+        data = np.ones((2, 100), dtype=float)
+        with self.assertRaisesRegex(ValueError, "n_overlap"):
+            _compute_psd(
+                data,
+                100.0,
+                {
+                    "psd_method": "welch",
+                    "fmin": 1.0,
+                    "fmax": 40.0,
+                    "n_per_seg": 50,
+                    "n_fft": 64,
+                    "n_overlap": 50,
+                    "exclude_line_noise": False,
+                },
+            )
+
+    def test_quality_rejects_negative_overlap(self):
+        data = np.ones((2, 100), dtype=float)
+        with self.assertRaisesRegex(ValueError, "n_overlap"):
+            _compute_psd(
+                data,
+                100.0,
+                {
+                    "psd_method": "welch",
+                    "fmin": 1.0,
+                    "fmax": 40.0,
+                    "n_per_seg": 50,
+                    "n_fft": 64,
+                    "n_overlap": -1,
+                    "exclude_line_noise": False,
+                },
+            )
+
+    def test_quality_rejects_explicit_segment_longer_than_data(self):
+        data = np.ones((2, 100), dtype=float)
+        with self.assertRaisesRegex(ValueError, "n_per_seg"):
+            _compute_psd(
+                data,
+                100.0,
+                {
+                    "psd_method": "welch",
+                    "fmin": 1.0,
+                    "fmax": 40.0,
+                    "n_per_seg": 101,
+                    "n_fft": 128,
+                    "exclude_line_noise": False,
+                },
+            )
+
+    def test_quality_rejects_fft_shorter_than_segment(self):
+        data = np.ones((2, 100), dtype=float)
+        with self.assertRaisesRegex(ValueError, "feature_engineering.quality.n_fft"):
+            _compute_psd(
+                data,
+                100.0,
+                {
+                    "psd_method": "welch",
+                    "fmin": 1.0,
+                    "fmax": 40.0,
+                    "n_per_seg": 50,
+                    "n_fft": 32,
+                    "exclude_line_noise": False,
+                },
+            )
+
+    def test_quality_surfaces_psd_failure(self):
+        with patch(
+            "eeg_pipeline.analysis.features.quality._compute_psd",
+            side_effect=ValueError("bad PSD"),
+        ):
+            with self.assertRaisesRegex(ValueError, "bad PSD"):
+                _compute_spectral_metrics(np.ones((2, 100)), 100.0, {})
+
+    def test_quality_rejects_invalid_line_noise_frequencies(self):
+        for line_noise_freqs in ([60.0, np.nan], [60.0, -120.0]):
+            with self.subTest(line_noise_freqs=line_noise_freqs):
+                with self.assertRaisesRegex(ValueError, "line_noise_freqs"):
+                    _get_line_noise_parameters({"line_noise_freqs": line_noise_freqs})
+
     def test_source_roi_sign_alignment_rejects_nonfinite_source_values(self):
         stcs = [
             SimpleNamespace(

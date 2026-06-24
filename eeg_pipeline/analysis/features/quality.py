@@ -143,6 +143,11 @@ def _get_line_noise_parameters(config: Dict[str, Any]) -> Tuple[List[float], flo
             f"(got {type(line_freqs_raw).__name__})."
         )
     line_freqs = [float(f) for f in line_freqs_raw]
+    if not all(np.isfinite(frequency) and frequency > 0 for frequency in line_freqs):
+        raise ValueError(
+            "feature_engineering.quality.line_noise_freqs must contain only "
+            f"positive finite numbers (got {line_freqs_raw!r})."
+        )
     
     width = float(config.get("line_noise_width_hz", DEFAULT_LINE_NOISE_WIDTH))
     n_harmonics = int(config.get("line_noise_harmonics", DEFAULT_LINE_NOISE_HARMONICS))
@@ -193,11 +198,6 @@ def _compute_psd(
     method = _get_psd_method(config)
     fmin, fmax = _get_frequency_range(config, sfreq)
     n_times = int(data.shape[1])
-    default_n_per_seg = min(int(float(sfreq) * 2.0), n_times)
-    n_per_seg = int(config.get("n_per_seg", default_n_per_seg))
-    n_per_seg = max(2, min(n_per_seg, n_times))
-    n_fft = int(config.get("n_fft", max(DEFAULT_N_FFT, n_per_seg)))
-    n_fft = max(2, min(n_fft, n_times))
     
     if method == "multitaper":
         multitaper_adaptive = bool(config.get("multitaper_adaptive", False))
@@ -211,53 +211,54 @@ def _compute_psd(
             verbose=False,
         )
     else:
-        n_overlap_raw = config.get("n_overlap", n_per_seg // 2)
+        default_n_per_seg = min(int(float(sfreq) * 2.0), n_times)
         try:
-            n_overlap_raw = int(n_overlap_raw)
+            n_per_seg = int(config.get("n_per_seg", default_n_per_seg))
         except (TypeError, ValueError) as exc:
             raise ValueError(
-                "feature_engineering.quality.n_overlap must be an int (samples) or None "
-                f"(got {type(n_overlap_raw).__name__})."
+                "feature_engineering.quality.n_per_seg must be an integer number of samples."
             ) from exc
+        if n_per_seg < 2 or n_per_seg > n_times:
+            raise ValueError(
+                "feature_engineering.quality.n_per_seg must satisfy "
+                f"2 <= n_per_seg <= n_times ({n_times}); got {n_per_seg}."
+            )
 
-        # Fail-safe: MNE requires n_overlap < n_per_seg (and <= n_fft).
-        # User request: warn and continue rather than crashing quality extraction.
-        n_overlap = max(0, min(n_overlap_raw, n_per_seg - 1, n_fft - 1))
-        if logger is not None and n_overlap != n_overlap_raw:
-            logger.warning(
-                "Quality PSD: clamped Welch n_overlap from %d → %d to satisfy "
-                "n_overlap < n_per_seg (%d) and n_overlap < n_fft (%d).",
-                int(n_overlap_raw),
-                int(n_overlap),
-                int(n_per_seg),
-                int(n_fft),
+        default_n_fft = min(max(DEFAULT_N_FFT, n_per_seg), n_times)
+        try:
+            n_fft = int(config.get("n_fft", default_n_fft))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "feature_engineering.quality.n_fft must be an integer number of samples."
+            ) from exc
+        if n_fft < n_per_seg:
+            raise ValueError(
+                "feature_engineering.quality.n_fft must be greater than or equal to "
+                f"n_per_seg ({n_per_seg}); got {n_fft}."
             )
 
         try:
-            psds, freqs = mne.time_frequency.psd_array_welch(
-                data,
-                sfreq=float(sfreq),
-                fmin=fmin,
-                fmax=fmax,
-                n_fft=n_fft,
-                n_per_seg=n_per_seg,
-                n_overlap=n_overlap,
-                verbose=False,
+            n_overlap = int(config.get("n_overlap", n_per_seg // 2))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "feature_engineering.quality.n_overlap must be an integer number of samples."
+            ) from exc
+        if n_overlap < 0 or n_overlap >= n_per_seg:
+            raise ValueError(
+                "feature_engineering.quality.n_overlap must satisfy "
+                f"0 <= n_overlap < n_per_seg ({n_per_seg}); got {n_overlap}."
             )
-        except ValueError as exc:
-            msg = str(exc).lower()
-            if (
-                "n_overlap cannot be greater than n_per_seg" in msg
-                or "n_overlap" in msg and "n_per_seg" in msg
-            ):
-                if logger is not None:
-                    logger.warning(
-                        "Quality PSD: Welch parameter error (%s). "
-                        "Skipping spectral quality metrics for this segment.",
-                        str(exc).strip(),
-                    )
-                raise
-            raise
+
+        psds, freqs = mne.time_frequency.psd_array_welch(
+            data,
+            sfreq=float(sfreq),
+            fmin=fmin,
+            fmax=fmax,
+            n_fft=n_fft,
+            n_per_seg=n_per_seg,
+            n_overlap=n_overlap,
+            verbose=False,
+        )
     
     freqs = np.asarray(freqs, dtype=float)
     psds = np.asarray(psds, dtype=float)
@@ -350,21 +351,7 @@ def _compute_spectral_metrics(
     logger: Any = None,
 ) -> Dict[str, np.ndarray]:
     """Compute spectral quality metrics from PSD."""
-    try:
-        psds, freqs = _compute_psd(data, sfreq, config, logger=logger)
-    except ValueError as exc:
-        # User request: warn and continue, do not crash feature extraction.
-        # We keep time-domain quality metrics and mark spectral metrics as NaN.
-        if logger is not None:
-            logger.warning(
-                "Quality: PSD computation failed (%s). Setting SNR/muscle metrics to NaN.",
-                str(exc).strip(),
-            )
-        n_channels = int(data.shape[0])
-        return {
-            "snr": np.full(n_channels, np.nan),
-            "muscle": np.full(n_channels, np.nan),
-        }
+    psds, freqs = _compute_psd(data, sfreq, config, logger=logger)
     snr = _compute_snr_from_psd(psds, freqs, config)
     muscle_ratio = _compute_muscle_ratio_from_psd(psds, freqs, config)
     return {"snr": snr, "muscle": muscle_ratio}
