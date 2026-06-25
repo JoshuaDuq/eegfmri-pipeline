@@ -117,7 +117,6 @@ def run_ica_label(
             str(f)
             for f in BIDSPath(
                 root=pipeline_path,
-                task=task,
                 session=None,
                 suffix="ica",
                 processing="icafit",
@@ -134,6 +133,13 @@ def run_ica_label(
         ]
     
     ica_files.sort()
+
+    if not ica_files:
+        raise FileNotFoundError(
+            "No subject-level ICA files found for labeling in "
+            f"{pipeline_path}; expected MNE-BIDS '*_proc-icafit_ica.fif' output "
+            f"for subjects {subjects}."
+        )
 
     logger.title(
         "Custom step - Find bad ICs using mne_icalabel in %d files." % len(ica_files)
@@ -159,10 +165,6 @@ def run_ica_label(
             )
             bad_ica_frames.append(bframe)
 
-    if len(bad_ica_frames) == 0:
-        logger.warning(f"No ICA files processed for task {task}")
-        return
-    
     if len(bad_ica_frames) > 1:
         bad_ica_frame = pd.concat(bad_ica_frames, ignore_index=False)
     else:

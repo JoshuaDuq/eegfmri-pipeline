@@ -20,6 +20,35 @@ Follow-up:
 
 ## Issues
 
+### 2026-06-22 - `sub-0008` - Resting-State Baseline Skipped
+
+Study/stage: Ten-minute resting-state baseline recording.
+
+Issue: The resting-state baseline recording was skipped because of technical
+issues. No ten-minute baseline recording is available for `sub-0008`.
+
+Decision: Treat the resting-state baseline as missing. Exclude `sub-0008` from
+analyses that require this baseline recording.
+
+Follow-up: Retain `sub-0008` for analyses that do not require the resting-state
+baseline, provided the participant otherwise meets the relevant eligibility and
+quality-control criteria.
+
+### 2026-06-22 - `sub-0009` - Missing Pain Binary Responses
+
+Study/stage: PsychoPy behavioral data and pain-binary-dependent analyses.
+
+Issue: The participant initially did not understand that the pain yes/no question
+required a keyboard response. PsychoPy therefore coded `pain_binary_coded` as `-1`
+for run 1 trials 1, 3, 6, and 10, and run 2 trial 3.
+
+Decision: Treat these five pain binary responses as missing. Do not infer a binary
+response from the VAS rating or include these trials in analyses that require a valid
+pain binary response.
+
+Follow-up: Retain the trials for analyses that do not require `pain_binary_coded`,
+provided they otherwise meet the relevant eligibility and quality-control criteria.
+
 ### 2026-06-14 - `sub-0003` - Run 3 Used Wrong Temperature/Surface Sequence
 
 Study/stage: Study 1 and Study 2 trial eligibility.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import Mock
@@ -127,3 +128,49 @@ class TestIcaFailFast(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "write boom"):
             self.ica.run_ica_label_single_file("/tmp/sub-0001_task-task_proc-icafit_ica.fif")
+
+    def test_run_ica_label_discovers_subject_level_ica_when_task_is_selected(self):
+        with tempfile.TemporaryDirectory() as pipeline_path:
+            ica_path = f"{pipeline_path}/sub-0001/eeg/sub-0001_proc-icafit_ica.fif"
+
+            def bids_path(**entities):
+                matches = [ica_path] if entities.get("task") is None else []
+                return types.SimpleNamespace(match=lambda: matches)
+
+            labeled = pd.DataFrame({"participant_id": ["0001"]})
+            mne_bids = sys.modules["mne_bids"]
+            with (
+                unittest.mock.patch.object(mne_bids, "BIDSPath", side_effect=bids_path),
+                unittest.mock.patch.object(
+                    self.ica,
+                    "run_ica_label_single_file",
+                    return_value=labeled,
+                ) as run_single,
+            ):
+                self.ica.run_ica_label(
+                    pipeline_path=pipeline_path,
+                    task="thermalactive",
+                    subjects=["0001"],
+                )
+
+            run_single.assert_called_once_with(
+                ica_path,
+                prob_threshold=0.8,
+                labels_to_keep=["brain", "other"],
+                keep_mnebids_bads=False,
+            )
+
+    def test_run_ica_label_raises_when_no_subject_level_ica_exists(self):
+        mne_bids = sys.modules["mne_bids"]
+        bids_path = Mock(return_value=types.SimpleNamespace(match=lambda: []))
+
+        with (
+            tempfile.TemporaryDirectory() as pipeline_path,
+            unittest.mock.patch.object(mne_bids, "BIDSPath", bids_path),
+            self.assertRaisesRegex(FileNotFoundError, "No subject-level ICA files found"),
+        ):
+            self.ica.run_ica_label(
+                pipeline_path=pipeline_path,
+                task="thermalactive",
+                subjects=["0001"],
+            )
