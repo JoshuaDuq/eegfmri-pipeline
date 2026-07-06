@@ -37,9 +37,9 @@ def _write_primary_targets(
             {
                 "subject_id": subject_id,
                 "task": task,
-                "block": 1,
+                "run": 1,
                 "trial_index": 1,
-                "within_block_trial": 1,
+                "within_run_trial": 1,
                 "onset": 10.0,
                 "duration": 1.0,
                 "NPS": 1.0,
@@ -282,9 +282,9 @@ def test_load_primary_target_table_rejects_empty_table(tmp_path) -> None:
             for col in (
                 "subject_id",
                 "task",
-                "block",
+                "run",
                 "trial_index",
-                "within_block_trial",
+                "within_run_trial",
                 "onset",
                 "duration",
                 "NPS",

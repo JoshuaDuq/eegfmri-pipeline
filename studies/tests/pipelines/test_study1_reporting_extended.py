@@ -37,8 +37,18 @@ def _config(root: Path) -> DotConfig:
                         "alpha": ["alpha"],
                         "beta": ["beta"],
                         "alpha_beta": ["alpha", "beta"],
-                        "gamma": ["gamma"],
-                        "alpha_beta_gamma": ["alpha", "beta", "gamma"],
+                        "gamma": [
+                            "gamma_low_clean",
+                            "gamma_mid_clean",
+                            "gamma_high_clean",
+                        ],
+                        "alpha_beta_gamma": [
+                            "alpha",
+                            "beta",
+                            "gamma_low_clean",
+                            "gamma_mid_clean",
+                            "gamma_high_clean",
+                        ],
                     }
                 },
             },
@@ -177,8 +187,8 @@ def _write_article_inputs(root: Path) -> None:
 
 def _target_row(
     subject_id: str,
-    block: int,
-    within_block_trial: int,
+    run: int,
+    within_run_trial: int,
     stimulus_temp: float,
     nps: float,
     siips1: float,
@@ -186,10 +196,10 @@ def _target_row(
     return {
         "subject_id": subject_id,
         "task": "pain",
-        "block": block,
-        "trial_index": within_block_trial,
-        "within_block_trial": within_block_trial,
-        "onset": float(within_block_trial),
+        "run": run,
+        "trial_index": within_run_trial,
+        "within_run_trial": within_run_trial,
+        "onset": float(within_run_trial),
         "duration": 1.0,
         "NPS": nps,
         "SIIPS1": siips1,
@@ -203,14 +213,14 @@ def _target_row(
 
 
 def _event_row(
-    run_id: int,
+    run: int,
     trial_number: int,
     stimulus_temp: float,
     pain_binary: int,
     rating: float,
 ) -> dict[str, object]:
     return {
-        "run_id": run_id,
+        "run": run,
         "trial_number": trial_number,
         "stimulus_temp": stimulus_temp,
         "selected_surface": 1,

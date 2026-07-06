@@ -31,7 +31,7 @@ def source_stage_required_columns(
     adjustment_columns: tuple[str, ...],
 ) -> tuple[str, ...]:
     columns = (
-        "block",
+        "run",
         "trial_index",
         *source_stage_continuous_columns(config),
         *source_stage_categorical_columns(config),

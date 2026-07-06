@@ -3,8 +3,12 @@ from __future__ import annotations
 
 def test_study2_default_confirmatory_cell_matches_readme() -> None:
     from studies.pain_study.study2.config import load_study2_config
+    from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_RANGES_HZ
 
     config = load_study2_config()
+    scanner_clean_gamma_ranges = [
+        list(frequency_range) for frequency_range in SCANNER_CLEAN_GAMMA_RANGES_HZ.values()
+    ]
     cell = config["study2"]["confirmatory"]["study1_cell"]
 
     assert cell["target"] == "NPS"
@@ -39,7 +43,7 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     source_stage = config["study2"]["source_stage"]
     assert source_stage["min_source_valid_subjects"] == 30
     assert source_stage["min_feasibility_subjects"] == 20
-    assert source_stage["min_valid_blocks_per_subject"] == 3
+    assert source_stage["min_valid_runs_per_subject"] == 3
     assert source_stage["min_retained_trials_per_subject"] == 25
     assert source_stage["min_residual_degrees_of_freedom"] == 15
     assert source_stage["max_condition_number"] == 100
@@ -47,19 +51,19 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     assert source_stage["max_collinearity_failure_fraction"] == 0.20
     assert source_stage["continuous_columns"] == [
         "onset",
-        "trial_index_within_block",
+        "trial_index_within_run",
         "hrf_weighted_framewise_displacement",
         "hrf_weighted_std_dvars",
         "hrf_weighted_fp1_fp2_high_frequency_power",
         "residual_ecg_coupling",
     ]
     assert source_stage["categorical_columns"] == [
-        "block",
+        "run",
         "stimulus_temp",
         "selected_surface",
     ]
     assert source_stage["fixed_categorical_levels"] == {
-        "block": [1, 2, 3, 4, 5, 6],
+        "run": [1, 2, 3, 4, 5, 6],
         "stimulus_temp": [44.3, 45.3, 46.3, 47.3, 48.3, 49.3],
         "selected_surface": [1, 2, 3, 4, 5],
     }
@@ -69,6 +73,11 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     assert source_modeling["erp_subtracted_power"] == "sensitivity_only"
     assert source_modeling["primary_inverse_method"] == "sLORETA"
     assert source_modeling["rank_excluded_channels"] == ["Fp1", "Fp2"]
+    assert source_modeling["frequency_bands"] == {
+        "alpha": [8.0, 12.9],
+        "beta": [13.0, 30.0],
+        "gamma": scanner_clean_gamma_ranges,
+    }
     assert source_modeling["noise_covariance_baseline_s"] == [-5.0, -0.01]
     assert source_modeling["immediate_baseline_s"] == [-0.2, -0.01]
     assert "early_precue_baseline_s" not in source_modeling
@@ -113,7 +122,7 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
 
     behavioral = config["study2"]["behavioral_convergence"]
     assert behavioral["min_rated_trials"] == 25
-    assert behavioral["min_permutation_valid_blocks"] == 3
+    assert behavioral["min_permutation_valid_runs"] == 3
     assert behavioral["permutations"] == 5000
 
     reporting = config["study2"]["reporting"]

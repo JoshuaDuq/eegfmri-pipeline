@@ -217,19 +217,19 @@ def create_inner_cv(train_groups: np.ndarray, inner_cv_splits: int) -> GroupKFol
     return GroupKFold(n_splits=n_splits)
 
 
-def create_block_aware_cv(
+def create_run_aware_cv(
     blocks: np.ndarray,
     n_splits: Optional[int] = None,
     config: Optional[Any] = None,
 ) -> Tuple[Optional[GroupKFold], int]:
-    """Create block-aware GroupKFold CV."""
+    """Create run-aware GroupKFold CV."""
     if n_splits is None:
         n_splits = int(get_config_value(config, "machine_learning.cv.default_n_splits", 5))
     unique_blocks = np.unique(blocks[~pd.isna(blocks)])
     n_unique = len(unique_blocks)
 
     if n_unique < 2:
-        logger.warning(f"Insufficient blocks ({n_unique}) for GroupKFold")
+        logger.warning(f"Insufficient runs ({n_unique}) for GroupKFold")
         return None, 0
 
     effective_splits = min(n_splits, n_unique)
@@ -733,12 +733,12 @@ def create_within_subject_folds(
     fold_counter = 0
     unique_subs = [str(s) for s in np.unique(groups)]
     if blocks_all is None:
-        raise ValueError("Within-subject CV requires run_id/block labels for every subject.")
+        raise ValueError("Within-subject CV requires run labels for every subject.")
 
     blocks_arr = np.asarray(blocks_all)
     if blocks_arr.shape[0] != np.asarray(groups).shape[0]:
         raise ValueError(
-            "Within-subject CV run_id/block labels must be aligned to the sample axis."
+            "Within-subject CV run labels must be aligned to the sample axis."
         )
 
     for subject in unique_subs:
@@ -750,19 +750,19 @@ def create_within_subject_folds(
 
         subject_blocks = blocks_arr[subject_indices]
         if np.any(pd.isna(subject_blocks)):
-            raise ValueError(f"Subject {subject}: missing run_id/block labels.")
+            raise ValueError(f"Subject {subject}: missing run labels.")
 
         n_unique_subject_blocks = len(np.unique(subject_blocks[~pd.isna(subject_blocks)]))
         if n_unique_subject_blocks < 2:
             raise ValueError(
-                f"Subject {subject}: insufficient blocks for within-subject CV "
+                f"Subject {subject}: insufficient runs for within-subject CV "
                 f"({n_unique_subject_blocks}); at least 2 are required."
             )
 
-        ordered_blocks = bool(
-            get_config_value(config, "machine_learning.cv.within_subject_ordered_blocks", False)
+        ordered_runs = bool(
+            get_config_value(config, "machine_learning.cv.within_subject_ordered_runs", False)
         )
-        if ordered_blocks:
+        if ordered_runs:
             subject_blocks_num = np.asarray(pd.to_numeric(subject_blocks, errors="coerce"), dtype=float)
             ordered_unique = sorted(np.unique(subject_blocks_num[np.isfinite(subject_blocks_num)]))
             ordered_splits: List[Tuple[np.ndarray, np.ndarray]] = []
@@ -801,15 +801,15 @@ def create_within_subject_folds(
                     folds.append((fold_counter, train_idx, test_idx, subject, fold_params))
                 continue
             raise ValueError(
-                "Subject %s: ordered within-subject CV requested but no valid ordered block "
+                "Subject %s: ordered within-subject CV requested but no valid ordered run "
                 "folds were found."
                 % subject
             )
 
-        block_cv, _ = create_block_aware_cv(subject_blocks, n_splits)
+        block_cv, _ = create_run_aware_cv(subject_blocks, n_splits)
 
         if block_cv is None:
-            raise ValueError(f"Subject {subject}: insufficient blocks for within-subject CV.")
+            raise ValueError(f"Subject {subject}: insufficient runs for within-subject CV.")
 
         for train_local, test_local in block_cv.split(subject_indices, groups=subject_blocks):
             fold_counter += 1
@@ -833,21 +833,21 @@ def create_within_subject_folds(
     return folds
 
 
-def create_block_aware_inner_cv(
+def create_run_aware_inner_cv(
     blocks_train: np.ndarray,
     n_splits_inner: int,
     seed: int,
     fold: int,
     subject: str,
 ) -> Optional[List[Tuple[np.ndarray, np.ndarray]]]:
-    """Create block-aware inner CV splits."""
-    block_cv, effective_splits = create_block_aware_cv(blocks_train, n_splits_inner)
+    """Create run-aware inner CV splits."""
+    block_cv, effective_splits = create_run_aware_cv(blocks_train, n_splits_inner)
 
     if block_cv is None:
         return None
 
     cv_splits = list(block_cv.split(np.arange(len(blocks_train)), groups=blocks_train))
-    logger.info(f"Within fold {fold} ({subject}): block-aware inner CV ({effective_splits} splits)")
+    logger.info(f"Within fold {fold} ({subject}): run-aware inner CV ({effective_splits} splits)")
     return cv_splits
 
 
@@ -1156,37 +1156,37 @@ def run_permutation_test(
         perm_scheme = str(
             get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)
         ).strip().lower()
-    if perm_scheme not in {"within_subject", "within_subject_within_block"}:
+    if perm_scheme not in {"within_subject", "within_subject_within_run"}:
         raise ValueError(
             "Invalid machine_learning.cv.permutation_scheme: "
-            f"{perm_scheme!r}. Expected one of: within_subject, within_subject_within_block."
+            f"{perm_scheme!r}. Expected one of: within_subject, within_subject_within_run."
         )
 
     blocks_arr = None
-    if perm_scheme == "within_subject_within_block":
+    if perm_scheme == "within_subject_within_run":
         if blocks is None:
             raise ValueError(
-                "machine_learning.cv.permutation_scheme='within_subject_within_block' "
-                "requires block labels."
+                "machine_learning.cv.permutation_scheme='within_subject_within_run' "
+                "requires run labels."
             )
         else:
             blocks_arr = np.asarray(blocks)
             if len(blocks_arr) != len(y):
                 raise ValueError(
-                    "Permutation blocks must have the same length as y when "
-                    "machine_learning.cv.permutation_scheme='within_subject_within_block'."
+                    "Permutation runs must have the same length as y when "
+                    "machine_learning.cv.permutation_scheme='within_subject_within_run'."
                 )
             if np.all(pd.isna(blocks_arr)):
                 raise ValueError(
-                    "machine_learning.cv.permutation_scheme='within_subject_within_block' "
-                    "requires block labels."
+                    "machine_learning.cv.permutation_scheme='within_subject_within_run' "
+                    "requires run labels."
                 )
 
     for perm in range(null_n_perm):
         y_perm = y.copy()
         for subj in np.unique(groups):
             subj_mask = groups == subj
-            if perm_scheme == "within_subject_within_block" and blocks_arr is not None:
+            if perm_scheme == "within_subject_within_run" and blocks_arr is not None:
                 subj_blocks = blocks_arr[subj_mask]
                 for b in np.unique(subj_blocks):
                     if np.isfinite(b):

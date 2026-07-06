@@ -9,18 +9,17 @@ import pytest
 def _target_frame() -> pd.DataFrame:
     rows = []
     for subject_id in ("sub-0001", "sub-0002"):
-        blocks = (1, 2, 3, 4, 5, 6) if subject_id == "sub-0001" else (1, 2, 3, 5, 6)
-        for block in blocks:
+        runs = (1, 2, 3, 4, 5, 6) if subject_id == "sub-0001" else (1, 2, 3, 5, 6)
+        for run in runs:
             for trial in range(1, 12):
                 rows.append(
                     {
                         "subject_id": subject_id,
-                        "block": block,
-                        "acquisition_run": block,
-                        "within_block_trial": trial,
-                        "onset": 10.0 * block + trial,
-                        "NPS": float(block + trial),
-                        "SIIPS1": float(10 * block + trial),
+                        "run": run,
+                        "within_run_trial": trial,
+                        "onset": 10.0 * run + trial,
+                        "NPS": float(run + trial),
+                        "SIIPS1": float(10 * run + trial),
                         "NPS_fmri_n_voxels": 10,
                         "NPS_fmri_scoring_mask_sha256": "nps-mask",
                         "SIIPS1_fmri_n_voxels": 20,
@@ -93,7 +92,7 @@ def _source_qc_frame() -> pd.DataFrame:
                 "band": "combined",
                 "source_stage_criteria_met": True,
                 "retained_trials": 6,
-                "valid_blocks": 3,
+                "valid_runs": 3,
                 "design_rank": 4,
                 "residual_degrees_of_freedom": 2,
                 "condition_number": 10.0,
@@ -104,7 +103,7 @@ def _source_qc_frame() -> pd.DataFrame:
                 "band": "combined",
                 "source_stage_criteria_met": False,
                 "retained_trials": 6,
-                "valid_blocks": 3,
+                "valid_runs": 3,
                 "design_rank": 2,
                 "residual_degrees_of_freedom": 0,
                 "condition_number": float("inf"),
@@ -167,13 +166,13 @@ def test_subject_qc_summary_writes_machine_and_human_readable_outputs(tmp_path: 
         study2_source_qc={"alpha": _source_qc_frame()},
         study2_source_input=pd.DataFrame(
             [
-                {"subject_id": "sub-0001", "block": 1, "acquisition_run": 1},
-                {"subject_id": "sub-0001", "block": 2, "acquisition_run": 2},
-                {"subject_id": "sub-0001", "block": 3, "acquisition_run": 3},
-                {"subject_id": "sub-0001", "block": 1, "acquisition_run": 1},
-                {"subject_id": "sub-0001", "block": 2, "acquisition_run": 2},
-                {"subject_id": "sub-0001", "block": 3, "acquisition_run": 3},
-                {"subject_id": "sub-0002", "block": 1, "acquisition_run": 1},
+                {"subject_id": "sub-0001", "run": 1},
+                {"subject_id": "sub-0001", "run": 2},
+                {"subject_id": "sub-0001", "run": 3},
+                {"subject_id": "sub-0001", "run": 1},
+                {"subject_id": "sub-0001", "run": 2},
+                {"subject_id": "sub-0001", "run": 3},
+                {"subject_id": "sub-0002", "run": 1},
             ]
         ),
         source_power_shapes={
@@ -235,7 +234,7 @@ def test_subject_qc_summary_rejects_missing_required_columns() -> None:
     )
 
     with pytest.raises(ValueError, match="missing required column"):
-        require_columns(pd.DataFrame({"subject_id": ["sub-0001"]}), {"subject_id", "block"})
+        require_columns(pd.DataFrame({"subject_id": ["sub-0001"]}), {"subject_id", "run"})
 
 
 def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
@@ -259,12 +258,12 @@ def test_subject_qc_summary_warns_when_source_qc_bands_disagree() -> None:
         study2_source_qc={"alpha": _source_qc_frame(), "beta": beta_qc},
         study2_source_input=pd.DataFrame(
             [
-                {"subject_id": "sub-0001", "block": 1, "acquisition_run": 1},
-                {"subject_id": "sub-0001", "block": 2, "acquisition_run": 2},
-                {"subject_id": "sub-0001", "block": 3, "acquisition_run": 3},
-                {"subject_id": "sub-0001", "block": 1, "acquisition_run": 1},
-                {"subject_id": "sub-0001", "block": 2, "acquisition_run": 2},
-                {"subject_id": "sub-0001", "block": 3, "acquisition_run": 3},
+                {"subject_id": "sub-0001", "run": 1},
+                {"subject_id": "sub-0001", "run": 2},
+                {"subject_id": "sub-0001", "run": 3},
+                {"subject_id": "sub-0001", "run": 1},
+                {"subject_id": "sub-0001", "run": 2},
+                {"subject_id": "sub-0001", "run": 3},
             ]
         ),
         source_power_shapes={"sub-0001": SourcePowerShape(rows=6, vertices=8196)},

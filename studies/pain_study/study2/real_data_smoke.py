@@ -194,9 +194,9 @@ def _load_primary_targets(targets_path: Path) -> pd.DataFrame:
         targets,
         (
             "subject_id",
-            "block",
+            "run",
             "trial_index",
-            "within_block_trial",
+            "within_run_trial",
             "onset",
             "hrf_weighted_framewise_displacement",
             "hrf_weighted_std_dvars",
@@ -210,7 +210,7 @@ def _load_primary_targets(targets_path: Path) -> pd.DataFrame:
     prepared = targets.copy()
     prepared["subject_id"] = prepared["subject_id"].astype(str)
     prepared["trial_id"] = prepared.groupby("subject_id", sort=False).cumcount() + 1
-    prepared["trial_index_within_block"] = prepared["within_block_trial"]
+    prepared["trial_index_within_run"] = prepared["within_run_trial"]
     return prepared
 
 

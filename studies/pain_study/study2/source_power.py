@@ -256,6 +256,75 @@ def compute_sloreta_hilbert_logratio_power(
     )
 
 
+def compute_morphed_sloreta_hilbert_logratio_power(
+    *,
+    stcs: list[Any] | tuple[Any, ...],
+    times: np.ndarray,
+    baseline_window_s: tuple[float, float],
+    active_window_s: tuple[float, float],
+    morph: Any,
+    epsilon: float = 1.0e-12,
+    chunk_size_vertices: int = 16,
+) -> SourcePowerExtraction:
+    """Compute native-space source power, then morph scalar log-ratio maps."""
+    native = compute_sloreta_hilbert_logratio_power(
+        stcs=stcs,
+        times=times,
+        baseline_window_s=baseline_window_s,
+        active_window_s=active_window_s,
+        epsilon=epsilon,
+        chunk_size_vertices=chunk_size_vertices,
+    )
+    morphed_logratio = morph_source_power_logratio(
+        native.power_logratio,
+        reference_stcs=stcs,
+        morph=morph,
+    )
+    return SourcePowerExtraction(
+        power_logratio=morphed_logratio,
+        baseline_window_s=native.baseline_window_s,
+        active_window_s=native.active_window_s,
+        n_trials=int(morphed_logratio.shape[0]),
+        n_vertices=int(morphed_logratio.shape[1]),
+    )
+
+
+def morph_source_power_logratio(
+    power_logratio: np.ndarray,
+    *,
+    reference_stcs: list[Any] | tuple[Any, ...],
+    morph: Any,
+) -> np.ndarray:
+    """Morph trial-level scalar source-power maps into the common source space."""
+    if morph is None:
+        raise ValueError("Study 2 source-power morph requires a morph object.")
+
+    values = np.asarray(power_logratio, dtype=float)
+    if values.ndim != 2:
+        raise ValueError(
+            f"Study 2 source-power log-ratio must be 2D, got shape {values.shape}."
+        )
+    if not np.all(np.isfinite(values)):
+        raise ValueError("Study 2 source-power log-ratio contains non-finite values.")
+    _validate_scalar_morph_references(reference_stcs, values)
+
+    morphed_rows = []
+    for trial_values, reference_stc in zip(values, reference_stcs):
+        scalar_stc = _source_estimate_like(reference_stc, trial_values)
+        morphed = morph.apply(scalar_stc)
+        morphed_data = np.asarray(getattr(morphed, "data", None), dtype=float)
+        if morphed_data.ndim != 2 or morphed_data.shape[1] != 1:
+            raise ValueError("Study 2 morphed source-power maps must have one time sample.")
+        if not np.all(np.isfinite(morphed_data)):
+            raise ValueError("Study 2 morphed source-power maps contain non-finite values.")
+        morphed_rows.append(morphed_data[:, 0])
+
+    vertex_counts = {row.shape[0] for row in morphed_rows}
+    if len(vertex_counts) != 1:
+        raise ValueError("Study 2 morphed source-power maps must share one vertex count.")
+    return np.stack(morphed_rows, axis=0)
+
+
 def _validate_times(times: np.ndarray) -> np.ndarray:
     values = np.asarray(times, dtype=float)
     if values.ndim != 1:
@@ -325,6 +394,36 @@ def _validate_stc_data(
     return tuple(stc_data)
 
 
+def _validate_scalar_morph_references(
+    reference_stcs: list[Any] | tuple[Any, ...],
+    values: np.ndarray,
+) -> None:
+    if not reference_stcs:
+        raise ValueError("Study 2 source-power morph requires at least one reference STC.")
+    if len(reference_stcs) != values.shape[0]:
+        raise ValueError("Study 2 source-power maps and reference STCs must have one row per trial.")
+    for index, reference_stc in enumerate(reference_stcs):
+        data = np.asarray(getattr(reference_stc, "data", None), dtype=float)
+        if data.ndim != 2:
+            raise ValueError(f"Study 2 reference STC data must be 2D for trial {index}.")
+        if data.shape[0] != values.shape[1]:
+            raise ValueError(
+                "Study 2 source-power map vertex count must match reference STC vertices."
+            )
+        if getattr(reference_stc, "vertices", None) is None:
+            raise ValueError("Study 2 reference STCs must expose source-space vertices.")
+
+
+def _source_estimate_like(reference_stc: Any, values: np.ndarray) -> Any:
+    return reference_stc.__class__(
+        np.asarray(values, dtype=float)[:, np.newaxis],
+        vertices=getattr(reference_stc, "vertices"),
+        tmin=0.0,
+        tstep=1.0,
+        subject=getattr(reference_stc, "subject", None),
+    )
+
+
 def _compute_chunked_logratio_power(
     stc_data: tuple[np.ndarray, ...],
     *,
@@ -354,8 +453,10 @@ __all__ = [
     "apply_sloreta_inverse",
     "build_surface_forward_model",
     "compute_baseline_noise_covariance",
+    "compute_morphed_sloreta_hilbert_logratio_power",
     "compute_sloreta_hilbert_logratio_power",
     "compute_sloreta_source_estimates",
     "make_surface_source_morph",
     "make_sloreta_inverse_operator",
+    "morph_source_power_logratio",
 ]

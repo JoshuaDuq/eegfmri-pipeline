@@ -2643,7 +2643,7 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 		}},
 		{key: "machine_learning.cv.permutation_scheme", apply: func(v interface{}) {
 			if s, ok := asString(v); ok {
-				if strings.EqualFold(s, "within_subject_within_block") {
+				if strings.EqualFold(s, "within_subject_within_run") {
 					m.mlCvPermutationScheme = 1
 				} else {
 					m.mlCvPermutationScheme = 0

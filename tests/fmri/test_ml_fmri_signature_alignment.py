@@ -32,7 +32,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
         events_df = pd.DataFrame(
             {
-                "run_id": [1, 1],
+                "run": [1, 1],
                 "trial_number": [1, 2],
                 # EEG Trig_therm-like timing/duration (does not match fMRI plateau rows)
                 "onset": [22.150, 65.084],
@@ -113,7 +113,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
         events_df = pd.DataFrame(
             {
-                "run_id": [1],
+                "run": [1],
                 "trial_number": [1],
                 "onset": [22.150],
                 "duration": [0.001],
@@ -197,7 +197,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
         events_df = pd.DataFrame(
             {
-                "run_id": [1, 1],
+                "run": [1, 1],
                 "onset": [10.1234, 20.5678],
                 "duration": [7.5, 7.5],
             }
@@ -256,7 +256,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
         events_df = pd.DataFrame(
             {
-                "run_id": [1, 1],
+                "run": [1, 1],
                 "trial_number": [1, 2],
                 "onset": [10.0, 20.0],
                 "duration": [7.5, 7.5],
@@ -317,7 +317,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
         events_df = pd.DataFrame(
             {
-                "run_id": [1, 1],
+                "run": [1, 1],
                 "trial_number": [1, 2],
                 "onset": [10.0, 20.0],
                 "duration": [7.5, 7.5],
@@ -378,7 +378,7 @@ class TestMlFmriSignatureAlignment(unittest.TestCase):
 
         events_df = pd.DataFrame(
             {
-                "run_id": [1, 1],
+                "run": [1, 1],
                 "trial_number": [1, 2],
                 "onset": [10.0, 20.0],
                 "duration": [7.5, 7.5],

@@ -104,8 +104,8 @@ preprocessing, estimator fitting, cross-validation, inference, and interpretatio
      - Predict binary labels under class imbalance
      - SVM objective, logistic probability, EEGNet logits
    * - Cross-validation schemes
-     - Estimate generalization with subject/block isolation
-     - Nested LOSO, block-aware within-subject CV
+     - Estimate generalization with subject/run isolation
+     - Nested LOSO, run-aware within-subject CV
    * - Evaluation metrics
      - Aggregate trial predictions at the scientific unit
      - Subject-level :math:`r`, :math:`R^2`, AUC, calibration metrics
@@ -291,17 +291,17 @@ Nested LOSO (Primary)
           Scoring: Pearson r + neg_MSE
           Refit: neg_MSE (regression) | average_precision (classification)
 
-Within-Subject CV (Block-Aware)
+Within-Subject CV (Run-Aware)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: text
 
    For each subject:
-     Outer loop: GroupKFold on block labels
-       Inner loop: GroupKFold on remaining blocks
+     Outer loop: GroupKFold on run labels
+       Inner loop: GroupKFold on remaining runs
 
-**Ordered block mode** (``machine_learning.cv.within_subject_ordered_blocks = true``): folds respect
-temporal ordering — all preceding blocks train, the next block is test.
+**Ordered run mode** (``machine_learning.cv.within_subject_ordered_runs = true``): folds respect
+temporal ordering — all preceding runs train, the next run is test.
 
 CV Hygiene
 ~~~~~~~~~~
@@ -355,8 +355,8 @@ Permutation Schemes
 ~~~~~~~~~~~~~~~~~~~
 
 - ``within_subject`` *(default)*: permute labels within each subject.
-- ``within_subject_within_block``: permute labels within each subject × block;
-  requested block labels must be available and valid.
+- ``within_subject_within_run``: permute labels within each subject × run;
+  requested run labels must be available and valid.
 
 P-Value
 ~~~~~~~

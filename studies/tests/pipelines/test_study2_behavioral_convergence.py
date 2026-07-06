@@ -16,7 +16,7 @@ def _behavior_frame(*, constant_second_subject_rating: bool = False) -> pd.DataF
                 rows.append(
                     {
                         "subject_id": subject_id,
-                        "block": block,
+                        "run": block,
                         "expression": signal + 0.1 * nuisance,
                         "rating": rating + 0.2 * nuisance,
                         "nuisance": nuisance,

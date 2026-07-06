@@ -88,8 +88,8 @@ def main() -> None:
     standardized_scores = standardize_scores_within_subject(held_out_scores, context.groups)
 
     frame = context.meta.copy().reset_index(drop=True)
-    frame["trial_index_within_block"] = pd.to_numeric(
-        frame["within_block_trial"],
+    frame["trial_index_within_run"] = pd.to_numeric(
+        frame["within_run_trial"],
         errors="raise",
     )
     frame["eta_combined_z"] = standardized_scores

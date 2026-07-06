@@ -95,7 +95,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.behaviorGroupGroupLevelExpanded {
 				label = "▾ Group-Level"
 			}
-			return label, "", "cross-subject target · controls · block perms"
+			return label, "", "cross-subject target · controls · run perms"
 		case optBehaviorGroupICC:
 			label := "▸ ICC"
 			if m.behaviorGroupICCExpanded {
@@ -462,7 +462,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optRegressionIncludePrev:
 			return "Prev/Delta Terms", m.boolToOnOff(m.regressionIncludePrev), "use prev_/delta_"
 		case optRegressionIncludeRunBlock:
-			return "Run/Block Dummies", m.boolToOnOff(m.regressionIncludeRunBlock), "categorical controls"
+			return "Run Dummies", m.boolToOnOff(m.regressionIncludeRunBlock), "categorical controls"
 		case optRegressionIncludeInteraction:
 			return "Feature×Temp", m.boolToOnOff(m.regressionIncludeInteraction), "interaction term"
 		case optRegressionStandardize:

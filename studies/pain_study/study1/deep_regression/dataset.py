@@ -11,7 +11,7 @@ import pandas as pd
 
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
-from eeg_pipeline.utils.data.fmri_signature_targets import find_block_column
+from eeg_pipeline.utils.data.fmri_signature_targets import find_run_column
 from studies.pain_study.study1.cohort import (
     resolve_primary_subjects,
     resolve_primary_target_name,
@@ -89,9 +89,9 @@ def _alignment_key_data(
     target_rows: pd.DataFrame,
     value_column: str,
 ) -> tuple[list[str | None], pd.Series]:
-    event_runs = find_block_column(aligned_events)
+    event_runs = find_run_column(aligned_events)
     if event_runs is None:
-        raise ValueError("Clean EEG events must contain a usable run/block column for deep regression.")
+        raise ValueError("Clean EEG events must contain a usable 'run' column for deep regression.")
     event_runs = pd.to_numeric(event_runs, errors="coerce")
 
     event_trial = None
@@ -102,7 +102,7 @@ def _alignment_key_data(
     elif "epoch" in aligned_events.columns:
         event_trial = pd.to_numeric(aligned_events["epoch"], errors="coerce")
 
-    target_runs = pd.to_numeric(target_rows["block"], errors="coerce")
+    target_runs = pd.to_numeric(target_rows["run"], errors="coerce")
     target_trials = pd.to_numeric(target_rows["trial_index"], errors="coerce")
     target_values = pd.to_numeric(target_rows[value_column], errors="coerce")
 
@@ -228,7 +228,7 @@ def _append_target_table_metadata(
     excluded = {
         "subject_id",
         "task",
-        "block",
+        "run",
         "trial_index",
         "onset",
         "duration",
@@ -300,10 +300,10 @@ def load_band_tensor_matrix(
     if not common_channels:
         raise ValueError("Study 1 deep regression found no common EEG channels across subjects.")
 
-    tensor_blocks: list[np.ndarray] = []
-    target_blocks: list[np.ndarray] = []
+    tensor_runs: list[np.ndarray] = []
+    target_runs: list[np.ndarray] = []
     groups: list[str] = []
-    meta_blocks: list[pd.DataFrame] = []
+    meta_runs: list[pd.DataFrame] = []
     for subject_id, epochs, aligned_events, target_rows in payloads:
         y = _align_subject_targets(
             aligned_events=aligned_events,
@@ -330,7 +330,9 @@ def load_band_tensor_matrix(
                 f"Band tensor/target length mismatch for {subject_id}: tensors={tensors.shape[0]}, targets={len(y)}."
             )
 
-        block = find_block_column(aligned_events)
+        run = find_run_column(aligned_events)
+        if run is None:
+            raise ValueError("Clean EEG events must contain a usable 'run' column for deep regression.")
         if "trial_number" in aligned_events.columns:
             trial_index = pd.to_numeric(aligned_events["trial_number"], errors="coerce")
         elif "trial_index" in aligned_events.columns:
@@ -342,7 +344,7 @@ def load_band_tensor_matrix(
             {
                 "subject_id": [subject_id] * len(y),
                 "task": [task] * len(y),
-                "block": pd.to_numeric(block, errors="coerce") if block is not None else np.nan,
+                "run": pd.to_numeric(run, errors="coerce"),
                 "trial_index": trial_index,
                 "onset": pd.to_numeric(aligned_events["onset"], errors="coerce"),
                 "duration": pd.to_numeric(aligned_events["duration"], errors="coerce"),
@@ -356,15 +358,15 @@ def load_band_tensor_matrix(
             target_rows=target_rows,
             target_name=resolved_target,
         )
-        tensor_blocks.append(tensors)
-        target_blocks.append(y)
+        tensor_runs.append(tensors)
+        target_runs.append(y)
         groups.extend([subject_id] * len(y))
-        meta_blocks.append(meta)
+        meta_runs.append(meta)
 
-    X = np.concatenate(tensor_blocks, axis=0)
-    y_all = np.concatenate(target_blocks, axis=0)
+    X = np.concatenate(tensor_runs, axis=0)
+    y_all = np.concatenate(target_runs, axis=0)
     groups_arr = np.asarray(groups, dtype=object)
-    meta = pd.concat(meta_blocks, axis=0, ignore_index=True)
+    meta = pd.concat(meta_runs, axis=0, ignore_index=True)
     meta["trial_id"] = np.arange(len(meta), dtype=int)
 
     if X.ndim != 4:

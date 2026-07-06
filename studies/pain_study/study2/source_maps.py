@@ -335,7 +335,7 @@ def _qc_record(qc: SourceStageSubjectQC) -> dict[str, Any]:
         "band": qc.band,
         "source_stage_criteria_met": qc.source_stage_criteria_met,
         "retained_trials": qc.retained_trials,
-        "valid_blocks": qc.valid_blocks,
+        "valid_runs": qc.valid_runs,
         "design_rank": qc.design_rank,
         "residual_degrees_of_freedom": qc.residual_degrees_of_freedom,
         "condition_number": qc.condition_number,

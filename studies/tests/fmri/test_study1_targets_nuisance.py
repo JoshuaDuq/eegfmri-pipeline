@@ -60,19 +60,19 @@ def test_nuisance_source_columns_combines_continuous_and_categorical() -> None:
     from studies.pain_study.study1.targets import nuisance_source_columns
 
     cfg = _nuisance_config(
-        continuous=["block", "onset"],
+        continuous=["run", "onset"],
         categorical=["stimulus_temp"],
     )
 
-    assert nuisance_source_columns(cfg) == ("block", "onset", "stimulus_temp")
+    assert nuisance_source_columns(cfg) == ("run", "onset", "stimulus_temp")
 
 
 def test_nuisance_source_columns_rejects_duplicates() -> None:
     from studies.pain_study.study1.targets import nuisance_source_columns
 
     cfg = _nuisance_config(
-        continuous=["block", "onset"],
-        categorical=["block"],
+        continuous=["run", "onset"],
+        categorical=["run"],
     )
 
     with pytest.raises(ValueError, match="unique"):
@@ -93,7 +93,7 @@ def test_nuisance_source_columns_rejects_raw_artifact_columns_for_level2() -> No
 
     cfg = _nuisance_config(
         continuous=[
-            "block",
+            "run",
             "framewise_displacement",
             "std_dvars",
             "fp1_fp2_high_frequency_power",
@@ -202,7 +202,7 @@ def test_resolve_residualization_columns_returns_empty_when_disabled() -> None:
     from studies.pain_study.study1.targets import resolve_residualization_columns
 
     cfg = _nuisance_config(enabled=False)
-    frame = pd.DataFrame({"block": [1]})
+    frame = pd.DataFrame({"run": [1]})
 
     assert resolve_residualization_columns(frame=frame, config=cfg) == ()
 
@@ -211,12 +211,12 @@ def test_resolve_residualization_columns_includes_continuous_and_categorical_dum
     from studies.pain_study.study1.targets import resolve_residualization_columns
 
     cfg = _nuisance_config(
-        continuous=["block"],
+        continuous=["run"],
         categorical=["stimulus_temp"],
     )
     frame = pd.DataFrame(
         {
-            "block": [1, 2, 3],
+            "run": [1, 2, 3],
             "stimulus_temp": [44.0, 46.0, 47.0],
             "stimulus_temp_level_46_0": [0.0, 1.0, 0.0],
             "stimulus_temp_level_47_0": [0.0, 0.0, 1.0],
@@ -225,14 +225,14 @@ def test_resolve_residualization_columns_includes_continuous_and_categorical_dum
 
     columns = resolve_residualization_columns(frame=frame, config=cfg)
 
-    assert columns == ("block", "stimulus_temp_level_46_0", "stimulus_temp_level_47_0")
+    assert columns == ("run", "stimulus_temp_level_46_0", "stimulus_temp_level_47_0")
 
 
 def test_resolve_residualization_columns_rejects_missing_continuous(tmp_path) -> None:
     from studies.pain_study.study1.targets import resolve_residualization_columns
 
     cfg = _nuisance_config(continuous=["missing_col"])
-    frame = pd.DataFrame({"block": [1]})
+    frame = pd.DataFrame({"run": [1]})
 
     with pytest.raises(ValueError, match="missing continuous"):
         resolve_residualization_columns(frame=frame, config=cfg)

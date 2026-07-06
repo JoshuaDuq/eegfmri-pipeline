@@ -94,7 +94,7 @@ def _write_smoke_derivatives(tmp_path: Path) -> Path:
         )
 
     targets = pd.concat(target_frames, ignore_index=True)
-    targets["within_block_trial"] = targets["trial_index_within_block"]
+    targets["within_run_trial"] = targets["trial_index_within_run"]
     targets.to_csv(targets_dir / "primary_targets.tsv", sep="\t", index=False)
 
     report = pd.DataFrame(

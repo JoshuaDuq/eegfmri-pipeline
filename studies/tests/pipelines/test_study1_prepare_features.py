@@ -93,9 +93,9 @@ def _write_primary_targets(config: DotConfig) -> None:
         {
             "subject_id": ["sub-0001", "sub-0002"],
             "task": ["pain", "pain"],
-            "block": [1, 1],
+            "run": [1, 1],
             "trial_index": [1, 1],
-            "within_block_trial": [1, 1],
+            "within_run_trial": [1, 1],
             "onset": [0.0, 0.0],
             "duration": [1.0, 1.0],
             "NPS": [1.0, 1.1],

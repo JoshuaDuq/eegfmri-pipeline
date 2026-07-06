@@ -84,8 +84,8 @@ ARTICLE_MODEL_COLUMNS = (
 )
 ARTICLE_REQUIRED_TARGET_COLUMNS = (
     "subject_id",
-    "block",
-    "within_block_trial",
+    "run",
+    "within_run_trial",
     "onset",
     "NPS",
     "SIIPS1",
@@ -97,7 +97,7 @@ ARTICLE_REQUIRED_TARGET_COLUMNS = (
     "selected_surface",
 )
 ARTICLE_REQUIRED_EVENT_COLUMNS = (
-    "run_id",
+    "run",
     "trial_number",
     "stimulus_temp",
     "selected_surface",
@@ -999,8 +999,8 @@ def _load_article_clean_events(
         )
         events = events.copy()
         events["subject_id"] = subject
-        events["_block_key"] = _required_integer_series(events, "run_id")
-        events["_within_block_trial_key"] = _required_integer_series(events, "trial_number")
+        events["_run_key"] = _required_integer_series(events, "run")
+        events["_within_run_trial_key"] = _required_integer_series(events, "trial_number")
         event_frames.append(events)
 
     if not event_frames:
@@ -1013,12 +1013,12 @@ def _merge_targets_with_clean_events(
     events: pd.DataFrame,
 ) -> pd.DataFrame:
     targets = target_table.copy()
-    targets["_block_key"] = _required_integer_series(targets, "block")
-    targets["_within_block_trial_key"] = _required_integer_series(targets, "within_block_trial")
+    targets["_run_key"] = _required_integer_series(targets, "run")
+    targets["_within_run_trial_key"] = _required_integer_series(targets, "within_run_trial")
     event_columns = [
         "subject_id",
-        "_block_key",
-        "_within_block_trial_key",
+        "_run_key",
+        "_within_run_trial_key",
         "pain_binary_coded",
         "vas_final_coded_rating",
         "fp1_fp2_high_frequency_power",
@@ -1035,19 +1035,19 @@ def _merge_targets_with_clean_events(
             }
         ),
         how="left",
-        on=["subject_id", "_block_key", "_within_block_trial_key"],
+        on=["subject_id", "_run_key", "_within_run_trial_key"],
         validate="one_to_one",
     )
     if merged["vas_final_coded_rating"].isna().any():
         missing = merged.loc[
             merged["vas_final_coded_rating"].isna(),
-            ["subject_id", "block", "within_block_trial"],
+            ["subject_id", "run", "within_run_trial"],
         ]
         raise ValueError(
             "Study 1 article tables found target rows without matching clean events:\n"
             f"{missing.to_string(index=False)}"
         )
-    return merged.drop(columns=["_block_key", "_within_block_trial_key"])
+    return merged.drop(columns=["_run_key", "_within_run_trial_key"])
 
 
 def _article_cohort_summary(
@@ -1065,14 +1065,14 @@ def _article_cohort_summary(
         ].copy()
         target_keys = set(
             zip(
-                _required_integer_series(target_rows, "block"),
-                _required_integer_series(target_rows, "within_block_trial"),
+                _required_integer_series(target_rows, "run"),
+                _required_integer_series(target_rows, "within_run_trial"),
             )
         )
         event_keys = set(
             zip(
-                event_rows["_block_key"].astype(int),
-                event_rows["_within_block_trial_key"].astype(int),
+                event_rows["_run_key"].astype(int),
+                event_rows["_within_run_trial_key"].astype(int),
             )
         )
 
@@ -1082,7 +1082,7 @@ def _article_cohort_summary(
             "n_clean_event_trials": int(len(event_rows)),
             "n_target_event_matches": int(len(target_keys & event_keys)),
             "n_event_without_target": int(len(event_keys - target_keys)),
-            "n_blocks": int(_numeric_series(target_rows, "block").nunique()),
+            "n_runs": int(_numeric_series(target_rows, "run").nunique()),
             "n_stimulus_temperatures": int(_numeric_series(target_rows, "stimulus_temp").nunique()),
             "min_stimulus_temp": float(_numeric_series(target_rows, "stimulus_temp").min()),
             "max_stimulus_temp": float(_numeric_series(target_rows, "stimulus_temp").max()),

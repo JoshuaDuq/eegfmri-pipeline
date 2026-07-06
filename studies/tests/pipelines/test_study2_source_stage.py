@@ -14,24 +14,24 @@ SELECTED_SURFACES = (1, 2, 3, 4, 5)
 
 def _source_stage_frame(
     *,
-    n_blocks: int = 6,
-    trials_per_block: int = 11,
+    n_runs: int = 6,
+    trials_per_run: int = 11,
     collinear_combined_score: bool = False,
     collinear_adjacent_band: bool = False,
     collinear_target_band: bool = False,
 ) -> pd.DataFrame:
     rng = np.random.default_rng(11)
     rows: list[dict[str, float | int | str]] = []
-    for block in range(1, n_blocks + 1):
-        for trial_index in range(1, trials_per_block + 1):
-            trial_offset = (block - 1) * trials_per_block + trial_index - 1
+    for block in range(1, n_runs + 1):
+        for trial_index in range(1, trials_per_run + 1):
+            trial_offset = (block - 1) * trials_per_run + trial_index - 1
             rows.append(
                 {
                     "subject_id": "sub-0001",
-                    "block": block,
+                    "run": block,
                     "trial_id": trial_offset + 1,
                     "trial_index": trial_index,
-                    "trial_index_within_block": trial_index,
+                    "trial_index_within_run": trial_index,
                     "onset": float(rng.normal()),
                     "hrf_weighted_framewise_displacement": float(rng.normal(scale=0.1)),
                     "hrf_weighted_std_dvars": float(rng.normal(scale=0.1)),
@@ -74,7 +74,7 @@ def test_evaluate_source_stage_subject_accepts_valid_combined_score_design() -> 
     assert qc.subject_id == "sub-0001"
     assert qc.band == "combined"
     assert qc.retained_trials == 66
-    assert qc.valid_blocks == 6
+    assert qc.valid_runs == 6
     assert qc.residual_degrees_of_freedom >= 15
     assert qc.condition_number <= 100
     assert math.isnan(qc.max_adjacent_band_vif)
@@ -101,7 +101,7 @@ def test_evaluate_source_stage_subject_rejects_raw_level2_artifact_columns() -> 
     config = load_study2_config()
     config["study2"]["source_stage"]["continuous_columns"] = [
         "onset",
-        "trial_index_within_block",
+        "trial_index_within_run",
         "framewise_displacement",
         "std_dvars",
         "fp1_fp2_high_frequency_power",
@@ -134,19 +134,19 @@ def test_source_stage_design_columns_are_required_config() -> None:
         evaluate_source_stage_subject(_source_stage_frame(), config=config)
 
 
-def test_evaluate_source_stage_subject_rejects_too_few_valid_blocks() -> None:
+def test_evaluate_source_stage_subject_rejects_too_few_valid_runs() -> None:
     from studies.pain_study.study2.config import load_study2_config
     from studies.pain_study.study2.source_stage import evaluate_source_stage_subject
 
     qc = evaluate_source_stage_subject(
-        _source_stage_frame(n_blocks=2),
+        _source_stage_frame(n_runs=2),
         config=load_study2_config(),
     )
 
     assert qc.source_stage_criteria_met is False
-    assert qc.valid_blocks == 2
+    assert qc.valid_runs == 2
     assert qc.unmet_criteria == (
-        "min_valid_blocks_per_subject",
+        "min_valid_runs_per_subject",
         "min_retained_trials_per_subject",
     )
 
@@ -278,7 +278,7 @@ def test_evaluate_source_stage_cohort_downgrades_for_too_few_valid_subjects() ->
     frame = pd.concat(
         [
             _source_stage_frame().assign(subject_id="sub-0001"),
-            _source_stage_frame(n_blocks=1, trials_per_block=7).assign(subject_id="sub-0002"),
+            _source_stage_frame(n_runs=1, trials_per_run=7).assign(subject_id="sub-0002"),
         ],
         ignore_index=True,
     )
@@ -355,8 +355,8 @@ def test_evaluate_source_stage_cohort_collinearity_fraction_uses_otherwise_valid
             _source_stage_frame().assign(subject_id="sub-0001"),
             _source_stage_frame().assign(subject_id="sub-0002"),
             _source_stage_frame(collinear_combined_score=True).assign(subject_id="sub-0003"),
-            _source_stage_frame(n_blocks=1, trials_per_block=7).assign(subject_id="sub-0004"),
-            _source_stage_frame(n_blocks=1, trials_per_block=7).assign(subject_id="sub-0005"),
+            _source_stage_frame(n_runs=1, trials_per_run=7).assign(subject_id="sub-0004"),
+            _source_stage_frame(n_runs=1, trials_per_run=7).assign(subject_id="sub-0005"),
         ],
         ignore_index=True,
     )

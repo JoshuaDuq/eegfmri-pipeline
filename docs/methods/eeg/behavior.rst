@@ -183,7 +183,7 @@ is explicitly set: ``correlate_*``, ``regression``, ``condition_column``.
 .. note::
 
    Grouped permutation labels must be complete and non-missing for every
-   analyzed trial — partially missing run/block labels raise instead of being
+   analyzed trial — partially missing run/run labels raise instead of being
    silently excluded from the permutation sample. Permutation scheme values
    are validated strictly; unsupported values raise instead of falling back
    to ``shuffle``.

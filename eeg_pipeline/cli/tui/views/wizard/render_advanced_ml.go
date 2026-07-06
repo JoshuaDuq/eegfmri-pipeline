@@ -391,7 +391,7 @@ func (m Model) renderMLAdvancedConfig() string {
 		case optMLCvHygieneEnabled:
 			label, value, hint = "CV Hygiene", m.boolToOnOff(m.mlCvHygieneEnabled), "strict CV data leakage checks"
 		case optMLCvPermutationScheme:
-			schemes := []string{"within_subject", "within_subject_within_block"}
+			schemes := []string{"within_subject", "within_subject_within_run"}
 			label, value, hint = "Perm. Scheme", schemes[m.mlCvPermutationScheme%len(schemes)], "permutation test method"
 		case optMLCvMinValidPermFraction:
 			label, value, hint = "Min Valid Perm Frac", fmt.Sprintf("%.6g", m.mlCvMinValidPermFraction), "min fraction of valid permutations"

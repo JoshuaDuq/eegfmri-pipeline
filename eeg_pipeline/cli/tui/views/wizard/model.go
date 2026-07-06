@@ -2252,7 +2252,7 @@ type Model struct {
 
 	// ML CV / Evaluation / Analysis
 	mlCvHygieneEnabled               bool    // CV hygiene toggle
-	mlCvPermutationScheme            int     // 0: within_subject, 1: within_subject_within_block
+	mlCvPermutationScheme            int     // 0: within_subject, 1: within_subject_within_run
 	mlCvMinValidPermFraction         float64 // Min valid permutation fraction
 	mlCvDefaultNBins                 int     // Default stratification bins
 	mlEvalCIMethod                   int     // 0: bootstrap, 1: fixed_effects

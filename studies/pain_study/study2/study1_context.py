@@ -114,7 +114,7 @@ def load_study1_model_context(
         outer_folds=outer_folds,
         groups=groups,
     )
-    blocks, trial_indices = _block_and_trial_indices(meta)
+    runs, trial_indices = _run_and_trial_indices(meta)
     scheme = require_config_string(
         feature_config,
         "machine_learning.cv.permutation_scheme",
@@ -131,7 +131,7 @@ def load_study1_model_context(
         param_grid=build_elasticnet_param_grid(feature_config),
         config=feature_config,
         target_residualization_columns=target_residualization_columns,
-        blocks=blocks,
+        runs=runs,
         trial_indices=trial_indices,
         scheme=scheme,
         inner_splits=inner_splits,
@@ -215,10 +215,10 @@ def _parse_best_params(raw: Any) -> Mapping[str, Any]:
     return params
 
 
-def _block_and_trial_indices(meta: pd.DataFrame) -> tuple[np.ndarray | None, np.ndarray | None]:
-    blocks = (
-        pd.to_numeric(meta["block"], errors="coerce").to_numpy(dtype=float)
-        if "block" in meta.columns
+def _run_and_trial_indices(meta: pd.DataFrame) -> tuple[np.ndarray | None, np.ndarray | None]:
+    runs = (
+        pd.to_numeric(meta["run"], errors="coerce").to_numpy(dtype=float)
+        if "run" in meta.columns
         else None
     )
     trial_indices = None
@@ -226,7 +226,7 @@ def _block_and_trial_indices(meta: pd.DataFrame) -> tuple[np.ndarray | None, np.
         if trial_column in meta.columns:
             trial_indices = pd.to_numeric(meta[trial_column], errors="coerce").to_numpy(dtype=float)
             break
-    return blocks, trial_indices
+    return runs, trial_indices
 
 
 __all__ = ["load_study1_model_context", "study1_model_comparison_path"]

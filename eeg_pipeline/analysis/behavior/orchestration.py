@@ -850,7 +850,7 @@ def run_group_level_correlations(
     random_state: Optional[int] = None,
     feature_files: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    """Run multilevel correlations across subjects with block-aware permutations."""
+    """Run multilevel correlations across subjects with run-aware permutations."""
     multilevel_cfg = require_config_value(
         config, "behavior_analysis.group_level.multilevel_correlations"
     )

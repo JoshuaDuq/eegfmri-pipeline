@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from eeg_pipeline.utils.config.loader import get_config_value
+from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_BANDS
 
-TEMPORAL_CONTROL_BANDS = ("alpha", "beta", "gamma")
+TEMPORAL_CONTROL_BANDS = ("alpha", "beta", *SCANNER_CLEAN_GAMMA_BANDS)
 TEMPORAL_CONTROL_FEATURE_PREFIX = "temporal_"
 TEMPORAL_CONTROL_FEATURE_STATS = ("log10raw",)
 TEMPORAL_CONTROL_PARTITION = "temporal_control"

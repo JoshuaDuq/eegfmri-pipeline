@@ -41,14 +41,13 @@ from eeg_pipeline.infra.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _extract_trial_blocks_from_records(
+def _extract_trial_runs_from_records(
     trial_records: List[Tuple[str, int]],
     subj_to_epochs: Dict[str, Any],
 ) -> np.ndarray:
-    """Extract per-trial block/run labels aligned to trial_records."""
-    candidate_cols = ("block", "run_id", "run", "session", "run_num")
-    block_values = np.full(len(trial_records), np.nan, dtype=object)
-    block_series_by_subject: Dict[str, Optional[pd.Series]] = {}
+    """Extract per-trial run labels aligned to trial_records."""
+    run_values = np.full(len(trial_records), np.nan, dtype=object)
+    run_series_by_subject: Dict[str, Optional[pd.Series]] = {}
 
     for subject_id, epochs in subj_to_epochs.items():
         metadata = getattr(epochs, "metadata", None)
@@ -56,52 +55,51 @@ def _extract_trial_blocks_from_records(
             metadata = getattr(epochs, "_behavioral", None)
             
         if not isinstance(metadata, pd.DataFrame) or metadata.empty:
-            block_series_by_subject[str(subject_id)] = None
+            run_series_by_subject[str(subject_id)] = None
             continue
-            
-        col = next((c for c in candidate_cols if c in metadata.columns), None)
-        if col is None:
-            block_series_by_subject[str(subject_id)] = None
+
+        if "run" not in metadata.columns:
+            run_series_by_subject[str(subject_id)] = None
             continue
-        block_series_by_subject[str(subject_id)] = metadata[col].reset_index(drop=True)
+        run_series_by_subject[str(subject_id)] = metadata["run"].reset_index(drop=True)
 
     for i, (subject_id, trial_idx) in enumerate(trial_records):
-        series = block_series_by_subject.get(str(subject_id))
+        series = run_series_by_subject.get(str(subject_id))
         if series is None:
             continue
         idx = int(trial_idx)
         if idx < 0 or idx >= len(series):
             continue
         val = series.iloc[idx]
-        block_values[i] = np.nan if pd.isna(val) else val
+        run_values[i] = np.nan if pd.isna(val) else val
 
-    return block_values
+    return run_values
 
 
 def _permute_labels_within_subject_structure(
     y: np.ndarray,
     groups: np.ndarray,
-    blocks: Optional[np.ndarray],
+    runs: Optional[np.ndarray],
     *,
     rng: np.random.Generator,
     scheme: str,
 ) -> np.ndarray:
-    """Permute labels within subject or within subject×block."""
+    """Permute labels within subject or within subject×run."""
     y_perm = np.asarray(y, dtype=float).copy()
     groups_arr = np.asarray(groups, dtype=object)
     perm_scheme = _resolve_permutation_scheme(scheme)
-    blocks_arr = _validate_permutation_blocks(y_perm, blocks, scheme=perm_scheme)
+    runs_arr = _validate_permutation_runs(y_perm, runs, scheme=perm_scheme)
 
     for subject_id in np.unique(groups_arr):
         subject_mask = groups_arr == subject_id
-        if perm_scheme == "within_subject_within_block" and blocks_arr is not None:
-            for block_label in pd.unique(blocks_arr[subject_mask]):
-                if pd.isna(block_label):
-                    block_mask = subject_mask & pd.isna(blocks_arr)
+        if perm_scheme == "within_subject_within_run" and runs_arr is not None:
+            for run in pd.unique(runs_arr[subject_mask]):
+                if pd.isna(run):
+                    run_mask = subject_mask & pd.isna(runs_arr)
                 else:
-                    block_mask = subject_mask & (blocks_arr == block_label)
-                if np.sum(block_mask) >= 2:
-                    y_perm[block_mask] = rng.permutation(y_perm[block_mask])
+                    run_mask = subject_mask & (runs_arr == run)
+                if np.sum(run_mask) >= 2:
+                    y_perm[run_mask] = rng.permutation(y_perm[run_mask])
         else:
             y_perm[subject_mask] = rng.permutation(y_perm[subject_mask])
     return y_perm
@@ -109,40 +107,40 @@ def _permute_labels_within_subject_structure(
 
 def _resolve_permutation_scheme(scheme: str) -> str:
     mode = str(scheme).strip().lower()
-    if mode not in {"within_subject", "within_subject_within_block"}:
+    if mode not in {"within_subject", "within_subject_within_run"}:
         raise ValueError(
             f"Unsupported permutation scheme: {scheme!r}. "
-            "Expected one of: within_subject, within_subject_within_block."
+            "Expected one of: within_subject, within_subject_within_run."
         )
     return mode
 
 
-def _validate_permutation_blocks(
+def _validate_permutation_runs(
     y: np.ndarray,
-    blocks: Optional[np.ndarray],
+    runs: Optional[np.ndarray],
     *,
     scheme: str,
 ) -> Optional[np.ndarray]:
-    if scheme != "within_subject_within_block":
+    if scheme != "within_subject_within_run":
         return None
-    if blocks is None:
+    if runs is None:
         raise ValueError(
-            "machine_learning.cv.permutation_scheme='within_subject_within_block' "
-            "requires block labels."
+            "machine_learning.cv.permutation_scheme='within_subject_within_run' "
+            "requires run labels."
         )
 
-    blocks_arr = np.asarray(blocks, dtype=object)
-    if len(blocks_arr) != len(y):
+    runs_arr = np.asarray(runs, dtype=object)
+    if len(runs_arr) != len(y):
         raise ValueError(
-            "Permutation blocks must have the same length as y when "
-            "machine_learning.cv.permutation_scheme='within_subject_within_block'."
+            "Permutation runs must have the same length as y when "
+            "machine_learning.cv.permutation_scheme='within_subject_within_run'."
         )
-    if np.all(pd.isna(blocks_arr)):
+    if np.all(pd.isna(runs_arr)):
         raise ValueError(
-            "machine_learning.cv.permutation_scheme='within_subject_within_block' "
-            "requires block labels."
+            "machine_learning.cv.permutation_scheme='within_subject_within_run' "
+            "requires run labels."
         )
-    return blocks_arr
+    return runs_arr
 
 
 def _aggregate_time_generalization_matrices(
@@ -524,7 +522,7 @@ def time_generalization_regression(
         target_kind="continuous",
     )
     trial_records, y_all_arr, groups_arr, subj_to_epochs, _ = prepare_trial_records_from_epochs(tuples)
-    trial_blocks_arr = _extract_trial_blocks_from_records(trial_records, subj_to_epochs)
+    trial_runs_arr = _extract_trial_runs_from_records(trial_records, subj_to_epochs)
 
     config = config_dict or load_config()
     min_subjects_for_loso = int(require_config_value(config, "analysis.min_subjects_for_group"))
@@ -734,9 +732,9 @@ def time_generalization_regression(
         perm_scheme = _resolve_permutation_scheme(
             get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject")
         )
-        blocks_for_permutation = _validate_permutation_blocks(
+        runs_for_permutation = _validate_permutation_runs(
             y_all_arr,
-            trial_blocks_arr,
+            trial_runs_arr,
             scheme=perm_scheme,
         )
 
@@ -744,7 +742,7 @@ def time_generalization_regression(
             y_perm = _permute_labels_within_subject_structure(
                 y_all_arr,
                 groups_arr,
-                blocks_for_permutation,
+                runs_for_permutation,
                 rng=rng,
                 scheme=perm_scheme,
             )

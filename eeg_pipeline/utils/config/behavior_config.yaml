@@ -115,7 +115,7 @@ behavior_analysis:
     # "spline" uses a restricted cubic spline basis (linear regression on nonlinear terms).
     predictor_control: "spline"  # "linear" | "spline"
     # If false, trial-level tests require permutation or aggregation.
-    # Grouped permutation also requires complete non-missing run/block labels.
+    # Grouped permutation also requires complete non-missing run/run labels.
     # Set true only if you explicitly accept i.i.d. trial assumptions.
     allow_iid_trials: false
 

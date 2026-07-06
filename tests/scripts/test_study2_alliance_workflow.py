@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from eeg_pipeline.utils.config.overrides import apply_set_overrides
+from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_RANGES_HZ
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -134,11 +135,14 @@ def test_study2_smoketest_has_required_source_modeling_fields():
     config_path = REPO_ROOT / "studies" / "pain_study" / "study2" / "config" / "study2_smoketest.yaml"
     config = yaml.safe_load(config_path.read_text())
     source_modeling = config["study2"]["source_modeling"]
+    scanner_clean_gamma_ranges = [
+        list(frequency_range) for frequency_range in SCANNER_CLEAN_GAMMA_RANGES_HZ.values()
+    ]
 
     assert source_modeling["source_space_spacing"] == "oct6"
     assert source_modeling["forward_mindist_mm"] == 5.0
     assert source_modeling["frequency_bands"] == {
         "alpha": [8.0, 12.9],
         "beta": [13.0, 30.0],
-        "gamma": [30.1, 80.0],
+        "gamma": scanner_clean_gamma_ranges,
     }

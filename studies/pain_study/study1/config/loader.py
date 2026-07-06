@@ -301,7 +301,7 @@ def _validate_feature_benchmark(config: dict[str, Any]) -> None:
         circular_shift = feature_config.get("circular_shift")
         if not isinstance(circular_shift, dict):
             raise ValueError("study1.feature_benchmark.circular_shift must be a mapping.")
-        for key in ("min_valid_blocks_per_subject", "min_retained_trials_per_subject"):
+        for key in ("min_valid_runs_per_subject", "min_retained_trials_per_subject"):
             _validate_positive_int(
                 circular_shift.get(key),
                 field_name=f"study1.feature_benchmark.circular_shift.{key}",

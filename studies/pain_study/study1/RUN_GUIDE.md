@@ -416,8 +416,8 @@ target preparation:
 
 ### Preprocessing Prerequisite
 
-Study 1 target alignment requires an explicit task `block` column or the protocol event column
-`run_id`, plus original `trial_number` or `trial_index`. Production nuisance regression requires
+Study 1 target alignment requires an explicit task `run` column plus original `trial_number` or
+`trial_index`. Production nuisance regression requires
 HRF-weighted artifact columns
 `hrf_weighted_framewise_displacement`, `hrf_weighted_std_dvars`, and
 `hrf_weighted_fp1_fp2_high_frequency_power`, plus `residual_ecg_coupling`. The raw Fp1/Fp2
@@ -425,7 +425,7 @@ artifact proxy remains `fp1_fp2_high_frequency_power`; it is an upstream input t
 covariate and artifact-censoring audits, not the Level 2 nuisance column.
 
 The smoke-test config uses the same Level 2 nuisance columns required by the report article tables:
-`block`, `onset`, `within_block_trial`, `hrf_weighted_framewise_displacement`,
+`run`, `onset`, `within_run_trial`, `hrf_weighted_framewise_displacement`,
 `hrf_weighted_std_dvars`, `hrf_weighted_fp1_fp2_high_frequency_power`,
 `residual_ecg_coupling`, `stimulus_temp`, and `selected_surface`. This keeps the smoke run
 scientifically aligned with the production estimand while reducing permutation counts and training

@@ -32,7 +32,7 @@ def test_public_signature_target_loader_supports_study1_config_root() -> None:
 
     events_df = pd.DataFrame(
         {
-            "run_id": [1, 1],
+            "run": [1, 1],
             "trial_number": [1, 2],
             "onset": [22.150, 65.084],
             "duration": [0.001, 0.001],
@@ -95,7 +95,7 @@ def test_signature_target_loader_uses_configured_primary_target_table() -> None:
 
     events_df = pd.DataFrame(
         {
-            "run_id": [1, 1],
+            "run": [1, 1],
             "trial_number": [1, 2],
             "onset": [22.150, 65.084],
             "duration": [0.001, 0.001],
@@ -109,7 +109,7 @@ def test_signature_target_loader_uses_configured_primary_target_table() -> None:
             {
                 "subject_id": ["sub-0001", "sub-0001"],
                 "task": ["task", "task"],
-                "block": [1, 1],
+                "run": [1, 1],
                 "trial_index": [1, 2],
                 "onset": [22.150, 65.084],
                 "duration": [0.001, 0.001],

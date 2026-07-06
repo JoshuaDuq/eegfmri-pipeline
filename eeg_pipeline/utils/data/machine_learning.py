@@ -23,7 +23,7 @@ from eeg_pipeline.utils.data.feature_alignment import (
     require_trial_id_column,
 )
 from eeg_pipeline.utils.data.fmri_signature_targets import (
-    find_block_column as _find_block_column,
+    find_run_column as _find_run_column,
     load_fmri_signature_target_for_subject as _shared_load_fmri_signature_target_for_subject,
 )
 from eeg_pipeline.utils.data.source_localization_paths import (
@@ -608,9 +608,9 @@ def _standardize_meta_columns(
     if "trial_id" in events_df.columns:
         meta_cols["trial_id"] = _coerce_trial_id_series(events_df["trial_id"])
 
-    block_col = _find_block_column(events_df)
-    if block_col is not None:
-        meta_cols["block"] = block_col
+    run_col = _find_run_column(events_df)
+    if run_col is not None:
+        meta_cols["run"] = run_col
 
     pred_col = find_predictor_column_in_events(events_df, config)
     if pred_col is not None:

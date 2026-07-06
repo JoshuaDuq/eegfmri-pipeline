@@ -17,9 +17,9 @@ __all__ = [
     "uncertainty",
     "create_loso_folds",
     "create_inner_cv",
-    "create_block_aware_cv",
+    "create_run_aware_cv",
     "create_within_subject_folds",
-    "create_block_aware_inner_cv",
+    "create_run_aware_inner_cv",
     "set_random_seeds",
     "determine_inner_n_jobs",
     "execute_folds_parallel",
@@ -71,17 +71,17 @@ _SUBMODULES = {
 _EXPORTS = {
     "create_loso_folds": ("eeg_pipeline.analysis.machine_learning.cv", "create_loso_folds"),
     "create_inner_cv": ("eeg_pipeline.analysis.machine_learning.cv", "create_inner_cv"),
-    "create_block_aware_cv": (
+    "create_run_aware_cv": (
         "eeg_pipeline.analysis.machine_learning.cv",
-        "create_block_aware_cv",
+        "create_run_aware_cv",
     ),
     "create_within_subject_folds": (
         "eeg_pipeline.analysis.machine_learning.cv",
         "create_within_subject_folds",
     ),
-    "create_block_aware_inner_cv": (
+    "create_run_aware_inner_cv": (
         "eeg_pipeline.analysis.machine_learning.cv",
-        "create_block_aware_inner_cv",
+        "create_run_aware_inner_cv",
     ),
     "set_random_seeds": ("eeg_pipeline.analysis.machine_learning.cv", "set_random_seeds"),
     "determine_inner_n_jobs": (

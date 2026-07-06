@@ -1061,8 +1061,8 @@ func TestBuildMLAdvancedArgs_EmitsWithinSubjectWithinBlockPermutationScheme(t *t
 
 	args := m.buildMLAdvancedArgs()
 
-	if !containsSubsequence(args, []string{"--cv-permutation-scheme", "within_subject_within_block"}) {
-		t.Fatalf("expected --cv-permutation-scheme within_subject_within_block in args, got: %#v", args)
+	if !containsSubsequence(args, []string{"--cv-permutation-scheme", "within_subject_within_run"}) {
+		t.Fatalf("expected --cv-permutation-scheme within_subject_within_run in args, got: %#v", args)
 	}
 }
 

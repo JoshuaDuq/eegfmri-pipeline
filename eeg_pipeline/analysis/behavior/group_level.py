@@ -221,7 +221,7 @@ def run_group_level_correlations_impl(
     feature_type_resolver: Callable[[str, Any], str],
     constant_variance_threshold: float,
 ) -> pd.DataFrame:
-    """Run multilevel correlations across subjects with block-aware permutations."""
+    """Run multilevel correlations across subjects with run-aware permutations."""
     config = ensure_behavior_config(config)
     from eeg_pipeline.infra.paths import deriv_stats_path
     from eeg_pipeline.infra.tsv import read_table

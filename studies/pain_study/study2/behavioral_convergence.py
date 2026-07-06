@@ -31,20 +31,20 @@ def compute_behavioral_convergence(
     n_permutations: int | None = None,
     random_state: int = 0,
     subject_column: str = "subject_id",
-    block_column: str = "block",
+    run_column: str = "run",
 ) -> BehavioralConvergenceResult:
     _require_columns(
         frame,
-        (subject_column, block_column, expression_column, rating_column, *design_columns),
+        (subject_column, run_column, expression_column, rating_column, *design_columns),
     )
     permutation_count = _permutation_count(config, n_permutations)
     min_trials = require_config_int(
         config,
         "study2.behavioral_convergence.min_rated_trials",
     )
-    min_blocks = require_config_int(
+    min_runs = require_config_int(
         config,
-        "study2.behavioral_convergence.min_permutation_valid_blocks",
+        "study2.behavioral_convergence.min_permutation_valid_runs",
     )
 
     subject_records: list[dict[str, object]] = []
@@ -54,12 +54,12 @@ def compute_behavioral_convergence(
         subject_copy = subject_frame.reset_index(drop=True).copy()
         unmet_criteria = _unmet_subject_criteria(
             subject_copy,
-            block_column=block_column,
+            run_column=run_column,
             expression_column=expression_column,
             rating_column=rating_column,
             design_columns=design_columns,
             min_trials=min_trials,
-            min_blocks=min_blocks,
+            min_runs=min_runs,
         )
         if unmet_criteria:
             subject_records.append(
@@ -104,7 +104,7 @@ def compute_behavioral_convergence(
                         _circular_shift_expression(
                             subject_frame,
                             expression_column=expression_column,
-                            block_column=block_column,
+                            run_column=run_column,
                             rng=rng,
                         ),
                         expression_column=expression_column,
@@ -158,12 +158,12 @@ def _permutation_count(config: Any, n_permutations: int | None) -> int:
 def _unmet_subject_criteria(
     frame: pd.DataFrame,
     *,
-    block_column: str,
+    run_column: str,
     expression_column: str,
     rating_column: str,
     design_columns: tuple[str, ...],
     min_trials: int,
-    min_blocks: int,
+    min_runs: int,
 ) -> tuple[str, ...]:
     numeric_columns = (expression_column, rating_column, *design_columns)
     numeric = frame.loc[:, numeric_columns].apply(pd.to_numeric, errors="coerce")
@@ -171,8 +171,8 @@ def _unmet_subject_criteria(
         raise ValueError("Study 2 behavioral convergence contains non-finite numeric values.")
     if len(frame) < min_trials:
         return ("min_rated_trials",)
-    if frame[block_column].nunique() < min_blocks:
-        return ("min_valid_blocks",)
+    if frame[run_column].nunique() < min_runs:
+        return ("min_valid_runs",)
     if float(np.std(numeric[rating_column].to_numpy(dtype=float), ddof=0)) <= 0.0:
         return ("zero_variance_rating",)
     if float(np.std(numeric[expression_column].to_numpy(dtype=float), ddof=0)) <= 0.0:
@@ -219,12 +219,12 @@ def _circular_shift_expression(
     frame: pd.DataFrame,
     *,
     expression_column: str,
-    block_column: str,
+    run_column: str,
     rng: np.random.Generator,
 ) -> pd.DataFrame:
     shifted = frame.copy()
-    for _block_id, block_index in shifted.groupby(block_column, sort=False).groups.items():
-        indices = np.asarray(list(block_index), dtype=int)
+    for _run, run_index in shifted.groupby(run_column, sort=False).groups.items():
+        indices = np.asarray(list(run_index), dtype=int)
         if indices.size <= 1:
             continue
         shift = int(rng.integers(1, indices.size))

@@ -34,10 +34,9 @@ def _targets() -> pd.DataFrame:
         {
             "subject_id": ["sub-0001", "sub-0001"],
             "task": ["thermalactive", "thermalactive"],
-            "block": [1, 1],
-            "acquisition_run": [1, 1],
+            "run": [1, 1],
             "trial_index": [1, 2],
-            "within_block_trial": [1, 2],
+            "within_run_trial": [1, 2],
             "onset": [0.0, 20.0],
             "duration": [0.001, 0.001],
         }
@@ -48,7 +47,7 @@ def _events() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "trial_id": [101, 102, 103],
-            "run_id": [1, 1, 1],
+            "run": [1, 1, 1],
             "trial_number": [1, 2, 3],
             "onset": [0.0, 20.0, 40.0],
             "duration": [0.001, 0.001, 0.001],
@@ -73,7 +72,7 @@ def _fmri_events() -> dict[str, pd.DataFrame]:
                     "plateau",
                     "ramp_down",
                 ],
-                "run_id": [1, 1, 1, 1, 1, 1],
+                "run": [1, 1, 1, 1, 1, 1],
                 "trial_number": [1, 1, 1, 2, 2, 2],
             }
         )

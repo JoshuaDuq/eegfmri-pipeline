@@ -31,6 +31,7 @@ class Command:
 
 from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
 from eeg_pipeline.cli.commands.features import setup_features, run_features
+from eeg_pipeline.cli.commands.harmonics import setup_harmonics, run_harmonics
 from eeg_pipeline.cli.commands.info import setup_info, run_info
 from eeg_pipeline.cli.commands.machine_learning import setup_ml, run_ml
 from eeg_pipeline.cli.commands.plotting import setup_plotting, run_plotting
@@ -69,6 +70,12 @@ def _builtin_commands() -> list[Command]:
             name="info",
             setup=setup_info,
             run=run_info,
+            requires_subjects=False,
+        ),
+        Command(
+            name="harmonics",
+            setup=setup_harmonics,
+            run=run_harmonics,
             requires_subjects=False,
         ),
         Command(

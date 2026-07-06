@@ -305,7 +305,7 @@ def _add_ml_specific_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--cnn-random-seed", type=int, default=None)
     parser.add_argument("--cv-hygiene", action="store_true", default=None, dest="cv_hygiene")
     parser.add_argument("--no-cv-hygiene", action="store_false", dest="cv_hygiene")
-    parser.add_argument("--cv-permutation-scheme", choices=["within_subject", "within_subject_within_block"], default=None)
+    parser.add_argument("--cv-permutation-scheme", choices=["within_subject", "within_subject_within_run"], default=None)
     parser.add_argument("--cv-min-valid-perm-fraction", type=float, default=None)
     parser.add_argument("--cv-default-n-bins", type=int, default=None)
     parser.add_argument("--eval-ci-method", choices=["bootstrap", "fixed_effects"], default=None)

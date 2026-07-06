@@ -584,6 +584,9 @@ def get_default_frequency_bands() -> Dict[str, List[float]]:
         "alpha": [8.0, 12.9],
         "beta": [13.0, 30.0],
         "gamma": [30.1, 80.0],
+        "gamma_low_clean": [30.1, 38.0],
+        "gamma_mid_clean": [43.0, 56.0],
+        "gamma_high_clean": [67.0, 77.0],
     }
 
 def get_frequency_bands_for_aperiodic(config: Any) -> Dict[str, List[float]]:

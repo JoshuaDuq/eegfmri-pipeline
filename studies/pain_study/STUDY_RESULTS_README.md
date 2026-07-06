@@ -28,8 +28,7 @@ construction and censoring.
 | Term | Definition |
 | --- | --- |
 | Trials | Row count for the subject in `targets/primary_targets.parquet`. |
-| Blocks | Distinct `block` values in retained target rows. Each block is an 11-trial thermal sequence (`study1.targets.trials_per_block`). |
-| Acquisition runs | Distinct `acquisition_run` values with at least one retained target row. |
+| Runs | Distinct `run` values in retained target rows. Each run is an 11-trial thermal sequence (`study1.targets.trials_per_run`). |
 | Stimulus temperatures | Distinct `stimulus_temp` values in retained trials. |
 | Selected surfaces | Distinct `selected_surface` values in retained trials. |
 | Onset range | Earliest-to-latest `onset` value, in seconds from run start, across retained trials. |
@@ -63,7 +62,7 @@ Values are read from per-fold `model_comparison.tsv` rows where
 cross-validation, each subject contributes one outer fold. Metrics are computed
 by `model_comparison_cv_predictions()` using staged residual learning: the
 nuisance-only model is fit on training subjects with the prespecified nuisance
-design (continuous covariates `block`, `onset`, `within_block_trial`,
+design (continuous covariates `run`, `onset`, `within_run_trial`,
 `hrf_weighted_framewise_displacement`, `hrf_weighted_std_dvars`,
 `hrf_weighted_fp1_fp2_high_frequency_power`, `residual_ecg_coupling`, plus
 categorical dummies for `stimulus_temp` and `selected_surface`); the EEG model
@@ -91,7 +90,7 @@ the training subjects' raw NPS values in that fold as the zero-skill baseline.
 
 Timing values come from `study1_timing_audit.py` and are summarized in
 `qc/timing_audit/study1_timing_audit_summary.tsv`. Alignment uses
-`{acquisition_run}|{trial_index}` keys shared by targets, clean EEG events,
+`{run}|{trial_index}` keys shared by targets, clean EEG events,
 fMRI BIDS plateau events, LSS plateau trials, and temporal-feature rows.
 
 | Term | Definition |
@@ -118,9 +117,9 @@ Per-subject QC fields are identical across bands for the primary combined-score 
 | Term | Definition |
 | --- | --- |
 | Source-stage criteria met | `source_stage_criteria_met` value from the source-stage QC table. |
-| Retained trials | Row count after `_permutation_valid_source_blocks()` filtering (Study 1 circular-shift QC criteria). |
-| Valid blocks | Distinct `block` values in that retained trial set. Requires ≥ 3 valid blocks and ≥ 25 retained trials for the source-stage criteria. |
-| Design rank | Rank of the source-stage nuisance design matrix (continuous nuisance covariates plus categorical dummies for `block`, `stimulus_temp`, `selected_surface`). Must be full rank. |
+| Retained trials | Row count after `_permutation_valid_source_runs()` filtering (Study 1 circular-shift QC criteria). |
+| Valid runs | Distinct `run` values in that retained trial set. Requires ≥ 3 valid runs and ≥ 25 retained trials for the source-stage criteria. |
+| Design rank | Rank of the source-stage nuisance design matrix (continuous nuisance covariates plus categorical dummies for `run`, `stimulus_temp`, `selected_surface`). Must be full rank. |
 | Residual df | `retained_trials − design_rank`. Must be ≥ 15 for the source-stage criteria. |
 | Condition number | Condition number of the contribution-stability design (nuisance design augmented with the band contribution target), evaluated on mean-centered, column-normalized columns. Must be ≤ 100 (`study2.source_stage.max_condition_number`). |
 | Source-stage input rows | Row count for the subject in `source_stage/source_stage_input.tsv`. |
@@ -160,22 +159,22 @@ hypothesis.
 ## Study 1 Retained Trial Checks
 
 These values come from `targets/primary_targets.parquet`. They log retained
-target rows by subject, acquisition run, and block. Acquisition-level reasons
+target rows by subject and run. Run-level reasons
 and exclusions are tracked in `STUDY_ISSUES_README.md`.
 
-| Subject | Retained trials | Acquisition runs | Blocks | Trials by acquisition run | Trials by block | Onset range, s |
-| --- | ---: | ---: | ---: | --- | --- | --- |
-| `sub-0000` | 66 | 6 | 6 | 1:11, 2:11, 3:11, 4:11, 5:11, 6:11 | 1:11, 2:11, 3:11, 4:11, 5:11, 6:11 | 18.6-478.8 |
-| `sub-0001` | 65 | 6 | 6 | 1:11, 2:11, 3:11, 4:11, 5:10, 6:11 | 1:11, 2:11, 3:11, 4:11, 5:10, 6:11 | 20.2-464.1 |
-| `sub-0003` | 55 | 5 | 5 | 1:11, 2:11, 4:11, 5:11, 6:11 | 1:11, 2:11, 4:11, 5:11, 6:11 | 19.1-444.7 |
-| `sub-0004` | 58 | 6 | 6 | 1:11, 2:10, 3:9, 4:11, 5:7, 6:10 | 1:11, 2:10, 3:9, 4:11, 5:7, 6:10 | 20.2-460.3 |
-| `sub-0005` | 61 | 6 | 6 | 1:11, 2:11, 3:10, 4:8, 5:11, 6:10 | 1:11, 2:11, 3:10, 4:8, 5:11, 6:10 | 19.1-466.5 |
+| Subject | Retained trials | Runs | Trials by run | Onset range, s |
+| --- | ---: | ---: | --- | --- |
+| `sub-0000` | 66 | 6 | 1:11, 2:11, 3:11, 4:11, 5:11, 6:11 | 18.6-478.8 |
+| `sub-0001` | 65 | 6 | 1:11, 2:11, 3:11, 4:11, 5:10, 6:11 | 20.2-464.1 |
+| `sub-0003` | 55 | 5 | 1:11, 2:11, 4:11, 5:11, 6:11 | 19.1-444.7 |
+| `sub-0004` | 58 | 6 | 1:11, 2:10, 3:9, 4:11, 5:7, 6:10 | 20.2-460.3 |
+| `sub-0005` | 61 | 6 | 1:11, 2:11, 3:10, 4:8, 5:11, 6:10 | 19.1-466.5 |
 
 ## QC Scope
 
 | QC category | Current scope | Source |
 | --- | --- | --- |
-| Study 1 retained trial counts | Recorded by subject, run, and block | `targets/primary_targets.parquet` |
+| Study 1 retained trial counts | Recorded by subject and run | `targets/primary_targets.parquet` |
 | Study 1 acquisition/run issues | Tracked as manual subject/run issue entries | `STUDY_ISSUES_README.md` |
 | EEG-fMRI timing alignment | Checks clean EEG events, fMRI BIDS plateau events, LSS plateau trials, and temporal-feature rows by subject/run/trial key | `qc/timing_audit/*`; `reports/subject_qc/subject_timing_alignment_qc.tsv` |
 | EEG-fMRI timing specificity | Evaluated through temporal control windows and wrong-lag controls | `subject_temporal_qc.tsv`; `feature_benchmark/temporal_control/*` |
@@ -284,7 +283,7 @@ Ridge temporal delta R2:
 
 These values come from source-stage QC and source-array outputs.
 
-| Subject | Source-stage criteria met | Retained trials | Valid blocks | Design rank | Residual df | Condition number |
+| Subject | Source-stage criteria met | Retained trials | Valid runs | Design rank | Residual df | Condition number |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | `sub-0000` | -- | -- | -- | -- | -- | -- |
 | `sub-0001` | false | 65 | 6 | 21 | 44 | inf |
@@ -294,11 +293,11 @@ These values come from source-stage QC and source-array outputs.
 
 Study 2 source-stage input and source-power file checks:
 
-| Subject | Source-stage input rows | Input blocks | Input runs | Source-power rows | Source vertices | Anatomy files found |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `sub-0001` | 65 | 6 | 6 | 65 | 8196 | trans + BEM |
-| `sub-0003` | 55 | 5 | 5 | 55 | 8196 | trans + BEM |
-| `sub-0005` | 53 | 5 | 5 | 61 | 8196 | trans + BEM |
+| Subject | Source-stage input rows | Input runs | Source-power rows | Source vertices | Anatomy files found |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `sub-0001` | 65 | 6 | 65 | 8196 | trans + BEM |
+| `sub-0003` | 55 | 5 | 55 | 8196 | trans + BEM |
+| `sub-0005` | 53 | 5 | 61 | 8196 | trans + BEM |
 
 ## Update Checklist
 
@@ -309,7 +308,7 @@ When a new full run is completed:
 3. Regenerate `reports/subject_qc/*` with `study_subject_qc_summary.py`.
 4. Update the generated QC summary table.
 5. Update the cohort-use table.
-6. Update Study 1 retained trial counts by run and block.
+6. Update Study 1 retained trial counts by run.
 7. Check that each signature still has one fixed scoring-mask hash.
 8. Update per-subject prediction and temporal metric tables.
 9. Add new Study 2 source-stage QC, source-input, and source-array values.

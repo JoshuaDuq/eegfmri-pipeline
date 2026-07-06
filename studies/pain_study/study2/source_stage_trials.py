@@ -1,4 +1,4 @@
-"""Trial/block filtering helpers for Study 2 source-stage analyses."""
+"""Trial/run filtering helpers for Study 2 source-stage analyses."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pandas as pd
 from eeg_pipeline.analysis.machine_learning.circular_shift import admissible_circular_shifts
 
 
-def permutation_valid_source_blocks_with_rows(
+def permutation_valid_source_runs_with_rows(
     frame: pd.DataFrame,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     row_index_column = "__source_stage_row_index"
@@ -17,23 +17,23 @@ def permutation_valid_source_blocks_with_rows(
 
     working = frame.reset_index(drop=True).copy()
     working[row_index_column] = np.arange(len(working), dtype=int)
-    valid_frame = permutation_valid_source_blocks(working)
+    valid_frame = permutation_valid_source_runs(working)
     retained_row_indices = valid_frame.pop(row_index_column).to_numpy(dtype=int)
     return valid_frame, retained_row_indices
 
 
-def permutation_valid_source_blocks(frame: pd.DataFrame) -> pd.DataFrame:
-    blocks = pd.to_numeric(frame["block"], errors="coerce")
+def permutation_valid_source_runs(frame: pd.DataFrame) -> pd.DataFrame:
+    runs = pd.to_numeric(frame["run"], errors="coerce")
     trial_indices = pd.to_numeric(frame["trial_index"], errors="coerce")
-    if blocks.isna().any() or trial_indices.isna().any():
-        raise ValueError("Source-stage block and trial_index columns must be finite.")
+    if runs.isna().any() or trial_indices.isna().any():
+        raise ValueError("Source-stage run and trial_index columns must be finite.")
 
     valid_indices: list[int] = []
     working = frame.copy()
-    working["block"] = blocks.to_numpy(dtype=int)
+    working["run"] = runs.to_numpy(dtype=int)
     working["trial_index"] = trial_indices.to_numpy(dtype=int)
-    for _block_id, block_frame in working.groupby("block", sort=True):
-        ordered = block_frame.sort_values("trial_index")
+    for _run, run_frame in working.groupby("run", sort=True):
+        ordered = run_frame.sort_values("trial_index")
         admissible = admissible_circular_shifts(
             ordered["trial_index"].to_numpy(dtype=int),
         )
@@ -46,6 +46,6 @@ def permutation_valid_source_blocks(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 __all__ = [
-    "permutation_valid_source_blocks",
-    "permutation_valid_source_blocks_with_rows",
+    "permutation_valid_source_runs",
+    "permutation_valid_source_runs_with_rows",
 ]

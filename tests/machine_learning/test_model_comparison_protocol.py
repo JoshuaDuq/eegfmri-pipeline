@@ -34,12 +34,12 @@ def test_circular_shift_permutation_orders_trials_by_original_index() -> None:
     trial_indices = np.asarray([3, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11], dtype=int)
     y = trial_indices.astype(float)
     groups = np.repeat("sub-0001", len(y)).astype(object)
-    blocks = np.repeat(1, len(y)).astype(float)
+    runs = np.repeat(1, len(y)).astype(float)
 
     permuted = _permute_labels_by_scheme(
         y,
         groups,
-        blocks=blocks,
+        runs=runs,
         trial_indices=trial_indices,
         rng=FixedShiftRng(),
         scheme="circular_shift_within_run",

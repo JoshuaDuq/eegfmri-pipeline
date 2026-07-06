@@ -10,13 +10,24 @@ the analysis uses Haufe-transformed sensor patterns and source-space association
 (Haufe et al., 2014).
 
 The analysis target is restricted a priori to the Study 1 primary cell: NPS prediction by
-ElasticNet from individual-channel spectral power of the alpha, beta, and gamma bands, residualized
-at Level 2. The primary analysis uses the out-of-sample EEG prediction of the NPS residual as a
-single combined prediction-derived score and associates each band's source power with that score.
-The primary source family comprises three full-plateau source maps, $A_\alpha$, $A_\beta$, and
-$A_\gamma$. Consistent with Study 1, gamma is included in the primary family, and its artifact
-diagnostics are reported explicitly because high-frequency EEG recorded during simultaneous fMRI is
-sensitive to muscular, oculomotor, and gradient contamination.
+ElasticNet from individual-channel spectral power of alpha, beta, and scanner-clean gamma,
+residualized at Level 2. The primary analysis uses the out-of-sample EEG prediction of the NPS
+residual as a single combined prediction-derived score and associates each band's source power with
+that score. The primary source family comprises three full-plateau source maps, $A_\alpha$,
+$A_\beta$, and $A_\gamma$. Consistent with Study 1, gamma remains in the primary family, but it is
+defined from retained intervals of 30.1–38.0, 43.0–56.0, and 67.0–77.0 Hz. The empirically
+contaminated scanner-harmonic windows of 38.0–43.0, 56.0–67.0, and 77.0–85.0 Hz are excluded before
+model fitting and source-power extraction.
+
+This restriction is a measurement decision, not a post hoc outcome filter. The scanner-harmonic QC
+benchmark applied to valid production recordings found subject-consistent residual peaks at
+approximately 41.138, 61.096, and 82.214 Hz after BrainVision Analyzer correction. Median peak
+prominences were 16.407, 26.187, and 20.890 dB across 53 successful runs from 9 subjects. Because
+event-locked QC showed late-window increases in both broad gamma and harmonic prominence, a
+contiguous 30.1–80.0 Hz source map would not isolate neural gamma. Study 2 therefore estimates
+$A_\gamma$ from the same scanner-clean gamma intervals as Study 1 and reports artifact diagnostics
+explicitly because high-frequency EEG recorded during simultaneous fMRI remains sensitive to
+muscular, oculomotor, and gradient contamination.
 
 Because scalp EEG cannot resolve the deep insular, thalamic, and brainstem generators that dominate
 the NPS, these maps characterize the *cortical EEG correlates* of the NPS-predictive component, not
@@ -72,14 +83,18 @@ frontal artifact-proxy channels do not influence reconstruction. The primary noi
 derived from the −5.0 to −0.01 s pre-stimulus baseline, matching Study 1.
 
 A single inverse operator is estimated with the broadband noise covariance and applied identically
-to voltage time series filtered into each canonical band. The primary source time series uses the
-cortical surface-normal component from the loose-orientation inverse (constraint 0.2), and
-instantaneous power envelopes are computed with the Hilbert transform. Source-power construction
-mirrors the Study 1 individual-channel spectral-power estimand by using total band-limited power
-without evoked-response subtraction. Hilbert power is baseline-corrected as a log-ratio with the same
-primary baseline and averaged over the same active plateau window (3.0 to 10.5 s). Regularization
-uses SNR = 3.0, corresponding to $\lambda^2 \approx 0.111$, oct6 source spacing, and depth weighting
-of 0.8.
+to voltage time series filtered into each modeled band. Alpha and beta are filtered as contiguous
+bands. Gamma is filtered separately in the three retained scanner-clean intervals, converted to
+native-space source-level Hilbert log-ratio power in each interval, morphed to fsaverage as scalar
+log-ratio maps, and combined as a bandwidth-weighted log-ratio mean to preserve the single Study 2
+contribution label $\gamma$ without reintroducing the excluded scanner windows. The primary source
+time series uses the cortical surface-normal component from the loose-orientation inverse
+(constraint 0.2), and instantaneous power envelopes are computed with the Hilbert transform before
+surface morphing. Source-power construction mirrors the Study 1 individual-channel spectral-power
+estimand by using total band-limited power without evoked-response subtraction. Hilbert power is
+baseline-corrected as a log-ratio with the same primary baseline and averaged over the same active
+plateau window (3.0 to 10.5 s). Regularization uses SNR = 3.0, corresponding to $\lambda^2 \approx
+0.111$, oct6 source spacing, and depth weighting of 0.8.
 
 Source quality control is completed before map inspection. A subject is excluded when FreeSurfer
 reconstruction fails visual quality control, the boundary element model fails, measured electrode
@@ -98,9 +113,9 @@ report replaces a full Monte Carlo calibration and adds no permutation cost.
 Association maps are computed directly in source space from a fixed log-ratio power tensor and an
 explicit residualization design. The prediction-derived score and each band's source power are
 residualized against the same design and standardized within subject. The primary source-stage
-design aligns with the Study 1 Level 2 nuisance family and comprises task-block intercepts,
+design aligns with the Study 1 Level 2 nuisance family and comprises task-run intercepts,
 categorical stimulus temperature and thermode surface with the Study 1 reference coding, trial onset
-time and the linear trial number within block, HRF-weighted framewise displacement, HRF-weighted
+time and the linear trial number within run, HRF-weighted framewise displacement, HRF-weighted
 standardized DVARS, HRF-weighted Fp1/Fp2 high-frequency power, and residual ECG coupling. The primary
 design includes no opposite-band contribution term; the cross-band adjustment is a secondary analysis
 (Section 10).
@@ -117,12 +132,12 @@ pain-specific cortical structure. The reported estimand is therefore the cortica
 the NPS-predictive component; the true-target directional-consistency map and the artifact
 diagnostics (Section 9) provide the corresponding specificity checks.
 
-Circular-shift permutations use the six 11-trial task blocks as exchangeability units, matching
-Study 1. A subject is excluded from source analyses when fewer than three permutation-valid blocks,
+Circular-shift permutations use the six 11-trial task runs as exchangeability units, matching
+Study 1. A subject is excluded from source analyses when fewer than three permutation-valid runs,
 fewer than 25 clean plateau trials, or fewer than 15 residual degrees of freedom remain, or when the
 design is not full rank after censoring. The source-stage design must have condition number ≤ 100
 after centering and scaling non-intercept columns. The quality-control report includes retained
-trial counts, valid-block counts, design rank, residual degrees of freedom, and condition number for
+trial counts, valid-run counts, design rank, residual degrees of freedom, and condition number for
 every subject before map inspection. With fewer than 30 valid subjects, source inference is reported
 as a feasibility analysis.
 
@@ -130,7 +145,7 @@ as a feasibility analysis.
 
 The primary permutation test uses a target-retrained null, which estimates the source-power
 association expected when the EEG-to-fMRI relationship is broken. For each outer fold and permutation,
-the Level 2 nuisance residual is circularly shifted relative to EEG within block using the Study 1
+the Level 2 nuisance residual is circularly shifted relative to EEG within run using the Study 1
 minimum-distance rule, and the permuted target is reconstructed as the unshifted nuisance prediction
 plus the shifted residual. The ElasticNet model is refit on the permuted target, reusing the frozen
 features, preprocessing statistics, Yeo-Johnson transformation, and hyperparameters, then applied to
@@ -206,8 +221,8 @@ $$
 The association between expression and the intensity score is estimated by ordinary least squares
 within each subject, controlling for the Level 2 nuisance design, and the statistic is the group mean
 of standardized coefficients, tested two-sided with 5,000 permutations that circularly shift
-expression relative to rating within block. A subject is excluded when fewer than 25 rated trials or
-fewer than three valid blocks remain, or when within-subject rating variance is zero; missing ratings
+expression relative to rating within run. A subject is excluded when fewer than 25 rated trials or
+fewer than three valid runs remain, or when within-subject rating variance is zero; missing ratings
 are not imputed. A positive significant coefficient supports intensity convergence.
 
 ## 9. Artifact Diagnostics and Robustness Controls

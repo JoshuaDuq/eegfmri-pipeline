@@ -13,9 +13,9 @@ from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 REQUIRED_PRIMARY_COLUMNS = (
     "subject_id",
     "task",
-    "block",
+    "run",
     "trial_index",
-    "within_block_trial",
+    "within_run_trial",
     "onset",
     "duration",
     "NPS",

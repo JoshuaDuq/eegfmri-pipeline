@@ -20,15 +20,13 @@ from studies.pain_study.study1.config import load_study1_config
 from studies.pain_study.study1.temporal_controls import resolve_temporal_control_windows
 
 
-ACQUISITION_RUN_COLUMNS = ("run_id", "run", "session", "block")
 TRIAL_INDEX_COLUMNS = ("trial_number", "trial_index", "epoch")
 TARGET_COLUMNS = (
     "subject_id",
     "task",
-    "block",
-    "acquisition_run",
+    "run",
     "trial_index",
-    "within_block_trial",
+    "within_run_trial",
     "onset",
     "duration",
 )
@@ -106,8 +104,8 @@ def read_clean_events(subject_id: str, *, task: str, config: Any) -> pd.DataFram
         raise FileNotFoundError(f"Clean events not found for {subject_id}, task-{task}.")
     frame = frame.reset_index(drop=True)
     require_columns(frame, EVENT_COLUMNS, table_name=f"{subject_id} clean events")
-    if find_first_column(frame, ACQUISITION_RUN_COLUMNS) is None:
-        raise ValueError(f"{subject_id} clean events are missing an acquisition run column.")
+    if "run" not in frame.columns:
+        raise ValueError(f"{subject_id} clean events are missing required run column.")
     if find_first_column(frame, TRIAL_INDEX_COLUMNS) is None:
         raise ValueError(f"{subject_id} clean events are missing a trial-number column.")
     return frame
@@ -127,8 +125,8 @@ def read_fmri_events(subject_id: str, *, task: str, config: Any) -> pd.DataFrame
         if frame is None or frame.empty:
             raise ValueError(f"Empty fMRI BIDS event file: {path}")
         require_columns(frame, FMRI_EVENT_COLUMNS, table_name=str(path))
-        if find_first_column(frame, ACQUISITION_RUN_COLUMNS) is None:
-            raise ValueError(f"{path} is missing an acquisition run column.")
+        if "run" not in frame.columns:
+            raise ValueError(f"{path} is missing required run column.")
         if find_first_column(frame, TRIAL_INDEX_COLUMNS) is None:
             raise ValueError(f"{path} is missing a trial-number column.")
         frames.append(frame)
@@ -310,10 +308,9 @@ def audit_subject(
             {
                 "subject_id": subject_id,
                 "alignment_key": alignment_key,
-                "acquisition_run": int(row.acquisition_run),
-                "block": int(row.block),
+                "run": int(row.run),
                 "trial_index": int(row.trial_index),
-                "within_block_trial": int(row.within_block_trial),
+                "within_run_trial": int(row.within_run_trial),
                 "target_onset": float(row.onset),
                 "target_duration": float(row.duration),
                 "event_onset": float(event_row["onset"]),
@@ -369,14 +366,13 @@ def audit_subject(
 
 
 def event_alignment_keys(events: pd.DataFrame, *, subject_id: str) -> pd.DataFrame:
-    run_column = find_first_column(events, ACQUISITION_RUN_COLUMNS)
     trial_column = find_first_column(events, TRIAL_INDEX_COLUMNS)
-    if run_column is None or trial_column is None:
+    if "run" not in events.columns or trial_column is None:
         raise ValueError(f"{subject_id} clean events are missing alignment columns.")
 
     frame = pd.DataFrame(
         {
-            "alignment_key": alignment_keys(events[run_column], events[trial_column]),
+            "alignment_key": alignment_keys(events["run"], events[trial_column]),
             "trial_id": integer_series(events["trial_id"], f"{subject_id} clean event trial_id"),
             "onset": numeric_series(events["onset"], f"{subject_id} clean event onset"),
             "duration": numeric_series(events["duration"], f"{subject_id} clean event duration"),
@@ -388,9 +384,8 @@ def event_alignment_keys(events: pd.DataFrame, *, subject_id: str) -> pd.DataFra
 
 def fmri_plateau_alignment_keys(fmri_events: pd.DataFrame, *, subject_id: str) -> pd.DataFrame:
     require_columns(fmri_events, FMRI_EVENT_COLUMNS, table_name=f"{subject_id} fMRI events")
-    run_column = find_first_column(fmri_events, ACQUISITION_RUN_COLUMNS)
     trial_column = find_first_column(fmri_events, TRIAL_INDEX_COLUMNS)
-    if run_column is None or trial_column is None:
+    if "run" not in fmri_events.columns or trial_column is None:
         raise ValueError(f"{subject_id} fMRI events are missing alignment columns.")
 
     trial_type = fmri_events["trial_type"].astype(str).str.strip()
@@ -403,7 +398,7 @@ def fmri_plateau_alignment_keys(fmri_events: pd.DataFrame, *, subject_id: str) -
 
     frame = pd.DataFrame(
         {
-            "alignment_key": alignment_keys(plateau_rows[run_column], plateau_rows[trial_column]),
+            "alignment_key": alignment_keys(plateau_rows["run"], plateau_rows[trial_column]),
             "onset": numeric_series(plateau_rows["onset"], f"{subject_id} fMRI plateau onset"),
             "duration": numeric_series(
                 plateau_rows["duration"],
@@ -443,7 +438,7 @@ def lss_plateau_alignment_keys(lss_trials: pd.DataFrame, *, subject_id: str) -> 
 
 def target_alignment_keys(targets: pd.DataFrame, *, subject_id: str) -> pd.DataFrame:
     frame = targets.copy()
-    frame["alignment_key"] = alignment_keys(frame["acquisition_run"], frame["trial_index"])
+    frame["alignment_key"] = alignment_keys(frame["run"], frame["trial_index"])
     require_unique(frame["alignment_key"], f"{subject_id} target alignment keys")
     return frame
 
@@ -471,10 +466,9 @@ def unmatched_trial_row(subject_id: str, row: object) -> dict[str, object]:
     return {
         "subject_id": subject_id,
         "alignment_key": str(getattr(row, "alignment_key")),
-        "acquisition_run": int(getattr(row, "acquisition_run")),
-        "block": int(getattr(row, "block")),
+        "run": int(getattr(row, "run")),
         "trial_index": int(getattr(row, "trial_index")),
-        "within_block_trial": int(getattr(row, "within_block_trial")),
+        "within_run_trial": int(getattr(row, "within_run_trial")),
         "target_onset": float(getattr(row, "onset")),
         "target_duration": float(getattr(row, "duration")),
         "event_onset": np.nan,

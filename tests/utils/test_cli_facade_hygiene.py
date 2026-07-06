@@ -10,6 +10,7 @@ CLI_FACADE_FILES = (
     "eeg_pipeline/cli/commands/info.py",
     "eeg_pipeline/cli/commands/stats.py",
     "eeg_pipeline/cli/commands/features.py",
+    "eeg_pipeline/cli/commands/harmonics.py",
     "eeg_pipeline/cli/commands/plotting.py",
     "eeg_pipeline/cli/commands/behavior.py",
     "eeg_pipeline/cli/commands/machine_learning.py",

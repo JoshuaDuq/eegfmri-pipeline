@@ -29,24 +29,22 @@ def parse_run_label_to_int(run_value: Any) -> Optional[int]:
         return None
 
 
-def find_block_column(aligned_events: pd.DataFrame) -> Optional[pd.Series]:
-    """Find block/run identifier column from aligned events."""
-    for candidate in ("block", "run_id", "run", "session"):
-        if candidate not in aligned_events.columns:
-            continue
-        series = aligned_events[candidate]
-        numeric = pd.to_numeric(series, errors="coerce")
-        if np.any(np.isfinite(numeric.to_numpy(dtype=float))):
-            return numeric
-        parsed = pd.Series(
-            [parse_run_label_to_int(value) for value in series],
-            index=series.index,
-            dtype="float64",
-        )
-        if np.any(np.isfinite(parsed.to_numpy(dtype=float))):
-            return parsed
+def find_run_column(aligned_events: pd.DataFrame) -> Optional[pd.Series]:
+    """Return the required run identifier column from aligned events."""
+    if "run" not in aligned_events.columns:
+        return None
+    series = aligned_events["run"]
+    numeric = pd.to_numeric(series, errors="coerce")
+    if np.any(np.isfinite(numeric.to_numpy(dtype=float))):
         return numeric
-    return None
+    parsed = pd.Series(
+        [parse_run_label_to_int(value) for value in series],
+        index=series.index,
+        dtype="float64",
+    )
+    if np.any(np.isfinite(parsed.to_numpy(dtype=float))):
+        return parsed
+    return numeric
 
 
 def _signature_target_defaults(config: Any, *, config_path: str) -> dict[str, Any]:
@@ -226,7 +224,7 @@ def _load_target_table_values_for_subject(
         raise ValueError("machine_learning.fmri_signature.target_column must be non-empty.")
 
     table = _read_target_table(table_path)
-    required = {"subject_id", "task", "block", "trial_index", "onset", "duration", target_column}
+    required = {"subject_id", "task", "run", "trial_index", "onset", "duration", target_column}
     missing = sorted(required - set(table.columns))
     if missing:
         raise ValueError(
@@ -244,7 +242,7 @@ def _load_target_table_values_for_subject(
             f"{table_path}"
         )
 
-    target_runs = pd.to_numeric(subject_rows["block"], errors="coerce").to_numpy(dtype=float)
+    target_runs = pd.to_numeric(subject_rows["run"], errors="coerce").to_numpy(dtype=float)
     target_trials = pd.to_numeric(subject_rows["trial_index"], errors="coerce").to_numpy(dtype=float)
     target_onset = pd.to_numeric(subject_rows["onset"], errors="coerce").to_numpy(dtype=float)
     target_duration = pd.to_numeric(subject_rows["duration"], errors="coerce").to_numpy(dtype=float)
@@ -349,7 +347,7 @@ def _aligned_numeric_target_table_columns(
     excluded = {
         "subject_id",
         "task",
-        "block",
+        "run",
         "trial_index",
         "onset",
         "duration",
@@ -367,7 +365,7 @@ def _aligned_numeric_target_table_columns(
             if np.isfinite(run_num) and np.isfinite(trial_num)
             else None
             for run_num, trial_num in zip(
-                pd.to_numeric(source["block"], errors="coerce").to_numpy(dtype=float),
+                pd.to_numeric(source["run"], errors="coerce").to_numpy(dtype=float),
                 pd.to_numeric(source["trial_index"], errors="coerce").to_numpy(dtype=float),
             )
         ]
@@ -379,7 +377,7 @@ def _aligned_numeric_target_table_columns(
             if np.isfinite(run_num) and np.isfinite(onset) and np.isfinite(duration)
             else None
             for run_num, onset, duration in zip(
-                pd.to_numeric(source["block"], errors="coerce").to_numpy(dtype=float),
+                pd.to_numeric(source["run"], errors="coerce").to_numpy(dtype=float),
                 pd.to_numeric(source["onset"], errors="coerce").to_numpy(dtype=float),
                 pd.to_numeric(source["duration"], errors="coerce").to_numpy(dtype=float),
             )
@@ -423,9 +421,9 @@ def load_fmri_signature_target_for_subject(
     if "onset" not in events_df.columns or "duration" not in events_df.columns:
         raise ValueError("Clean events.tsv must contain onset and duration to align fMRI trial signatures.")
 
-    run_series = find_block_column(events_df)
+    run_series = find_run_column(events_df)
     if run_series is None or not np.any(np.isfinite(run_series.to_numpy(dtype=float))):
-        raise ValueError("Clean events.tsv is missing a usable run/block column (expected block/run_id/run/session).")
+        raise ValueError("Clean events.tsv is missing a usable 'run' column.")
 
     round_decimals = int(cfg["round_decimals"])
     onset = pd.to_numeric(events_df["onset"], errors="coerce").to_numpy(dtype=float)
@@ -719,7 +717,7 @@ def load_fmri_signature_target_for_subject(
 
 
 __all__ = [
-    "find_block_column",
+    "find_run_column",
     "load_fmri_signature_target_for_subject",
     "parse_run_label_to_int",
 ]

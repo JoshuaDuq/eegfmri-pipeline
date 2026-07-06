@@ -8,6 +8,23 @@ import pytest
 from scipy.signal import hilbert as scipy_hilbert
 
 
+class _FakeSourceEstimate:
+    def __init__(
+        self,
+        data,
+        *,
+        vertices=None,
+        tmin=0.0,
+        tstep=1.0,
+        subject=None,
+    ):
+        self.data = np.asarray(data, dtype=float)
+        self.vertices = vertices if vertices is not None else [np.arange(self.data.shape[0])]
+        self.tmin = float(tmin)
+        self.tstep = float(tstep)
+        self.subject = subject
+
+
 def test_sloreta_hilbert_logratio_power_extracts_trial_vertex_matrix() -> None:
     from studies.pain_study.study2.source_power import (
         compute_sloreta_hilbert_logratio_power,
@@ -80,6 +97,63 @@ def test_sloreta_hilbert_logratio_power_processes_vertex_chunks(monkeypatch) -> 
     assert all(shape[0] == 2 for shape in hilbert_shapes)
     assert all(shape[1] <= 2 for shape in hilbert_shapes)
     assert all(shape[2] == times.size for shape in hilbert_shapes)
+
+
+def test_morphed_sloreta_power_morphs_scalar_logratio_maps_after_power() -> None:
+    from studies.pain_study.study2.source_power import (
+        compute_morphed_sloreta_hilbert_logratio_power,
+        compute_sloreta_hilbert_logratio_power,
+    )
+
+    times = np.asarray([-1.0, -0.5, 0.0, 0.5], dtype=float)
+    stcs = [
+        _FakeSourceEstimate(
+            [
+                [1.0, 1.0, 2.0, 2.0],
+                [2.0, 2.0, 1.0, 1.0],
+            ],
+            vertices=[np.arange(2)],
+            subject="sub-0001",
+        ),
+        _FakeSourceEstimate(
+            [
+                [1.0, 1.0, 4.0, 4.0],
+                [4.0, 4.0, 1.0, 1.0],
+            ],
+            vertices=[np.arange(2)],
+            subject="sub-0001",
+        ),
+    ]
+    morph_matrix = np.asarray([[0.25, 0.75]], dtype=float)
+    morphed_inputs: list[np.ndarray] = []
+
+    class FakeMorph:
+        def apply(self, stc):
+            morphed_inputs.append(stc.data.copy())
+            return _FakeSourceEstimate(
+                morph_matrix @ stc.data,
+                vertices=[np.arange(1)],
+                subject="fsaverage",
+            )
+
+    result = compute_morphed_sloreta_hilbert_logratio_power(
+        stcs=stcs,
+        times=times,
+        baseline_window_s=(-1.0, -0.5),
+        active_window_s=(0.0, 0.5),
+        morph=FakeMorph(),
+    )
+    native = compute_sloreta_hilbert_logratio_power(
+        stcs=stcs,
+        times=times,
+        baseline_window_s=(-1.0, -0.5),
+        active_window_s=(0.0, 0.5),
+    )
+
+    assert [data.shape for data in morphed_inputs] == [(2, 1), (2, 1)]
+    np.testing.assert_allclose(result.power_logratio, native.power_logratio @ morph_matrix.T)
+    assert result.n_trials == 2
+    assert result.n_vertices == 1
 
 
 def test_make_surface_source_morph_uses_configured_common_space(monkeypatch) -> None:

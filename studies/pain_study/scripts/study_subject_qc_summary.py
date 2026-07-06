@@ -235,8 +235,7 @@ def validate_inputs(inputs: SubjectQcInputs) -> None:
         inputs.study1_targets,
         {
             "subject_id",
-            "block",
-            "acquisition_run",
+            "run",
             "onset",
             "NPS",
             "SIIPS1",
@@ -257,7 +256,7 @@ def validate_inputs(inputs: SubjectQcInputs) -> None:
     require_model_columns(inputs.gamma_model, table_name="Gamma model table")
     require_columns(
         inputs.study2_source_input,
-        {"subject_id", "block", "acquisition_run"},
+        {"subject_id", "run"},
         table_name="Study 2 source-stage input",
     )
     for band, frame in inputs.study2_source_qc.items():
@@ -267,7 +266,7 @@ def validate_inputs(inputs: SubjectQcInputs) -> None:
                 "subject_id",
                 "source_stage_criteria_met",
                 "retained_trials",
-                "valid_blocks",
+                "valid_runs",
                 "design_rank",
                 "residual_degrees_of_freedom",
                 "condition_number",
@@ -340,9 +339,7 @@ def study1_metrics(
         return {
             "study1_retained_trials": 0,
             "study1_runs": 0,
-            "study1_blocks": 0,
             "study1_trials_by_run": "",
-            "study1_trials_by_block": "",
             "study1_missing_runs": ",".join(str(run) for run in EXPECTED_STUDY1_RUNS),
             "study1_incomplete_runs": "",
             "study1_stimulus_temperatures": 0,
@@ -361,15 +358,13 @@ def study1_metrics(
     gamma = model_subject_row(inputs.gamma_model, subject_id, "elasticnet")
     nps_temp_r = correlation(target_rows["NPS"], target_rows["stimulus_temp"])
     siips1_temp_r = correlation(target_rows["SIIPS1"], target_rows["stimulus_temp"])
-    missing_runs = missing_run_summary(target_rows["acquisition_run"])
-    incomplete_runs = incomplete_run_summary(target_rows["acquisition_run"])
+    missing_runs = missing_run_summary(target_rows["run"])
+    incomplete_runs = incomplete_run_summary(target_rows["run"])
 
     return {
         "study1_retained_trials": len(target_rows),
-        "study1_runs": target_rows["acquisition_run"].nunique(),
-        "study1_blocks": target_rows["block"].nunique(),
-        "study1_trials_by_run": count_summary(target_rows["acquisition_run"]),
-        "study1_trials_by_block": count_summary(target_rows["block"]),
+        "study1_runs": target_rows["run"].nunique(),
+        "study1_trials_by_run": count_summary(target_rows["run"]),
         "study1_missing_runs": missing_runs,
         "study1_incomplete_runs": incomplete_runs,
         "study1_stimulus_temperatures": target_rows["stimulus_temp"].nunique(),
@@ -397,7 +392,7 @@ def study2_metrics(
             "study2_qc_bands_consistent": "",
             "study2_source_stage_criteria_met": "",
             "study2_retained_trials": 0,
-            "study2_valid_blocks": 0,
+            "study2_valid_runs": 0,
             "study2_design_rank": "",
             "study2_residual_df": "",
             "study2_condition_number": "",
@@ -413,7 +408,7 @@ def study2_metrics(
             "study2_qc_bands_consistent": False,
             "study2_source_stage_criteria_met": "",
             "study2_retained_trials": int(source_qc["retained_trials"]),
-            "study2_valid_blocks": int(source_qc["valid_blocks"]),
+            "study2_valid_runs": int(source_qc["valid_runs"]),
             "study2_design_rank": int(source_qc["design_rank"]),
             "study2_residual_df": int(source_qc["residual_degrees_of_freedom"]),
             "study2_condition_number": source_qc["condition_number"],
@@ -432,7 +427,7 @@ def study2_metrics(
         "study2_qc_bands_consistent": True,
         "study2_source_stage_criteria_met": source_stage_criteria_met,
         "study2_retained_trials": int(source_qc["retained_trials"]),
-        "study2_valid_blocks": int(source_qc["valid_blocks"]),
+        "study2_valid_runs": int(source_qc["valid_runs"]),
         "study2_design_rank": int(source_qc["design_rank"]),
         "study2_residual_df": int(source_qc["residual_degrees_of_freedom"]),
         "study2_condition_number": source_qc["condition_number"],
@@ -464,7 +459,7 @@ def source_qc_bands_disagree(rows: list[pd.Series]) -> bool:
     fields = (
         "source_stage_criteria_met",
         "retained_trials",
-        "valid_blocks",
+        "valid_runs",
         "design_rank",
         "residual_degrees_of_freedom",
         "condition_number",

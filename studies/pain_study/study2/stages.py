@@ -43,11 +43,10 @@ from studies.pain_study.study2.source_maps import (
 from studies.pain_study.study2.source_model_qc import evaluate_source_model_qc
 from studies.pain_study.study2.source_stage_design import contribution_bands
 from studies.pain_study.study2.source_power import (
-    apply_source_morph,
     apply_sloreta_inverse,
     build_surface_forward_model,
     compute_baseline_noise_covariance,
-    compute_sloreta_hilbert_logratio_power,
+    compute_morphed_sloreta_hilbert_logratio_power,
     make_surface_source_morph,
     make_sloreta_inverse_operator,
 )
@@ -75,20 +74,65 @@ if TYPE_CHECKING:
     from studies.pain_study.study2.runner import Study2StageContext
 
 
-def _band_frequency_ranges(config: Any) -> dict[str, tuple[float, float]]:
+BandFrequencyRanges = tuple[tuple[float, float], ...]
+
+
+def _band_frequency_ranges(config: Any) -> dict[str, BandFrequencyRanges]:
     bands = require_config_value(config, "study2.source_modeling.frequency_bands")
     if not isinstance(bands, Mapping):
         raise ValueError("study2.source_modeling.frequency_bands must be a mapping.")
-    ranges: dict[str, tuple[float, float]] = {}
+    ranges: dict[str, BandFrequencyRanges] = {}
     for band in contribution_bands(config):
         bounds = bands.get(band)
-        if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
-            raise ValueError(f"study2.source_modeling.frequency_bands.{band} must be [low, high].")
-        low, high = float(bounds[0]), float(bounds[1])
-        if high <= low:
-            raise ValueError(f"study2.source_modeling.frequency_bands.{band} must have high > low.")
-        ranges[band] = (low, high)
+        ranges[band] = _parse_band_frequency_ranges(
+            bounds,
+            field_name=f"study2.source_modeling.frequency_bands.{band}",
+        )
     return ranges
+
+
+def _parse_band_frequency_ranges(value: Any, *, field_name: str) -> BandFrequencyRanges:
+    if _is_frequency_range(value):
+        return (_frequency_range(value, field_name=field_name),)
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError(f"{field_name} must be [low, high] or a non-empty list of ranges.")
+    ranges = tuple(
+        _frequency_range(bounds, field_name=f"{field_name}[{index}]")
+        for index, bounds in enumerate(value)
+    )
+    _require_non_overlapping_ranges(ranges, field_name=field_name)
+    return ranges
+
+
+def _is_frequency_range(value: Any) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) == 2
+        and not isinstance(value[0], (list, tuple))
+        and not isinstance(value[1], (list, tuple))
+    )
+
+
+def _frequency_range(value: Any, *, field_name: str) -> tuple[float, float]:
+    if not _is_frequency_range(value):
+        raise ValueError(f"{field_name} must be [low, high].")
+    low, high = float(value[0]), float(value[1])
+    if not np.isfinite(low) or not np.isfinite(high):
+        raise ValueError(f"{field_name} must contain finite frequencies.")
+    if high <= low:
+        raise ValueError(f"{field_name} must have high > low.")
+    return low, high
+
+
+def _require_non_overlapping_ranges(
+    ranges: BandFrequencyRanges,
+    *,
+    field_name: str,
+) -> None:
+    ordered = sorted(ranges)
+    for previous, current in zip(ordered, ordered[1:]):
+        if current[0] < previous[1]:
+            raise ValueError(f"{field_name} ranges must not overlap.")
 
 
 def _time_window(config: Any, key: str) -> tuple[float, float]:
@@ -158,6 +202,36 @@ def source_power_required_inputs(context: "Study2StageContext") -> tuple[Path, .
     return tuple(required)
 
 
+def _aggregate_subband_logratio_power(
+    extractions: list[Any],
+    *,
+    frequency_ranges: BandFrequencyRanges,
+) -> np.ndarray:
+    if len(extractions) != len(frequency_ranges):
+        raise ValueError("Study 2 source-power subband extraction count does not match ranges.")
+    if len(extractions) == 1:
+        return extractions[0].power_logratio
+
+    reference = extractions[0]
+    for extraction in extractions[1:]:
+        if extraction.power_logratio.shape != reference.power_logratio.shape:
+            raise ValueError("Study 2 source-power subband maps must have identical shapes.")
+        if extraction.baseline_window_s != reference.baseline_window_s:
+            raise ValueError("Study 2 source-power subbands must use the same baseline window.")
+        if extraction.active_window_s != reference.active_window_s:
+            raise ValueError("Study 2 source-power subbands must use the same active window.")
+
+    weights = np.asarray([high - low for low, high in frequency_ranges], dtype=float)
+    maps = np.stack([extraction.power_logratio for extraction in extractions], axis=0)
+    return np.average(maps, axis=0, weights=weights)
+
+
+def _frequency_aggregation_label(frequency_ranges: BandFrequencyRanges) -> str:
+    if len(frequency_ranges) == 1:
+        return "single_contiguous_band"
+    return "bandwidth_weighted_logratio_mean"
+
+
 def run_source_power(context: "Study2StageContext") -> None:
     """Reconstruct per-subject sLORETA source power per band from cleaned epochs."""
     config = context.config
@@ -206,32 +280,42 @@ def run_source_power(context: "Study2StageContext") -> None:
         )
 
         source_morph = None
-        for band, (low, high) in band_ranges.items():
-            band_epochs = epochs.copy().filter(low, high, verbose=False)
-            stcs = apply_sloreta_inverse(
-                epochs=band_epochs,
-                inverse_operator=inverse_operator,
-                snr=snr,
-                pick_ori="normal",
-            )
-            if source_morph is None:
-                source_morph = make_surface_source_morph(
-                    reference_stc=stcs[0],
-                    subject_from=subject_id,
-                    subject_to=common_subject,
-                    subjects_dir=str(anatomy.subjects_dir),
-                    spacing=common_spacing,
+        for band, frequency_ranges in band_ranges.items():
+            subband_extractions = []
+            for low, high in frequency_ranges:
+                band_epochs = epochs.copy().filter(low, high, verbose=False)
+                stcs = apply_sloreta_inverse(
+                    epochs=band_epochs,
+                    inverse_operator=inverse_operator,
+                    snr=snr,
+                    pick_ori="normal",
                 )
-            morphed_stcs = apply_source_morph(stcs, morph=source_morph)
-            extraction = compute_sloreta_hilbert_logratio_power(
-                stcs=morphed_stcs,
-                times=np.asarray(epochs.times, dtype=float),
-                baseline_window_s=baseline_window,
-                active_window_s=active_window,
+                if source_morph is None:
+                    source_morph = make_surface_source_morph(
+                        reference_stc=stcs[0],
+                        subject_from=subject_id,
+                        subject_to=common_subject,
+                        subjects_dir=str(anatomy.subjects_dir),
+                        spacing=common_spacing,
+                    )
+                extraction = compute_morphed_sloreta_hilbert_logratio_power(
+                    stcs=stcs,
+                    times=np.asarray(epochs.times, dtype=float),
+                    baseline_window_s=baseline_window,
+                    active_window_s=active_window,
+                    morph=source_morph,
+                )
+                subband_extractions.append(extraction)
+                del band_epochs, stcs
+                gc.collect()
+            extraction = subband_extractions[0]
+            power_logratio = _aggregate_subband_logratio_power(
+                subband_extractions,
+                frequency_ranges=frequency_ranges,
             )
             power_path = paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             power_path.parent.mkdir(parents=True, exist_ok=True)
-            np.save(power_path, extraction.power_logratio)
+            np.save(power_path, power_logratio)
             metadata_path = paths.subject_source_power_metadata_path(
                 config,
                 subject_id=subject_id,
@@ -240,7 +324,8 @@ def run_source_power(context: "Study2StageContext") -> None:
             metadata_payload = {
                 "subject_id": subject_id,
                 "band": band,
-                "frequency_hz": [low, high],
+                "frequency_hz": [list(frequency_range) for frequency_range in frequency_ranges],
+                "frequency_aggregation": _frequency_aggregation_label(frequency_ranges),
                 "baseline_window_s": list(extraction.baseline_window_s),
                 "active_window_s": list(extraction.active_window_s),
                 "source_space_spacing": spacing,
@@ -263,7 +348,7 @@ def run_source_power(context: "Study2StageContext") -> None:
                 extraction.n_trials,
                 extraction.n_vertices,
             )
-            del band_epochs, stcs, morphed_stcs, extraction
+            del subband_extractions, extraction, power_logratio
             gc.collect()
         del forward, noise_cov, inverse_operator, source_morph, epochs
         gc.collect()

@@ -42,7 +42,7 @@ study2:
   source_stage:
     min_source_valid_subjects: 30
     min_feasibility_subjects: 20
-    min_valid_blocks_per_subject: 3
+    min_valid_runs_per_subject: 3
     min_retained_trials_per_subject: 25
     min_residual_degrees_of_freedom: 15
     max_condition_number: 100
@@ -50,17 +50,17 @@ study2:
     max_collinearity_failure_fraction: 0.20
     continuous_columns:
       - "onset"
-      - "trial_index_within_block"
+      - "trial_index_within_run"
       - "hrf_weighted_framewise_displacement"
       - "hrf_weighted_std_dvars"
       - "hrf_weighted_fp1_fp2_high_frequency_power"
       - "residual_ecg_coupling"
     categorical_columns:
-      - "block"
+      - "run"
       - "stimulus_temp"
       - "selected_surface"
     fixed_categorical_levels:
-      block:
+      run:
         - 1
         - 2
         - 3
@@ -94,7 +94,10 @@ study2:
     frequency_bands:
       alpha: [8.0, 12.9]
       beta: [13.0, 30.0]
-      gamma: [30.1, 80.0]
+      gamma:
+        - [30.1, 38.0]
+        - [43.0, 56.0]
+        - [67.0, 77.0]
     anatomy:
       subjects_dir: null
       trans_path_template: null
@@ -146,7 +149,7 @@ study2:
     rating_column: null
     design_columns: null
     min_rated_trials: 25
-    min_permutation_valid_blocks: 3
+    min_permutation_valid_runs: 3
     permutations: 5000
   reporting:
     bca_bootstrap_resamples: 10000

@@ -2,7 +2,7 @@
 
 The null estimates the source-power association expected when the EEG-to-fMRI
 relationship is broken (README Section 6). For each draw and outer fold, the
-Level 2 nuisance residual is circularly shifted within block, the permuted
+Level 2 nuisance residual is circularly shifted within run, the permuted
 target is rebuilt, and the frozen ElasticNet is refit (reusing Study 1's frozen
 hyperparameters) to regenerate the held-out prediction-derived score. The score
 then flows through the same source-stage association as the observed maps.
@@ -55,7 +55,7 @@ class Study1ModelContext:
     param_grid: Mapping[str, Any]
     config: Any
     target_residualization_columns: tuple[str, ...]
-    blocks: np.ndarray | None
+    runs: np.ndarray | None
     trial_indices: np.ndarray | None
     scheme: str
     inner_splits: int
@@ -167,7 +167,7 @@ def stacked_permuted_targets(
             train_idx=train_idx,
             test_idx=test_idx,
             columns=context.target_residualization_columns,
-            blocks=context.blocks,
+            runs=context.runs,
             trial_indices=context.trial_indices,
             rng=rng,
             scheme=context.scheme,

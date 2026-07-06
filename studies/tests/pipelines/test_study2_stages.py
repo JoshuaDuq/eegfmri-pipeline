@@ -189,15 +189,31 @@ def test_source_power_required_inputs_fails_when_anatomy_unconfigured(tmp_path: 
         source_power_required_inputs(_context(config, subjects=("sub-0000",)))
 
 
+def test_band_frequency_ranges_keep_gamma_scanner_clean(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+
+    assert stages._band_frequency_ranges(config) == {
+        "alpha": ((8.0, 12.9),),
+        "beta": ((13.0, 30.0),),
+        "gamma": ((30.1, 38.0), (43.0, 56.0), (67.0, 77.0)),
+    }
+
+
 def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeypatch) -> None:
     config = _with_anatomy(_config(tmp_path), tmp_path / "freesurfer")
     times = np.linspace(-5.0, 10.5, 32)
     rng = np.random.default_rng(0)
     stcs = [SimpleNamespace(data=rng.normal(size=(3, times.size))) for _ in range(4)]
+    filtered_ranges = []
+
+    def fake_filter(low, high, **kwargs):
+        filtered_ranges.append((low, high))
+        return object()
+
     fake_epochs = SimpleNamespace(
         info={},
         times=times,
-        copy=lambda: SimpleNamespace(filter=lambda low, high, **kwargs: object()),
+        copy=lambda: SimpleNamespace(filter=fake_filter),
     )
 
     monkeypatch.setattr(stages, "_load_subject_epochs", lambda *a, **k: fake_epochs)
@@ -206,7 +222,21 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
     monkeypatch.setattr(stages, "make_sloreta_inverse_operator", lambda **k: object())
     monkeypatch.setattr(stages, "apply_sloreta_inverse", lambda **k: stcs)
     monkeypatch.setattr(stages, "make_surface_source_morph", lambda **k: object())
-    monkeypatch.setattr(stages, "apply_source_morph", lambda stcs, **k: stcs)
+
+    def fake_morphed_power(*, stcs, times, baseline_window_s, active_window_s, morph):
+        return SimpleNamespace(
+            power_logratio=np.stack([np.mean(stc.data, axis=1) for stc in stcs], axis=0),
+            baseline_window_s=baseline_window_s,
+            active_window_s=active_window_s,
+            n_trials=len(stcs),
+            n_vertices=stcs[0].data.shape[0],
+        )
+
+    monkeypatch.setattr(
+        stages,
+        "compute_morphed_sloreta_hilbert_logratio_power",
+        fake_morphed_power,
+    )
 
     run_source_power(_context(config, subjects=("sub-0000",)))
 
@@ -223,13 +253,27 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
         )
         assert metadata["subject_id"] == "sub-0000"
         assert metadata["band"] == band
-        assert metadata["frequency_hz"] == list(config["study2"]["source_modeling"]["frequency_bands"][band])
+        assert metadata["frequency_hz"] == [
+            list(frequency_range)
+            for frequency_range in stages._band_frequency_ranges(config)[band]
+        ]
+        if band == "gamma":
+            assert metadata["frequency_aggregation"] == "bandwidth_weighted_logratio_mean"
+        else:
+            assert metadata["frequency_aggregation"] == "single_contiguous_band"
         assert metadata["baseline_window_s"] == [-5.0, -0.01]
         assert metadata["active_window_s"] == [3.0, 10.5]
         assert metadata["common_subject"] == "fsaverage"
         assert metadata["common_source_space_spacing"] == "oct6"
         assert metadata["n_trials"] == 4
         assert metadata["n_vertices"] == 3
+    assert filtered_ranges == [
+        (8.0, 12.9),
+        (13.0, 30.0),
+        (30.1, 38.0),
+        (43.0, 56.0),
+        (67.0, 77.0),
+    ]
 
 
 def test_run_source_stage_writes_band_maps_and_qc(tmp_path: Path) -> None:
@@ -589,7 +633,7 @@ def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:
             rows.append(
                 {
                     "subject_id": subject_id,
-                    "block": (trial % 3) + 1,
+                    "run": (trial % 3) + 1,
                     "expression": float(trial),
                     "rating": float(trial) + 0.1,
                     "nuisance": float(trial % 2),

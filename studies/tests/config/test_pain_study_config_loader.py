@@ -10,9 +10,9 @@ from studies.pain_study.eeg_coupling.config.eeg_bold_coupling_loader import (
 from studies.tests.test_support import REPO_ROOT
 
 LEVEL2_CONTINUOUS_COLUMNS = [
-    "block",
+    "run",
     "onset",
-    "within_block_trial",
+    "within_run_trial",
     "hrf_weighted_framewise_displacement",
     "hrf_weighted_std_dvars",
     "hrf_weighted_fp1_fp2_high_frequency_power",

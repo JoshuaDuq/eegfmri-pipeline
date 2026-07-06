@@ -20,6 +20,18 @@ Follow-up:
 
 ## Issues
 
+### 2026-06-30 - `sub-0006` - Pilot Participant Exclusion
+
+Study/stage: Study 1 and Study 2 eligibility.
+
+Issue: `sub-0006` was a pilot participant.
+
+Decision: Exclude `sub-0006` from Study 1 and Study 2 analyses.
+
+Follow-up: Keep `sub-0006` out of the analytic sample unless a future written
+analysis plan explicitly defines and justifies a separate pilot-participant
+quality-control use case.
+
 ### 2026-06-22 - `sub-0008` - Resting-State Baseline Skipped
 
 Study/stage: Ten-minute resting-state baseline recording.

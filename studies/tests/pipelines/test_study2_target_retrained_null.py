@@ -48,7 +48,7 @@ def _aligned_context(frame, config):
         param_grid={},
         config=config,
         target_residualization_columns=NUISANCE_COLUMNS,
-        blocks=None,
+        runs=None,
         trial_indices=None,
         scheme="within_subject",
         inner_splits=2,

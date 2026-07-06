@@ -11,6 +11,7 @@ import pytest
 from eeg_pipeline.analysis.features.api import (
     _compute_tfr_for_features,
     _extract_feature_with_error_handling,
+    _prepare_precomputed_data,
     extract_precomputed_features,
 )
 from eeg_pipeline.analysis.features.bursts import (
@@ -88,6 +89,34 @@ def test_precomputed_psd_requires_baseline_for_event_related_compute(monkeypatch
             config=DotConfig({"feature_engineering": {"task_is_rest": False}}),
             logger=logging.getLogger("strict-psd-baseline"),
         )
+
+
+@pytest.mark.parametrize("feature_category", ["aperiodic", "spectral"])
+def test_psd_precompute_keeps_full_epoch_for_event_baseline(feature_category: str) -> None:
+    class FullEpochPrecompute:
+        def crop(self, *_args, **_kwargs):
+            raise AssertionError(
+                f"{feature_category} precomputed data must keep baseline samples"
+            )
+
+    cached = FullEpochPrecompute()
+    ctx = SimpleNamespace(
+        feature_categories=[feature_category],
+        config=DotConfig({"feature_engineering": {"task_is_rest": False}}),
+        precomputed=cached,
+        logger=logging.getLogger("strict-psd-precompute"),
+        get_precomputed_for_family=lambda _family: None,
+    )
+
+    result = _prepare_precomputed_data(
+        ctx,
+        working_epochs=None,
+        power_bands=["alpha"],
+        tmin=0.0,
+        tmax=3.0,
+    )
+
+    assert result is cached
 
 
 def test_subtract_evoked_rejects_missing_condition_labels() -> None:

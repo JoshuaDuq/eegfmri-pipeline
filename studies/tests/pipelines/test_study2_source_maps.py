@@ -85,7 +85,7 @@ def test_compute_subject_source_association_map_returns_qc_without_map_when_crit
         compute_subject_source_association_map,
     )
 
-    frame = _source_stage_frame(n_blocks=2)
+    frame = _source_stage_frame(n_runs=2)
     source_power = np.ones((len(frame), 3), dtype=float)
 
     result = compute_subject_source_association_map(
@@ -98,7 +98,7 @@ def test_compute_subject_source_association_map_returns_qc_without_map_when_crit
     assert result.qc.source_stage_criteria_met is False
     assert result.association is None
     assert result.qc.unmet_criteria == (
-        "min_valid_blocks_per_subject",
+        "min_valid_runs_per_subject",
         "min_retained_trials_per_subject",
     )
 
@@ -264,7 +264,7 @@ def _cohort_source_stage_frame(*, include_subject_with_unmet_criteria: bool = Tr
         _source_stage_frame().assign(subject_id="sub-0002"),
     ]
     if include_subject_with_unmet_criteria:
-        frames.append(_source_stage_frame(n_blocks=2).assign(subject_id="sub-0003"))
+        frames.append(_source_stage_frame(n_runs=2).assign(subject_id="sub-0003"))
     return pd.concat(frames, ignore_index=True)
 
 

@@ -156,6 +156,9 @@ frequency_bands: &frequency_bands
   alpha: [8.0, 12.9]
   beta: [13.0, 30.0]
   gamma: [30.1, 80.0]
+  gamma_low_clean: [30.1, 38.0]
+  gamma_mid_clean: [43.0, 56.0]
+  gamma_high_clean: [67.0, 77.0]
 
 # 2.2 Time Windows
 time_windows:
@@ -812,7 +815,7 @@ machine_learning:
     strict_regression_target_continuous: false  # If true, error when regression target is binary-like (prefer ml classify)
 
   incremental_validity:
-    baseline_predictors: []              # required; standardized meta names: predictor, trial_index, block
+    baseline_predictors: []              # required; standardized meta names: predictor, trial_index, run
     require_baseline_predictors: true    # If true, missing baseline predictors raise an error instead of intercept-only fallback
     baseline_alpha: 1.0
 
@@ -820,8 +823,8 @@ machine_learning:
     inner_splits: 5
     outer_splits: 5
     hygiene_enabled: true
-    within_subject_ordered_blocks: false  # If true, within-subject CV uses forward block splits when block labels are explicitly ordered.
-    permutation_scheme: "within_subject"  # "within_subject" | "within_subject_within_block"
+    within_subject_ordered_runs: false  # If true, within-subject CV uses forward run splits when run labels are explicitly ordered.
+    permutation_scheme: "within_subject"  # "within_subject" | "within_subject_within_run"
     min_label_shuffle_fraction: 0.01     # Minimum fraction of labels that must change for a permutation to be considered effective
     min_valid_permutation_fraction: 0.5  # Minimum completed/requested permutations required for valid p-values
     min_valid_permutation_fold_fraction: 1.0

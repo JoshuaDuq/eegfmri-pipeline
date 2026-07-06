@@ -45,7 +45,7 @@ def _epochs_and_events() -> tuple[mne.EpochsArray, pd.DataFrame]:
     epochs = mne.EpochsArray(data, info, tmin=0.0, verbose=False)
     events = pd.DataFrame(
         {
-            "run_id": [1, 1],
+            "run": [1, 1],
             "trial_number": [1, 2],
             "onset": [1.0, 2.0],
             "duration": [0.5, 0.5],
@@ -68,7 +68,7 @@ def _subject_targets(
         {
             "subject_id": [subject_id, subject_id],
             "task": ["pain", "pain"],
-            "block": [1, 1],
+            "run": [1, 1],
             "trial_index": [1, 2],
             "onset": [1.0, 2.0],
             "duration": [0.5, 0.5],
@@ -172,7 +172,7 @@ def test_deep_target_alignment_rejects_conflicting_duplicate_keys() -> None:
 
     aligned_events = pd.DataFrame(
         {
-            "run_id": [1],
+            "run": [1],
             "trial_number": [1],
             "onset": [1.0],
             "duration": [0.5],
@@ -180,7 +180,7 @@ def test_deep_target_alignment_rejects_conflicting_duplicate_keys() -> None:
     )
     target_rows = pd.DataFrame(
         {
-            "block": [1, 1],
+            "run": [1, 1],
             "trial_index": [1, 1],
             "onset": [1.0, 1.0],
             "duration": [0.5, 0.5],
@@ -260,7 +260,7 @@ def test_run_loso_deep_regression_validates_shape_and_subject_folds(tmp_path) ->
         {
             "subject_id": groups,
             "task": ["pain"] * 4,
-            "block": [1, 1, 1, 1],
+            "run": [1, 1, 1, 1],
             "trial_index": [1, 2, 1, 2],
             "onset": [1.0, 2.0, 1.0, 2.0],
             "duration": [0.5, 0.5, 0.5, 0.5],

@@ -101,7 +101,7 @@ def test_load_study1_config_defines_prespecified_permutation_controls() -> None:
     assert benchmark["permutation_scheme"] == "circular_shift_within_run"
     assert benchmark["max_invalid_permutation_fraction"] == 0.20
     assert benchmark["circular_shift"] == {
-        "min_valid_blocks_per_subject": 3,
+        "min_valid_runs_per_subject": 3,
         "min_retained_trials_per_subject": 25,
     }
 
@@ -112,8 +112,9 @@ def test_load_study1_config_includes_gamma_deep_regression_presets() -> None:
     config = load_study1_config()
     presets = config["study1"]["deep_regression"]["presets"]
 
-    assert presets["gamma"] == ["gamma"]
-    assert presets["alpha_beta_gamma"] == ["alpha", "beta", "gamma"]
+    clean_gamma = ["gamma_low_clean", "gamma_mid_clean", "gamma_high_clean"]
+    assert presets["gamma"] == clean_gamma
+    assert presets["alpha_beta_gamma"] == ["alpha", "beta", *clean_gamma]
 
 
 def test_load_study1_config_uses_readme_bootstrap_iterations() -> None:
@@ -282,7 +283,7 @@ def test_load_study1_config_rejects_wrong_lag_after_plateau_starts(tmp_path) -> 
                         "permutation_scheme": "circular_shift_within_run",
                         "max_invalid_permutation_fraction": 0.20,
                         "circular_shift": {
-                            "min_valid_blocks_per_subject": 3,
+                            "min_valid_runs_per_subject": 3,
                             "min_retained_trials_per_subject": 25,
                         },
                     },
@@ -318,7 +319,7 @@ def test_load_study1_config_rejects_plateau_window_that_reaches_ramp_down(tmp_pa
                         "permutation_scheme": "circular_shift_within_run",
                         "max_invalid_permutation_fraction": 0.20,
                         "circular_shift": {
-                            "min_valid_blocks_per_subject": 3,
+                            "min_valid_runs_per_subject": 3,
                             "min_retained_trials_per_subject": 25,
                         },
                     },
@@ -353,7 +354,7 @@ def test_load_study1_config_rejects_missing_permutation_scheme(tmp_path) -> None
                         "n_perm": 5000,
                         "max_invalid_permutation_fraction": 0.20,
                         "circular_shift": {
-                            "min_valid_blocks_per_subject": 3,
+                            "min_valid_runs_per_subject": 3,
                             "min_retained_trials_per_subject": 25,
                         },
                     },
@@ -393,7 +394,7 @@ def test_load_study1_config_uses_env_var_override(tmp_path, monkeypatch) -> None
                         "permutation_scheme": "circular_shift_within_run",
                         "max_invalid_permutation_fraction": 0.20,
                         "circular_shift": {
-                            "min_valid_blocks_per_subject": 3,
+                            "min_valid_runs_per_subject": 3,
                             "min_retained_trials_per_subject": 25,
                         },
                     },
@@ -505,9 +506,9 @@ def test_smoketest_config_uses_article_required_nuisance_regression_columns() ->
     nuisance = config["study1"]["targets"]["nuisance_regression"]
     assert nuisance["enabled"] is True
     assert nuisance["continuous_columns"] == [
-        "block",
+        "run",
         "onset",
-        "within_block_trial",
+        "within_run_trial",
         "hrf_weighted_framewise_displacement",
         "hrf_weighted_std_dvars",
         "hrf_weighted_fp1_fp2_high_frequency_power",
@@ -535,6 +536,6 @@ def test_smoketest_config_defines_prespecified_permutation_controls() -> None:
     assert benchmark["permutation_scheme"] == "circular_shift_within_run"
     assert benchmark["max_invalid_permutation_fraction"] == 0.20
     assert benchmark["circular_shift"] == {
-        "min_valid_blocks_per_subject": 3,
+        "min_valid_runs_per_subject": 3,
         "min_retained_trials_per_subject": 25,
     }

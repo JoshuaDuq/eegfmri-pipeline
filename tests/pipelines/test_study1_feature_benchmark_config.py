@@ -1,6 +1,6 @@
 import pandas as pd
 
-from eeg_pipeline.utils.config.loader import ConfigDict, get_config_value
+from eeg_pipeline.utils.config.loader import ConfigDict, get_config_value, get_frequency_bands
 from studies.pain_study.study1.cohort import primary_targets_parquet_path
 from studies.pain_study.study1.config import load_study1_config
 from studies.pain_study.study1.feature_benchmark import (
@@ -9,11 +9,17 @@ from studies.pain_study.study1.feature_benchmark import (
     feature_benchmark_config,
 )
 from studies.pain_study.study1.reporting import PRIMARY_GATE_FEATURE_SPEC
+from studies.pain_study.scanner_contamination import (
+    SCANNER_CLEAN_GAMMA_BANDS,
+    SCANNER_CLEAN_GAMMA_RANGES_HZ,
+)
+
+SCANNER_CLEAN_GAMMA_BAND_LIST = list(SCANNER_CLEAN_GAMMA_BANDS)
 
 LEVEL2_CONTINUOUS_COLUMNS = [
-    "block",
+    "run",
     "onset",
-    "within_block_trial",
+    "within_run_trial",
     "hrf_weighted_framewise_displacement",
     "hrf_weighted_std_dvars",
     "hrf_weighted_fp1_fp2_high_frequency_power",
@@ -49,7 +55,7 @@ def test_study1_default_circular_shift_structure_rules_match_readme() -> None:
     config = load_study1_config()
     circular_shift = config["study1"]["feature_benchmark"]["circular_shift"]
 
-    assert circular_shift["min_valid_blocks_per_subject"] == 3
+    assert circular_shift["min_valid_runs_per_subject"] == 3
     assert circular_shift["min_retained_trials_per_subject"] == 25
     assert config["study1"]["feature_benchmark"]["max_invalid_permutation_fraction"] == 0.20
 
@@ -66,7 +72,11 @@ def test_study1_default_clean_events_qc_matches_artifact_proxy_estimand() -> Non
 
 def test_study1_primary_gate_uses_alpha_beta_gamma() -> None:
     assert PRIMARY_GATE_FEATURE_SPEC == "alpha_beta_gamma"
-    assert PRIMARY_BAND_PRESETS["alpha_beta_gamma"] == ["alpha", "beta", "gamma"]
+    assert PRIMARY_BAND_PRESETS["alpha_beta_gamma"] == [
+        "alpha",
+        "beta",
+        *SCANNER_CLEAN_GAMMA_BAND_LIST,
+    ]
 
 
 def test_study1_primary_power_presets_exclude_low_frequency_exploration() -> None:
@@ -80,14 +90,28 @@ def test_study1_exploratory_power_presets_keep_low_frequency_audit() -> None:
     assert EXPLORATORY_BAND_PRESETS["delta"] == ["delta"]
     assert EXPLORATORY_BAND_PRESETS["theta"] == ["theta"]
     assert EXPLORATORY_BAND_PRESETS["delta_theta"] == ["delta", "theta"]
-    assert PRIMARY_BAND_PRESETS["gamma"] == ["gamma"]
+    assert PRIMARY_BAND_PRESETS["gamma"] == SCANNER_CLEAN_GAMMA_BAND_LIST
     assert EXPLORATORY_BAND_PRESETS["all_bands"] == [
         "delta",
         "theta",
         "alpha",
         "beta",
-        "gamma",
+        *SCANNER_CLEAN_GAMMA_BAND_LIST,
     ]
+
+
+def test_study1_config_defines_scanner_clean_gamma_bands() -> None:
+    config = load_study1_config()
+    bands = config["time_frequency_analysis"]["bands"]
+
+    for band, frequency_range in SCANNER_CLEAN_GAMMA_RANGES_HZ.items():
+        assert list(bands[band]) == list(frequency_range)
+    assert "gamma" not in bands
+    assert get_frequency_bands(config) == bands
+
+    presets = config["study1"]["deep_regression"]["presets"]
+    assert presets["gamma"] == SCANNER_CLEAN_GAMMA_BAND_LIST
+    assert presets["alpha_beta_gamma"] == ["alpha", "beta", *SCANNER_CLEAN_GAMMA_BAND_LIST]
 
 
 def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
@@ -100,10 +124,10 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
             "subject_id": ["sub-0001", "sub-0001"],
             "NPS": [1.0, 2.0],
             "SIIPS1": [2.0, 3.0],
-            "block": [1, 1],
+            "run": [1, 1],
             "onset": [10.0, 20.0],
             "trial_index": [1, 2],
-            "within_block_trial": [1, 2],
+            "within_run_trial": [1, 2],
             "hrf_weighted_framewise_displacement": [0.1, 0.2],
             "hrf_weighted_std_dvars": [0.5, 0.6],
             "hrf_weighted_fp1_fp2_high_frequency_power": [1.1, 1.2],
@@ -136,7 +160,7 @@ def test_feature_benchmark_primary_config_is_non_transductive(tmp_path) -> None:
     assert (
         get_config_value(
             feature_config,
-            "machine_learning.cv.circular_shift.min_valid_blocks_per_subject",
+            "machine_learning.cv.circular_shift.min_valid_runs_per_subject",
             None,
         )
         == 3
@@ -173,10 +197,10 @@ def test_feature_benchmark_siips1_residualization_includes_nps(tmp_path) -> None
             "subject_id": ["sub-0001", "sub-0001"],
             "NPS": [1.0, 2.0],
             "SIIPS1": [2.0, 3.0],
-            "block": [1, 1],
+            "run": [1, 1],
             "onset": [10.0, 20.0],
             "trial_index": [1, 2],
-            "within_block_trial": [1, 2],
+            "within_run_trial": [1, 2],
             "hrf_weighted_framewise_displacement": [0.1, 0.2],
             "hrf_weighted_std_dvars": [0.5, 0.6],
             "hrf_weighted_fp1_fp2_high_frequency_power": [1.1, 1.2],

@@ -50,6 +50,7 @@ from studies.pain_study.study2.reporting import (
 )
 from studies.pain_study.study2.source_power import (
     SourcePowerExtraction,
+    compute_morphed_sloreta_hilbert_logratio_power,
     compute_sloreta_hilbert_logratio_power,
     compute_sloreta_source_estimates,
 )
@@ -133,6 +134,7 @@ __all__ = [
     "compute_source_family_inference",
     "compute_group_source_inference",
     "compute_haufe_pattern",
+    "compute_morphed_sloreta_hilbert_logratio_power",
     "compute_sloreta_hilbert_logratio_power",
     "compute_sloreta_source_estimates",
     "compute_spatial_correspondence",

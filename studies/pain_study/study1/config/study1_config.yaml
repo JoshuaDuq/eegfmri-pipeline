@@ -24,7 +24,7 @@ study1:
     method: "lss"
     normalization: "none"
     round_decimals: 3
-    trials_per_block: 11
+    trials_per_run: 11
     names: ["NPS", "SIIPS1"]
     signature_manifest_path: "signature_manifest.yaml"
     signature_scoring_mask_path: "tpl-MNI152NLin2009cAsym_res-02_desc-brain_mask.nii.gz"
@@ -60,9 +60,9 @@ study1:
     nuisance_regression:
       enabled: true
       continuous_columns:
-        - "block"
+        - "run"
         - "onset"
-        - "within_block_trial"
+        - "within_run_trial"
         - "hrf_weighted_framewise_displacement"
         - "hrf_weighted_std_dvars"
         - "hrf_weighted_fp1_fp2_high_frequency_power"
@@ -79,7 +79,7 @@ study1:
     permutation_scheme: "circular_shift_within_run"
     max_invalid_permutation_fraction: 0.20
     circular_shift:
-      min_valid_blocks_per_subject: 3
+      min_valid_runs_per_subject: 3
       min_retained_trials_per_subject: 25
   reporting:
     sensitivity_output_roots: []
@@ -110,13 +110,26 @@ study1:
     presets:
       alpha: ["alpha"]
       beta: ["beta"]
-      gamma: ["gamma"]
+      gamma: ["gamma_low_clean", "gamma_mid_clean", "gamma_high_clean"]
       alpha_beta: ["alpha", "beta"]
-      alpha_beta_gamma: ["alpha", "beta", "gamma"]
+      alpha_beta_gamma:
+        - "alpha"
+        - "beta"
+        - "gamma_low_clean"
+        - "gamma_mid_clean"
+        - "gamma_high_clean"
   outputs:
     root_name: "study1"
 
 time_frequency_analysis:
+  bands:
+    delta: [1.0, 3.9]
+    theta: [4.0, 7.9]
+    alpha: [8.0, 12.9]
+    beta: [13.0, 30.0]
+    gamma_low_clean: [30.1, 38.0]
+    gamma_mid_clean: [43.0, 56.0]
+    gamma_high_clean: [67.0, 77.0]
   baseline_window: [-5.0, -0.01]
   active_window: [3.0, 10.5]
 

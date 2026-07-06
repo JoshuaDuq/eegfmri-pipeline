@@ -39,19 +39,20 @@ from studies.pain_study.study1.temporal_controls import (
     resolve_temporal_control_windows,
     temporal_control_feature_spec,
 )
+from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_BANDS
 
 PRIMARY_BAND_PRESETS: dict[str, list[str]] = {
     "alpha": ["alpha"],
     "beta": ["beta"],
-    "gamma": ["gamma"],
+    "gamma": list(SCANNER_CLEAN_GAMMA_BANDS),
     "alpha_beta": ["alpha", "beta"],
-    "alpha_beta_gamma": ["alpha", "beta", "gamma"],
+    "alpha_beta_gamma": ["alpha", "beta", *SCANNER_CLEAN_GAMMA_BANDS],
 }
 EXPLORATORY_BAND_PRESETS: dict[str, list[str]] = {
     "delta": ["delta"],
     "theta": ["theta"],
     "delta_theta": ["delta", "theta"],
-    "all_bands": ["delta", "theta", "alpha", "beta", "gamma"],
+    "all_bands": ["delta", "theta", "alpha", "beta", *SCANNER_CLEAN_GAMMA_BANDS],
 }
 PRIMARY_FEATURE_SEGMENTS = ("active",)
 PRIMARY_FEATURE_SCOPES = ("ch",)
@@ -129,7 +130,7 @@ def feature_benchmark_config(
     ).strip()
     feature_config["machine_learning.cv.permutation_scheme"] = permutation_scheme
     if permutation_scheme == "circular_shift_within_run":
-        for key in ("min_valid_blocks_per_subject", "min_retained_trials_per_subject"):
+        for key in ("min_valid_runs_per_subject", "min_retained_trials_per_subject"):
             value = require_config_value(
                 config,
                 f"study1.feature_benchmark.circular_shift.{key}",

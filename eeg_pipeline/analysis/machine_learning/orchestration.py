@@ -33,7 +33,7 @@ from sklearn.base import clone
 
 from eeg_pipeline.analysis.machine_learning.cv import (
     create_within_subject_folds,
-    create_block_aware_inner_cv,
+    create_run_aware_inner_cv,
     create_inner_cv,
     apply_fold_feature_harmonization,
     create_scoring_dict,
@@ -258,7 +258,7 @@ def _resolve_permutation_scheme(config: Any) -> str:
     scheme = str(
         get_config_value(config, "machine_learning.cv.permutation_scheme", "within_subject")
     ).strip().lower()
-    valid = {"within_subject", "within_subject_within_block", "circular_shift_within_run"}
+    valid = {"within_subject", "within_subject_within_run", "circular_shift_within_run"}
     if scheme not in valid:
         raise ValueError(
             "Invalid machine_learning.cv.permutation_scheme: "
@@ -267,30 +267,30 @@ def _resolve_permutation_scheme(config: Any) -> str:
     return scheme
 
 
-def _validate_permutation_blocks(
+def _validate_permutation_runs(
     y: np.ndarray,
-    blocks: Optional[np.ndarray],
+    runs: Optional[np.ndarray],
     *,
     scheme: str,
 ) -> Optional[np.ndarray]:
-    if scheme not in {"within_subject_within_block", "circular_shift_within_run"}:
+    if scheme not in {"within_subject_within_run", "circular_shift_within_run"}:
         return None
-    if blocks is None:
+    if runs is None:
         raise ValueError(
-            f"machine_learning.cv.permutation_scheme='{scheme}' requires block labels."
+            f"machine_learning.cv.permutation_scheme='{scheme}' requires run labels."
         )
 
-    blocks_arr = np.asarray(blocks)
-    if len(blocks_arr) != len(y):
+    runs_arr = np.asarray(runs)
+    if len(runs_arr) != len(y):
         raise ValueError(
-            "Permutation blocks must have the same length as y when "
+            "Permutation runs must have the same length as y when "
             f"machine_learning.cv.permutation_scheme='{scheme}'."
         )
-    if np.all(pd.isna(blocks_arr)):
+    if np.all(pd.isna(runs_arr)):
         raise ValueError(
-            f"machine_learning.cv.permutation_scheme='{scheme}' requires block labels."
+            f"machine_learning.cv.permutation_scheme='{scheme}' requires run labels."
         )
-    return blocks_arr
+    return runs_arr
 
 
 def _validate_permutation_trial_indices(
@@ -304,7 +304,7 @@ def _validate_permutation_trial_indices(
     if trial_indices is None:
         raise ValueError(
             "machine_learning.cv.permutation_scheme='circular_shift_within_run' "
-            "requires original within-block trial indices."
+            "requires original within-run trial indices."
         )
 
     trial_arr = pd.to_numeric(pd.Series(trial_indices), errors="coerce").to_numpy(dtype=float)
@@ -316,7 +316,7 @@ def _validate_permutation_trial_indices(
     if not np.all(np.isfinite(trial_arr)):
         raise ValueError(
             "machine_learning.cv.permutation_scheme='circular_shift_within_run' "
-            "requires finite original within-block trial indices."
+            "requires finite original within-run trial indices."
         )
     return trial_arr.astype(int)
 
@@ -350,22 +350,22 @@ def _permute_labels_by_scheme(
     y: np.ndarray,
     groups: np.ndarray,
     *,
-    blocks: Optional[np.ndarray],
+    runs: Optional[np.ndarray],
     trial_indices: Optional[np.ndarray] = None,
     rng: np.random.Generator,
     scheme: str,
 ) -> np.ndarray:
-    """Permute labels within-subject, within-subject×block, or circular-shift within-run."""
+    """Permute labels within subject, within subject-run, or circular-shift within run."""
     y_perm = np.asarray(y, dtype=float).copy()
     groups_arr = np.asarray(groups, dtype=object)
     mode = str(scheme).strip().lower()
-    valid = {"within_subject", "within_subject_within_block", "circular_shift_within_run"}
+    valid = {"within_subject", "within_subject_within_run", "circular_shift_within_run"}
     if mode not in valid:
         raise ValueError(
             f"Unsupported permutation scheme: {scheme!r}. "
             f"Expected one of: {sorted(valid)}."
         )
-    blocks_arr = _validate_permutation_blocks(y_perm, blocks, scheme=mode)
+    runs_arr = _validate_permutation_runs(y_perm, runs, scheme=mode)
     trial_indices_arr = _validate_permutation_trial_indices(
         y_perm,
         trial_indices,
@@ -378,41 +378,41 @@ def _permute_labels_by_scheme(
             continue
 
         if mode == "circular_shift_within_run":
-            subj_blocks = blocks_arr[subj_mask]
+            subj_runs = runs_arr[subj_mask]
             subj_global_idx = np.where(subj_mask)[0]
-            for block_id in np.unique(subj_blocks):
-                if pd.isna(block_id):
-                    block_mask = pd.isna(subj_blocks)
+            for run in np.unique(subj_runs):
+                if pd.isna(run):
+                    run_mask = pd.isna(subj_runs)
                 else:
-                    block_mask = subj_blocks == block_id
-                block_global_idx = subj_global_idx[block_mask]
-                block_global_idx = _trial_index_ordered_indices(
-                    block_global_idx,
+                    run_mask = subj_runs == run
+                run_global_idx = subj_global_idx[run_mask]
+                run_global_idx = _trial_index_ordered_indices(
+                    run_global_idx,
                     trial_indices_arr,
                 )
                 admissible_shifts = _admissible_circular_shifts(
-                    trial_indices_arr[block_global_idx],
+                    trial_indices_arr[run_global_idx],
                 )
                 if not admissible_shifts:
                     raise ValueError(
-                        "circular_shift_within_run requires permutation-valid blocks "
+                        "circular_shift_within_run requires permutation-valid runs "
                         "with at least 8 retained trials and at least four admissible "
                         "nonzero circular shifts."
                     )
                 shift = int(rng.choice(np.asarray(admissible_shifts, dtype=int)))
-                y_perm[block_global_idx] = np.roll(y_perm[block_global_idx], shift)
+                y_perm[run_global_idx] = np.roll(y_perm[run_global_idx], shift)
 
-        elif mode == "within_subject_within_block" and blocks_arr is not None:
-            subj_blocks = blocks_arr[subj_mask]
+        elif mode == "within_subject_within_run" and runs_arr is not None:
+            subj_runs = runs_arr[subj_mask]
             subj_y = y_perm[subj_mask]
-            for block_id in np.unique(subj_blocks):
-                if pd.isna(block_id):
-                    block_mask = pd.isna(subj_blocks)
+            for run in np.unique(subj_runs):
+                if pd.isna(run):
+                    run_mask = pd.isna(subj_runs)
                 else:
-                    block_mask = subj_blocks == block_id
-                block_indices = np.where(block_mask)[0]
-                if block_indices.size >= 2:
-                    subj_y[block_indices] = rng.permutation(subj_y[block_indices])
+                    run_mask = subj_runs == run
+                run_indices = np.where(run_mask)[0]
+                if run_indices.size >= 2:
+                    subj_y[run_indices] = rng.permutation(subj_y[run_indices])
             y_perm[subj_mask] = subj_y
         else:
             y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
@@ -423,7 +423,7 @@ def _generate_effective_permutation(
     y: np.ndarray,
     groups: np.ndarray,
     *,
-    blocks: Optional[np.ndarray],
+    runs: Optional[np.ndarray],
     trial_indices: Optional[np.ndarray] = None,
     rng: np.random.Generator,
     requested_scheme: str,
@@ -433,7 +433,7 @@ def _generate_effective_permutation(
     y_perm = _permute_labels_by_scheme(
         y,
         groups,
-        blocks=blocks,
+        runs=runs,
         trial_indices=trial_indices,
         rng=rng,
         scheme=requested_scheme,
@@ -477,10 +477,10 @@ def filter_circular_shift_permutation_rows(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, pd.DataFrame]:
     if _resolve_permutation_scheme(config) != "circular_shift_within_run":
         return X, y, groups, meta
-    if "block" not in meta.columns:
+    if "run" not in meta.columns:
         raise ValueError(
             "machine_learning.cv.permutation_scheme='circular_shift_within_run' "
-            "requires a 'block' metadata column."
+            "requires a 'run' metadata column."
         )
     trial_column = next(
         (column for column in ("trial_index", "trial_number") if column in meta.columns),
@@ -493,17 +493,17 @@ def filter_circular_shift_permutation_rows(
         )
 
     groups_arr = np.asarray(groups, dtype=object)
-    blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy(dtype=float)
+    blocks = pd.to_numeric(meta["run"], errors="coerce").to_numpy(dtype=float)
     trial_indices = pd.to_numeric(meta[trial_column], errors="coerce").to_numpy(dtype=float)
-    _validate_permutation_blocks(y, blocks, scheme="circular_shift_within_run")
+    _validate_permutation_runs(y, blocks, scheme="circular_shift_within_run")
     _validate_permutation_trial_indices(
         y,
         trial_indices,
         scheme="circular_shift_within_run",
     )
 
-    valid_block_mask = np.zeros(len(y), dtype=bool)
-    invalid_block_records: list[dict[str, Any]] = []
+    valid_run_mask = np.zeros(len(y), dtype=bool)
+    invalid_run_records: list[dict[str, Any]] = []
     for subject_id in np.unique(groups_arr):
         subject_mask = groups_arr == subject_id
         subject_indices = np.flatnonzero(subject_mask)
@@ -514,22 +514,22 @@ def filter_circular_shift_permutation_rows(
             block_indices = _trial_index_ordered_indices(block_indices, trial_indices)
             admissible_shifts = _admissible_circular_shifts(trial_indices[block_indices])
             if admissible_shifts:
-                valid_block_mask[block_indices] = True
+                valid_run_mask[block_indices] = True
                 continue
-            invalid_block_records.append(
+            invalid_run_records.append(
                 {
                     "subject_id": str(subject_id),
-                    "block": _json_safe_scalar(block_id),
+                    "run": _json_safe_scalar(block_id),
                     "retained_trials": int(len(block_indices)),
                 }
             )
 
-    if not np.any(valid_block_mask):
-        raise RuntimeError("No permutation-valid circular-shift task blocks remain.")
+    if not np.any(valid_run_mask):
+        raise RuntimeError("No permutation-valid circular-shift runs remain.")
 
-    min_valid_blocks_raw = get_config_value(
+    min_valid_runs_raw = get_config_value(
         config,
-        "machine_learning.cv.circular_shift.min_valid_blocks_per_subject",
+        "machine_learning.cv.circular_shift.min_valid_runs_per_subject",
         None,
     )
     min_retained_trials_raw = get_config_value(
@@ -537,8 +537,8 @@ def filter_circular_shift_permutation_rows(
         "machine_learning.cv.circular_shift.min_retained_trials_per_subject",
         None,
     )
-    min_valid_blocks = (
-        int(min_valid_blocks_raw) if min_valid_blocks_raw is not None else None
+    min_valid_runs = (
+        int(min_valid_runs_raw) if min_valid_runs_raw is not None else None
     )
     min_retained_trials = (
         int(min_retained_trials_raw) if min_retained_trials_raw is not None else None
@@ -547,24 +547,24 @@ def filter_circular_shift_permutation_rows(
     eligible_subject_mask = np.zeros(len(y), dtype=bool)
     subject_exclusion_records: list[dict[str, str]] = []
     for subject_id in np.unique(groups_arr):
-        subject_valid_mask = (groups_arr == subject_id) & valid_block_mask
+        subject_valid_mask = (groups_arr == subject_id) & valid_run_mask
         retained_trials = int(np.sum(subject_valid_mask))
-        valid_blocks = int(len(np.unique(blocks[subject_valid_mask])))
-        too_few_blocks = (
-            min_valid_blocks is not None
-            and valid_blocks < int(min_valid_blocks)
+        valid_runs = int(len(np.unique(blocks[subject_valid_mask])))
+        too_few_runs = (
+            min_valid_runs is not None
+            and valid_runs < int(min_valid_runs)
         )
         too_few_trials = (
             min_retained_trials is not None
             and retained_trials < int(min_retained_trials)
         )
-        if too_few_blocks or too_few_trials:
+        if too_few_runs or too_few_trials:
             subject_exclusion_records.append(
                 {
                     "subject_id": str(subject_id),
                     "reason": (
                         "Excluded by circular-shift permutation structure: "
-                        f"valid_blocks={valid_blocks}, retained_trials={retained_trials}."
+                        f"valid_runs={valid_runs}, retained_trials={retained_trials}."
                     ),
                 }
             )
@@ -581,7 +581,7 @@ def filter_circular_shift_permutation_rows(
     meta_filtered.attrs.update(dict(meta.attrs))
     meta_filtered.attrs["excluded_subjects"] = previous_exclusions + subject_exclusion_records
     meta_filtered.attrs["circular_shift_trial_structure"] = {
-        "invalid_blocks": invalid_block_records,
+        "invalid_runs": invalid_run_records,
         "excluded_subjects": subject_exclusion_records,
         "n_trials_before": int(len(y)),
         "n_trials_after": int(np.sum(eligible_subject_mask)),
@@ -591,9 +591,9 @@ def filter_circular_shift_permutation_rows(
     if n_removed > 0:
         logger.info(
             "Circular-shift trial-structure filtering removed %d trial(s), "
-            "%d invalid block(s), and %d subject(s).",
+            "%d invalid run(s), and %d subject(s).",
             n_removed,
-            len(invalid_block_records),
+            len(invalid_run_records),
             len(subject_exclusion_records),
         )
     return (
@@ -832,7 +832,7 @@ def _fit_within_subject_fold(
         if n_splits_inner < 2:
             return _fit_default_pipeline(pipe, X_train, y_train, fold)
         
-        inner_cv_splits = create_block_aware_inner_cv(blocks_train, n_splits_inner, random_state, fold, subject_id)
+        inner_cv_splits = create_run_aware_inner_cv(blocks_train, n_splits_inner, random_state, fold, subject_id)
         
         if inner_cv_splits is not None and len(inner_cv_splits) >= 2:
             scoring = create_scoring_dict()
@@ -972,8 +972,8 @@ def run_regression_ml(
         context="LOSO regression",
     )
     blocks = None
-    if meta is not None and hasattr(meta, "columns") and "block" in meta.columns:
-        blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy()
+    if meta is not None and hasattr(meta, "columns") and "run" in meta.columns:
+        blocks = pd.to_numeric(meta["run"], errors="coerce").to_numpy()
 
     results_dir = results_root / "regression"
     plots_dir = results_dir / "plots"
@@ -1242,7 +1242,7 @@ def run_within_subject_regression_ml(
     feature_scopes: Optional[List[str]] = None,
     feature_stats: Optional[List[str]] = None,
 ) -> Path:
-    """Run within-subject (block-aware) regression on per-trial feature-table inputs."""
+    """Run within-subject (run-aware) regression on per-trial feature-table inputs."""
     if target is None:
         target = get_config_value(config, "machine_learning.targets.regression", None)
 
@@ -1271,15 +1271,15 @@ def run_within_subject_regression_ml(
     )
 
     if meta is None or not hasattr(meta, "columns"):
-        raise ValueError("Within-subject machine learning requires trial metadata with block/run labels.")
+        raise ValueError("Within-subject machine learning requires trial metadata with run labels.")
 
-    if "block" not in meta.columns:
+    if "run" not in meta.columns:
         raise ValueError(
-            "Within-subject machine learning requires block/run labels to prevent temporal data leakage. "
-            "Ensure your events.tsv contains one of: block, run_id, run, session."
+            "Within-subject machine learning requires run labels to prevent temporal data leakage. "
+            "Ensure your events.tsv contains a run column."
         )
 
-    blocks_all = pd.to_numeric(meta["block"], errors="coerce").to_numpy()
+    blocks_all = pd.to_numeric(meta["run"], errors="coerce").to_numpy()
 
     finite_mask = np.isfinite(y)
     if not np.all(finite_mask):
@@ -1292,7 +1292,7 @@ def run_within_subject_regression_ml(
     finite_blocks = np.isfinite(blocks_all)
     if not np.all(finite_blocks):
         dropped = int((~finite_blocks).sum())
-        logger.warning(f"Dropping {dropped} trials with missing block labels for within-subject machine learning.")
+        logger.warning(f"Dropping {dropped} trials with missing run labels for within-subject machine learning.")
         X = X[finite_blocks]
         y = y[finite_blocks]
         groups = groups[finite_blocks]
@@ -1343,7 +1343,7 @@ def run_within_subject_regression_ml(
     if not folds:
         raise ValueError(
             "No within-subject folds could be created. "
-            "Ensure each selected subject has at least 2 unique block/run labels."
+            "Ensure each selected subject has at least 2 unique run labels."
         )
 
     fold_records = []
@@ -1470,7 +1470,7 @@ def run_within_subject_regression_ml(
     n_perm_completed = 0
     
     if n_perm > 0:
-        logger.info(f"Running {n_perm} block-aware permutations for within-subject inference...")
+        logger.info(f"Running {n_perm} run-aware permutations for within-subject inference...")
         rng = np.random.default_rng(rng_seed)
         n_effective = 0
         perm_scheme = _resolve_permutation_scheme(config)
@@ -1485,7 +1485,7 @@ def run_within_subject_regression_ml(
             y_perm, effective, _changed_fraction, used_scheme = _generate_effective_permutation(
                 y,
                 groups,
-                blocks=blocks_all,
+                runs=blocks_all,
                 rng=rng,
                 requested_scheme=perm_scheme,
                 min_changed_fraction=min_shuffle_fraction,
@@ -1843,8 +1843,8 @@ def run_classification_ml(
             feature_stats=feature_stats,
         )
     blocks = None
-    if meta is not None and hasattr(meta, "columns") and "block" in meta.columns:
-        blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy()
+    if meta is not None and hasattr(meta, "columns") and "run" in meta.columns:
+        blocks = pd.to_numeric(meta["run"], errors="coerce").to_numpy()
 
     n_subjects = len(np.unique(groups))
     n_features_desc = (
@@ -2321,9 +2321,9 @@ def run_within_subject_classification_ml(
     feature_scopes: Optional[List[str]] = None,
     feature_stats: Optional[List[str]] = None,
 ) -> Path:
-    """Run within-subject (block-aware) classification on per-trial feature-table inputs.
+    """Run within-subject (run-aware) classification on per-trial feature-table inputs.
 
-    Uses block/run labels to prevent temporal leakage. Statistical unit is subject.
+    Uses run labels to prevent temporal leakage. Statistical unit is subject.
     """
     from eeg_pipeline.analysis.machine_learning.classification import (
         ClassificationResult,
@@ -2381,18 +2381,18 @@ def run_within_subject_classification_ml(
             feature_stats=feature_stats,
         )
 
-    if meta is None or not hasattr(meta, "columns") or "block" not in meta.columns:
+    if meta is None or not hasattr(meta, "columns") or "run" not in meta.columns:
         raise ValueError(
-            "Within-subject classification requires block/run labels to prevent temporal leakage. "
-            "Ensure your events.tsv contains one of: block, run_id, run, session."
+            "Within-subject classification requires run labels to prevent temporal leakage. "
+            "Ensure your events.tsv contains a run column."
         )
 
-    blocks_all = pd.to_numeric(meta["block"], errors="coerce").to_numpy()
+    blocks_all = pd.to_numeric(meta["run"], errors="coerce").to_numpy()
     finite_blocks = np.isfinite(blocks_all)
     if not np.all(finite_blocks):
         dropped = int((~finite_blocks).sum())
         logger.warning(
-            "Dropping %d trials with missing block labels for within-subject classification.",
+            "Dropping %d trials with missing run labels for within-subject classification.",
             dropped,
         )
         X = X[finite_blocks]
@@ -2446,7 +2446,7 @@ def run_within_subject_classification_ml(
     if not folds:
         raise ValueError(
             "No within-subject folds could be created. "
-            "Ensure each selected subject has at least 2 unique block/run labels."
+            "Ensure each selected subject has at least 2 unique run labels."
         )
 
     def _run_with_labels(y_labels: np.ndarray) -> Tuple[List[Dict[str, Any]], int]:
@@ -2478,7 +2478,7 @@ def run_within_subject_classification_ml(
                     f"{fold_label}: only one class in training."
                 )
 
-            # Inner CV: stratified and block-aware (within subject).
+            # Inner CV: stratified and run-aware (within subject).
             n_unique_blocks = len(np.unique(blocks_train))
             effective_splits = min(max(2, int(inner_splits)), n_unique_blocks)
             if model_type == "cnn":
@@ -2811,7 +2811,7 @@ def run_within_subject_classification_ml(
             y_perm, effective, _changed_fraction, used_scheme = _generate_effective_permutation(
                 y,
                 groups,
-                blocks=blocks_all,
+                runs=blocks_all,
                 rng=rng,
                 requested_scheme=perm_scheme,
                 min_changed_fraction=min_shuffle_fraction,
@@ -2954,7 +2954,7 @@ def _run_classification_permutations(
     )
 
     perm_scheme = _resolve_permutation_scheme(config)
-    blocks_arr = _validate_permutation_blocks(y, blocks, scheme=perm_scheme)
+    blocks_arr = _validate_permutation_runs(y, blocks, scheme=perm_scheme)
     
     max_failed_perm_fraction = float(
         get_config_value(config, "machine_learning.classification.max_failed_fold_fraction", 0.25)
@@ -2967,7 +2967,7 @@ def _run_classification_permutations(
         y_perm, effective, _changed_fraction, used_scheme = _generate_effective_permutation(
             y,
             groups,
-            blocks=blocks_arr,
+            runs=blocks_arr,
             rng=rng,
             requested_scheme=perm_scheme,
             min_changed_fraction=min_shuffle_fraction,
@@ -3567,7 +3567,7 @@ def reconstruct_staged_permutation_target_for_fold(
     train_idx: np.ndarray,
     test_idx: np.ndarray,
     columns: Tuple[str, ...],
-    blocks: Optional[np.ndarray],
+    runs: Optional[np.ndarray],
     trial_indices: Optional[np.ndarray],
     rng: np.random.Generator,
     scheme: str,
@@ -3603,14 +3603,14 @@ def reconstruct_staged_permutation_target_for_fold(
     if not np.all(np.isfinite(nuisance_prediction_fold)):
         raise ValueError("Staged residual permutation requires finite nuisance predictions.")
 
-    blocks_fold = None if blocks is None else np.asarray(blocks)[fold_indices]
+    runs_fold = None if runs is None else np.asarray(runs)[fold_indices]
     trial_indices_fold = None
     if trial_indices is not None:
         trial_indices_fold = np.asarray(trial_indices)[fold_indices]
     shifted_residual_fold = _permute_labels_by_scheme(
         residual_fold,
         np.asarray(groups, dtype=object)[fold_indices],
-        blocks=blocks_fold,
+        runs=runs_fold,
         trial_indices=trial_indices_fold,
         rng=rng,
         scheme=scheme,
@@ -3653,8 +3653,8 @@ def _model_comparison_permutation_p_value(
         )
 
     blocks = None
-    if meta is not None and "block" in meta.columns:
-        blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy(dtype=float)
+    if meta is not None and "run" in meta.columns:
+        blocks = pd.to_numeric(meta["run"], errors="coerce").to_numpy(dtype=float)
     trial_indices = None
     if meta is not None:
         for trial_column in ("trial_index", "trial_number"):
@@ -3700,7 +3700,7 @@ def _model_comparison_permutation_p_value(
                     train_idx=train_idx,
                     test_idx=test_idx,
                     columns=target_residualization_columns,
-                    blocks=blocks,
+                    runs=blocks,
                     trial_indices=trial_indices,
                     rng=rng,
                     scheme=requested_scheme,
@@ -3755,7 +3755,7 @@ def _model_comparison_permutation_p_value(
         y_perm, effective, _changed_fraction, _scheme = _generate_effective_permutation(
             y,
             groups,
-            blocks=blocks,
+            runs=blocks,
             trial_indices=trial_indices,
             rng=rng,
             requested_scheme=requested_scheme,
@@ -4323,7 +4323,7 @@ def run_incremental_validity_ml(
         get_config_value(config, "machine_learning.incremental_validity.require_baseline_predictors", True)
     )
 
-    # Extract baseline predictors from meta (meta uses standardized names: predictor, trial_index, block, etc.)
+    # Extract baseline predictors from meta (meta uses standardized names: predictor, trial_index, run, etc.)
     missing = [c for c in baseline_predictors if c not in meta.columns]
     if missing:
         msg = (

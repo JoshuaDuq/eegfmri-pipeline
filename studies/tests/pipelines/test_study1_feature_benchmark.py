@@ -40,7 +40,7 @@ def _config(root: Path) -> DotConfig:
                     "permutation_scheme": "circular_shift_within_run",
                     "max_invalid_permutation_fraction": 0.20,
                     "circular_shift": {
-                        "min_valid_blocks_per_subject": 3,
+                        "min_valid_runs_per_subject": 3,
                         "min_retained_trials_per_subject": 25,
                     },
                 },
@@ -64,9 +64,9 @@ def _write_primary_targets(config: DotConfig) -> Path:
         {
             "subject_id": ["sub-0001", "sub-0001", "sub-0002", "sub-0002"],
             "task": ["pain", "pain", "pain", "pain"],
-            "block": [1, 1, 1, 1],
+            "run": [1, 1, 1, 1],
             "trial_index": [1, 2, 1, 2],
-            "within_block_trial": [1, 2, 1, 2],
+            "within_run_trial": [1, 2, 1, 2],
             "onset": [1.0, 2.0, 1.0, 2.0],
             "duration": [0.5, 0.5, 0.5, 0.5],
             "pain_binary_coded": [0, 1, 0, 1],
@@ -220,7 +220,7 @@ def _write_clean_events(
         {
             "trial_id": trial_ids,
             "trial_number": trial_ids,
-            "block": ((trial_ids - 1) // 3) + 1,
+            "run": ((trial_ids - 1) // 3) + 1,
             "onset": trial_ids.astype(float) * 10.0,
             "duration": np.ones(n_trials, dtype=float),
         }
@@ -240,9 +240,9 @@ def _write_four_subject_targets(config: DotConfig, *, task: str, n_trials: int) 
                 {
                     "subject_id": subject_id,
                     "task": task,
-                    "block": ((trial_id - 1) // 3) + 1,
+                    "run": ((trial_id - 1) // 3) + 1,
                     "trial_index": trial_id,
-                    "within_block_trial": ((trial_id - 1) % 3) + 1,
+                    "within_run_trial": ((trial_id - 1) % 3) + 1,
                     "onset": float(trial_id * 10),
                     "duration": 1.0,
                     "NPS": float(subject_number + trial_id * 0.25),
@@ -419,7 +419,7 @@ def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path
     cfg["study1"]["features"]["exploratory_feature_families"] = []
     cfg["study1"]["targets"]["nuisance_regression"] = {
         "enabled": True,
-        "continuous_columns": ["pain_binary_coded", "block", "onset"],
+        "continuous_columns": ["pain_binary_coded", "run", "onset"],
         "categorical_columns": [],
     }
     _write_primary_targets(cfg)
@@ -454,7 +454,7 @@ def test_run_feature_benchmark_passes_foldwise_nuisance_residualization(tmp_path
     )
     assert captured_calls[0]["config"].get("machine_learning.target_residualization.columns") == [
         "pain_binary_coded",
-        "block",
+        "run",
         "onset",
     ]
 
@@ -503,7 +503,13 @@ def test_run_feature_benchmark_adds_temporal_control_windows(tmp_path) -> None:
         / "features_temporal_controls"
     )
     assert prestimulus_call["feature_families"] == ["power"]
-    assert prestimulus_call["feature_bands"] == ["alpha", "beta", "gamma"]
+    assert prestimulus_call["feature_bands"] == [
+        "alpha",
+        "beta",
+        "gamma_low_clean",
+        "gamma_mid_clean",
+        "gamma_high_clean",
+    ]
     assert prestimulus_call["feature_segments"] == ["prestimulus_wide"]
     assert prestimulus_call["feature_scopes"] == ["ch"]
     assert prestimulus_call["feature_stats"] == ["log10raw"]
@@ -661,7 +667,7 @@ def test_model_comparison_permutation_refits_full_pipeline_for_subject_mean_r2()
     X = pd.DataFrame({"feature": [1.0, 2.0, 3.0, 4.0]}).to_numpy(dtype=float)
     y = pd.Series([1.0, 2.0, 3.0, 4.0]).to_numpy(dtype=float)
     groups = pd.Series(["sub-0001", "sub-0001", "sub-0002", "sub-0002"]).to_numpy(dtype=object)
-    meta = pd.DataFrame({"block": [1, 1, 1, 1]})
+    meta = pd.DataFrame({"run": [1, 1, 1, 1]})
     outer_folds = [
         (pd.Series([2, 3]).to_numpy(dtype=int), pd.Series([0, 1]).to_numpy(dtype=int)),
         (pd.Series([0, 1]).to_numpy(dtype=int), pd.Series([2, 3]).to_numpy(dtype=int)),
@@ -724,7 +730,7 @@ def test_model_comparison_permutation_resamples_until_requested_valid_draws() ->
     X = pd.DataFrame({"feature": [1.0, 2.0, 3.0, 4.0]}).to_numpy(dtype=float)
     y = pd.Series([1.0, 2.0, 3.0, 4.0]).to_numpy(dtype=float)
     groups = pd.Series(["sub-0001", "sub-0001", "sub-0002", "sub-0002"]).to_numpy(dtype=object)
-    meta = pd.DataFrame({"block": [1, 1, 1, 1]})
+    meta = pd.DataFrame({"run": [1, 1, 1, 1]})
     outer_folds = [
         (pd.Series([2, 3]).to_numpy(dtype=int), pd.Series([0, 1]).to_numpy(dtype=int)),
         (pd.Series([0, 1]).to_numpy(dtype=int), pd.Series([2, 3]).to_numpy(dtype=int)),
@@ -1031,7 +1037,7 @@ def test_staged_permutation_reconstructs_raw_targets_from_shifted_residuals() ->
 
     y = np.zeros(22, dtype=float)
     groups = np.array(["sub-0001"] * 11 + ["sub-0002"] * 11, dtype=object)
-    blocks = np.ones(22, dtype=float)
+    runs = np.ones(22, dtype=float)
     trial_indices = np.tile(np.arange(1, 12, dtype=int), 2)
     meta = pd.DataFrame({"nuisance": np.arange(22, dtype=float)})
     train_idx = np.arange(0, 11, dtype=int)
@@ -1046,7 +1052,7 @@ def test_staged_permutation_reconstructs_raw_targets_from_shifted_residuals() ->
         details={"columns": ["nuisance"]},
     )
 
-    def _shift_residuals(residuals, groups_arg, *, blocks, trial_indices, rng, scheme):
+    def _shift_residuals(residuals, groups_arg, *, runs, trial_indices, rng, scheme):
         np.testing.assert_array_equal(groups_arg, groups)
         np.testing.assert_array_equal(residuals[train_idx], nuisance_fit.train_residual)
         np.testing.assert_array_equal(residuals[test_idx], nuisance_fit.test_residual)
@@ -1069,7 +1075,7 @@ def test_staged_permutation_reconstructs_raw_targets_from_shifted_residuals() ->
             train_idx=train_idx,
             test_idx=test_idx,
             columns=("nuisance",),
-            blocks=blocks,
+            runs=runs,
             trial_indices=trial_indices,
             rng=np.random.default_rng(7),
             scheme="circular_shift_within_run",
@@ -1093,7 +1099,7 @@ def test_model_comparison_permutation_reconstructs_staged_targets_per_outer_fold
     groups = np.array(["sub-0001"] * 11 + ["sub-0002"] * 11, dtype=object)
     meta = pd.DataFrame(
         {
-            "block": np.ones(22, dtype=int),
+            "run": np.ones(22, dtype=int),
             "trial_index": np.tile(np.arange(1, 12, dtype=int), 2),
             "nuisance": np.arange(22, dtype=float),
         }
@@ -1159,17 +1165,17 @@ def test_model_comparison_permutation_reconstructs_staged_targets_per_outer_fold
     assert p_value.n_perm_attempted == 1
 
 
-def test_circular_shift_within_run_requires_blocks() -> None:
+def test_circular_shift_within_run_requires_runs() -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import _permute_labels_by_scheme
 
     y = np.arange(11, dtype=float)
     groups = np.array(["sub-0001"] * len(y), dtype=object)
 
-    with pytest.raises(ValueError, match="circular_shift_within_run.*requires block labels"):
+    with pytest.raises(ValueError, match="circular_shift_within_run.*requires run labels"):
         _permute_labels_by_scheme(
             y,
             groups,
-            blocks=None,
+            runs=None,
             rng=np.random.default_rng(1),
             scheme="circular_shift_within_run",
         )
@@ -1180,13 +1186,13 @@ def test_circular_shift_within_run_requires_trial_indices() -> None:
 
     y = np.arange(11, dtype=float)
     groups = np.array(["sub-0001"] * len(y), dtype=object)
-    blocks = np.ones(len(y), dtype=float)
+    runs = np.ones(len(y), dtype=float)
 
     with pytest.raises(ValueError, match="circular_shift_within_run.*trial indices"):
         _permute_labels_by_scheme(
             y,
             groups,
-            blocks=blocks,
+            runs=runs,
             rng=np.random.default_rng(1),
             scheme="circular_shift_within_run",
         )
@@ -1195,51 +1201,51 @@ def test_circular_shift_within_run_requires_trial_indices() -> None:
 def test_admissible_circular_shifts_follow_original_trial_distance_rule() -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import _admissible_circular_shifts
 
-    complete_block = np.arange(1, 12, dtype=int)
-    assert _admissible_circular_shifts(complete_block) == (5, 6, 7, 8, 9, 10)
+    complete_run = np.arange(1, 12, dtype=int)
+    assert _admissible_circular_shifts(complete_run) == (5, 6, 7, 8, 9, 10)
     assert _admissible_circular_shifts(np.arange(1, 8, dtype=int)) == tuple()
 
 
-def test_circular_shift_within_run_preserves_subject_block_label_sets() -> None:
+def test_circular_shift_within_run_preserves_subject_run_label_sets() -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import _permute_labels_by_scheme
 
     y = np.arange(22, dtype=float)
     groups = np.array(["sub-0001"] * len(y), dtype=object)
-    blocks = np.repeat([1.0, 2.0], 11)
+    runs = np.repeat([1.0, 2.0], 11)
     trial_indices = np.tile(np.arange(1, 12), 2)
 
     y_perm = _permute_labels_by_scheme(
         y,
         groups,
-        blocks=blocks,
+        runs=runs,
         trial_indices=trial_indices,
         rng=np.random.default_rng(1),
         scheme="circular_shift_within_run",
     )
 
-    first_block = blocks == 1.0
-    second_block = blocks == 2.0
-    assert set(y_perm[first_block]) == set(y[first_block])
-    assert set(y_perm[second_block]) == set(y[second_block])
+    first_run = runs == 1.0
+    second_run = runs == 2.0
+    assert set(y_perm[first_run]) == set(y[first_run])
+    assert set(y_perm[second_run]) == set(y[second_run])
     assert not np.array_equal(y_perm, y)
 
 
-def test_circular_shift_trial_structure_filter_excludes_invalid_blocks_and_subjects() -> None:
+def test_circular_shift_trial_structure_filter_excludes_invalid_runs_and_subjects() -> None:
     from eeg_pipeline.analysis.machine_learning.orchestration import (
         filter_circular_shift_permutation_rows,
     )
 
     rows: list[dict[str, object]] = []
-    for subject, block_lengths in (
+    for subject, run_lengths in (
         ("sub-0001", [9, 9, 9, 7]),
         ("sub-0002", [9, 9, 7]),
     ):
-        for block_id, block_length in enumerate(block_lengths, start=1):
-            for trial_index in range(1, block_length + 1):
+        for run, run_length in enumerate(run_lengths, start=1):
+            for trial_index in range(1, run_length + 1):
                 rows.append(
                     {
                         "subject_id": subject,
-                        "block": block_id,
+                        "run": run,
                         "trial_index": trial_index,
                     }
                 )
@@ -1248,7 +1254,7 @@ def test_circular_shift_trial_structure_filter_excludes_invalid_blocks_and_subje
     groups = frame["subject_id"].to_numpy(dtype=object)
     X = np.arange(len(frame), dtype=float).reshape(-1, 1)
     y = np.arange(len(frame), dtype=float)
-    meta = frame[["block", "trial_index"]].copy()
+    meta = frame[["run", "trial_index"]].copy()
 
     X_filtered, y_filtered, groups_filtered, meta_filtered = (
         filter_circular_shift_permutation_rows(
@@ -1262,7 +1268,7 @@ def test_circular_shift_trial_structure_filter_excludes_invalid_blocks_and_subje
                         "cv": {
                             "permutation_scheme": "circular_shift_within_run",
                             "circular_shift": {
-                                "min_valid_blocks_per_subject": 3,
+                                "min_valid_runs_per_subject": 3,
                                 "min_retained_trials_per_subject": 25,
                             },
                         }
@@ -1276,14 +1282,14 @@ def test_circular_shift_trial_structure_filter_excludes_invalid_blocks_and_subje
     assert len(X_filtered) == 27
     assert len(y_filtered) == 27
     assert set(groups_filtered) == {"sub-0001"}
-    assert set(meta_filtered["block"]) == {1, 2, 3}
+    assert set(meta_filtered["run"]) == {1, 2, 3}
     excluded_subjects = meta_filtered.attrs["excluded_subjects"]
     assert excluded_subjects == [
         {
             "subject_id": "sub-0002",
             "reason": (
                 "Excluded by circular-shift permutation structure: "
-                "valid_blocks=2, retained_trials=18."
+                "valid_runs=2, retained_trials=18."
             ),
         }
     ]

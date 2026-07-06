@@ -63,7 +63,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     load_epochs_for_analysis=lambda *_args, **_kwargs: (None, None),
                 ),
                 "eeg_pipeline.utils.data.fmri_signature_targets": types.SimpleNamespace(
-                    find_block_column=lambda *_args, **_kwargs: None,
+                    find_run_column=lambda *_args, **_kwargs: None,
                     load_fmri_signature_target_for_subject=lambda **_kwargs: (_ for _ in ()).throw(
                         AssertionError("fMRI signature target helper should not be used in this test")
                     ),
@@ -219,7 +219,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
 
         with patch.object(
             orch,
-            "create_block_aware_inner_cv",
+            "create_run_aware_inner_cv",
             return_value=inner_splits,
         ), patch.object(orch, "GridSearchCV", FailingGridSearch):
             with self.assertRaisesRegex(RuntimeError, "inner CV failed"):
@@ -369,12 +369,12 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
         self.assertEqual(len(folds), 2)
 
-    def test_create_within_subject_folds_requires_run_blocks(self):
+    def test_create_within_subject_folds_requires_runs(self):
         from eeg_pipeline.analysis.machine_learning.cv import create_within_subject_folds
 
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
 
-        with self.assertRaisesRegex(ValueError, "run_id"):
+        with self.assertRaisesRegex(ValueError, "run labels"):
             create_within_subject_folds(
                 groups=groups,
                 blocks_all=None,
@@ -392,7 +392,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
         blocks = np.array([1, 1, 1, 2], dtype=int)
 
-        with self.assertRaisesRegex(ValueError, "insufficient blocks"):
+        with self.assertRaisesRegex(ValueError, "insufficient runs"):
             create_within_subject_folds(
                 groups=groups,
                 blocks_all=blocks,
@@ -3749,7 +3749,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "machine_learning": {
                     "cv": {
-                        "permutation_scheme": "within_subject_within_block",
+                        "permutation_scheme": "within_subject_within_run",
                         "min_label_shuffle_fraction": 0.1,
                         "min_valid_permutation_fraction": 0.0,
                     }
@@ -3840,57 +3840,57 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
 
         self.assertEqual(orch._resolve_permutation_scheme(DotConfig({})), "within_subject")
 
-    def test_generate_effective_permutation_requires_blocks_for_blockwise_scheme(self):
+    def test_generate_effective_permutation_requires_runs_for_runwise_scheme(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
         y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
 
-        with self.assertRaisesRegex(ValueError, "requires block labels"):
+        with self.assertRaisesRegex(ValueError, "requires run labels"):
             orch._generate_effective_permutation(
                 y,
                 groups,
-                blocks=None,
+                runs=None,
                 rng=np.random.default_rng(42),
-                requested_scheme="within_subject_within_block",
+                requested_scheme="within_subject_within_run",
                 min_changed_fraction=0.1,
             )
 
-    def test_generate_effective_permutation_rejects_block_length_mismatch(self):
+    def test_generate_effective_permutation_rejects_run_length_mismatch(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
         y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
-        blocks = np.array([1.0, 2.0], dtype=float)
+        runs = np.array([1.0, 2.0], dtype=float)
 
         with self.assertRaisesRegex(ValueError, "same length as y"):
             orch._generate_effective_permutation(
                 y,
                 groups,
-                blocks=blocks,
+                runs=runs,
                 rng=np.random.default_rng(42),
-                requested_scheme="within_subject_within_block",
+                requested_scheme="within_subject_within_run",
                 min_changed_fraction=0.1,
             )
 
-    def test_generate_effective_permutation_rejects_all_missing_blocks(self):
+    def test_generate_effective_permutation_rejects_all_missing_runs(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
         y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
-        blocks = np.array([np.nan, np.nan, np.nan, np.nan], dtype=float)
+        runs = np.array([np.nan, np.nan, np.nan, np.nan], dtype=float)
 
-        with self.assertRaisesRegex(ValueError, "requires block labels"):
+        with self.assertRaisesRegex(ValueError, "requires run labels"):
             orch._generate_effective_permutation(
                 y,
                 groups,
-                blocks=blocks,
+                runs=runs,
                 rng=np.random.default_rng(42),
-                requested_scheme="within_subject_within_block",
+                requested_scheme="within_subject_within_run",
                 min_changed_fraction=0.1,
             )
 
-    def test_run_permutation_test_rejects_all_missing_blocks_for_blockwise_scheme(self):
+    def test_run_permutation_test_rejects_all_missing_runs_for_runwise_scheme(self):
         from sklearn.dummy import DummyRegressor
         from sklearn.pipeline import Pipeline
 
@@ -3899,12 +3899,12 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         X = np.array([[0.0], [1.0], [2.0], [3.0]], dtype=float)
         y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
-        blocks = np.array([np.nan, np.nan, np.nan, np.nan], dtype=float)
+        runs = np.array([np.nan, np.nan, np.nan, np.nan], dtype=float)
         cfg = DotConfig(
             {
                 "machine_learning": {
                     "cv": {
-                        "permutation_scheme": "within_subject_within_block",
+                        "permutation_scheme": "within_subject_within_run",
                         "min_valid_permutation_fraction": 0.0,
                     }
                 }
@@ -3912,12 +3912,12 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as td:
-            with self.assertRaisesRegex(ValueError, "requires block labels"):
+            with self.assertRaisesRegex(ValueError, "requires run labels"):
                 cv.run_permutation_test(
                     X=X,
                     y=y,
                     groups=groups,
-                    blocks=blocks,
+                    blocks=runs,
                     pipe=Pipeline([("regressor", DummyRegressor(strategy="mean"))]),
                     param_grid={},
                     inner_cv_splits=2,
@@ -3929,24 +3929,24 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                     config=cfg,
                 )
 
-    def test_generate_effective_permutation_does_not_downgrade_blockwise_scheme(self):
+    def test_generate_effective_permutation_does_not_downgrade_runwise_scheme(self):
         from eeg_pipeline.analysis.machine_learning import orchestration as orch
 
         y = np.array([0.0, 1.0, 0.0, 1.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001", "sub-0002", "sub-0002"], dtype=object)
-        blocks = np.array([1.0, 2.0, 1.0, 2.0], dtype=float)
+        runs = np.array([1.0, 2.0, 1.0, 2.0], dtype=float)
 
         y_perm, effective, changed_fraction, used_scheme = orch._generate_effective_permutation(
             y,
             groups,
-            blocks=blocks,
+            runs=runs,
             rng=np.random.default_rng(42),
-            requested_scheme="within_subject_within_block",
+            requested_scheme="within_subject_within_run",
             min_changed_fraction=0.1,
         )
 
         self.assertFalse(effective)
-        self.assertEqual(used_scheme, "within_subject_within_block")
+        self.assertEqual(used_scheme, "within_subject_within_run")
         self.assertAlmostEqual(changed_fraction, 0.0, places=8)
         np.testing.assert_array_equal(y_perm, y)
 
@@ -4045,7 +4045,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
 
         groups = np.array(["sub-0001"] * 6, dtype=object)
         blocks = np.array([1, 1, 2, 2, 3, 3], dtype=float)
-        cfg = DotConfig({"machine_learning": {"cv": {"within_subject_ordered_blocks": True}}})
+        cfg = DotConfig({"machine_learning": {"cv": {"within_subject_ordered_runs": True}}})
 
         folds = create_within_subject_folds(
             groups=groups,
@@ -4064,12 +4064,12 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             test_blocks = blocks[np.asarray(test_idx, dtype=int)]
             self.assertLess(np.max(train_blocks), np.min(test_blocks))
 
-    def test_create_within_subject_folds_raises_when_ordered_blocks_cannot_be_formed(self):
+    def test_create_within_subject_folds_raises_when_ordered_runs_cannot_be_formed(self):
         from eeg_pipeline.analysis.machine_learning.cv import create_within_subject_folds
 
         groups = np.array(["sub-0001"] * 4, dtype=object)
         blocks = np.array(["run-a", "run-a", "run-b", "run-b"], dtype=object)
-        cfg = DotConfig({"machine_learning": {"cv": {"within_subject_ordered_blocks": True}}})
+        cfg = DotConfig({"machine_learning": {"cv": {"within_subject_ordered_runs": True}}})
 
         with self.assertRaisesRegex(ValueError, "ordered within-subject CV requested"):
             create_within_subject_folds(
@@ -4222,33 +4222,33 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             tg._permute_labels_within_subject_structure(
                 y,
                 groups,
-                blocks=np.array([0.0, 1.0], dtype=float),
+                runs=np.array([0.0, 1.0], dtype=float),
                 rng=np.random.default_rng(42),
                 scheme="not-a-scheme",
             )
 
-    def test_time_generalization_permutation_helper_requires_blocks_for_blockwise_scheme(self):
+    def test_time_generalization_permutation_helper_requires_runs_for_runwise_scheme(self):
         from eeg_pipeline.analysis.machine_learning import time_generalization as tg
 
         y = np.array([0.0, 1.0], dtype=float)
         groups = np.array(["sub-0001", "sub-0001"], dtype=object)
 
-        with self.assertRaisesRegex(ValueError, "requires block labels"):
+        with self.assertRaisesRegex(ValueError, "requires run labels"):
             tg._permute_labels_within_subject_structure(
                 y,
                 groups,
-                blocks=None,
+                runs=None,
                 rng=np.random.default_rng(42),
-                scheme="within_subject_within_block",
+                scheme="within_subject_within_run",
             )
 
-    def test_time_generalization_regression_raises_when_blockwise_permutations_lack_blocks(self):
+    def test_time_generalization_regression_raises_when_runwise_permutations_lack_runs(self):
         from eeg_pipeline.analysis.machine_learning import time_generalization as tg
 
         class _FakeEpochs:
             def __init__(self):
                 self.times = np.array([0.0, 0.1], dtype=float)
-                self.metadata = pd.DataFrame({"block": [np.nan, np.nan]})
+                self.metadata = pd.DataFrame({"run": [np.nan, np.nan]})
 
             def copy(self):
                 return _FakeEpochs()
@@ -4280,7 +4280,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "analysis": {"min_subjects_for_group": 2},
                 "machine_learning": {
-                    "cv": {"permutation_scheme": "within_subject_within_block"},
+                    "cv": {"permutation_scheme": "within_subject_within_run"},
                     "analysis": {
                         "time_generalization": {
                             "active_window": [0.0, 0.1],
@@ -4319,7 +4319,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
         ), patch.object(
             tg, "r2_score", return_value=0.2
         ):
-            with self.assertRaisesRegex(ValueError, "requires block labels"):
+            with self.assertRaisesRegex(ValueError, "requires run labels"):
                 tg.time_generalization_regression(
                     deriv_root=Path("."),
                     subjects=["0001", "0002"],
@@ -4781,13 +4781,13 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
                 log=Mock(),
             )
 
-    def test_find_block_column_parses_run_prefixed_labels(self):
-        from eeg_pipeline.utils.data.machine_learning import _find_block_column
+    def test_find_run_column_parses_run_prefixed_labels(self):
+        from eeg_pipeline.utils.data.machine_learning import _find_run_column
 
-        events = pd.DataFrame({"run_id": ["run-01", "run-01", "run-02", "run-02"]})
-        block = _find_block_column(events)
-        self.assertIsNotNone(block)
-        vals = pd.to_numeric(block, errors="coerce").to_numpy(dtype=float)
+        events = pd.DataFrame({"run": ["run-01", "run-01", "run-02", "run-02"]})
+        runs = _find_run_column(events)
+        self.assertIsNotNone(runs)
+        vals = pd.to_numeric(runs, errors="coerce").to_numpy(dtype=float)
         np.testing.assert_allclose(vals, np.array([1.0, 1.0, 2.0, 2.0], dtype=float), atol=1e-12)
 
     def test_cv_hygiene_surfaces_fold_context_failures(self):

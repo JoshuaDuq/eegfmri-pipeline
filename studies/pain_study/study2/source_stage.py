@@ -31,8 +31,8 @@ from studies.pain_study.study2.validation import (
     require_config_string,
 )
 from studies.pain_study.study2.source_stage_trials import (
-    permutation_valid_source_blocks,
-    permutation_valid_source_blocks_with_rows,
+    permutation_valid_source_runs,
+    permutation_valid_source_runs_with_rows,
 )
 
 
@@ -42,7 +42,7 @@ class SourceStageSubjectQC:
     band: str
     source_stage_criteria_met: bool
     retained_trials: int
-    valid_blocks: int
+    valid_runs: int
     design_rank: int
     residual_degrees_of_freedom: int
     condition_number: float
@@ -196,7 +196,7 @@ def _evaluate_source_stage_cohort(
                 "band": qc.band,
                 "source_stage_criteria_met": qc.source_stage_criteria_met,
                 "retained_trials": qc.retained_trials,
-                "valid_blocks": qc.valid_blocks,
+                "valid_runs": qc.valid_runs,
                 "design_rank": qc.design_rank,
                 "residual_degrees_of_freedom": qc.residual_degrees_of_freedom,
                 "condition_number": qc.condition_number,
@@ -304,28 +304,28 @@ def _evaluate_source_stage_subject(
     if missing:
         raise ValueError(f"Study 2 source-stage table is missing columns: {missing}.")
 
-    valid_frame = permutation_valid_source_blocks(frame)
+    valid_frame = permutation_valid_source_runs(frame)
     retained_trials = int(len(valid_frame))
-    valid_blocks = int(valid_frame["block"].nunique()) if not valid_frame.empty else 0
-    min_blocks = require_config_int(
+    valid_runs = int(valid_frame["run"].nunique()) if not valid_frame.empty else 0
+    min_runs = require_config_int(
         config,
-        "study2.source_stage.min_valid_blocks_per_subject",
+        "study2.source_stage.min_valid_runs_per_subject",
     )
     min_trials = require_config_int(
         config,
         "study2.source_stage.min_retained_trials_per_subject",
     )
-    if valid_blocks < min_blocks or retained_trials < min_trials:
+    if valid_runs < min_runs or retained_trials < min_trials:
         unmet_count_criteria: list[str] = []
-        if valid_blocks < min_blocks:
-            unmet_count_criteria.append("min_valid_blocks_per_subject")
+        if valid_runs < min_runs:
+            unmet_count_criteria.append("min_valid_runs_per_subject")
         if retained_trials < min_trials:
             unmet_count_criteria.append("min_retained_trials_per_subject")
         return _source_stage_qc_with_unmet_criteria(
             subject_id=subject_id,
             band=band_label,
             retained_trials=retained_trials,
-            valid_blocks=valid_blocks,
+            valid_runs=valid_runs,
             unmet_criteria=tuple(unmet_count_criteria),
         )
 
@@ -342,7 +342,7 @@ def _evaluate_source_stage_subject(
             subject_id=subject_id,
             band=band_label,
             retained_trials=retained_trials,
-            valid_blocks=valid_blocks,
+            valid_runs=valid_runs,
             design_rank=rank,
             residual_degrees_of_freedom=residual_degrees_of_freedom,
             condition_number=condition_number,
@@ -360,7 +360,7 @@ def _evaluate_source_stage_subject(
             subject_id=subject_id,
             band=band_label,
             retained_trials=retained_trials,
-            valid_blocks=valid_blocks,
+            valid_runs=valid_runs,
             design_rank=rank,
             residual_degrees_of_freedom=residual_degrees_of_freedom,
             condition_number=contribution_condition_number,
@@ -376,7 +376,7 @@ def _evaluate_source_stage_subject(
             subject_id=subject_id,
             band=band_label,
             retained_trials=retained_trials,
-            valid_blocks=valid_blocks,
+            valid_runs=valid_runs,
             design_rank=rank,
             residual_degrees_of_freedom=residual_degrees_of_freedom,
             condition_number=condition_number,
@@ -392,7 +392,7 @@ def _evaluate_source_stage_subject(
             subject_id=subject_id,
             band=band_label,
             retained_trials=retained_trials,
-            valid_blocks=valid_blocks,
+            valid_runs=valid_runs,
             design_rank=rank,
             residual_degrees_of_freedom=residual_degrees_of_freedom,
             condition_number=contribution_condition_number,
@@ -415,7 +415,7 @@ def _evaluate_source_stage_subject(
                 subject_id=subject_id,
                 band=band_label,
                 retained_trials=retained_trials,
-                valid_blocks=valid_blocks,
+                valid_runs=valid_runs,
                 design_rank=rank,
                 residual_degrees_of_freedom=residual_degrees_of_freedom,
                 condition_number=contribution_condition_number,
@@ -428,7 +428,7 @@ def _evaluate_source_stage_subject(
         band=band_label,
         source_stage_criteria_met=True,
         retained_trials=retained_trials,
-        valid_blocks=valid_blocks,
+        valid_runs=valid_runs,
         design_rank=rank,
         residual_degrees_of_freedom=residual_degrees_of_freedom,
         condition_number=contribution_condition_number,
@@ -448,7 +448,7 @@ def _prepare_source_stage_association_inputs(
     if not qc.source_stage_criteria_met:
         return _empty_source_stage_association_inputs(qc)
 
-    valid_frame, retained_row_indices = permutation_valid_source_blocks_with_rows(frame)
+    valid_frame, retained_row_indices = permutation_valid_source_runs_with_rows(frame)
     design, design_columns = build_source_stage_design(
         valid_frame,
         config=config,
@@ -488,7 +488,7 @@ def _source_stage_qc_with_unmet_criteria(
     band: str,
     unmet_criteria: tuple[str, ...],
     retained_trials: int = 0,
-    valid_blocks: int = 0,
+    valid_runs: int = 0,
     design_rank: int = 0,
     residual_degrees_of_freedom: int = 0,
     condition_number: float = float("nan"),
@@ -499,7 +499,7 @@ def _source_stage_qc_with_unmet_criteria(
         band=band,
         source_stage_criteria_met=False,
         retained_trials=retained_trials,
-        valid_blocks=valid_blocks,
+        valid_runs=valid_runs,
         design_rank=design_rank,
         residual_degrees_of_freedom=residual_degrees_of_freedom,
         condition_number=condition_number,

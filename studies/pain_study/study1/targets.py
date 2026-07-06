@@ -19,7 +19,6 @@ from eeg_pipeline.utils.config.loader import get_config_value, require_config_va
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root, resolve_fmri_bids_root
 from eeg_pipeline.utils.data.fmri_signature_targets import (
     load_fmri_signature_target_for_subject,
-    parse_run_label_to_int,
 )
 from fmri_pipeline.analysis.trial_signatures import (
     TrialSignatureExtractionConfig,
@@ -36,9 +35,6 @@ RAW_LEVEL2_ARTIFACT_COLUMNS = {
     "std_dvars": "hrf_weighted_std_dvars",
     "fp1_fp2_high_frequency_power": "hrf_weighted_fp1_fp2_high_frequency_power",
 }
-ACQUISITION_RUN_COLUMNS = ("run_id", "run", "session")
-
-
 def _study1_output_root(config: Any) -> Path:
     root_name = str(get_config_value(config, "study1.outputs.root_name", "study1")).strip()
     if not root_name:
@@ -618,24 +614,24 @@ def _required_trial_index(events_df: pd.DataFrame) -> pd.Series:
     return trial_index
 
 
-def _trials_per_block(config: Any) -> int:
-    trials_per_block = int(require_config_value(config, "study1.targets.trials_per_block"))
-    if trials_per_block <= 0:
-        raise ValueError("study1.targets.trials_per_block must be a positive integer.")
-    return trials_per_block
+def _trials_per_run(config: Any) -> int:
+    trials_per_run = int(require_config_value(config, "study1.targets.trials_per_run"))
+    if trials_per_run <= 0:
+        raise ValueError("study1.targets.trials_per_run must be a positive integer.")
+    return trials_per_run
 
 
-def _within_block_trial_number(
+def _within_run_trial_number(
     *,
     trial_index: pd.Series,
-    block: pd.Series,
+    run: pd.Series,
     config: Any,
 ) -> pd.Series:
-    trials_per_block = _trials_per_block(config)
+    trials_per_run = _trials_per_run(config)
     labels = pd.to_numeric(trial_index, errors="coerce")
-    blocks = pd.to_numeric(block, errors="coerce")
+    runs = pd.to_numeric(run, errors="coerce")
     values = labels.to_numpy(dtype=float)
-    block_values = blocks.to_numpy(dtype=float)
+    run_values = runs.to_numpy(dtype=float)
     if not np.all(np.isfinite(values)):
         raise ValueError("Study 1 trial-order labels must be finite.")
     if not np.all(values >= 1):
@@ -644,46 +640,35 @@ def _within_block_trial_number(
     if not np.allclose(values, rounded):
         raise ValueError("Study 1 trial-order labels must be integer-valued.")
 
-    if not np.all(np.isfinite(block_values)):
-        raise ValueError("Study 1 task block labels must be finite.")
-    block_rounded = np.rint(block_values)
-    if not np.allclose(block_values, block_rounded):
-        raise ValueError("Study 1 task block labels must be integer-valued.")
+    if not np.all(np.isfinite(run_values)):
+        raise ValueError("Study 1 task run labels must be finite.")
+    run_rounded = np.rint(run_values)
+    if not np.allclose(run_values, run_rounded):
+        raise ValueError("Study 1 task run labels must be integer-valued.")
 
     trial_labels = rounded.astype(int)
-    task_blocks = block_rounded.astype(int)
-    global_label_mask = trial_labels > trials_per_block
+    task_runs = run_rounded.astype(int)
+    global_label_mask = trial_labels > trials_per_run
     if np.any(global_label_mask):
-        expected_blocks = ((trial_labels[global_label_mask] - 1) // trials_per_block) + 1
-        actual_blocks = task_blocks[global_label_mask]
-        if not np.array_equal(expected_blocks, actual_blocks):
+        expected_runs = ((trial_labels[global_label_mask] - 1) // trials_per_run) + 1
+        actual_runs = task_runs[global_label_mask]
+        if not np.array_equal(expected_runs, actual_runs):
             raise ValueError(
-                "Study 1 trial-order labels and task blocks are inconsistent. "
-                "Global trial labels must map to the explicit task block."
+                "Study 1 trial-order labels and task runs are inconsistent. "
+                "Global trial labels must map to the explicit task run."
             )
 
-    within_block = ((trial_labels - 1) % trials_per_block) + 1
-    return pd.Series(within_block, index=trial_index.index, dtype="int64")
+    within_run = ((trial_labels - 1) % trials_per_run) + 1
+    return pd.Series(within_run, index=trial_index.index, dtype="int64")
 
 
-def _required_task_block(events_df: pd.DataFrame) -> pd.Series:
-    if "block" in events_df.columns:
-        block = pd.to_numeric(events_df["block"], errors="coerce")
-        if not block.notna().all():
-            raise ValueError("Study 1 task block column 'block' must contain finite values.")
-        return block
-
-    if "run_id" not in events_df.columns:
-        raise ValueError(
-            "Study 1 target preparation requires an explicit task block column named "
-            "'block' or the protocol event column 'run_id'. BIDS run/session labels "
-            "are acquisition metadata and cannot substitute for task blocks."
-        )
-
-    block = pd.to_numeric(events_df["run_id"], errors="coerce")
-    if not block.notna().all():
-        raise ValueError("Study 1 protocol block column 'run_id' must contain finite values.")
-    return block
+def _required_run(events_df: pd.DataFrame) -> pd.Series:
+    if "run" not in events_df.columns:
+        raise ValueError("Study 1 target preparation requires an explicit 'run' column.")
+    run = pd.to_numeric(events_df["run"], errors="coerce")
+    if not run.notna().all():
+        raise ValueError("Study 1 run column must contain finite values.")
+    return run
 
 
 def _condition_value_mask(series: pd.Series, configured_value: Any) -> pd.Series:
@@ -739,39 +724,13 @@ def _filter_events_to_configured_contrast(
     return events_df.loc[keep].copy().reset_index(drop=True)
 
 
-def _parse_acquisition_run(series: pd.Series, *, column: str) -> pd.Series:
-    numeric = pd.to_numeric(series, errors="coerce")
-    if numeric.notna().all():
-        return numeric
-
-    parsed = pd.Series(
-        [parse_run_label_to_int(value) for value in series],
-        index=series.index,
-        dtype="float64",
-    )
-    if parsed.notna().all():
-        return parsed
-
-    raise ValueError(
-        f"Study 1 acquisition run column '{column}' must contain finite run labels "
-        "for every clean EEG event row."
-    )
-
-
-def _required_acquisition_run(events_df: pd.DataFrame, task_block: pd.Series) -> pd.Series:
-    for column in ACQUISITION_RUN_COLUMNS:
-        if column in events_df.columns:
-            return _parse_acquisition_run(events_df[column], column=column)
-    return task_block
-
-
 def _events_for_signature_alignment(
     *,
     events_df: pd.DataFrame,
-    acquisition_run: pd.Series,
+    run: pd.Series,
 ) -> pd.DataFrame:
     aligned_events = events_df.copy()
-    aligned_events["block"] = acquisition_run.reset_index(drop=True)
+    aligned_events["run"] = run.reset_index(drop=True)
     return aligned_events
 
 
@@ -838,13 +797,7 @@ def _compute_convolved_nuisance_columns(
     )
     from fmri_pipeline.analysis.contrast_builder import discover_confounds
 
-    # Find the run ID column
-    from eeg_pipeline.utils.data.fmri_signature_targets import find_block_column
-    run_col = find_block_column(events_df)
-    if run_col is None:
-        raise ValueError("Cannot resolve task run/block column in clean EEG events.")
-
-    run_numbers = pd.to_numeric(run_col, errors="coerce")
+    run_numbers = _required_run(events_df)
     subject_raw = subject.replace("sub-", "", 1) if subject.startswith("sub-") else subject
     subject_bids = f"sub-{subject_raw}"
     space = str(require_config_value(config, "study1.targets.fmriprep_space")).strip()
@@ -978,16 +931,15 @@ def _subject_target_rows(
         logger=logger,
     )
     trial_index = _required_trial_index(events_df)
-    block = _required_task_block(events_df)
-    within_block_trial = _within_block_trial_number(
+    run = _required_run(events_df)
+    within_run_trial = _within_run_trial_number(
         trial_index=trial_index,
-        block=block,
+        run=run,
         config=config,
     )
-    acquisition_run = _required_acquisition_run(events_df, task_block=block)
     signature_events = _events_for_signature_alignment(
         events_df=events_df,
-        acquisition_run=acquisition_run,
+        run=run,
     )
 
     nps, _nps_label, nps_extra = load_fmri_signature_target_for_subject(
@@ -1013,10 +965,9 @@ def _subject_target_rows(
         {
             "subject_id": f"sub-{subject}" if not str(subject).startswith("sub-") else str(subject),
             "task": task,
-            "block": block,
-            "acquisition_run": acquisition_run,
+            "run": run,
             "trial_index": trial_index,
-            "within_block_trial": within_block_trial,
+            "within_run_trial": within_run_trial,
             "onset": pd.to_numeric(events_df["onset"], errors="coerce"),
             "duration": pd.to_numeric(events_df["duration"], errors="coerce"),
             "NPS": pd.to_numeric(nps, errors="coerce"),

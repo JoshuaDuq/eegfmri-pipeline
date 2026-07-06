@@ -180,13 +180,16 @@ def _prepare_precomputed_data(
         "spectral",
         "aperiodic",
     }
-    baseline_dependent_categories = {"erds", "bursts"}
+    baseline_dependent_categories = {"aperiodic", "bursts", "erds", "spectral"}
 
     needs_precompute = bool(precompute_categories & set(ctx.feature_categories))
     if not needs_precompute:
         return None
 
-    needs_baseline = bool(baseline_dependent_categories & set(ctx.feature_categories))
+    needs_baseline = (
+        bool(baseline_dependent_categories & set(ctx.feature_categories))
+        and not is_resting_state_feature_mode(ctx.config)
+    )
     has_time_range = tmin is not None or tmax is not None
 
     cached = None

@@ -66,7 +66,7 @@ order regardless of the order you specify them.
    * - ``cluster``
      - Cluster permutation tests on epoch-level data.
    * - ``multilevel_correlations``
-     - Cross-subject multilevel correlations with block-aware permutations.
+     - Cross-subject multilevel correlations with run-aware permutations.
 
 Multiple comparison correction uses Benjamini–Hochberg FDR within analyses
 and hierarchical Simes gating across analysis families when
