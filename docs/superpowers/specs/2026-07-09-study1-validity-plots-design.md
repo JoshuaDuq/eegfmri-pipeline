@@ -63,6 +63,12 @@ participant set across every temperature, preserving the repeated-measures struc
 seed is fixed in configuration. A bootstrap replicate computes a temperature mean from sampled
 participants who have a retained cell at that temperature.
 
+A draw is invalid when it selects no participant with an observed cell at any configured
+temperature. Invalid draws are resampled until 10,000 valid draws are obtained, subject to the
+configured maximum invalid-draw fraction. The figure computation raises when it exceeds that
+budget. This preserves one sampled participant set across the temperature curve without imputing
+missing cells or silently changing the estimand.
+
 The cohort estimate is drawn as a stronger target-specific line with circular markers and vertical
 confidence-interval whiskers. No hypothesis-test stars, categorical validity verdicts, or fitted
 regression curves are added.
@@ -143,7 +149,7 @@ that affect the publication contract or statistical estimator are configurable:
 - font family and font sizes;
 - line widths, marker sizes, and opacity;
 - behavioral, NPS, SIIPS1, and participant colours;
-- bootstrap iterations, confidence level, and seed; and
+- bootstrap iterations, confidence level, seed, and maximum invalid-draw fraction; and
 - SVG output directory relative to the Study 1 report root.
 
 The initial defaults are:
@@ -155,7 +161,8 @@ The initial defaults are:
 - low-opacity neutral gray for participants;
 - 10,000 bootstrap iterations;
 - 95% confidence intervals; and
-- one fixed bootstrap seed.
+- one fixed bootstrap seed; and
+- at most 20% invalid bootstrap draws.
 
 Axes use outward ticks, visible left and bottom spines, no top or right spines, and no grid. Figure
 titles stay in the manuscript caption rather than inside the SVG. The behavioral y-axis spans the
@@ -191,7 +198,8 @@ The plotting code fails immediately and explicitly when:
 - required values are missing, non-numeric, or non-finite;
 - configured and observed temperature levels disagree;
 - a temperature has fewer than two represented participants;
-- bootstrap estimates are non-finite;
+- the valid bootstrap count cannot be reached within the configured invalid-draw budget;
+- accepted bootstrap estimates are non-finite;
 - Arial is unavailable; or
 - SVG writing fails.
 
@@ -207,6 +215,7 @@ Tests will be written before implementation and will cover:
 - gaps for missing participant-temperature cells without imputation;
 - equal participant weighting of cohort estimates;
 - participant-cluster resampling across the full temperature trajectory;
+- invalid-draw resampling and strict enforcement of its configured budget;
 - deterministic confidence intervals under the configured seed;
 - rejection of invalid temperatures, values, keys, fonts, and bootstrap outputs;
 - one SVG output from each plotting module;
