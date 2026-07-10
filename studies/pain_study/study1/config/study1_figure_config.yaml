@@ -1,0 +1,36 @@
+study1:
+  figures:
+    validity:
+      temperatures: [44.3, 45.3, 46.3, 47.3, 48.3, 49.3]
+      dimensions_mm:
+        width: 89.0
+        height: 70.0
+      font:
+        family: "Arial"
+        axis_label_pt: 7.0
+        tick_label_pt: 6.0
+        legend_pt: 6.0
+        annotation_pt: 5.5
+      style:
+        participant_color: "#7F7F7F"
+        participant_alpha: 0.22
+        participant_line_width_pt: 0.45
+        participant_marker_size_pt: 1.8
+        cohort_line_width_pt: 1.2
+        cohort_marker_size_pt: 3.0
+        confidence_line_width_pt: 0.8
+        axis_line_width_pt: 0.6
+      colors:
+        behavioral: "#222222"
+        nps: "#0072B2"
+        siips1: "#D55E00"
+      bootstrap:
+        iterations: 10000
+        confidence_level: 0.95
+        seed: 42
+        max_invalid_fraction: 0.20
+      output_parts:
+        - "reports"
+        - "figures"
+        - "supplementary"
+        - "validity"

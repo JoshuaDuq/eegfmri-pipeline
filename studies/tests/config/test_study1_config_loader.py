@@ -539,3 +539,99 @@ def test_smoketest_config_defines_prespecified_permutation_controls() -> None:
         "min_valid_runs_per_subject": 3,
         "min_retained_trials_per_subject": 25,
     }
+
+
+###################################################################
+# Validity figure configuration
+###################################################################
+
+
+def test_load_study1_config_includes_validity_figure_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+    validity = config["study1"]["figures"]["validity"]
+
+    assert validity["temperatures"] == [44.3, 45.3, 46.3, 47.3, 48.3, 49.3]
+    assert validity["dimensions_mm"] == {"width": 89.0, "height": 70.0}
+    assert validity["font"]["family"] == "Arial"
+    assert validity["bootstrap"] == {
+        "iterations": 10000,
+        "confidence_level": 0.95,
+        "seed": 42,
+        "max_invalid_fraction": 0.20,
+    }
+    assert validity["output_parts"] == [
+        "reports",
+        "figures",
+        "supplementary",
+        "validity",
+    ]
+
+
+def test_validate_validity_figure_config_rejects_duplicate_temperatures() -> None:
+    from studies.pain_study.study1.config.loader import _validate_validity_figure_config
+
+    config = _validity_figure_config()
+    config["study1"]["figures"]["validity"]["temperatures"] = [44.3, 44.3]
+
+    with pytest.raises(ValueError, match="strictly increasing"):
+        _validate_validity_figure_config(config)
+
+
+def test_validate_validity_figure_config_rejects_invalid_bootstrap_budget() -> None:
+    from studies.pain_study.study1.config.loader import _validate_validity_figure_config
+
+    config = _validity_figure_config()
+    bootstrap = config["study1"]["figures"]["validity"]["bootstrap"]
+    bootstrap["max_invalid_fraction"] = 1.0
+
+    with pytest.raises(ValueError, match=r"max_invalid_fraction must be in \[0, 1\)"):
+        _validate_validity_figure_config(config)
+
+
+def _validity_figure_config() -> dict:
+    return {
+        "study1": {
+            "figures": {
+                "validity": {
+                    "temperatures": [44.3, 49.3],
+                    "dimensions_mm": {"width": 89.0, "height": 70.0},
+                    "font": {
+                        "family": "Arial",
+                        "axis_label_pt": 7.0,
+                        "tick_label_pt": 6.0,
+                        "legend_pt": 6.0,
+                        "annotation_pt": 5.5,
+                    },
+                    "style": {
+                        "participant_color": "#7F7F7F",
+                        "participant_alpha": 0.22,
+                        "participant_line_width_pt": 0.45,
+                        "participant_marker_size_pt": 1.8,
+                        "cohort_line_width_pt": 1.2,
+                        "cohort_marker_size_pt": 3.0,
+                        "confidence_line_width_pt": 0.8,
+                        "axis_line_width_pt": 0.6,
+                    },
+                    "colors": {
+                        "behavioral": "#222222",
+                        "nps": "#0072B2",
+                        "siips1": "#D55E00",
+                    },
+                    "bootstrap": {
+                        "iterations": 100,
+                        "confidence_level": 0.95,
+                        "seed": 42,
+                        "max_invalid_fraction": 0.20,
+                    },
+                    "output_parts": [
+                        "reports",
+                        "figures",
+                        "supplementary",
+                        "validity",
+                    ],
+                }
+            }
+        }
+    }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import math
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -14,7 +15,9 @@ from eeg_pipeline.utils.config.loader import resolve_config_paths
 
 
 STUDY1_CONFIG_ENV_VAR = "PAIN_STUDY_STUDY1_CONFIG"
+STUDY1_FIGURE_CONFIG_PATH = Path(__file__).with_name("study1_figure_config.yaml")
 TEMPORAL_NEGATIVE_CONTROL_TRANSFORM = "raw_log_power"
+_HEX_COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 def _resolve_study1_config_path(config_path: Optional[str | Path] = None) -> Path:
@@ -33,18 +36,25 @@ def load_study1_config(config_path: Optional[str | Path] = None) -> dict[str, An
     if not resolved_path.exists():
         raise FileNotFoundError(f"Study 1 config file not found: {resolved_path}")
 
-    with open(resolved_path, "r", encoding="utf-8") as handle:
-        parsed = yaml.safe_load(handle) or {}
+    figure_defaults = _load_yaml_mapping(STUDY1_FIGURE_CONFIG_PATH)
+    parsed = _load_yaml_mapping(resolved_path)
+    _merge_non_null(figure_defaults, parsed)
 
-    if not isinstance(parsed, dict):
-        raise ValueError(f"Study 1 config must be a YAML mapping: {resolved_path}")
-
-    resolved = resolve_config_paths(copy.deepcopy(parsed), resolved_path)
+    resolved = resolve_config_paths(copy.deepcopy(figure_defaults), resolved_path)
     _preserve_signature_reference_paths(resolved, parsed)
     _validate_temporal_negative_controls(resolved)
     _validate_reference_power(resolved)
     _validate_feature_benchmark(resolved)
+    _validate_validity_figure_config(resolved)
     return resolved
+
+
+def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as handle:
+        parsed = yaml.safe_load(handle) or {}
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Study 1 config must be a YAML mapping: {path}")
+    return parsed
 
 
 def _preserve_signature_reference_paths(
@@ -308,6 +318,132 @@ def _validate_feature_benchmark(config: dict[str, Any]) -> None:
             )
 
 
+def _validate_validity_figure_config(config: dict[str, Any]) -> None:
+    validity = _required_mapping(config, "study1", "figures", "validity")
+    temperatures = validity.get("temperatures")
+    if not isinstance(temperatures, list) or len(temperatures) < 2:
+        raise ValueError("study1.figures.validity.temperatures must contain at least two values.")
+    numeric_temperatures = [
+        _finite_float(value, field_name="study1.figures.validity.temperatures")
+        for value in temperatures
+    ]
+    if any(right <= left for left, right in zip(numeric_temperatures, numeric_temperatures[1:])):
+        raise ValueError("study1.figures.validity.temperatures must be strictly increasing.")
+
+    dimensions = _required_mapping(validity, "dimensions_mm")
+    for name in ("width", "height"):
+        _positive_float(
+            dimensions.get(name),
+            field_name=f"study1.figures.validity.dimensions_mm.{name}",
+        )
+
+    font = _required_mapping(validity, "font")
+    family = str(font.get("family", "")).strip()
+    if not family:
+        raise ValueError("study1.figures.validity.font.family must be non-empty.")
+    for name in ("axis_label_pt", "tick_label_pt", "legend_pt", "annotation_pt"):
+        size = _finite_float(
+            font.get(name),
+            field_name=f"study1.figures.validity.font.{name}",
+        )
+        if not 5.0 <= size <= 7.0:
+            raise ValueError(
+                f"study1.figures.validity.font.{name} must be between 5 and 7 pt."
+            )
+
+    style = _required_mapping(validity, "style")
+    _validate_hex_color(style.get("participant_color"), "style.participant_color")
+    participant_alpha = _finite_float(
+        style.get("participant_alpha"),
+        field_name="study1.figures.validity.style.participant_alpha",
+    )
+    if not 0.0 < participant_alpha <= 1.0:
+        raise ValueError("study1.figures.validity.style.participant_alpha must be in (0, 1].")
+    for name in (
+        "participant_line_width_pt",
+        "participant_marker_size_pt",
+        "cohort_line_width_pt",
+        "cohort_marker_size_pt",
+        "confidence_line_width_pt",
+        "axis_line_width_pt",
+    ):
+        _positive_float(
+            style.get(name),
+            field_name=f"study1.figures.validity.style.{name}",
+        )
+
+    colors = _required_mapping(validity, "colors")
+    for name in ("behavioral", "nps", "siips1"):
+        _validate_hex_color(colors.get(name), f"colors.{name}")
+
+    bootstrap = _required_mapping(validity, "bootstrap")
+    _validate_positive_int(
+        bootstrap.get("iterations"),
+        field_name="study1.figures.validity.bootstrap.iterations",
+    )
+    confidence_level = _finite_float(
+        bootstrap.get("confidence_level"),
+        field_name="study1.figures.validity.bootstrap.confidence_level",
+    )
+    if not 0.0 < confidence_level < 1.0:
+        raise ValueError(
+            "study1.figures.validity.bootstrap.confidence_level must be between 0 and 1."
+        )
+    if not isinstance(bootstrap.get("seed"), int):
+        raise ValueError("study1.figures.validity.bootstrap.seed must be an integer.")
+    max_invalid_fraction = _finite_float(
+        bootstrap.get("max_invalid_fraction"),
+        field_name="study1.figures.validity.bootstrap.max_invalid_fraction",
+    )
+    if not 0.0 <= max_invalid_fraction < 1.0:
+        raise ValueError(
+            "study1.figures.validity.bootstrap.max_invalid_fraction must be in [0, 1)."
+        )
+
+    output_parts = validity.get("output_parts")
+    if not isinstance(output_parts, list) or not output_parts:
+        raise ValueError("study1.figures.validity.output_parts must be a non-empty list.")
+    for part in output_parts:
+        value = str(part).strip()
+        if not value or value in {".", ".."} or "/" in value or "\\" in value:
+            raise ValueError(
+                "study1.figures.validity.output_parts entries must be safe path components."
+            )
+
+
+def _required_mapping(config: dict[str, Any], *keys: str) -> dict[str, Any]:
+    value: Any = config
+    path: list[str] = []
+    for key in keys:
+        path.append(key)
+        if not isinstance(value, dict) or not isinstance(value.get(key), dict):
+            raise ValueError(f"{'.'.join(path)} must be a mapping.")
+        value = value[key]
+    return value
+
+
+def _finite_float(value: Any, *, field_name: str) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be finite numeric value.") from exc
+    if not math.isfinite(numeric):
+        raise ValueError(f"{field_name} must be finite numeric value.")
+    return numeric
+
+
+def _positive_float(value: Any, *, field_name: str) -> float:
+    numeric = _finite_float(value, field_name=field_name)
+    if numeric <= 0.0:
+        raise ValueError(f"{field_name} must be positive.")
+    return numeric
+
+
+def _validate_hex_color(value: Any, field_name: str) -> None:
+    if not isinstance(value, str) or _HEX_COLOR_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"study1.figures.validity.{field_name} must be a #RRGGBB color.")
+
+
 def _validate_positive_int(value: Any, *, field_name: str) -> int:
     try:
         numeric = int(value)
@@ -354,6 +490,7 @@ def apply_study1_config_defaults(
 
 __all__ = [
     "STUDY1_CONFIG_ENV_VAR",
+    "STUDY1_FIGURE_CONFIG_PATH",
     "TEMPORAL_NEGATIVE_CONTROL_TRANSFORM",
     "apply_study1_config_defaults",
     "load_study1_config",
