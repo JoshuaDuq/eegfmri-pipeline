@@ -569,6 +569,29 @@ def test_load_study1_config_includes_validity_figure_defaults() -> None:
     ]
 
 
+def test_load_study1_config_includes_scanner_harmonic_figure_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["study1"]["figures"]["scanner_harmonics"] == {
+        "dimensions_mm": {"width": 183.0, "height": 82.0},
+        "frequency_range_hz": [15.0, 90.0],
+        "n_fft": 8192,
+        "n_overlap": 4096,
+        "sampling_frequency_hz": 500.0,
+        "peak_prominence_db": 1.0,
+        "peak_distance_bins": 4,
+        "volume_repetition_time_s": 0.9,
+        "harmonic_orders": [18, 37, 55, 74],
+        "excluded_subjects": ["sub-0006"],
+        "colors": {
+            "excluded": "#D55E00",
+            "retained": "#0072B2",
+        },
+    }
+
+
 def test_validate_validity_figure_config_rejects_duplicate_temperatures() -> None:
     from studies.pain_study.study1.config.loader import _validate_validity_figure_config
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -65,17 +66,27 @@ def publication_style(config: Any) -> Iterator[None]:
 
 def configured_figure_size(config: Any) -> tuple[float, float]:
     dimensions = require_config_value(config, "study1.figures.validity.dimensions_mm")
+    return figure_size_inches(dimensions)
+
+
+def figure_size_inches(dimensions_mm: Mapping[str, float]) -> tuple[float, float]:
     return (
-        float(dimensions["width"]) / MILLIMETERS_PER_INCH,
-        float(dimensions["height"]) / MILLIMETERS_PER_INCH,
+        float(dimensions_mm["width"]) / MILLIMETERS_PER_INCH,
+        float(dimensions_mm["height"]) / MILLIMETERS_PER_INCH,
     )
 
 
-def save_validity_svg(figure: Figure, output_path: Path, config: Any) -> Path:
+def save_publication_svg(
+    figure: Figure,
+    output_path: Path,
+    config: Any,
+    *,
+    dimensions_mm: Mapping[str, float],
+) -> Path:
     if output_path.suffix != ".svg":
-        raise ValueError(f"Study 1 validity figures require an .svg path: {output_path}")
+        raise ValueError(f"Study 1 publication figures require an .svg path: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.set_size_inches(*configured_figure_size(config), forward=True)
+    figure.set_size_inches(*figure_size_inches(dimensions_mm), forward=False)
     with NamedTemporaryFile(
         dir=output_path.parent,
         prefix=f".{output_path.stem}.",
@@ -97,10 +108,22 @@ def save_validity_svg(figure: Figure, output_path: Path, config: Any) -> Path:
     return output_path
 
 
+def save_validity_svg(figure: Figure, output_path: Path, config: Any) -> Path:
+    dimensions = require_config_value(config, "study1.figures.validity.dimensions_mm")
+    return save_publication_svg(
+        figure,
+        output_path,
+        config,
+        dimensions_mm=dimensions,
+    )
+
+
 __all__ = [
     "configured_figure_size",
+    "figure_size_inches",
     "publication_style",
     "require_configured_font",
+    "save_publication_svg",
     "save_validity_svg",
     "validity_output_dir",
 ]
