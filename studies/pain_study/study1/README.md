@@ -385,6 +385,14 @@ correlations, pain-rating correlations, and split-half reliability values.
 
 The report stage writes `reports/full_picture/target_qc_metrics.tsv`.
 
+The report also writes three standalone supplementary validity figures to
+`reports/figures/supplementary/validity/`: `behavioral_dose_response.svg`,
+`nps_dose_response.svg`, and `siips1_dose_response.svg`. Each single-column SVG shows retained
+participant-level temperature trajectories behind the equally weighted cohort mean and its 95%
+paired participant-bootstrap confidence interval. The behavioral figure additionally marks the
+protocol pain threshold at 100. Missing participant-by-temperature cells remain missing and are
+not imputed.
+
 ### 6.2 Reported QC Metrics and Sensitivity Analyses
 
 The report records the following metrics without deriving automatic interpretation columns:

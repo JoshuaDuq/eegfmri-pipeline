@@ -11,15 +11,22 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.infra.paths import find_clean_events_path
 from eeg_pipeline.infra.tsv import write_parquet, write_tsv
 from eeg_pipeline.utils.config.loader import get_config_value
 from studies.pain_study.study1.cohort import (
-    load_primary_target_table,
     primary_targets_parquet_path,
     study1_output_root,
 )
 from studies.pain_study.study1.feature_benchmark import PRIMARY_BAND_PRESETS
+from studies.pain_study.study1.figures import (
+    write_behavioral_dose_response,
+    write_nps_dose_response,
+    write_siips1_dose_response,
+)
+from studies.pain_study.study1.figures.validity_data import (
+    ValidityTrialData,
+    load_validity_trial_data,
+)
 from studies.pain_study.study1.targets import (
     PRIMARY_SIGNATURES,
     residualization_columns_for_target_table,
@@ -95,16 +102,6 @@ ARTICLE_REQUIRED_TARGET_COLUMNS = (
     "residual_ecg_coupling",
     "stimulus_temp",
     "selected_surface",
-)
-ARTICLE_REQUIRED_EVENT_COLUMNS = (
-    "run",
-    "trial_number",
-    "stimulus_temp",
-    "selected_surface",
-    "pain_binary_coded",
-    "vas_final_coded_rating",
-    "residual_ecg_coupling",
-    "fp1_fp2_high_frequency_power",
 )
 FULL_PICTURE_MODEL_COLUMNS = (
     "lane",
@@ -587,11 +584,12 @@ def _write_article_tables(
     *,
     frame: pd.DataFrame,
     task: str,
+    trial_data: ValidityTrialData,
     config: Any,
     report_root: Path,
     report_path: Path,
 ) -> None:
-    target_table = load_primary_target_table(config)
+    target_table = trial_data.targets
     _require_columns(
         target_table,
         ARTICLE_REQUIRED_TARGET_COLUMNS,
@@ -601,12 +599,8 @@ def _write_article_tables(
     if not included_subjects:
         raise ValueError("Study 1 article tables require at least one included subject.")
 
-    events = _load_article_clean_events(
-        subjects=included_subjects,
-        task=task,
-        config=config,
-    )
-    enriched_targets = _merge_targets_with_clean_events(target_table, events)
+    events = trial_data.clean_events
+    enriched_targets = trial_data.enriched_targets
 
     article_root = report_root / "article_tables"
     model_table = _article_model_results(frame)
@@ -652,19 +646,14 @@ def _write_article_tables(
 def _write_full_picture_tables(
     *,
     frame: pd.DataFrame,
-    task: str,
+    trial_data: ValidityTrialData,
+    supplementary_figures: dict[str, Path],
     config: Any,
     report_root: Path,
     report_path: Path,
 ) -> None:
-    target_table = load_primary_target_table(config)
-    included_subjects = sorted(target_table["subject_id"].astype(str).unique().tolist())
-    events = _load_article_clean_events(
-        subjects=included_subjects,
-        task=task,
-        config=config,
-    )
-    enriched_targets = _merge_targets_with_clean_events(target_table, events)
+    target_table = trial_data.targets
+    enriched_targets = trial_data.enriched_targets
     target_diagnostics = _article_target_diagnostics(
         target_table=target_table,
         enriched_targets=enriched_targets,
@@ -715,6 +704,9 @@ def _write_full_picture_tables(
     manifest = {
         "source_report": str(report_path),
         "target_table": str(primary_targets_parquet_path(config)),
+        "supplementary_figures": {
+            name: str(path) for name, path in supplementary_figures.items()
+        },
         "tables": {
             name: {"tsv": str(paths["tsv"]), "parquet": str(paths["parquet"])}
             for name, paths in table_paths.items()
@@ -975,79 +967,6 @@ def _article_model_results(frame: pd.DataFrame) -> pd.DataFrame:
     return rows.sort_values(["target", "feature_spec", "model"], kind="stable").reset_index(
         drop=True
     )
-
-
-def _load_article_clean_events(
-    *,
-    subjects: list[str],
-    task: str,
-    config: Any,
-) -> pd.DataFrame:
-    event_frames: list[pd.DataFrame] = []
-    for subject in subjects:
-        event_path = find_clean_events_path(subject, task, config=config)
-        if event_path is None or not event_path.exists():
-            raise FileNotFoundError(
-                "Study 1 article tables require clean EEG events for every included "
-                f"subject. Missing: {subject}, task-{task}."
-            )
-        events = pd.read_csv(event_path, sep="\t")
-        _require_columns(
-            events,
-            ARTICLE_REQUIRED_EVENT_COLUMNS,
-            table_name=f"clean events for {subject}",
-        )
-        events = events.copy()
-        events["subject_id"] = subject
-        events["_run_key"] = _required_integer_series(events, "run")
-        events["_within_run_trial_key"] = _required_integer_series(events, "trial_number")
-        event_frames.append(events)
-
-    if not event_frames:
-        raise ValueError("Study 1 article tables require at least one clean events table.")
-    return pd.concat(event_frames, axis=0, ignore_index=True)
-
-
-def _merge_targets_with_clean_events(
-    target_table: pd.DataFrame,
-    events: pd.DataFrame,
-) -> pd.DataFrame:
-    targets = target_table.copy()
-    targets["_run_key"] = _required_integer_series(targets, "run")
-    targets["_within_run_trial_key"] = _required_integer_series(targets, "within_run_trial")
-    event_columns = [
-        "subject_id",
-        "_run_key",
-        "_within_run_trial_key",
-        "pain_binary_coded",
-        "vas_final_coded_rating",
-        "fp1_fp2_high_frequency_power",
-        "stimulus_temp",
-        "selected_surface",
-        "residual_ecg_coupling",
-    ]
-    merged = targets.merge(
-        events[event_columns].rename(
-            columns={
-                "stimulus_temp": "event_stimulus_temp",
-                "selected_surface": "event_selected_surface",
-                "residual_ecg_coupling": "event_residual_ecg_coupling",
-            }
-        ),
-        how="left",
-        on=["subject_id", "_run_key", "_within_run_trial_key"],
-        validate="one_to_one",
-    )
-    if merged["vas_final_coded_rating"].isna().any():
-        missing = merged.loc[
-            merged["vas_final_coded_rating"].isna(),
-            ["subject_id", "run", "within_run_trial"],
-        ]
-        raise ValueError(
-            "Study 1 article tables found target rows without matching clean events:\n"
-            f"{missing.to_string(index=False)}"
-        )
-    return merged.drop(columns=["_run_key", "_within_run_trial_key"])
 
 
 def _article_cohort_summary(
@@ -1496,6 +1415,7 @@ def write_study1_report(
     )
     frame = _append_feature_multiplicity(frame)
     frame = _append_derived_qc_metrics(frame)
+    trial_data = load_validity_trial_data(task=task, config=config)
     summary_payload = {
         "task": task,
         "n_records": int(len(frame)),
@@ -1515,13 +1435,29 @@ def write_study1_report(
     _write_article_tables(
         frame=frame,
         task=task,
+        trial_data=trial_data,
         config=config,
         report_root=report_root,
         report_path=tsv_path,
     )
+    supplementary_figures = {
+        "behavioral_dose_response": write_behavioral_dose_response(
+            trial_data=trial_data,
+            config=config,
+        ),
+        "nps_dose_response": write_nps_dose_response(
+            trial_data=trial_data,
+            config=config,
+        ),
+        "siips1_dose_response": write_siips1_dose_response(
+            trial_data=trial_data,
+            config=config,
+        ),
+    }
     _write_full_picture_tables(
         frame=frame,
-        task=task,
+        trial_data=trial_data,
+        supplementary_figures=supplementary_figures,
         config=config,
         report_root=report_root,
         report_path=tsv_path,

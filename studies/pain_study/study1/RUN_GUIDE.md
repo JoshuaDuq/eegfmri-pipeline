@@ -316,6 +316,9 @@ $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/targets/primary_targets.parquet
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/article_tables/
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/full_picture/
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/behavioral_dose_response.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/nps_dose_response.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/siips1_dose_response.svg
 ```
 
 Run `report` again with sensitivity roots when you want one article-ready comparison table across
@@ -607,7 +610,9 @@ The default Study 1 config enables the theoretically prioritized exploratory fea
    are not required for the primary Study 1 report.
    The report also writes `reports/full_picture/`, which contains model leaderboards,
    the target-validity gate, target-by-temperature summaries, subject-by-temperature summaries,
-   and a manifest. To compare sibling sensitivity runs in the same bundle, set
+   and a manifest. It writes the behavioral, NPS, and SIIPS1 dose-response figures as separate
+   editable SVGs under `reports/figures/supplementary/validity/`; the manifest records their paths.
+   To compare sibling sensitivity runs in the same bundle, set
    `study1.reporting.sensitivity_output_roots` to a list of `{label, root_name}` entries before
    running `report`.
 

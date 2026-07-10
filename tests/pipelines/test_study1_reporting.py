@@ -9,6 +9,7 @@ from eeg_pipeline.utils.config.loader import ConfigDict
 from studies.pain_study.study1.feature_benchmark import PRIMARY_BAND_PRESETS
 from studies.pain_study.study1.reporting import FEATURE_MODELS, write_study1_report
 from studies.pain_study.study1.targets import PRIMARY_SIGNATURES
+from studies.tests.test_support import validity_figure_test_config
 
 
 def test_write_study1_report_writes_article_tables(tmp_path: Path) -> None:
@@ -17,6 +18,7 @@ def test_write_study1_report_writes_article_tables(tmp_path: Path) -> None:
             "paths": {"deriv_root": str(tmp_path / "derivatives")},
             "study1": {
                 "outputs": {"root_name": "study1"},
+                "figures": validity_figure_test_config((44.0, 46.0, 48.0, 50.0)),
                 "feature_benchmark": {
                     "n_perm": 10,
                     "max_invalid_permutation_fraction": 0.2,

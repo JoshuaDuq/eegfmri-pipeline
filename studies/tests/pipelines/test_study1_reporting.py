@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from studies.tests.test_support import DotConfig
+from studies.tests.test_support import DotConfig, validity_figure_test_config
 
 
 def _config(root: Path) -> DotConfig:
@@ -16,6 +16,7 @@ def _config(root: Path) -> DotConfig:
             "paths": {"deriv_root": deriv_root},
             "study1": {
                 "outputs": {"root_name": "study1"},
+                "figures": validity_figure_test_config((45.3, 49.3)),
                 "targets": {"names": ["NPS", "SIIPS1"]},
                 "deep_regression": {
                     "presets": {

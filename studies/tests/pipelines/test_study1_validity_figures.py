@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -136,6 +137,34 @@ def test_behavioral_plot_marks_protocol_pain_threshold(tmp_path: Path) -> None:
     text = " ".join(ElementTree.parse(output_path).getroot().itertext())
     assert "Pain threshold" in text
     assert "100" in text
+
+
+@pytest.mark.parametrize(
+    ("module_name", "filename"),
+    [
+        ("plot_behavioral_dose_response", "behavioral_dose_response.svg"),
+        ("plot_nps_dose_response", "nps_dose_response.svg"),
+        ("plot_siips1_dose_response", "siips1_dose_response.svg"),
+    ],
+)
+def test_plot_module_main_writes_its_svg(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    module_name: str,
+    filename: str,
+) -> None:
+    module = importlib.import_module(f"studies.pain_study.study1.figures.{module_name}")
+    config = _config(tmp_path)
+    monkeypatch.setattr(module, "load_config", lambda path: config)
+    monkeypatch.setattr(module, "apply_study1_config_defaults", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "load_validity_trial_data", lambda **kwargs: _trial_data())
+
+    output_path = module.main(["--config", "pipeline.yaml", "--task", "thermalactive"])
+
+    assert output_path.name == filename
+    assert output_path.exists()
+    assert capsys.readouterr().out.strip() == str(output_path)
 
 
 def _config(tmp_path: Path) -> ConfigDict:

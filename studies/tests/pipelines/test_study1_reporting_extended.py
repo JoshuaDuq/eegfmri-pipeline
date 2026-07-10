@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from studies.tests.test_support import DotConfig
+from studies.tests.test_support import DotConfig, validity_figure_test_config
 
 
 def _config(root: Path) -> DotConfig:
@@ -20,6 +20,7 @@ def _config(root: Path) -> DotConfig:
             "time_frequency_analysis": {"active_window": [3.0, 10.5]},
             "study1": {
                 "outputs": {"root_name": "study1"},
+                "figures": validity_figure_test_config((45.3, 49.3)),
                 "targets": {"names": ["NPS", "SIIPS1"]},
                 "feature_benchmark": {
                     "n_perm": 5000,

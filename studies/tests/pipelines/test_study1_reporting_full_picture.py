@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from studies.tests.test_support import DotConfig
+from studies.tests.test_support import DotConfig, validity_figure_test_config
 
 
 def _config(root: Path, *, sensitivity_outputs: list[dict[str, str]] | None = None) -> DotConfig:
@@ -25,6 +25,7 @@ def _config(root: Path, *, sensitivity_outputs: list[dict[str, str]] | None = No
                     "n_perm": 10,
                     "max_invalid_permutation_fraction": 0.20,
                 },
+                "figures": validity_figure_test_config((45.3, 49.3)),
                 "reporting": reporting,
             },
         }
@@ -238,6 +239,18 @@ def test_report_writes_full_picture_bundle(tmp_path, monkeypatch) -> None:
     assert (full_picture_root / "target_by_stimulus_temp.tsv").exists()
     assert (full_picture_root / "target_by_subject_and_stimulus_temp.tsv").exists()
     assert (full_picture_root / "target_qc_metrics.tsv").exists()
+
+    figure_root = report_path.parent / "figures" / "supplementary" / "validity"
+    expected_figures = {
+        "behavioral_dose_response": figure_root / "behavioral_dose_response.svg",
+        "nps_dose_response": figure_root / "nps_dose_response.svg",
+        "siips1_dose_response": figure_root / "siips1_dose_response.svg",
+    }
+    assert sorted(figure_root.iterdir()) == sorted(expected_figures.values())
+    manifest = json.loads((full_picture_root / "full_picture_manifest.json").read_text())
+    assert manifest["supplementary_figures"] == {
+        name: str(path) for name, path in expected_figures.items()
+    }
 
     by_temp = pd.read_csv(full_picture_root / "target_by_stimulus_temp.tsv", sep="\t")
     assert by_temp["stimulus_temp"].tolist() == [45.3, 49.3]
