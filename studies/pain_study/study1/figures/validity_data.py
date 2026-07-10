@@ -36,6 +36,7 @@ EVENT_REQUIRED_COLUMNS = (
     "fp1_fp2_high_frequency_power",
 )
 TRIAL_KEY_COLUMNS = ("subject_id", "_run_key", "_within_run_trial_key")
+BEHAVIORAL_RATING_RANGE = (0.0, 200.0)
 
 
 @dataclass(frozen=True)
@@ -68,11 +69,28 @@ def load_validity_trial_data(*, task: str, config: Any) -> ValidityTrialData:
     subjects = sorted(targets["subject_id"].astype(str).unique())
     clean_events = _load_clean_events(subjects=subjects, task=task, config=config)
     enriched_targets = _merge_targets_with_clean_events(targets, clean_events)
+    validate_behavioral_ratings(enriched_targets)
     return ValidityTrialData(
         targets=targets,
         clean_events=clean_events,
         enriched_targets=enriched_targets,
     )
+
+
+def validate_behavioral_ratings(trials: pd.DataFrame) -> None:
+    _require_columns(
+        trials,
+        ("vas_final_coded_rating",),
+        table_name="behavioral validity trials",
+    )
+    ratings = _finite_numeric_series(
+        trials,
+        "vas_final_coded_rating",
+        table_name="behavioral validity trials",
+    )
+    minimum, maximum = BEHAVIORAL_RATING_RANGE
+    if ((ratings < minimum) | (ratings > maximum)).any():
+        raise ValueError("Behavioral validity ratings must be within [0, 200].")
 
 
 def build_dose_response_summary(
@@ -324,4 +342,5 @@ __all__ = [
     "ValidityTrialData",
     "build_dose_response_summary",
     "load_validity_trial_data",
+    "validate_behavioral_ratings",
 ]

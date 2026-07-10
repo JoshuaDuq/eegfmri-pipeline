@@ -590,6 +590,39 @@ def test_validate_validity_figure_config_rejects_invalid_bootstrap_budget() -> N
         _validate_validity_figure_config(config)
 
 
+@pytest.mark.parametrize("value", [1.9, True, "100"])
+def test_validate_validity_figure_config_rejects_non_integer_bootstrap_iterations(
+    value: object,
+) -> None:
+    from studies.pain_study.study1.config.loader import _validate_validity_figure_config
+
+    config = _validity_figure_config()
+    config["study1"]["figures"]["validity"]["bootstrap"]["iterations"] = value
+
+    with pytest.raises(ValueError, match="iterations must be a positive integer"):
+        _validate_validity_figure_config(config)
+
+
+def test_validate_validity_figure_config_rejects_boolean_seed() -> None:
+    from studies.pain_study.study1.config.loader import _validate_validity_figure_config
+
+    config = _validity_figure_config()
+    config["study1"]["figures"]["validity"]["bootstrap"]["seed"] = True
+
+    with pytest.raises(ValueError, match="seed must be an integer"):
+        _validate_validity_figure_config(config)
+
+
+def test_validate_validity_figure_config_rejects_non_string_output_part() -> None:
+    from studies.pain_study.study1.config.loader import _validate_validity_figure_config
+
+    config = _validity_figure_config()
+    config["study1"]["figures"]["validity"]["output_parts"] = ["reports", 1]
+
+    with pytest.raises(ValueError, match="entries must be strings"):
+        _validate_validity_figure_config(config)
+
+
 def _validity_figure_config() -> dict:
     return {
         "study1": {

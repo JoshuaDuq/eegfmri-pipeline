@@ -47,6 +47,21 @@ def test_load_validity_trial_data_rejects_temperature_disagreement(tmp_path: Pat
         load_validity_trial_data(task="thermalactive", config=config)
 
 
+@pytest.mark.parametrize("rating", [-0.1, 200.1])
+def test_load_validity_trial_data_rejects_out_of_range_retained_rating(
+    tmp_path: Path,
+    rating: float,
+) -> None:
+    from studies.pain_study.study1.figures.validity_data import load_validity_trial_data
+
+    config = _config(tmp_path)
+    _write_targets(config)
+    _write_events(config, first_rating=rating)
+
+    with pytest.raises(ValueError, match=r"within \[0, 200\]"):
+        load_validity_trial_data(task="thermalactive", config=config)
+
+
 def test_build_dose_response_summary_weights_participants_equally(tmp_path: Path) -> None:
     from studies.pain_study.study1.figures.validity_data import build_dose_response_summary
 
@@ -174,10 +189,11 @@ def _write_events(
     *,
     include_extra_event: bool = False,
     first_temperature: float = 44.3,
+    first_rating: float = 20.0,
 ) -> None:
     for subject_id in ("sub-01", "sub-02", "sub-03"):
         rows = [
-            _event_row(1, 1, first_temperature, 20.0),
+            _event_row(1, 1, first_temperature, first_rating),
             _event_row(1, 2, 49.3, 160.0),
             _event_row(2, 1, 44.3, 25.0),
             _event_row(2, 2, 49.3, 165.0),

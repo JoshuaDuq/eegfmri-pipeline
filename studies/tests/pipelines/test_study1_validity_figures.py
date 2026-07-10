@@ -152,6 +152,19 @@ def test_behavioral_plot_marks_protocol_pain_threshold(tmp_path: Path) -> None:
     assert "100" in text
 
 
+def test_behavioral_plot_rejects_rating_outside_protocol_range(tmp_path: Path) -> None:
+    from studies.pain_study.study1.figures import write_behavioral_dose_response
+
+    trial_data = _trial_data()
+    trial_data.enriched_targets.loc[0, "vas_final_coded_rating"] = 250.0
+
+    with pytest.raises(ValueError, match=r"within \[0, 200\]"):
+        write_behavioral_dose_response(
+            trial_data=trial_data,
+            config=_config(tmp_path),
+        )
+
+
 @pytest.mark.parametrize(
     ("module_name", "filename"),
     [

@@ -389,8 +389,10 @@ def _validate_validity_figure_config(config: dict[str, Any]) -> None:
         raise ValueError(
             "study1.figures.validity.bootstrap.confidence_level must be between 0 and 1."
         )
-    if not isinstance(bootstrap.get("seed"), int):
-        raise ValueError("study1.figures.validity.bootstrap.seed must be an integer.")
+    _validate_int(
+        bootstrap.get("seed"),
+        field_name="study1.figures.validity.bootstrap.seed",
+    )
     max_invalid_fraction = _finite_float(
         bootstrap.get("max_invalid_fraction"),
         field_name="study1.figures.validity.bootstrap.max_invalid_fraction",
@@ -404,7 +406,11 @@ def _validate_validity_figure_config(config: dict[str, Any]) -> None:
     if not isinstance(output_parts, list) or not output_parts:
         raise ValueError("study1.figures.validity.output_parts must be a non-empty list.")
     for part in output_parts:
-        value = str(part).strip()
+        if not isinstance(part, str):
+            raise ValueError(
+                "study1.figures.validity.output_parts entries must be strings."
+            )
+        value = part.strip()
         if not value or value in {".", ".."} or "/" in value or "\\" in value:
             raise ValueError(
                 "study1.figures.validity.output_parts entries must be safe path components."
@@ -445,13 +451,15 @@ def _validate_hex_color(value: Any, field_name: str) -> None:
 
 
 def _validate_positive_int(value: Any, *, field_name: str) -> int:
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be a positive integer.") from exc
-    if numeric <= 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{field_name} must be a positive integer.")
-    return numeric
+    return value
+
+
+def _validate_int(value: Any, *, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer.")
+    return value
 
 
 def _validate_fraction(value: Any, *, field_name: str) -> float:

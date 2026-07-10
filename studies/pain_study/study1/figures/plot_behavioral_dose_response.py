@@ -18,6 +18,7 @@ from studies.pain_study.study1.figures.validity_data import (
     ValidityTrialData,
     build_dose_response_summary,
     load_validity_trial_data,
+    validate_behavioral_ratings,
 )
 from studies.pain_study.study1.figures.validity_style import (
     save_validity_svg,
@@ -38,6 +39,7 @@ def write_behavioral_dose_response(
     trial_data: ValidityTrialData,
     config: Any,
 ) -> Path:
+    validate_behavioral_ratings(trial_data.enriched_targets)
     summary = build_dose_response_summary(
         trial_data.enriched_targets,
         outcome="vas_final_coded_rating",
