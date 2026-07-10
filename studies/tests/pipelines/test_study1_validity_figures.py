@@ -82,6 +82,19 @@ def test_save_validity_svg_writes_one_editable_publication_svg(tmp_path: Path) -
     assert sorted(tmp_path.iterdir()) == [output_path]
 
 
+def test_save_validity_svg_is_byte_reproducible(tmp_path: Path) -> None:
+    from studies.pain_study.study1.figures.validity_style import save_validity_svg
+
+    output_paths = [tmp_path / "first.svg", tmp_path / "second.svg"]
+    for output_path in output_paths:
+        figure, axis = plt.subplots()
+        axis.set_xlabel("Temperature (°C)")
+        axis.plot([44.3, 49.3], [1.0, 2.0])
+        save_validity_svg(figure, output_path, _config(tmp_path))
+
+    assert output_paths[0].read_bytes() == output_paths[1].read_bytes()
+
+
 @pytest.mark.parametrize(
     ("writer_name", "filename", "label", "color"),
     [

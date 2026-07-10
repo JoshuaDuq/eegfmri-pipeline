@@ -16,6 +16,7 @@ from eeg_pipeline.utils.config.loader import require_config_value
 from studies.pain_study.study1.cohort import study1_output_root
 
 MILLIMETERS_PER_INCH = 25.4
+SVG_HASH_SALT = "study1-validity"
 
 
 def validity_output_dir(config: Any) -> Path:
@@ -56,6 +57,7 @@ def publication_style(config: Any) -> Iterator[None]:
         "xtick.major.width": float(style["axis_line_width_pt"]),
         "ytick.major.width": float(style["axis_line_width_pt"]),
         "svg.fonttype": "none",
+        "svg.hashsalt": SVG_HASH_SALT,
     }
     with mpl.rc_context(rc_params):
         yield
