@@ -10,6 +10,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from scipy.signal import find_peaks
 
 from eeg_pipeline.analysis.qc.scanner_harmonics import (
@@ -17,6 +21,11 @@ from eeg_pipeline.analysis.qc.scanner_harmonics import (
     FrequencyWindow,
 )
 from eeg_pipeline.utils.config.loader import require_config_value
+from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_RANGES_HZ
+from studies.pain_study.study1.figures.validity_style import (
+    figure_size_inches,
+    publication_style,
+)
 
 NUMBERED_SUBJECT_PATTERN = re.compile(r"^sub-\d+$")
 FINAL_CLEAN_FILENAME_PATTERN = re.compile(
@@ -115,6 +124,16 @@ def scanner_harmonic_specification(config: Any) -> ScannerHarmonicSpecification:
         volume_repetition_time_s=float(scanner["volume_repetition_time_s"]),
         harmonic_orders=harmonic_orders,
         excluded_subjects=tuple(str(value) for value in scanner["excluded_subjects"]),
+    )
+
+
+def validity_bootstrap_specification(config: Any) -> ParticipantBootstrapSpecification:
+    """Load participant-bootstrap settings shared by Study 1 validity figures."""
+    bootstrap = require_config_value(config, "study1.figures.validity.bootstrap")
+    return ParticipantBootstrapSpecification(
+        iterations=int(bootstrap["iterations"]),
+        confidence_level=float(bootstrap["confidence_level"]),
+        seed=int(bootstrap["seed"]),
     )
 
 
@@ -422,6 +441,251 @@ def _peak_for_window(run: RunSpectrum, window_name: str) -> HarmonicPeak:
     return matching[0]
 
 
+def build_scanner_harmonic_figure(
+    summary: ScannerHarmonicSummary,
+    config: Any,
+) -> Figure:
+    """Render participant spectra and their MRI-timing agreement."""
+    dimensions = require_config_value(
+        config,
+        "study1.figures.scanner_harmonics.dimensions_mm",
+    )
+    with publication_style(config):
+        figure = plt.figure(figsize=figure_size_inches(dimensions))
+        grid = figure.add_gridspec(
+            1,
+            2,
+            width_ratios=(2.25, 1.0),
+            left=0.075,
+            right=0.985,
+            bottom=0.22,
+            top=0.91,
+            wspace=0.34,
+        )
+        spectrum_axis = figure.add_subplot(grid[0, 0])
+        offset_axis = figure.add_subplot(grid[0, 1])
+        _draw_spectrum_panel(spectrum_axis, summary, config)
+        _draw_offset_panel(offset_axis, summary, config)
+        _add_panel_labels(spectrum_axis, offset_axis)
+    return figure
+
+
+def _draw_spectrum_panel(axis, summary: ScannerHarmonicSummary, config: Any) -> None:
+    style = require_config_value(config, "study1.figures.validity.style")
+    scanner = require_config_value(config, "study1.figures.scanner_harmonics")
+    excluded_color = str(scanner["colors"]["excluded"])
+    retained_color = str(scanner["colors"]["retained"])
+    specification = scanner_harmonic_specification(config)
+
+    for window in specification.harmonic_windows:
+        axis.axvspan(
+            window.low_hz,
+            window.high_hz,
+            color=excluded_color,
+            alpha=0.12,
+            linewidth=0.0,
+            zorder=0,
+        )
+
+    cohort = summary.cohort_spectrum
+    frequencies = cohort["frequency_hz"].to_numpy(dtype=float)
+    axis.fill_between(
+        frequencies,
+        cohort["ci_low_relative_psd_db"].to_numpy(dtype=float),
+        cohort["ci_high_relative_psd_db"].to_numpy(dtype=float),
+        color="#202020",
+        alpha=0.12,
+        linewidth=0.0,
+        zorder=1,
+    )
+    participant_matrix = summary.participant_spectra.pivot(
+        index="subject_id",
+        columns="frequency_hz",
+        values="relative_psd_db",
+    ).sort_index()
+    for participant_spectrum in participant_matrix.to_numpy(dtype=float):
+        axis.plot(
+            frequencies,
+            participant_spectrum,
+            color=str(style["participant_color"]),
+            alpha=max(float(style["participant_alpha"]), 0.28),
+            linewidth=float(style["participant_line_width_pt"]),
+            zorder=2,
+        )
+    axis.plot(
+        frequencies,
+        cohort["median_relative_psd_db"].to_numpy(dtype=float),
+        color="#111111",
+        linewidth=float(style["cohort_line_width_pt"]),
+        zorder=3,
+    )
+    for lower_frequency, upper_frequency in SCANNER_CLEAN_GAMMA_RANGES_HZ.values():
+        axis.plot(
+            (lower_frequency, upper_frequency),
+            (0.025, 0.025),
+            color=retained_color,
+            linewidth=2.4,
+            solid_capstyle="butt",
+            transform=axis.get_xaxis_transform(),
+            clip_on=False,
+            zorder=4,
+        )
+
+    lower_frequency, upper_frequency = specification.frequency_range_hz
+    axis.set_xlim(lower_frequency, upper_frequency)
+    axis.set_xticks((15, 20, 30, 40, 50, 60, 70, 80, 90))
+    axis.set_xlabel("Frequency (Hz)")
+    axis.set_ylabel("PSD relative to participant median (dB)")
+    axis.margins(y=0.08)
+    axis.grid(False)
+    axis.spines[["top", "right"]].set_visible(False)
+    axis.text(
+        0.01,
+        0.98,
+        f"n = {summary.n_subjects}; {summary.n_runs} runs",
+        ha="left",
+        va="top",
+        transform=axis.transAxes,
+        fontsize=float(
+            require_config_value(config, "study1.figures.validity.font.annotation_pt")
+        ),
+    )
+    axis.legend(
+        handles=(
+            Line2D(
+                [],
+                [],
+                color=str(style["participant_color"]),
+                linewidth=float(style["participant_line_width_pt"]),
+                label="Participant median",
+            ),
+            Line2D(
+                [],
+                [],
+                color="#111111",
+                linewidth=float(style["cohort_line_width_pt"]),
+                label="Cohort median",
+            ),
+            Patch(facecolor="#202020", alpha=0.12, label="95% bootstrap CI"),
+            Patch(facecolor=excluded_color, alpha=0.12, label="Scanner-harmonic window"),
+            Line2D([], [], color=retained_color, linewidth=2.4, label="Retained gamma"),
+        ),
+        frameon=False,
+        loc="upper right",
+        bbox_to_anchor=(1.0, 0.88),
+        handlelength=2.0,
+    )
+
+
+def _draw_offset_panel(axis, summary: ScannerHarmonicSummary, config: Any) -> None:
+    style = require_config_value(config, "study1.figures.validity.style")
+    scanner = require_config_value(config, "study1.figures.scanner_harmonics")
+    retained_color = str(scanner["colors"]["retained"])
+    specification = scanner_harmonic_specification(config)
+    bin_width = specification.sampling_frequency_hz / specification.n_fft
+
+    axis.axhspan(-bin_width, bin_width, color=retained_color, alpha=0.10, linewidth=0.0)
+    axis.axhline(0.0, color="#333333", linewidth=0.6, linestyle=(0, (3, 2)), zorder=1)
+    participants = summary.participant_offsets
+    cohort = summary.cohort_offsets.set_index("window_name")
+    x_positions = np.arange(len(specification.harmonic_windows), dtype=float)
+    for window_index, (x_position, window) in enumerate(
+        zip(x_positions, specification.harmonic_windows, strict=True)
+    ):
+        values = participants.loc[
+            participants["window_name"] == window.name,
+            ["subject_id", "offset_hz"],
+        ].sort_values("subject_id", kind="stable")
+        jitter = np.linspace(-0.12, 0.12, len(values))
+        axis.scatter(
+            x_position + jitter,
+            values["offset_hz"].to_numpy(dtype=float),
+            s=float(style["participant_marker_size_pt"]) ** 2,
+            color=str(style["participant_color"]),
+            alpha=max(float(style["participant_alpha"]), 0.55),
+            edgecolors="white",
+            linewidths=0.25,
+            zorder=2,
+        )
+        estimate = cohort.loc[window.name]
+        median = float(estimate["median_offset_hz"])
+        axis.errorbar(
+            x_position,
+            median,
+            yerr=np.asarray(
+                [
+                    [median - float(estimate["ci_low_offset_hz"])],
+                    [float(estimate["ci_high_offset_hz"]) - median],
+                ]
+            ),
+            color="#111111",
+            linestyle="none",
+            elinewidth=float(style["confidence_line_width_pt"]),
+            marker="D",
+            markersize=float(style["cohort_marker_size_pt"]),
+            markerfacecolor="white",
+            markeredgecolor="#111111",
+            markeredgewidth=float(style["confidence_line_width_pt"]),
+            capsize=0.0,
+            zorder=3,
+        )
+
+    axis.set_xticks(
+        x_positions,
+        labels=[
+            f"{order} × fTR\n{predicted:.3f} Hz"
+            for order, predicted in zip(
+                specification.harmonic_orders,
+                cohort["predicted_frequency_hz"].to_numpy(dtype=float),
+                strict=True,
+            )
+        ],
+    )
+    axis.set_ylabel("Peak offset from predicted\nTR harmonic (Hz)")
+    y_values = np.concatenate(
+        (
+            participants["offset_hz"].to_numpy(dtype=float),
+            cohort[["ci_low_offset_hz", "ci_high_offset_hz"]].to_numpy(dtype=float).ravel(),
+            np.asarray((-bin_width, bin_width)),
+        )
+    )
+    half_range = max(1.15 * float(np.max(np.abs(y_values))), 0.08)
+    axis.set_ylim(-half_range, half_range)
+    axis.grid(False)
+    axis.spines[["top", "right"]].set_visible(False)
+    axis.text(
+        0.02,
+        0.98,
+        f"blue band: ±1 Welch bin ({bin_width:.3f} Hz)",
+        ha="left",
+        va="top",
+        color=retained_color,
+        transform=axis.transAxes,
+        fontsize=float(
+            require_config_value(config, "study1.figures.validity.font.annotation_pt")
+        ),
+    )
+
+
+def _add_panel_labels(spectrum_axis, offset_axis) -> None:
+    spectrum_axis.text(
+        -0.13,
+        1.04,
+        "a",
+        transform=spectrum_axis.transAxes,
+        fontweight="bold",
+        fontsize=8.0,
+    )
+    offset_axis.text(
+        -0.23,
+        1.04,
+        "b",
+        transform=offset_axis.transAxes,
+        fontweight="bold",
+        fontsize=8.0,
+    )
+
+
 __all__ = [
     "HarmonicPeak",
     "ParticipantBootstrapSpecification",
@@ -429,9 +693,11 @@ __all__ = [
     "ScannerHarmonicSpecification",
     "ScannerHarmonicSummary",
     "build_scanner_harmonic_summary",
+    "build_scanner_harmonic_figure",
     "discover_final_clean_runs",
     "estimate_run_spectrum",
     "paired_participant_bootstrap",
     "scanner_harmonic_specification",
     "select_scanner_harmonic_peaks",
+    "validity_bootstrap_specification",
 ]

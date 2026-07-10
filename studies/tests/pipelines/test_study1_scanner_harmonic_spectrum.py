@@ -22,6 +22,19 @@ def test_scanner_harmonic_specification_reads_fixed_qc_config() -> None:
     assert len(specification.harmonic_windows) == 4
 
 
+def test_validity_bootstrap_specification_reads_participant_bootstrap_config() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+    from studies.pain_study.study1.figures.scanner_harmonic_spectrum import (
+        validity_bootstrap_specification,
+    )
+
+    specification = validity_bootstrap_specification(load_study1_config())
+
+    assert specification.iterations == 10_000
+    assert specification.confidence_level == 0.95
+    assert specification.seed == 42
+
+
 def test_discover_final_clean_runs_uses_numbered_nonexcluded_participants(
     tmp_path: Path,
 ) -> None:

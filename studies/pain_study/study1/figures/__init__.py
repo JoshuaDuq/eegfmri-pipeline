@@ -3,13 +3,27 @@
 from studies.pain_study.study1.figures.plot_behavioral_dose_response import (
     write_behavioral_dose_response,
 )
+from studies.pain_study.study1.figures.plot_nps_behavioral_validity import (
+    write_nps_behavioral_validity,
+)
 from studies.pain_study.study1.figures.plot_nps_dose_response import write_nps_dose_response
+from studies.pain_study.study1.figures.plot_scanner_harmonic_spectrum import (
+    ScannerHarmonicFigurePaths,
+    write_scanner_harmonic_spectrum,
+)
+from studies.pain_study.study1.figures.plot_siips1_behavioral_validity import (
+    write_siips1_behavioral_validity,
+)
 from studies.pain_study.study1.figures.plot_siips1_dose_response import (
     write_siips1_dose_response,
 )
 
 __all__ = [
     "write_behavioral_dose_response",
+    "write_nps_behavioral_validity",
     "write_nps_dose_response",
+    "ScannerHarmonicFigurePaths",
+    "write_scanner_harmonic_spectrum",
+    "write_siips1_behavioral_validity",
     "write_siips1_dose_response",
 ]
