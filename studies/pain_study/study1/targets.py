@@ -663,11 +663,11 @@ def _within_run_trial_number(
 
 
 def _required_run(events_df: pd.DataFrame) -> pd.Series:
-    if "run" not in events_df.columns:
-        raise ValueError("Study 1 target preparation requires an explicit 'run' column.")
-    run = pd.to_numeric(events_df["run"], errors="coerce")
+    if "run_id" not in events_df.columns:
+        raise ValueError("Study 1 target preparation requires an explicit 'run_id' column.")
+    run = pd.to_numeric(events_df["run_id"], errors="coerce")
     if not run.notna().all():
-        raise ValueError("Study 1 run column must contain finite values.")
+        raise ValueError("Study 1 run_id column must contain finite values.")
     return run
 
 
