@@ -46,6 +46,7 @@ class Study1ModelContext:
     """
 
     X: np.ndarray
+    feature_names: tuple[str, ...]
     y: np.ndarray
     groups: np.ndarray
     meta: pd.DataFrame
@@ -100,8 +101,7 @@ def build_target_retrained_null_maps(
         compute_source_maps=compute_source_maps,
     )
     null_by_band = {
-        band: result.null_source_maps[:, band_index]
-        for band_index, band in enumerate(bands)
+        band: result.null_source_maps[:, band_index] for band_index, band in enumerate(bands)
     }
     return null_by_band, result
 

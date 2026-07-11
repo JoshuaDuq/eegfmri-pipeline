@@ -7,7 +7,6 @@ import yaml
 
 from studies.tests.test_support import REPO_ROOT
 
-
 REFERENCE_POWER = {
     "primary_window": [-5.0, -0.01],
     "sensitivity_windows": {
@@ -567,6 +566,135 @@ def test_load_study1_config_includes_validity_figure_defaults() -> None:
         "supplementary",
         "validity",
     ]
+
+
+def test_load_study1_config_includes_scanner_harmonic_figure_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["study1"]["figures"]["scanner_harmonics"] == {
+        "dimensions_mm": {"width": 183.0, "height": 82.0},
+        "frequency_range_hz": [15.0, 90.0],
+        "n_fft": 8192,
+        "n_overlap": 4096,
+        "sampling_frequency_hz": 500.0,
+        "peak_prominence_db": 1.0,
+        "peak_distance_bins": 4,
+        "volume_repetition_time_s": 0.9,
+        "harmonic_orders": [18, 37, 55, 74],
+        "excluded_subjects": ["sub-0006"],
+        "colors": {
+            "excluded": "#D55E00",
+            "retained": "#0072B2",
+        },
+    }
+
+
+def test_load_study1_config_includes_temporal_specificity_figure_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["study1"]["figures"]["temporal_specificity"] == {
+        "dimensions_mm": {"width": 183.0, "height": 88.0},
+        "model": "elasticnet",
+        "targets": ["NPS", "SIIPS1"],
+    }
+
+
+def test_load_study1_config_includes_primary_prediction_figure_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["study1"]["figures"]["primary_prediction"] == {
+        "dimensions_mm": {"width": 183.0, "height": 86.0},
+        "lane": "feature_benchmark",
+        "analysis_partition": "primary",
+        "model": "elasticnet",
+        "feature_spec": "alpha_beta_gamma",
+        "targets": ["NPS", "SIIPS1"],
+    }
+
+
+def test_load_study1_config_includes_spectral_specificity_figure_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["study1"]["figures"]["spectral_specificity"] == {
+        "dimensions_mm": {"width": 183.0, "height": 84.0},
+        "model": "elasticnet",
+        "targets": ["NPS", "SIIPS1"],
+        "feature_specs": [
+            "alpha",
+            "beta",
+            "gamma",
+            "alpha_beta",
+            "alpha_beta_gamma",
+        ],
+    }
+
+
+def test_load_study1_config_includes_power_construct_validity_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["study1"]["figures"]["power_construct_validity"] == {
+        "dimensions_mm": {"width": 183.0, "height": 108.0},
+        "bands": [
+            {"name": "alpha", "label": "Alpha", "frequency_hz": [8.0, 12.9]},
+            {"name": "beta", "label": "Beta", "frequency_hz": [13.0, 30.0]},
+            {
+                "name": "gamma_low_clean",
+                "label": "Low gamma",
+                "frequency_hz": [30.1, 38.0],
+            },
+            {
+                "name": "gamma_mid_clean",
+                "label": "Mid gamma",
+                "frequency_hz": [43.0, 56.0],
+            },
+            {
+                "name": "gamma_high_clean",
+                "label": "High gamma",
+                "frequency_hz": [67.0, 77.0],
+            },
+        ],
+        "channels": {
+            "include_fp1_fp2": True,
+            "compute_complementary_sensitivity": True,
+        },
+        "rating_model": {
+            "minimum_trials": 25,
+            "minimum_runs": 3,
+            "max_condition_number": 100.0,
+        },
+        "minimum_article_subjects": 30,
+        "colors": {"cohort": "#0072B2"},
+    }
+
+
+def test_load_study1_config_includes_fmri_construct_validity_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["study1"]["figures"]["fmri_construct_validity"] == {
+        "dimensions_mm": {"width": 183.0, "height": 112.0},
+        "axial_slices_mm": [-12.0, 0.0, 12.0, 24.0, 36.0, 48.0],
+        "surface_mesh": "fsaverage5",
+        "inference": {
+            "n_permutations": 10000,
+            "two_sided": True,
+            "alpha": 0.05,
+            "random_state": 20260711,
+        },
+        "display": {"robust_percentile": 99.5},
+        "minimum_article_subjects": 30,
+    }
 
 
 def test_validate_validity_figure_config_rejects_duplicate_temperatures() -> None:

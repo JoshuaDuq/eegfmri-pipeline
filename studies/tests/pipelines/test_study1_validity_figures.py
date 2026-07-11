@@ -82,6 +82,29 @@ def test_save_validity_svg_writes_one_editable_publication_svg(tmp_path: Path) -
     assert sorted(tmp_path.iterdir()) == [output_path]
 
 
+def test_publication_svg_respects_explicit_physical_dimensions(tmp_path: Path) -> None:
+    from studies.pain_study.study1.figures.validity_style import (
+        save_publication_svg,
+    )
+
+    figure, axis = plt.subplots()
+    axis.set_xlabel("Frequency (Hz)")
+    output_path = tmp_path / "scanner.svg"
+
+    save_publication_svg(
+        figure,
+        output_path,
+        _config(tmp_path),
+        dimensions_mm={"width": 183.0, "height": 82.0},
+    )
+
+    root = ElementTree.parse(output_path).getroot()
+    width_pt = float(root.attrib["width"].removesuffix("pt"))
+    height_pt = float(root.attrib["height"].removesuffix("pt"))
+    assert width_pt * 25.4 / 72.0 == pytest.approx(183.0, abs=0.01)
+    assert height_pt * 25.4 / 72.0 == pytest.approx(82.0, abs=0.01)
+
+
 def test_save_validity_svg_is_byte_reproducible(tmp_path: Path) -> None:
     from studies.pain_study.study1.figures.validity_style import save_validity_svg
 

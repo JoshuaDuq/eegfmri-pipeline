@@ -39,6 +39,7 @@ def _aligned_context(frame, config):
     }
     return Study1ModelContext(
         X=feature.reshape(-1, 1),
+        feature_names=("feature",),
         y=y,
         groups=groups,
         meta=frame,

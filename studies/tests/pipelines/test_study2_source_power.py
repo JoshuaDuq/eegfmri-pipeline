@@ -124,7 +124,7 @@ def test_morphed_sloreta_power_morphs_scalar_logratio_maps_after_power() -> None
             subject="sub-0001",
         ),
     ]
-    morph_matrix = np.asarray([[0.25, 0.75]], dtype=float)
+    morph_matrix = np.asarray([[0.25, 0.75], [0.75, 0.25]], dtype=float)
     morphed_inputs: list[np.ndarray] = []
 
     class FakeMorph:
@@ -132,7 +132,7 @@ def test_morphed_sloreta_power_morphs_scalar_logratio_maps_after_power() -> None
             morphed_inputs.append(stc.data.copy())
             return _FakeSourceEstimate(
                 morph_matrix @ stc.data,
-                vertices=[np.arange(1)],
+                vertices=[np.array([2]), np.array([5])],
                 subject="fsaverage",
             )
 
@@ -153,7 +153,33 @@ def test_morphed_sloreta_power_morphs_scalar_logratio_maps_after_power() -> None
     assert [data.shape for data in morphed_inputs] == [(2, 1), (2, 1)]
     np.testing.assert_allclose(result.power_logratio, native.power_logratio @ morph_matrix.T)
     assert result.n_trials == 2
-    assert result.n_vertices == 1
+    assert result.n_vertices == 2
+    assert tuple(vertices.tolist() for vertices in result.vertices) == ([2], [5])
+
+
+def test_morphed_sloreta_power_rejects_noninteger_vertex_identity() -> None:
+    from studies.pain_study.study2.source_power import morph_source_power_logratio
+
+    reference = _FakeSourceEstimate(
+        np.ones((2, 1)),
+        vertices=[np.array([0]), np.array([1])],
+        subject="sub-0001",
+    )
+
+    class InvalidVertexMorph:
+        def apply(self, stc):
+            return _FakeSourceEstimate(
+                stc.data,
+                vertices=[np.array([0.5]), np.array([1.5])],
+                subject="fsaverage",
+            )
+
+    with pytest.raises(ValueError, match="vertices must be integers"):
+        morph_source_power_logratio(
+            np.ones((1, 2)),
+            reference_stcs=[reference],
+            morph=InvalidVertexMorph(),
+        )
 
 
 def test_make_surface_source_morph_uses_configured_common_space(monkeypatch) -> None:

@@ -86,6 +86,31 @@ def test_study2_paths_require_configured_study1_root(tmp_path: Path) -> None:
         paths.study1_report_path(config)
 
 
+def test_primary_source_figure_paths_share_one_output_family(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    output_dir = paths.figures_dir(config)
+
+    assert (
+        paths.primary_source_figure_path(config) == output_dir / "primary_source_associations.svg"
+    )
+    assert paths.primary_source_png_path(config) == output_dir / "primary_source_associations.png"
+    assert paths.primary_source_vertices_path(config) == (
+        output_dir / "primary_source_associations_vertices.tsv"
+    )
+    assert paths.primary_source_clusters_path(config) == (
+        output_dir / "primary_source_associations_clusters.tsv"
+    )
+    assert paths.primary_source_summary_path(config) == (
+        output_dir / "primary_source_associations_summary.tsv"
+    )
+    assert paths.primary_source_caption_path(config) == (
+        output_dir / "primary_source_associations_caption.txt"
+    )
+    assert paths.primary_source_manifest_path(config) == (
+        output_dir / "primary_source_associations_manifest.json"
+    )
+
+
 def _write_study1_report(config: dict, *, overrides: dict[str, object]) -> None:
     row = {
         "analysis_partition": "primary",
@@ -153,11 +178,7 @@ def test_target_permutations_required_inputs_use_study2_study1_root_name(
     required = target_permutations_required_inputs(_context(config, subjects=()))
 
     assert (
-        tmp_path
-        / "group"
-        / "multimodal"
-        / "study1_custom"
-        / "feature_benchmark"
+        tmp_path / "group" / "multimodal" / "study1_custom" / "feature_benchmark"
         in required[1].parents
     )
 
@@ -230,6 +251,7 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
             active_window_s=active_window_s,
             n_trials=len(stcs),
             n_vertices=stcs[0].data.shape[0],
+            vertices=(np.array([0, 1], dtype=int), np.array([2], dtype=int)),
         )
 
     monkeypatch.setattr(
@@ -254,8 +276,7 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
         assert metadata["subject_id"] == "sub-0000"
         assert metadata["band"] == band
         assert metadata["frequency_hz"] == [
-            list(frequency_range)
-            for frequency_range in stages._band_frequency_ranges(config)[band]
+            list(frequency_range) for frequency_range in stages._band_frequency_ranges(config)[band]
         ]
         if band == "gamma":
             assert metadata["frequency_aggregation"] == "bandwidth_weighted_logratio_mean"
@@ -267,6 +288,13 @@ def test_run_source_power_writes_per_band_logratio_power(tmp_path: Path, monkeyp
         assert metadata["common_source_space_spacing"] == "oct6"
         assert metadata["n_trials"] == 4
         assert metadata["n_vertices"] == 3
+    manifest = np.load(paths.source_vertex_manifest_path(config))
+    np.testing.assert_array_equal(manifest["lh_vertices"], [0, 1])
+    np.testing.assert_array_equal(manifest["rh_vertices"], [2])
+    vertex_metadata = json.loads(paths.source_vertex_metadata_path(config).read_text())
+    assert vertex_metadata["common_subject"] == "fsaverage"
+    assert vertex_metadata["spacing"] == "oct6"
+    assert vertex_metadata["n_vertices"] == 3
     assert filtered_ranges == [
         (8.0, 12.9),
         (13.0, 30.0),
@@ -286,9 +314,7 @@ def test_run_source_stage_writes_band_maps_and_qc(tmp_path: Path) -> None:
     source_power = _source_power_by_subject(frame, column="eta_combined_z")
     for band in ("alpha", "beta", "gamma"):
         for subject_id in subjects:
-            power_path = paths.subject_source_power_path(
-                config, subject_id=subject_id, band=band
-            )
+            power_path = paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             power_path.parent.mkdir(parents=True, exist_ok=True)
             np.save(power_path, source_power[subject_id])
 
@@ -332,9 +358,7 @@ def test_run_target_permutations_writes_null_maps_per_band(tmp_path: Path, monke
     source_power = _source_power_by_subject(frame, column="eta_combined_z")
     for band in ("alpha", "beta", "gamma"):
         for subject_id in subjects:
-            power_path = paths.subject_source_power_path(
-                config, subject_id=subject_id, band=band
-            )
+            power_path = paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             power_path.parent.mkdir(parents=True, exist_ok=True)
             np.save(power_path, source_power[subject_id])
 
@@ -401,27 +425,34 @@ def test_run_inference_writes_holm_corrected_source_family_summary(tmp_path: Pat
     assert bool(summary.loc[summary["band"] == "beta", "significant"].iloc[0]) is False
 
 
-def test_run_haufe_writes_sensor_pattern_outputs(tmp_path: Path) -> None:
+def test_run_haufe_writes_sensor_pattern_outputs(tmp_path: Path, monkeypatch) -> None:
     config = _config(tmp_path)
-    paths.sensor_dir(config).mkdir(parents=True)
-    X_train = np.asarray(
-        [[1.0, 2.0], [2.0, 4.0], [4.0, 7.0], [5.0, 9.0]],
-        dtype=float,
+    model_path = study1_model_comparison_path(config)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"model": ["elasticnet"]}).to_csv(model_path, sep="\t", index=False)
+    report_path = paths.study1_report_path(config)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("target\nNPS\n", encoding="utf-8")
+    summary = SimpleNamespace(
+        fold_patterns=pd.DataFrame({"target": ["NPS"], "fold": [0]}),
+        aggregate_patterns=pd.DataFrame({"target": ["NPS"], "band": ["alpha"]}),
+        stability=pd.DataFrame({"target": ["NPS"], "spatial_correlation": [0.8]}),
     )
-    coefficients = np.asarray([0.5, -0.25], dtype=float)
-    np.savez(paths.haufe_input_path(config), X_train=X_train, coefficients=coefficients)
+    monkeypatch.setattr(stages, "load_study1_model_context", lambda **kwargs: object())
+    monkeypatch.setattr(stages, "compute_sensor_pattern_summary", lambda **kwargs: summary)
 
-    assert haufe_required_inputs(_context(config, subjects=())) == (paths.haufe_input_path(config),)
+    assert haufe_required_inputs(_context(config, subjects=("sub-0001",))) == (
+        report_path,
+        model_path,
+    )
 
-    run_haufe(_context(config, subjects=()))
+    run_haufe(_context(config, subjects=("sub-0001",)))
 
-    pattern = np.load(paths.haufe_pattern_path(config))
-    covariance = np.load(paths.haufe_covariance_path(config))
-    summary = pd.read_csv(paths.haufe_summary_path(config), sep="\t")
-    expected_covariance = np.cov(X_train, rowvar=False, ddof=1)
-    np.testing.assert_allclose(pattern, expected_covariance @ coefficients)
-    np.testing.assert_allclose(covariance, expected_covariance)
-    assert summary[["n_observations", "n_features"]].iloc[0].tolist() == [4, 2]
+    assert pd.read_csv(paths.haufe_fold_patterns_path(config), sep="\t").shape == (1, 2)
+    assert pd.read_parquet(
+        paths.haufe_aggregate_patterns_path(config).with_suffix(".parquet")
+    ).shape == (1, 2)
+    assert pd.read_csv(paths.haufe_stability_path(config), sep="\t").shape == (1, 2)
 
 
 def test_run_source_model_qc_writes_subject_criteria(tmp_path: Path) -> None:
@@ -503,9 +534,13 @@ def test_run_directional_consistency_writes_band_summary(tmp_path: Path) -> None
     config = _config(tmp_path)
     paths.diagnostics_dir(config).mkdir(parents=True)
     for band in ("alpha", "beta", "gamma"):
-        np.save(paths.directional_prediction_map_path(config, band=band), np.asarray([1.0, 2.0, 3.0]))
+        np.save(
+            paths.directional_prediction_map_path(config, band=band), np.asarray([1.0, 2.0, 3.0])
+        )
         np.save(paths.directional_target_map_path(config, band=band), np.asarray([1.1, 2.1, 3.1]))
-        np.save(paths.directional_cluster_mask_path(config, band=band), np.asarray([True, True, False]))
+        np.save(
+            paths.directional_cluster_mask_path(config, band=band), np.asarray([True, True, False])
+        )
 
     required = directional_consistency_required_inputs(_context(config, subjects=()))
     assert paths.directional_prediction_map_path(config, band="alpha") in required
@@ -639,7 +674,9 @@ def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:
                     "nuisance": float(trial % 2),
                 }
             )
-    pd.DataFrame(rows).to_csv(paths.behavioral_convergence_input_path(config), sep="\t", index=False)
+    pd.DataFrame(rows).to_csv(
+        paths.behavioral_convergence_input_path(config), sep="\t", index=False
+    )
 
     assert behavioral_convergence_required_inputs(_context(config, subjects=())) == (
         paths.behavioral_convergence_input_path(config),
@@ -677,9 +714,7 @@ def test_run_band_unique_stage_and_inference_write_outputs(tmp_path: Path) -> No
     }
     for band in ("alpha", "beta", "gamma"):
         for subject_id in subjects:
-            power_path = paths.subject_source_power_path(
-                config, subject_id=subject_id, band=band
-            )
+            power_path = paths.subject_source_power_path(config, subject_id=subject_id, band=band)
             power_path.parent.mkdir(parents=True, exist_ok=True)
             np.save(power_path, source_power[subject_id])
 
@@ -693,7 +728,9 @@ def test_run_band_unique_stage_and_inference_write_outputs(tmp_path: Path) -> No
     for band in ("alpha", "beta", "gamma"):
         maps = np.load(paths.band_unique_fisher_z_path(config, band=band))
         assert maps.shape == (2, 3)
-        np.save(paths.band_unique_null_maps_path(config, band=band), np.zeros((9, 2, 3), dtype=float))
+        np.save(
+            paths.band_unique_null_maps_path(config, band=band), np.zeros((9, 2, 3), dtype=float)
+        )
 
     required = band_unique_inference_required_inputs(_context(config, subjects=()))
     assert paths.source_adjacency_path(config) in required

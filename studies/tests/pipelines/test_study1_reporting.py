@@ -15,6 +15,7 @@ def _config(root: Path) -> DotConfig:
             "deriv_root": deriv_root,
             "paths": {"deriv_root": deriv_root},
             "study1": {
+                "cohort": {"min_subjects": 2},
                 "outputs": {"root_name": "study1"},
                 "figures": validity_figure_test_config((45.3, 49.3)),
                 "targets": {"names": ["NPS", "SIIPS1"]},
@@ -123,25 +124,48 @@ def _write_feature_summary(
 def _write_article_inputs(root: Path) -> None:
     target_dir = root / "targets"
     target_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(
-        [
-            _target_row("sub-0001", 1, 1, 45.3, 1.0, 100.0),
-            _target_row("sub-0001", 1, 2, 49.3, 5.0, 500.0),
-            _target_row("sub-0002", 1, 1, 45.3, 2.0, 200.0),
-            _target_row("sub-0002", 1, 2, 49.3, 6.0, 600.0),
-        ]
-    ).to_parquet(target_dir / "primary_targets.parquet", index=False)
+    target_rows: list[dict[str, object]] = []
+    event_rows_by_subject: dict[str, list[dict[str, object]]] = {
+        "sub-0001": [],
+        "sub-0002": [],
+    }
+    pain_pattern = (0, 0, 1, 1)
+    intensity_pattern = (10.0, 30.0, 30.0, 10.0)
+    nuisance_pattern = (-1.0, 1.0, -1.0, 1.0)
+    for subject_index, subject_id in enumerate(("sub-0001", "sub-0002")):
+        for run, (pain, intensity, nuisance) in enumerate(
+            zip(pain_pattern, intensity_pattern, nuisance_pattern, strict=True),
+            start=1,
+        ):
+            for trial_number, (temperature, target_base) in enumerate(
+                ((45.3, 1.1), (49.3, 5.1)),
+                start=1,
+            ):
+                nps = (
+                    subject_index
+                    + target_base
+                    + 0.4 * (pain - 0.5)
+                    + 0.01 * (intensity - 20.0)
+                    + 0.2 * nuisance
+                )
+                siips1 = 100.0 * nps + 5.0 * nuisance
+                target_rows.append(
+                    _target_row(subject_id, run, trial_number, temperature, nps, siips1)
+                )
+                rating = intensity + 100.0 if pain else intensity
+                event_rows_by_subject[subject_id].append(
+                    _event_row(run, trial_number, temperature, pain, rating)
+                )
+    pd.DataFrame(target_rows).to_parquet(
+        target_dir / "primary_targets.parquet",
+        index=False,
+    )
 
     deriv_root = root.parents[2]
     for subject_id in ("sub-0001", "sub-0002"):
         event_dir = deriv_root / "preprocessed" / "eeg" / subject_id / "eeg"
         event_dir.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(
-            [
-                _event_row(1, 1, 45.3, 0, 110.0),
-                _event_row(1, 2, 49.3, 1, 170.0),
-            ]
-        ).to_csv(
+        pd.DataFrame(event_rows_by_subject[subject_id]).to_csv(
             event_dir / f"{subject_id}_task-pain_proc-clean_events.tsv",
             sep="\t",
             index=False,

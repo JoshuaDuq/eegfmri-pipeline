@@ -244,14 +244,34 @@ contiguous 30.1–80.0 Hz interval. The retained gamma intervals are 30.1–38.0
 
 This definition is based on the scanner-harmonic benchmark run after BrainVision Analyzer
 gradient- and pulse-artifact correction. In the production thermal-pain recordings with valid
-headers, residual narrow-band peaks were subject-consistent in the 38–43, 56–67, and 77–85 Hz
-windows. Across 53 successful runs from 9 subjects, the observed peak medians were 41.138,
-61.096, and 82.214 Hz, with median prominences of 16.407, 26.187, and 20.890 dB,
-respectively. Event-locked QC showed that the early stimulation window did not materially increase
+headers, residual narrow-band peaks were subject-consistent in the 18–23, 38–43, 56–67, and
+77–85 Hz windows. The final-clean QC sample comprises 77 runs from 13 numbered participants,
+excluding the prespecified pilot `sub-0006`. Event-locked QC showed that the early stimulation
+window did not materially increase
 these peaks relative to pre-stimulus baseline, whereas late stimulation increased both broad gamma
 and scanner-harmonic prominence. A broad 30.1–80.0 Hz gamma feature would therefore combine
 physiological high-frequency activity with residual scanner-locked energy. The confirmatory gamma
 estimand keeps gamma in the study while removing the empirically contaminated windows.
+
+The standalone `scanner_harmonic_spectrum.svg` QC figure estimates 15–90 Hz Welch spectra with
+`n_fft = n_per_seg = 8192` and 50% overlap. Within each run it takes the median linear PSD across
+EEG channels before conversion to dB; it then takes the median across runs within participant and
+subtracts each participant's across-frequency median as a constant display offset. The cohort
+curve is the equally weighted participant median with a 95% interval from 10,000 paired
+participant-bootstrap resamples. A second panel compares participant-median peak centres with the
+18th, 37th, 55th, and 74th harmonics of the 0.9 s volume repetition time, using one Welch bin as
+the frequency-agreement reference. This panel distinguishes scanner-locked peaks from arbitrary
+narrow spectral features.
+
+In the final 13-participant audit, the cohort medians of the participant-median peak centres are
+20.020, 41.138, 61.096, and 82.214 Hz. Their offsets from the specified TR harmonics are +0.020,
++0.027, −0.015, and −0.008 Hz, respectively; every offset is smaller than the 0.061 Hz Welch-bin
+width. Every run contains a qualifying peak in all four windows, and the minimum observed
+run-level prominence across those windows is 7.54 dB.
+
+The residual approximately 20 Hz peak lies inside the conventional 13–30 Hz beta band. Beta is
+retained as a prespecified feature family, but beta-containing results are not described as
+scanner-clean and require the scanner-spectrum and artifact-control evidence for interpretation.
 
 The primary gate still uses the alpha+beta+gamma preset for interpretability, but this preset is
 implemented as alpha, beta, and the three scanner-clean gamma sub-bands. The required secondary
@@ -385,13 +405,76 @@ correlations, pain-rating correlations, and split-half reliability values.
 
 The report stage writes `reports/full_picture/target_qc_metrics.tsv`.
 
-The report also writes three standalone supplementary validity figures to
-`reports/figures/supplementary/validity/`: `behavioral_dose_response.svg`,
-`nps_dose_response.svg`, and `siips1_dose_response.svg`. Each single-column SVG shows retained
-participant-level temperature trajectories behind the equally weighted cohort mean and its 95%
-paired participant-bootstrap confidence interval. The behavioral figure additionally marks the
-protocol pain threshold at 100. Missing participant-by-temperature cells remain missing and are
-not imputed.
+The report writes five standalone supplementary validity figures to
+`reports/figures/supplementary/validity/`. The behavioral, NPS, and SIIPS1 dose-response SVGs show
+retained participant-level temperature trajectories behind the equally weighted cohort mean and
+its 95% paired participant-bootstrap confidence interval. The behavioral figure additionally
+marks the protocol pain threshold at 100. Missing participant-by-temperature cells remain missing
+and are not imputed.
+
+The additional `nps_behavioral_validity.svg` and `siips1_behavioral_validity.svg` coefficient
+plots test whether signature expression tracks reported pain beyond delivered temperature. Each
+participant model jointly estimates standardized partial coefficients for the binary pain report
+and the protocol-defined within-scale intensity score while adjusting categorical temperature.
+The SIIPS1 model additionally adjusts NPS. Participants are equally weighted in the cohort mean,
+and uncertainty is a 95% interval from 10,000 paired participant-bootstrap resamples. The
+continuous construct estimand uses the within-scale 0–100 score, never the discontinuous 0–200
+display code. Participant coefficients, explicit non-estimability status, and cohort summaries
+are written to `reports/full_picture/behavior_signature_validity_by_subject.tsv` and
+`reports/full_picture/behavior_signature_validity_summary.tsv`.
+
+The outcome-blind scanner-harmonic spectrum is generated separately because it reads all
+continuous final-clean EEG runs and should not be recomputed whenever the model report is rebuilt.
+It writes `scanner_harmonic_spectrum.svg`, `scanner_harmonic_spectrum_by_run.tsv`, and
+`scanner_harmonic_spectrum_by_subject.tsv` under the same supplementary validity directory;
+matching parquet audits preserve the same schemas.
+
+The standalone `power_construct_validity.svg` tests whether the prespecified global EEG power
+summary tracks delivered temperature and subjective intensity. For each band and trial, global
+power is reconstructed as
+`10 × log10(mean(active linear channel power) / mean(baseline linear channel power))`; linear
+power is averaged before the logarithm. Panel a shows participant-centered temperature
+trajectories for alpha, beta, and the three scanner-clean gamma intervals, with an equally weighted
+cohort trajectory and a simultaneous participant-bootstrap band. Panel b shows participant-level
+partial correlations between power and the within-scale 0–100 intensity score after adjusting
+temperature, run, thermode surface, within-run trial order, residual ECG coupling, and the Fp1/Fp2
+high-frequency artifact proxy. Fp1/Fp2 inclusion is configured explicitly and defaults to true;
+the complementary channel sensitivity is always retained in audit tables when enabled. Trials are
+never treated as independent inferential units.
+
+The standalone `fmri_construct_validity.svg` supplies the whole-brain spatial manipulation check
+that cannot be represented adequately by the signature summaries. Panel a shows the unthresholded
+participant-mean BOLD effect per 1 °C increase in delivered temperature. Panel b shows the
+participant-mean BOLD effect per 10-point increase in within-scale subjective intensity after
+categorically adjusting the six delivered temperatures. Both panels use separate multi-run
+first-level GLMs with the configured HRF, drift, smoothing, motion24 confounds, explicit censoring,
+and within-run trial-order nuisance terms. Dark outlines indicate two-sided voxelwise max-T FWE
+`p < 0.05` from 10,000 deterministic participant-level sign-flipping permutations. Surface and
+axial coordinates are fixed before inspecting the results; peak coordinates remain in the paired
+audit table, and no post-hoc ROI analysis is drawn.
+
+The report-driven `temporal_specificity.svg` is also generated separately. It shows held-out
+participant $\Delta R^2$ values and cohort 95% bootstrap intervals for NPS and SIIPS1 across the
+two pre-stimulus, ramp-up, and three plateau windows, all using the same raw-log-power temporal
+control transform. The command requires the exact six-window protocol in the current
+configuration and rejects legacy report rows. It writes subject-level and cohort-level TSV and
+parquet audits beside the SVG. The primary full-plateau estimator is intentionally absent because
+its log-ratio feature transform is not commensurate with the raw-log-power temporal controls.
+
+The main-results `primary_prediction_estimation.svg` uses only the prespecified ElasticNet
+alpha+beta+scanner-clean-gamma cell. For each target it pairs every participant's nuisance-only
+and nuisance+EEG held-out $R^2$, then shows the participant $\Delta R^2$ distribution beside the
+equally weighted mean and its 95% participant-bootstrap interval. Negative held-out $R^2$ values
+are valid and remain visible. Trials and runs are never displayed as independent observations.
+The matching subject-level and cohort-level TSV/parquet audits preserve every plotted value and
+the source fold-table paths.
+
+The complementary `spectral_specificity.svg` restricts the frequency comparison to the five
+prespecified confirmatory families: alpha, beta, scanner-clean gamma, alpha+beta, and
+alpha+beta+scanner-clean-gamma. It shows held-out participant $\Delta R^2$ values and the cohort
+95% bootstrap interval separately for NPS and SIIPS1. Ridge and exploratory delta, theta,
+delta+theta, and all-band models remain in report tables. The plot therefore describes spectral
+specificity of incremental prediction rather than ranking every fitted model.
 
 ### 6.2 Reported QC Metrics and Sensitivity Analyses
 

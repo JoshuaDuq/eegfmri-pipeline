@@ -74,6 +74,30 @@ fitted weight vector in the same space. Because Study 1 standardizes features to
 variance, $W$ is estimated in standardized units and $\Sigma_{X,\mathrm{train}}$ is the training-fold
 correlation matrix.
 
+The orchestrated `haufe` stage reconstructs the predesignated frozen NPS model fold by fold and
+writes tidy fold-pattern, aggregate-map, and spatial-stability artifacts under `sensor/`. Generate
+the artifacts and the standalone editable figure with:
+
+```bash
+eeg-pipeline source-interpretation haufe \
+  --all-subjects \
+  --task thermalactive \
+  --study2-config studies/pain_study/study2/config/study2_config.yaml \
+  --deriv-root "$DERIV_ROOT"
+
+python -m studies.pain_study.study2.figures.plot_haufe_forward_patterns \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study2-config studies/pain_study/study2/config/study2_config.yaml \
+  --deriv-root "$DERIV_ROOT"
+```
+
+The exact 183 × 92 mm SVG contains the five individual feature maps entered into the frozen
+model—alpha, beta, and the three scanner-clean gamma intervals—and a separate descriptive panel
+of all pairwise LOSO fold-map correlations. Each fold-band map is normalized to unit norm before
+aggregation, so color represents relative sensor topology rather than coefficient magnitude.
+The figure is sensor-level multivariate interpretation, not cortical source localization, and is
+marked preliminary until at least 30 participants contribute valid folds.
+
 ## 4. Cortical Source Reconstruction
 
 The primary inverse operator uses sLORETA (Pascual-Marqui, 2002), FreeSurfer subject-specific head
@@ -95,6 +119,12 @@ estimand by using total band-limited power without evoked-response subtraction. 
 baseline-corrected as a log-ratio with the same primary baseline and averaged over the same active
 plateau window (3.0 to 10.5 s). Regularization uses SNR = 3.0, corresponding to $\lambda^2 \approx
 0.111$, oct6 source spacing, and depth weighting of 0.8.
+
+The source-power stage writes `source_model/common_source_vertices.npz` and paired JSON
+metadata from the actual morphed source estimate. These artifacts preserve the exact left- and
+right-hemisphere fsaverage vertex numbers represented by every downstream array. Subsequent
+subjects and bands must match this manifest exactly; cortical plotting never infers hemispheres or
+vertex identity from array positions.
 
 Source quality control is completed before map inspection. A subject is excluded when FreeSurfer
 reconstruction fails visual quality control, the boundary element model fails, measured electrode
@@ -169,6 +199,28 @@ Inferential scope is bounded by available power. For roughly 30 valid source sub
 rated trials per subject, the analysis is calibrated to detect moderate within-subject partial
 correlations rather than subtle associations; this limit is stated explicitly, and non-significant
 effects are not interpreted as the absence of association.
+
+### Primary cortical source-association figure
+
+After `source-power`, `source-stage`, `target-permutations`, and `inference` have produced their
+validated artifacts, generate the article figure and audits with:
+
+```bash
+python -m studies.pain_study.study2.figures.plot_primary_source_associations \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study2-config studies/pain_study/study2/config/study2_config.yaml \
+  --deriv-root "$DERIV_ROOT"
+```
+
+The exact 183 × 100 mm figure contains matched lateral and medial fsaverage views for alpha, beta,
+and scanner-clean gamma. Cortical fill shows the complete equal-participant Fisher-z mean partial
+correlation back-transformed to $r$ on one shared symmetric scale. Dark contours are drawn only for
+clusters that survive the target-retrained two-sided maximum-cluster test and whose band survives
+Holm correction across the three-map family. The output directory also contains a 600-dpi PNG,
+vertex- and cluster-level TSV audits, a band summary, a complete caption, and a checksum manifest.
+The writer requires at least `source_stage.min_source_valid_subjects` valid participants and fails
+before output when an upstream map, null, adjacency, family summary, QC table, surface, or vertex
+identity artifact is absent or inconsistent.
 
 ## 7. Multimodal Spatial Comparison
 

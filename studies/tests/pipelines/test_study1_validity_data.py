@@ -23,6 +23,12 @@ def test_load_validity_trial_data_uses_only_retained_target_trials(tmp_path: Pat
     assert len(data.enriched_targets) == 12
     assert set(data.enriched_targets["trial_index"]) == {1, 2, 3, 4}
     assert data.clean_events["trial_number"].max() == 3
+    assert data.enriched_targets["within_scale_intensity"].tolist() == [
+        20.0,
+        60.0,
+        25.0,
+        65.0,
+    ] * 3
 
 
 def test_load_validity_trial_data_rejects_duplicate_target_keys(tmp_path: Path) -> None:
@@ -60,6 +66,52 @@ def test_load_validity_trial_data_rejects_out_of_range_retained_rating(
 
     with pytest.raises(ValueError, match=r"within \[0, 200\]"):
         load_validity_trial_data(task="thermalactive", config=config)
+
+
+def test_add_within_scale_intensity_uses_protocol_scales() -> None:
+    from studies.pain_study.study1.figures.validity_data import (
+        add_within_scale_intensity,
+    )
+
+    trials = pd.DataFrame(
+        {
+            "pain_binary_coded": [0, 0, 1, 1],
+            "vas_final_coded_rating": [0.0, 99.0, 100.0, 200.0],
+        }
+    )
+
+    scored = add_within_scale_intensity(trials)
+
+    assert scored["within_scale_intensity"].tolist() == [0.0, 99.0, 0.0, 100.0]
+    assert "within_scale_intensity" not in trials.columns
+
+
+@pytest.mark.parametrize(
+    ("pain_report", "rating"),
+    [
+        (0, 100.0),
+        (1, 99.0),
+        (2, 150.0),
+        (0.5, 50.0),
+    ],
+)
+def test_add_within_scale_intensity_rejects_inconsistent_protocol_codes(
+    pain_report: float,
+    rating: float,
+) -> None:
+    from studies.pain_study.study1.figures.validity_data import (
+        add_within_scale_intensity,
+    )
+
+    trials = pd.DataFrame(
+        {
+            "pain_binary_coded": [pain_report],
+            "vas_final_coded_rating": [rating],
+        }
+    )
+
+    with pytest.raises(ValueError, match="pain/rating protocol coding"):
+        add_within_scale_intensity(trials)
 
 
 def test_build_dose_response_summary_weights_participants_equally(tmp_path: Path) -> None:
