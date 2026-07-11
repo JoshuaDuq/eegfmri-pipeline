@@ -19,6 +19,7 @@ def _config(root: Path, *, sensitivity_outputs: list[dict[str, str]] | None = No
             "deriv_root": deriv_root,
             "paths": {"deriv_root": deriv_root},
             "study1": {
+                "cohort": {"min_subjects": 2},
                 "outputs": {"root_name": "study1"},
                 "targets": {"names": ["NPS", "SIIPS1"]},
                 "feature_benchmark": {
@@ -37,18 +38,36 @@ def _study1_root(config: DotConfig) -> Path:
 
 
 def _write_primary_target_table(root: Path) -> None:
-    targets = pd.DataFrame(
-        [
-            _target_row("sub-0001", 1, 1, 45.3, 1.0, 100.0),
-            _target_row("sub-0001", 1, 2, 49.3, 5.0, 500.0),
-            _target_row("sub-0001", 2, 1, 45.3, 1.2, 115.0),
-            _target_row("sub-0001", 2, 2, 49.3, 5.2, 515.0),
-            _target_row("sub-0002", 1, 1, 45.3, 2.0, 200.0),
-            _target_row("sub-0002", 1, 2, 49.3, 6.0, 600.0),
-            _target_row("sub-0002", 2, 1, 45.3, 2.2, 215.0),
-            _target_row("sub-0002", 2, 2, 49.3, 6.2, 615.0),
-        ]
-    )
+    rows: list[dict[str, object]] = []
+    pain_pattern = (0, 0, 1, 1)
+    intensity_pattern = (10.0, 30.0, 30.0, 10.0)
+    nuisance_pattern = (-1.0, 1.0, -1.0, 1.0)
+    for subject_index, subject_id in enumerate(("sub-0001", "sub-0002")):
+        for run, (pain, intensity, nuisance) in enumerate(
+            zip(pain_pattern, intensity_pattern, nuisance_pattern, strict=True),
+            start=1,
+        ):
+            for trial_number, (temperature, nps_base, siips1_base) in enumerate(
+                ((45.3, 1.1, 107.5), (49.3, 5.1, 507.5)),
+                start=1,
+            ):
+                nps = (
+                    subject_index
+                    + nps_base
+                    + 0.4 * (pain - 0.5)
+                    + 0.01 * (intensity - 20.0)
+                    + 0.2 * nuisance
+                )
+                siips1 = (
+                    100.0 * nps
+                    + siips1_base
+                    - 100.0 * nps_base
+                    + 10.0 * (intensity - 20.0)
+                )
+                rows.append(
+                    _target_row(subject_id, run, trial_number, temperature, nps, siips1)
+                )
+    targets = pd.DataFrame(rows)
     target_dir = root / "targets"
     target_dir.mkdir(parents=True, exist_ok=True)
     targets.to_parquet(target_dir / "primary_targets.parquet", index=False)
@@ -88,18 +107,24 @@ def _target_row(
 
 def _write_clean_events(config: DotConfig) -> None:
     deriv_root = Path(config.get("paths.deriv_root"))
+    pain_pattern = (0, 0, 1, 1)
+    intensity_pattern = (10.0, 30.0, 30.0, 10.0)
     for subject_id in ("sub-0001", "sub-0002"):
         event_dir = deriv_root / "preprocessed" / "eeg" / subject_id / "eeg"
         event_dir.mkdir(parents=True, exist_ok=True)
-        subject_rating_offset = 0.0 if subject_id == "sub-0001" else 20.0
-        events = pd.DataFrame(
-            [
-                _event_row(1, 1, 45.3, 0, 110.0 + subject_rating_offset),
-                _event_row(1, 2, 49.3, 1, 170.0 + subject_rating_offset),
-                _event_row(2, 1, 45.3, 0, 112.0 + subject_rating_offset),
-                _event_row(2, 2, 49.3, 1, 172.0 + subject_rating_offset),
-            ]
-        )
+        rows: list[dict[str, object]] = []
+        for run, (pain, intensity) in enumerate(
+            zip(pain_pattern, intensity_pattern, strict=True),
+            start=1,
+        ):
+            rating = intensity + 100.0 if pain else intensity
+            rows.extend(
+                (
+                    _event_row(run, 1, 45.3, pain, rating),
+                    _event_row(run, 2, 49.3, pain, rating),
+                )
+            )
+        events = pd.DataFrame(rows)
         events.to_csv(
             event_dir / f"{subject_id}_task-pain_proc-clean_events.tsv",
             sep="\t",
@@ -239,11 +264,15 @@ def test_report_writes_full_picture_bundle(tmp_path, monkeypatch) -> None:
     assert (full_picture_root / "target_by_stimulus_temp.tsv").exists()
     assert (full_picture_root / "target_by_subject_and_stimulus_temp.tsv").exists()
     assert (full_picture_root / "target_qc_metrics.tsv").exists()
+    assert (full_picture_root / "behavior_signature_validity_by_subject.tsv").exists()
+    assert (full_picture_root / "behavior_signature_validity_summary.tsv").exists()
 
     figure_root = report_path.parent / "figures" / "supplementary" / "validity"
     expected_figures = {
         "behavioral_dose_response": figure_root / "behavioral_dose_response.svg",
+        "nps_behavioral_validity": figure_root / "nps_behavioral_validity.svg",
         "nps_dose_response": figure_root / "nps_dose_response.svg",
+        "siips1_behavioral_validity": figure_root / "siips1_behavioral_validity.svg",
         "siips1_dose_response": figure_root / "siips1_dose_response.svg",
     }
     assert sorted(figure_root.iterdir()) == sorted(expected_figures.values())
@@ -257,14 +286,41 @@ def test_report_writes_full_picture_bundle(tmp_path, monkeypatch) -> None:
     assert by_temp["mean_NPS"].tolist() == [1.6, 5.6]
     assert by_temp["mean_SIIPS1"].tolist() == [157.5, 557.5]
 
+    participant_validity = pd.read_csv(
+        full_picture_root / "behavior_signature_validity_by_subject.tsv",
+        sep="\t",
+    )
+    assert set(participant_validity["target"]) == {"NPS", "SIIPS1"}
+    assert participant_validity["estimable"].all()
+    assert set(participant_validity["non_estimability_reason"]) == {"none"}
+    assert participant_validity[
+        ["painful_report_beta", "within_scale_intensity_beta"]
+    ].notna().all().all()
+
+    cohort_validity = pd.read_csv(
+        full_picture_root / "behavior_signature_validity_summary.tsv",
+        sep="\t",
+    )
+    assert cohort_validity[["target", "term"]].values.tolist() == [
+        ["NPS", "painful_report"],
+        ["NPS", "within_scale_intensity"],
+        ["SIIPS1", "painful_report"],
+        ["SIIPS1", "within_scale_intensity"],
+    ]
+    assert cohort_validity["n_subjects"].tolist() == [2, 2, 2, 2]
+    assert cohort_validity[["mean", "ci_low", "ci_high"]].notna().all().all()
+
     target_qc = pd.read_csv(full_picture_root / "target_qc_metrics.tsv", sep="\t")
     assert set(target_qc["target"]) == {"NPS", "SIIPS1"}
     assert "target_interpretation" not in target_qc.columns
     assert "validity_limitations" not in target_qc.columns
     assert "expected_construct_relation" not in target_qc.columns
     assert "scope_sensitivity" not in target_qc.columns
+    assert "within_scale_intensity_r" in target_qc.columns
+    assert "vas_rating_r" not in target_qc.columns
+    assert "siips1_rating_beyond_temperature_nps_r" not in target_qc.columns
     siips1 = target_qc.loc[target_qc["target"] == "SIIPS1"].iloc[0]
-    assert siips1["siips1_rating_beyond_temperature_nps_r"] > 0.0
+    assert siips1["siips1_intensity_beyond_temperature_nps_r"] > 0.0
 
 
 def test_report_compares_configured_sensitivity_roots(tmp_path, monkeypatch) -> None:

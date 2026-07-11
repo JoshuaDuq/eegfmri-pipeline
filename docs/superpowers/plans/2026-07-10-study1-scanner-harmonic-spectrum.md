@@ -570,3 +570,59 @@ Render the SVG to a 400 dpi PNG and inspect it at both full size and 100% public
 git add studies/pain_study/study1/README.md studies/pain_study/study1/RUN_GUIDE.md
 git commit -m "docs: publish Study 1 scanner harmonic QC figure"
 ```
+
+### Task 6: Keep the legend outside the data panels
+
+**Files:**
+- Modify: `studies/pain_study/study1/figures/scanner_harmonic_spectrum.py`
+- Modify: `studies/tests/pipelines/test_study1_scanner_harmonic_figure.py`
+
+- [ ] **Step 1: Write a failing layout regression test**
+
+Build the synthetic figure and assert that it owns exactly one figure-level five-column legend,
+that neither axis owns a legend, and that the legend anchor is above the axes:
+
+```python
+figure = build_scanner_harmonic_figure(_summary(), _config(tmp_path))
+assert len(figure.legends) == 1
+assert figure.legends[0]._ncols == 5
+assert all(axis.get_legend() is None for axis in figure.axes)
+assert min(axis.get_position().y1 for axis in figure.axes) < 0.84
+```
+
+- [ ] **Step 2: Run the test and verify RED**
+
+Run:
+
+```bash
+env MNE_DONTWRITE_HOME=true MPLCONFIGDIR=/tmp/matplotlib-study1-scanner \
+  /Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m pytest \
+  studies/tests/pipelines/test_study1_scanner_harmonic_figure.py::test_scanner_harmonic_legend_stays_outside_data_panels -q
+```
+
+Expected: failure because the current legend belongs to panel a and overlaps spectra.
+
+- [ ] **Step 3: Move the legend and reserve top margin**
+
+Return the five legend handles from the spectrum-panel helper, set the grid top to `0.80`, and add:
+
+```python
+figure.legend(
+    handles=legend_handles,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 0.985),
+    ncol=5,
+    frameon=False,
+    handlelength=1.7,
+    handletextpad=0.5,
+    columnspacing=1.1,
+)
+```
+
+Remove the axis-level legend call completely.
+
+- [ ] **Step 4: Run focused and full verification**
+
+Run the focused figure module, Ruff, the Study 1 pipeline suite, repository gates, and the real
+77-run command. Expected: all automated checks pass, the SVG remains exactly 183 × 82 mm, and no
+legend artist occupies either data axis.

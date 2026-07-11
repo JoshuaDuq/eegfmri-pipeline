@@ -137,3 +137,52 @@ def test_study2_default_confirmatory_cell_matches_readme() -> None:
     assert robustness["min_unthresholded_spatial_r"] == 0.50
     assert robustness["min_cluster_dice"] == 0.40
     assert robustness["max_centroid_displacement_mm"] == 15.0
+
+    sensor_figure = config["study2"]["figures"]["haufe_forward_patterns"]
+    assert sensor_figure == {
+        "dimensions_mm": {"width": 183.0, "height": 92.0},
+        "target": "NPS",
+        "model": "elasticnet",
+        "feature_spec": "alpha_beta_gamma",
+        "bands": [
+            {"name": "alpha", "label": "Alpha", "frequency_hz": [8.0, 12.9]},
+            {"name": "beta", "label": "Beta", "frequency_hz": [13.0, 30.0]},
+            {
+                "name": "gamma_low_clean",
+                "label": "Low gamma",
+                "frequency_hz": [30.1, 38.0],
+            },
+            {
+                "name": "gamma_mid_clean",
+                "label": "Mid gamma",
+                "frequency_hz": [43.0, 56.0],
+            },
+            {
+                "name": "gamma_high_clean",
+                "label": "High gamma",
+                "frequency_hz": [67.0, 77.0],
+            },
+        ],
+        "montage": "easycap-M1",
+        "minimum_article_subjects": 30,
+        "refit_r2_tolerance": 1.0e-8,
+        "font_family": "Arial",
+        "nps_color": "#0072B2",
+    }
+
+    source_figure = config["study2"]["figures"]["primary_source_associations"]
+    assert source_figure == {
+        "dimensions_mm": {"width": 183.0, "height": 100.0},
+        "bands": [
+            {"name": "alpha", "label": "Alpha", "frequency_label": "8.0–12.9 Hz"},
+            {"name": "beta", "label": "Beta", "frequency_label": "13.0–30.0 Hz"},
+            {
+                "name": "gamma",
+                "label": "Scanner-clean gamma",
+                "frequency_label": "30.1–38, 43–56, 67–77 Hz",
+            },
+        ],
+        "surface": "inflated",
+        "font_family": "Arial",
+        "png_dpi": 600,
+    }

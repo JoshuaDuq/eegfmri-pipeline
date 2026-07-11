@@ -50,3 +50,74 @@ study1:
       colors:
         excluded: "#D55E00"
         retained: "#0072B2"
+    temporal_specificity:
+      dimensions_mm:
+        width: 183.0
+        height: 88.0
+      model: "elasticnet"
+      targets: ["NPS", "SIIPS1"]
+    primary_prediction:
+      dimensions_mm:
+        width: 183.0
+        height: 86.0
+      lane: "feature_benchmark"
+      analysis_partition: "primary"
+      model: "elasticnet"
+      feature_spec: "alpha_beta_gamma"
+      targets: ["NPS", "SIIPS1"]
+    spectral_specificity:
+      dimensions_mm:
+        width: 183.0
+        height: 84.0
+      model: "elasticnet"
+      targets: ["NPS", "SIIPS1"]
+      feature_specs:
+        - "alpha"
+        - "beta"
+        - "gamma"
+        - "alpha_beta"
+        - "alpha_beta_gamma"
+    power_construct_validity:
+      dimensions_mm:
+        width: 183.0
+        height: 108.0
+      bands:
+        - name: "alpha"
+          label: "Alpha"
+          frequency_hz: [8.0, 12.9]
+        - name: "beta"
+          label: "Beta"
+          frequency_hz: [13.0, 30.0]
+        - name: "gamma_low_clean"
+          label: "Low gamma"
+          frequency_hz: [30.1, 38.0]
+        - name: "gamma_mid_clean"
+          label: "Mid gamma"
+          frequency_hz: [43.0, 56.0]
+        - name: "gamma_high_clean"
+          label: "High gamma"
+          frequency_hz: [67.0, 77.0]
+      channels:
+        include_fp1_fp2: true
+        compute_complementary_sensitivity: true
+      rating_model:
+        minimum_trials: 25
+        minimum_runs: 3
+        max_condition_number: 100.0
+      minimum_article_subjects: 30
+      colors:
+        cohort: "#0072B2"
+    fmri_construct_validity:
+      dimensions_mm:
+        width: 183.0
+        height: 112.0
+      axial_slices_mm: [-12.0, 0.0, 12.0, 24.0, 36.0, 48.0]
+      surface_mesh: "fsaverage5"
+      inference:
+        n_permutations: 10000
+        two_sided: true
+        alpha: 0.05
+        random_state: 20260711
+      display:
+        robust_percentile: 99.5
+      minimum_article_subjects: 30

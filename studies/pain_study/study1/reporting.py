@@ -20,8 +20,16 @@ from studies.pain_study.study1.cohort import (
 from studies.pain_study.study1.feature_benchmark import PRIMARY_BAND_PRESETS
 from studies.pain_study.study1.figures import (
     write_behavioral_dose_response,
+    write_nps_behavioral_validity,
     write_nps_dose_response,
+    write_siips1_behavioral_validity,
     write_siips1_dose_response,
+)
+from studies.pain_study.study1.figures.behavioral_validity import (
+    NPS_SPECIFICATION,
+    SIIPS1_SPECIFICATION,
+    BehavioralValiditySummary,
+    build_behavioral_validity_summary,
 )
 from studies.pain_study.study1.figures.validity_data import (
     ValidityTrialData,
@@ -647,6 +655,7 @@ def _write_full_picture_tables(
     *,
     frame: pd.DataFrame,
     trial_data: ValidityTrialData,
+    behavioral_validity_summaries: dict[str, BehavioralValiditySummary],
     supplementary_figures: dict[str, Path],
     config: Any,
     report_root: Path,
@@ -660,7 +669,18 @@ def _write_full_picture_tables(
         config=config,
     )
     full_picture_root = report_root / "full_picture"
+    participant_validity, cohort_validity = _behavioral_validity_tables(
+        behavioral_validity_summaries
+    )
     table_paths = {
+        "behavior_signature_validity_by_subject": _write_article_table(
+            participant_validity,
+            full_picture_root / "behavior_signature_validity_by_subject",
+        ),
+        "behavior_signature_validity_summary": _write_article_table(
+            cohort_validity,
+            full_picture_root / "behavior_signature_validity_summary",
+        ),
         "primary_feature_model_summary": _write_article_table(
             _primary_feature_model_summary(frame),
             full_picture_root / "primary_feature_model_summary",
@@ -716,6 +736,35 @@ def _write_full_picture_tables(
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
+
+
+def _behavioral_validity_summaries(
+    trial_data: ValidityTrialData,
+    config: Any,
+) -> dict[str, BehavioralValiditySummary]:
+    return {
+        specification.target: build_behavioral_validity_summary(
+            trial_data.enriched_targets,
+            specification=specification,
+            config=config,
+        )
+        for specification in (NPS_SPECIFICATION, SIIPS1_SPECIFICATION)
+    }
+
+
+def _behavioral_validity_tables(
+    summaries: dict[str, BehavioralValiditySummary],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    ordered = [summaries[target] for target in PRIMARY_SIGNATURES]
+    participants = pd.concat(
+        [summary.participant_models for summary in ordered],
+        ignore_index=True,
+    )
+    cohort = pd.concat(
+        [summary.cohort_estimates for summary in ordered],
+        ignore_index=True,
+    )
+    return participants, cohort
 
 
 def _write_article_table(frame: pd.DataFrame, stem: Path) -> dict[str, Path]:
@@ -1064,9 +1113,9 @@ def _article_target_diagnostics(
                 "mean": _mean(target_table, target_name),
                 "sd": _std(target_table, target_name),
                 "stimulus_temp_r": _correlation(target_table, "stimulus_temp", target_name),
-                "vas_rating_r": _correlation(
+                "within_scale_intensity_r": _correlation(
                     enriched_targets,
-                    "vas_final_coded_rating",
+                    "within_scale_intensity",
                     target_name,
                 ),
                 "pain_binary_r": _correlation(
@@ -1074,11 +1123,11 @@ def _article_target_diagnostics(
                     "pain_binary_coded",
                     target_name,
                 ),
-                "siips1_rating_beyond_temperature_nps_r": (
+                "siips1_intensity_beyond_temperature_nps_r": (
                     _partial_correlation(
                         enriched_targets,
                         x_column="SIIPS1",
-                        y_column="vas_final_coded_rating",
+                        y_column="within_scale_intensity",
                         covariate_columns=("stimulus_temp", "NPS"),
                     )
                     if target_name == "SIIPS1"
@@ -1128,9 +1177,9 @@ def _target_qc_metrics(
         "n_trials",
         "n_subjects",
         "stimulus_temp_r",
-        "vas_rating_r",
+        "within_scale_intensity_r",
         "pain_binary_r",
-        "siips1_rating_beyond_temperature_nps_r",
+        "siips1_intensity_beyond_temperature_nps_r",
         "split_half_subject_temperature_r",
         "split_half_subject_temperature_n_cells",
     )
@@ -1148,10 +1197,10 @@ def _target_qc_metrics(
                 "n_trials": int(diagnostic["n_trials"]),
                 "n_subjects": int(diagnostic["n_subjects"]),
                 "stimulus_temp_r": diagnostic["stimulus_temp_r"],
-                "vas_rating_r": diagnostic["vas_rating_r"],
+                "within_scale_intensity_r": diagnostic["within_scale_intensity_r"],
                 "pain_binary_r": diagnostic["pain_binary_r"],
-                "siips1_rating_beyond_temperature_nps_r": diagnostic[
-                    "siips1_rating_beyond_temperature_nps_r"
+                "siips1_intensity_beyond_temperature_nps_r": diagnostic[
+                    "siips1_intensity_beyond_temperature_nps_r"
                 ],
                 "split_half_subject_temperature_r": diagnostic["split_half_subject_temperature_r"],
                 "split_half_subject_temperature_n_cells": int(
@@ -1416,6 +1465,7 @@ def write_study1_report(
     frame = _append_feature_multiplicity(frame)
     frame = _append_derived_qc_metrics(frame)
     trial_data = load_validity_trial_data(task=task, config=config)
+    behavioral_validity_summaries = _behavioral_validity_summaries(trial_data, config)
     summary_payload = {
         "task": task,
         "n_records": int(len(frame)),
@@ -1445,8 +1495,16 @@ def write_study1_report(
             trial_data=trial_data,
             config=config,
         ),
+        "nps_behavioral_validity": write_nps_behavioral_validity(
+            summary=behavioral_validity_summaries["NPS"],
+            config=config,
+        ),
         "nps_dose_response": write_nps_dose_response(
             trial_data=trial_data,
+            config=config,
+        ),
+        "siips1_behavioral_validity": write_siips1_behavioral_validity(
+            summary=behavioral_validity_summaries["SIIPS1"],
             config=config,
         ),
         "siips1_dose_response": write_siips1_dose_response(
@@ -1457,6 +1515,7 @@ def write_study1_report(
     _write_full_picture_tables(
         frame=frame,
         trial_data=trial_data,
+        behavioral_validity_summaries=behavioral_validity_summaries,
         supplementary_figures=supplementary_figures,
         config=config,
         report_root=report_root,

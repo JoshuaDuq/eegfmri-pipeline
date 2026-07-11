@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
+import sys
 from xml.etree import ElementTree
 
 import matplotlib.pyplot as plt
@@ -19,6 +22,29 @@ WINDOW_NAMES = (
 )
 HARMONIC_ORDERS = (18, 37, 55, 74)
 PREDICTED_FREQUENCIES = np.asarray(HARMONIC_ORDERS, dtype=float) / 0.9
+
+
+def test_scanner_harmonic_cli_module_help_has_no_runtime_warning(tmp_path: Path) -> None:
+    environment = os.environ.copy()
+    environment["MNE_DONTWRITE_HOME"] = "true"
+    environment["MPLCONFIGDIR"] = str(tmp_path / "matplotlib")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-W",
+            "error::RuntimeWarning",
+            "-m",
+            "studies.pain_study.study1.figures.plot_scanner_harmonic_spectrum",
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_build_scanner_harmonic_figure_draws_scientific_layers(tmp_path: Path) -> None:
@@ -41,6 +67,20 @@ def test_build_scanner_harmonic_figure_draws_scientific_layers(tmp_path: Path) -
     assert len(offset_axis.collections) >= 5
     assert not spectrum_axis.spines["top"].get_visible()
     assert not offset_axis.spines["right"].get_visible()
+    plt.close(figure)
+
+
+def test_scanner_harmonic_legend_stays_outside_data_panels(tmp_path: Path) -> None:
+    from studies.pain_study.study1.figures.scanner_harmonic_spectrum import (
+        build_scanner_harmonic_figure,
+    )
+
+    figure = build_scanner_harmonic_figure(_summary(), _config(tmp_path))
+
+    assert len(figure.legends) == 1
+    assert figure.legends[0]._ncols == 5
+    assert all(axis.get_legend() is None for axis in figure.axes)
+    assert max(axis.get_position().y1 for axis in figure.axes) < 0.84
     plt.close(figure)
 
 

@@ -307,6 +307,45 @@ COMMON_ARGS=(
 "$EEG_PIPELINE" signature-prediction report \
   "${SUBJECT_ARGS[@]}" \
   "${COMMON_ARGS[@]}"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_primary_prediction \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --report "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/primary_prediction_estimation.svg"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_spectral_specificity \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --report "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/spectral_specificity.svg"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_power_construct_validity \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --deriv-root "$DERIV_ROOT" \
+  --task "$TASK" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/power_construct_validity.svg"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_fmri_construct_validity \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --deriv-root "$DERIV_ROOT" \
+  --task "$TASK" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/fmri_construct_validity.svg"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_temporal_specificity \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --report "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/temporal_specificity.svg"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_scanner_harmonic_spectrum \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --task "$TASK" \
+  --derivative-root "$DERIV_ROOT/preprocessed/eeg" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum.svg"
 ```
 
 The main outputs are:
@@ -317,8 +356,27 @@ $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/article_tables/
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/full_picture/
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/behavioral_dose_response.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/fmri_construct_validity.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/fmri_construct_validity_provenance.json
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/nps_behavioral_validity.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/nps_dose_response.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/primary_prediction_estimation.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/primary_prediction_by_subject.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/primary_prediction_summary.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/power_construct_validity.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum_by_run.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum_by_subject.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/siips1_behavioral_validity.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/siips1_dose_response.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/spectral_specificity.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/spectral_specificity_by_subject.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/spectral_specificity_summary.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/temporal_specificity.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/temporal_specificity_by_subject.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/temporal_specificity_summary.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/full_picture/behavior_signature_validity_by_subject.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/full_picture/behavior_signature_validity_summary.tsv
 ```
 
 Run `report` again with sensitivity roots when you want one article-ready comparison table across
@@ -610,8 +668,111 @@ The default Study 1 config enables the theoretically prioritized exploratory fea
    are not required for the primary Study 1 report.
    The report also writes `reports/full_picture/`, which contains model leaderboards,
    the target-validity gate, target-by-temperature summaries, subject-by-temperature summaries,
-   and a manifest. It writes the behavioral, NPS, and SIIPS1 dose-response figures as separate
-   editable SVGs under `reports/figures/supplementary/validity/`; the manifest records their paths.
+   behavioral construct-validity coefficients, and a manifest. It writes the behavioral, NPS, and
+   SIIPS1 dose-response figures plus the NPS and SIIPS1 behavioral-validity coefficient plots as
+   separate editable SVGs under `reports/figures/supplementary/validity/`; the manifest records
+   their paths.
+   Generate the primary held-out prediction estimation figure from the completed report:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_primary_prediction \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --report "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv" \
+     --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/primary_prediction_estimation.svg"
+   ```
+
+   This command plots participants as the statistical unit, verifies fold-level nuisance-only,
+   nuisance+EEG, and incremental $R^2$ against the report, and writes subject-level and
+   cohort-level TSV/parquet audits beside the editable SVG. Negative held-out $R^2$ values are
+   expected when prediction performs worse than the held-out-target mean benchmark and are not
+   clipped.
+
+   Generate the prespecified spectral-specificity estimation figure from the same report:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_spectral_specificity \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --report "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv" \
+     --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/spectral_specificity.svg"
+   ```
+
+   This command includes only ElasticNet alpha, beta, scanner-clean gamma, alpha+beta, and
+   alpha+beta+scanner-clean-gamma cells. It verifies every participant effect and cohort mean
+   against the fold tables and writes subject-level and cohort-level TSV/parquet audits. Ridge and
+   exploratory low-frequency/all-band models remain tabular.
+
+   Generate the EEG power construct-validity figure from the retained target cohort and
+   trial-ML-safe power tables:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_power_construct_validity \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --deriv-root "$DERIV_ROOT" \
+     --task "$TASK" \
+     --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/power_construct_validity.svg"
+   ```
+
+   This command requires alpha, beta, and all three scanner-clean gamma features. It writes the
+   editable SVG and seven TSV/parquet audit pairs covering trial power, participant and cohort
+   temperature estimates, participant and cohort rating estimates, and the complementary Fp1/Fp2
+   sensitivity. The primary figure includes Fp1/Fp2 when
+   `study1.figures.power_construct_validity.channels.include_fp1_fp2` is true. The alternative
+   channel scope is computed without selecting results by appearance.
+
+   Generate the whole-brain fMRI construct-validity figure directly from the retained cohort,
+   current clean events, and MNI-space fMRIPrep runs:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_fmri_construct_validity \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --deriv-root "$DERIV_ROOT" \
+     --task "$TASK" \
+     --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/fmri_construct_validity.svg"
+   ```
+
+   The command fits separate temperature and rating first-level GLMs so rating does not alter the
+   total temperature estimand. The rating regressor is centered within participant and delivered
+   temperature; temperature is represented categorically in that model. Group inference uses the
+   participant effect maps, 10,000 deterministic two-sided sign-flipping permutations, and
+   voxelwise max-T FWE correction. The SVG displays unthresholded mean effects with corrected
+   significance outlines and fixed surface/axial views. Participant and group NIfTI maps, design,
+   subject and peak TSV/parquet audits, plus a checksum provenance JSON are written beside it.
+
+   Generate the temporal-specificity figure separately from the completed current-protocol report:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_temporal_specificity \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --report "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv" \
+     --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/temporal_specificity.svg"
+   ```
+
+   This command requires all six configured temporal-control windows exactly once for NPS and
+   SIIPS1, verifies every cohort mean against its held-out-subject fold table, and writes
+   subject-level and cohort-level TSV/parquet audits beside the editable SVG. Legacy temporal
+   window names fail validation and produce no figure.
+
+   Generate the scanner-harmonic spectrum separately after the report because it reads continuous
+   final-clean EEG rather than report tables:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_scanner_harmonic_spectrum \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --deriv-root "$DERIV_ROOT" \
+     --task "$TASK" \
+     --derivative-root "$DERIV_ROOT/preprocessed/eeg" \
+     --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum.svg"
+   ```
+
+   This standalone command writes the editable SVG plus run- and participant-level TSV/parquet
+   audits in the same directory. Numbered final-clean participants are included; pilot-style
+   identifiers and the prespecified `sub-0006` pilot are excluded before any outcome is read.
    To compare sibling sensitivity runs in the same bundle, set
    `study1.reporting.sensitivity_output_roots` to a list of `{label, root_name}` entries before
    running `report`.

@@ -72,6 +72,10 @@ There is no title inside the figure, no significance stars, no bar chart, and no
 pseudoreplication in cohort summaries. The color palette is color-vision-accessible and the SVG
 retains editable text.
 
+The five-item legend is a single figure-level row above both panels, outside both plotting axes.
+The layout reserves explicit top margin for the legend; neither panel may own an in-axis legend or
+allow legend artists to cover data.
+
 ## Code organization
 
 - `scanner_harmonic_spectrum.py`: discovery, PSD estimation, aggregation, audit tables, bootstrap,

@@ -52,17 +52,27 @@ def subject_source_power_path(config: Any, *, subject_id: str, band: str) -> Pat
 
 
 def subject_source_power_metadata_path(config: Any, *, subject_id: str, band: str) -> Path:
-    return (
-        study2_output_root(config)
-        / subject_id
-        / "eeg"
-        / "source"
-        / f"source_power_{band}.json"
-    )
+    return study2_output_root(config) / subject_id / "eeg" / "source" / f"source_power_{band}.json"
+
+
+def source_vertex_manifest_path(config: Any) -> Path:
+    return source_model_dir(config) / "common_source_vertices.npz"
+
+
+def source_vertex_metadata_path(config: Any) -> Path:
+    return source_model_dir(config) / "common_source_vertices.json"
 
 
 def source_stage_fisher_z_path(config: Any, *, band: str) -> Path:
     return source_stage_dir(config) / f"fisher_z_{band}.npy"
+
+
+def source_stage_partial_r_path(config: Any, *, band: str) -> Path:
+    return source_stage_dir(config) / f"partial_r_{band}.npy"
+
+
+def source_stage_qc_path(config: Any, *, band: str) -> Path:
+    return source_stage_dir(config) / f"qc_{band}.tsv"
 
 
 def inference_dir(config: Any) -> Path:
@@ -85,20 +95,52 @@ def sensor_dir(config: Any) -> Path:
     return study2_output_root(config) / "sensor"
 
 
-def haufe_input_path(config: Any) -> Path:
-    return sensor_dir(config) / "haufe_input.npz"
+def haufe_fold_patterns_path(config: Any) -> Path:
+    return sensor_dir(config) / "haufe_forward_patterns_by_fold.tsv"
 
 
-def haufe_pattern_path(config: Any) -> Path:
-    return sensor_dir(config) / "haufe_pattern.npy"
+def haufe_aggregate_patterns_path(config: Any) -> Path:
+    return sensor_dir(config) / "haufe_forward_patterns_summary.tsv"
 
 
-def haufe_covariance_path(config: Any) -> Path:
-    return sensor_dir(config) / "haufe_feature_covariance.npy"
+def haufe_stability_path(config: Any) -> Path:
+    return sensor_dir(config) / "haufe_forward_patterns_stability.tsv"
 
 
-def haufe_summary_path(config: Any) -> Path:
-    return sensor_dir(config) / "haufe_summary.tsv"
+def figures_dir(config: Any) -> Path:
+    return study2_output_root(config) / "figures"
+
+
+def haufe_figure_path(config: Any) -> Path:
+    return figures_dir(config) / "haufe_forward_patterns.svg"
+
+
+def primary_source_figure_path(config: Any) -> Path:
+    return figures_dir(config) / "primary_source_associations.svg"
+
+
+def primary_source_png_path(config: Any) -> Path:
+    return figures_dir(config) / "primary_source_associations.png"
+
+
+def primary_source_vertices_path(config: Any) -> Path:
+    return figures_dir(config) / "primary_source_associations_vertices.tsv"
+
+
+def primary_source_clusters_path(config: Any) -> Path:
+    return figures_dir(config) / "primary_source_associations_clusters.tsv"
+
+
+def primary_source_summary_path(config: Any) -> Path:
+    return figures_dir(config) / "primary_source_associations_summary.tsv"
+
+
+def primary_source_caption_path(config: Any) -> Path:
+    return figures_dir(config) / "primary_source_associations_caption.txt"
+
+
+def primary_source_manifest_path(config: Any) -> Path:
+    return figures_dir(config) / "primary_source_associations_manifest.json"
 
 
 def source_model_dir(config: Any) -> Path:
@@ -244,16 +286,24 @@ __all__ = [
     "directional_consistency_summary_path",
     "directional_prediction_map_path",
     "directional_target_map_path",
-    "haufe_covariance_path",
-    "haufe_input_path",
-    "haufe_pattern_path",
-    "haufe_summary_path",
+    "figures_dir",
+    "haufe_aggregate_patterns_path",
+    "haufe_figure_path",
+    "haufe_fold_patterns_path",
+    "haufe_stability_path",
     "inference_dir",
     "null_source_maps_path",
     "point_spread_distances_path",
     "point_spread_resolution_matrix_path",
     "point_spread_summary_path",
     "point_spread_vertex_fwhm_path",
+    "primary_source_caption_path",
+    "primary_source_clusters_path",
+    "primary_source_figure_path",
+    "primary_source_manifest_path",
+    "primary_source_png_path",
+    "primary_source_summary_path",
+    "primary_source_vertices_path",
     "robustness_metrics_path",
     "robustness_summary_path",
     "sensor_dir",
@@ -271,6 +321,10 @@ __all__ = [
     "source_stage_dir",
     "source_stage_fisher_z_path",
     "source_stage_frame_path",
+    "source_stage_partial_r_path",
+    "source_stage_qc_path",
+    "source_vertex_manifest_path",
+    "source_vertex_metadata_path",
     "study1_report_path",
     "study2_output_root",
     "subject_source_power_path",

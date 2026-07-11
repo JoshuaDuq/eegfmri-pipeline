@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.infra.tsv import write_parquet, write_tsv
 from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from studies.pain_study.study2 import paths
@@ -30,7 +31,6 @@ from studies.pain_study.study2.gates import (
     evaluate_study1_confirmatory_criteria,
     load_study1_confirmatory_row,
 )
-from studies.pain_study.study2.haufe import compute_haufe_pattern
 from studies.pain_study.study2.point_spread import compute_point_spread_fwhm
 from studies.pain_study.study2.source_family import (
     compute_source_family_inference,
@@ -41,6 +41,7 @@ from studies.pain_study.study2.source_maps import (
     compute_cohort_source_association_maps,
 )
 from studies.pain_study.study2.source_model_qc import evaluate_source_model_qc
+from studies.pain_study.study2.sensor_patterns import compute_sensor_pattern_summary
 from studies.pain_study.study2.source_stage_design import contribution_bands
 from studies.pain_study.study2.source_power import (
     apply_sloreta_inverse,
@@ -50,6 +51,7 @@ from studies.pain_study.study2.source_power import (
     make_surface_source_morph,
     make_sloreta_inverse_operator,
 )
+from studies.pain_study.study2.source_vertex_manifest import ensure_common_source_vertices
 from studies.pain_study.study2.study1_context import (
     load_study1_model_context,
     study1_model_comparison_path,
@@ -60,7 +62,6 @@ from studies.pain_study.study2.table_io import (
     metric_mapping,
     parse_bool,
     require_columns,
-    require_npz_keys,
 )
 from studies.pain_study.study2.target_retrained_null import build_target_retrained_null_maps
 from studies.pain_study.study2.validation import (
@@ -260,7 +261,9 @@ def run_source_power(context: "Study2StageContext") -> None:
 
     for subject_id in context.subjects:
         anatomy = _resolve_anatomy(config, subject_id=subject_id)
-        epochs = _load_subject_epochs(config, subject_id=subject_id, task=context.task, logger=context.logger)
+        epochs = _load_subject_epochs(
+            config, subject_id=subject_id, task=context.task, logger=context.logger
+        )
         forward = build_surface_forward_model(
             epochs.info,
             subject=subject_id,
@@ -304,6 +307,13 @@ def run_source_power(context: "Study2StageContext") -> None:
                     baseline_window_s=baseline_window,
                     active_window_s=active_window,
                     morph=source_morph,
+                )
+                ensure_common_source_vertices(
+                    array_path=paths.source_vertex_manifest_path(config),
+                    metadata_path=paths.source_vertex_metadata_path(config),
+                    vertices=extraction.vertices,
+                    common_subject=common_subject,
+                    spacing=common_spacing,
                 )
                 subband_extractions.append(extraction)
                 del band_epochs, stcs
@@ -384,31 +394,62 @@ def run_gate(context: "Study2StageContext") -> None:
 
 
 def haufe_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
-    return (paths.haufe_input_path(context.config),)
+    return (
+        paths.study1_report_path(context.config),
+        study1_model_comparison_path(_study1_capable_config(context.config)),
+    )
 
 
 def run_haufe(context: "Study2StageContext") -> None:
-    """Compute the Haufe sensor pattern from a persisted training-fold design."""
+    """Compute foldwise sensor patterns from the frozen Study 1 NPS model."""
     config = context.config
-    with np.load(paths.haufe_input_path(config)) as payload:
-        require_npz_keys(payload, ("X_train", "coefficients"))
-        result = compute_haufe_pattern(
-            payload["X_train"],
-            payload["coefficients"],
-        )
+    figure_config = require_config_value(config, "study2.figures.haufe_forward_patterns")
+    if not isinstance(figure_config, Mapping):
+        raise ValueError("study2.figures.haufe_forward_patterns must be a mapping.")
+    target = require_config_string(config, "study2.confirmatory.study1_cell.target")
+    model = require_config_string(config, "study2.confirmatory.study1_cell.model")
+    feature_spec = require_config_string(
+        config,
+        "study2.confirmatory.study1_cell.frequency_preset",
+    )
+    if target != str(figure_config.get("target")):
+        raise ValueError("Study 2 Haufe figure target must match the confirmatory target.")
+    if model != str(figure_config.get("model")):
+        raise ValueError("Study 2 Haufe figure model must match the confirmatory model.")
+    if feature_spec != str(figure_config.get("feature_spec")):
+        raise ValueError("Study 2 Haufe figure feature spec must match the confirmatory preset.")
+    band_specs = figure_config.get("bands")
+    if not isinstance(band_specs, list) or not band_specs:
+        raise ValueError("Study 2 Haufe figure bands must be a non-empty list.")
+    bands = tuple(str(spec["name"]) for spec in band_specs)
+    study1_config = _study1_capable_config(config)
 
-    sensor_dir = paths.sensor_dir(config)
-    sensor_dir.mkdir(parents=True, exist_ok=True)
-    np.save(paths.haufe_pattern_path(config), result.pattern)
-    np.save(paths.haufe_covariance_path(config), result.feature_covariance)
-    pd.DataFrame(
-        [
-            {
-                "n_observations": result.n_observations,
-                "n_features": result.n_features,
-            }
-        ]
-    ).to_csv(paths.haufe_summary_path(config), sep="\t", index=False)
+    model_context = load_study1_model_context(
+        subjects=list(context.subjects),
+        task=context.task,
+        config=study1_config,
+        target_name=target,
+        feature_spec=feature_spec,
+        logger=context.logger,
+    )
+    fold_metrics = pd.read_csv(study1_model_comparison_path(study1_config), sep="\t")
+    summary = compute_sensor_pattern_summary(
+        context=model_context,
+        fold_metrics=fold_metrics,
+        target=target,
+        bands=bands,
+        refit_tolerance=float(figure_config["refit_r2_tolerance"]),
+        minimum_article_subjects=int(figure_config["minimum_article_subjects"]),
+    )
+
+    outputs = (
+        (summary.fold_patterns, paths.haufe_fold_patterns_path(config)),
+        (summary.aggregate_patterns, paths.haufe_aggregate_patterns_path(config)),
+        (summary.stability, paths.haufe_stability_path(config)),
+    )
+    for frame, tsv_path in outputs:
+        write_tsv(frame, tsv_path)
+        write_parquet(frame, tsv_path.with_suffix(".parquet"))
 
 
 def source_model_qc_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
@@ -956,9 +997,7 @@ def run_inference(context: "Study2StageContext") -> None:
     observed_maps = {
         band: np.load(paths.source_stage_fisher_z_path(config, band=band)) for band in bands
     }
-    null_maps = {
-        band: np.load(paths.null_source_maps_path(config, band=band)) for band in bands
-    }
+    null_maps = {band: np.load(paths.null_source_maps_path(config, band=band)) for band in bands}
     result = compute_source_family_inference(
         observed_maps_by_band=observed_maps,
         null_maps_by_band=null_maps,

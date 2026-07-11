@@ -459,18 +459,28 @@ def build_scanner_harmonic_figure(
             left=0.075,
             right=0.985,
             bottom=0.22,
-            top=0.91,
+            top=0.80,
             wspace=0.34,
         )
         spectrum_axis = figure.add_subplot(grid[0, 0])
         offset_axis = figure.add_subplot(grid[0, 1])
-        _draw_spectrum_panel(spectrum_axis, summary, config)
+        legend_handles = _draw_spectrum_panel(spectrum_axis, summary, config)
         _draw_offset_panel(offset_axis, summary, config)
         _add_panel_labels(spectrum_axis, offset_axis)
+        figure.legend(
+            handles=legend_handles,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.985),
+            ncol=5,
+            frameon=False,
+            handlelength=1.7,
+            handletextpad=0.5,
+            columnspacing=1.1,
+        )
     return figure
 
 
-def _draw_spectrum_panel(axis, summary: ScannerHarmonicSummary, config: Any) -> None:
+def _draw_spectrum_panel(axis, summary: ScannerHarmonicSummary, config: Any) -> tuple:
     style = require_config_value(config, "study1.figures.validity.style")
     scanner = require_config_value(config, "study1.figures.scanner_harmonics")
     excluded_color = str(scanner["colors"]["excluded"])
@@ -550,30 +560,24 @@ def _draw_spectrum_panel(axis, summary: ScannerHarmonicSummary, config: Any) -> 
             require_config_value(config, "study1.figures.validity.font.annotation_pt")
         ),
     )
-    axis.legend(
-        handles=(
-            Line2D(
-                [],
-                [],
-                color=str(style["participant_color"]),
-                linewidth=float(style["participant_line_width_pt"]),
-                label="Participant median",
-            ),
-            Line2D(
-                [],
-                [],
-                color="#111111",
-                linewidth=float(style["cohort_line_width_pt"]),
-                label="Cohort median",
-            ),
-            Patch(facecolor="#202020", alpha=0.12, label="95% bootstrap CI"),
-            Patch(facecolor=excluded_color, alpha=0.12, label="Scanner-harmonic window"),
-            Line2D([], [], color=retained_color, linewidth=2.4, label="Retained gamma"),
+    return (
+        Line2D(
+            [],
+            [],
+            color=str(style["participant_color"]),
+            linewidth=float(style["participant_line_width_pt"]),
+            label="Participant median",
         ),
-        frameon=False,
-        loc="upper right",
-        bbox_to_anchor=(1.0, 0.88),
-        handlelength=2.0,
+        Line2D(
+            [],
+            [],
+            color="#111111",
+            linewidth=float(style["cohort_line_width_pt"]),
+            label="Cohort median",
+        ),
+        Patch(facecolor="#202020", alpha=0.12, label="95% bootstrap CI"),
+        Patch(facecolor=excluded_color, alpha=0.12, label="Scanner-harmonic window"),
+        Line2D([], [], color=retained_color, linewidth=2.4, label="Retained gamma"),
     )
 
 

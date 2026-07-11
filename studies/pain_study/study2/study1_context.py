@@ -80,7 +80,7 @@ def load_study1_model_context(
     inner_splits = require_config_int(config, "study1.feature_benchmark.inner_splits")
     rng_seed = require_config_int(config, "project.random_state")
 
-    X, y, groups, _feature_names, meta = load_active_matrix(
+    X, y, groups, feature_names, meta = load_active_matrix(
         subjects,
         task,
         deriv_root,
@@ -122,6 +122,7 @@ def load_study1_model_context(
 
     return Study1ModelContext(
         X=X,
+        feature_names=tuple(feature_names),
         y=y,
         groups=groups,
         meta=meta,
