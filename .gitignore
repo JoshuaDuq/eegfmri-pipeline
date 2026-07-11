@@ -94,6 +94,7 @@ output.json
 columns_sample.txt
 
 ### Local workflow state ###
+.superpowers/
 local_workflows/*
 !local_workflows/alliance_canada/
 local_workflows/alliance_canada/*
