@@ -11,19 +11,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
-from matplotlib.colors import to_hex
+from matplotlib.colors import Normalize, to_hex
 from matplotlib.text import Text
 
 from studies.pain_study.study2 import paths
 from studies.pain_study.study2.config import load_study2_config
 from studies.pain_study.study2.figures.spatial_convergence import (
     AUDIT_COLUMNS,
+    SpatialConvergenceSummary,
     load_spatial_convergence,
 )
 from studies.pain_study.study2.figures.spatial_convergence_plot import (
     build_spatial_convergence_figure,
 )
-from studies.pain_study.study2.source_vertex_manifest import ensure_common_source_vertices
+from studies.pain_study.study2.figures.primary_source_associations_plot import (
+    CommonSourceSurfaces,
+    HemisphereSurface,
+)
+from studies.pain_study.study2.figures.style import study2_diverging_color_map
+from studies.pain_study.study2.source_vertex_manifest import (
+    CommonSourceVertices,
+    ensure_common_source_vertices,
+)
 from studies.pain_study.study2.spatial_comparison import compute_spatial_correspondence
 from studies.tests.pipelines.test_study2_primary_source_associations_figure import (
     _synthetic_surfaces,
@@ -73,7 +82,8 @@ def test_renderer_has_fixed_multimodal_structure(tmp_path: Path) -> None:
             )
             assert len([line for line in axis.lines if line.get_gid() == "zero-reference"]) == 1
             assert axis.get_title() == (
-                f"r = {result.spatial_r:.3f}   plus-one p = {result.p_value:.4f}   "
+                f"r = {result.spatial_r:.3f}   plus-one two-sided p = "
+                f"{result.p_value:.4f}   "
                 f"Holm p = {result.holm_adjusted_p_value:.4f}"
             )
             histogram_patches = [
@@ -176,44 +186,77 @@ def test_renderer_rejects_complex_masked_fmri_map(tmp_path: Path) -> None:
         build_spatial_convergence_figure(invalid_summary, _synthetic_surfaces(), config)
 
 
-def test_renderer_neutralizes_unmasked_vertices_and_excludes_them_from_limits(
+def test_renderer_colors_only_fully_masked_faces_without_diluting_effects(
     tmp_path: Path,
 ) -> None:
     config = _write_spatial_artifacts(tmp_path)
-    summary = load_spatial_convergence(config)
-    mask = np.array([True, True, False, True, True, False])
-    fmri_map = summary.fmri_map.copy()
-    fmri_map[~mask] = (300.0, -400.0)
-    band_results = {}
-    for band in BANDS:
-        eeg_map = summary.band_results[band].eeg_map.copy()
-        eeg_map[~mask] = (0.99, -0.99)
-        band_results[band] = replace(summary.band_results[band], eeg_map=eeg_map)
-    masked_summary = replace(
-        summary,
-        fmri_map=fmri_map,
-        mask=mask,
-        band_results=band_results,
-    )
+    summary, surfaces = _two_face_mask_fixture(load_spatial_convergence(config))
 
-    figure = build_spatial_convergence_figure(masked_summary, _synthetic_surfaces(), config)
+    figure = build_spatial_convergence_figure(summary, surfaces, config)
 
     try:
+        figure.canvas.draw()
         surface_axes = [
             axis for axis in figure.axes if str(axis.get_gid()).startswith("surface-")
         ]
+        expected_face_values = {
+            "fmri": (3.0, -3.0),
+            "alpha": (0.3, -0.3),
+            "beta": (0.2, -0.2),
+            "gamma": (0.1, -0.1),
+        }
+        color_map = study2_diverging_color_map()
+        expected_background_color = plt.get_cmap("gray_r")(0.5)
         for axis in surface_axes:
-            displayed = axis._study2_display_values
-            assert np.isnan(displayed[-1])
-            expected_limit = 3.0 if axis.get_gid().split("-")[1] == "fmri" else 0.3
-            map_collections = [
+            _, map_name, hemisphere, _ = axis.get_gid().split("-")
+            masked_map_collections = [
                 collection
                 for collection in axis.collections
                 if collection.get_gid() == "unthresholded-map"
             ]
-            assert {tuple(collection.get_clim()) for collection in map_collections} == {
-                (-expected_limit, expected_limit)
-            }
+            assert len(masked_map_collections) == 1
+            masked_map_collection = masked_map_collections[0]
+            assert len(masked_map_collection.get_facecolors()) == 2
+            assert np.array_equal(
+                masked_map_collection._study2_effect_face_mask,
+                np.array([True, False]),
+            )
+
+            expected_limit = 3.0 if map_name == "fmri" else 0.3
+            assert tuple(masked_map_collection.get_clim()) == (
+                -expected_limit,
+                expected_limit,
+            )
+            hemisphere_index = 0 if hemisphere == "left" else 1
+            expected_value = expected_face_values[map_name][hemisphere_index]
+            expected_color = color_map(
+                Normalize(-expected_limit, expected_limit)(expected_value)
+            )
+            rendered_colors = masked_map_collection.get_facecolors()
+            assert sum(np.allclose(color, expected_color) for color in rendered_colors) == 1
+            assert (
+                sum(
+                    np.allclose(color, expected_background_color)
+                    for color in rendered_colors
+                )
+                == 1
+            )
+    finally:
+        plt.close(figure)
+
+
+def test_renderer_does_not_mutate_common_surface_coordinates(tmp_path: Path) -> None:
+    config = _write_spatial_artifacts(tmp_path)
+    summary = load_spatial_convergence(config)
+    surfaces = _synthetic_surfaces()
+    original_left = surfaces.left.coordinates.copy()
+    original_right = surfaces.right.coordinates.copy()
+
+    figure = build_spatial_convergence_figure(summary, surfaces, config)
+
+    try:
+        assert np.array_equal(surfaces.left.coordinates, original_left)
+        assert np.array_equal(surfaces.right.coordinates, original_right)
     finally:
         plt.close(figure)
 
@@ -440,6 +483,65 @@ def test_loader_rejects_modified_surrogates_with_unchanged_inference(tmp_path: P
 
     with pytest.raises(ValueError, match="alpha spatial metadata names the wrong surrogate maps"):
         load_spatial_convergence(config)
+
+
+def _two_face_mask_fixture(
+    summary: SpatialConvergenceSummary,
+) -> tuple[SpatialConvergenceSummary, CommonSourceSurfaces]:
+    vertices = np.arange(4, dtype=np.int64)
+    manifest = CommonSourceVertices(
+        lh_vertices=vertices,
+        rh_vertices=vertices,
+        common_subject="fsaverage",
+        spacing="oct6",
+    )
+    coordinates = np.array(
+        [
+            [-1.0, -1.0, -0.5],
+            [1.0, 0.0, -0.8],
+            [-0.5, 1.0, 0.7],
+            [1.2, 0.6, 0.4],
+        ]
+    )
+    faces = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int64)
+    sulcal_depth = np.array([-1.0, 0.0, 1.0, 0.5])
+    surfaces = CommonSourceSurfaces(
+        left=HemisphereSurface(
+            hemisphere="left",
+            vertex_numbers=vertices.copy(),
+            coordinates=coordinates.copy(),
+            faces=faces.copy(),
+            sulcal_depth=sulcal_depth.copy(),
+        ),
+        right=HemisphereSurface(
+            hemisphere="right",
+            vertex_numbers=vertices.copy(),
+            coordinates=coordinates * np.array([-1.0, 1.0, 1.0]),
+            faces=faces.copy(),
+            sulcal_depth=sulcal_depth.copy(),
+        ),
+        source_paths=(),
+    )
+    mask = np.array([True, True, True, False, True, True, True, False])
+    fmri_map = np.array([3.0, 3.0, 3.0, 300.0, -3.0, -3.0, -3.0, -400.0])
+    band_values = {"alpha": 0.3, "beta": 0.2, "gamma": 0.1}
+    band_results = {
+        band: replace(
+            summary.band_results[band],
+            eeg_map=np.array([value, value, value, 0.99, -value, -value, -value, -0.99]),
+        )
+        for band, value in band_values.items()
+    }
+    return (
+        replace(
+            summary,
+            fmri_map=fmri_map,
+            mask=mask,
+            band_results=band_results,
+            vertices_manifest=manifest,
+        ),
+        surfaces,
+    )
 
 
 def _write_spatial_artifacts(tmp_path: Path) -> dict:

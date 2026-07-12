@@ -175,30 +175,49 @@ def _draw_surface(
 ) -> None:
     from nilearn import plotting
 
-    plotted_values = np.nan_to_num(values, nan=0.0)
-    before_map = len(axis.collections)
+    coordinates = surface.coordinates.copy()
+    faces = surface.faces.copy()
+    before_background = len(axis.collections)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"mpl_toolkits")
-        plotting.plot_surf_stat_map(
-            surf_mesh=(surface.coordinates, surface.faces),
-            stat_map=plotted_values,
+        plotting.plot_surf(
+            surf_mesh=(coordinates, faces),
             bg_map=surface.sulcal_depth,
             hemi=surface.hemisphere,
             view="lateral",
-            cmap=color_map,
             colorbar=False,
-            threshold=None,
-            vmin=-limit,
-            vmax=limit,
-            symmetric_cbar=True,
-            bg_on_data=False,
             axes=axis,
             figure=axis.figure,
         )
-    for collection in axis.collections[before_map:]:
-        collection.set_gid("unthresholded-map")
-        collection.set_clim(-limit, limit)
+    surface_collections = axis.collections[before_background:]
+    if len(surface_collections) != 1:
+        raise RuntimeError("Study 2 surface rendering must create exactly one face collection.")
+
+    valid_face_mask = np.isfinite(values[faces]).all(axis=1)
+    valid_faces = faces[valid_face_mask]
+    normalization = Normalize(vmin=-limit, vmax=limit, clip=True)
+    face_colors = _anatomical_face_colors(surface.sulcal_depth, faces)
+    if valid_faces.size:
+        face_values = np.mean(values[valid_faces], axis=1)
+        face_colors[valid_face_mask] = color_map(normalization(face_values))
+    surface_collection = surface_collections[0]
+    surface_collection.set_gid("unthresholded-map")
+    surface_collection.set_facecolors(face_colors)
+    surface_collection.set_edgecolors(face_colors)
+    surface_collection.set_cmap(color_map)
+    surface_collection.set_norm(normalization)
+    surface_collection.set_clim(-limit, limit)
+    surface_collection._study2_effect_face_mask = valid_face_mask.copy()
     axis._study2_display_values = values.copy()
+
+
+def _anatomical_face_colors(sulcal_depth: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    face_values = np.mean(sulcal_depth[faces], axis=1)
+    minimum = float(face_values.min())
+    maximum = float(face_values.max())
+    if minimum < 0.0 or maximum > 1.0:
+        face_values = Normalize(vmin=minimum, vmax=maximum)(face_values)
+    return plt.get_cmap("gray_r")(face_values)
 
 
 def _hemisphere_display_values(
@@ -331,7 +350,7 @@ def _draw_null_distribution(
     axis.set_xlim(*null_limits)
     axis.set_ylim(0.0, observed_height * 1.18)
     axis.set_title(
-        f"r = {result.spatial_r:.3f}   plus-one p = {result.p_value:.4f}   "
+        f"r = {result.spatial_r:.3f}   plus-one two-sided p = {result.p_value:.4f}   "
         f"Holm p = {result.holm_adjusted_p_value:.4f}",
         fontsize=5.1,
         pad=3.0,
