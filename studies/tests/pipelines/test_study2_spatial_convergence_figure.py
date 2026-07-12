@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+from matplotlib.colors import to_hex
+from matplotlib.text import Text
 
 from studies.pain_study.study2 import paths
 from studies.pain_study.study2.config import load_study2_config
@@ -53,7 +55,11 @@ def test_renderer_has_fixed_multimodal_structure(tmp_path: Path) -> None:
         assert [axis.get_gid() for axis in null_axes] == [f"null-{band}" for band in BANDS]
         assert len(null_axes) == 3
         assert len({axis.get_xlim() for axis in null_axes}) == 1
-        observed_colors = set()
+        expected_band_colors = {
+            "alpha": "#0072B2",
+            "beta": "#CC79A7",
+            "gamma": "#009E73",
+        }
         for axis, band in zip(null_axes, BANDS, strict=True):
             result = summary.band_results[band]
             observed_lines = [
@@ -62,7 +68,10 @@ def test_renderer_has_fixed_multimodal_structure(tmp_path: Path) -> None:
                 if line.get_gid() == "observed-correlation" and line.get_marker() == "D"
             ]
             assert len(observed_lines) == 1
-            observed_colors.add(observed_lines[0].get_markerfacecolor())
+            assert to_hex(observed_lines[0].get_markerfacecolor()).upper() == (
+                expected_band_colors[band]
+            )
+            assert len([line for line in axis.lines if line.get_gid() == "zero-reference"]) == 1
             assert axis.get_title() == (
                 f"r = {result.spatial_r:.3f}   plus-one p = {result.p_value:.4f}   "
                 f"Holm p = {result.holm_adjusted_p_value:.4f}"
@@ -89,8 +98,6 @@ def test_renderer_has_fixed_multimodal_structure(tmp_path: Path) -> None:
                 [patch.get_x() for patch in histogram_patches],
                 expected_edges[:-1],
             )
-        assert len(observed_colors) == 3
-
         fmri_colorbar = [axis for axis in figure.axes if axis.get_gid() == "fmri-colorbar"]
         eeg_colorbar = [axis for axis in figure.axes if axis.get_gid() == "eeg-colorbar"]
         assert len(fmri_colorbar) == 1
@@ -158,6 +165,17 @@ def test_renderer_rejects_all_zero_masked_fmri_map(tmp_path: Path) -> None:
         build_spatial_convergence_figure(invalid_summary, _synthetic_surfaces(), config)
 
 
+def test_renderer_rejects_complex_masked_fmri_map(tmp_path: Path) -> None:
+    config = _write_spatial_artifacts(tmp_path)
+    summary = load_spatial_convergence(config)
+    fmri_map = summary.fmri_map.astype(np.complex128)
+    fmri_map[0] += 1.0j
+    invalid_summary = replace(summary, fmri_map=fmri_map)
+
+    with pytest.raises(ValueError, match="masked fMRI map must be real-valued"):
+        build_spatial_convergence_figure(invalid_summary, _synthetic_surfaces(), config)
+
+
 def test_renderer_neutralizes_unmasked_vertices_and_excludes_them_from_limits(
     tmp_path: Path,
 ) -> None:
@@ -215,6 +233,44 @@ def test_renderer_rejects_all_zero_masked_eeg_map(tmp_path: Path) -> None:
         match="masked beta EEG map must contain a finite nonzero effect",
     ):
         build_spatial_convergence_figure(invalid_summary, _synthetic_surfaces(), config)
+
+
+def test_renderer_rejects_complex_masked_eeg_map(tmp_path: Path) -> None:
+    config = _write_spatial_artifacts(tmp_path)
+    summary = load_spatial_convergence(config)
+    eeg_map = summary.band_results["beta"].eeg_map.astype(np.complex128)
+    eeg_map[0] += 1.0j
+    band_results = dict(summary.band_results)
+    band_results["beta"] = replace(band_results["beta"], eeg_map=eeg_map)
+    invalid_summary = replace(summary, band_results=band_results)
+
+    with pytest.raises(ValueError, match="masked beta EEG map must be real-valued"):
+        build_spatial_convergence_figure(invalid_summary, _synthetic_surfaces(), config)
+
+
+def test_renderer_outlines_only_holm_significant_null_panel(tmp_path: Path) -> None:
+    config = _write_spatial_artifacts(tmp_path)
+    summary = load_spatial_convergence(config)
+    band_results = dict(summary.band_results)
+    band_results["alpha"] = replace(band_results["alpha"], holm_significant=True)
+    significant_summary = replace(summary, band_results=band_results)
+
+    figure = build_spatial_convergence_figure(
+        significant_summary,
+        _synthetic_surfaces(),
+        config,
+    )
+
+    try:
+        outlined_axes = {
+            axis.get_gid()
+            for axis in figure.axes
+            if any(patch.get_gid() == "holm-significant-outline" for patch in axis.patches)
+        }
+        assert outlined_axes == {"null-alpha"}
+        assert "*" not in " ".join(text.get_text() for text in figure.findobj(Text))
+    finally:
+        plt.close(figure)
 
 
 def test_renderer_rejects_configured_band_order_mismatch(tmp_path: Path) -> None:

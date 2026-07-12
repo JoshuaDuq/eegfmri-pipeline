@@ -406,6 +406,11 @@ def _masked_nonzero_values(
     n_vertices: int,
 ) -> np.ndarray:
     array = np.asarray(values)
+    if not np.issubdtype(array.dtype, np.number) or np.issubdtype(
+        array.dtype,
+        np.complexfloating,
+    ):
+        raise ValueError(f"Study 2 spatial masked {label} must be real-valued.")
     if array.ndim != 1 or array.size != n_vertices:
         raise ValueError(f"Study 2 spatial {label} does not match the source vertex manifest.")
     masked_values = array[mask]
