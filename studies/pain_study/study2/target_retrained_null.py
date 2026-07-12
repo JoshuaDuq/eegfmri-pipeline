@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.analysis.machine_learning.orchestration import (
+    _permutation_indices_by_scheme,
     model_comparison_cv_predictions,
     reconstruct_staged_permutation_target_for_fold,
 )
@@ -158,19 +159,22 @@ def stacked_permuted_targets(
     context: Study1ModelContext,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Reconstruct one permuted target per outer fold, stacked row-wise."""
+    """Reconstruct fold-specific targets from one coherent permutation mapping."""
+    permutation_indices = _permutation_indices_by_scheme(
+        context.groups,
+        runs=context.runs,
+        trial_indices=context.trial_indices,
+        rng=rng,
+        scheme=context.scheme,
+    )
     fold_targets = [
         reconstruct_staged_permutation_target_for_fold(
             y=context.y,
-            groups=context.groups,
             meta=context.meta,
             train_idx=train_idx,
             test_idx=test_idx,
             columns=context.target_residualization_columns,
-            runs=context.runs,
-            trial_indices=context.trial_indices,
-            rng=rng,
-            scheme=context.scheme,
+            permutation_indices=permutation_indices,
         )
         for train_idx, test_idx in context.outer_folds
     ]
@@ -190,7 +194,7 @@ def assemble_permuted_scores(
 
     scores = np.full(len(context.y), np.nan, dtype=float)
     for fold_index, (train_idx, test_idx) in enumerate(context.outer_folds):
-        _y_true, y_pred, _records = model_comparison_cv_predictions(
+        prediction_result = model_comparison_cv_predictions(
             model_name="study2_target_retrained_null",
             pipe=context.pipe,
             param_grid=dict(context.param_grid),
@@ -208,7 +212,10 @@ def assemble_permuted_scores(
             collect_records=False,
             fixed_params=dict(context.fixed_params_by_fold[fold_index]),
         )
-        scores[np.asarray(test_idx, dtype=int)] = np.asarray(y_pred, dtype=float)[
+        scores[np.asarray(test_idx, dtype=int)] = np.asarray(
+            prediction_result.residual_prediction,
+            dtype=float,
+        )[
             np.asarray(test_idx, dtype=int)
         ]
 

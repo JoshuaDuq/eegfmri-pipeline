@@ -15,6 +15,24 @@ from studies.tests.test_support import DotConfig
 EXPLORATORY_FAMILIES = ["spectral", "erds"]
 
 
+def _model_prediction_result(
+    values: np.ndarray,
+    records: list[dict[str, object]],
+):
+    from eeg_pipeline.analysis.machine_learning.orchestration import (
+        ModelComparisonPredictions,
+    )
+
+    prediction = np.asarray(values, dtype=float)
+    return ModelComparisonPredictions(
+        evaluation_target=prediction.copy(),
+        full_prediction=prediction.copy(),
+        nuisance_prediction=np.zeros_like(prediction),
+        residual_prediction=prediction.copy(),
+        records=tuple(records),
+    )
+
+
 def _config(root: Path) -> DotConfig:
     return DotConfig(
         {
@@ -680,7 +698,7 @@ def test_model_comparison_permutation_refits_full_pipeline_for_subject_mean_r2()
 
     def _capture_cv(**kwargs):
         refit_targets.append(list(kwargs["y"]))
-        return kwargs["y"].copy(), kwargs["y"].copy(), [{"r2": 1.0}]
+        return _model_prediction_result(kwargs["y"], [{"r2": 1.0}])
 
     with (
         patch(
@@ -738,7 +756,10 @@ def test_model_comparison_permutation_resamples_until_requested_valid_draws() ->
     null_scores = [0.0, 2.0]
 
     def _capture_cv(**kwargs):
-        return kwargs["y"].copy(), kwargs["y"].copy(), [{"r2": null_scores.pop(0)}]
+        return _model_prediction_result(
+            kwargs["y"],
+            [{"r2": null_scores.pop(0)}],
+        )
 
     with (
         patch(
@@ -799,7 +820,7 @@ def test_model_comparison_staged_residual_learning_scores_raw_incremental_predic
         (np.array([5, 6, 7, 8, 9]), np.array([0, 1, 2, 3, 4])),
     ]
 
-    y_true, y_pred, records = model_comparison_cv_predictions(
+    result = model_comparison_cv_predictions(
         model_name="linear",
         pipe=LinearRegression(),
         param_grid={},
@@ -825,13 +846,21 @@ def test_model_comparison_staged_residual_learning_scores_raw_incremental_predic
         collect_records=True,
     )
 
-    assert np.allclose(y_true, y)
-    assert np.all(np.isfinite(y_pred))
-    for record, (_train_idx, test_idx) in zip(records, outer_folds):
-        expected_mae = float(np.mean(np.abs(y[test_idx] - y_pred[test_idx])))
+    assert np.allclose(result.evaluation_target, y)
+    assert np.all(np.isfinite(result.full_prediction))
+    assert np.all(np.isfinite(result.nuisance_prediction))
+    assert np.all(np.isfinite(result.residual_prediction))
+    np.testing.assert_allclose(
+        result.full_prediction,
+        result.nuisance_prediction + result.residual_prediction,
+    )
+    for record, (_train_idx, test_idx) in zip(result.records, outer_folds):
+        expected_mae = float(
+            np.mean(np.abs(y[test_idx] - result.full_prediction[test_idx]))
+        )
         assert record["mae"] == pytest.approx(expected_mae)
-    assert all(record["delta_r2"] > 0.0 for record in records)
-    assert all(record["r2_nuisance"] < record["r2"] for record in records)
+    assert all(record["delta_r2"] > 0.0 for record in result.records)
+    assert all(record["r2_nuisance"] < record["r2"] for record in result.records)
 
 
 def test_model_comparison_fixed_params_skips_inner_cv_and_refits_frozen_params(monkeypatch) -> None:
@@ -863,7 +892,7 @@ def test_model_comparison_fixed_params_skips_inner_cv_and_refits_frozen_params(m
     meta = pd.DataFrame({"nuisance": y})
     outer_folds = [(np.array([0, 1, 2]), np.array([3, 4, 5]))]
 
-    _y_true, y_pred, records = model_comparison_cv_predictions(
+    result = model_comparison_cv_predictions(
         model_name="constant",
         pipe=_ConstantRegressor(),
         param_grid={},
@@ -882,8 +911,8 @@ def test_model_comparison_fixed_params_skips_inner_cv_and_refits_frozen_params(m
         fixed_params={"alpha": 0.5},
     )
 
-    assert records[0]["best_params"] == str({"alpha": 0.5})
-    assert np.allclose(y_pred[outer_folds[0][1]], 0.5)
+    assert result.records[0]["best_params"] == str({"alpha": 0.5})
+    assert np.allclose(result.full_prediction[outer_folds[0][1]], 0.5)
 
 
 def test_model_comparison_staged_residual_learning_scores_raw_nuisance_model() -> None:
@@ -903,7 +932,7 @@ def test_model_comparison_staged_residual_learning_scores_raw_nuisance_model() -
         (np.array([4, 5, 6, 7]), np.array([0, 1, 2, 3])),
     ]
 
-    _y_true, _y_pred, records = model_comparison_cv_predictions(
+    result = model_comparison_cv_predictions(
         model_name="linear",
         pipe=LinearRegression(),
         param_grid={},
@@ -929,7 +958,7 @@ def test_model_comparison_staged_residual_learning_scores_raw_nuisance_model() -
         collect_records=True,
     )
 
-    for record, (train_idx, test_idx) in zip(records, outer_folds):
+    for record, (train_idx, test_idx) in zip(result.records, outer_folds):
         design_train = np.column_stack([np.ones(len(train_idx), dtype=float), nuisance[train_idx]])
         design_test = np.column_stack([np.ones(len(test_idx), dtype=float), nuisance[test_idx]])
         coefficients, *_ = np.linalg.lstsq(design_train, y[train_idx], rcond=None)
@@ -987,8 +1016,7 @@ def test_model_comparison_summary_reports_staged_incremental_delta_r2(tmp_path) 
         patch.object(
             orchestration,
             "model_comparison_cv_predictions",
-            return_value=(
-                np.arange(4, dtype=float),
+            return_value=_model_prediction_result(
                 np.arange(4, dtype=float),
                 records,
             ),
@@ -1036,9 +1064,6 @@ def test_staged_permutation_reconstructs_raw_targets_from_shifted_residuals() ->
     from eeg_pipeline.analysis.machine_learning.target_residualization import FoldNuisanceFit
 
     y = np.zeros(22, dtype=float)
-    groups = np.array(["sub-0001"] * 11 + ["sub-0002"] * 11, dtype=object)
-    runs = np.ones(22, dtype=float)
-    trial_indices = np.tile(np.arange(1, 12, dtype=int), 2)
     meta = pd.DataFrame({"nuisance": np.arange(22, dtype=float)})
     train_idx = np.arange(0, 11, dtype=int)
     test_idx = np.arange(11, 22, dtype=int)
@@ -1051,47 +1076,38 @@ def test_staged_permutation_reconstructs_raw_targets_from_shifted_residuals() ->
         test_residual=np.arange(11, 22, dtype=float),
         details={"columns": ["nuisance"]},
     )
+    permutation_indices = np.concatenate(
+        [
+            np.roll(train_idx, 5),
+            np.roll(test_idx, 5),
+        ]
+    )
 
-    def _shift_residuals(residuals, groups_arg, *, runs, trial_indices, rng, scheme):
-        np.testing.assert_array_equal(groups_arg, groups)
-        np.testing.assert_array_equal(residuals[train_idx], nuisance_fit.train_residual)
-        np.testing.assert_array_equal(residuals[test_idx], nuisance_fit.test_residual)
-        return residuals + 1.0
-
-    with (
-        patch(
-            "eeg_pipeline.analysis.machine_learning.orchestration.fit_nuisance_model_for_fold",
-            return_value=nuisance_fit,
-        ),
-        patch(
-            "eeg_pipeline.analysis.machine_learning.orchestration._permute_labels_by_scheme",
-            side_effect=_shift_residuals,
-        ),
+    with patch(
+        "eeg_pipeline.analysis.machine_learning.orchestration.fit_nuisance_model_for_fold",
+        return_value=nuisance_fit,
     ):
         y_perm = reconstruct_staged_permutation_target_for_fold(
             y=y,
-            groups=groups,
             meta=meta,
             train_idx=train_idx,
             test_idx=test_idx,
             columns=("nuisance",),
-            runs=runs,
-            trial_indices=trial_indices,
-            rng=np.random.default_rng(7),
-            scheme="circular_shift_within_run",
+            permutation_indices=permutation_indices,
         )
 
     np.testing.assert_array_equal(
         y_perm[train_idx],
-        nuisance_fit.train_prediction + nuisance_fit.train_residual + 1.0,
+        nuisance_fit.train_prediction + nuisance_fit.train_residual[np.roll(train_idx, 5)],
     )
     np.testing.assert_array_equal(
         y_perm[test_idx],
-        nuisance_fit.test_prediction + nuisance_fit.test_residual + 1.0,
+        nuisance_fit.test_prediction
+        + nuisance_fit.test_residual[np.roll(np.arange(len(test_idx)), 5)],
     )
 
 
-def test_model_comparison_permutation_reconstructs_staged_targets_per_outer_fold() -> None:
+def test_model_comparison_permutation_reuses_one_mapping_across_outer_folds() -> None:
     from eeg_pipeline.analysis.machine_learning import orchestration
 
     X = np.zeros((22, 1), dtype=float)
@@ -1109,13 +1125,20 @@ def test_model_comparison_permutation_reconstructs_staged_targets_per_outer_fold
         (np.arange(11, 22, dtype=int), np.arange(0, 11, dtype=int)),
     ]
     reconstructed_targets = [y + 10.0, y + 20.0]
+    permutation_indices = np.roll(np.arange(len(y), dtype=int), 5)
     captured_refit_targets: list[np.ndarray] = []
 
     def _capture_cv(**kwargs):
         captured_refit_targets.append(np.asarray(kwargs["y"], dtype=float).copy())
-        return kwargs["y"].copy(), kwargs["y"].copy(), [{"delta_r2": 0.5}]
+        return _model_prediction_result(kwargs["y"], [{"delta_r2": 0.5}])
 
     with (
+        patch.object(
+            orchestration,
+            "_permutation_indices_by_scheme",
+            return_value=permutation_indices,
+            create=True,
+        ) as sample_indices,
         patch.object(
             orchestration,
             "reconstruct_staged_permutation_target_for_fold",
@@ -1157,7 +1180,13 @@ def test_model_comparison_permutation_reconstructs_staged_targets_per_outer_fold
             score_column="delta_r2",
         )
 
+    assert sample_indices.call_count == 1
     assert reconstruct.call_count == 2
+    for call in reconstruct.call_args_list:
+        np.testing.assert_array_equal(
+            call.kwargs["permutation_indices"],
+            permutation_indices,
+        )
     np.testing.assert_array_equal(captured_refit_targets[0], y + 10.0)
     np.testing.assert_array_equal(captured_refit_targets[1], y + 20.0)
     assert p_value.p_value == 1.0
@@ -1202,7 +1231,9 @@ def test_admissible_circular_shifts_follow_original_trial_distance_rule() -> Non
     from eeg_pipeline.analysis.machine_learning.orchestration import _admissible_circular_shifts
 
     complete_run = np.arange(1, 12, dtype=int)
-    assert _admissible_circular_shifts(complete_run) == (5, 6, 7, 8, 9, 10)
+    assert _admissible_circular_shifts(complete_run) == (5, 6)
+    assert _admissible_circular_shifts(np.arange(1, 10, dtype=int)) == (4, 5)
+    assert _admissible_circular_shifts(np.arange(1, 9, dtype=int)) == (4,)
     assert _admissible_circular_shifts(np.arange(1, 8, dtype=int)) == tuple()
 
 

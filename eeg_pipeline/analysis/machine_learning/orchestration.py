@@ -85,6 +85,15 @@ class ModelComparisonPermutationResult:
     max_invalid_permutation_fraction: float
 
 
+@dataclass(frozen=True)
+class ModelComparisonPredictions:
+    evaluation_target: np.ndarray
+    full_prediction: np.ndarray
+    nuisance_prediction: np.ndarray
+    residual_prediction: np.ndarray
+    records: tuple[dict[str, Any], ...]
+
+
 def _write_json(payload: Dict[str, Any], output_path: Path) -> None:
     with open(output_path, "w") as f:
         json.dump(payload, f, indent=2, default=str)
@@ -325,16 +334,12 @@ def _admissible_circular_shifts(
     trial_indices: np.ndarray,
     *,
     min_retained_trials: int = 8,
-    min_original_distance: int = 5,
     original_block_length: int = 11,
-    min_admissible_shifts: int = 4,
 ) -> tuple[int, ...]:
     return admissible_circular_shifts(
         trial_indices,
         min_retained_trials=min_retained_trials,
-        min_original_distance=min_original_distance,
         original_block_length=original_block_length,
-        min_admissible_shifts=min_admissible_shifts,
     )
 
 
@@ -346,8 +351,7 @@ def _trial_index_ordered_indices(
     return np.asarray(indices, dtype=int)[order]
 
 
-def _permute_labels_by_scheme(
-    y: np.ndarray,
+def _permutation_indices_by_scheme(
     groups: np.ndarray,
     *,
     runs: Optional[np.ndarray],
@@ -355,9 +359,9 @@ def _permute_labels_by_scheme(
     rng: np.random.Generator,
     scheme: str,
 ) -> np.ndarray:
-    """Permute labels within subject, within subject-run, or circular-shift within run."""
-    y_perm = np.asarray(y, dtype=float).copy()
+    """Sample source-row indices for one coherent permutation draw."""
     groups_arr = np.asarray(groups, dtype=object)
+    source_indices = np.arange(len(groups_arr), dtype=int)
     mode = str(scheme).strip().lower()
     valid = {"within_subject", "within_subject_within_run", "circular_shift_within_run"}
     if mode not in valid:
@@ -365,9 +369,9 @@ def _permute_labels_by_scheme(
             f"Unsupported permutation scheme: {scheme!r}. "
             f"Expected one of: {sorted(valid)}."
         )
-    runs_arr = _validate_permutation_runs(y_perm, runs, scheme=mode)
+    runs_arr = _validate_permutation_runs(source_indices, runs, scheme=mode)
     trial_indices_arr = _validate_permutation_trial_indices(
-        y_perm,
+        source_indices,
         trial_indices,
         scheme=mode,
     )
@@ -396,15 +400,18 @@ def _permute_labels_by_scheme(
                 if not admissible_shifts:
                     raise ValueError(
                         "circular_shift_within_run requires permutation-valid runs "
-                        "with at least 8 retained trials and at least four admissible "
-                        "nonzero circular shifts."
+                        "with at least 8 retained trials and a nonzero maximally "
+                        "separated circular shift."
                     )
                 shift = int(rng.choice(np.asarray(admissible_shifts, dtype=int)))
-                y_perm[run_global_idx] = np.roll(y_perm[run_global_idx], shift)
+                source_indices[run_global_idx] = np.roll(
+                    source_indices[run_global_idx],
+                    shift,
+                )
 
         elif mode == "within_subject_within_run" and runs_arr is not None:
             subj_runs = runs_arr[subj_mask]
-            subj_y = y_perm[subj_mask]
+            subject_source_indices = source_indices[subj_mask]
             for run in np.unique(subj_runs):
                 if pd.isna(run):
                     run_mask = pd.isna(subj_runs)
@@ -412,11 +419,37 @@ def _permute_labels_by_scheme(
                     run_mask = subj_runs == run
                 run_indices = np.where(run_mask)[0]
                 if run_indices.size >= 2:
-                    subj_y[run_indices] = rng.permutation(subj_y[run_indices])
-            y_perm[subj_mask] = subj_y
+                    subject_source_indices[run_indices] = rng.permutation(
+                        subject_source_indices[run_indices]
+                    )
+            source_indices[subj_mask] = subject_source_indices
         else:
-            y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
-    return y_perm
+            source_indices[subj_mask] = rng.permutation(source_indices[subj_mask])
+    return source_indices
+
+
+def _permute_labels_by_scheme(
+    y: np.ndarray,
+    groups: np.ndarray,
+    *,
+    runs: Optional[np.ndarray],
+    trial_indices: Optional[np.ndarray] = None,
+    rng: np.random.Generator,
+    scheme: str,
+) -> np.ndarray:
+    """Permute values with one sampled source-row mapping."""
+    values = np.asarray(y, dtype=float)
+    groups_arr = np.asarray(groups, dtype=object)
+    if len(values) != len(groups_arr):
+        raise ValueError("Permutation values and groups must have the same length.")
+    source_indices = _permutation_indices_by_scheme(
+        groups_arr,
+        runs=runs,
+        trial_indices=trial_indices,
+        rng=rng,
+        scheme=scheme,
+    )
+    return values[source_indices]
 
 
 def _generate_effective_permutation(
@@ -3378,7 +3411,7 @@ def model_comparison_cv_predictions(
     target_residualization_columns: Tuple[str, ...],
     collect_records: bool,
     fixed_params: Optional[Dict[str, Any]] = None,
-) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
+) -> ModelComparisonPredictions:
     """Cross-validated staged-residual predictions.
 
     When ``fixed_params`` is given, inner cross-validation is skipped and the
@@ -3386,8 +3419,10 @@ def model_comparison_cv_predictions(
     target-retrained null relies on this to reuse the frozen Study 1 model
     rather than reselecting hyperparameters per permutation draw.
     """
-    y_pred = np.zeros(len(y))
-    y_true_eval = np.zeros(len(y))
+    y_pred = np.full(len(y), np.nan, dtype=float)
+    y_true_eval = np.full(len(y), np.nan, dtype=float)
+    nuisance_prediction = np.full(len(y), np.nan, dtype=float)
+    residual_prediction = np.full(len(y), np.nan, dtype=float)
     records: list[dict[str, Any]] = []
     resolved_param_grid = _resolve_param_grid_aliases(pipe, param_grid)
     residualization_strategy = _resolve_target_residualization_strategy(config)
@@ -3497,19 +3532,25 @@ def model_comparison_cv_predictions(
             fold_pred = estimator.predict(X_test)
             best_params_repr = "{}"
 
+        fold_residual_prediction = np.asarray(fold_pred, dtype=float)
         if nuisance_test_prediction is not None:
             if residualization_strategy == "staged_residual_learning" and pt is not None:
-                residual_prediction = pt.inverse_transform(
+                fold_residual_prediction = pt.inverse_transform(
                     np.asarray(fold_pred, dtype=float).reshape(-1, 1)
                 ).flatten()
-            else:
-                residual_prediction = np.asarray(fold_pred, dtype=float)
             fold_pred = (
                 np.asarray(nuisance_test_prediction, dtype=float)
-                + residual_prediction
+                + fold_residual_prediction
             )
+            nuisance_prediction[test_idx] = np.asarray(
+                nuisance_test_prediction,
+                dtype=float,
+            )
+        else:
+            nuisance_prediction[test_idx] = 0.0
 
         y_pred[test_idx] = fold_pred
+        residual_prediction[test_idx] = fold_residual_prediction
         y_test_raw = y[test_idx]
         if nuisance_test_prediction is not None:
             fold_eval_target = y_test_raw
@@ -3556,21 +3597,23 @@ def model_comparison_cv_predictions(
                 ),
             }
         )
-    return y_true_eval, y_pred, records
+    return ModelComparisonPredictions(
+        evaluation_target=y_true_eval,
+        full_prediction=y_pred,
+        nuisance_prediction=nuisance_prediction,
+        residual_prediction=residual_prediction,
+        records=tuple(records),
+    )
 
 
 def reconstruct_staged_permutation_target_for_fold(
     *,
     y: np.ndarray,
-    groups: np.ndarray,
     meta: pd.DataFrame,
     train_idx: np.ndarray,
     test_idx: np.ndarray,
     columns: Tuple[str, ...],
-    runs: Optional[np.ndarray],
-    trial_indices: Optional[np.ndarray],
-    rng: np.random.Generator,
-    scheme: str,
+    permutation_indices: np.ndarray,
 ) -> np.ndarray:
     y_arr = np.asarray(y, dtype=float)
     train_indices = np.asarray(train_idx, dtype=int)
@@ -3603,18 +3646,15 @@ def reconstruct_staged_permutation_target_for_fold(
     if not np.all(np.isfinite(nuisance_prediction_fold)):
         raise ValueError("Staged residual permutation requires finite nuisance predictions.")
 
-    runs_fold = None if runs is None else np.asarray(runs)[fold_indices]
-    trial_indices_fold = None
-    if trial_indices is not None:
-        trial_indices_fold = np.asarray(trial_indices)[fold_indices]
-    shifted_residual_fold = _permute_labels_by_scheme(
-        residual_fold,
-        np.asarray(groups, dtype=object)[fold_indices],
-        runs=runs_fold,
-        trial_indices=trial_indices_fold,
-        rng=rng,
-        scheme=scheme,
-    )
+    source_indices = np.asarray(permutation_indices, dtype=int)
+    if source_indices.shape != (len(y_arr),):
+        raise ValueError("Permutation indices must contain one source row per target row.")
+    if not np.array_equal(np.sort(source_indices), np.arange(len(y_arr), dtype=int)):
+        raise ValueError("Permutation indices must be a permutation of all row indices.")
+    fold_source_indices = source_indices[fold_indices]
+    if not np.all(fold_mask[fold_source_indices]):
+        raise ValueError("Permutation indices map an outer-fold row outside that fold.")
+    shifted_residual_fold = residual[fold_source_indices]
 
     y_perm = y_arr.copy()
     y_perm[fold_indices] = nuisance_prediction_fold + shifted_residual_fold
@@ -3690,20 +3730,23 @@ def _model_comparison_permutation_p_value(
     while len(null_scores) < int(n_perm) and attempts < max_attempts:
         attempts += 1
         if use_staged_residual_permutation:
+            permutation_indices = _permutation_indices_by_scheme(
+                np.asarray(groups, dtype=object),
+                runs=blocks,
+                trial_indices=trial_indices,
+                rng=rng,
+                scheme=requested_scheme,
+            )
             fold_scores: list[float] = []
             effective_permutation = True
             for train_idx, test_idx in outer_folds:
                 y_perm = reconstruct_staged_permutation_target_for_fold(
                     y=y,
-                    groups=groups,
                     meta=meta,
                     train_idx=train_idx,
                     test_idx=test_idx,
                     columns=target_residualization_columns,
-                    runs=blocks,
-                    trial_indices=trial_indices,
-                    rng=rng,
-                    scheme=requested_scheme,
+                    permutation_indices=permutation_indices,
                 )
                 fold_indices = np.unique(
                     np.concatenate(
@@ -3722,7 +3765,7 @@ def _model_comparison_permutation_p_value(
                     effective_permutation = False
                     break
 
-                _y_true_perm, _y_pred_perm, records = model_comparison_cv_predictions(
+                permutation_result = model_comparison_cv_predictions(
                     model_name=model_name,
                     pipe=pipe,
                     param_grid=param_grid,
@@ -3741,7 +3784,7 @@ def _model_comparison_permutation_p_value(
                 )
                 fold_scores.extend(
                     float(rec[score_column])
-                    for rec in records
+                    for rec in permutation_result.records
                     if np.isfinite(rec.get(score_column, np.nan))
                 )
             if not effective_permutation:
@@ -3763,7 +3806,7 @@ def _model_comparison_permutation_p_value(
         )
         if not effective:
             continue
-        y_true_perm, y_pred_perm, _records = model_comparison_cv_predictions(
+        permutation_result = model_comparison_cv_predictions(
             model_name=model_name,
             pipe=pipe,
             param_grid=param_grid,
@@ -3782,7 +3825,7 @@ def _model_comparison_permutation_p_value(
         )
         fold_scores = [
             float(rec[score_column])
-            for rec in _records
+            for rec in permutation_result.records
             if np.isfinite(rec.get(score_column, np.nan))
         ]
         if fold_scores:
@@ -3935,7 +3978,7 @@ def run_model_comparison_ml(
         pipe = model_spec["pipe"]
         param_grid = _resolve_param_grid_aliases(pipe, model_spec["param_grid"])
 
-        y_true_eval, y_pred, model_records = model_comparison_cv_predictions(
+        prediction_result = model_comparison_cv_predictions(
             model_name=model_name,
             pipe=pipe,
             param_grid=param_grid,
@@ -3952,13 +3995,19 @@ def run_model_comparison_ml(
             target_residualization_columns=target_residualization_columns,
             collect_records=True,
         )
-        comparison_records.extend(model_records)
+        comparison_records.extend(prediction_result.records)
         
         # Overall metrics
         from sklearn.metrics import r2_score
-        overall_r2 = r2_score(y_true_eval, y_pred)
+        overall_r2 = r2_score(
+            prediction_result.evaluation_target,
+            prediction_result.full_prediction,
+        )
         observed_overall_r2[model_name] = float(overall_r2)
-        observed_eval[model_name] = (y_true_eval.copy(), y_pred.copy())
+        observed_eval[model_name] = (
+            prediction_result.evaluation_target.copy(),
+            prediction_result.full_prediction.copy(),
+        )
         logger.info(
             "  \u2713 %s: R\u00b2=%.4f (%.1fs)",
             model_name, overall_r2, _time.perf_counter() - t_model,

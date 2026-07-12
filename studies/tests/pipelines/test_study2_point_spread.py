@@ -42,3 +42,31 @@ def test_compute_point_spread_fwhm_rejects_distance_shape_mismatch() -> None:
             resolution_matrix=np.ones((3, 3), dtype=float),
             distances_mm=np.ones((2, 2), dtype=float),
         )
+
+
+def test_compute_point_spread_fwhm_uses_resolution_matrix_columns() -> None:
+    from studies.pain_study.study2.point_spread import compute_point_spread_fwhm
+
+    resolution_matrix = np.asarray(
+        [
+            [1.0, 0.1, 0.1],
+            [0.6, 1.0, 0.1],
+            [0.1, 0.6, 1.0],
+        ],
+        dtype=float,
+    )
+    distances_mm = np.asarray(
+        [
+            [0.0, 10.0, 20.0],
+            [10.0, 0.0, 10.0],
+            [20.0, 10.0, 0.0],
+        ],
+        dtype=float,
+    )
+
+    result = compute_point_spread_fwhm(
+        resolution_matrix=resolution_matrix,
+        distances_mm=distances_mm,
+    )
+
+    assert result.vertex_fwhm_mm.tolist() == [10.0, 10.0, 0.0]

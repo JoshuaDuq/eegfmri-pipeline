@@ -526,8 +526,9 @@ def test_run_point_spread_writes_resolution_summary(tmp_path: Path) -> None:
 
     vertex_fwhm = np.load(paths.point_spread_vertex_fwhm_path(config))
     summary = pd.read_csv(paths.point_spread_summary_path(config), sep="\t")
-    assert vertex_fwhm.tolist() == [8.0, 0.0]
+    assert vertex_fwhm.tolist() == [0.0, 8.0]
     assert summary.loc[0, "n_vertices"] == 2
+    assert summary.loc[0, "resolution_matrix_axis"] == "columns_are_psfs"
 
 
 def test_run_directional_consistency_writes_band_summary(tmp_path: Path) -> None:

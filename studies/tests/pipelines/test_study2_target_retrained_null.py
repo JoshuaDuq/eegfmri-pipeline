@@ -5,11 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from sklearn.linear_model import LinearRegression
+from unittest.mock import patch
 
 from studies.pain_study.study2.config import load_study2_config
 from studies.pain_study.study2.target_permutations import InvalidPermutationDraw
 from studies.pain_study.study2.target_retrained_null import (
     Study1ModelContext,
+    assemble_permuted_scores,
     build_target_retrained_null_maps,
     stacked_permuted_targets,
     standardize_scores_within_subject,
@@ -68,12 +70,61 @@ def test_stacked_permuted_targets_returns_one_row_per_fold() -> None:
     assert np.all(np.isfinite(stacked))
 
 
+def test_stacked_permuted_targets_reuses_one_mapping_across_folds() -> None:
+    frame = _cohort_frame()
+    context = _aligned_context(frame, load_study2_config())
+    permutation_indices = np.arange(len(context.y), dtype=int)
+
+    with (
+        patch(
+            "studies.pain_study.study2.target_retrained_null._permutation_indices_by_scheme",
+            return_value=permutation_indices,
+        ) as sample_indices,
+        patch(
+            "studies.pain_study.study2.target_retrained_null.reconstruct_staged_permutation_target_for_fold",
+            return_value=context.y,
+        ) as reconstruct,
+    ):
+        stacked_permuted_targets(context, np.random.default_rng(1))
+
+    assert sample_indices.call_count == 1
+    assert reconstruct.call_count == len(context.outer_folds)
+    for call in reconstruct.call_args_list:
+        np.testing.assert_array_equal(call.kwargs["permutation_indices"], permutation_indices)
+
+
 def test_standardize_scores_within_subject_raises_on_zero_variance() -> None:
     scores = np.array([1.0, 1.0, 1.0, 3.0, 5.0, 7.0], dtype=float)
     groups = np.array(["a", "a", "a", "b", "b", "b"], dtype=object)
 
     with pytest.raises(InvalidPermutationDraw, match="zero variance"):
         standardize_scores_within_subject(scores, groups)
+
+
+def test_assemble_permuted_scores_uses_eeg_residual_prediction() -> None:
+    from eeg_pipeline.analysis.machine_learning.orchestration import (
+        ModelComparisonPredictions,
+    )
+
+    frame = _cohort_frame()
+    context = _aligned_context(frame, load_study2_config())
+    residual_prediction = np.arange(len(context.y), dtype=float)
+    prediction_result = ModelComparisonPredictions(
+        evaluation_target=context.y,
+        full_prediction=100.0 + residual_prediction,
+        nuisance_prediction=np.full(len(context.y), 100.0, dtype=float),
+        residual_prediction=residual_prediction,
+        records=tuple(),
+    )
+    stacked_targets = np.tile(context.y, (len(context.outer_folds), 1))
+
+    with patch(
+        "studies.pain_study.study2.target_retrained_null.model_comparison_cv_predictions",
+        return_value=prediction_result,
+    ):
+        scores = assemble_permuted_scores(context, stacked_targets)
+
+    np.testing.assert_array_equal(scores, residual_prediction)
 
 
 def test_standardize_scores_within_subject_unit_variance_per_subject() -> None:

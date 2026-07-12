@@ -51,6 +51,20 @@ class SensorPatternSummary:
     article_ready: bool
 
 
+@dataclass(frozen=True)
+class FrozenStudy1FoldFit:
+    transformed_training: np.ndarray
+    transformed_test: np.ndarray
+    transformed_feature_names: tuple[str, ...]
+    coefficients: np.ndarray
+    nuisance_prediction: np.ndarray
+    residual_prediction: np.ndarray
+    full_prediction: np.ndarray
+    evaluation_target: np.ndarray
+    train_target_mean: float
+    parameters: dict[str, object]
+
+
 def compute_sensor_pattern_summary(
     *,
     context: Study1ModelContext,
@@ -238,6 +252,50 @@ def _compute_fold_pattern(
     bands: tuple[str, ...],
     tolerance: float,
 ) -> pd.DataFrame:
+    fit = fit_frozen_study1_fold(context, fold)
+    prediction = fit.full_prediction
+    evaluation_target = fit.evaluation_target
+    total_sum = float(np.sum((evaluation_target - fit.train_target_mean) ** 2))
+    if total_sum <= 1.0e-12:
+        raise ValueError(f"Fold {fold} has undefined held-out R².")
+    model_r2 = 1.0 - float(np.sum((evaluation_target - prediction) ** 2)) / total_sum
+    nuisance_r2 = (
+        1.0
+        - float(np.sum((evaluation_target - fit.nuisance_prediction) ** 2)) / total_sum
+    )
+    _require_metric_agreement(saved_metric, model_r2, nuisance_r2, tolerance)
+
+    pattern = compute_haufe_pattern(
+        fit.transformed_training,
+        fit.coefficients,
+    ).pattern
+    parsed = [parse_channel_band(name, bands) for name in fit.transformed_feature_names]
+    frame = pd.DataFrame(
+        {
+            "target": target,
+            "fold": fold,
+            "test_subject": str(context.groups[test_indices[0]]),
+            "band": [band for _, band in parsed],
+            "channel": [channel for channel, _ in parsed],
+            "haufe_pattern": pattern,
+            "n_train_trials": len(train_indices),
+            "n_test_trials": len(test_indices),
+            "refit_r2": model_r2,
+            "saved_r2": float(saved_metric["r2"]),
+            "refit_delta_r2": model_r2 - nuisance_r2,
+            "saved_delta_r2": float(saved_metric["delta_r2"]),
+            "best_params": str(fit.parameters),
+        }
+    )
+    return normalize_band_patterns(frame, bands)
+
+
+def fit_frozen_study1_fold(
+    context: Study1ModelContext,
+    fold: int,
+) -> FrozenStudy1FoldFit:
+    """Refit one frozen Study 1 outer fold and expose its transformed feature space."""
+    train_indices, test_indices = context.outer_folds[fold]
     nuisance = fit_nuisance_model_for_fold(
         y=context.y,
         meta=context.meta,
@@ -293,43 +351,29 @@ def _compute_fold_pattern(
     residual_prediction = target_transformer.inverse_transform(
         transformed_prediction.reshape(-1, 1)
     ).ravel()
-    prediction = nuisance.test_prediction + residual_prediction
-    evaluation_target = context.y[test_indices]
-    train_mean = float(np.mean(context.y[train_indices]))
-    total_sum = float(np.sum((evaluation_target - train_mean) ** 2))
-    if total_sum <= 1.0e-12:
-        raise ValueError(f"Fold {fold} has undefined held-out R².")
-    model_r2 = 1.0 - float(np.sum((evaluation_target - prediction) ** 2)) / total_sum
-    nuisance_r2 = (
-        1.0 - float(np.sum((evaluation_target - nuisance.test_prediction) ** 2)) / total_sum
-    )
-    _require_metric_agreement(saved_metric, model_r2, nuisance_r2, tolerance)
-
     transformed_training = estimator[:-1].transform(training_matrix)
+    transformed_test = estimator[:-1].transform(test_matrix)
     transformed_names = transform_feature_names_through_steps(estimator.steps[:-1], retained_names)
-    if transformed_training.shape[1] != len(transformed_names):
+    if (
+        transformed_training.shape[1] != len(transformed_names)
+        or transformed_test.shape[1] != len(transformed_names)
+    ):
         raise ValueError("Fitted preprocessing cannot be mapped one-to-one to EEG features.")
     weights = np.asarray(estimator.named_steps["regressor"].coef_, dtype=float)
-    pattern = compute_haufe_pattern(transformed_training, weights).pattern
-    parsed = [parse_channel_band(name, bands) for name in transformed_names]
-    frame = pd.DataFrame(
-        {
-            "target": target,
-            "fold": fold,
-            "test_subject": str(context.groups[test_indices[0]]),
-            "band": [band for _, band in parsed],
-            "channel": [channel for channel, _ in parsed],
-            "haufe_pattern": pattern,
-            "n_train_trials": len(train_indices),
-            "n_test_trials": len(test_indices),
-            "refit_r2": model_r2,
-            "saved_r2": float(saved_metric["r2"]),
-            "refit_delta_r2": model_r2 - nuisance_r2,
-            "saved_delta_r2": float(saved_metric["delta_r2"]),
-            "best_params": str(parameters),
-        }
+    if weights.shape != (len(transformed_names),):
+        raise ValueError("Frozen Study 1 coefficients do not match transformed features.")
+    return FrozenStudy1FoldFit(
+        transformed_training=np.asarray(transformed_training, dtype=float),
+        transformed_test=np.asarray(transformed_test, dtype=float),
+        transformed_feature_names=tuple(transformed_names),
+        coefficients=weights,
+        nuisance_prediction=np.asarray(nuisance.test_prediction, dtype=float),
+        residual_prediction=np.asarray(residual_prediction, dtype=float),
+        full_prediction=np.asarray(nuisance.test_prediction + residual_prediction, dtype=float),
+        evaluation_target=np.asarray(context.y[test_indices], dtype=float),
+        train_target_mean=float(np.mean(context.y[train_indices])),
+        parameters=parameters,
     )
-    return normalize_band_patterns(frame, bands)
 
 
 def _require_metric_agreement(

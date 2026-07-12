@@ -2,10 +2,32 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 import pandas as pd
 
 from eeg_pipeline.domain.features.naming import NamingSchema
+from studies.pain_study.study2.sensor_patterns import fit_frozen_study1_fold
+
+CONTRIBUTION_BAND_MEMBERS = {
+    "alpha": ("alpha",),
+    "beta": ("beta",),
+    "gamma": (
+        "gamma_low_clean",
+        "gamma_mid_clean",
+        "gamma_high_clean",
+    ),
+}
+
+
+def contribution_band_members(
+    bands: tuple[str, ...],
+) -> dict[str, tuple[str, ...]]:
+    unknown = sorted(set(bands) - set(CONTRIBUTION_BAND_MEMBERS))
+    if unknown:
+        raise ValueError(f"Study 2 contribution bands have no feature mapping: {unknown}.")
+    return {band: CONTRIBUTION_BAND_MEMBERS[band] for band in bands}
 
 
 def compute_band_contribution_scores(
@@ -14,6 +36,7 @@ def compute_band_contribution_scores(
     feature_names: list[str],
     coefficients: np.ndarray,
     bands: tuple[str, ...],
+    band_members: Mapping[str, tuple[str, ...]],
     subject_ids: tuple[str, ...] | list[str] | np.ndarray | None = None,
     trial_ids: tuple[int, ...] | list[int] | np.ndarray | None = None,
     combined_column: str = "eta_combined",
@@ -47,15 +70,60 @@ def compute_band_contribution_scores(
 
     output[combined_column] = X_arr @ coefficient_arr
     feature_bands = tuple(_feature_band(feature_name) for feature_name in feature_names)
+    if set(band_members) != set(bands):
+        raise ValueError("Study 2 band_members must define every requested band exactly once.")
     for band in bands:
         band_name = str(band).strip()
         if not band_name:
             raise ValueError("Requested contribution bands must be non-empty.")
-        band_mask = np.asarray([feature_band == band_name for feature_band in feature_bands])
+        members = tuple(str(member).strip() for member in band_members[band_name])
+        if not members or any(not member for member in members):
+            raise ValueError(f"Study 2 band_members for '{band_name}' must be non-empty.")
+        band_mask = np.asarray([feature_band in members for feature_band in feature_bands])
         if not np.any(band_mask):
             raise ValueError(f"No features found for requested band '{band_name}'.")
         output[f"eta_{band_name}"] = X_arr[:, band_mask] @ coefficient_arr[band_mask]
     return output.reset_index(drop=True)
+
+
+def compute_held_out_contribution_scores(
+    context,
+    *,
+    bands: tuple[str, ...],
+    band_members: Mapping[str, tuple[str, ...]],
+) -> pd.DataFrame:
+    """Compute frozen-fold combined and band-specific scores in canonical row order."""
+    fold_scores: list[pd.DataFrame] = []
+    assigned_rows = np.zeros(len(context.groups), dtype=bool)
+    for fold, (_train_indices, test_indices) in enumerate(context.outer_folds):
+        test_rows = np.asarray(test_indices, dtype=int)
+        if np.any(assigned_rows[test_rows]):
+            raise ValueError("Study 2 outer folds assign a trial more than once.")
+        fit = fit_frozen_study1_fold(context, fold)
+        residual_prediction = np.asarray(fit.residual_prediction, dtype=float)
+        if residual_prediction.shape != (len(test_rows),):
+            raise ValueError("Frozen-fold residual predictions do not match held-out rows.")
+        scores = compute_band_contribution_scores(
+            X=np.asarray(fit.transformed_test, dtype=float),
+            feature_names=list(fit.transformed_feature_names),
+            coefficients=np.asarray(fit.coefficients, dtype=float),
+            bands=bands,
+            band_members=band_members,
+            subject_ids=np.asarray(context.groups, dtype=object)[test_rows],
+            trial_ids=test_rows,
+        )
+        scores["eta_combined"] = residual_prediction
+        fold_scores.append(scores)
+        assigned_rows[test_rows] = True
+
+    if not np.all(assigned_rows):
+        missing_rows = np.flatnonzero(~assigned_rows).tolist()
+        raise ValueError(f"Study 2 outer folds do not assign rows: {missing_rows}.")
+    return (
+        pd.concat(fold_scores, ignore_index=True)
+        .sort_values("trial_id")
+        .reset_index(drop=True)
+    )
 
 
 def standardize_contribution_scores(
@@ -174,6 +242,8 @@ def _unmet_subject_criteria(
 
 
 __all__ = [
+    "contribution_band_members",
     "compute_band_contribution_scores",
+    "compute_held_out_contribution_scores",
     "standardize_contribution_scores",
 ]
