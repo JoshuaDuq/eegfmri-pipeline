@@ -847,11 +847,13 @@ def run_spatial_surrogates(context: "Study2StageContext") -> None:
         )
         surrogate_maps = np.zeros((n_surrogates, mask.size), dtype=float)
         surrogate_maps[:, mask] = masked_surrogates
-        np.save(paths.spatial_surrogate_maps_path(config, band=band), surrogate_maps)
+        surrogate_path = paths.spatial_surrogate_maps_path(config, band=band)
+        np.save(surrogate_path, surrogate_maps)
         metadata["bands"][band] = {
             "seed": seed,
             "masked_vertices": int(mask.sum()),
             "fmri_map_sha256": _sha256_file(fmri_path),
+            "surrogate_maps_sha256": _sha256_file(surrogate_path),
         }
     paths.spatial_surrogate_metadata_path(config).write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",

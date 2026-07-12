@@ -17,6 +17,7 @@ from studies.pain_study.study2.figures.spatial_convergence import (
     load_spatial_convergence,
 )
 from studies.pain_study.study2.source_vertex_manifest import ensure_common_source_vertices
+from studies.pain_study.study2.spatial_comparison import compute_spatial_correspondence
 
 BANDS = ("alpha", "beta", "gamma")
 
@@ -60,6 +61,46 @@ def test_loader_rejects_map_with_wrong_vertex_count(tmp_path: Path) -> None:
     np.save(paths.spatial_eeg_map_path(config, band="alpha"), np.ones(5))
 
     with pytest.raises(ValueError, match="source vertex manifest"):
+        load_spatial_convergence(config)
+
+
+@pytest.mark.parametrize("artifact", ["eeg", "fmri", "surrogate"])
+def test_loader_rejects_complex_spatial_arrays(tmp_path: Path, artifact: str) -> None:
+    config = _write_spatial_artifacts(tmp_path)
+    artifact_paths = {
+        "eeg": paths.spatial_eeg_map_path(config, band="alpha"),
+        "fmri": paths.spatial_fmri_map_path(config, band="alpha"),
+        "surrogate": paths.spatial_surrogate_maps_path(config, band="alpha"),
+    }
+    artifact_path = artifact_paths[artifact]
+    values = np.load(artifact_path, allow_pickle=False).astype(np.complex128)
+    np.save(artifact_path, values)
+    if artifact in {"fmri", "surrogate"}:
+        _refresh_band_artifact_hash(config, band="alpha", artifact=artifact)
+
+    labels = {
+        "eeg": "alpha EEG map",
+        "fmri": "alpha fMRI map",
+        "surrogate": "alpha surrogate maps",
+    }
+    with pytest.raises(ValueError, match=rf"Study 2 {labels[artifact]} must be real-valued\."):
+        load_spatial_convergence(config)
+
+
+@pytest.mark.parametrize("invalid_value", [-1.1, -1.0, 1.0, 1.1])
+def test_loader_rejects_eeg_values_outside_correlation_bounds(
+    tmp_path: Path,
+    invalid_value: float,
+) -> None:
+    config = _write_spatial_artifacts(tmp_path)
+    eeg_path = paths.spatial_eeg_map_path(config, band="alpha")
+    eeg_map = np.load(eeg_path, allow_pickle=False)
+    eeg_map[0] = invalid_value
+    np.save(eeg_path, eeg_map)
+
+    with pytest.raises(
+        ValueError, match=r"alpha EEG map values must lie strictly within \(-1, 1\)"
+    ):
         load_spatial_convergence(config)
 
 
@@ -108,6 +149,38 @@ def test_loader_requires_every_surrogate_artifact(tmp_path: Path) -> None:
         load_spatial_convergence(config)
 
 
+def test_loader_rejects_modified_surrogates_with_unchanged_inference(tmp_path: Path) -> None:
+    config = _write_spatial_artifacts(tmp_path)
+    surrogate_path = paths.spatial_surrogate_maps_path(config, band="alpha")
+    surrogate_maps = np.load(surrogate_path, allow_pickle=False)
+    correspondence_inputs = {
+        "eeg_map": np.load(
+            paths.spatial_eeg_map_path(config, band="alpha"),
+            allow_pickle=False,
+        ),
+        "fmri_map": np.load(
+            paths.spatial_fmri_map_path(config, band="alpha"),
+            allow_pickle=False,
+        ),
+        "mask": np.load(paths.spatial_mask_path(config), allow_pickle=False),
+        "config": config,
+    }
+    original_result = compute_spatial_correspondence(
+        surrogate_maps=surrogate_maps,
+        **correspondence_inputs,
+    )
+    surrogate_maps[0] *= 2.0
+    modified_result = compute_spatial_correspondence(
+        surrogate_maps=surrogate_maps,
+        **correspondence_inputs,
+    )
+    assert modified_result.p_value == original_result.p_value
+    np.save(surrogate_path, surrogate_maps)
+
+    with pytest.raises(ValueError, match="alpha spatial metadata names the wrong surrogate maps"):
+        load_spatial_convergence(config)
+
+
 def _write_spatial_artifacts(tmp_path: Path) -> dict:
     config = load_study2_config()
     config["paths"] = {"deriv_root": str(tmp_path / "derivatives")}
@@ -122,9 +195,9 @@ def _write_spatial_artifacts(tmp_path: Path) -> dict:
 
     fmri_map = np.asarray([-3.0, -2.0, -1.0, 1.0, 2.0, 3.0])
     eeg_maps = {
-        "alpha": fmri_map.copy(),
-        "beta": -fmri_map,
-        "gamma": np.asarray([1.0, -1.0, 2.0, -2.0, 3.0, -3.0]),
+        "alpha": fmri_map / 10.0,
+        "beta": -fmri_map / 10.0,
+        "gamma": np.asarray([0.1, -0.1, 0.2, -0.2, 0.3, -0.3]),
     }
     surrogate_maps = np.asarray(
         [
@@ -153,6 +226,9 @@ def _write_spatial_artifacts(tmp_path: Path) -> dict:
                 "seed": 42 + band_index,
                 "masked_vertices": 6,
                 "fmri_map_sha256": _sha256(paths.spatial_fmri_map_path(config, band=band)),
+                "surrogate_maps_sha256": _sha256(
+                    paths.spatial_surrogate_maps_path(config, band=band)
+                ),
             }
             for band_index, band in enumerate(BANDS)
         },
@@ -186,9 +262,21 @@ def _write_fmri_map_and_refresh_hash(
 ) -> None:
     fmri_path = paths.spatial_fmri_map_path(config, band=band)
     np.save(fmri_path, values)
+    _refresh_band_artifact_hash(config, band=band, artifact="fmri")
+
+
+def _refresh_band_artifact_hash(config: dict, *, band: str, artifact: str) -> None:
+    artifact_paths = {
+        "fmri": paths.spatial_fmri_map_path(config, band=band),
+        "surrogate": paths.spatial_surrogate_maps_path(config, band=band),
+    }
+    metadata_keys = {
+        "fmri": "fmri_map_sha256",
+        "surrogate": "surrogate_maps_sha256",
+    }
     metadata_path = paths.spatial_surrogate_metadata_path(config)
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["bands"][band]["fmri_map_sha256"] = _sha256(fmri_path)
+    metadata["bands"][band][metadata_keys[artifact]] = _sha256(artifact_paths[artifact])
     metadata_path.write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

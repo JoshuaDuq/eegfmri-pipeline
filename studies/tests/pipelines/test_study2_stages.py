@@ -709,20 +709,35 @@ def test_run_spatial_surrogates_records_source_identity(
     run_spatial_surrogates(_context(config, subjects=()))
 
     metadata = json.loads(paths.spatial_surrogate_metadata_path(config).read_text(encoding="utf-8"))
-    assert metadata["schema_version"] == 1
-    assert metadata["common_subject"] == "fsaverage"
-    assert metadata["common_source_space_spacing"] == "oct6"
-    assert metadata["source_vertex_manifest_sha256"] == _sha256(
-        paths.source_vertex_manifest_path(config)
-    )
-    assert metadata["analysis_mask_sha256"] == _sha256(paths.spatial_mask_path(config))
-    for band in ("alpha", "beta", "gamma"):
-        assert metadata["bands"][band]["fmri_map_sha256"] == _sha256(
-            paths.spatial_fmri_map_path(config, band=band)
-        )
+    bands = ("alpha", "beta", "gamma")
+    assert metadata == {
+        "schema_version": 1,
+        "method": "BrainSMASH Base",
+        "n_surrogates": 2,
+        "common_subject": "fsaverage",
+        "common_source_space_spacing": "oct6",
+        "source_vertex_manifest_sha256": _sha256(paths.source_vertex_manifest_path(config)),
+        "analysis_mask_sha256": _sha256(paths.spatial_mask_path(config)),
+        "bands": {
+            band: {
+                "seed": 42 + band_index,
+                "masked_vertices": 3,
+                "fmri_map_sha256": _sha256(paths.spatial_fmri_map_path(config, band=band)),
+                "surrogate_maps_sha256": _sha256(
+                    paths.spatial_surrogate_maps_path(config, band=band)
+                ),
+            }
+            for band_index, band in enumerate(bands)
+        },
+    }
     required = spatial_surrogates_required_inputs(_context(config, subjects=()))
-    assert paths.source_vertex_manifest_path(config) in required
-    assert paths.source_vertex_metadata_path(config) in required
+    assert required == (
+        paths.source_vertex_manifest_path(config),
+        paths.source_vertex_metadata_path(config),
+        paths.spatial_mask_path(config),
+        paths.spatial_distance_matrix_path(config),
+        *(paths.spatial_fmri_map_path(config, band=band) for band in bands),
+    )
 
 
 @pytest.mark.parametrize("dtype", [np.int64, np.float64])

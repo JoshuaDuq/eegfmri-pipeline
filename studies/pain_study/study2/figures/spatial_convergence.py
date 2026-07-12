@@ -49,7 +49,12 @@ _METADATA_KEYS = {
     "analysis_mask_sha256",
     "bands",
 }
-_BAND_METADATA_KEYS = {"seed", "masked_vertices", "fmri_map_sha256"}
+_BAND_METADATA_KEYS = {
+    "seed",
+    "masked_vertices",
+    "fmri_map_sha256",
+    "surrogate_maps_sha256",
+}
 
 
 @dataclass(frozen=True)
@@ -148,7 +153,7 @@ def load_spatial_convergence(config: Any) -> SpatialConvergenceSummary:
         eeg_map = _load_array(eeg_path, label=f"{band} EEG map")
         fmri_map = _load_array(fmri_path, label=f"{band} fMRI map")
         surrogates = _load_array(surrogate_path, label=f"{band} surrogate maps")
-        _validate_map(eeg_map, label=f"{band} EEG map", n_vertices=manifest.n_vertices)
+        _validate_eeg_map(eeg_map, band=band, n_vertices=manifest.n_vertices)
         _validate_map(fmri_map, label=f"{band} fMRI map", n_vertices=manifest.n_vertices)
         _validate_surrogates(
             surrogates,
@@ -156,7 +161,12 @@ def load_spatial_convergence(config: Any) -> SpatialConvergenceSummary:
             n_surrogates=n_surrogates,
             n_vertices=manifest.n_vertices,
         )
-        _validate_band_metadata_hash(metadata, band=band, fmri_path=fmri_path)
+        _validate_band_metadata_hashes(
+            metadata,
+            band=band,
+            fmri_path=fmri_path,
+            surrogate_path=surrogate_path,
+        )
         eeg_maps[band] = eeg_map
         fmri_maps[band] = fmri_map
         surrogate_maps[band] = surrogates
@@ -244,10 +254,18 @@ def _validate_mask(mask: np.ndarray, *, n_vertices: int) -> None:
 
 
 def _validate_map(array: np.ndarray, *, label: str, n_vertices: int) -> None:
+    _validate_real_values(array, label=label)
     if array.ndim != 1 or array.size != n_vertices:
         raise ValueError(f"Study 2 {label} does not match the source vertex manifest.")
     if not np.isfinite(array).all():
         raise ValueError(f"Study 2 {label} contains non-finite values.")
+
+
+def _validate_eeg_map(array: np.ndarray, *, band: str, n_vertices: int) -> None:
+    label = f"{band} EEG map"
+    _validate_map(array, label=label, n_vertices=n_vertices)
+    if np.any(np.abs(array) >= 1.0):
+        raise ValueError(f"Study 2 {label} values must lie strictly within (-1, 1).")
 
 
 def _validate_surrogates(
@@ -257,12 +275,22 @@ def _validate_surrogates(
     n_surrogates: int,
     n_vertices: int,
 ) -> None:
+    label = f"{band} surrogate maps"
+    _validate_real_values(array, label=label)
     if array.ndim != 2 or array.shape != (n_surrogates, n_vertices):
         raise ValueError(
             f"Study 2 {band} surrogate maps must have shape ({n_surrogates}, {n_vertices})."
         )
     if not np.isfinite(array).all():
         raise ValueError(f"Study 2 {band} surrogate maps contain non-finite values.")
+
+
+def _validate_real_values(array: np.ndarray, *, label: str) -> None:
+    if not np.issubdtype(array.dtype, np.number) or np.issubdtype(
+        array.dtype,
+        np.complexfloating,
+    ):
+        raise ValueError(f"Study 2 {label} must be real-valued.")
 
 
 def _load_metadata(path: Path) -> Mapping[str, object]:
@@ -315,16 +343,19 @@ def _validate_metadata_family(
             raise ValueError(f"Study 2 {band} spatial masked-vertex count is inconsistent.")
 
 
-def _validate_band_metadata_hash(
+def _validate_band_metadata_hashes(
     metadata: Mapping[str, object],
     *,
     band: str,
     fmri_path: Path,
+    surrogate_path: Path,
 ) -> None:
     band_metadata = cast(Mapping[str, object], metadata["bands"])
     entry = cast(Mapping[str, object], band_metadata[band])
     if entry["fmri_map_sha256"] != _sha256(fmri_path):
         raise ValueError(f"Study 2 {band} spatial metadata names the wrong fMRI map.")
+    if entry["surrogate_maps_sha256"] != _sha256(surrogate_path):
+        raise ValueError(f"Study 2 {band} spatial metadata names the wrong surrogate maps.")
 
 
 def _load_summary(path: Path) -> pd.DataFrame:
