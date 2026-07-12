@@ -29,7 +29,10 @@ def compute_point_spread_fwhm(
     _validate_inputs(resolution, distances)
 
     vertex_fwhm = np.asarray(
-        [_single_vertex_fwhm(row, distances) for row in resolution],
+        [
+            _single_vertex_fwhm(resolution[:, vertex], distances)
+            for vertex in range(resolution.shape[1])
+        ],
         dtype=float,
     )
     return PointSpreadFWHMReport(
@@ -64,7 +67,7 @@ def _single_vertex_fwhm(psf: np.ndarray, distances: np.ndarray) -> float:
     magnitude = np.abs(psf)
     peak = float(np.max(magnitude))
     if peak <= 0.0:
-        raise ValueError("Study 2 point-spread row has zero peak.")
+        raise ValueError("Study 2 point-spread function has zero peak.")
     half_max_mask = magnitude >= peak / 2.0
     half_max_distances = distances[np.ix_(half_max_mask, half_max_mask)]
     return float(np.max(half_max_distances))

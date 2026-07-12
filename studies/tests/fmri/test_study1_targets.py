@@ -126,7 +126,7 @@ def _base_config(root: Path) -> DotConfig:
 def _events_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "run": [1, 1],
+            "run_id": [1, 1],
             "trial_number": [1, 2],
             "pain_binary_coded": [1, 0],
             "onset": [22.150, 65.084],
@@ -360,14 +360,14 @@ def test_prepare_primary_targets_rejects_non_finite_primary_values() -> None:
                 )
 
 
-def test_prepare_primary_targets_requires_explicit_run_column() -> None:
+def test_prepare_primary_targets_requires_explicit_run_id_column() -> None:
     from studies.pain_study.study1.targets import prepare_primary_targets
 
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         cfg = _base_config(root)
         _write_signature_outputs(root)
-        events = _events_frame().drop(columns=["run"])
+        events = _events_frame().drop(columns=["run_id"])
 
         with (
             patch(
@@ -379,7 +379,7 @@ def test_prepare_primary_targets_requires_explicit_run_column() -> None:
                 return_value=events,
             ),
         ):
-            with pytest.raises(ValueError, match="run"):
+            with pytest.raises(ValueError, match="run_id"):
                 prepare_primary_targets(
                     subjects=["0001"],
                     task="pain",
@@ -388,7 +388,7 @@ def test_prepare_primary_targets_requires_explicit_run_column() -> None:
                 )
 
 
-def test_prepare_primary_targets_uses_run_column() -> None:
+def test_prepare_primary_targets_maps_run_id_to_run_column() -> None:
     from studies.pain_study.study1.targets import prepare_primary_targets
 
     with tempfile.TemporaryDirectory() as td:
@@ -398,7 +398,7 @@ def test_prepare_primary_targets_uses_run_column() -> None:
         _write_signature_outputs(root, trial_count=4)
         events = pd.DataFrame(
             {
-                "run": [1, 1, 2, 2],
+                "run_id": [1, 1, 2, 2],
                 "trial_number": [1, 2, 12, 13],
                 "pain_binary_coded": [1, 0, 1, 0],
                 "onset": [10.0, 20.0, 30.0, 40.0],
@@ -546,7 +546,7 @@ def test_prepare_primary_targets_excludes_events_outside_configured_contrast() -
         _write_signature_outputs(root, trial_count=3)
         events = pd.DataFrame(
             {
-                "run": [1, 1, 1],
+                "run_id": [1, 1, 1],
                 "trial_number": [1, 2, 3],
                 "pain_binary_coded": [1, -1, 0],
                 "onset": [22.150, 40.0, 65.084],
@@ -586,7 +586,7 @@ def test_prepare_primary_targets_aligns_signatures_by_run() -> None:
         _write_signature_outputs(root, trial_count=4)
         events = pd.DataFrame(
             {
-                "run": [1, 1, 1, 1],
+                "run_id": [1, 1, 1, 1],
                 "trial_number": [1, 2, 3, 4],
                 "pain_binary_coded": [1, 0, 1, 0],
                 "onset": [10.0, 20.0, 30.0, 40.0],
@@ -629,7 +629,7 @@ def test_prepare_primary_targets_records_within_run_trial_number() -> None:
         _write_signature_outputs(root, trial_count=4)
         events = pd.DataFrame(
             {
-                "run": [1, 1, 2, 2],
+                "run_id": [1, 1, 2, 2],
                 "trial_number": [1, 2, 12, 13],
                 "pain_binary_coded": [1, 0, 1, 0],
                 "onset": [10.0, 20.0, 30.0, 40.0],
@@ -692,7 +692,7 @@ def test_prepare_primary_targets_rejects_global_trial_run_mismatch() -> None:
         cfg = _base_config(root)
         events = pd.DataFrame(
             {
-                "run": [1, 1],
+                "run_id": [1, 1],
                 "trial_number": [1, 12],
                 "pain_binary_coded": [1, 0],
                 "onset": [10.0, 20.0],
@@ -738,7 +738,7 @@ def test_prepare_primary_targets_records_nuisance_columns_without_residual_targe
 
         events = pd.DataFrame(
             {
-                "run": [1, 1, 1, 1],
+                "run_id": [1, 1, 1, 1],
                 "trial_number": [1, 2, 3, 4],
                 "pain_binary_coded": [0, 0, 1, 1],
                 "onset": [10.0, 20.0, 30.0, 40.0],
@@ -809,7 +809,7 @@ def test_prepare_primary_targets_expands_categorical_temperature_nuisance() -> N
 
         events = pd.DataFrame(
             {
-                "run": [1, 1, 1, 1],
+                "run_id": [1, 1, 1, 1],
                 "trial_number": [1, 2, 3, 4],
                 "pain_binary_coded": [1, 0, 1, 0],
                 "stimulus_temp": [44.0, 46.0, 44.0, 47.0],

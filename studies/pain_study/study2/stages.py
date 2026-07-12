@@ -511,6 +511,7 @@ def run_point_spread(context: "Study2StageContext") -> None:
                 "q1_fwhm_mm": report.q1_fwhm_mm,
                 "q3_fwhm_mm": report.q3_fwhm_mm,
                 "n_vertices": report.n_vertices,
+                "resolution_matrix_axis": "columns_are_psfs",
             }
         ]
     ).to_csv(paths.point_spread_summary_path(config), sep="\t", index=False)

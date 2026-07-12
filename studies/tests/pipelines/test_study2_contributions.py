@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -28,6 +30,7 @@ def test_compute_band_contribution_scores_decomposes_linear_predictor_by_band() 
         feature_names=feature_names,
         coefficients=coefficients,
         bands=("alpha", "beta"),
+        band_members={"alpha": ("alpha",), "beta": ("beta",)},
         subject_ids=("sub-0001", "sub-0001"),
         trial_ids=(1, 2),
     )
@@ -58,7 +61,81 @@ def test_compute_band_contribution_scores_requires_each_requested_band() -> None
             feature_names=feature_names,
             coefficients=np.ones(1, dtype=float),
             bands=("alpha", "beta"),
+            band_members={"alpha": ("alpha",), "beta": ("beta",)},
         )
+
+
+def test_compute_band_contribution_scores_aggregates_clean_gamma_subbands() -> None:
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    from studies.pain_study.study2.contributions import compute_band_contribution_scores
+
+    feature_names = [
+        NamingSchema.build("power", "active", "alpha", "ch", "logratio_mean", channel="Cz"),
+        NamingSchema.build(
+            "power", "active", "gamma_low_clean", "ch", "logratio_mean", channel="Cz"
+        ),
+        NamingSchema.build(
+            "power", "active", "gamma_high_clean", "ch", "logratio_mean", channel="Cz"
+        ),
+    ]
+    X = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=float)
+
+    contributions = compute_band_contribution_scores(
+        X=X,
+        feature_names=feature_names,
+        coefficients=np.ones(3, dtype=float),
+        bands=("alpha", "gamma"),
+        band_members={
+            "alpha": ("alpha",),
+            "gamma": (
+                "gamma_low_clean",
+                "gamma_mid_clean",
+                "gamma_high_clean",
+            ),
+        },
+    )
+
+    np.testing.assert_allclose(contributions["eta_alpha"], [1.0, 4.0])
+    np.testing.assert_allclose(contributions["eta_gamma"], [5.0, 11.0])
+
+
+def test_compute_held_out_contribution_scores_uses_frozen_fold_space(monkeypatch) -> None:
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    from studies.pain_study.study2 import contributions as contribution_module
+
+    feature_names = (
+        NamingSchema.build("power", "active", "alpha", "ch", "logratio_mean", channel="Cz"),
+        NamingSchema.build(
+            "power", "active", "gamma_low_clean", "ch", "logratio_mean", channel="Cz"
+        ),
+    )
+    fold_fit = SimpleNamespace(
+        transformed_test=np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=float),
+        transformed_feature_names=feature_names,
+        coefficients=np.asarray([2.0, 3.0], dtype=float),
+        residual_prediction=np.asarray([10.0, 20.0], dtype=float),
+    )
+    context = SimpleNamespace(
+        outer_folds=((np.asarray([], dtype=int), np.asarray([0, 1], dtype=int)),),
+        groups=np.asarray(["sub-0001", "sub-0001"], dtype=object),
+    )
+    monkeypatch.setattr(
+        contribution_module,
+        "fit_frozen_study1_fold",
+        lambda _context, _fold: fold_fit,
+        raising=False,
+    )
+
+    scores = contribution_module.compute_held_out_contribution_scores(
+        context,
+        bands=("alpha", "gamma"),
+        band_members={"alpha": ("alpha",), "gamma": ("gamma_low_clean",)},
+    )
+
+    assert scores["subject_id"].tolist() == ["sub-0001", "sub-0001"]
+    np.testing.assert_allclose(scores["eta_combined"], [10.0, 20.0])
+    np.testing.assert_allclose(scores["eta_alpha"], [2.0, 6.0])
+    np.testing.assert_allclose(scores["eta_gamma"], [6.0, 12.0])
 
 
 def test_compute_band_contribution_scores_rejects_invalid_feature_names() -> None:
@@ -70,6 +147,7 @@ def test_compute_band_contribution_scores_rejects_invalid_feature_names() -> Non
             feature_names=["unstructured_feature"],
             coefficients=np.ones(1, dtype=float),
             bands=("alpha",),
+            band_members={"alpha": ("alpha",)},
         )
 
 

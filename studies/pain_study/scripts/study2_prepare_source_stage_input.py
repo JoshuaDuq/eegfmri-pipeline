@@ -14,10 +14,12 @@ from studies.pain_study.study2 import paths
 from studies.pain_study.study2.config import load_study2_config
 from studies.pain_study.study2.stages import _study1_capable_config
 from studies.pain_study.study2.study1_context import load_study1_model_context
-from studies.pain_study.study2.target_retrained_null import (
-    assemble_permuted_scores,
-    standardize_scores_within_subject,
+from studies.pain_study.study2.contributions import (
+    compute_held_out_contribution_scores,
+    contribution_band_members,
+    standardize_contribution_scores,
 )
+from studies.pain_study.study2.source_stage_design import contribution_bands
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,6 +75,36 @@ def build_config(args: argparse.Namespace) -> dict:
     return config
 
 
+def build_source_stage_frame(context, config) -> tuple[pd.DataFrame, pd.DataFrame]:
+    bands = contribution_bands(config)
+    raw_scores = compute_held_out_contribution_scores(
+        context,
+        bands=bands,
+        band_members=contribution_band_members(bands),
+    )
+    score_columns = ("eta_combined", *(f"eta_{band}" for band in bands))
+    standardized_scores, qc = standardize_contribution_scores(
+        raw_scores,
+        subject_column="subject_id",
+        score_columns=score_columns,
+    )
+
+    frame = context.meta.copy().reset_index(drop=True)
+    frame["trial_id"] = np.arange(len(frame), dtype=int)
+    frame["trial_index_within_run"] = pd.to_numeric(
+        frame["within_run_trial"],
+        errors="raise",
+    )
+    standardized_columns = ["trial_id", *(f"{column}_z" for column in score_columns)]
+    frame = frame.merge(
+        standardized_scores[standardized_columns],
+        on="trial_id",
+        how="inner",
+        validate="one_to_one",
+    )
+    return frame.drop(columns=["trial_id"]), qc
+
+
 def main() -> None:
     args = parse_args()
     subjects = load_subjects(Path(args.subjects_file))
@@ -83,20 +115,16 @@ def main() -> None:
         task=args.task,
         config=_study1_capable_config(config),
     )
-    original_targets_by_fold = np.tile(context.y, (len(context.outer_folds), 1))
-    held_out_scores = assemble_permuted_scores(context, original_targets_by_fold)
-    standardized_scores = standardize_scores_within_subject(held_out_scores, context.groups)
-
-    frame = context.meta.copy().reset_index(drop=True)
-    frame["trial_index_within_run"] = pd.to_numeric(
-        frame["within_run_trial"],
-        errors="raise",
-    )
-    frame["eta_combined_z"] = standardized_scores
+    frame, contribution_qc = build_source_stage_frame(context, config)
 
     output_path = paths.source_stage_frame_path(config)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(output_path, sep="\t", index=False)
+    contribution_qc.to_csv(
+        output_path.with_name("contribution_qc.tsv"),
+        sep="\t",
+        index=False,
+    )
     print(f"Wrote {len(frame)} rows to {output_path}")
     print(frame.groupby("subject_id").size().to_string())
 
