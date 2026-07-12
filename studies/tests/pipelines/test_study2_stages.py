@@ -665,12 +665,16 @@ def test_run_spatial_correspondence_writes_band_results(tmp_path: Path) -> None:
     assert summary["holm_significant"].tolist() == [False, False, False]
 
 
-def test_run_spatial_surrogates_records_source_identity(
-    tmp_path: Path,
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_spatial_surrogate_stage_inputs(
+    config: dict,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    mask: np.ndarray,
 ) -> None:
-    config = _config(tmp_path)
-    config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
     ensure_common_source_vertices(
         array_path=paths.source_vertex_manifest_path(config),
         metadata_path=paths.source_vertex_metadata_path(config),
@@ -679,7 +683,6 @@ def test_run_spatial_surrogates_records_source_identity(
         spacing="oct6",
     )
     paths.spatial_dir(config).mkdir(parents=True)
-    mask = np.asarray([True, True, True])
     np.save(paths.spatial_mask_path(config), mask)
     np.save(paths.spatial_distance_matrix_path(config), np.zeros((3, 3), dtype=float))
     for band in ("alpha", "beta", "gamma"):
@@ -688,6 +691,19 @@ def test_run_spatial_surrogates_records_source_identity(
         stages,
         "generate_brainsmash_surrogates",
         lambda **kwargs: np.tile(kwargs["target_map"], (kwargs["n_surrogates"], 1)),
+    )
+
+
+def test_run_spatial_surrogates_records_source_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
+    _write_spatial_surrogate_stage_inputs(
+        config,
+        monkeypatch,
+        mask=np.ones(3, dtype=np.bool_),
     )
 
     run_spatial_surrogates(_context(config, subjects=()))
@@ -709,8 +725,25 @@ def test_run_spatial_surrogates_records_source_identity(
     assert paths.source_vertex_metadata_path(config) in required
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+@pytest.mark.parametrize("dtype", [np.int64, np.float64])
+def test_run_spatial_surrogates_rejects_nonboolean_mask(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dtype: type[np.generic],
+) -> None:
+    config = _config(tmp_path)
+    config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
+    _write_spatial_surrogate_stage_inputs(
+        config,
+        monkeypatch,
+        mask=np.ones(3, dtype=dtype),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Study 2 spatial analysis mask must have boolean dtype\.",
+    ):
+        run_spatial_surrogates(_context(config, subjects=()))
 
 
 def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:

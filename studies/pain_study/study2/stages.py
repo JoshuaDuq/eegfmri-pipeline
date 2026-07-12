@@ -805,7 +805,9 @@ def run_spatial_surrogates(context: "Study2StageContext") -> None:
         raise ValueError("Study 2 source vertex manifest does not match the configured space.")
 
     mask_path = paths.spatial_mask_path(config)
-    mask = np.asarray(np.load(mask_path, allow_pickle=False), dtype=bool)
+    mask = np.load(mask_path, allow_pickle=False)
+    if mask.dtype != np.bool_:
+        raise ValueError("Study 2 spatial analysis mask must have boolean dtype.")
     if mask.ndim != 1 or mask.size != manifest.n_vertices:
         raise ValueError("Study 2 spatial analysis mask does not match the source vertex manifest.")
     distances = np.asarray(
