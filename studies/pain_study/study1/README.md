@@ -272,6 +272,9 @@ run-level prominence across those windows is 7.54 dB.
 The residual approximately 20 Hz peak lies inside the conventional 13–30 Hz beta band. Beta is
 retained as a prespecified feature family, but beta-containing results are not described as
 scanner-clean and require the scanner-spectrum and artifact-control evidence for interpretation.
+Exploratory `beta_scanner_clean` and `alpha_beta_scanner_clean_gamma` specifications omit
+18.0–23.0 Hz using 13.0–17.9 Hz and 23.1–30.0 Hz beta sub-bands. These quantify sensitivity to the
+residual scanner peak without replacing or gating the prespecified conventional-beta analysis.
 
 The primary gate still uses the alpha+beta+gamma preset for interpretability, but this preset is
 implemented as alpha, beta, and the three scanner-clean gamma sub-bands. The required secondary

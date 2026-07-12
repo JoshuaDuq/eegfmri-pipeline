@@ -57,6 +57,8 @@ from studies.pain_study.study2.study1_context import (
     study1_model_comparison_path,
 )
 from studies.pain_study.study2.spatial_comparison import compute_spatial_correspondence
+from studies.pain_study.study2.spatial_surrogates import generate_brainsmash_surrogates
+from studies.pain_study.study2.statistics import holm_q_values
 from studies.pain_study.study2.table_io import (
     format_mapping,
     metric_mapping,
@@ -476,7 +478,6 @@ def run_source_model_qc(context: "Study2StageContext") -> None:
                 "unmet_criteria": ";".join(qc.unmet_criteria),
             }
         )
-
     paths.source_model_dir(config).mkdir(parents=True, exist_ok=True)
     pd.DataFrame.from_records(records).to_csv(
         paths.source_model_qc_path(config),
@@ -697,6 +698,7 @@ def run_artifact_controls(context: "Study2StageContext") -> None:
                 "artifact_control_criteria_met": qc.artifact_control_criteria_met,
                 "unmet_criteria": ";".join(qc.unmet_criteria),
                 "expression_q_values": format_mapping(qc.expression_q_values),
+                "missing_controls": ";".join(qc.missing_controls),
             }
         )
 
@@ -769,6 +771,51 @@ def spatial_correspondence_required_inputs(context: "Study2StageContext") -> tup
     return tuple(required)
 
 
+def spatial_surrogates_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
+    config = context.config
+    return (
+        paths.spatial_mask_path(config),
+        paths.spatial_distance_matrix_path(config),
+        *(paths.spatial_fmri_map_path(config, band=band) for band in contribution_bands(config)),
+    )
+
+
+def run_spatial_surrogates(context: "Study2StageContext") -> None:
+    """Generate the configured BrainSMASH null maps on analysis vertices."""
+    config = context.config
+    mask = np.asarray(np.load(paths.spatial_mask_path(config)), dtype=bool)
+    distances = np.asarray(np.load(paths.spatial_distance_matrix_path(config)), dtype=float)
+    if distances.shape != (mask.size, mask.size):
+        raise ValueError("Study 2 spatial distance matrix must match the analysis mask.")
+    n_surrogates = require_config_int(
+        config,
+        "study2.spatial_comparison.brainsmash_surrogates",
+    )
+    base_seed = require_config_int(config, "project.random_state")
+    bands = contribution_bands(config)
+    paths.spatial_dir(config).mkdir(parents=True, exist_ok=True)
+    metadata = {"method": "BrainSMASH Base", "n_surrogates": n_surrogates, "bands": {}}
+    for band_index, band in enumerate(bands):
+        target = np.asarray(np.load(paths.spatial_fmri_map_path(config, band=band)), dtype=float)
+        if target.shape != mask.shape:
+            raise ValueError(f"Study 2 spatial fMRI map shape does not match mask: {band}.")
+        seed = base_seed + band_index
+        masked_surrogates = generate_brainsmash_surrogates(
+            target_map=target[mask],
+            distance_matrix=distances[np.ix_(mask, mask)],
+            n_surrogates=n_surrogates,
+            seed=seed,
+        )
+        surrogate_maps = np.zeros((n_surrogates, mask.size), dtype=float)
+        surrogate_maps[:, mask] = masked_surrogates
+        np.save(paths.spatial_surrogate_maps_path(config, band=band), surrogate_maps)
+        metadata["bands"][band] = {"seed": seed, "masked_vertices": int(mask.sum())}
+    paths.spatial_surrogate_metadata_path(config).write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def run_spatial_correspondence(context: "Study2StageContext") -> None:
     """Compute EEG/fMRI spatial-correspondence summaries from prepared maps."""
     config = context.config
@@ -790,6 +837,15 @@ def run_spatial_correspondence(context: "Study2StageContext") -> None:
                 "meaningful": result.meaningful,
             }
         )
+    q_values = holm_q_values({row["band"]: row["p_value"] for row in records})
+    family_alpha = require_config_float(
+        config,
+        "study2.spatial_comparison.holm_alpha",
+    )
+    for record in records:
+        q_value = q_values[str(record["band"])]
+        record["holm_q_value"] = q_value
+        record["holm_significant"] = q_value <= family_alpha
     paths.spatial_dir(config).mkdir(parents=True, exist_ok=True)
     pd.DataFrame.from_records(records).to_csv(
         paths.spatial_correspondence_summary_path(config),
@@ -1011,6 +1067,24 @@ def run_inference(context: "Study2StageContext") -> None:
     )
 
     summary = summarize_source_family(result)
+    confirmatory_subjects = require_config_int(
+        config,
+        "study2.source_inference.confirmatory_subjects",
+    )
+    feasibility_subjects = require_config_int(
+        config,
+        "study2.source_inference.feasibility_subjects",
+    )
+    summary["inference_tier"] = np.select(
+        [
+            summary["n_subjects"] >= confirmatory_subjects,
+            summary["n_subjects"] >= feasibility_subjects,
+        ],
+        ["confirmatory", "feasibility"],
+        default="below_feasibility",
+    )
+    summary["confirmatory_subjects"] = confirmatory_subjects
+    summary["feasibility_subjects"] = feasibility_subjects
     summary_path = paths.source_family_summary_path(config)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary.to_csv(summary_path, sep="\t", index=False)
@@ -1064,10 +1138,12 @@ __all__ = [
     "run_source_power",
     "run_source_stage",
     "run_spatial_correspondence",
+    "run_spatial_surrogates",
     "run_target_permutations",
     "source_model_qc_required_inputs",
     "source_power_required_inputs",
     "source_stage_required_inputs",
     "spatial_correspondence_required_inputs",
+    "spatial_surrogates_required_inputs",
     "target_permutations_required_inputs",
 ]

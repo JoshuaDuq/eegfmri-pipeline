@@ -583,6 +583,8 @@ def get_default_frequency_bands() -> Dict[str, List[float]]:
         "theta": [4.0, 7.9],
         "alpha": [8.0, 12.9],
         "beta": [13.0, 30.0],
+        "beta_low_clean": [13.0, 17.9],
+        "beta_high_clean": [23.1, 30.0],
         "gamma": [30.1, 80.0],
         "gamma_low_clean": [30.1, 38.0],
         "gamma_mid_clean": [43.0, 56.0],

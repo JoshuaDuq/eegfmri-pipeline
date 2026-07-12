@@ -124,10 +124,18 @@ study2:
     sensor_template_abs_r_threshold: 0.80
     source_artifact_map_abs_r_threshold: 0.50
     holm_alpha: 0.05
+    required_metrics:
+      - "framewise_displacement"
+      - "dvars"
+      - "cardiac_phase"
+      - "scanner_residual_power"
+      - "frontal_high_frequency_power"
   directional_consistency:
     min_true_target_spatial_r: 0.20
     min_cluster_same_sign_fraction: 0.60
   source_inference:
+    confirmatory_subjects: 30
+    feasibility_subjects: 2
     primary_cluster_forming_p: 0.01
     sensitivity_cluster_forming_p:
       - 0.001
@@ -138,6 +146,7 @@ study2:
   spatial_comparison:
     min_meaningful_eeg_fmri_abs_r: 0.15
     brainsmash_surrogates: 10
+    holm_alpha: 0.05
     fmri_smoothing_kernel_source: "median_point_spread_fwhm"
   behavioral_convergence:
     min_rated_trials: 8

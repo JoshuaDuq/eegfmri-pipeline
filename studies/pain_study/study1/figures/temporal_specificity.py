@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -51,6 +51,8 @@ class TemporalSpecificitySummary:
     windows: tuple[str, ...]
     participant_effects: pd.DataFrame
     cohort_effects: pd.DataFrame
+    matched_participant_contrasts: pd.DataFrame = field(default_factory=pd.DataFrame)
+    matched_cohort_contrasts: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def temporal_window_label(window: TemporalControlWindow) -> str:
@@ -109,12 +111,79 @@ def load_temporal_specificity_summary(
             participant_rows.extend(participant)
             cohort_rows.append(cohort)
 
+    participant_effects = pd.DataFrame(participant_rows)
+    matched_participants, matched_cohort = _matched_primary_control_contrasts(
+        report,
+        participant_effects=participant_effects,
+        targets=targets,
+        model=model,
+    )
     return TemporalSpecificitySummary(
         targets=targets,
         windows=tuple(window.name for window in windows),
-        participant_effects=pd.DataFrame(participant_rows),
+        participant_effects=participant_effects,
         cohort_effects=pd.DataFrame(cohort_rows),
+        matched_participant_contrasts=matched_participants,
+        matched_cohort_contrasts=matched_cohort,
     )
+
+
+def _matched_primary_control_contrasts(
+    report: pd.DataFrame,
+    *,
+    participant_effects: pd.DataFrame,
+    targets: tuple[str, ...],
+    model: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    records: list[pd.DataFrame] = []
+    for target in targets:
+        primary_rows = report.loc[
+            report["lane"].eq("feature_benchmark")
+            & report["analysis_partition"].eq("primary")
+            & report["target"].eq(target)
+            & report["feature_spec"].eq("alpha_beta_gamma")
+            & report["model"].eq(model)
+        ]
+        if len(primary_rows) != 1:
+            raise ValueError(
+                f"Temporal specificity requires one primary result for {target}/{model}."
+            )
+        primary_summary = Path(str(primary_rows.iloc[0]["summary_path"])).expanduser()
+        primary_folds = pd.read_csv(primary_summary.parent / "model_comparison.tsv", sep="\t")
+        _require_columns(primary_folds, FOLD_COLUMNS, source=str(primary_summary.parent))
+        primary_folds = primary_folds.loc[primary_folds["model"].eq(model)].copy()
+        primary_folds["primary_delta_r2"] = pd.to_numeric(
+            primary_folds["delta_r2"], errors="coerce"
+        )
+        if primary_folds["test_subject"].duplicated().any():
+            raise ValueError(f"Primary fold table contains duplicate subjects for {target}.")
+
+        controls = participant_effects.loc[participant_effects["target"].eq(target)].copy()
+        matched = controls.merge(
+            primary_folds[["test_subject", "primary_delta_r2"]],
+            left_on="subject_id",
+            right_on="test_subject",
+            how="inner",
+            validate="many_to_one",
+        )
+        if len(matched) != len(controls):
+            raise ValueError(f"Primary and temporal-control subjects do not match for {target}.")
+        matched["control_delta_r2"] = matched["delta_r2"]
+        matched["primary_minus_control_delta_r2"] = (
+            matched["primary_delta_r2"] - matched["control_delta_r2"]
+        )
+        records.append(matched.drop(columns=["test_subject", "delta_r2"]))
+
+    participant = pd.concat(records, ignore_index=True)
+    cohort = (
+        participant.groupby(
+            ["target", "model", "window_name", "window_kind", "window_order"],
+            sort=False,
+        )["primary_minus_control_delta_r2"]
+        .agg([("n_subjects", "size"), ("mean_primary_minus_control_delta_r2", "mean")])
+        .reset_index()
+    )
+    return participant, cohort
 
 
 def _figure_selection(config: Any) -> tuple[str, tuple[str, ...]]:

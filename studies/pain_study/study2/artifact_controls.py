@@ -10,6 +10,7 @@ from studies.pain_study.study2.statistics import holm_q_values
 from studies.pain_study.study2.validation import (
     finite_number,
     require_config_float,
+    require_config_value,
 )
 
 
@@ -19,6 +20,7 @@ class ArtifactControlQC:
     artifact_control_criteria_met: bool
     unmet_criteria: tuple[str, ...]
     expression_q_values: dict[str, float]
+    missing_controls: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,9 @@ def evaluate_artifact_controls(
     sensor_values = _finite_mapping(sensor_template_abs_r, name="sensor artifact templates")
     source_values = _finite_mapping(source_artifact_map_abs_r, name="source artifact maps")
     expression_q_values = holm_q_values(expression_p_values)
+    required_metrics = _required_metric_names(config)
+    available_metrics = set(sensor_values) | set(source_values) | set(expression_q_values)
+    missing_controls = tuple(name for name in required_metrics if name not in available_metrics)
 
     unmet_criteria: list[str] = []
     if sensor_values and max(sensor_values.values()) > sensor_threshold:
@@ -59,13 +64,25 @@ def evaluate_artifact_controls(
         unmet_criteria.append("source_artifact_template")
     if expression_q_values and min(expression_q_values.values()) <= alpha:
         unmet_criteria.append("artifact_expression")
+    unmet_criteria.extend(f"missing_control:{name}" for name in missing_controls)
 
     return ArtifactControlQC(
         band=band_name,
         artifact_control_criteria_met=not unmet_criteria,
         unmet_criteria=tuple(unmet_criteria),
         expression_q_values=expression_q_values,
+        missing_controls=missing_controls,
     )
+
+
+def _required_metric_names(config: Any) -> tuple[str, ...]:
+    values = require_config_value(config, "study2.artifact_controls.required_metrics")
+    if not isinstance(values, list) or not values:
+        raise ValueError("Study 2 artifact control required_metrics must be a non-empty list.")
+    names = tuple(str(value).strip() for value in values)
+    if any(not name for name in names) or len(set(names)) != len(names):
+        raise ValueError("Study 2 artifact control required_metrics must be unique names.")
+    return names
 
 
 def evaluate_robustness_summary(

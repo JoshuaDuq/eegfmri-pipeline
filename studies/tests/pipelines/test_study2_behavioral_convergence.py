@@ -70,3 +70,27 @@ def test_behavioral_convergence_excludes_zero_variance_rating_subjects() -> None
         False,
     ]
     assert result.subject_results.loc[1, "unmet_criteria"] == "zero_residual_variance_rating"
+
+
+def test_behavioral_convergence_counts_only_shiftable_runs() -> None:
+    from studies.pain_study.study2.behavioral_convergence import _unmet_subject_criteria
+
+    frame = pd.DataFrame(
+        {
+            "run": [1, 2, 3, 3],
+            "expression": [1.0, 2.0, 3.0, 4.0],
+            "rating": [1.0, 2.0, 4.0, 3.0],
+            "nuisance": [0.0, 1.0, 0.0, 1.0],
+        }
+    )
+    unmet = _unmet_subject_criteria(
+        frame,
+        run_column="run",
+        expression_column="expression",
+        rating_column="rating",
+        design_columns=("nuisance",),
+        min_trials=4,
+        min_runs=2,
+    )
+
+    assert unmet == ("min_valid_runs",)
