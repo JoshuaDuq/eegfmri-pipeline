@@ -125,15 +125,52 @@ def _promote_family(
     staged: SpatialConvergenceFigurePaths,
     destination: SpatialConvergenceFigurePaths,
 ) -> None:
+    backup_directory = staged.svg.parent / "backup"
+    backup_directory.mkdir()
+    backups: list[tuple[Path, Path]] = []
+    promoted: list[Path] = []
+
     staged_non_manifest = staged.all_files[:-1]
     destination_non_manifest = destination.all_files[:-1]
-    for staged_path, destination_path in zip(
-        staged_non_manifest,
-        destination_non_manifest,
-        strict=True,
-    ):
-        staged_path.replace(destination_path)
-    staged.manifest.replace(destination.manifest)
+    try:
+        _backup_existing_outputs(destination, backup_directory, backups)
+        for staged_path, destination_path in zip(
+            staged_non_manifest,
+            destination_non_manifest,
+            strict=True,
+        ):
+            staged_path.replace(destination_path)
+            promoted.append(destination_path)
+        staged.manifest.replace(destination.manifest)
+        promoted.append(destination.manifest)
+    except OSError as promotion_error:
+        try:
+            _rollback_promotion(promoted, backups)
+        except OSError as rollback_error:
+            promotion_error.add_note(f"Publication-family rollback failed: {rollback_error}")
+        raise
+
+
+def _backup_existing_outputs(
+    destination: SpatialConvergenceFigurePaths,
+    backup_directory: Path,
+    backups: list[tuple[Path, Path]],
+) -> None:
+    for destination_path in destination.all_files:
+        if destination_path.exists():
+            backup_path = backup_directory / destination_path.name
+            destination_path.replace(backup_path)
+            backups.append((destination_path, backup_path))
+
+
+def _rollback_promotion(
+    promoted: list[Path],
+    backups: list[tuple[Path, Path]],
+) -> None:
+    for promoted_path in promoted:
+        promoted_path.unlink(missing_ok=True)
+    for destination_path, backup_path in backups:
+        backup_path.replace(destination_path)
 
 
 def _output_paths(svg: Path) -> SpatialConvergenceFigurePaths:

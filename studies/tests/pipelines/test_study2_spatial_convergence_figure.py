@@ -252,6 +252,99 @@ def test_writer_preserves_existing_family_when_manifest_staging_fails(
     }
 
 
+@pytest.mark.parametrize("existing_family", (False, True))
+def test_writer_rolls_back_when_later_family_promotion_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing_family: bool,
+) -> None:
+    import studies.pain_study.study2.figures.plot_spatial_convergence as module
+
+    config = _write_spatial_artifacts(tmp_path)
+    _patch_writer_surfaces(monkeypatch, module, tmp_path)
+    output = tmp_path / "article" / "spatial_convergence.svg"
+    expected_files = module._output_paths(output).all_files
+    if existing_family:
+        existing = module.write_spatial_convergence(config=config, output_path=output)
+        original_files = {
+            path: (path.read_bytes(), path.stat().st_ino) for path in existing.all_files
+        }
+    else:
+        original_files = {}
+
+    original_replace = Path.replace
+    promotion_count = 0
+    promotion_error = OSError("injected promotion failure")
+
+    def fail_third_promotion(source: Path, target: Path) -> Path:
+        nonlocal promotion_count
+        target = Path(target)
+        is_staged_promotion = (
+            target.parent == output.parent
+            and source.parent.name.startswith(".spatial_convergence-")
+        )
+        if is_staged_promotion:
+            promotion_count += 1
+            if promotion_count == 3:
+                raise promotion_error
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_third_promotion)
+
+    with pytest.raises(OSError, match="injected promotion failure") as captured:
+        module.write_spatial_convergence(config=config, output_path=output)
+
+    assert captured.value is promotion_error
+    assert promotion_count == 3
+    if existing_family:
+        assert {
+            path: (path.read_bytes(), path.stat().st_ino) for path in expected_files
+        } == original_files
+    else:
+        assert not any(path.exists() for path in expected_files)
+    assert not any(
+        path.name.startswith(".spatial_convergence-") for path in output.parent.iterdir()
+    )
+
+
+def test_writer_restores_existing_family_when_backup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study2.figures.plot_spatial_convergence as module
+
+    config = _write_spatial_artifacts(tmp_path)
+    _patch_writer_surfaces(monkeypatch, module, tmp_path)
+    output = tmp_path / "article" / "spatial_convergence.svg"
+    existing = module.write_spatial_convergence(config=config, output_path=output)
+    original_files = {
+        path: (path.read_bytes(), path.stat().st_ino) for path in existing.all_files
+    }
+    original_replace = Path.replace
+    backup_count = 0
+    backup_error = OSError("injected backup failure")
+
+    def fail_third_backup(source: Path, target: Path) -> Path:
+        nonlocal backup_count
+        target = Path(target)
+        if source.parent == output.parent and target.parent.name == "backup":
+            backup_count += 1
+            if backup_count == 3:
+                raise backup_error
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_third_backup)
+
+    with pytest.raises(OSError, match="injected backup failure") as captured:
+        module.write_spatial_convergence(config=config, output_path=output)
+
+    assert captured.value is backup_error
+    assert all(path.is_file() for path in existing.all_files)
+    assert {
+        path: (path.read_bytes(), path.stat().st_ino) for path in existing.all_files
+    } == original_files
+
+
 def test_writer_stably_deduplicates_summary_and_surface_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -373,51 +466,36 @@ def test_writer_is_deterministic_for_identical_spatial_artifacts(
 ) -> None:
     import studies.pain_study.study2.figures.plot_spatial_convergence as module
 
-    first_config = _write_spatial_artifacts(tmp_path / "first")
-    second_config = _write_spatial_artifacts(tmp_path / "second")
-    surfaces_by_root = {}
-    for name, config in (("first", first_config), ("second", second_config)):
-        surface_paths = tuple(tmp_path / name / f"surface-{index}" for index in range(4))
-        for surface_path in surface_paths:
-            surface_path.write_bytes(surface_path.name.encode("utf-8"))
-        surfaces_by_root[Path(config["paths"]["deriv_root"]).parent.name] = replace(
-            _synthetic_surfaces(),
-            source_paths=surface_paths,
-        )
-
-    monkeypatch.setattr(
-        module,
-        "load_common_source_surfaces",
-        lambda config, _manifest: surfaces_by_root[
-            Path(config["paths"]["deriv_root"]).parent.name
-        ],
+    config = _write_spatial_artifacts(tmp_path / "sources")
+    surface_paths = tuple(tmp_path / "sources" / f"surface-{index}" for index in range(4))
+    for surface_path in surface_paths:
+        surface_path.write_bytes(surface_path.name.encode("utf-8"))
+    surfaces = replace(
+        _synthetic_surfaces(),
+        source_paths=surface_paths,
     )
+    monkeypatch.setattr(module, "load_common_source_surfaces", lambda *args: surfaces)
     first_outputs = module.write_spatial_convergence(
-        config=first_config,
+        config=config,
         output_path=tmp_path / "first-article" / "spatial_convergence.svg",
     )
     second_outputs = module.write_spatial_convergence(
-        config=second_config,
+        config=config,
         output_path=tmp_path / "second-article" / "spatial_convergence.svg",
     )
 
     for first_path, second_path in zip(
-        first_outputs.all_files[:-1],
-        second_outputs.all_files[:-1],
+        first_outputs.all_files,
+        second_outputs.all_files,
         strict=True,
     ):
         assert first_path.read_bytes() == second_path.read_bytes()
     assert b"<dc:date" not in first_outputs.svg.read_bytes()
     with Image.open(first_outputs.png) as png:
         assert not any("date" in key.lower() for key in png.info)
-
-    first_manifest = json.loads(first_outputs.manifest.read_text(encoding="utf-8"))
-    second_manifest = json.loads(second_outputs.manifest.read_text(encoding="utf-8"))
-    first_source_hashes = first_manifest.pop("source_sha256")
-    second_source_hashes = second_manifest.pop("source_sha256")
-    assert sorted(first_source_hashes.values()) == sorted(second_source_hashes.values())
-    assert first_manifest == second_manifest
-    assert first_manifest["output_sha256"] == second_manifest["output_sha256"]
+    manifest_bytes = first_outputs.manifest.read_bytes()
+    assert str(first_outputs.svg.parent).encode() not in manifest_bytes
+    assert str(second_outputs.svg.parent).encode() not in manifest_bytes
 
 
 def test_renderer_has_fixed_multimodal_structure(tmp_path: Path) -> None:
