@@ -8,8 +8,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+from matplotlib.colors import to_hex
 
 from studies.tests.pipelines.test_study2_primary_source_associations import _write_artifacts
+
+
+def test_study2_diverging_color_map_preserves_source_figure_palette() -> None:
+    from studies.pain_study.study2.figures.style import study2_diverging_color_map
+
+    color_map = study2_diverging_color_map()
+
+    assert [to_hex(color_map(value)).upper() for value in (0.0, 0.5, 1.0)] == [
+        "#2166AC",
+        "#F7F6F6",
+        "#D95F0E",
+    ]
 
 
 def test_primary_source_figure_has_fixed_publication_structure(tmp_path: Path) -> None:

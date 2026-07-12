@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -43,7 +44,10 @@ from studies.pain_study.study2.stages import (
     target_permutations_required_inputs,
     robustness_required_inputs,
     run_spatial_correspondence,
+    run_spatial_surrogates,
+    spatial_surrogates_required_inputs,
 )
+from studies.pain_study.study2.source_vertex_manifest import ensure_common_source_vertices
 from studies.pain_study.study2.study1_context import study1_model_comparison_path
 from studies.tests.pipelines.test_study2_source_family import (
     _chain_adjacency,
@@ -659,6 +663,125 @@ def test_run_spatial_correspondence_writes_band_results(tmp_path: Path) -> None:
     assert summary["meaningful"].tolist() == [True, True, True]
     assert summary["holm_adjusted_p_value"].tolist() == pytest.approx([1.0, 1.0, 1.0])
     assert summary["holm_significant"].tolist() == [False, False, False]
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_spatial_surrogate_stage_inputs(
+    config: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    mask: np.ndarray,
+) -> None:
+    ensure_common_source_vertices(
+        array_path=paths.source_vertex_manifest_path(config),
+        metadata_path=paths.source_vertex_metadata_path(config),
+        vertices=(np.asarray([0, 1]), np.asarray([2])),
+        common_subject="fsaverage",
+        spacing="oct6",
+    )
+    paths.spatial_dir(config).mkdir(parents=True)
+    np.save(paths.spatial_mask_path(config), mask)
+    np.save(paths.spatial_distance_matrix_path(config), np.zeros((3, 3), dtype=float))
+    for band in ("alpha", "beta", "gamma"):
+        np.save(paths.spatial_fmri_map_path(config, band=band), np.arange(3, dtype=float))
+    monkeypatch.setattr(
+        stages,
+        "generate_brainsmash_surrogates",
+        lambda **kwargs: np.tile(kwargs["target_map"], (kwargs["n_surrogates"], 1)),
+    )
+
+
+def test_run_spatial_surrogates_records_source_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
+    _write_spatial_surrogate_stage_inputs(
+        config,
+        monkeypatch,
+        mask=np.ones(3, dtype=np.bool_),
+    )
+
+    run_spatial_surrogates(_context(config, subjects=()))
+
+    metadata = json.loads(paths.spatial_surrogate_metadata_path(config).read_text(encoding="utf-8"))
+    bands = ("alpha", "beta", "gamma")
+    assert metadata == {
+        "schema_version": 1,
+        "method": "BrainSMASH Base",
+        "n_surrogates": 2,
+        "common_subject": "fsaverage",
+        "common_source_space_spacing": "oct6",
+        "source_vertex_manifest_sha256": _sha256(paths.source_vertex_manifest_path(config)),
+        "analysis_mask_sha256": _sha256(paths.spatial_mask_path(config)),
+        "bands": {
+            band: {
+                "seed": 42 + band_index,
+                "masked_vertices": 3,
+                "fmri_map_sha256": _sha256(paths.spatial_fmri_map_path(config, band=band)),
+                "surrogate_maps_sha256": _sha256(
+                    paths.spatial_surrogate_maps_path(config, band=band)
+                ),
+            }
+            for band_index, band in enumerate(bands)
+        },
+    }
+    required = spatial_surrogates_required_inputs(_context(config, subjects=()))
+    assert required == (
+        paths.source_vertex_manifest_path(config),
+        paths.source_vertex_metadata_path(config),
+        paths.spatial_mask_path(config),
+        paths.spatial_distance_matrix_path(config),
+        *(paths.spatial_fmri_map_path(config, band=band) for band in bands),
+    )
+
+
+@pytest.mark.parametrize("dtype", [np.int64, np.float64])
+def test_run_spatial_surrogates_rejects_nonboolean_mask(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dtype: type[np.generic],
+) -> None:
+    config = _config(tmp_path)
+    config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
+    _write_spatial_surrogate_stage_inputs(
+        config,
+        monkeypatch,
+        mask=np.ones(3, dtype=dtype),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Study 2 spatial analysis mask must have boolean dtype\.",
+    ):
+        run_spatial_surrogates(_context(config, subjects=()))
+
+
+def test_run_spatial_surrogates_rejects_complex_fmri_map(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
+    _write_spatial_surrogate_stage_inputs(
+        config,
+        monkeypatch,
+        mask=np.ones(3, dtype=np.bool_),
+    )
+    fmri_path = paths.spatial_fmri_map_path(config, band="alpha")
+    fmri_map = np.arange(3, dtype=np.complex128)
+    fmri_map[0] = 1.0j
+    np.save(fmri_path, fmri_map)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Study 2 spatial fMRI map must be real-valued: alpha\.",
+    ):
+        run_spatial_surrogates(_context(config, subjects=()))
 
 
 def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:

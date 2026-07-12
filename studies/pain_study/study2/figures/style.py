@@ -11,10 +11,19 @@ from typing import Iterator
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 
 MILLIMETERS_PER_INCH = 25.4
 EMBEDDED_RASTER_DPI = 600
+
+
+def study2_diverging_color_map() -> LinearSegmentedColormap:
+    return LinearSegmentedColormap.from_list(
+        "study2_source_association",
+        ("#2166AC", "#F7F7F7", "#D95F0E"),
+        N=256,
+    )
 
 
 def figure_size_inches(dimensions_mm: Mapping[str, float]) -> tuple[float, float]:
@@ -130,4 +139,5 @@ __all__ = [
     "publication_style",
     "save_publication_png",
     "save_publication_svg",
+    "study2_diverging_color_map",
 ]
