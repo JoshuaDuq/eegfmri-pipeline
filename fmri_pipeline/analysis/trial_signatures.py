@@ -393,6 +393,22 @@ def _union_masks_to_target(mask_imgs: Sequence[Any], target_img: Any) -> Any:
     return nib.Nifti1Image(union.astype(np.uint8), ref.affine, ref.header)
 
 
+def _resolve_summary_signature_mask(
+    *,
+    signature_mask_img: Optional[Any],
+    run_brain_masks: Sequence[Any],
+    target_img: Any,
+    summary_name: str,
+) -> Any:
+    if signature_mask_img is not None:
+        return signature_mask_img
+    if not run_brain_masks:
+        raise ValueError(
+            f"{summary_name} signature expression requires at least one brain mask."
+        )
+    return _union_masks_to_target(run_brain_masks, target_img)
+
+
 def _normalize_confounds_strategy(strategy: str) -> str:
     normalized = str(strategy or "auto").strip().lower()
     if normalized in {"", "default"}:
@@ -1002,7 +1018,9 @@ def _combine_effect_images(
     method = (method or "variance").strip().lower()
     if method == "mean":
         out = np.nanmean(eff, axis=0)
-        return nib.Nifti1Image(out, ref_img.affine, ref_img.header)
+        header = ref_img.header.copy()
+        header.set_data_dtype(np.float32)
+        return nib.Nifti1Image(out.astype(np.float32), ref_img.affine, header)
     if not variances:
         raise ValueError("Variance-weighted fixed effects requires effect variances.")
 
@@ -1018,7 +1036,9 @@ def _combine_effect_images(
         out = np.full_like(num, np.nan, dtype=float)
         m = den > 0
         out[m] = num[m] / den[m]
-    return nib.Nifti1Image(out, ref_img.affine, ref_img.header)
+    header = ref_img.header.copy()
+    header.set_data_dtype(np.float32)
+    return nib.Nifti1Image(out.astype(np.float32), ref_img.affine, header)
 
 
 def _write_tsv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
@@ -1531,16 +1551,17 @@ def run_trial_signature_extraction_for_subject(
                 ]:
                     if img is None:
                         continue
-                    if not run_brain_masks:
-                        raise ValueError(
-                            "Condition-level signature expression requires at least one brain mask."
-                        )
-                    brain_union = _union_masks_to_target(run_brain_masks, img)
+                    scoring_mask = _resolve_summary_signature_mask(
+                        signature_mask_img=signature_mask_img,
+                        run_brain_masks=run_brain_masks,
+                        target_img=img,
+                        summary_name="Condition-level",
+                    )
                     sigs = compute_signature_expression(
                         stat_or_effect_img=img,
                         signature_root=signature_root,
                         signature_specs=signature_specs,
-                        mask_img=brain_union,
+                        mask_img=scoring_mask,
                         signatures=cfg.signatures,
                         min_support_fraction=cfg.min_signature_support_fraction,
                         max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
@@ -1625,16 +1646,17 @@ def run_trial_signature_extraction_for_subject(
                 n_trials = _count_trials_for_group(run_label or None, group)
 
                 if signature_root is not None and signature_specs:
-                    if not run_brain_masks:
-                        raise ValueError(
-                            "Grouped signature expression requires at least one brain mask."
-                        )
-                    brain_union = _union_masks_to_target(run_brain_masks, img)
+                    scoring_mask = _resolve_summary_signature_mask(
+                        signature_mask_img=signature_mask_img,
+                        run_brain_masks=run_brain_masks,
+                        target_img=img,
+                        summary_name="Grouped",
+                    )
                     sigs = compute_signature_expression(
                         stat_or_effect_img=img,
                         signature_root=signature_root,
                         signature_specs=signature_specs,
-                        mask_img=brain_union,
+                        mask_img=scoring_mask,
                         signatures=cfg.signatures,
                         min_support_fraction=cfg.min_signature_support_fraction,
                         max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,

@@ -2015,7 +2015,7 @@ def test_trial_signature_extraction_validates_events_against_bold_run(tmp_path: 
             )
 
 
-def test_trial_signature_condition_signatures_require_union_mask(tmp_path: Path) -> None:
+def test_trial_signature_condition_signatures_use_fixed_signature_mask(tmp_path: Path) -> None:
     nib = pytest.importorskip("nibabel")
 
     cfg = TrialSignatureExtractionConfig(
@@ -2046,6 +2046,10 @@ def test_trial_signature_condition_signatures_require_union_mask(tmp_path: Path)
     signature_root = tmp_path / "signatures"
     signature_root.mkdir()
     signature_path = signature_root / "sig.nii.gz"
+    signature_mask_img = nib.Nifti1Image(
+        np.ones((2, 2, 2), dtype=np.uint8),
+        np.eye(4),
+    )
     effect_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
     variance_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
     nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, 4), dtype=np.float32), np.eye(4)), bold_path)
@@ -2081,7 +2085,7 @@ def test_trial_signature_condition_signatures_require_union_mask(tmp_path: Path)
             return effect_img
 
     def fake_signature_expression(**kwargs):
-        assert kwargs["mask_img"] is not None
+        assert kwargs["mask_img"] is signature_mask_img
         return [
             SignatureResult(
                 name="SIG",
@@ -2115,16 +2119,45 @@ def test_trial_signature_condition_signatures_require_union_mask(tmp_path: Path)
         "fmri_pipeline.analysis.trial_signatures._union_masks_to_target",
         side_effect=RuntimeError("union failed"),
     ):
-        with pytest.raises(RuntimeError, match="union failed"):
-            run_trial_signature_extraction_for_subject(
-                bids_fmri_root=tmp_path,
-                bids_derivatives=tmp_path,
-                deriv_root=tmp_path / "derivatives",
-                subject="0001",
-                cfg=cfg,
-                signature_root=signature_root,
-                signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
-            )
+        run_trial_signature_extraction_for_subject(
+            bids_fmri_root=tmp_path,
+            bids_derivatives=tmp_path,
+            deriv_root=tmp_path / "derivatives",
+            subject="0001",
+            cfg=cfg,
+            signature_root=signature_root,
+            signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
+            signature_mask_img=signature_mask_img,
+        )
+
+
+def test_combine_effect_images_writes_float_data_with_nonfinite_support(tmp_path: Path) -> None:
+    nib = pytest.importorskip("nibabel")
+
+    integer_header = nib.Nifti1Header()
+    integer_header.set_data_dtype(np.uint8)
+    effect = nib.Nifti1Image(
+        np.array([[[1.25, 2.75]]], dtype=np.float32),
+        np.eye(4),
+        integer_header,
+    )
+    variance = nib.Nifti1Image(
+        np.array([[[1.0, np.inf]]], dtype=np.float32),
+        np.eye(4),
+    )
+
+    combined = _combine_effect_images(
+        effects=[effect],
+        variances=[variance],
+        method="variance",
+    )
+    output_path = tmp_path / "combined.nii.gz"
+    nib.save(combined, output_path)
+    saved = nib.load(output_path)
+
+    assert saved.get_data_dtype() == np.dtype(np.float32)
+    assert np.isclose(saved.get_fdata()[0, 0, 0], 1.25)
+    assert np.isnan(saved.get_fdata()[0, 0, 1])
 
 
 def test_run_fmri_plotting_and_report_raises_when_provenance_write_fails(tmp_path: Path) -> None:
