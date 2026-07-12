@@ -657,7 +657,7 @@ def test_run_spatial_correspondence_writes_band_results(tmp_path: Path) -> None:
     summary = pd.read_csv(paths.spatial_correspondence_summary_path(config), sep="\t")
     assert summary["band"].tolist() == ["alpha", "beta", "gamma"]
     assert summary["meaningful"].tolist() == [True, True, True]
-    assert summary["holm_q_value"].tolist() == pytest.approx([1.0, 1.0, 1.0])
+    assert summary["holm_adjusted_p_value"].tolist() == pytest.approx([1.0, 1.0, 1.0])
     assert summary["holm_significant"].tolist() == [False, False, False]
 
 

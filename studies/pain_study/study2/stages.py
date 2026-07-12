@@ -58,7 +58,7 @@ from studies.pain_study.study2.study1_context import (
 )
 from studies.pain_study.study2.spatial_comparison import compute_spatial_correspondence
 from studies.pain_study.study2.spatial_surrogates import generate_brainsmash_surrogates
-from studies.pain_study.study2.statistics import holm_q_values
+from studies.pain_study.study2.statistics import holm_adjusted_p_values
 from studies.pain_study.study2.table_io import (
     format_mapping,
     metric_mapping,
@@ -839,15 +839,17 @@ def run_spatial_correspondence(context: "Study2StageContext") -> None:
                 "meaningful": result.meaningful,
             }
         )
-    q_values = holm_q_values({row["band"]: row["p_value"] for row in records})
+    adjusted_p_values = holm_adjusted_p_values(
+        {row["band"]: row["p_value"] for row in records}
+    )
     family_alpha = require_config_float(
         config,
         "study2.spatial_comparison.holm_alpha",
     )
     for record in records:
-        q_value = q_values[str(record["band"])]
-        record["holm_q_value"] = q_value
-        record["holm_significant"] = q_value <= family_alpha
+        adjusted_p_value = adjusted_p_values[str(record["band"])]
+        record["holm_adjusted_p_value"] = adjusted_p_value
+        record["holm_significant"] = adjusted_p_value <= family_alpha
     paths.spatial_dir(config).mkdir(parents=True, exist_ok=True)
     pd.DataFrame.from_records(records).to_csv(
         paths.spatial_correspondence_summary_path(config),
