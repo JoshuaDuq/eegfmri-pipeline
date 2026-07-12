@@ -640,6 +640,16 @@ def test_run_spatial_correspondence_writes_band_results(tmp_path: Path) -> None:
     config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
     paths.spatial_dir(config).mkdir(parents=True)
     np.save(paths.spatial_mask_path(config), np.asarray([True, True, True]))
+    paths.spatial_surrogate_metadata_path(config).write_text(
+        json.dumps(
+            {
+                "method": "BrainSMASH Base",
+                "n_surrogates": 2,
+                "bands": {band: {} for band in ("alpha", "beta", "gamma")},
+            }
+        ),
+        encoding="utf-8",
+    )
     for band in ("alpha", "beta", "gamma"):
         np.save(paths.spatial_eeg_map_path(config, band=band), np.asarray([1.0, 2.0, 3.0]))
         np.save(paths.spatial_fmri_map_path(config, band=band), np.asarray([1.0, 2.0, 3.0]))
@@ -675,6 +685,7 @@ def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:
                 {
                     "subject_id": subject_id,
                     "run": (trial % 3) + 1,
+                    "trial_id": trial,
                     "expression": float(trial),
                     "rating": float(trial) + 0.1,
                     "nuisance": float(trial % 2),

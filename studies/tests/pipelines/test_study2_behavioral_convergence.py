@@ -17,6 +17,7 @@ def _behavior_frame(*, constant_second_subject_rating: bool = False) -> pd.DataF
                     {
                         "subject_id": subject_id,
                         "run": block,
+                        "trial_id": trial,
                         "expression": signal + 0.1 * nuisance,
                         "rating": rating + 0.2 * nuisance,
                         "nuisance": nuisance,
@@ -78,6 +79,7 @@ def test_behavioral_convergence_counts_only_shiftable_runs() -> None:
     frame = pd.DataFrame(
         {
             "run": [1, 2, 3, 3],
+            "trial_id": [1, 1, 1, 2],
             "expression": [1.0, 2.0, 3.0, 4.0],
             "rating": [1.0, 2.0, 4.0, 3.0],
             "nuisance": [0.0, 1.0, 0.0, 1.0],

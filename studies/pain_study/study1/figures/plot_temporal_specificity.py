@@ -26,6 +26,8 @@ from studies.pain_study.study1.figures.validity_style import (
 OUTPUT_FILENAME = "temporal_specificity.svg"
 SUBJECT_AUDIT_FILENAME = "temporal_specificity_by_subject.tsv"
 SUMMARY_AUDIT_FILENAME = "temporal_specificity_summary.tsv"
+MATCHED_SUBJECT_AUDIT_FILENAME = "temporal_specificity_primary_minus_control_by_subject.tsv"
+MATCHED_SUMMARY_AUDIT_FILENAME = "temporal_specificity_primary_minus_control_summary.tsv"
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,10 @@ class TemporalSpecificityFigurePaths:
     subject_parquet: Path
     summary_tsv: Path
     summary_parquet: Path
+    matched_subject_tsv: Path
+    matched_subject_parquet: Path
+    matched_summary_tsv: Path
+    matched_summary_parquet: Path
 
 
 def write_temporal_specificity(
@@ -64,16 +70,28 @@ def write_temporal_specificity(
     subject_parquet = subject_tsv.with_suffix(".parquet")
     summary_tsv = resolved_output.with_name(SUMMARY_AUDIT_FILENAME)
     summary_parquet = summary_tsv.with_suffix(".parquet")
+    matched_subject_tsv = resolved_output.with_name(MATCHED_SUBJECT_AUDIT_FILENAME)
+    matched_subject_parquet = matched_subject_tsv.with_suffix(".parquet")
+    matched_summary_tsv = resolved_output.with_name(MATCHED_SUMMARY_AUDIT_FILENAME)
+    matched_summary_parquet = matched_summary_tsv.with_suffix(".parquet")
     write_tsv(summary.participant_effects, subject_tsv)
     write_parquet(summary.participant_effects, subject_parquet)
     write_tsv(summary.cohort_effects, summary_tsv)
     write_parquet(summary.cohort_effects, summary_parquet)
+    write_tsv(summary.matched_participant_contrasts, matched_subject_tsv)
+    write_parquet(summary.matched_participant_contrasts, matched_subject_parquet)
+    write_tsv(summary.matched_cohort_contrasts, matched_summary_tsv)
+    write_parquet(summary.matched_cohort_contrasts, matched_summary_parquet)
     return TemporalSpecificityFigurePaths(
         svg=resolved_output,
         subject_tsv=subject_tsv,
         subject_parquet=subject_parquet,
         summary_tsv=summary_tsv,
         summary_parquet=summary_parquet,
+        matched_subject_tsv=matched_subject_tsv,
+        matched_subject_parquet=matched_subject_parquet,
+        matched_summary_tsv=matched_summary_tsv,
+        matched_summary_parquet=matched_summary_parquet,
     )
 
 

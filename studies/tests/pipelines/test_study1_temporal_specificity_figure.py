@@ -161,9 +161,13 @@ def test_temporal_specificity_writer_creates_exact_svg_and_audits(
     )
     assert sorted(path.name for path in first.svg.parent.iterdir()) == [
         "temporal_specificity.svg",
-        "temporal_specificity_by_subject.parquet",
-        "temporal_specificity_by_subject.tsv",
-        "temporal_specificity_summary.parquet",
+            "temporal_specificity_by_subject.parquet",
+            "temporal_specificity_by_subject.tsv",
+            "temporal_specificity_primary_minus_control_by_subject.parquet",
+            "temporal_specificity_primary_minus_control_by_subject.tsv",
+            "temporal_specificity_primary_minus_control_summary.parquet",
+            "temporal_specificity_primary_minus_control_summary.tsv",
+            "temporal_specificity_summary.parquet",
         "temporal_specificity_summary.tsv",
     ]
 
@@ -182,6 +186,10 @@ def test_temporal_specificity_plot_main_writes_only_its_figure(
         subject_parquet=tmp_path / "subject.parquet",
         summary_tsv=tmp_path / "summary.tsv",
         summary_parquet=tmp_path / "summary.parquet",
+        matched_subject_tsv=tmp_path / "matched_subject.tsv",
+        matched_subject_parquet=tmp_path / "matched_subject.parquet",
+        matched_summary_tsv=tmp_path / "matched_summary.tsv",
+        matched_summary_parquet=tmp_path / "matched_summary.parquet",
     )
     monkeypatch.setattr(module, "load_config", lambda path: load_study1_config())
     monkeypatch.setattr(module, "apply_study1_config_defaults", lambda *args, **kwargs: None)
