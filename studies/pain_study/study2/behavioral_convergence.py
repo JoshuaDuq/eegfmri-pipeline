@@ -32,10 +32,18 @@ def compute_behavioral_convergence(
     random_state: int = 0,
     subject_column: str = "subject_id",
     run_column: str = "run",
+    trial_column: str = "trial_id",
 ) -> BehavioralConvergenceResult:
     _require_columns(
         frame,
-        (subject_column, run_column, expression_column, rating_column, *design_columns),
+        (
+            subject_column,
+            run_column,
+            trial_column,
+            expression_column,
+            rating_column,
+            *design_columns,
+        ),
     )
     permutation_count = _permutation_count(config, n_permutations)
     min_trials = require_config_int(
@@ -51,7 +59,13 @@ def compute_behavioral_convergence(
     criteria_met_frames: list[pd.DataFrame] = []
     observed_betas: list[float] = []
     for subject_id, subject_frame in frame.groupby(subject_column, sort=True):
-        subject_copy = subject_frame.reset_index(drop=True).copy()
+        if subject_frame.duplicated([run_column, trial_column]).any():
+            raise ValueError("Study 2 behavioral convergence contains duplicate run/trial rows.")
+        subject_copy = (
+            subject_frame.sort_values([run_column, trial_column], kind="mergesort")
+            .reset_index(drop=True)
+            .copy()
+        )
         unmet_criteria = _unmet_subject_criteria(
             subject_copy,
             run_column=run_column,

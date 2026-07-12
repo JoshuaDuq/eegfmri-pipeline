@@ -247,6 +247,9 @@ the correlation of the EEG source map with a motion covariance pattern and a phy
 covariance pattern built by the same procedure. The fMRI target is smoothed with the cohort-median
 source point-spread FWHM (Section 4), matching the kernel to the empirical source resolution, and
 the kernel effect is checked over a sensitivity range spanning the regional point-spread range.
+The `spatial-surrogates` stage generates the configured count independently within each hemisphere,
+records method, seed, vertex, band, and draw-count provenance, and is followed by
+`spatial-correspondence`. The latter rejects arrays or provenance that disagree with configuration.
 
 Because the cortical point-spread of the EEG inverse is broad (typically centimeters), this
 comparison is treated as coarse corroboration of large-scale spatial alignment, not as voxel-scale
@@ -282,7 +285,9 @@ are not imputed. A positive significant coefficient supports intensity convergen
 For each sensor and source map, trial-wise expression is regressed against framewise displacement,
 DVARS, cardiac phase, scanner-frequency residual power, and Fp1/Fp2 high-frequency power, within
 subject and then at the group level with Holm correction. The artifact-control summary reports
-`artifact_control_criteria_met`, `unmet_criteria`, and Holm-adjusted expression q-values. Criteria
+`artifact_control_criteria_met`, `unmet_criteria`, missing required controls, and Holm-adjusted
+expression q-values. Missing metrics are recorded as unmet advisory criteria but do not abort the
+analysis. Criteria
 are unmet when the absolute spatial correlation with an artifact template exceeds 0.80 at the sensor
 level or 0.50 in source space, or when expression significantly covaries with an artifact metric.
 The summary does not relabel maps as neural, exploratory, or contaminated.

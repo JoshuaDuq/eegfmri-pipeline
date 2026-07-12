@@ -149,6 +149,7 @@ study2:
     holm_alpha: 0.05
     fmri_smoothing_kernel_source: "median_point_spread_fwhm"
   behavioral_convergence:
+    trial_column: "trial_id"
     min_rated_trials: 8
     min_permutation_valid_runs: 1
     permutations: 10

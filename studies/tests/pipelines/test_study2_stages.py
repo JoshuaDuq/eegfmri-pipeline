@@ -644,6 +644,16 @@ def test_run_spatial_correspondence_writes_band_results(tmp_path: Path) -> None:
     config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
     paths.spatial_dir(config).mkdir(parents=True)
     np.save(paths.spatial_mask_path(config), np.asarray([True, True, True]))
+    paths.spatial_surrogate_metadata_path(config).write_text(
+        json.dumps(
+            {
+                "method": "BrainSMASH Base",
+                "n_surrogates": 2,
+                "bands": {band: {} for band in ("alpha", "beta", "gamma")},
+            }
+        ),
+        encoding="utf-8",
+    )
     for band in ("alpha", "beta", "gamma"):
         np.save(paths.spatial_eeg_map_path(config, band=band), np.asarray([1.0, 2.0, 3.0]))
         np.save(paths.spatial_fmri_map_path(config, band=band), np.asarray([1.0, 2.0, 3.0]))
@@ -720,8 +730,16 @@ def test_run_spatial_surrogates_records_source_identity(
         "analysis_mask_sha256": _sha256(paths.spatial_mask_path(config)),
         "bands": {
             band: {
-                "seed": 42 + band_index,
-                "masked_vertices": 3,
+                "hemispheres": {
+                    "left": {
+                        "seed": 42 + 2 * band_index,
+                        "masked_vertices": 2,
+                    },
+                    "right": {
+                        "seed": 43 + 2 * band_index,
+                        "masked_vertices": 1,
+                    },
+                },
                 "fmri_map_sha256": _sha256(paths.spatial_fmri_map_path(config, band=band)),
                 "surrogate_maps_sha256": _sha256(
                     paths.spatial_surrogate_maps_path(config, band=band)
@@ -798,6 +816,7 @@ def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:
                 {
                     "subject_id": subject_id,
                     "run": (trial % 3) + 1,
+                    "trial_id": trial,
                     "expression": float(trial),
                     "rating": float(trial) + 0.1,
                     "nuisance": float(trial % 2),

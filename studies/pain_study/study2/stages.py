@@ -765,7 +765,10 @@ def run_robustness(context: "Study2StageContext") -> None:
 
 def spatial_correspondence_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
     config = context.config
-    required: list[Path] = [paths.spatial_mask_path(config)]
+    required: list[Path] = [
+        paths.spatial_mask_path(config),
+        paths.spatial_surrogate_metadata_path(config),
+    ]
     for band in contribution_bands(config):
         required.extend(
             [
@@ -821,6 +824,10 @@ def run_spatial_surrogates(context: "Study2StageContext") -> None:
         "study2.spatial_comparison.brainsmash_surrogates",
     )
     base_seed = require_config_int(config, "project.random_state")
+    hemisphere_slices = {
+        "left": slice(0, manifest.lh_vertices.size),
+        "right": slice(manifest.lh_vertices.size, manifest.n_vertices),
+    }
     bands = contribution_bands(config)
     paths.spatial_dir(config).mkdir(parents=True, exist_ok=True)
     metadata = {
@@ -844,20 +851,30 @@ def run_spatial_surrogates(context: "Study2StageContext") -> None:
         target = np.asarray(target, dtype=float)
         if target.shape != mask.shape:
             raise ValueError(f"Study 2 spatial fMRI map shape does not match mask: {band}.")
-        seed = base_seed + band_index
-        masked_surrogates = generate_brainsmash_surrogates(
-            target_map=target[mask],
-            distance_matrix=distances[np.ix_(mask, mask)],
-            n_surrogates=n_surrogates,
-            seed=seed,
-        )
+        seed = base_seed + 2 * band_index
         surrogate_maps = np.zeros((n_surrogates, mask.size), dtype=float)
-        surrogate_maps[:, mask] = masked_surrogates
+        hemisphere_metadata = {}
+        for hemisphere_index, (hemisphere, hemisphere_slice) in enumerate(
+            hemisphere_slices.items()
+        ):
+            hemisphere_indices = np.arange(mask.size)[hemisphere_slice]
+            analysis_indices = hemisphere_indices[mask[hemisphere_slice]]
+            hemisphere_seed = seed + hemisphere_index
+            masked_surrogates = generate_brainsmash_surrogates(
+                target_map=target[analysis_indices],
+                distance_matrix=distances[np.ix_(analysis_indices, analysis_indices)],
+                n_surrogates=n_surrogates,
+                seed=hemisphere_seed,
+            )
+            surrogate_maps[:, analysis_indices] = masked_surrogates
+            hemisphere_metadata[hemisphere] = {
+                "seed": hemisphere_seed,
+                "masked_vertices": int(analysis_indices.size),
+            }
         surrogate_path = paths.spatial_surrogate_maps_path(config, band=band)
         np.save(surrogate_path, surrogate_maps)
         metadata["bands"][band] = {
-            "seed": seed,
-            "masked_vertices": int(mask.sum()),
+            "hemispheres": hemisphere_metadata,
             "fmri_map_sha256": _sha256_file(fmri_path),
             "surrogate_maps_sha256": _sha256_file(surrogate_path),
         }
@@ -879,6 +896,19 @@ def run_spatial_correspondence(context: "Study2StageContext") -> None:
     """Compute EEG/fMRI spatial-correspondence summaries from prepared maps."""
     config = context.config
     mask = np.load(paths.spatial_mask_path(config))
+    metadata = json.loads(
+        paths.spatial_surrogate_metadata_path(config).read_text(encoding="utf-8")
+    )
+    expected_surrogates = require_config_int(
+        config,
+        "study2.spatial_comparison.brainsmash_surrogates",
+    )
+    if metadata.get("method") != "BrainSMASH Base":
+        raise ValueError("Study 2 spatial surrogates lack BrainSMASH provenance.")
+    if metadata.get("n_surrogates") != expected_surrogates:
+        raise ValueError("Study 2 spatial surrogate metadata count does not match config.")
+    if set(metadata.get("bands", {})) != set(contribution_bands(config)):
+        raise ValueError("Study 2 spatial surrogate metadata band set is incomplete.")
     records = []
     for band in contribution_bands(config):
         result = compute_spatial_correspondence(
@@ -935,11 +965,16 @@ def run_behavioral_convergence(context: "Study2StageContext") -> None:
         config,
         "study2.behavioral_convergence.design_columns",
     )
+    trial_column = _required_config_string(
+        config,
+        "study2.behavioral_convergence.trial_column",
+    )
     result = compute_behavioral_convergence(
         frame,
         expression_column=expression_column,
         rating_column=rating_column,
         design_columns=design_columns,
+        trial_column=trial_column,
         config=config,
         random_state=require_config_int(config, "project.random_state"),
     )

@@ -40,6 +40,8 @@ def test_load_temporal_specificity_summary_joins_current_protocol_folds(
     assert summary.participant_effects.groupby(["target", "window_name"]).size().eq(3).all()
     assert summary.cohort_effects["window_order"].tolist() == list(range(6)) * 2
     assert set(summary.participant_effects["model"]) == {"elasticnet"}
+    assert len(summary.matched_participant_contrasts) == 36
+    assert len(summary.matched_cohort_contrasts) == 12
 
 
 def test_load_temporal_specificity_summary_rejects_legacy_window_set(
@@ -74,7 +76,8 @@ def test_load_temporal_specificity_summary_rejects_report_fold_mean_mismatch(
     config = load_study1_config()
     report_path = _write_temporal_report(tmp_path, config)
     report = pd.read_csv(report_path, sep="\t")
-    report.loc[0, "mean_delta_r2"] += 0.01
+    row_index = report.index[report["analysis_partition"].eq("temporal_control")][0]
+    report.loc[row_index, "mean_delta_r2"] += 0.01
     report.to_csv(report_path, sep="\t", index=False)
 
     with pytest.raises(ValueError, match="fold mean does not match report mean"):
@@ -91,7 +94,8 @@ def test_load_temporal_specificity_summary_rejects_duplicate_held_out_subject(
     config = load_study1_config()
     report_path = _write_temporal_report(tmp_path, config)
     report = pd.read_csv(report_path, sep="\t")
-    fold_path = Path(report.loc[0, "summary_path"]).parent / "model_comparison.tsv"
+    row = report.loc[report["analysis_partition"].eq("temporal_control")].iloc[0]
+    fold_path = Path(row["summary_path"]).parent / "model_comparison.tsv"
     folds = pd.read_csv(fold_path, sep="\t")
     folds.loc[1, "test_subject"] = folds.loc[0, "test_subject"]
     folds.to_csv(fold_path, sep="\t", index=False)
@@ -108,7 +112,8 @@ def test_load_temporal_specificity_summary_requires_fold_table(tmp_path: Path) -
     config = load_study1_config()
     report_path = _write_temporal_report(tmp_path, config)
     report = pd.read_csv(report_path, sep="\t")
-    fold_path = Path(report.loc[0, "summary_path"]).parent / "model_comparison.tsv"
+    row = report.loc[report["analysis_partition"].eq("temporal_control")].iloc[0]
+    fold_path = Path(row["summary_path"]).parent / "model_comparison.tsv"
     fold_path.unlink()
 
     with pytest.raises(FileNotFoundError, match="fold table does not exist"):
@@ -124,14 +129,6 @@ def test_load_temporal_specificity_summary_excludes_primary_partition(
 
     config = load_study1_config()
     report_path = _write_temporal_report(tmp_path, config)
-    report = pd.read_csv(report_path, sep="\t")
-    primary = report.iloc[[0]].copy()
-    primary["analysis_partition"] = "primary"
-    primary["feature_spec"] = "alpha_beta_gamma"
-    primary["temporal_control_window"] = pd.NA
-    primary["temporal_control_kind"] = pd.NA
-    pd.concat([report, primary], ignore_index=True).to_csv(report_path, sep="\t", index=False)
-
     summary = load_temporal_specificity_summary(report_path, config)
 
     assert len(summary.cohort_effects) == 12
@@ -142,6 +139,45 @@ def _write_temporal_report(tmp_path: Path, config) -> Path:
     report_rows: list[dict[str, object]] = []
     windows = resolve_temporal_control_windows(config)
     for target_index, target in enumerate(("NPS", "SIIPS1")):
+        primary_root = (
+            tmp_path
+            / "feature_benchmark"
+            / "primary"
+            / target
+            / "alpha_beta_gamma"
+            / "model_comparison"
+            / "metrics"
+        )
+        primary_root.mkdir(parents=True, exist_ok=True)
+        primary_summary = primary_root / "model_comparison_summary.json"
+        primary_summary.write_text("{}\n", encoding="utf-8")
+        primary_delta = np.asarray([0.10, 0.20, 0.30]) + target_index * 0.02
+        pd.DataFrame(
+            {
+                "model": ["elasticnet"] * 3,
+                "fold": [0, 1, 2],
+                "test_subject": ["sub-01", "sub-02", "sub-03"],
+                "delta_r2": primary_delta,
+            }
+        ).to_csv(primary_root / "model_comparison.tsv", sep="\t", index=False)
+        report_rows.append(
+            {
+                "lane": "feature_benchmark",
+                "analysis_partition": "primary",
+                "target": target,
+                "feature_spec": "alpha_beta_gamma",
+                "temporal_control_window": pd.NA,
+                "temporal_control_kind": pd.NA,
+                "model": "elasticnet",
+                "mean_delta_r2": float(primary_delta.mean()),
+                "ci_low_delta_r2": 0.0,
+                "ci_high_delta_r2": 0.4,
+                "p_value_delta_r2_holm": 0.05,
+                "n_folds": 3,
+                "n_subjects_included": 3,
+                "summary_path": str(primary_summary),
+            }
+        )
         for window_index, window in enumerate(windows):
             metrics_root = (
                 tmp_path
