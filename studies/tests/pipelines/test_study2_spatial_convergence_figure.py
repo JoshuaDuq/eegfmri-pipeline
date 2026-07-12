@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
+from xml.etree import ElementTree
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +17,7 @@ import pandas as pd
 import pytest
 from matplotlib.colors import Normalize, to_hex
 from matplotlib.text import Text
+from PIL import Image
 
 from studies.pain_study.study2 import paths
 from studies.pain_study.study2.config import load_study2_config
@@ -39,6 +44,246 @@ from studies.tests.pipelines.test_study2_primary_source_associations_figure impo
 )
 
 BANDS = ("alpha", "beta", "gamma")
+
+
+def test_spatial_convergence_paths_use_study2_figure_directory(tmp_path: Path) -> None:
+    config = load_study2_config()
+    config["paths"] = {"deriv_root": str(tmp_path / "derivatives")}
+    figure_directory = paths.figures_dir(config)
+
+    assert (
+        paths.spatial_convergence_figure_path(config),
+        paths.spatial_convergence_png_path(config),
+        paths.spatial_convergence_summary_path(config),
+        paths.spatial_convergence_caption_path(config),
+        paths.spatial_convergence_manifest_path(config),
+    ) == (
+        figure_directory / "spatial_convergence.svg",
+        figure_directory / "spatial_convergence.png",
+        figure_directory / "spatial_convergence_summary.tsv",
+        figure_directory / "spatial_convergence_caption.txt",
+        figure_directory / "spatial_convergence_manifest.json",
+    )
+
+
+def test_writer_creates_complete_spatial_convergence_publication_family(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study2.figures.plot_spatial_convergence as module
+
+    config = _write_spatial_artifacts(tmp_path)
+    surface_paths = tuple(tmp_path / f"surface-{index}" for index in range(4))
+    for surface_path in surface_paths:
+        surface_path.write_bytes(surface_path.name.encode("utf-8"))
+    surfaces = replace(_synthetic_surfaces(), source_paths=surface_paths)
+    monkeypatch.setattr(
+        module,
+        "load_common_source_surfaces",
+        lambda *args: surfaces,
+    )
+    output = tmp_path / "article" / "spatial_convergence.svg"
+
+    outputs = module.write_spatial_convergence(config=config, output_path=output)
+
+    expected_names = {
+        "spatial_convergence.svg",
+        "spatial_convergence.png",
+        "spatial_convergence_summary.tsv",
+        "spatial_convergence_caption.txt",
+        "spatial_convergence_manifest.json",
+    }
+    assert {path.name for path in outputs.all_files} == expected_names
+    assert all(path.is_file() for path in outputs.all_files)
+    assert {path.name for path in output.parent.iterdir()} == expected_names
+
+    svg_root = ElementTree.parse(outputs.svg).getroot()
+    assert float(svg_root.attrib["width"].removesuffix("pt")) * 25.4 / 72.0 == pytest.approx(
+        183.0,
+        abs=0.01,
+    )
+    assert float(svg_root.attrib["height"].removesuffix("pt")) * 25.4 / 72.0 == pytest.approx(
+        112.0,
+        abs=0.01,
+    )
+    svg_text = outputs.svg.read_text(encoding="utf-8")
+    assert "<text" in svg_text
+    assert "<path" in svg_text
+    assert "<dc:date" not in svg_text
+
+    dimensions = config["study2"]["figures"]["spatial_convergence"]["dimensions_mm"]
+    dpi = config["study2"]["figures"]["spatial_convergence"]["png_dpi"]
+    expected_pixels = tuple(
+        int(dimensions[dimension] / 25.4 * dpi) for dimension in ("width", "height")
+    )
+    with Image.open(outputs.png) as png:
+        assert png.size == expected_pixels
+
+    audit = pd.read_csv(outputs.summary, sep="\t")
+    assert tuple(audit.columns) == AUDIT_COLUMNS
+    assert tuple(audit["band"]) == BANDS
+
+    caption = outputs.caption.read_text(encoding="utf-8")
+    required_caption_phrases = (
+        "resolution-matched, nuisance-residualized NPS-L2 fMRI forward covariance",
+        "alpha, beta, and scanner-clean gamma EEG group source partial-r maps",
+        "unthresholded masked maps",
+        "BrainSMASH surrogate correlations preserve spatial autocorrelation",
+        "observed Pearson r",
+        "two-sided plus-one p",
+        "Holm adjustment across the three bands",
+        "coarse spatial correspondence",
+        "not vertex independence or shared generators",
+    )
+    assert all(phrase in caption for phrase in required_caption_phrases)
+
+    manifest = json.loads(outputs.manifest.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert manifest["bands"] == list(BANDS)
+    assert manifest["n_vertices"] == 6
+    assert manifest["n_surrogates"] == 3
+    assert manifest["common_subject"] == "fsaverage"
+    assert manifest["common_source_space_spacing"] == "oct6"
+    assert manifest["family_alpha"] == 0.05
+    assert manifest["figure_dimensions_mm"] == {"height": 112.0, "width": 183.0}
+    assert manifest["analysis_parameters"] == {
+        "correlation": "Pearson r",
+        "multiple_comparison_adjustment": "Holm across bands",
+        "null_method": "BrainSMASH Base",
+        "p_value": "two-sided plus-one",
+    }
+    assert set(manifest["software"]) == {
+        "matplotlib",
+        "mne",
+        "nibabel",
+        "nilearn",
+        "numpy",
+        "pandas",
+        "python",
+        "scipy",
+    }
+    summary = load_spatial_convergence(config)
+    expected_sources = (*summary.source_paths, *surface_paths)
+    assert len(expected_sources) == len(set(expected_sources))
+    assert set(manifest["source_sha256"]) == {
+        str(path.resolve()) for path in expected_sources
+    }
+    assert manifest["source_sha256"] == {
+        str(path.resolve()): _sha256(path) for path in expected_sources
+    }
+    expected_output_paths = tuple(
+        path for path in outputs.all_files if path != outputs.manifest
+    )
+    assert manifest["output_sha256"] == {
+        path.name: _sha256(path) for path in expected_output_paths
+    }
+
+
+def test_writer_fails_before_output_for_missing_scientific_inputs(tmp_path: Path) -> None:
+    from studies.pain_study.study2.figures.plot_spatial_convergence import (
+        write_spatial_convergence,
+    )
+
+    config = load_study2_config()
+    config["paths"] = {"deriv_root": str(tmp_path / "derivatives")}
+    output = tmp_path / "article" / "spatial_convergence.svg"
+
+    with pytest.raises(FileNotFoundError, match="source vertex array"):
+        write_spatial_convergence(config=config, output_path=output)
+
+    assert not output.parent.exists()
+
+
+def test_writer_rejects_non_svg_output_before_reading_config(tmp_path: Path) -> None:
+    from studies.pain_study.study2.figures.plot_spatial_convergence import (
+        write_spatial_convergence,
+    )
+
+    with pytest.raises(ValueError, match="must be an SVG"):
+        write_spatial_convergence(
+            config={},
+            output_path=tmp_path / "spatial_convergence.pdf",
+        )
+
+
+def test_spatial_convergence_cli_module_help_has_no_runtime_warning(tmp_path: Path) -> None:
+    environment = os.environ.copy()
+    environment["MNE_DONTWRITE_HOME"] = "true"
+    environment["MPLCONFIGDIR"] = str(tmp_path / "matplotlib")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-W",
+            "error::RuntimeWarning",
+            "-m",
+            "studies.pain_study.study2.figures.plot_spatial_convergence",
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--config" in result.stdout
+    assert "--study2-config" in result.stdout
+    assert "--deriv-root" in result.stdout
+    assert "--output" in result.stdout
+
+
+def test_writer_is_deterministic_for_identical_spatial_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study2.figures.plot_spatial_convergence as module
+
+    first_config = _write_spatial_artifacts(tmp_path / "first")
+    second_config = _write_spatial_artifacts(tmp_path / "second")
+    surfaces_by_root = {}
+    for name, config in (("first", first_config), ("second", second_config)):
+        surface_paths = tuple(tmp_path / name / f"surface-{index}" for index in range(4))
+        for surface_path in surface_paths:
+            surface_path.write_bytes(surface_path.name.encode("utf-8"))
+        surfaces_by_root[Path(config["paths"]["deriv_root"]).parent.name] = replace(
+            _synthetic_surfaces(),
+            source_paths=surface_paths,
+        )
+
+    monkeypatch.setattr(
+        module,
+        "load_common_source_surfaces",
+        lambda config, _manifest: surfaces_by_root[
+            Path(config["paths"]["deriv_root"]).parent.name
+        ],
+    )
+    first_outputs = module.write_spatial_convergence(
+        config=first_config,
+        output_path=tmp_path / "first-article" / "spatial_convergence.svg",
+    )
+    second_outputs = module.write_spatial_convergence(
+        config=second_config,
+        output_path=tmp_path / "second-article" / "spatial_convergence.svg",
+    )
+
+    for first_path, second_path in zip(
+        first_outputs.all_files[:-1],
+        second_outputs.all_files[:-1],
+        strict=True,
+    ):
+        assert first_path.read_bytes() == second_path.read_bytes()
+    assert b"<dc:date" not in first_outputs.svg.read_bytes()
+    with Image.open(first_outputs.png) as png:
+        assert not any("date" in key.lower() for key in png.info)
+
+    first_manifest = json.loads(first_outputs.manifest.read_text(encoding="utf-8"))
+    second_manifest = json.loads(second_outputs.manifest.read_text(encoding="utf-8"))
+    first_source_hashes = first_manifest.pop("source_sha256")
+    second_source_hashes = second_manifest.pop("source_sha256")
+    assert sorted(first_source_hashes.values()) == sorted(second_source_hashes.values())
+    assert first_manifest == second_manifest
+    assert first_manifest["output_sha256"] == second_manifest["output_sha256"]
 
 
 def test_renderer_has_fixed_multimodal_structure(tmp_path: Path) -> None:

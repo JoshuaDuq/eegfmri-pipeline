@@ -143,6 +143,26 @@ def primary_source_manifest_path(config: Any) -> Path:
     return figures_dir(config) / "primary_source_associations_manifest.json"
 
 
+def spatial_convergence_figure_path(config: Any) -> Path:
+    return figures_dir(config) / "spatial_convergence.svg"
+
+
+def spatial_convergence_png_path(config: Any) -> Path:
+    return figures_dir(config) / "spatial_convergence.png"
+
+
+def spatial_convergence_summary_path(config: Any) -> Path:
+    return figures_dir(config) / "spatial_convergence_summary.tsv"
+
+
+def spatial_convergence_caption_path(config: Any) -> Path:
+    return figures_dir(config) / "spatial_convergence_caption.txt"
+
+
+def spatial_convergence_manifest_path(config: Any) -> Path:
+    return figures_dir(config) / "spatial_convergence_manifest.json"
+
+
 def source_model_dir(config: Any) -> Path:
     return study2_output_root(config) / "source_model"
 
@@ -321,6 +341,11 @@ __all__ = [
     "source_model_metrics_path",
     "source_model_qc_path",
     "spatial_correspondence_summary_path",
+    "spatial_convergence_caption_path",
+    "spatial_convergence_figure_path",
+    "spatial_convergence_manifest_path",
+    "spatial_convergence_png_path",
+    "spatial_convergence_summary_path",
     "spatial_distance_matrix_path",
     "spatial_dir",
     "spatial_eeg_map_path",
