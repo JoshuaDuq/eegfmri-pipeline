@@ -835,7 +835,13 @@ def run_spatial_surrogates(context: "Study2StageContext") -> None:
     }
     for band_index, band in enumerate(bands):
         fmri_path = paths.spatial_fmri_map_path(config, band=band)
-        target = np.asarray(np.load(fmri_path, allow_pickle=False), dtype=float)
+        target = np.load(fmri_path, allow_pickle=False)
+        if not np.issubdtype(target.dtype, np.number) or np.issubdtype(
+            target.dtype,
+            np.complexfloating,
+        ):
+            raise ValueError(f"Study 2 spatial fMRI map must be real-valued: {band}.")
+        target = np.asarray(target, dtype=float)
         if target.shape != mask.shape:
             raise ValueError(f"Study 2 spatial fMRI map shape does not match mask: {band}.")
         seed = base_seed + band_index

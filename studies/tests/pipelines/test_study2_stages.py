@@ -761,6 +761,29 @@ def test_run_spatial_surrogates_rejects_nonboolean_mask(
         run_spatial_surrogates(_context(config, subjects=()))
 
 
+def test_run_spatial_surrogates_rejects_complex_fmri_map(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
+    _write_spatial_surrogate_stage_inputs(
+        config,
+        monkeypatch,
+        mask=np.ones(3, dtype=np.bool_),
+    )
+    fmri_path = paths.spatial_fmri_map_path(config, band="alpha")
+    fmri_map = np.arange(3, dtype=np.complex128)
+    fmri_map[0] = 1.0j
+    np.save(fmri_path, fmri_map)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Study 2 spatial fMRI map must be real-valued: alpha\.",
+    ):
+        run_spatial_surrogates(_context(config, subjects=()))
+
+
 def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config["study2"]["behavioral_convergence"]["expression_column"] = "expression"
