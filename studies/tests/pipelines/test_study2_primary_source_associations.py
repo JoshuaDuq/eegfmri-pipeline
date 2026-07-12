@@ -45,8 +45,8 @@ def test_primary_source_reader_computes_fisher_mean_and_corrected_contours(
         False,
     ]
     assert not result.band_results["beta"].corrected_vertex_mask.any()
-    assert result.band_results["alpha"].holm_q_value == pytest.approx(0.03)
-    assert result.band_results["beta"].holm_q_value == pytest.approx(1.0)
+    assert result.band_results["alpha"].holm_adjusted_p_value == pytest.approx(0.03)
+    assert result.band_results["beta"].holm_adjusted_p_value == pytest.approx(1.0)
     assert set(result.vertices.columns) == {
         "band",
         "hemisphere",
@@ -63,9 +63,11 @@ def test_primary_source_reader_computes_fisher_mean_and_corrected_contours(
         "n_vertices",
         "cluster_mass",
         "max_cluster_p_value",
-        "band_holm_q_value",
+        "band_holm_adjusted_p_value",
         "corrected_contour",
     }
+    assert "holm_adjusted_p_value" in result.summary.columns
+    assert "holm_q_value" not in result.summary.columns
 
 
 def test_primary_source_reader_rejects_inconsistent_fisher_maps(tmp_path: Path) -> None:
@@ -106,7 +108,7 @@ def test_primary_source_reader_rejects_stale_family_summary(tmp_path: Path) -> N
     config = _write_artifacts(tmp_path)
     summary_path = paths.source_family_summary_path(config)
     summary = pd.read_csv(summary_path, sep="\t")
-    summary.loc[summary["band"].eq("alpha"), "holm_q_value"] = 0.9
+    summary.loc[summary["band"].eq("alpha"), "holm_adjusted_p_value"] = 0.9
     summary.to_csv(summary_path, sep="\t", index=False)
 
     with pytest.raises(ValueError, match="does not match recomputed inference"):

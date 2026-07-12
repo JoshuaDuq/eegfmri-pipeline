@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from studies.pain_study.study2.statistics import holm_q_values
+from studies.pain_study.study2.statistics import holm_adjusted_p_values
 from studies.pain_study.study2.validation import (
     finite_number,
     require_config_float,
@@ -18,7 +18,7 @@ class ArtifactControlQC:
     band: str
     artifact_control_criteria_met: bool
     unmet_criteria: tuple[str, ...]
-    expression_q_values: dict[str, float]
+    expression_adjusted_p_values: dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -50,21 +50,21 @@ def evaluate_artifact_controls(
     alpha = require_config_float(config, "study2.artifact_controls.holm_alpha")
     sensor_values = _finite_mapping(sensor_template_abs_r, name="sensor artifact templates")
     source_values = _finite_mapping(source_artifact_map_abs_r, name="source artifact maps")
-    expression_q_values = holm_q_values(expression_p_values)
+    expression_adjusted_p_values = holm_adjusted_p_values(expression_p_values)
 
     unmet_criteria: list[str] = []
     if sensor_values and max(sensor_values.values()) > sensor_threshold:
         unmet_criteria.append("sensor_artifact_template")
     if source_values and max(source_values.values()) > source_threshold:
         unmet_criteria.append("source_artifact_template")
-    if expression_q_values and min(expression_q_values.values()) <= alpha:
+    if expression_adjusted_p_values and min(expression_adjusted_p_values.values()) <= alpha:
         unmet_criteria.append("artifact_expression")
 
     return ArtifactControlQC(
         band=band_name,
         artifact_control_criteria_met=not unmet_criteria,
         unmet_criteria=tuple(unmet_criteria),
-        expression_q_values=expression_q_values,
+        expression_adjusted_p_values=expression_adjusted_p_values,
     )
 
 

@@ -5,7 +5,10 @@ import pytest
 
 
 def test_compute_source_family_inference_holm_corrects_band_cluster_p_values() -> None:
-    from studies.pain_study.study2.source_family import compute_source_family_inference
+    from studies.pain_study.study2.source_family import (
+        compute_source_family_inference,
+        summarize_source_family,
+    )
 
     observed_maps_by_band = {
         "alpha": _clustered_subject_maps(),
@@ -24,12 +27,21 @@ def test_compute_source_family_inference_holm_corrects_band_cluster_p_values() -
 
     assert result.bands == ("alpha", "beta", "gamma")
     assert result.band_results["alpha"].min_cluster_p_value == pytest.approx(0.01)
-    assert result.band_results["alpha"].holm_q_value == pytest.approx(0.03)
+    assert result.band_results["alpha"].holm_adjusted_p_value == pytest.approx(0.03)
     assert result.band_results["alpha"].significant is True
     assert result.band_results["beta"].min_cluster_p_value == 1.0
-    assert result.band_results["beta"].holm_q_value == 1.0
+    assert result.band_results["beta"].holm_adjusted_p_value == 1.0
     assert result.band_results["beta"].significant is False
     assert result.band_results["gamma"].inference.n_subjects == 4
+    assert tuple(summarize_source_family(result).columns) == (
+        "band",
+        "n_subjects",
+        "n_permutations",
+        "n_clusters",
+        "min_cluster_p_value",
+        "holm_adjusted_p_value",
+        "significant",
+    )
 
 
 def test_compute_source_family_inference_requires_matching_band_keys() -> None:

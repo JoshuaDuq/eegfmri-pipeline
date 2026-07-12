@@ -17,7 +17,7 @@ def test_artifact_controls_report_unmet_criteria() -> None:
     )
 
     assert qc.artifact_control_criteria_met is False
-    assert qc.expression_q_values["dvars"] == pytest.approx(0.02)
+    assert qc.expression_adjusted_p_values["dvars"] == pytest.approx(0.02)
     assert qc.unmet_criteria == ("source_artifact_template", "artifact_expression")
 
 

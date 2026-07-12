@@ -41,7 +41,7 @@ def plus_one_p_value(observed: float, null_values: object) -> float:
     return float((exceedances + 1) / (null_arr.size + 1))
 
 
-def holm_q_values(p_values: Mapping[str, object]) -> dict[str, float]:
+def holm_adjusted_p_values(p_values: Mapping[str, object]) -> dict[str, float]:
     if not p_values:
         return {}
 
@@ -88,7 +88,7 @@ def standardized_residual(values: object, design: object, *, name: str) -> np.nd
 
 __all__ = [
     "as_finite_1d",
-    "holm_q_values",
+    "holm_adjusted_p_values",
     "pearson_r",
     "plus_one_p_value",
     "residualize_vector",

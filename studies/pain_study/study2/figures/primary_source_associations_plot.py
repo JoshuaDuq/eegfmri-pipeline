@@ -196,7 +196,7 @@ def build_primary_source_associations_figure(
                 band_index=band_index,
                 band_spec=band_spec,
                 n_subjects=summary.n_subjects,
-                holm_q_value=result.holm_q_value,
+                holm_adjusted_p_value=result.holm_adjusted_p_value,
                 significant=result.significant,
             )
 
@@ -305,11 +305,15 @@ def _add_band_header(
     band_index: int,
     band_spec: Mapping[str, object],
     n_subjects: int,
-    holm_q_value: float,
+    holm_adjusted_p_value: float,
     significant: bool,
 ) -> None:
     x_position = (band_index + 0.5) / 3.0
-    status = f"Holm q = {holm_q_value:.3f}" if significant else "no family-corrected cluster"
+    status = (
+        f"Holm q = {holm_adjusted_p_value:.3f}"
+        if significant
+        else "no family-corrected cluster"
+    )
     figure.text(
         x_position,
         0.905,
