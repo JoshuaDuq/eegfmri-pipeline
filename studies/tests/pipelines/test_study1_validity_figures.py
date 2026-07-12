@@ -5,6 +5,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pytest
 from matplotlib import font_manager
@@ -15,6 +16,7 @@ from studies.pain_study.study1.figures.validity_data import (
     DoseResponseSummary,
     ValidityTrialData,
 )
+from studies.tests.figure_svg import embedded_raster_dpi
 
 
 def test_require_configured_font_rejects_missing_font(
@@ -103,6 +105,25 @@ def test_publication_svg_respects_explicit_physical_dimensions(tmp_path: Path) -
     height_pt = float(root.attrib["height"].removesuffix("pt"))
     assert width_pt * 25.4 / 72.0 == pytest.approx(183.0, abs=0.01)
     assert height_pt * 25.4 / 72.0 == pytest.approx(82.0, abs=0.01)
+
+
+def test_publication_svg_embeds_rasters_at_print_resolution(tmp_path: Path) -> None:
+    from studies.pain_study.study1.figures.validity_style import save_publication_svg
+
+    figure, axis = plt.subplots()
+    axis.imshow(np.eye(2), interpolation="nearest")
+    output_path = tmp_path / "embedded.svg"
+
+    save_publication_svg(
+        figure,
+        output_path,
+        _config(tmp_path),
+        dimensions_mm={"width": 89.0, "height": 70.0},
+    )
+
+    resolutions = embedded_raster_dpi(output_path)
+    assert len(resolutions) == 1
+    assert all(dpi >= 599.0 for resolution in resolutions for dpi in resolution)
 
 
 def test_save_validity_svg_is_byte_reproducible(tmp_path: Path) -> None:
