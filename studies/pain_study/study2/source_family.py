@@ -12,7 +12,7 @@ from studies.pain_study.study2.source_inference import (
     GroupSourceInferenceResult,
     compute_group_source_inference,
 )
-from studies.pain_study.study2.statistics import holm_q_values
+from studies.pain_study.study2.statistics import holm_adjusted_p_values
 from studies.pain_study.study2.validation import finite_number
 
 
@@ -21,7 +21,7 @@ class SourceFamilyBandResult:
     band: str
     inference: GroupSourceInferenceResult
     min_cluster_p_value: float
-    holm_q_value: float
+    holm_adjusted_p_value: float
     significant: bool
 
 
@@ -58,14 +58,14 @@ def compute_source_family_inference(
         inferences[band] = inference
         p_values[band] = _min_cluster_p_value(inference)
 
-    q_values = holm_q_values(p_values)
+    adjusted_p_values = holm_adjusted_p_values(p_values)
     band_results = {
         band: SourceFamilyBandResult(
             band=band,
             inference=inferences[band],
             min_cluster_p_value=p_values[band],
-            holm_q_value=q_values[band],
-            significant=q_values[band] <= alpha_value,
+            holm_adjusted_p_value=adjusted_p_values[band],
+            significant=adjusted_p_values[band] <= alpha_value,
         )
         for band in observed_maps
     }
@@ -89,7 +89,7 @@ def summarize_source_family(result: SourceFamilyInferenceResult) -> pd.DataFrame
                 "n_permutations": inference.n_permutations,
                 "n_clusters": len(inference.clusters),
                 "min_cluster_p_value": band_result.min_cluster_p_value,
-                "holm_q_value": band_result.holm_q_value,
+                "holm_adjusted_p_value": band_result.holm_adjusted_p_value,
                 "significant": band_result.significant,
             }
         )

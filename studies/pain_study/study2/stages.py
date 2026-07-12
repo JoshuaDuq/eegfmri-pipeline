@@ -695,7 +695,9 @@ def run_artifact_controls(context: "Study2StageContext") -> None:
                 "band": qc.band,
                 "artifact_control_criteria_met": qc.artifact_control_criteria_met,
                 "unmet_criteria": ";".join(qc.unmet_criteria),
-                "expression_q_values": format_mapping(qc.expression_q_values),
+                "expression_adjusted_p_values": format_mapping(
+                    qc.expression_adjusted_p_values
+                ),
             }
         )
 

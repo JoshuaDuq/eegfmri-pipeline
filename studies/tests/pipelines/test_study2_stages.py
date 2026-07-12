@@ -592,7 +592,7 @@ def test_run_artifact_controls_writes_criteria_summary(tmp_path: Path) -> None:
         "band",
         "artifact_control_criteria_met",
         "unmet_criteria",
-        "expression_q_values",
+        "expression_adjusted_p_values",
     ]
     assert summary.loc[0, "band"] == "gamma"
     assert bool(summary.loc[0, "artifact_control_criteria_met"]) is False

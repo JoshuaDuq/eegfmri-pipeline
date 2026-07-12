@@ -43,7 +43,7 @@ CLUSTER_COLUMNS = (
     "n_vertices",
     "cluster_mass",
     "max_cluster_p_value",
-    "band_holm_q_value",
+    "band_holm_adjusted_p_value",
     "corrected_contour",
 )
 SUMMARY_COLUMNS = (
@@ -54,7 +54,7 @@ SUMMARY_COLUMNS = (
     "n_clusters",
     "n_corrected_clusters",
     "min_cluster_p_value",
-    "holm_q_value",
+    "holm_adjusted_p_value",
     "significant",
     "cluster_forming_p",
     "cluster_threshold",
@@ -73,7 +73,7 @@ class PrimarySourceBand:
     cluster_ids: np.ndarray
     corrected_vertex_mask: np.ndarray
     min_cluster_p_value: float
-    holm_q_value: float
+    holm_adjusted_p_value: float
     significant: bool
     n_permutations: int
 
@@ -305,7 +305,7 @@ def _reconcile_family_summary(
             raise ValueError(
                 "Study 2 saved source-family summary does not match recomputed inference."
             )
-    for column in ("min_cluster_p_value", "holm_q_value"):
+    for column in ("min_cluster_p_value", "holm_adjusted_p_value"):
         if not np.allclose(
             pd.to_numeric(saved[column], errors="raise").to_numpy(dtype=float),
             recomputed[column].to_numpy(dtype=float),
@@ -348,7 +348,8 @@ def _build_outputs(
             cluster_vertices = np.asarray(cluster.vertices, dtype=int)
             cluster_ids[cluster_vertices] = cluster_id
             corrected = bool(
-                cluster.p_value <= family_alpha and family_band.holm_q_value <= family_alpha
+                cluster.p_value <= family_alpha
+                and family_band.holm_adjusted_p_value <= family_alpha
             )
             if corrected:
                 corrected_mask[cluster_vertices] = True
@@ -360,7 +361,7 @@ def _build_outputs(
                     "n_vertices": len(cluster.vertices),
                     "cluster_mass": cluster.mass,
                     "max_cluster_p_value": cluster.p_value,
-                    "band_holm_q_value": family_band.holm_q_value,
+                    "band_holm_adjusted_p_value": family_band.holm_adjusted_p_value,
                     "corrected_contour": corrected,
                 }
             )
@@ -386,7 +387,7 @@ def _build_outputs(
             cluster_ids=cluster_ids,
             corrected_vertex_mask=corrected_mask,
             min_cluster_p_value=family_band.min_cluster_p_value,
-            holm_q_value=family_band.holm_q_value,
+            holm_adjusted_p_value=family_band.holm_adjusted_p_value,
             significant=family_band.significant,
             n_permutations=inference.n_permutations,
         )
@@ -426,11 +427,12 @@ def _summary_table(
                 "n_permutations": result.n_permutations,
                 "n_clusters": len(inference.clusters),
                 "n_corrected_clusters": sum(
-                    cluster.p_value <= family_alpha and result.holm_q_value <= family_alpha
+                    cluster.p_value <= family_alpha
+                    and result.holm_adjusted_p_value <= family_alpha
                     for cluster in inference.clusters
                 ),
                 "min_cluster_p_value": result.min_cluster_p_value,
-                "holm_q_value": result.holm_q_value,
+                "holm_adjusted_p_value": result.holm_adjusted_p_value,
                 "significant": result.significant,
                 "cluster_forming_p": cluster_forming_p,
                 "cluster_threshold": inference.threshold,
