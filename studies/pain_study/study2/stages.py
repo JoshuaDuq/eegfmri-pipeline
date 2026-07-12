@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import gc
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,7 +52,10 @@ from studies.pain_study.study2.source_power import (
     make_surface_source_morph,
     make_sloreta_inverse_operator,
 )
-from studies.pain_study.study2.source_vertex_manifest import ensure_common_source_vertices
+from studies.pain_study.study2.source_vertex_manifest import (
+    ensure_common_source_vertices,
+    load_common_source_vertices,
+)
 from studies.pain_study.study2.study1_context import (
     load_study1_model_context,
     study1_model_comparison_path,
@@ -776,6 +780,8 @@ def spatial_correspondence_required_inputs(context: "Study2StageContext") -> tup
 def spatial_surrogates_required_inputs(context: "Study2StageContext") -> tuple[Path, ...]:
     config = context.config
     return (
+        paths.source_vertex_manifest_path(config),
+        paths.source_vertex_metadata_path(config),
         paths.spatial_mask_path(config),
         paths.spatial_distance_matrix_path(config),
         *(paths.spatial_fmri_map_path(config, band=band) for band in contribution_bands(config)),
@@ -785,8 +791,27 @@ def spatial_surrogates_required_inputs(context: "Study2StageContext") -> tuple[P
 def run_spatial_surrogates(context: "Study2StageContext") -> None:
     """Generate the configured BrainSMASH null maps on analysis vertices."""
     config = context.config
-    mask = np.asarray(np.load(paths.spatial_mask_path(config)), dtype=bool)
-    distances = np.asarray(np.load(paths.spatial_distance_matrix_path(config)), dtype=float)
+    manifest_path = paths.source_vertex_manifest_path(config)
+    manifest = load_common_source_vertices(
+        array_path=manifest_path,
+        metadata_path=paths.source_vertex_metadata_path(config),
+    )
+    common_subject = require_config_string(config, "study2.source_modeling.common_subject")
+    spacing = require_config_string(
+        config,
+        "study2.source_modeling.common_source_space_spacing",
+    )
+    if manifest.common_subject != common_subject or manifest.spacing != spacing:
+        raise ValueError("Study 2 source vertex manifest does not match the configured space.")
+
+    mask_path = paths.spatial_mask_path(config)
+    mask = np.asarray(np.load(mask_path, allow_pickle=False), dtype=bool)
+    if mask.ndim != 1 or mask.size != manifest.n_vertices:
+        raise ValueError("Study 2 spatial analysis mask does not match the source vertex manifest.")
+    distances = np.asarray(
+        np.load(paths.spatial_distance_matrix_path(config), allow_pickle=False),
+        dtype=float,
+    )
     if distances.shape != (mask.size, mask.size):
         raise ValueError("Study 2 spatial distance matrix must match the analysis mask.")
     n_surrogates = require_config_int(
@@ -796,9 +821,19 @@ def run_spatial_surrogates(context: "Study2StageContext") -> None:
     base_seed = require_config_int(config, "project.random_state")
     bands = contribution_bands(config)
     paths.spatial_dir(config).mkdir(parents=True, exist_ok=True)
-    metadata = {"method": "BrainSMASH Base", "n_surrogates": n_surrogates, "bands": {}}
+    metadata = {
+        "schema_version": 1,
+        "method": "BrainSMASH Base",
+        "n_surrogates": n_surrogates,
+        "common_subject": common_subject,
+        "common_source_space_spacing": spacing,
+        "source_vertex_manifest_sha256": _sha256_file(manifest_path),
+        "analysis_mask_sha256": _sha256_file(mask_path),
+        "bands": {},
+    }
     for band_index, band in enumerate(bands):
-        target = np.asarray(np.load(paths.spatial_fmri_map_path(config, band=band)), dtype=float)
+        fmri_path = paths.spatial_fmri_map_path(config, band=band)
+        target = np.asarray(np.load(fmri_path, allow_pickle=False), dtype=float)
         if target.shape != mask.shape:
             raise ValueError(f"Study 2 spatial fMRI map shape does not match mask: {band}.")
         seed = base_seed + band_index
@@ -811,11 +846,23 @@ def run_spatial_surrogates(context: "Study2StageContext") -> None:
         surrogate_maps = np.zeros((n_surrogates, mask.size), dtype=float)
         surrogate_maps[:, mask] = masked_surrogates
         np.save(paths.spatial_surrogate_maps_path(config, band=band), surrogate_maps)
-        metadata["bands"][band] = {"seed": seed, "masked_vertices": int(mask.sum())}
+        metadata["bands"][band] = {
+            "seed": seed,
+            "masked_vertices": int(mask.sum()),
+            "fmri_map_sha256": _sha256_file(fmri_path),
+        }
     paths.spatial_surrogate_metadata_path(config).write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def run_spatial_correspondence(context: "Study2StageContext") -> None:
