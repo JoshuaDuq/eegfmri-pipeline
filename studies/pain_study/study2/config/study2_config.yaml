@@ -163,6 +163,23 @@ study2:
   reporting:
     bca_bootstrap_resamples: 10000
   figures:
+    spatial_convergence:
+      dimensions_mm:
+        width: 183.0
+        height: 112.0
+      bands:
+        - name: "alpha"
+          label: "Alpha"
+          frequency_label: "8.0–12.9 Hz"
+        - name: "beta"
+          label: "Beta"
+          frequency_label: "13.0–30.0 Hz"
+        - name: "gamma"
+          label: "Scanner-clean gamma"
+          frequency_label: "30.1–38, 43–56, 67–77 Hz"
+      font_family: "Arial"
+      png_dpi: 600
+      null_histogram_bins: 40
     primary_source_associations:
       dimensions_mm:
         width: 183.0

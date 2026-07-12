@@ -17,7 +17,11 @@ from eeg_pipeline.utils.config.loader import require_config_value
 from studies.pain_study.study2.figures.primary_source_associations import (
     PrimarySourceAssociations,
 )
-from studies.pain_study.study2.figures.style import figure_size_inches, publication_style
+from studies.pain_study.study2.figures.style import (
+    figure_size_inches,
+    publication_style,
+    study2_diverging_color_map,
+)
 from studies.pain_study.study2.source_vertex_manifest import CommonSourceVertices
 from studies.pain_study.study2.validation import require_config_string
 
@@ -139,7 +143,7 @@ def build_primary_source_associations_figure(
     _validate_surfaces(surfaces, summary.vertices_manifest)
     dimensions = figure_config["dimensions_mm"]
     font_family = str(figure_config["font_family"])
-    color_map = _association_color_map()
+    color_map = study2_diverging_color_map()
 
     with publication_style(font_family):
         figure = plt.figure(
@@ -351,14 +355,6 @@ def _add_shared_colorbar(
     colorbar.set_label("Fisher mean partial correlation, r", labelpad=2.0)
     colorbar.outline.set_linewidth(0.5)
     colorbar.ax.tick_params(length=2.0, width=0.5, pad=1.5)
-
-
-def _association_color_map() -> LinearSegmentedColormap:
-    return LinearSegmentedColormap.from_list(
-        "study2_source_association",
-        ("#2166AC", "#F7F7F7", "#D95F0E"),
-        N=256,
-    )
 
 
 def _reindex_faces(
