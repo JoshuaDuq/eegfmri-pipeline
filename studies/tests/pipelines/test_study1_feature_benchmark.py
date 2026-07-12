@@ -1055,6 +1055,9 @@ def test_model_comparison_summary_reports_staged_incremental_delta_r2(tmp_path) 
     assert summary["ridge"]["mean_r2"] == pytest.approx(0.60)
     assert summary["ridge"]["mean_nuisance_r2"] == pytest.approx(0.15)
     assert summary["ridge"]["mean_delta_r2"] == pytest.approx(0.45)
+    assert summary["ridge"]["within_subject_centered_full_r2"] == pytest.approx(1.0)
+    assert summary["ridge"]["within_subject_centered_nuisance_r2"] == pytest.approx(0.0)
+    assert summary["ridge"]["within_subject_centered_delta_r2"] == pytest.approx(1.0)
 
 
 def test_staged_permutation_reconstructs_raw_targets_from_shifted_residuals() -> None:

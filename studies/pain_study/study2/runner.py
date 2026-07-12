@@ -38,11 +38,13 @@ from studies.pain_study.study2.stages import (
     run_source_power,
     run_source_stage,
     run_spatial_correspondence,
+    run_spatial_surrogates,
     run_target_permutations,
     source_model_qc_required_inputs,
     source_power_required_inputs,
     source_stage_required_inputs,
     spatial_correspondence_required_inputs,
+    spatial_surrogates_required_inputs,
     target_permutations_required_inputs,
 )
 
@@ -125,6 +127,11 @@ STUDY2_STAGES: tuple[Study2Stage, ...] = (
         name="robustness",
         run=run_robustness,
         required_inputs=robustness_required_inputs,
+    ),
+    Study2Stage(
+        name="spatial-surrogates",
+        run=run_spatial_surrogates,
+        required_inputs=spatial_surrogates_required_inputs,
     ),
     Study2Stage(
         name="spatial-correspondence",

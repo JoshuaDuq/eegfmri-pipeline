@@ -3851,6 +3851,47 @@ def _model_comparison_permutation_p_value(
     )
 
 
+def _within_subject_centered_prediction_metrics(
+    predictions: ModelComparisonPredictions,
+    groups: np.ndarray,
+) -> Dict[str, float]:
+    """Score held-out predictions after removing subject-level offsets."""
+    group_array = np.asarray(groups)
+    target = np.asarray(predictions.evaluation_target, dtype=float)
+    full = np.asarray(predictions.full_prediction, dtype=float)
+    nuisance = np.asarray(predictions.nuisance_prediction, dtype=float)
+    if not (group_array.shape == target.shape == full.shape == nuisance.shape):
+        raise ValueError("Within-subject prediction metrics require aligned 1D arrays.")
+
+    centered_target = np.empty_like(target)
+    centered_full = np.empty_like(full)
+    centered_nuisance = np.empty_like(nuisance)
+    for subject_id in np.unique(group_array):
+        subject_mask = group_array == subject_id
+        centered_target[subject_mask] = target[subject_mask] - np.mean(target[subject_mask])
+        centered_full[subject_mask] = full[subject_mask] - np.mean(full[subject_mask])
+        centered_nuisance[subject_mask] = nuisance[subject_mask] - np.mean(
+            nuisance[subject_mask]
+        )
+
+    denominator = float(centered_target @ centered_target)
+    if denominator <= 1.0e-12:
+        return {
+            "within_subject_centered_full_r2": float("nan"),
+            "within_subject_centered_nuisance_r2": float("nan"),
+            "within_subject_centered_delta_r2": float("nan"),
+        }
+    full_residual = centered_target - centered_full
+    nuisance_residual = centered_target - centered_nuisance
+    full_r2 = 1.0 - float(full_residual @ full_residual) / denominator
+    nuisance_r2 = 1.0 - float(nuisance_residual @ nuisance_residual) / denominator
+    return {
+        "within_subject_centered_full_r2": full_r2,
+        "within_subject_centered_nuisance_r2": nuisance_r2,
+        "within_subject_centered_delta_r2": full_r2 - nuisance_r2,
+    }
+
+
 def run_model_comparison_ml(
     subjects: List[str],
     task: str,
@@ -3969,7 +4010,7 @@ def run_model_comparison_ml(
     
     comparison_records = []
     observed_overall_r2: Dict[str, float] = {}
-    observed_eval: Dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    observed_predictions: Dict[str, ModelComparisonPredictions] = {}
     
     import time as _time
 
@@ -4004,10 +4045,7 @@ def run_model_comparison_ml(
             prediction_result.full_prediction,
         )
         observed_overall_r2[model_name] = float(overall_r2)
-        observed_eval[model_name] = (
-            prediction_result.evaluation_target.copy(),
-            prediction_result.full_prediction.copy(),
-        )
+        observed_predictions[model_name] = prediction_result
         logger.info(
             "  \u2713 %s: R\u00b2=%.4f (%.1fs)",
             model_name, overall_r2, _time.perf_counter() - t_model,
@@ -4065,6 +4103,11 @@ def run_model_comparison_ml(
             "ci_high_mae": mae_ci_high,
             "n_folds": int(len(model_rows)),
         }
+        centered_metrics = _within_subject_centered_prediction_metrics(
+            observed_predictions[model_name],
+            groups,
+        )
+        summary[model_name].update(centered_metrics)
         if "r2_nuisance" in model_rows.columns:
             nuisance_r2_vals = pd.to_numeric(
                 model_rows["r2_nuisance"],

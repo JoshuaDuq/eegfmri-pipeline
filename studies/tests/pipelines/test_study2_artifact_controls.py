@@ -18,7 +18,9 @@ def test_artifact_controls_report_unmet_criteria() -> None:
 
     assert qc.artifact_control_criteria_met is False
     assert qc.expression_adjusted_p_values["dvars"] == pytest.approx(0.02)
-    assert qc.unmet_criteria == ("source_artifact_template", "artifact_expression")
+    assert qc.unmet_criteria[:2] == ("source_artifact_template", "artifact_expression")
+    assert "missing_control:cardiac_phase" in qc.unmet_criteria
+    assert "cardiac_phase" in qc.missing_controls
 
 
 def test_robustness_summary_uses_configured_thresholds() -> None:

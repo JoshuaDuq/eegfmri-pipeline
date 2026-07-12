@@ -422,6 +422,7 @@ def test_run_inference_writes_holm_corrected_source_family_summary(tmp_path: Pat
     assert summary["band"].tolist() == ["alpha", "beta", "gamma"]
     alpha_row = summary.loc[summary["band"] == "alpha"].iloc[0]
     assert bool(alpha_row["significant"]) is True
+    assert alpha_row["inference_tier"] == "below_feasibility"
     assert bool(summary.loc[summary["band"] == "beta", "significant"].iloc[0]) is False
 
 
@@ -594,6 +595,7 @@ def test_run_artifact_controls_writes_criteria_summary(tmp_path: Path) -> None:
         "artifact_control_criteria_met",
         "unmet_criteria",
         "expression_adjusted_p_values",
+        "missing_controls",
     ]
     assert summary.loc[0, "band"] == "gamma"
     assert bool(summary.loc[0, "artifact_control_criteria_met"]) is False
@@ -635,6 +637,7 @@ def test_run_robustness_writes_criteria_summary(tmp_path: Path) -> None:
 
 def test_run_spatial_correspondence_writes_band_results(tmp_path: Path) -> None:
     config = _config(tmp_path)
+    config["study2"]["spatial_comparison"]["brainsmash_surrogates"] = 2
     paths.spatial_dir(config).mkdir(parents=True)
     np.save(paths.spatial_mask_path(config), np.asarray([True, True, True]))
     for band in ("alpha", "beta", "gamma"):
@@ -654,6 +657,8 @@ def test_run_spatial_correspondence_writes_band_results(tmp_path: Path) -> None:
     summary = pd.read_csv(paths.spatial_correspondence_summary_path(config), sep="\t")
     assert summary["band"].tolist() == ["alpha", "beta", "gamma"]
     assert summary["meaningful"].tolist() == [True, True, True]
+    assert summary["holm_q_value"].tolist() == pytest.approx([1.0, 1.0, 1.0])
+    assert summary["holm_significant"].tolist() == [False, False, False]
 
 
 def test_run_behavioral_convergence_writes_summary(tmp_path: Path) -> None:

@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from studies.pain_study.study2.statistics import pearson_r, plus_one_p_value
-from studies.pain_study.study2.validation import require_config_float
+from studies.pain_study.study2.validation import require_config_float, require_config_int
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,17 @@ def compute_spatial_correspondence(
     surrogates = np.asarray(surrogate_maps, dtype=float)
     analysis_mask = _analysis_mask(eeg, fmri, mask)
     _validate_inputs(eeg, fmri, surrogates, analysis_mask)
+    expected_surrogates = require_config_int(
+        config,
+        "study2.spatial_comparison.brainsmash_surrogates",
+    )
+    if expected_surrogates < 1:
+        raise ValueError("Study 2 BrainSMASH surrogate count must be positive.")
+    if surrogates.shape[0] != expected_surrogates:
+        raise ValueError(
+            "Study 2 spatial comparison requires exactly "
+            f"{expected_surrogates} surrogate maps, got {surrogates.shape[0]}."
+        )
 
     spatial_r = pearson_r(eeg[analysis_mask], fmri[analysis_mask], name="spatial comparison")
     surrogate_r = np.asarray(

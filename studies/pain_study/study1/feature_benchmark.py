@@ -39,7 +39,10 @@ from studies.pain_study.study1.temporal_controls import (
     resolve_temporal_control_windows,
     temporal_control_feature_spec,
 )
-from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_BANDS
+from studies.pain_study.scanner_contamination import (
+    SCANNER_CLEAN_BETA_BANDS,
+    SCANNER_CLEAN_GAMMA_BANDS,
+)
 
 PRIMARY_BAND_PRESETS: dict[str, list[str]] = {
     "alpha": ["alpha"],
@@ -53,6 +56,12 @@ EXPLORATORY_BAND_PRESETS: dict[str, list[str]] = {
     "theta": ["theta"],
     "delta_theta": ["delta", "theta"],
     "all_bands": ["delta", "theta", "alpha", "beta", *SCANNER_CLEAN_GAMMA_BANDS],
+    "beta_scanner_clean": list(SCANNER_CLEAN_BETA_BANDS),
+    "alpha_beta_scanner_clean_gamma": [
+        "alpha",
+        *SCANNER_CLEAN_BETA_BANDS,
+        *SCANNER_CLEAN_GAMMA_BANDS,
+    ],
 }
 PRIMARY_FEATURE_SEGMENTS = ("active",)
 PRIMARY_FEATURE_SCOPES = ("ch",)

@@ -171,7 +171,8 @@ def _unmet_subject_criteria(
         raise ValueError("Study 2 behavioral convergence contains non-finite numeric values.")
     if len(frame) < min_trials:
         return ("min_rated_trials",)
-    if frame[run_column].nunique() < min_runs:
+    shiftable_runs = int((frame.groupby(run_column, sort=False).size() > 1).sum())
+    if shiftable_runs < min_runs:
         return ("min_valid_runs",)
     if float(np.std(numeric[rating_column].to_numpy(dtype=float), ddof=0)) <= 0.0:
         return ("zero_variance_rating",)

@@ -227,6 +227,14 @@ def spatial_mask_path(config: Any) -> Path:
     return spatial_dir(config) / "analysis_mask.npy"
 
 
+def spatial_distance_matrix_path(config: Any) -> Path:
+    return spatial_dir(config) / "surface_distance_matrix.npy"
+
+
+def spatial_surrogate_metadata_path(config: Any) -> Path:
+    return spatial_dir(config) / "surrogate_metadata.json"
+
+
 def spatial_correspondence_summary_path(config: Any) -> Path:
     return spatial_dir(config) / "spatial_correspondence.tsv"
 
@@ -313,11 +321,13 @@ __all__ = [
     "source_model_metrics_path",
     "source_model_qc_path",
     "spatial_correspondence_summary_path",
+    "spatial_distance_matrix_path",
     "spatial_dir",
     "spatial_eeg_map_path",
     "spatial_fmri_map_path",
     "spatial_mask_path",
     "spatial_surrogate_maps_path",
+    "spatial_surrogate_metadata_path",
     "source_stage_dir",
     "source_stage_fisher_z_path",
     "source_stage_frame_path",
