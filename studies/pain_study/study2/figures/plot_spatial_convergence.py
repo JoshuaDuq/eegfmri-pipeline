@@ -10,10 +10,11 @@ import platform
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Any
 
 import pandas as pd
+from matplotlib.figure import Figure
 
 from eeg_pipeline.infra.tsv import write_tsv
 from eeg_pipeline.utils.config.loader import load_config, require_config_value
@@ -36,6 +37,8 @@ from studies.pain_study.study2.figures.style import (
 )
 
 FIGURE_CONFIG_KEY = "study2.figures.spatial_convergence"
+PUBLICATION_DIMENSIONS_MM = {"width": 183.0, "height": 112.0}
+PUBLICATION_PNG_DPI = 600
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,30 @@ def write_spatial_convergence(
     outputs = _output_paths(resolved_output)
     outputs.svg.parent.mkdir(parents=True, exist_ok=True)
 
+    with TemporaryDirectory(
+        dir=outputs.svg.parent,
+        prefix=f".{outputs.svg.stem}-",
+    ) as staging_directory:
+        staged_outputs = _output_paths(Path(staging_directory) / outputs.svg.name)
+        _write_staged_family(
+            figure_config=figure_config,
+            figure=figure,
+            summary=summary,
+            source_paths=source_paths,
+            outputs=staged_outputs,
+        )
+        _promote_family(staged_outputs, outputs)
+    return outputs
+
+
+def _write_staged_family(
+    *,
+    figure_config: Mapping[str, object],
+    figure: Figure,
+    summary: SpatialConvergenceSummary,
+    source_paths: tuple[Path, ...],
+    outputs: SpatialConvergenceFigurePaths,
+) -> None:
     save_publication_png(
         figure,
         outputs.png,
@@ -87,12 +114,26 @@ def write_spatial_convergence(
     _write_text(outputs.caption, _caption())
     _write_manifest(
         outputs.manifest,
-        config=config,
+        figure_config=figure_config,
         summary=summary,
         source_paths=source_paths,
         outputs=outputs,
     )
-    return outputs
+
+
+def _promote_family(
+    staged: SpatialConvergenceFigurePaths,
+    destination: SpatialConvergenceFigurePaths,
+) -> None:
+    staged_non_manifest = staged.all_files[:-1]
+    destination_non_manifest = destination.all_files[:-1]
+    for staged_path, destination_path in zip(
+        staged_non_manifest,
+        destination_non_manifest,
+        strict=True,
+    ):
+        staged_path.replace(destination_path)
+    staged.manifest.replace(destination.manifest)
 
 
 def _output_paths(svg: Path) -> SpatialConvergenceFigurePaths:
@@ -107,9 +148,7 @@ def _output_paths(svg: Path) -> SpatialConvergenceFigurePaths:
 
 
 def _source_paths(source_paths: tuple[Path, ...]) -> tuple[Path, ...]:
-    resolved_paths = tuple(path.resolve() for path in source_paths)
-    if len(resolved_paths) != len(set(resolved_paths)):
-        raise ValueError("Study 2 spatial-convergence provenance contains duplicate paths.")
+    resolved_paths = tuple(dict.fromkeys(path.resolve() for path in source_paths))
     missing = [path for path in resolved_paths if not path.is_file()]
     if missing:
         raise FileNotFoundError(
@@ -167,12 +206,11 @@ def _caption() -> str:
 def _write_manifest(
     path: Path,
     *,
-    config: Any,
+    figure_config: Mapping[str, object],
     summary: SpatialConvergenceSummary,
     source_paths: tuple[Path, ...],
     outputs: SpatialConvergenceFigurePaths,
 ) -> None:
-    figure_config = _figure_config(config)
     output_files = tuple(output for output in outputs.all_files if output != path)
     payload = {
         "schema_version": 1,
@@ -217,6 +255,12 @@ def _figure_config(config: Any) -> Mapping[str, object]:
     value = require_config_value(config, FIGURE_CONFIG_KEY)
     if not isinstance(value, Mapping):
         raise ValueError(f"{FIGURE_CONFIG_KEY} must be a mapping.")
+    dimensions = value.get("dimensions_mm")
+    if not isinstance(dimensions, Mapping) or dict(dimensions) != PUBLICATION_DIMENSIONS_MM:
+        raise ValueError("Study 2 spatial-convergence dimensions must be exactly 183 x 112 mm.")
+    png_dpi = value.get("png_dpi")
+    if type(png_dpi) is not int or png_dpi != PUBLICATION_PNG_DPI:
+        raise ValueError("Study 2 spatial-convergence PNG resolution must be exactly 600 dpi.")
     return value
 
 

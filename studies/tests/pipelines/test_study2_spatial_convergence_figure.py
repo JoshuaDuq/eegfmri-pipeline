@@ -194,6 +194,94 @@ def test_writer_fails_before_output_for_missing_scientific_inputs(tmp_path: Path
     assert not output.parent.exists()
 
 
+def test_writer_leaves_no_partial_family_when_caption_staging_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study2.figures.plot_spatial_convergence as module
+
+    config = _write_spatial_artifacts(tmp_path)
+    _patch_writer_surfaces(monkeypatch, module, tmp_path)
+    output = tmp_path / "article" / "spatial_convergence.svg"
+    original_write_text = module._write_text
+
+    def fail_caption(path: Path, content: str) -> None:
+        if path.name == "spatial_convergence_caption.txt":
+            raise OSError("injected caption failure")
+        original_write_text(path, content)
+
+    monkeypatch.setattr(module, "_write_text", fail_caption)
+
+    with pytest.raises(OSError, match="injected caption failure"):
+        module.write_spatial_convergence(config=config, output_path=output)
+
+    assert output.parent.is_dir()
+    assert not any(output.parent.iterdir())
+
+
+def test_writer_preserves_existing_family_when_manifest_staging_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study2.figures.plot_spatial_convergence as module
+
+    config = _write_spatial_artifacts(tmp_path)
+    _patch_writer_surfaces(monkeypatch, module, tmp_path)
+    output = tmp_path / "article" / "spatial_convergence.svg"
+    existing = module.write_spatial_convergence(config=config, output_path=output)
+    original_files = {
+        path: (path.read_bytes(), path.stat().st_ino) for path in existing.all_files
+    }
+    original_write_text = module._write_text
+
+    def fail_manifest(path: Path, content: str) -> None:
+        if path.name == "spatial_convergence_manifest.json":
+            raise OSError("injected manifest failure")
+        original_write_text(path, content)
+
+    monkeypatch.setattr(module, "_write_text", fail_manifest)
+
+    with pytest.raises(OSError, match="injected manifest failure"):
+        module.write_spatial_convergence(config=config, output_path=output)
+
+    assert {
+        path: (path.read_bytes(), path.stat().st_ino) for path in existing.all_files
+    } == original_files
+    assert {path.name for path in output.parent.iterdir()} == {
+        path.name for path in existing.all_files
+    }
+
+
+def test_writer_stably_deduplicates_summary_and_surface_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study2.figures.plot_spatial_convergence as module
+
+    config = _write_spatial_artifacts(tmp_path)
+    summary = load_spatial_convergence(config)
+    surface_path = tmp_path / "surface"
+    surface_path.write_bytes(b"surface")
+    surfaces = replace(
+        _synthetic_surfaces(),
+        source_paths=(summary.source_paths[0], surface_path, surface_path),
+    )
+    monkeypatch.setattr(module, "load_common_source_surfaces", lambda *args: surfaces)
+
+    outputs = module.write_spatial_convergence(
+        config=config,
+        output_path=tmp_path / "article" / "spatial_convergence.svg",
+    )
+
+    combined_paths = (*summary.source_paths, *surfaces.source_paths)
+    expected_paths = tuple(dict.fromkeys(path.resolve() for path in combined_paths))
+    assert module._source_paths(combined_paths) == expected_paths
+    manifest = json.loads(outputs.manifest.read_text(encoding="utf-8"))
+    assert manifest["source_sha256"] == {
+        str(path): _sha256(path) for path in expected_paths
+    }
+
+
 def test_writer_rejects_non_svg_output_before_reading_config(tmp_path: Path) -> None:
     from studies.pain_study.study2.figures.plot_spatial_convergence import (
         write_spatial_convergence,
@@ -204,6 +292,52 @@ def test_writer_rejects_non_svg_output_before_reading_config(tmp_path: Path) -> 
             config={},
             output_path=tmp_path / "spatial_convergence.pdf",
         )
+
+
+@pytest.mark.parametrize(
+    ("dimension", "invalid_value"),
+    (("width", 182.0), ("height", 113.0)),
+)
+def test_writer_rejects_noncanonical_publication_dimensions_before_loading_inputs(
+    tmp_path: Path,
+    dimension: str,
+    invalid_value: float,
+) -> None:
+    from studies.pain_study.study2.figures.plot_spatial_convergence import (
+        write_spatial_convergence,
+    )
+
+    config = load_study2_config()
+    config["paths"] = {"deriv_root": str(tmp_path / "derivatives")}
+    config["study2"]["figures"]["spatial_convergence"]["dimensions_mm"][
+        dimension
+    ] = invalid_value
+    output = tmp_path / "article" / "spatial_convergence.svg"
+
+    with pytest.raises(ValueError, match="dimensions must be exactly 183 x 112 mm"):
+        write_spatial_convergence(config=config, output_path=output)
+
+    assert not output.parent.exists()
+
+
+@pytest.mark.parametrize("invalid_dpi", (599, 601, 600.0))
+def test_writer_rejects_noncanonical_publication_dpi_before_loading_inputs(
+    tmp_path: Path,
+    invalid_dpi: object,
+) -> None:
+    from studies.pain_study.study2.figures.plot_spatial_convergence import (
+        write_spatial_convergence,
+    )
+
+    config = load_study2_config()
+    config["paths"] = {"deriv_root": str(tmp_path / "derivatives")}
+    config["study2"]["figures"]["spatial_convergence"]["png_dpi"] = invalid_dpi
+    output = tmp_path / "article" / "spatial_convergence.svg"
+
+    with pytest.raises(ValueError, match="PNG resolution must be exactly 600 dpi"):
+        write_spatial_convergence(config=config, output_path=output)
+
+    assert not output.parent.exists()
 
 
 def test_spatial_convergence_cli_module_help_has_no_runtime_warning(tmp_path: Path) -> None:
@@ -787,6 +921,18 @@ def _two_face_mask_fixture(
         ),
         surfaces,
     )
+
+
+def _patch_writer_surfaces(
+    monkeypatch: pytest.MonkeyPatch,
+    module,
+    tmp_path: Path,
+) -> None:
+    surface_paths = tuple(tmp_path / f"surface-{index}" for index in range(4))
+    for surface_path in surface_paths:
+        surface_path.write_bytes(surface_path.name.encode("utf-8"))
+    surfaces = replace(_synthetic_surfaces(), source_paths=surface_paths)
+    monkeypatch.setattr(module, "load_common_source_surfaces", lambda *args: surfaces)
 
 
 def _write_spatial_artifacts(tmp_path: Path) -> dict:
