@@ -10,6 +10,7 @@ import pytest
 
 from studies.pain_study.study2.config import load_study2_config
 from studies.pain_study.study2.sensor_patterns import SensorPatternSummary
+from studies.tests.figure_svg import embedded_raster_dpi
 
 BANDS = (
     "alpha",
@@ -114,6 +115,9 @@ def test_haufe_writer_creates_exact_editable_svg(
         92.0, abs=0.01
     )
     assert output.read_text(encoding="utf-8").count("<text") > 0
+    resolutions = embedded_raster_dpi(output)
+    assert len(resolutions) == 6
+    assert all(dpi >= 599.0 for resolution in resolutions for dpi in resolution)
 
 
 def sensor_summary() -> SensorPatternSummary:

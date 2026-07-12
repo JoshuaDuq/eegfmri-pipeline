@@ -14,6 +14,7 @@ from matplotlib import font_manager
 from matplotlib.figure import Figure
 
 MILLIMETERS_PER_INCH = 25.4
+EMBEDDED_RASTER_DPI = 600
 
 
 def figure_size_inches(dimensions_mm: Mapping[str, float]) -> tuple[float, float]:
@@ -74,7 +75,12 @@ def save_publication_svg(
         temporary_path = Path(handle.name)
     try:
         with publication_style(font_family):
-            figure.savefig(temporary_path, format="svg", metadata={"Date": None})
+            figure.savefig(
+                temporary_path,
+                format="svg",
+                dpi=EMBEDDED_RASTER_DPI,
+                metadata={"Date": None},
+            )
         temporary_path.replace(output_path)
     finally:
         plt.close(figure)

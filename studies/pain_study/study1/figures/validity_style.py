@@ -17,6 +17,7 @@ from eeg_pipeline.utils.config.loader import require_config_value
 from studies.pain_study.study1.cohort import study1_output_root
 
 MILLIMETERS_PER_INCH = 25.4
+EMBEDDED_RASTER_DPI = 600
 SVG_HASH_SALT = "study1-validity"
 
 
@@ -99,6 +100,7 @@ def save_publication_svg(
             figure.savefig(
                 temporary_path,
                 format="svg",
+                dpi=EMBEDDED_RASTER_DPI,
                 metadata={"Date": None},
             )
         temporary_path.replace(output_path)
