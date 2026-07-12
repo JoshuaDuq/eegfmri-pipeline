@@ -56,6 +56,7 @@ from fmri_pipeline.analysis.trial_signatures import (
     _discover_runs,
     _extract_trials_for_run,
     _prepare_confounds_for_first_level_model,
+    _prepare_summary_signature_inputs,
     run_trial_signature_extraction_for_subject,
 )
 
@@ -710,7 +711,7 @@ def test_combine_effect_images_preserves_missing_support_as_nan(tmp_path: Path) 
     nib = pytest.importorskip("nibabel")
 
     effect_a = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
-    effect_b = nib.Nifti1Image(np.array([[[3.0]]], dtype=np.float32), np.eye(4))
+    effect_b = nib.Nifti1Image(np.array([[[np.nan]]], dtype=np.float32), np.eye(4))
     variance_a = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
     variance_b = nib.Nifti1Image(np.array([[[np.inf]]], dtype=np.float32), np.eye(4))
 
@@ -730,6 +731,46 @@ def test_combine_effect_images_preserves_missing_support_as_nan(tmp_path: Path) 
     )
     no_support_data = np.asarray(no_support.dataobj, dtype=float)
     assert np.isnan(no_support_data[0, 0, 0])
+
+
+def test_combine_effect_images_preserves_float32_weighted_product_semantics() -> None:
+    nib = pytest.importorskip("nibabel")
+
+    effect_data = np.array([[[[1.0]]], [[[2.0]]]], dtype=np.float32)
+    variance_data = np.array([[[[0.1]]], [[[5.0]]]], dtype=np.float32)
+    effects = [nib.Nifti1Image(data, np.eye(4)) for data in effect_data]
+    variances = [nib.Nifti1Image(data, np.eye(4)) for data in variance_data]
+    weights = 1.0 / variance_data
+    expected = np.sum(weights * effect_data, axis=0) / np.sum(weights, axis=0)
+
+    combined = _combine_effect_images(
+        effects=effects,
+        variances=variances,
+        method="variance",
+    )
+
+    assert np.array_equal(np.asarray(combined.dataobj), expected)
+
+
+def test_summary_signature_inputs_reject_nonfinite_weighted_effect_inside_coverage() -> None:
+    nib = pytest.importorskip("nibabel")
+
+    effect = nib.Nifti1Image(np.array([[[np.nan]]], dtype=np.float32), np.eye(4))
+    variance = nib.Nifti1Image(np.array([[[1.0]]], dtype=np.float32), np.eye(4))
+    coverage = nib.Nifti1Image(np.ones((1, 1, 1), dtype=np.uint8), np.eye(4))
+    combined = _combine_effect_images(
+        effects=[effect],
+        variances=[variance],
+        method="variance",
+    )
+
+    with pytest.raises(ValueError, match="inside the analysis mask"):
+        _prepare_summary_signature_inputs(
+            summary_img=combined,
+            signature_mask_img=coverage,
+            run_brain_masks=[coverage],
+            summary_name="Condition-level",
+        )
 
 
 def test_combine_effect_images_requires_variances_for_variance_weighting(tmp_path: Path) -> None:
@@ -2015,7 +2056,9 @@ def test_trial_signature_extraction_validates_events_against_bold_run(tmp_path: 
             )
 
 
-def test_trial_signature_condition_signatures_use_fixed_signature_mask(tmp_path: Path) -> None:
+def test_trial_signature_condition_signatures_zero_background_outside_run_coverage(
+    tmp_path: Path,
+) -> None:
     nib = pytest.importorskip("nibabel")
 
     cfg = TrialSignatureExtractionConfig(
@@ -2051,7 +2094,12 @@ def test_trial_signature_condition_signatures_use_fixed_signature_mask(tmp_path:
         np.eye(4),
     )
     effect_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
-    variance_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.float32), np.eye(4))
+    variance_data = np.ones((2, 2, 2), dtype=np.float32)
+    variance_data[0, 0, 0] = np.inf
+    variance_img = nib.Nifti1Image(variance_data, np.eye(4))
+    coverage_data = np.ones((2, 2, 2), dtype=np.uint8)
+    coverage_data[0, 0, 0] = 0
+    coverage_img = nib.Nifti1Image(coverage_data, np.eye(4))
     nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, 4), dtype=np.float32), np.eye(4)), bold_path)
     nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4)), mask_path)
     nib.save(effect_img, signature_path)
@@ -2086,6 +2134,7 @@ def test_trial_signature_condition_signatures_use_fixed_signature_mask(tmp_path:
 
     def fake_signature_expression(**kwargs):
         assert kwargs["mask_img"] is signature_mask_img
+        assert np.isfinite(kwargs["stat_or_effect_img"].get_fdata()).all()
         return [
             SignatureResult(
                 name="SIG",
@@ -2117,7 +2166,7 @@ def test_trial_signature_condition_signatures_use_fixed_signature_mask(tmp_path:
         side_effect=fake_signature_expression,
     ), patch(
         "fmri_pipeline.analysis.trial_signatures._union_masks_to_target",
-        side_effect=RuntimeError("union failed"),
+        return_value=coverage_img,
     ):
         run_trial_signature_extraction_for_subject(
             bids_fmri_root=tmp_path,

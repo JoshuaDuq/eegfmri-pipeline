@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from fmri_pipeline.analysis.contrast_builder import discover_runless_confounds
-from fmri_pipeline.analysis.multivariate_signatures import compute_signature_expression
+from fmri_pipeline.analysis.multivariate_signatures import (
+    _fill_nonfinite_background_for_resampling,
+    compute_signature_expression,
+)
 from fmri_pipeline.analysis.smoothing import normalize_smoothing_fwhm
 from fmri_pipeline.utils.bold_discovery import (
     build_first_level_model as _build_first_level_model,
@@ -393,20 +396,24 @@ def _union_masks_to_target(mask_imgs: Sequence[Any], target_img: Any) -> Any:
     return nib.Nifti1Image(union.astype(np.uint8), ref.affine, ref.header)
 
 
-def _resolve_summary_signature_mask(
+def _prepare_summary_signature_inputs(
     *,
+    summary_img: Any,
     signature_mask_img: Optional[Any],
     run_brain_masks: Sequence[Any],
-    target_img: Any,
     summary_name: str,
-) -> Any:
-    if signature_mask_img is not None:
-        return signature_mask_img
+) -> Tuple[Any, Any]:
     if not run_brain_masks:
         raise ValueError(
             f"{summary_name} signature expression requires at least one brain mask."
         )
-    return _union_masks_to_target(run_brain_masks, target_img)
+    coverage_mask = _union_masks_to_target(run_brain_masks, summary_img)
+    prepared_img = _fill_nonfinite_background_for_resampling(
+        image_img=summary_img,
+        mask_img=coverage_mask,
+    )
+    scoring_mask = signature_mask_img if signature_mask_img is not None else coverage_mask
+    return prepared_img, scoring_mask
 
 
 def _normalize_confounds_strategy(strategy: str) -> str:
@@ -1031,7 +1038,9 @@ def _combine_effect_images(
     with np.errstate(divide="ignore", invalid="ignore"):
         w = 1.0 / var
         w[~np.isfinite(w)] = 0.0
-        num = np.sum(w * eff, axis=0)
+        weighted_effects = np.zeros_like(eff, dtype=np.result_type(w, eff))
+        np.multiply(w, eff, out=weighted_effects, where=w != 0.0)
+        num = np.sum(weighted_effects, axis=0)
         den = np.sum(w, axis=0)
         out = np.full_like(num, np.nan, dtype=float)
         m = den > 0
@@ -1551,14 +1560,14 @@ def run_trial_signature_extraction_for_subject(
                 ]:
                     if img is None:
                         continue
-                    scoring_mask = _resolve_summary_signature_mask(
+                    scoring_img, scoring_mask = _prepare_summary_signature_inputs(
+                        summary_img=img,
                         signature_mask_img=signature_mask_img,
                         run_brain_masks=run_brain_masks,
-                        target_img=img,
                         summary_name="Condition-level",
                     )
                     sigs = compute_signature_expression(
-                        stat_or_effect_img=img,
+                        stat_or_effect_img=scoring_img,
                         signature_root=signature_root,
                         signature_specs=signature_specs,
                         mask_img=scoring_mask,
@@ -1646,14 +1655,14 @@ def run_trial_signature_extraction_for_subject(
                 n_trials = _count_trials_for_group(run_label or None, group)
 
                 if signature_root is not None and signature_specs:
-                    scoring_mask = _resolve_summary_signature_mask(
+                    scoring_img, scoring_mask = _prepare_summary_signature_inputs(
+                        summary_img=img,
                         signature_mask_img=signature_mask_img,
                         run_brain_masks=run_brain_masks,
-                        target_img=img,
                         summary_name="Grouped",
                     )
                     sigs = compute_signature_expression(
-                        stat_or_effect_img=img,
+                        stat_or_effect_img=scoring_img,
                         signature_root=signature_root,
                         signature_specs=signature_specs,
                         mask_img=scoring_mask,
