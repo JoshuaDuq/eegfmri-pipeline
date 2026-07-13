@@ -51,12 +51,16 @@ from fmri_pipeline.analysis.reporting import (
 from fmri_pipeline.analysis.trial_signatures import (
     TrialInfo,
     TrialSignatureExtractionConfig,
+    _RunSummaryEffect,
+    _build_matched_condition_difference,
     _combine_effect_images,
     _build_lss_events,
     _discover_runs,
     _extract_trials_for_run,
     _prepare_confounds_for_first_level_model,
     _prepare_summary_signature_inputs,
+    _resolve_contributing_run_masks,
+    _store_run_brain_mask,
     run_trial_signature_extraction_for_subject,
 )
 
@@ -2101,7 +2105,7 @@ def test_trial_signature_condition_signatures_zero_background_outside_run_covera
     coverage_data[0, 0, 0] = 0
     coverage_img = nib.Nifti1Image(coverage_data, np.eye(4))
     nib.save(nib.Nifti1Image(np.zeros((2, 2, 2, 4), dtype=np.float32), np.eye(4)), bold_path)
-    nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4)), mask_path)
+    nib.save(coverage_img, mask_path)
     nib.save(effect_img, signature_path)
     pd.DataFrame(
         {
@@ -2177,6 +2181,401 @@ def test_trial_signature_condition_signatures_zero_background_outside_run_covera
             signature_root=signature_root,
             signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
             signature_mask_img=signature_mask_img,
+        )
+
+
+def test_trial_signature_condition_summaries_use_only_contributing_run_coverage(
+    tmp_path: Path,
+) -> None:
+    nib = pytest.importorskip("nibabel")
+
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="MNI152NLin2009cAsym",
+        require_fmriprep=True,
+        runs=[1, 2, 3, 4, 5, 6],
+        task="pain",
+        name="pain",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="none",
+        method="beta-series",
+        write_condition_betas=False,
+        write_trial_betas=False,
+        write_trial_variances=False,
+    )
+    signature_root = tmp_path / "signatures"
+    signature_root.mkdir()
+    signature_path = signature_root / "sig.nii.gz"
+    signature_mask_img = nib.Nifti1Image(np.ones((2, 2, 2), dtype=np.uint8), np.eye(4))
+    nib.save(signature_mask_img, signature_path)
+
+    discovered_runs = []
+    mask_paths = {}
+    matched_runs = {1, 2, 5, 6}
+    for run_num in range(1, 7):
+        bold_path = tmp_path / f"run-{run_num:02d}_bold.nii.gz"
+        events_path = tmp_path / f"run-{run_num:02d}_events.tsv"
+        mask_path = tmp_path / f"run-{run_num:02d}_mask.nii.gz"
+        nib.save(
+            nib.Nifti1Image(np.zeros((2, 2, 2, 4), dtype=np.float32), np.eye(4)),
+            bold_path,
+        )
+        trial_types = ["pain", "rest"] if run_num in matched_runs else ["pain"]
+        pd.DataFrame(
+            {
+                "onset": np.arange(len(trial_types), dtype=float),
+                "duration": np.ones(len(trial_types), dtype=float),
+                "trial_type": trial_types,
+            }
+        ).to_csv(events_path, sep="\t", index=False)
+        mask_data = np.ones((2, 2, 2), dtype=np.uint8)
+        mask_data[0, 0, 0] = int(run_num in {3, 4})
+        nib.save(nib.Nifti1Image(mask_data, np.eye(4)), mask_path)
+        discovered_runs.append((run_num, bold_path, events_path, None))
+        mask_paths[bold_path] = mask_path
+
+    class FakeFirstLevelModel:
+        def __init__(self, run_num: int, extreme_value: float):
+            trial_types = ["A", "B"] if run_num in matched_runs else ["A"]
+            columns = [
+                f"trial_run-{run_num:02d}_{index:03d}_{condition.lower()}"
+                for index, condition in enumerate(trial_types, start=1)
+            ]
+            self.design_matrices_ = [pd.DataFrame(np.ones((4, len(columns))), columns=columns)]
+            self.run_num = run_num
+            self.extreme_value = extreme_value
+
+        def fit(self, *_args, **_kwargs):
+            return self
+
+        def compute_contrast(self, contrast, *, output_type):
+            active_columns = [
+                str(column)
+                for column, weight in zip(self.design_matrices_[0].columns, contrast)
+                if weight > 0
+            ]
+            is_condition_a = all(column.endswith("_a") for column in active_columns)
+            data = np.ones((2, 2, 2), dtype=np.float32)
+            covered = self.run_num in {3, 4}
+            if output_type == "effect_variance":
+                data[0, 0, 0] = 1.0 if covered else np.inf
+            else:
+                data *= 10.0 if is_condition_a else 2.0
+                data[0, 0, 0] = self.extreme_value if covered else np.nan
+            return nib.Nifti1Image(data, np.eye(4))
+
+    def extract_summaries(extreme_value: float):
+        signature_calls = []
+        models = iter(FakeFirstLevelModel(run_num, extreme_value) for run_num in range(1, 7))
+
+        def capture_signature_call(**kwargs):
+            signature_calls.append(kwargs)
+            return [
+                SignatureResult(
+                    name="SIG",
+                    weight_path=signature_path,
+                    n_voxels=8,
+                    dot=1.0,
+                    cosine=1.0,
+                    pearson_r=1.0,
+                )
+            ]
+
+        with (
+            patch(
+                "fmri_pipeline.analysis.trial_signatures._discover_runs",
+                return_value=discovered_runs,
+            ),
+            patch(
+                "fmri_pipeline.analysis.trial_signatures._discover_brain_mask_for_bold",
+                side_effect=lambda bold_path: mask_paths[bold_path],
+            ),
+            patch(
+                "fmri_pipeline.analysis.trial_signatures._get_tr_from_bold",
+                return_value=2.0,
+            ),
+            patch(
+                "fmri_pipeline.analysis.trial_signatures._build_first_level_model",
+                side_effect=lambda **_kwargs: next(models),
+            ),
+            patch(
+                "fmri_pipeline.analysis.trial_signatures._validate_design_matrices",
+                return_value=None,
+            ),
+            patch(
+                "fmri_pipeline.analysis.trial_signatures.compute_signature_expression",
+                side_effect=capture_signature_call,
+            ),
+        ):
+            run_trial_signature_extraction_for_subject(
+                bids_fmri_root=tmp_path,
+                bids_derivatives=tmp_path,
+                deriv_root=tmp_path / f"derivatives-{extreme_value:g}",
+                subject="0012",
+                cfg=cfg,
+                signature_root=signature_root,
+                signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
+                signature_mask_img=signature_mask_img,
+            )
+        return signature_calls[-3:]
+
+    baseline_calls = extract_summaries(10.0)
+    extreme_calls = extract_summaries(1_000_000.0)
+    affected_voxel = (0, 0, 0)
+    condition_rows = pd.read_csv(
+        tmp_path
+        / "derivatives-10"
+        / "sub-0012"
+        / "fmri"
+        / "beta_series"
+        / "task-pain"
+        / "contrast-pain"
+        / "signatures"
+        / "condition_signature_expression.tsv",
+        sep="\t",
+    ).set_index("map")
+
+    assert condition_rows.loc["cond_a", "map_inference"] == "run_level_fixed_effects"
+    assert condition_rows.loc["cond_b", "map_inference"] == "run_level_fixed_effects"
+    assert condition_rows.loc["cond_a_minus_b", "map_inference"] == "descriptive_trial_summary"
+    assert "coverage_nonzero_support_fraction" in condition_rows.columns
+
+    for calls in (baseline_calls, extreme_calls):
+        a_call, b_call, difference_call = calls
+        assert a_call["mask_img"] is signature_mask_img
+        assert b_call["mask_img"] is signature_mask_img
+        assert difference_call["mask_img"] is signature_mask_img
+        assert bool(a_call["coverage_mask_img"].get_fdata()[affected_voxel])
+        assert not bool(b_call["coverage_mask_img"].get_fdata()[affected_voxel])
+        assert not bool(difference_call["coverage_mask_img"].get_fdata()[affected_voxel])
+        assert np.isfinite(b_call["stat_or_effect_img"].get_fdata()[affected_voxel])
+        assert np.isfinite(difference_call["stat_or_effect_img"].get_fdata()[affected_voxel])
+
+    np.testing.assert_allclose(
+        baseline_calls[2]["stat_or_effect_img"].get_fdata(),
+        extreme_calls[2]["stat_or_effect_img"].get_fdata(),
+    )
+
+
+def _capture_grouped_summary_calls(tmp_path: Path, *, scope: str, groups: list[str]):
+    nib = pytest.importorskip("nibabel")
+    cfg = TrialSignatureExtractionConfig(
+        input_source="fmriprep",
+        fmriprep_space="MNI152NLin2009cAsym",
+        require_fmriprep=True,
+        runs=list(range(1, len(groups) + 1)),
+        task="pain",
+        name="pain",
+        condition_a_column="trial_type",
+        condition_a_value="pain",
+        condition_b_column="trial_type",
+        condition_b_value="rest",
+        hrf_model="spm",
+        drift_model="cosine",
+        high_pass_hz=0.008,
+        low_pass_hz=None,
+        smoothing_fwhm=None,
+        confounds_strategy="none",
+        method="beta-series",
+        fixed_effects_weighting="mean",
+        signature_group_column="temperature",
+        signature_group_values=tuple(sorted(set(groups))),
+        signature_group_scope=scope,
+        write_condition_betas=False,
+        write_trial_betas=False,
+        write_trial_variances=False,
+    )
+    signature_root = tmp_path / f"signatures-{scope}"
+    signature_root.mkdir()
+    signature_path = signature_root / "sig.nii.gz"
+    image_shape = (len(groups), 1, 1)
+    signature_mask_img = nib.Nifti1Image(np.ones(image_shape, dtype=np.uint8), np.eye(4))
+    nib.save(signature_mask_img, signature_path)
+
+    discovered_runs = []
+    mask_paths = {}
+    for run_num, group in enumerate(groups, start=1):
+        bold_path = tmp_path / f"{scope}_run-{run_num:02d}_bold.nii.gz"
+        events_path = tmp_path / f"{scope}_run-{run_num:02d}_events.tsv"
+        mask_path = tmp_path / f"{scope}_run-{run_num:02d}_mask.nii.gz"
+        nib.save(
+            nib.Nifti1Image(np.zeros((*image_shape, 4), dtype=np.float32), np.eye(4)),
+            bold_path,
+        )
+        pd.DataFrame(
+            {
+                "onset": [0.0],
+                "duration": [1.0],
+                "trial_type": ["pain"],
+                "temperature": [group],
+            }
+        ).to_csv(events_path, sep="\t", index=False)
+        mask_data = np.zeros(image_shape, dtype=np.uint8)
+        mask_data[run_num - 1, 0, 0] = 1
+        nib.save(nib.Nifti1Image(mask_data, np.eye(4)), mask_path)
+        discovered_runs.append((run_num, bold_path, events_path, None))
+        mask_paths[bold_path] = mask_path
+
+    class FakeFirstLevelModel:
+        def __init__(self, run_num: int, group: str):
+            column = f"trial_run-{run_num:02d}_001_{group}"
+            self.design_matrices_ = [pd.DataFrame(np.ones((4, 1)), columns=[column])]
+
+        def fit(self, *_args, **_kwargs):
+            return self
+
+        def compute_contrast(self, _contrast, *, output_type):
+            value = 1.0 if output_type == "effect_variance" else 2.0
+            return nib.Nifti1Image(np.full(image_shape, value, dtype=np.float32), np.eye(4))
+
+    models = iter(
+        FakeFirstLevelModel(run_num, group) for run_num, group in enumerate(groups, start=1)
+    )
+    signature_calls = []
+
+    def capture_signature_call(**kwargs):
+        signature_calls.append(kwargs)
+        return [
+            SignatureResult(
+                name="SIG",
+                weight_path=signature_path,
+                n_voxels=8,
+                dot=1.0,
+                cosine=1.0,
+                pearson_r=1.0,
+            )
+        ]
+
+    with (
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._discover_runs",
+            return_value=discovered_runs,
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._discover_brain_mask_for_bold",
+            side_effect=lambda bold_path: mask_paths[bold_path],
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._get_tr_from_bold",
+            return_value=2.0,
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._build_first_level_model",
+            side_effect=lambda **_kwargs: next(models),
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures._validate_design_matrices",
+            return_value=None,
+        ),
+        patch(
+            "fmri_pipeline.analysis.trial_signatures.compute_signature_expression",
+            side_effect=capture_signature_call,
+        ),
+    ):
+        run_trial_signature_extraction_for_subject(
+            bids_fmri_root=tmp_path,
+            bids_derivatives=tmp_path,
+            deriv_root=tmp_path / f"derivatives-{scope}",
+            subject="0012",
+            cfg=cfg,
+            signature_root=signature_root,
+            signature_specs=[{"name": "SIG", "path": "sig.nii.gz"}],
+            signature_mask_img=signature_mask_img,
+        )
+    return signature_calls[len(groups) :]
+
+
+def test_across_run_group_summary_uses_contributor_union(tmp_path: Path) -> None:
+    cold_call, hot_call = _capture_grouped_summary_calls(
+        tmp_path,
+        scope="across_runs",
+        groups=["hot", "cold", "hot"],
+    )
+
+    cold_coverage = cold_call["coverage_mask_img"].get_fdata()
+    hot_coverage = hot_call["coverage_mask_img"].get_fdata()
+    assert not bool(cold_coverage[0, 0, 0])
+    assert bool(cold_coverage[1, 0, 0])
+    assert bool(hot_coverage[0, 0, 0])
+    assert not bool(hot_coverage[1, 0, 0])
+    assert bool(hot_coverage[2, 0, 0])
+
+
+def test_per_run_group_summary_uses_only_own_run_mask(tmp_path: Path) -> None:
+    run_one_call, run_two_call = _capture_grouped_summary_calls(
+        tmp_path,
+        scope="per_run",
+        groups=["hot", "hot"],
+    )
+
+    run_one_coverage = run_one_call["coverage_mask_img"].get_fdata()
+    run_two_coverage = run_two_call["coverage_mask_img"].get_fdata()
+    assert bool(run_one_coverage[0, 0, 0])
+    assert not bool(run_one_coverage[1, 0, 0])
+    assert not bool(run_two_coverage[0, 0, 0])
+    assert bool(run_two_coverage[1, 0, 0])
+
+
+def test_matched_condition_difference_rejects_nonfinite_effect_inside_run_mask() -> None:
+    nib = pytest.importorskip("nibabel")
+    finite_effect = nib.Nifti1Image(np.ones((1, 1, 1), dtype=np.float32), np.eye(4))
+    nonfinite_effect = nib.Nifti1Image(np.full((1, 1, 1), np.nan), np.eye(4))
+    variance = nib.Nifti1Image(np.ones((1, 1, 1), dtype=np.float32), np.eye(4))
+    mask = nib.Nifti1Image(np.ones((1, 1, 1), dtype=np.uint8), np.eye(4))
+    condition_a_entries = [
+        _RunSummaryEffect(run_num, finite_effect, variance) for run_num in (1, 2)
+    ]
+    condition_b_entries = [
+        _RunSummaryEffect(1, nonfinite_effect, variance),
+        _RunSummaryEffect(2, finite_effect, variance),
+    ]
+
+    with pytest.raises(ValueError, match="non-finite values inside run coverage for run 1"):
+        _build_matched_condition_difference(
+            condition_a_entries=condition_a_entries,
+            condition_b_entries=condition_b_entries,
+            run_brain_masks={1: mask, 2: mask},
+            weighting="variance",
+        )
+
+
+def test_store_run_brain_mask_rejects_duplicate_run_number() -> None:
+    run_brain_masks = {1: object()}
+
+    with pytest.raises(ValueError, match="Duplicate discovered run number: 1"):
+        _store_run_brain_mask(run_brain_masks, 1, object())
+
+
+def test_resolve_contributing_run_masks_rejects_unknown_run_reference() -> None:
+    entry = _RunSummaryEffect(2, object(), None)
+
+    with pytest.raises(ValueError, match=r"runs without brain masks: \[2\]"):
+        _resolve_contributing_run_masks([entry], {1: object()})
+
+
+def test_resolve_contributing_run_masks_rejects_empty_entries() -> None:
+    with pytest.raises(ValueError, match="at least one contributing effect"):
+        _resolve_contributing_run_masks([], {})
+
+
+def test_condition_difference_rejects_disjoint_contributing_runs() -> None:
+    entry = _RunSummaryEffect(1, object(), None)
+    other_entry = _RunSummaryEffect(2, object(), None)
+
+    with pytest.raises(ValueError, match="no matched contributing runs"):
+        _build_matched_condition_difference(
+            condition_a_entries=[entry],
+            condition_b_entries=[other_entry],
+            run_brain_masks={1: object(), 2: object()},
+            weighting="mean",
         )
 
 

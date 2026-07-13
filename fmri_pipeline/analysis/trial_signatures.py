@@ -351,6 +351,43 @@ class TrialInfo:
     extra: Dict[str, str]
 
 
+@dataclass(frozen=True)
+class _RunSummaryEffect:
+    run_num: int
+    effect_img: Any
+    variance_img: Optional[Any]
+
+
+def _store_run_brain_mask(
+    run_brain_masks: Dict[int, Any],
+    run_num: int,
+    mask_img: Any,
+) -> None:
+    normalized_run_num = int(run_num)
+    if normalized_run_num in run_brain_masks:
+        raise ValueError(f"Duplicate discovered run number: {normalized_run_num}.")
+    run_brain_masks[normalized_run_num] = mask_img
+
+
+def _contributing_run_numbers(entries: Sequence[_RunSummaryEffect]) -> Tuple[int, ...]:
+    if not entries:
+        raise ValueError("Summary coverage requires at least one contributing effect.")
+    return tuple(dict.fromkeys(int(entry.run_num) for entry in entries))
+
+
+def _resolve_contributing_run_masks(
+    entries: Sequence[_RunSummaryEffect],
+    run_brain_masks: Dict[int, Any],
+) -> List[Any]:
+    run_numbers = _contributing_run_numbers(entries)
+    unknown_run_numbers = [run_num for run_num in run_numbers if run_num not in run_brain_masks]
+    if unknown_run_numbers:
+        raise ValueError(
+            f"Summary effects reference runs without brain masks: {unknown_run_numbers}."
+        )
+    return [run_brain_masks[run_num] for run_num in run_numbers]
+
+
 def _resample_mask_to_target(mask_img: Any, target_img: Any) -> Any:
     import numpy as np  # type: ignore
 
@@ -402,7 +439,7 @@ def _prepare_summary_signature_inputs(
     signature_mask_img: Optional[Any],
     run_brain_masks: Sequence[Any],
     summary_name: str,
-) -> Tuple[Any, Any]:
+) -> Tuple[Any, Any, Any]:
     if not run_brain_masks:
         raise ValueError(
             f"{summary_name} signature expression requires at least one brain mask."
@@ -413,7 +450,7 @@ def _prepare_summary_signature_inputs(
         mask_img=coverage_mask,
     )
     scoring_mask = signature_mask_img if signature_mask_img is not None else coverage_mask
-    return prepared_img, scoring_mask
+    return prepared_img, scoring_mask, coverage_mask
 
 
 def _normalize_confounds_strategy(strategy: str) -> str:
@@ -1050,6 +1087,117 @@ def _combine_effect_images(
     return nib.Nifti1Image(out.astype(np.float32), ref_img.affine, header)
 
 
+def _combine_run_summary_effects(
+    entries: Sequence[_RunSummaryEffect],
+    *,
+    method: str,
+) -> Any:
+    if not entries:
+        raise ValueError("No summary effects provided.")
+    variances = [entry.variance_img for entry in entries]
+    return _combine_effect_images(
+        effects=[entry.effect_img for entry in entries],
+        variances=variances if all(variance is not None for variance in variances) else None,
+        method=method,
+    )
+
+
+def _entries_for_run(
+    entries: Sequence[_RunSummaryEffect],
+    run_num: int,
+) -> List[_RunSummaryEffect]:
+    return [entry for entry in entries if int(entry.run_num) == int(run_num)]
+
+
+def _mask_difference_to_run_coverage(
+    *,
+    difference_img: Any,
+    run_mask_img: Any,
+    run_num: int,
+) -> Any:
+    import numpy as np  # type: ignore
+    import nibabel as nib  # type: ignore
+
+    run_mask = _resample_mask_to_target(run_mask_img, difference_img)
+    mask_data = np.asanyarray(run_mask.get_fdata(), dtype=float)
+    coverage = np.isfinite(mask_data) & (mask_data > 0)
+    difference_data = np.asanyarray(difference_img.dataobj, dtype=float)
+    if np.any(~np.isfinite(difference_data) & coverage):
+        raise ValueError(
+            "Condition A-minus-B contains non-finite values inside run coverage "
+            f"for run {int(run_num)}."
+        )
+    masked_difference = np.where(coverage, difference_data, np.nan)
+    header = difference_img.header.copy()
+    header.set_data_dtype(np.float32)
+    return nib.Nifti1Image(
+        masked_difference.astype(np.float32),
+        difference_img.affine,
+        header,
+    )
+
+
+def _build_matched_condition_difference(
+    *,
+    condition_a_entries: Sequence[_RunSummaryEffect],
+    condition_b_entries: Sequence[_RunSummaryEffect],
+    run_brain_masks: Dict[int, Any],
+    weighting: str,
+) -> Tuple[Any, List[Any]]:
+    import numpy as np  # type: ignore
+    import nibabel as nib  # type: ignore
+
+    condition_a_runs = set(_contributing_run_numbers(condition_a_entries))
+    condition_b_runs = set(_contributing_run_numbers(condition_b_entries))
+    matched_runs = tuple(sorted(condition_a_runs & condition_b_runs))
+    if not matched_runs:
+        raise ValueError("Conditions A and B have no matched contributing runs.")
+    unknown_run_numbers = [run_num for run_num in matched_runs if run_num not in run_brain_masks]
+    if unknown_run_numbers:
+        raise ValueError(
+            f"Condition A-minus-B references runs without brain masks: {unknown_run_numbers}."
+        )
+
+    run_differences = []
+    matched_masks = []
+    for run_num in matched_runs:
+        condition_a_img = _combine_run_summary_effects(
+            _entries_for_run(condition_a_entries, run_num),
+            method=weighting,
+        )
+        condition_b_img = _combine_run_summary_effects(
+            _entries_for_run(condition_b_entries, run_num),
+            method=weighting,
+        )
+        _validate_same_image_grid([condition_a_img, condition_b_img])
+        difference_data = np.asanyarray(condition_a_img.dataobj) - np.asanyarray(
+            condition_b_img.dataobj
+        )
+        difference_img = nib.Nifti1Image(
+            difference_data,
+            condition_a_img.affine,
+            condition_a_img.header,
+        )
+        run_mask_img = run_brain_masks[run_num]
+        run_differences.append(
+            _mask_difference_to_run_coverage(
+                difference_img=difference_img,
+                run_mask_img=run_mask_img,
+                run_num=run_num,
+            )
+        )
+        matched_masks.append(run_mask_img)
+
+    return (
+        _combine_effect_images(
+            effects=run_differences,
+            variances=None,
+            method="mean",
+        ),
+        matched_masks,
+    )
+
+
 def _write_tsv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = list(rows)
@@ -1077,6 +1225,31 @@ def _signature_support_fields(result: Any) -> Dict[str, Any]:
         "negative_weight_mass_change_fraction": getattr(
             result,
             "negative_weight_mass_change_fraction",
+            None,
+        ),
+        "coverage_nonzero_support_fraction": getattr(
+            result,
+            "coverage_nonzero_support_fraction",
+            None,
+        ),
+        "coverage_positive_support_fraction": getattr(
+            result,
+            "coverage_positive_support_fraction",
+            None,
+        ),
+        "coverage_negative_support_fraction": getattr(
+            result,
+            "coverage_negative_support_fraction",
+            None,
+        ),
+        "coverage_positive_weight_mass_loss_fraction": getattr(
+            result,
+            "coverage_positive_weight_mass_loss_fraction",
+            None,
+        ),
+        "coverage_negative_weight_mass_loss_fraction": getattr(
+            result,
+            "coverage_negative_weight_mass_loss_fraction",
             None,
         ),
         "scoring_mask_sha256": getattr(result, "scoring_mask_sha256", None),
@@ -1170,23 +1343,26 @@ def run_trial_signature_extraction_for_subject(
     trial_infos: List[TrialInfo] = []
     trial_rows_out: List[Dict[str, Any]] = []
     trial_sig_rows: List[Dict[str, Any]] = []
-    run_brain_masks: List[Any] = []
+    run_brain_masks: Dict[int, Any] = {}
     confounds_strategy = _normalize_confounds_strategy(cfg.confounds_strategy)
 
     grouping_enabled = bool(cfg.signature_group_column and cfg.signature_group_values)
 
-    group_effects: Dict[str, List[Any]] = {}
-    group_vars: Dict[str, List[Any]] = {}
-    group_effects_by_run: Dict[int, Dict[str, List[Any]]] = {}
-    group_vars_by_run: Dict[int, Dict[str, List[Any]]] = {}
+    group_effects: Dict[str, List[_RunSummaryEffect]] = {}
 
-    def _append_group(container: Dict[str, List[Any]], key: str, value: Any) -> None:
-        container.setdefault(str(key), []).append(value)
-
-    def _append_group_by_run(
-        container: Dict[int, Dict[str, List[Any]]], run_num: int, key: str, value: Any
+    def _append_group(
+        condition: str,
+        run_num: int,
+        effect_img: Any,
+        variance_img: Optional[Any],
     ) -> None:
-        container.setdefault(int(run_num), {}).setdefault(str(key), []).append(value)
+        group_effects.setdefault(str(condition), []).append(
+            _RunSummaryEffect(
+                run_num=int(run_num),
+                effect_img=effect_img,
+                variance_img=variance_img,
+            )
+        )
 
     for run_num, bold_path, events_path, confounds_path in runs:
         import pandas as pd  # type: ignore
@@ -1201,7 +1377,7 @@ def run_trial_signature_extraction_for_subject(
                 f"{bold_path.name}."
             )
         mask_img = nib.load(str(mask_path))
-        run_brain_masks.append(mask_img)
+        _store_run_brain_mask(run_brain_masks, run_num, mask_img)
 
         _validate_events_against_bold_run(
             events_df,
@@ -1354,8 +1530,6 @@ def run_trial_signature_extraction_for_subject(
             for condition, regressors in sorted(run_regressors_by_condition.items()):
                 run_contrast = _contrast_vector_for_columns(dm_cols, regressors)
                 run_effect_img = flm.compute_contrast(run_contrast, output_type="effect_size")
-                _append_group(group_effects, condition, run_effect_img)
-                _append_group_by_run(group_effects_by_run, run_num, condition, run_effect_img)
 
                 run_var_img = _compute_effect_variance(
                     flm,
@@ -1363,9 +1537,7 @@ def run_trial_signature_extraction_for_subject(
                     cfg=cfg,
                     context=f"Trial-wise beta-series condition GLM ({bold_path.name}, {condition})",
                 )
-                if run_var_img is not None:
-                    _append_group(group_vars, condition, run_var_img)
-                    _append_group_by_run(group_vars_by_run, run_num, condition, run_var_img)
+                _append_group(condition, run_num, run_effect_img, run_var_img)
 
         else:
             # LSS: one model per trial within each run
@@ -1427,11 +1599,7 @@ def run_trial_signature_extraction_for_subject(
                     ),
                 )
 
-                _append_group(group_effects, t.condition, beta_img)
-                _append_group_by_run(group_effects_by_run, run_num, t.condition, beta_img)
-                if var_img is not None:
-                    _append_group(group_vars, t.condition, var_img)
-                    _append_group_by_run(group_vars_by_run, run_num, t.condition, var_img)
+                _append_group(t.condition, run_num, beta_img, var_img)
 
                 if cfg.write_trial_betas:
                     p = (
@@ -1512,16 +1680,13 @@ def run_trial_signature_extraction_for_subject(
 
         if not grouping_enabled:
             cond_a_effects = list(group_effects.get("A", []))
-            cond_a_vars = list(group_vars.get("A", []))
             cond_b_effects = list(group_effects.get("B", []))
-            cond_b_vars = list(group_vars.get("B", []))
 
             a_img = None
             b_img = None
             if cond_a_effects:
-                a_img = _combine_effect_images(
-                    effects=cond_a_effects,
-                    variances=cond_a_vars if cond_a_vars else None,
+                a_img = _combine_run_summary_effects(
+                    cond_a_effects,
                     method=cfg.fixed_effects_weighting,
                 )
                 if cfg.write_condition_betas:
@@ -1529,9 +1694,8 @@ def run_trial_signature_extraction_for_subject(
                         a_img, str(cond_dir / f"{sub_label}_task-{cfg.task}_cond-a_beta.nii.gz")
                     )
             if cond_b_effects:
-                b_img = _combine_effect_images(
-                    effects=cond_b_effects,
-                    variances=cond_b_vars if cond_b_vars else None,
+                b_img = _combine_run_summary_effects(
+                    cond_b_effects,
                     method=cfg.fixed_effects_weighting,
                 )
                 if cfg.write_condition_betas:
@@ -1540,12 +1704,14 @@ def run_trial_signature_extraction_for_subject(
                     )
 
             diff_img = None
+            difference_masks: List[Any] = []
             if a_img is not None and b_img is not None:
-                import numpy as np  # type: ignore
-
-                a = np.asanyarray(a_img.dataobj)
-                b = np.asanyarray(b_img.dataobj)
-                diff_img = nib.Nifti1Image(a - b, a_img.affine, a_img.header)
+                diff_img, difference_masks = _build_matched_condition_difference(
+                    condition_a_entries=cond_a_effects,
+                    condition_b_entries=cond_b_effects,
+                    run_brain_masks=run_brain_masks,
+                    weighting=cfg.fixed_effects_weighting,
+                )
                 if cfg.write_condition_betas:
                     nib.save(
                         diff_img,
@@ -1560,10 +1726,22 @@ def run_trial_signature_extraction_for_subject(
                 ]:
                     if img is None:
                         continue
-                    scoring_img, scoring_mask = _prepare_summary_signature_inputs(
+                    if label == "cond_a":
+                        contributing_masks = _resolve_contributing_run_masks(
+                            cond_a_effects,
+                            run_brain_masks,
+                        )
+                    elif label == "cond_b":
+                        contributing_masks = _resolve_contributing_run_masks(
+                            cond_b_effects,
+                            run_brain_masks,
+                        )
+                    else:
+                        contributing_masks = difference_masks
+                    scoring_img, scoring_mask, coverage_mask = _prepare_summary_signature_inputs(
                         summary_img=img,
                         signature_mask_img=signature_mask_img,
-                        run_brain_masks=run_brain_masks,
+                        run_brain_masks=contributing_masks,
                         summary_name="Condition-level",
                     )
                     sigs = compute_signature_expression(
@@ -1571,6 +1749,7 @@ def run_trial_signature_extraction_for_subject(
                         signature_root=signature_root,
                         signature_specs=signature_specs,
                         mask_img=scoring_mask,
+                        coverage_mask_img=coverage_mask,
                         signatures=cfg.signatures,
                         min_support_fraction=cfg.min_signature_support_fraction,
                         max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
@@ -1581,7 +1760,11 @@ def run_trial_signature_extraction_for_subject(
                                 "subject": sub_label,
                                 "task": cfg.task,
                                 "method": cfg.method,
-                                "map_inference": condition_map_inference,
+                                "map_inference": (
+                                    "descriptive_trial_summary"
+                                    if label == "cond_a_minus_b"
+                                    else condition_map_inference
+                                ),
                                 "map": label,
                                 "signature": s.name,
                                 "dot": f"{s.dot:.8g}",
@@ -1614,16 +1797,24 @@ def run_trial_signature_extraction_for_subject(
                     .replace("-", "_")
                 )
                 if scope == "per_run":
-                    for r in sorted(group_effects_by_run.keys()):
-                        by_group = group_effects_by_run.get(int(r), {})
-                        for g in sorted(by_group.keys()):
+                    run_numbers = sorted(
+                        {
+                            int(entry.run_num)
+                            for entries in group_effects.values()
+                            for entry in entries
+                        }
+                    )
+                    for r in run_numbers:
+                        for g in sorted(group_effects.keys()):
+                            entries = _entries_for_run(group_effects[str(g)], r)
+                            if not entries:
+                                continue
                             yield (
                                 "per_run",
                                 f"run-{int(r):02d}",
                                 int(r),
                                 str(g),
-                                by_group.get(str(g), []),
-                                group_vars_by_run.get(int(r), {}).get(str(g), []),
+                                entries,
                             )
                 else:
                     for g in sorted(group_effects.keys()):
@@ -1633,15 +1824,13 @@ def run_trial_signature_extraction_for_subject(
                             None,
                             str(g),
                             group_effects.get(str(g), []),
-                            group_vars.get(str(g), []),
                         )
 
-            for scope, run_label, run_num, group, effects, variances in _iter_group_sets():
+            for scope, run_label, run_num, group, effects in _iter_group_sets():
                 if not effects:
                     continue
-                img = _combine_effect_images(
-                    effects=effects,
-                    variances=variances if variances else None,
+                img = _combine_run_summary_effects(
+                    effects,
                     method=cfg.fixed_effects_weighting,
                 )
 
@@ -1655,10 +1844,14 @@ def run_trial_signature_extraction_for_subject(
                 n_trials = _count_trials_for_group(run_label or None, group)
 
                 if signature_root is not None and signature_specs:
-                    scoring_img, scoring_mask = _prepare_summary_signature_inputs(
+                    contributing_masks = _resolve_contributing_run_masks(
+                        effects,
+                        run_brain_masks,
+                    )
+                    scoring_img, scoring_mask, coverage_mask = _prepare_summary_signature_inputs(
                         summary_img=img,
                         signature_mask_img=signature_mask_img,
-                        run_brain_masks=run_brain_masks,
+                        run_brain_masks=contributing_masks,
                         summary_name="Grouped",
                     )
                     sigs = compute_signature_expression(
@@ -1666,6 +1859,7 @@ def run_trial_signature_extraction_for_subject(
                         signature_root=signature_root,
                         signature_specs=signature_specs,
                         mask_img=scoring_mask,
+                        coverage_mask_img=coverage_mask,
                         signatures=cfg.signatures,
                         min_support_fraction=cfg.min_signature_support_fraction,
                         max_weight_mass_change_fraction=cfg.max_signature_weight_mass_change_fraction,
