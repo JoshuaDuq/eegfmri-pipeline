@@ -7,9 +7,23 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
+import pandas as pd
+
 from eeg_pipeline.utils.config.loader import require_config_value
+from studies.pain_study.study1.figures.cohort_power_spectral_density import (
+    CohortPsdSpecification,
+    CohortPsdSummary,
+    build_cohort_psd_summary,
+)
 from studies.pain_study.study1.figures.continuous_spectrum import (
     ContinuousSpectrumSpecification,
+)
+from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+    EegRunSource,
+    estimate_source_spectrum,
+)
+from studies.pain_study.study1.figures.spectral_statistics import (
+    ParticipantBootstrapSpecification,
 )
 
 
@@ -87,6 +101,69 @@ def preprocessing_stage_psd_specification(
     )
 
 
+def build_preprocessing_stage_psd_summary(
+    sources: tuple[EegRunSource, ...],
+    specification: PreprocessingStagePsdSpecification,
+    *,
+    bootstrap: ParticipantBootstrapSpecification,
+) -> CohortPsdSummary:
+    """Estimate and summarize all runs for one preprocessing stage."""
+    run_spectra = tuple(
+        estimate_source_spectrum(source, specification.spectrum) for source in sources
+    )
+    summary = build_cohort_psd_summary(
+        run_spectra,
+        CohortPsdSpecification(
+            spectrum=specification.spectrum,
+            excluded_subjects=specification.excluded_subjects,
+        ),
+        bootstrap=bootstrap,
+    )
+    return label_preprocessing_stage_summary(summary, sources, specification)
+
+
+def label_preprocessing_stage_summary(
+    summary: CohortPsdSummary,
+    sources: tuple[EegRunSource, ...],
+    specification: PreprocessingStagePsdSpecification,
+) -> CohortPsdSummary:
+    """Return a stage-labeled summary with exact source provenance."""
+    representations = {source.source_path: source.representation for source in sources}
+    run_audit = summary.run_audit.copy()
+    run_audit["run"] = pd.to_numeric(run_audit["run"], errors="raise").astype(int)
+    run_audit.insert(0, "stage", specification.stage.identifier)
+    run_audit.insert(
+        1,
+        "source_representation",
+        run_audit["source_file"].astype(str).map(representations),
+    )
+    if run_audit["source_representation"].isna().any():
+        missing = run_audit.loc[
+            run_audit["source_representation"].isna(),
+            "source_file",
+        ].tolist()
+        raise ValueError(f"Missing preprocessing-stage source provenance: {missing}")
+    run_audit["segment_duration_s"] = specification.segment_duration_s
+    run_audit["overlap_fraction"] = specification.overlap_fraction
+    return CohortPsdSummary(
+        participant_spectra=_prepend_stage(
+            summary.participant_spectra,
+            specification.stage.identifier,
+        ),
+        cohort_spectrum=_prepend_stage(
+            summary.cohort_spectrum,
+            specification.stage.identifier,
+        ),
+        run_audit=run_audit,
+    )
+
+
+def _prepend_stage(frame: pd.DataFrame, stage_identifier: str) -> pd.DataFrame:
+    labeled = frame.copy()
+    labeled.insert(0, "stage", stage_identifier)
+    return labeled
+
+
 def _integral_samples(duration_s: float, sampling_frequency_hz: float, name: str) -> int:
     sample_count = duration_s * sampling_frequency_hz
     if not math.isfinite(sample_count) or not sample_count.is_integer():
@@ -97,5 +174,7 @@ def _integral_samples(duration_s: float, sampling_frequency_hz: float, name: str
 __all__ = [
     "PreprocessingStage",
     "PreprocessingStagePsdSpecification",
+    "build_preprocessing_stage_psd_summary",
+    "label_preprocessing_stage_summary",
     "preprocessing_stage_psd_specification",
 ]
