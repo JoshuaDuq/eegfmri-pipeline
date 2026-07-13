@@ -147,6 +147,97 @@ def test_discover_mne_runs_reuses_final_clean_contract(tmp_path: Path) -> None:
     assert sources[0].representation == "fif"
 
 
+def test_estimate_source_spectrum_loads_and_types_brainvision_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mne
+
+    import studies.pain_study.study1.figures.preprocessing_psd_sources as module
+
+    _write_processed_triplet(tmp_path)
+    source = module.discover_processed_brainvision_runs(
+        tmp_path,
+        excluded_subjects=(),
+    )[0]
+    raw = _ClosableRaw()
+    typed = []
+    monkeypatch.setattr(mne.io, "read_raw_brainvision", lambda *args, **kwargs: raw)
+    monkeypatch.setattr(module, "set_channel_types", lambda loaded: typed.append(loaded))
+    monkeypatch.setattr(
+        module,
+        "estimate_raw_continuous_run_spectrum",
+        lambda loaded, **kwargs: (loaded, kwargs),
+    )
+
+    loaded, arguments = module.estimate_source_spectrum(source, _specification(1000.0))
+
+    assert loaded is raw
+    assert typed == [raw]
+    assert arguments["subject_id"] == "sub-0001"
+    assert arguments["run_id"] == "1"
+    assert arguments["source_file"] == source.source_path
+    assert raw.closed
+
+
+def test_estimate_source_spectrum_extracts_one_archive_triplet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mne
+
+    import studies.pain_study.study1.figures.preprocessing_psd_sources as module
+
+    _write_raw_archive(tmp_path)
+    source = module.discover_raw_brainvision_runs(tmp_path, excluded_subjects=())[0]
+    raw = _ClosableRaw()
+    observed_header = None
+
+    def read_raw_brainvision(path, **kwargs):
+        nonlocal observed_header
+        observed_header = Path(path)
+        assert observed_header.is_file()
+        assert observed_header.with_suffix(".eeg").is_file()
+        assert observed_header.with_suffix(".vmrk").is_file()
+        return raw
+
+    monkeypatch.setattr(mne.io, "read_raw_brainvision", read_raw_brainvision)
+    monkeypatch.setattr(module, "set_channel_types", lambda loaded: None)
+    monkeypatch.setattr(
+        module,
+        "estimate_raw_continuous_run_spectrum",
+        lambda loaded, **kwargs: kwargs["source_file"],
+    )
+
+    result = module.estimate_source_spectrum(source, _specification(5000.0))
+
+    assert result == source.source_path
+    assert observed_header is not None
+    assert not observed_header.exists()
+    assert raw.closed
+
+
+def _specification(sampling_frequency_hz: float):
+    from studies.pain_study.study1.figures.continuous_spectrum import (
+        ContinuousSpectrumSpecification,
+    )
+
+    return ContinuousSpectrumSpecification(
+        frequency_range_hz=(1.0, 90.0),
+        n_fft=int(16.384 * sampling_frequency_hz),
+        n_overlap=int(8.192 * sampling_frequency_hz),
+        sampling_frequency_hz=sampling_frequency_hz,
+    )
+
+
+class _ClosableRaw:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _write_raw_archive(tmp_path: Path, *, include_data: bool = True) -> Path:
     participant = tmp_path / "sub_0001_2026_03_02"
     participant.mkdir()

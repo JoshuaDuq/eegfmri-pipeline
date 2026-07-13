@@ -44,7 +44,7 @@ class ContinuousRunSpectrum:
 
     subject_id: str
     run_id: str
-    source_file: Path
+    source_file: Path | str
     frequencies_hz: np.ndarray
     median_psd_v2_hz: np.ndarray
     n_channels: int
@@ -137,24 +137,23 @@ def bad_annotation_duration_s(
     return union_duration_s + current_end - current_start
 
 
-def estimate_continuous_run_spectrum(
-    path: Path,
+def estimate_raw_continuous_run_spectrum(
+    raw,
+    *,
+    subject_id: str,
+    run_id: str,
+    source_file: Path | str,
     specification: ContinuousSpectrumSpecification,
 ) -> ContinuousRunSpectrum:
-    """Estimate a validated channel-median Welch PSD for one final-clean run."""
-    import mne
-
-    source_path = Path(path)
-    subject_id, run_id = parse_final_clean_filename(source_path)
-    raw = mne.io.read_raw_fif(source_path, preload=False, verbose="ERROR")
+    """Estimate a validated channel-median Welch PSD from one loaded run."""
     sampling_frequency_hz = float(raw.info["sfreq"])
     if sampling_frequency_hz != specification.sampling_frequency_hz:
         raise ValueError(
-            f"Unexpected sampling frequency in {source_path}: {sampling_frequency_hz} Hz."
+            f"Unexpected sampling frequency in {source_file}: {sampling_frequency_hz} Hz."
         )
     n_samples = int(raw.n_times)
     if n_samples < specification.n_fft:
-        raise ValueError(f"Run has fewer samples than n_fft: {source_path}")
+        raise ValueError(f"Run has fewer samples than n_fft: {source_file}")
 
     recording_duration_s = n_samples / sampling_frequency_hz
     rejected_duration_s = bad_annotation_duration_s(
@@ -179,18 +178,18 @@ def estimate_continuous_run_spectrum(
     frequencies = np.asarray(spectrum.freqs, dtype=float)
     channel_psd = np.asarray(spectrum.get_data(), dtype=float)
     if frequencies.ndim != 1 or frequencies.size == 0:
-        raise ValueError(f"Unexpected PSD frequency shape for {source_path}: {frequencies.shape}.")
+        raise ValueError(f"Unexpected PSD frequency shape for {source_file}: {frequencies.shape}.")
     if channel_psd.ndim != 2 or channel_psd.shape[0] == 0:
-        raise ValueError(f"Unexpected PSD channel shape for {source_path}: {channel_psd.shape}.")
+        raise ValueError(f"Unexpected PSD channel shape for {source_file}: {channel_psd.shape}.")
     if channel_psd.shape[1] != frequencies.size:
-        raise ValueError(f"PSD values and frequencies are misaligned: {source_path}")
+        raise ValueError(f"PSD values and frequencies are misaligned: {source_file}")
     if not np.isfinite(channel_psd).all() or np.any(channel_psd <= 0.0):
-        raise ValueError(f"PSD contains nonpositive or non-finite values: {source_path}")
+        raise ValueError(f"PSD contains nonpositive or non-finite values: {source_file}")
 
     return ContinuousRunSpectrum(
         subject_id=subject_id,
         run_id=run_id,
-        source_file=source_path,
+        source_file=source_file,
         frequencies_hz=frequencies,
         median_psd_v2_hz=np.median(channel_psd, axis=0),
         n_channels=int(channel_psd.shape[0]),
@@ -202,11 +201,31 @@ def estimate_continuous_run_spectrum(
     )
 
 
+def estimate_continuous_run_spectrum(
+    path: Path,
+    specification: ContinuousSpectrumSpecification,
+) -> ContinuousRunSpectrum:
+    """Estimate a validated channel-median Welch PSD for one final-clean run."""
+    import mne
+
+    source_path = Path(path)
+    subject_id, run_id = parse_final_clean_filename(source_path)
+    raw = mne.io.read_raw_fif(source_path, preload=False, verbose="ERROR")
+    return estimate_raw_continuous_run_spectrum(
+        raw,
+        subject_id=subject_id,
+        run_id=run_id,
+        source_file=source_path,
+        specification=specification,
+    )
+
+
 __all__ = [
     "ContinuousRunSpectrum",
     "ContinuousSpectrumSpecification",
     "bad_annotation_duration_s",
     "discover_final_clean_runs",
     "estimate_continuous_run_spectrum",
+    "estimate_raw_continuous_run_spectrum",
     "parse_final_clean_filename",
 ]

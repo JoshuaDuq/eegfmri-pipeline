@@ -124,6 +124,29 @@ def test_estimate_continuous_run_spectrum_uses_linear_channel_median(
     }
 
 
+def test_estimate_raw_continuous_run_spectrum_preserves_explicit_identity() -> None:
+    from studies.pain_study.study1.figures.continuous_spectrum import (
+        estimate_raw_continuous_run_spectrum,
+    )
+
+    frequencies = np.asarray([1.0, 10.0, 90.0])
+    channel_psd = np.asarray([[1.0, 2.0, 3.0], [3.0, 4.0, 5.0]])
+    raw = _FakeRaw(_FakeSpectrum(frequencies, channel_psd))
+
+    result = estimate_raw_continuous_run_spectrum(
+        raw,
+        subject_id="sub-0001",
+        run_id="4",
+        source_file="/data/raw.zip::raw/run4.vhdr",
+        specification=_specification(),
+    )
+
+    assert result.subject_id == "sub-0001"
+    assert result.run_id == "4"
+    assert result.source_file == "/data/raw.zip::raw/run4.vhdr"
+    assert result.median_psd_v2_hz == pytest.approx([2.0, 3.0, 4.0])
+
+
 def test_estimate_continuous_run_spectrum_rejects_short_run(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

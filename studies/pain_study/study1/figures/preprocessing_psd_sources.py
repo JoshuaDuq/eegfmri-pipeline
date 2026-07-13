@@ -6,10 +6,17 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import re
+from shutil import copyfileobj
+from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
+from eeg_pipeline.utils.data.preprocessing import set_channel_types
 from studies.pain_study.study1.figures.continuous_spectrum import (
+    ContinuousRunSpectrum,
+    ContinuousSpectrumSpecification,
     discover_final_clean_runs,
+    estimate_continuous_run_spectrum,
+    estimate_raw_continuous_run_spectrum,
     parse_final_clean_filename,
 )
 
@@ -188,6 +195,54 @@ def discover_mne_runs(
     )
 
 
+def estimate_source_spectrum(
+    source: EegRunSource,
+    specification: ContinuousSpectrumSpecification,
+) -> ContinuousRunSpectrum:
+    """Load one source, estimate its spectrum, and release its resources."""
+    if isinstance(source, FifRunSource):
+        return estimate_continuous_run_spectrum(source.path, specification)
+    if isinstance(source, BrainVisionFileRunSource):
+        return _estimate_brainvision_file(source, source.header_path, specification)
+    with TemporaryDirectory(prefix="study1-psd-") as temporary_directory:
+        header_path = _extract_archive_triplet(source, Path(temporary_directory))
+        return _estimate_brainvision_file(source, header_path, specification)
+
+
+def _estimate_brainvision_file(
+    source: BrainVisionArchiveRunSource | BrainVisionFileRunSource,
+    header_path: Path,
+    specification: ContinuousSpectrumSpecification,
+) -> ContinuousRunSpectrum:
+    import mne
+
+    raw = mne.io.read_raw_brainvision(header_path, preload=False, verbose="ERROR")
+    try:
+        set_channel_types(raw)
+        return estimate_raw_continuous_run_spectrum(
+            raw,
+            subject_id=source.subject_id,
+            run_id=source.run_id,
+            source_file=source.source_path,
+            specification=specification,
+        )
+    finally:
+        raw.close()
+
+
+def _extract_archive_triplet(
+    source: BrainVisionArchiveRunSource,
+    destination: Path,
+) -> Path:
+    members = (source.header_member, source.marker_member, source.data_member)
+    with ZipFile(source.archive_path) as archive:
+        for member in members:
+            output_path = destination / PurePosixPath(member).name
+            with archive.open(member) as input_handle, open(output_path, "wb") as output_handle:
+                copyfileobj(input_handle, output_handle)
+    return destination / PurePosixPath(source.header_member).name
+
+
 def _parse_run_name(filename: str, pattern: re.Pattern[str]) -> tuple[str, str]:
     match = pattern.fullmatch(filename)
     if match is None:
@@ -277,4 +332,5 @@ __all__ = [
     "discover_mne_runs",
     "discover_processed_brainvision_runs",
     "discover_raw_brainvision_runs",
+    "estimate_source_spectrum",
 ]
