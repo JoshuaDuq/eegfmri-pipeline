@@ -73,9 +73,7 @@ def discover_final_clean_runs(
     """Discover final-clean FIF runs for numbered, eligible participants."""
     excluded = set(excluded_subjects)
     requested = set(requested_subjects)
-    candidates = Path(derivative_root).glob(
-        f"sub-*/eeg/sub-*_task-{task}_run-*_proc-clean_raw.fif"
-    )
+    candidates = Path(derivative_root).glob(f"sub-*/eeg/sub-*_task-{task}_run-*_proc-clean_raw.fif")
     selected = tuple(
         sorted(
             path

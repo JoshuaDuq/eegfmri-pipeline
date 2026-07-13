@@ -71,9 +71,7 @@ def test_build_cohort_psd_summary_bootstraps_complete_participants() -> None:
     indices = rng.integers(0, matrix.shape[0], size=(200, matrix.shape[0]))
     estimates = np.median(matrix[indices], axis=1)
     cohort = summary.cohort_spectrum
-    assert cohort["median_psd_db_uv2_hz"].to_numpy() == pytest.approx(
-        np.median(matrix, axis=0)
-    )
+    assert cohort["median_psd_db_uv2_hz"].to_numpy() == pytest.approx(np.median(matrix, axis=0))
     assert cohort["ci_low_psd_db_uv2_hz"].to_numpy() == pytest.approx(
         np.quantile(estimates, 0.025, axis=0)
     )

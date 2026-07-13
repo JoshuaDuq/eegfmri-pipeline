@@ -43,15 +43,13 @@ def test_build_cohort_psd_figure_draws_exact_frequency_annotations() -> None:
     spectrum_axis, band_axis = figure.axes
 
     harmonic_bounds = sorted(
-        (patch.get_x(), patch.get_x() + patch.get_width())
-        for patch in spectrum_axis.patches
+        (patch.get_x(), patch.get_x() + patch.get_width()) for patch in spectrum_axis.patches
     )
     assert harmonic_bounds == pytest.approx(
         [(18.0, 23.0), (38.0, 43.0), (56.0, 67.0), (77.0, 85.0)]
     )
     band_bounds = [
-        (patch.get_x(), patch.get_x() + patch.get_width())
-        for patch in band_axis.patches
+        (patch.get_x(), patch.get_x() + patch.get_width()) for patch in band_axis.patches
     ]
     assert band_bounds == pytest.approx(
         [

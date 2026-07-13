@@ -188,12 +188,7 @@ class _FakeRaw:
 
 
 def _touch_run(root: Path, subject: str, *, run: int) -> Path:
-    path = (
-        root
-        / subject
-        / "eeg"
-        / f"{subject}_task-thermalactive_run-{run}_proc-clean_raw.fif"
-    )
+    path = root / subject / "eeg" / f"{subject}_task-thermalactive_run-{run}_proc-clean_raw.fif"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch()
     return path

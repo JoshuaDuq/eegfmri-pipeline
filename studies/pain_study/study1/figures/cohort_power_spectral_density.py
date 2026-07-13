@@ -171,8 +171,8 @@ def _build_run_audit(
         }
         for run in runs
     ]
-    return pd.DataFrame(rows).sort_values(["subject_id", "run"], kind="stable").reset_index(
-        drop=True
+    return (
+        pd.DataFrame(rows).sort_values(["subject_id", "run"], kind="stable").reset_index(drop=True)
     )
 
 
