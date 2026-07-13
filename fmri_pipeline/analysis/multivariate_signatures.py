@@ -428,23 +428,40 @@ def _raise_if_coverage_thresholds_fail(
     min_support_fraction: Optional[float],
     max_weight_mass_change_fraction: Optional[float],
 ) -> None:
-    threshold_summary = {
-        "nonzero_support_fraction": summary["coverage_nonzero_support_fraction"],
-        "positive_support_fraction": summary["coverage_positive_support_fraction"],
-        "negative_support_fraction": summary["coverage_negative_support_fraction"],
-        "positive_weight_mass_change_fraction": summary[
-            "coverage_positive_weight_mass_loss_fraction"
-        ],
-        "negative_weight_mass_change_fraction": summary[
-            "coverage_negative_weight_mass_loss_fraction"
-        ],
-    }
-    _raise_if_support_thresholds_fail(
-        name=f"{name} coverage",
-        summary=threshold_summary,
-        min_support_fraction=min_support_fraction,
-        max_weight_mass_change_fraction=max_weight_mass_change_fraction,
+    support_fields = (
+        "coverage_nonzero_support_fraction",
+        "coverage_positive_support_fraction",
+        "coverage_negative_support_fraction",
     )
+    support_failures = [
+        field
+        for field in support_fields
+        if summary[field] is not None
+        and min_support_fraction is not None
+        and float(summary[field]) < min_support_fraction
+    ]
+    if support_failures:
+        raise ValueError(
+            f"{name} failed coverage signature support retention: "
+            f"{support_failures} below {min_support_fraction:.3f}."
+        )
+
+    mass_loss_fields = (
+        "coverage_positive_weight_mass_loss_fraction",
+        "coverage_negative_weight_mass_loss_fraction",
+    )
+    mass_loss_failures = [
+        field
+        for field in mass_loss_fields
+        if summary[field] is not None
+        and max_weight_mass_change_fraction is not None
+        and float(summary[field]) > max_weight_mass_change_fraction
+    ]
+    if mass_loss_failures:
+        raise ValueError(
+            f"{name} failed coverage signature weight-mass loss threshold: "
+            f"{mass_loss_failures} above {max_weight_mass_change_fraction:.3f}."
+        )
 
 
 def _raise_if_support_thresholds_fail(

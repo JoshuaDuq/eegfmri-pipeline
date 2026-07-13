@@ -305,6 +305,7 @@ def test_compute_signature_expression_reports_coverage_support_without_changing_
     assert coverage_result.coverage_negative_support_fraction == pytest.approx(0.0)
     assert coverage_result.coverage_positive_weight_mass_loss_fraction == pytest.approx(0.75)
     assert coverage_result.coverage_negative_weight_mass_loss_fraction == pytest.approx(1.0)
+    assert coverage_result.dot == pytest.approx(2.0)
     assert coverage_result.dot == finite_result.dot
     assert coverage_result.cosine == finite_result.cosine
     assert coverage_result.pearson_r is not None
@@ -325,3 +326,165 @@ def test_compute_signature_expression_rejects_insufficient_coverage_support(
             min_support_fraction=0.90,
             max_weight_mass_change_fraction=0.10,
         )
+
+
+def _resampled_coverage_support_inputs(tmp_path: Path, *, resampling: str):
+    root = tmp_path / "signatures"
+    root.mkdir(parents=True, exist_ok=True)
+    weight_path = root / "nps.nii.gz"
+    weights = np.array([1.0, -2.0, 3.0, 4.0], dtype=np.float32).reshape(4, 1, 1)
+
+    image_affine = np.eye(4)
+    weight_affine = np.eye(4)
+    if resampling == "image_to_weights":
+        image_affine[0, 0] = 1.01
+    else:
+        weight_affine[0, 0] = 1.01
+    coverage_affine = np.eye(4)
+    coverage_affine[0, 0] = 1.02
+    fixed_mask_affine = np.eye(4)
+    fixed_mask_affine[0, 0] = 1.03
+
+    nib.save(nib.Nifti1Image(weights, weight_affine), weight_path)
+    fixed_mask = np.array([1, 1, 1, 0], dtype=np.uint8).reshape(4, 1, 1)
+    coverage = np.array([1, 0, 0, 0], dtype=np.uint8).reshape(4, 1, 1)
+    effect = np.array([2.0, np.nan, np.nan, 0.0], dtype=np.float32).reshape(4, 1, 1)
+    finite_effect = np.nan_to_num(effect, nan=0.0)
+
+    return {
+        "stat_or_effect_img": nib.Nifti1Image(effect, image_affine),
+        "finite_effect_img": nib.Nifti1Image(finite_effect, image_affine),
+        "signature_root": root,
+        "signature_specs": [{"name": "NPS", "path": "nps.nii.gz"}],
+        "mask_img": nib.Nifti1Image(fixed_mask, fixed_mask_affine),
+        "coverage_mask_img": nib.Nifti1Image(coverage, coverage_affine),
+        "resampling": resampling,
+    }
+
+
+@pytest.mark.parametrize("resampling", ["image_to_weights", "weights_to_image"])
+def test_compute_signature_expression_resamples_coverage_independently_of_scoring(
+    tmp_path: Path,
+    resampling: str,
+) -> None:
+    inputs = _resampled_coverage_support_inputs(tmp_path, resampling=resampling)
+    finite_effect_img = inputs.pop("finite_effect_img")
+    effect_img = inputs["stat_or_effect_img"]
+    coverage_img = inputs["coverage_mask_img"]
+    fixed_mask_img = inputs["mask_img"]
+    weight_img = nib.load(str(inputs["signature_root"] / "nps.nii.gz"))
+    scoring_reference = weight_img if resampling == "image_to_weights" else effect_img
+    continuous_moving = effect_img if resampling == "image_to_weights" else weight_img
+    assert not np.allclose(continuous_moving.affine, scoring_reference.affine)
+    assert not np.allclose(fixed_mask_img.affine, scoring_reference.affine)
+    assert not np.allclose(coverage_img.affine, scoring_reference.affine)
+    assert not np.allclose(coverage_img.affine, effect_img.affine)
+
+    coverage_result = compute_signature_expression(**inputs)[0]
+    inputs.pop("coverage_mask_img")
+    inputs["stat_or_effect_img"] = finite_effect_img
+    finite_result = compute_signature_expression(**inputs)[0]
+
+    assert coverage_result.coverage_nonzero_support_fraction == pytest.approx(1.0 / 3.0)
+    assert coverage_result.coverage_positive_support_fraction == pytest.approx(0.5)
+    assert coverage_result.coverage_negative_support_fraction == pytest.approx(0.0)
+    assert coverage_result.n_voxels == finite_result.n_voxels == 3
+    assert coverage_result.scoring_mask_sha256 == finite_result.scoring_mask_sha256
+    assert coverage_result.dot == pytest.approx(finite_result.dot)
+    assert coverage_result.cosine == pytest.approx(finite_result.cosine)
+    assert coverage_result.pearson_r == pytest.approx(finite_result.pearson_r)
+
+
+@pytest.mark.parametrize("resampling", ["image_to_weights", "weights_to_image"])
+def test_compute_signature_expression_rejects_nonfinite_inside_resampled_coverage(
+    tmp_path: Path,
+    resampling: str,
+) -> None:
+    inputs = _resampled_coverage_support_inputs(tmp_path, resampling=resampling)
+    inputs.pop("finite_effect_img")
+    effect_img = inputs["stat_or_effect_img"]
+    invalid_effect = np.asanyarray(effect_img.dataobj).copy()
+    invalid_effect[0, 0, 0] = np.nan
+    invalid_effect[1:, :, :] = 0.0
+    inputs["stat_or_effect_img"] = nib.Nifti1Image(invalid_effect, effect_img.affine)
+
+    with pytest.raises(ValueError, match="inside the analysis mask before signature resampling"):
+        compute_signature_expression(**inputs)
+
+
+def test_compute_signature_expression_reports_coverage_mass_loss_threshold_field(
+    tmp_path: Path,
+) -> None:
+    inputs = _coverage_support_inputs(tmp_path)
+    inputs.pop("finite_effect_img")
+    coverage = np.array([1, 1, 0, 0], dtype=np.uint8).reshape(4, 1, 1)
+    effect = np.array([2.0, 2.0, np.nan, np.nan], dtype=np.float32).reshape(4, 1, 1)
+    inputs["coverage_mask_img"] = nib.Nifti1Image(coverage, np.eye(4))
+    inputs["stat_or_effect_img"] = nib.Nifti1Image(effect, np.eye(4))
+
+    with pytest.raises(
+        ValueError,
+        match="coverage_positive_weight_mass_loss_fraction.*above 0.100",
+    ):
+        compute_signature_expression(
+            **inputs,
+            min_support_fraction=0.50,
+            max_weight_mass_change_fraction=0.10,
+        )
+
+
+def test_compute_signature_expression_reports_empty_coverage_support(tmp_path: Path) -> None:
+    inputs = _coverage_support_inputs(tmp_path)
+    inputs.pop("finite_effect_img")
+    empty = np.zeros((4, 1, 1), dtype=np.uint8)
+    inputs["coverage_mask_img"] = nib.Nifti1Image(empty, np.eye(4))
+
+    result = compute_signature_expression(**inputs)[0]
+
+    assert result.coverage_nonzero_support_fraction == pytest.approx(0.0)
+    assert result.coverage_positive_support_fraction == pytest.approx(0.0)
+    assert result.coverage_negative_support_fraction == pytest.approx(0.0)
+    assert result.coverage_positive_weight_mass_loss_fraction == pytest.approx(1.0)
+    assert result.coverage_negative_weight_mass_loss_fraction == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    ("weights", "missing_support_field", "missing_mass_field"),
+    [
+        (
+            [1.0, 2.0, 3.0, 4.0],
+            "coverage_negative_support_fraction",
+            "coverage_negative_weight_mass_loss_fraction",
+        ),
+        (
+            [-1.0, -2.0, -3.0, -4.0],
+            "coverage_positive_support_fraction",
+            "coverage_positive_weight_mass_loss_fraction",
+        ),
+    ],
+)
+def test_compute_signature_expression_ignores_absent_fixed_mask_sign_class(
+    tmp_path: Path,
+    weights: list[float],
+    missing_support_field: str,
+    missing_mass_field: str,
+) -> None:
+    root = tmp_path / "signatures"
+    root.mkdir(parents=True, exist_ok=True)
+    weight_path = root / "nps.nii.gz"
+    data = np.asarray(weights, dtype=np.float32).reshape(4, 1, 1)
+    nib.save(nib.Nifti1Image(data, np.eye(4)), weight_path)
+    full_mask = nib.Nifti1Image(np.ones((4, 1, 1), dtype=np.uint8), np.eye(4))
+
+    result = compute_signature_expression(
+        stat_or_effect_img=nib.Nifti1Image(np.ones((4, 1, 1)), np.eye(4)),
+        signature_root=root,
+        signature_specs=[{"name": "NPS", "path": "nps.nii.gz"}],
+        mask_img=full_mask,
+        coverage_mask_img=full_mask,
+        min_support_fraction=0.90,
+        max_weight_mass_change_fraction=0.10,
+    )[0]
+
+    assert getattr(result, missing_support_field) is None
+    assert getattr(result, missing_mass_field) is None
