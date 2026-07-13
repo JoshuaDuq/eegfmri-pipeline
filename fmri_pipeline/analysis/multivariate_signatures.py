@@ -20,6 +20,11 @@ class SignatureResult:
     negative_support_fraction: Optional[float] = None
     positive_weight_mass_change_fraction: Optional[float] = None
     negative_weight_mass_change_fraction: Optional[float] = None
+    coverage_nonzero_support_fraction: Optional[float] = None
+    coverage_positive_support_fraction: Optional[float] = None
+    coverage_negative_support_fraction: Optional[float] = None
+    coverage_positive_weight_mass_loss_fraction: Optional[float] = None
+    coverage_negative_weight_mass_loss_fraction: Optional[float] = None
     scoring_mask_sha256: Optional[str] = None
 
 
@@ -151,6 +156,23 @@ def _mask_on_image_grid(*, mask_img: Any, image_img: Any) -> Any:
         target_img=image_img,
         interpolation="nearest",
     )
+
+
+def _mask_data_on_grid(*, mask_img: Optional[Any], reference_img: Any, mask_name: str) -> Any:
+    if mask_img is None:
+        return None
+
+    import numpy as np  # type: ignore
+
+    mask_on_reference = _mask_on_image_grid(mask_img=mask_img, image_img=reference_img)
+    mask_data = np.asanyarray(mask_on_reference.get_fdata(), dtype=float) > 0
+    reference_shape = tuple(getattr(reference_img, "shape", ()))
+    if mask_data.shape != reference_shape:
+        raise ValueError(
+            f"{mask_name} grid mismatch: mask_shape={mask_data.shape}, "
+            f"reference_shape={reference_shape}."
+        )
+    return mask_data
 
 
 def _fill_nonfinite_background_for_resampling(*, image_img: Any, mask_img: Optional[Any]) -> Any:
@@ -288,6 +310,12 @@ def _mass_change_fraction(*, original_mass: float, retained_mass: float) -> Opti
     return abs(float(retained_mass) - float(original_mass)) / float(original_mass)
 
 
+def _mass_loss_fraction(*, fixed_mass: float, retained_mass: float) -> Optional[float]:
+    if fixed_mass <= 0:
+        return None
+    return 1.0 - float(retained_mass) / float(fixed_mass)
+
+
 def _signature_support_summary(
     *,
     original_weights: Any,
@@ -340,6 +368,85 @@ def _signature_support_summary(
     }
 
 
+def _coverage_support_summary(
+    *,
+    weights: Any,
+    scoring_mask: Any,
+    coverage_mask: Any,
+) -> Dict[str, Optional[float]]:
+    import numpy as np  # type: ignore
+
+    weight_data = np.asanyarray(weights, dtype=float)
+    fixed_mask = np.asanyarray(scoring_mask, dtype=bool)
+    coverage = np.asanyarray(coverage_mask, dtype=bool)
+    if coverage.shape != fixed_mask.shape:
+        raise ValueError(
+            "Coverage grid mismatch while summarizing signature support: "
+            f"coverage_shape={coverage.shape}, scoring_shape={fixed_mask.shape}."
+        )
+
+    fixed_nonzero = fixed_mask & (np.abs(weight_data) > 0.0)
+    fixed_positive = fixed_mask & (weight_data > 0.0)
+    fixed_negative = fixed_mask & (weight_data < 0.0)
+    covered_nonzero = fixed_nonzero & coverage
+    covered_positive = fixed_positive & coverage
+    covered_negative = fixed_negative & coverage
+
+    positive_mass_fixed = float(np.sum(np.abs(weight_data[fixed_positive])))
+    negative_mass_fixed = float(np.sum(np.abs(weight_data[fixed_negative])))
+    positive_mass_covered = float(np.sum(np.abs(weight_data[covered_positive])))
+    negative_mass_covered = float(np.sum(np.abs(weight_data[covered_negative])))
+
+    return {
+        "coverage_nonzero_support_fraction": _support_fraction(
+            original_count=int(np.count_nonzero(fixed_nonzero)),
+            retained_count=int(np.count_nonzero(covered_nonzero)),
+        ),
+        "coverage_positive_support_fraction": _support_fraction(
+            original_count=int(np.count_nonzero(fixed_positive)),
+            retained_count=int(np.count_nonzero(covered_positive)),
+        ),
+        "coverage_negative_support_fraction": _support_fraction(
+            original_count=int(np.count_nonzero(fixed_negative)),
+            retained_count=int(np.count_nonzero(covered_negative)),
+        ),
+        "coverage_positive_weight_mass_loss_fraction": _mass_loss_fraction(
+            fixed_mass=positive_mass_fixed,
+            retained_mass=positive_mass_covered,
+        ),
+        "coverage_negative_weight_mass_loss_fraction": _mass_loss_fraction(
+            fixed_mass=negative_mass_fixed,
+            retained_mass=negative_mass_covered,
+        ),
+    }
+
+
+def _raise_if_coverage_thresholds_fail(
+    *,
+    name: str,
+    summary: Dict[str, Optional[float]],
+    min_support_fraction: Optional[float],
+    max_weight_mass_change_fraction: Optional[float],
+) -> None:
+    threshold_summary = {
+        "nonzero_support_fraction": summary["coverage_nonzero_support_fraction"],
+        "positive_support_fraction": summary["coverage_positive_support_fraction"],
+        "negative_support_fraction": summary["coverage_negative_support_fraction"],
+        "positive_weight_mass_change_fraction": summary[
+            "coverage_positive_weight_mass_loss_fraction"
+        ],
+        "negative_weight_mass_change_fraction": summary[
+            "coverage_negative_weight_mass_loss_fraction"
+        ],
+    }
+    _raise_if_support_thresholds_fail(
+        name=f"{name} coverage",
+        summary=threshold_summary,
+        min_support_fraction=min_support_fraction,
+        max_weight_mass_change_fraction=max_weight_mass_change_fraction,
+    )
+
+
 def _raise_if_support_thresholds_fail(
     *,
     name: str,
@@ -389,6 +496,7 @@ def compute_signature_expression(
     signature_root: Path,
     signature_specs: Sequence[Dict[str, str]],
     mask_img: Optional[Any] = None,
+    coverage_mask_img: Optional[Any] = None,
     signatures: Optional[Sequence[str]] = None,
     resampling: str = "image_to_weights",
     min_support_fraction: Optional[float] = None,
@@ -447,6 +555,10 @@ def compute_signature_expression(
         if isinstance(m, (str, Path)):
             m = nib.load(str(m))
 
+    coverage = coverage_mask_img
+    if isinstance(coverage, (str, Path)):
+        coverage = nib.load(str(coverage))
+
     for name, w_path in files.items():
         try:
             w_img = nib.load(str(w_path))
@@ -454,26 +566,34 @@ def compute_signature_expression(
             if resampling == "image_to_weights":
                 x_img = _fill_nonfinite_background_for_resampling(
                     image_img=img,
-                    mask_img=m,
+                    mask_img=coverage if coverage is not None else m,
                 )
                 if not _image_grids_match(x_img, w_img):
                     x_img = _maybe_resample_to_img(
                         moving_img=x_img, target_img=w_img, interpolation="continuous"
                     )
 
-                mask_data = None
-                if m is not None:
-                    mask_on_ref = m
-                    if not _image_grids_match(mask_on_ref, w_img):
-                        mask_on_ref = _maybe_resample_to_img(
-                            moving_img=mask_on_ref, target_img=w_img, interpolation="nearest"
-                        )
-                    mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
+                mask_data = _mask_data_on_grid(
+                    mask_img=m,
+                    reference_img=w_img,
+                    mask_name="Fixed scoring mask",
+                )
+                coverage_data = _mask_data_on_grid(
+                    mask_img=coverage,
+                    reference_img=w_img,
+                    mask_name="Coverage mask",
+                )
 
                 img_data = x_img.get_fdata()
                 w_data = original_w_data
                 scoring_affine = w_img.affine
             else:
+                x_img = img
+                if coverage is not None:
+                    x_img = _fill_nonfinite_background_for_resampling(
+                        image_img=img,
+                        mask_img=coverage,
+                    )
                 w_on_ref = w_img
                 if tuple(getattr(w_on_ref, "shape", ())) != tuple(getattr(img, "shape", ())):
                     w_on_ref = _maybe_resample_to_img(
@@ -492,28 +612,18 @@ def compute_signature_expression(
                             moving_img=w_on_ref, target_img=img, interpolation="continuous"
                         )
 
-                mask_data = None
-                if m is not None:
-                    mask_on_ref = m
-                    if tuple(getattr(mask_on_ref, "shape", ())) != tuple(getattr(img, "shape", ())):
-                        mask_on_ref = _maybe_resample_to_img(
-                            moving_img=mask_on_ref, target_img=img, interpolation="nearest"
-                        )
-                    else:
-                        try:
-                            import numpy as np
+                mask_data = _mask_data_on_grid(
+                    mask_img=m,
+                    reference_img=img,
+                    mask_name="Fixed scoring mask",
+                )
+                coverage_data = _mask_data_on_grid(
+                    mask_img=coverage,
+                    reference_img=img,
+                    mask_name="Coverage mask",
+                )
 
-                            if not np.allclose(mask_on_ref.affine, img.affine):
-                                mask_on_ref = _maybe_resample_to_img(
-                                    moving_img=mask_on_ref, target_img=img, interpolation="nearest"
-                                )
-                        except Exception:
-                            mask_on_ref = _maybe_resample_to_img(
-                                moving_img=mask_on_ref, target_img=img, interpolation="nearest"
-                            )
-                    mask_data = (mask_on_ref.get_fdata() > 0).astype(bool)
-
-                img_data = img.get_fdata()
+                img_data = x_img.get_fdata()
                 w_data = w_on_ref.get_fdata()
                 scoring_affine = img.affine
 
@@ -532,6 +642,21 @@ def compute_signature_expression(
                     f"mask_shape={getattr(mask_data,'shape',None)} img_shape={getattr(img_data,'shape',None)}"
                 )
 
+            scoring_mask = _scoring_mask(w_data=w_data, mask_data=mask_data)
+            coverage_summary: Dict[str, Optional[float]] = {}
+            if coverage_data is not None:
+                coverage_summary = _coverage_support_summary(
+                    weights=w_data,
+                    scoring_mask=scoring_mask,
+                    coverage_mask=coverage_data,
+                )
+                _raise_if_coverage_thresholds_fail(
+                    name=name,
+                    summary=coverage_summary,
+                    min_support_fraction=min_support_fraction,
+                    max_weight_mass_change_fraction=max_weight_mass_change_fraction,
+                )
+
             support_summary = _signature_support_summary(
                 original_weights=original_w_data,
                 scored_weights=w_data,
@@ -544,7 +669,6 @@ def compute_signature_expression(
                 max_weight_mass_change_fraction=max_weight_mass_change_fraction,
             )
 
-            scoring_mask = _scoring_mask(w_data=w_data, mask_data=mask_data)
             x_vec, w_vec = _flatten_masked_pairs(
                 img_data=img_data, w_data=w_data, mask_data=mask_data
             )
@@ -568,6 +692,7 @@ def compute_signature_expression(
                     cosine=cosine,
                     pearson_r=r,
                     **support_summary,
+                    **coverage_summary,
                     scoring_mask_sha256=_scoring_mask_sha256(
                         scoring_mask=scoring_mask,
                         affine=scoring_affine,

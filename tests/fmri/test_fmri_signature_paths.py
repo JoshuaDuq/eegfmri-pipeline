@@ -265,3 +265,63 @@ def test_compute_signature_expression_enforces_signature_support_thresholds(
             min_support_fraction=0.90,
             max_weight_mass_change_fraction=0.10,
         )
+
+
+def _coverage_support_inputs(tmp_path: Path):
+    root = tmp_path / "signatures"
+    root.mkdir(parents=True, exist_ok=True)
+    weight_path = root / "nps.nii.gz"
+    weights = np.array([1.0, -2.0, 3.0, 4.0], dtype=np.float32).reshape(4, 1, 1)
+    nib.save(nib.Nifti1Image(weights, np.eye(4)), weight_path)
+
+    fixed_mask = np.array([1, 1, 1, 0], dtype=np.uint8).reshape(4, 1, 1)
+    coverage = np.array([1, 0, 0, 0], dtype=np.uint8).reshape(4, 1, 1)
+    effect = np.array([2.0, np.nan, np.nan, np.nan], dtype=np.float32).reshape(4, 1, 1)
+    finite_effect = np.array([2.0, 0.0, 0.0, np.nan], dtype=np.float32).reshape(4, 1, 1)
+
+    return {
+        "stat_or_effect_img": nib.Nifti1Image(effect, np.eye(4)),
+        "finite_effect_img": nib.Nifti1Image(finite_effect, np.eye(4)),
+        "signature_root": root,
+        "signature_specs": [{"name": "NPS", "path": "nps.nii.gz"}],
+        "mask_img": nib.Nifti1Image(fixed_mask, np.eye(4)),
+        "coverage_mask_img": nib.Nifti1Image(coverage, np.eye(4)),
+    }
+
+
+def test_compute_signature_expression_reports_coverage_support_without_changing_scores(
+    tmp_path: Path,
+) -> None:
+    inputs = _coverage_support_inputs(tmp_path)
+    finite_effect_img = inputs.pop("finite_effect_img")
+
+    coverage_result = compute_signature_expression(**inputs)[0]
+    inputs.pop("coverage_mask_img")
+    inputs["stat_or_effect_img"] = finite_effect_img
+    finite_result = compute_signature_expression(**inputs)[0]
+
+    assert coverage_result.coverage_nonzero_support_fraction == pytest.approx(1.0 / 3.0)
+    assert coverage_result.coverage_positive_support_fraction == pytest.approx(0.5)
+    assert coverage_result.coverage_negative_support_fraction == pytest.approx(0.0)
+    assert coverage_result.coverage_positive_weight_mass_loss_fraction == pytest.approx(0.75)
+    assert coverage_result.coverage_negative_weight_mass_loss_fraction == pytest.approx(1.0)
+    assert coverage_result.dot == finite_result.dot
+    assert coverage_result.cosine == finite_result.cosine
+    assert coverage_result.pearson_r is not None
+    assert coverage_result.pearson_r == finite_result.pearson_r
+    assert coverage_result.n_voxels == finite_result.n_voxels == 3
+    assert coverage_result.scoring_mask_sha256 == finite_result.scoring_mask_sha256
+
+
+def test_compute_signature_expression_rejects_insufficient_coverage_support(
+    tmp_path: Path,
+) -> None:
+    inputs = _coverage_support_inputs(tmp_path)
+    inputs.pop("finite_effect_img")
+
+    with pytest.raises(ValueError, match="coverage.*support"):
+        compute_signature_expression(
+            **inputs,
+            min_support_fraction=0.90,
+            max_weight_mass_change_fraction=0.10,
+        )
