@@ -62,6 +62,19 @@ study1:
       colors:
         scanner_window: "#D55E00"
         neural_band: "#0072B2"
+    preprocessing_stage_power_spectral_density:
+      segment_duration_s: 16.384
+      overlap_fraction: 0.5
+      stages:
+        raw:
+          label: "Original BrainVision"
+          sampling_frequency_hz: 5000.0
+        processed:
+          label: "BrainVision processed"
+          sampling_frequency_hz: 1000.0
+        mne:
+          label: "Final MNE processed"
+          sampling_frequency_hz: 500.0
     temporal_specificity:
       dimensions_mm:
         width: 183.0
