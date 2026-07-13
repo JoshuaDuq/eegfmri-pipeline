@@ -377,7 +377,7 @@ def set_channel_types(raw: mne.io.BaseRaw) -> None:
         if name in raw.ch_names
     }
     if present_channel_types:
-        raw.set_channel_types(present_channel_types)
+        raw.set_channel_types(present_channel_types, on_unit_change="ignore")
 
 
 def set_montage(raw: mne.io.BaseRaw, montage_name: str) -> None:

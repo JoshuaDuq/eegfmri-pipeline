@@ -200,6 +200,105 @@ def test_multi_stage_writer_validates_every_source_before_writing(
     assert written == []
 
 
+def test_multi_stage_writer_builds_every_summary_before_publishing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density as module
+
+    built = []
+    published = []
+    monkeypatch.setattr(module, "_discover_stage_sources", lambda **kwargs: ())
+
+    def build(*, specification, **kwargs):
+        stage = specification.stage.identifier
+        built.append(stage)
+        if stage == "mne":
+            raise ValueError("invalid MNE spectrum")
+        return _summary(stage=stage)
+
+    monkeypatch.setattr(module, "_build_stage_summary", build)
+    monkeypatch.setattr(
+        module,
+        "_write_preprocessing_stage_psd_summary",
+        lambda **kwargs: published.append(kwargs),
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="invalid MNE spectrum"):
+        module.write_preprocessing_stage_psds(
+            stage_identifiers=("raw", "processed", "mne"),
+            kingston_root=tmp_path / "kingston",
+            derivative_root=tmp_path / "derivatives",
+            task="thermalactive",
+            config=load_study1_config(),
+            output_dir=tmp_path / "reports",
+        )
+
+    assert built == ["raw", "processed", "mne"]
+    assert published == []
+    assert not (tmp_path / "reports").exists()
+
+
+def test_multi_stage_writer_does_not_publish_partial_staged_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density as module
+
+    monkeypatch.setattr(module, "_discover_stage_sources", lambda **kwargs: ())
+    monkeypatch.setattr(
+        module,
+        "_build_stage_summary",
+        lambda *, specification, **kwargs: _summary(stage=specification.stage.identifier),
+    )
+
+    def write(*, specification, output_dir, **kwargs):
+        stage = specification.stage.identifier
+        if stage == "processed":
+            raise OSError("processed render failed")
+        staged = output_dir / f"{stage}.svg"
+        staged.touch()
+        return module.PreprocessingStagePsdPaths(
+            svg=staged,
+            run_tsv=staged,
+            run_parquet=staged,
+            participant_tsv=staged,
+            participant_parquet=staged,
+            summary_tsv=staged,
+            summary_parquet=staged,
+        )
+
+    monkeypatch.setattr(module, "_write_preprocessing_stage_psd_summary", write)
+
+    with pytest.raises(OSError, match="processed render failed"):
+        module.write_preprocessing_stage_psds(
+            stage_identifiers=("raw", "processed"),
+            kingston_root=tmp_path,
+            derivative_root=None,
+            task="thermalactive",
+            config=load_study1_config(),
+            output_dir=tmp_path / "reports",
+        )
+
+    assert not (tmp_path / "reports").exists()
+
+
+def test_multi_stage_writer_rejects_nonthermal_brainvision_task(
+    tmp_path: Path,
+) -> None:
+    import studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density as module
+
+    with pytest.raises(ValueError, match="require task 'thermalactive'"):
+        module.write_preprocessing_stage_psds(
+            stage_identifiers=("raw", "processed"),
+            kingston_root=tmp_path,
+            derivative_root=None,
+            task="rest",
+            config=load_study1_config(),
+        )
+
+
 def test_multi_stage_writer_preserves_requested_stage_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -208,12 +307,17 @@ def test_multi_stage_writer_preserves_requested_stage_order(
 
     written = []
     monkeypatch.setattr(module, "_discover_stage_sources", lambda **kwargs: ())
+    monkeypatch.setattr(
+        module,
+        "_build_stage_summary",
+        lambda *, specification, **kwargs: _summary(stage=specification.stage.identifier),
+    )
 
     def write(**kwargs):
         stage = kwargs["specification"].stage.identifier
         written.append(stage)
-        path = tmp_path / f"{stage}.svg"
-        return module.PreprocessingStagePsdPaths(
+        path = kwargs["output_dir"] / f"{stage}.svg"
+        paths = module.PreprocessingStagePsdPaths(
             svg=path,
             run_tsv=path.with_suffix(".run.tsv"),
             run_parquet=path.with_suffix(".run.parquet"),
@@ -222,8 +326,11 @@ def test_multi_stage_writer_preserves_requested_stage_order(
             summary_tsv=path.with_suffix(".summary.tsv"),
             summary_parquet=path.with_suffix(".summary.parquet"),
         )
+        for artifact_path in paths.__dict__.values():
+            artifact_path.touch()
+        return paths
 
-    monkeypatch.setattr(module, "write_preprocessing_stage_psd", write)
+    monkeypatch.setattr(module, "_write_preprocessing_stage_psd_summary", write)
 
     paths = module.write_preprocessing_stage_psds(
         stage_identifiers=("raw", "processed", "mne"),

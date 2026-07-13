@@ -74,21 +74,28 @@ def discover_final_clean_runs(
     excluded = set(excluded_subjects)
     requested = set(requested_subjects)
     candidates = Path(derivative_root).glob(f"sub-*/eeg/sub-*_task-{task}_run-*_proc-clean_raw.fif")
-    selected = tuple(
-        sorted(
-            path
-            for path in candidates
-            if NUMBERED_SUBJECT_PATTERN.fullmatch(path.parts[-3]) is not None
-            and path.parts[-3] not in excluded
-            and (not requested or path.parts[-3] in requested)
-        )
-    )
+    selected = []
+    for path in sorted(candidates):
+        participant_subject_id = path.parts[-3]
+        if NUMBERED_SUBJECT_PATTERN.fullmatch(participant_subject_id) is None:
+            continue
+        source_subject_id, _ = parse_final_clean_filename(path)
+        if source_subject_id != participant_subject_id:
+            raise ValueError(
+                f"EEG source {path} identifies {source_subject_id}, "
+                f"but participant directory {participant_subject_id}."
+            )
+        if participant_subject_id in excluded:
+            continue
+        if requested and participant_subject_id not in requested:
+            continue
+        selected.append(path)
     if not selected:
         raise FileNotFoundError(
             "No numbered-participant final-clean FIF files found for task "
             f"{task!r} in {derivative_root}."
         )
-    return selected
+    return tuple(selected)
 
 
 def bad_annotation_duration_s(

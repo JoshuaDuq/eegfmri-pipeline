@@ -27,7 +27,8 @@ Most participants store the same triplets in an uncompressed `raw` directory;
 the discoverer supports these two explicit source representations. Participant
 directories must follow the canonical fMRI-session naming contract. Acquisition
 folders suffixed `_EXCL` and follow-up folders suffixed `_eeg_only` are not part
-of this cohort.
+of this cohort. The subject encoded by every filename or correction manifest
+must match its canonical participant directory.
 
 Every selected header must declare a sampling frequency of 5,000 Hz. Duplicate
 participant/run identifiers, missing triplet members, malformed filenames, and
@@ -48,7 +49,7 @@ trash and macOS metadata files are outside the discovery scope.
 Two exact `sub-0003` acquisition issues are declared in Study 1 YAML rather than
 handled by permissive filename parsing:
 
-- the full recording at `11h30.23.962` reused the run-1 task sequence and is
+- the full recording at `11h30.23.962` reused the run-1 temperature sequence and is
   identified as run 3;
 - the earlier `11h10.39.899` recording is an aborted 8.76-second run-1 start and
   is excluded from the full-run cohort.
@@ -114,7 +115,8 @@ A dedicated stage artifact writer will orchestrate discovery, estimation,
 aggregation, plotting, and table serialization. The existing final-clean cohort
 PSD command and its output filenames will remain unchanged.
 
-The new CLI will require one or more explicit stage selections from:
+The new CLI will require the `thermalactive` task and one or more explicit stage
+selections from:
 
 - `raw`;
 - `processed`;
@@ -122,8 +124,9 @@ The new CLI will require one or more explicit stage selections from:
 
 It will accept the Kingston source root, EEG derivative root, task, configuration
 paths, repeatable participant filters, and output directory. All requested
-stages will be discovered and validated before any report is written, preventing
-partial output when a selected input contract fails.
+stages will be discovered, estimated, rendered, and serialized in a temporary
+staging directory before any report is published, preventing partial output
+when a selected input or artifact contract fails.
 
 ## Outputs
 
@@ -162,11 +165,11 @@ Automated tests will cover:
 - strict discovery and filename parsing for all source kinds;
 - archive triplet completeness and duplicate detection;
 - exact sampling-frequency validation;
-- ECG exclusion from BrainVision EEG picks;
+- ECG exclusion from real MNE EEG picks and channel audits;
 - equal segment duration and frequency axes across sampling rates;
 - unchanged participant-first aggregation and bootstrap behavior;
 - stage columns and exact output filenames;
-- all-input validation before writes;
+- all-stage validation and staging before publication;
 - deterministic SVG and TSV/Parquet parity;
 - unchanged existing final-clean cohort PSD behavior.
 

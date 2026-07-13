@@ -40,6 +40,25 @@ def test_discover_final_clean_runs_rejects_empty_selection(tmp_path: Path) -> No
         )
 
 
+def test_discover_final_clean_runs_rejects_participant_directory_mismatch(
+    tmp_path: Path,
+) -> None:
+    from studies.pain_study.study1.figures.continuous_spectrum import (
+        discover_final_clean_runs,
+    )
+
+    eeg_directory = tmp_path / "sub-0002" / "eeg"
+    eeg_directory.mkdir(parents=True)
+    (eeg_directory / "sub-0001_task-thermalactive_run-1_proc-clean_raw.fif").touch()
+
+    with pytest.raises(ValueError, match="participant directory sub-0002"):
+        discover_final_clean_runs(
+            tmp_path,
+            task="thermalactive",
+            excluded_subjects=(),
+        )
+
+
 def test_parse_final_clean_filename_rejects_malformed_name() -> None:
     from studies.pain_study.study1.figures.continuous_spectrum import (
         parse_final_clean_filename,
@@ -145,6 +164,47 @@ def test_estimate_raw_continuous_run_spectrum_preserves_explicit_identity() -> N
     assert result.run_id == "4"
     assert result.source_file == "/data/raw.zip::raw/run4.vhdr"
     assert result.median_psd_v2_hz == pytest.approx([2.0, 3.0, 4.0])
+
+
+def test_estimate_raw_continuous_run_spectrum_excludes_real_mne_ecg_channel() -> None:
+    import mne
+
+    from studies.pain_study.study1.figures.continuous_spectrum import (
+        ContinuousSpectrumSpecification,
+        estimate_raw_continuous_run_spectrum,
+    )
+
+    sampling_frequency_hz = 100.0
+    times = np.arange(1_000) / sampling_frequency_hz
+    data = np.vstack(
+        (
+            1e-6 * np.sin(2 * np.pi * 10 * times),
+            2e-6 * np.sin(2 * np.pi * 10 * times),
+            100e-6 * np.sin(2 * np.pi * 20 * times),
+        )
+    )
+    info = mne.create_info(
+        ["Cz", "Pz", "ECG"],
+        sampling_frequency_hz,
+        ch_types=["eeg", "eeg", "ecg"],
+    )
+    raw = mne.io.RawArray(data, info, verbose="ERROR")
+
+    result = estimate_raw_continuous_run_spectrum(
+        raw,
+        subject_id="sub-0001",
+        run_id="1",
+        source_file="real-mne-raw",
+        specification=ContinuousSpectrumSpecification(
+            frequency_range_hz=(1.0, 40.0),
+            n_fft=200,
+            n_overlap=100,
+            sampling_frequency_hz=sampling_frequency_hz,
+        ),
+    )
+
+    assert result.n_channels == 2
+    assert result.median_psd_v2_hz.max() < 1e-10
 
 
 def test_estimate_continuous_run_spectrum_rejects_short_run(

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from eeg_pipeline.infra.tsv import write_parquet, write_tsv
@@ -40,6 +41,7 @@ from studies.pain_study.study1.figures.validity_style import (
 )
 
 STAGE_IDENTIFIERS = ("raw", "processed", "mne")
+BRAINVISION_TASK = "thermalactive"
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,21 @@ def write_preprocessing_stage_psd(
         specification=specification,
         config=config,
     )
+    return _write_preprocessing_stage_psd_summary(
+        summary=summary,
+        specification=specification,
+        config=config,
+        output_dir=output_dir,
+    )
+
+
+def _write_preprocessing_stage_psd_summary(
+    *,
+    summary: CohortPsdSummary,
+    specification: PreprocessingStagePsdSpecification,
+    config: Any,
+    output_dir: Path | None,
+) -> PreprocessingStagePsdPaths:
     directory = Path(output_dir) if output_dir is not None else validity_output_dir(config)
     paths = _artifact_paths(directory, specification.stage.identifier)
     figure = build_preprocessing_stage_psd_figure(summary, specification, config)
@@ -100,6 +117,8 @@ def write_preprocessing_stage_psds(
         raise ValueError("At least one preprocessing PSD stage is required.")
     if len(set(stages)) != len(stages):
         raise ValueError("Duplicate preprocessing PSD stage requested.")
+    if any(stage in {"raw", "processed"} for stage in stages) and task != BRAINVISION_TASK:
+        raise ValueError(f"BrainVision preprocessing PSD stages require task {BRAINVISION_TASK!r}.")
 
     specifications = tuple(
         preprocessing_stage_psd_specification(config, stage_identifier)
@@ -118,15 +137,29 @@ def write_preprocessing_stage_psds(
         )
         for specification in specifications
     )
-    return tuple(
-        write_preprocessing_stage_psd(
+    summaries = tuple(
+        _build_stage_summary(
             sources=sources,
             specification=specification,
             config=config,
-            output_dir=output_dir,
         )
         for specification, sources in zip(specifications, source_sets, strict=True)
     )
+    directory = Path(output_dir) if output_dir is not None else validity_output_dir(config)
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".study1-psd-", dir=directory.parent) as temporary:
+        staging_directory = Path(temporary)
+        staged_paths = tuple(
+            _write_preprocessing_stage_psd_summary(
+                summary=summary,
+                specification=specification,
+                config=config,
+                output_dir=staging_directory,
+            )
+            for summary, specification in zip(summaries, specifications, strict=True)
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        return tuple(_publish_stage_paths(paths, directory) for paths in staged_paths)
 
 
 def _discover_stage_sources(
@@ -190,6 +223,19 @@ def _artifact_paths(directory: Path, stage_identifier: str) -> PreprocessingStag
         summary_tsv=directory / f"{stem}_summary.tsv",
         summary_parquet=directory / f"{stem}_summary.parquet",
     )
+
+
+def _publish_stage_paths(
+    staged: PreprocessingStagePsdPaths,
+    directory: Path,
+) -> PreprocessingStagePsdPaths:
+    published = {}
+    for field in fields(staged):
+        staged_path = getattr(staged, field.name)
+        published_path = directory / staged_path.name
+        staged_path.replace(published_path)
+        published[field.name] = published_path
+    return PreprocessingStagePsdPaths(**published)
 
 
 def _write_summary_tables(

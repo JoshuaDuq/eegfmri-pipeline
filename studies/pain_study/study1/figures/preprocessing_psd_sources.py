@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import re
@@ -29,7 +29,9 @@ HEADER_VALUE_PATTERN = re.compile(
     r"^(?P<key>[^\r\n=]+)=(?P<value>[^\r\n]+)$",
     re.MULTILINE,
 )
-PARTICIPANT_DIRECTORY_PATTERN = re.compile(r"^sub_\d{4}_(?:\d{4}_\d{2}_\d{2}|\d{2}_\d{2}_\d{4})$")
+PARTICIPANT_DIRECTORY_PATTERN = re.compile(
+    r"^sub_(?P<subject>\d{4})_(?:\d{4}_\d{2}_\d{2}|\d{2}_\d{2}_\d{4})$"
+)
 
 
 @dataclass(frozen=True)
@@ -43,14 +45,13 @@ class BrainVisionArchiveRunSource:
     header_member: str
     marker_member: str
     data_member: str
+    data_reference: str
+    marker_reference: str
+    source_correction: str | None
 
     @property
     def representation(self) -> str:
         return "brainvision_zip"
-
-    @property
-    def source_correction(self) -> None:
-        return None
 
 
 @dataclass(frozen=True)
@@ -124,9 +125,14 @@ def discover_raw_brainvision_runs(
     source_exclusions: Sequence[BrainVisionSourceExclusion] = (),
 ) -> tuple[BrainVisionArchiveRunSource | BrainVisionFileRunSource, ...]:
     """Discover original 5,000-Hz thermal runs in raw directories or ZIP archives."""
+    corrections = _index_source_corrections(source_corrections)
+    exclusions = _index_source_exclusions(source_exclusions)
+    observed_corrections: set[str] = set()
+    observed_exclusions: set[str] = set()
     selected: list[BrainVisionArchiveRunSource | BrainVisionFileRunSource] = []
-    file_candidates: list[Path] = []
+    file_candidates: list[tuple[Path, str]] = []
     for participant_directory in _participant_directories(source_root):
+        participant_subject_id = _participant_subject_id(participant_directory)
         archive_path = participant_directory / "raw.zip"
         raw_directory = participant_directory / "raw"
         if archive_path.is_file() and raw_directory.is_dir():
@@ -134,51 +140,25 @@ def discover_raw_brainvision_runs(
                 f"Participant has both raw.zip and raw directory: {participant_directory}"
             )
         if raw_directory.is_dir():
-            file_candidates.extend(raw_directory.glob("ThermalPainEEGFMRI*.vhdr"))
+            file_candidates.extend(
+                (path, participant_subject_id)
+                for path in raw_directory.glob("ThermalPainEEGFMRI*.vhdr")
+            )
             continue
         if not archive_path.is_file():
             continue
-        with ZipFile(archive_path) as archive:
-            members = set(archive.namelist())
-            header_members = sorted(
-                member
-                for member in members
-                if PurePosixPath(member).name.startswith("ThermalPainEEGFMRI")
-                and PurePosixPath(member).suffix == ".vhdr"
+        selected.extend(
+            _discover_archive_sources(
+                archive_path,
+                participant_subject_id=participant_subject_id,
+                excluded_subjects=excluded_subjects,
+                requested_subjects=requested_subjects,
+                corrections=corrections,
+                exclusions=exclusions,
+                observed_corrections=observed_corrections,
+                observed_exclusions=observed_exclusions,
             )
-            for header_member in header_members:
-                subject_id, run_id = _parse_run_name(
-                    PurePosixPath(header_member).name,
-                    RAW_RUN_PATTERN,
-                )
-                if not _subject_is_selected(
-                    subject_id,
-                    excluded_subjects=excluded_subjects,
-                    requested_subjects=requested_subjects,
-                ):
-                    continue
-                header_text = archive.read(header_member).decode("utf-8-sig")
-                data_member, marker_member = _archive_triplet_members(
-                    header_member,
-                    header_text,
-                    members,
-                )
-                _validate_sampling_frequency(
-                    header_text,
-                    expected_hz=5000.0,
-                    source=f"{archive_path}::{header_member}",
-                )
-                selected.append(
-                    BrainVisionArchiveRunSource(
-                        subject_id=subject_id,
-                        run_id=run_id,
-                        source_path=f"{archive_path}::{header_member}",
-                        archive_path=archive_path,
-                        header_member=header_member,
-                        marker_member=marker_member,
-                        data_member=data_member,
-                    )
-                )
+        )
     selected.extend(
         _discover_file_sources(
             file_candidates,
@@ -186,10 +166,14 @@ def discover_raw_brainvision_runs(
             expected_sampling_frequency_hz=5000.0,
             excluded_subjects=excluded_subjects,
             requested_subjects=requested_subjects,
-            source_corrections=source_corrections,
-            source_exclusions=source_exclusions,
+            corrections=corrections,
+            exclusions=exclusions,
+            observed_corrections=observed_corrections,
+            observed_exclusions=observed_exclusions,
         )
     )
+    _validate_manifest_entries(corrections, observed_corrections, "corrections")
+    _validate_manifest_entries(exclusions, observed_exclusions, "exclusions")
     _validate_selected_sources(selected, stage="raw")
     return tuple(sorted(selected, key=_source_sort_key))
 
@@ -203,8 +187,12 @@ def discover_processed_brainvision_runs(
     source_exclusions: Sequence[BrainVisionSourceExclusion] = (),
 ) -> tuple[BrainVisionFileRunSource, ...]:
     """Discover BrainVision-processed 1,000-Hz thermal runs."""
+    corrections = _index_source_corrections(source_corrections)
+    exclusions = _index_source_exclusions(source_exclusions)
+    observed_corrections: set[str] = set()
+    observed_exclusions: set[str] = set()
     candidates = (
-        path
+        (path, _participant_subject_id(participant_directory))
         for participant_directory in _participant_directories(source_root)
         for path in (participant_directory / "processed").rglob("ThermalPainEEGFMRI*.vhdr")
     )
@@ -214,30 +202,43 @@ def discover_processed_brainvision_runs(
         expected_sampling_frequency_hz=1000.0,
         excluded_subjects=excluded_subjects,
         requested_subjects=requested_subjects,
-        source_corrections=source_corrections,
-        source_exclusions=source_exclusions,
+        corrections=corrections,
+        exclusions=exclusions,
+        observed_corrections=observed_corrections,
+        observed_exclusions=observed_exclusions,
     )
+    _validate_manifest_entries(corrections, observed_corrections, "corrections")
+    _validate_manifest_entries(exclusions, observed_exclusions, "exclusions")
     _validate_selected_sources(selected, stage="processed")
     return tuple(sorted(selected, key=_source_sort_key))
 
 
 def _discover_file_sources(
-    candidates,
+    candidates: Iterable[tuple[Path, str]],
     *,
     filename_pattern: re.Pattern[str],
     expected_sampling_frequency_hz: float,
     excluded_subjects: Sequence[str],
     requested_subjects: Sequence[str],
-    source_corrections: Sequence[BrainVisionSourceCorrection],
-    source_exclusions: Sequence[BrainVisionSourceExclusion],
+    corrections: dict[str, BrainVisionSourceCorrection],
+    exclusions: dict[str, BrainVisionSourceExclusion],
+    observed_corrections: set[str],
+    observed_exclusions: set[str],
 ) -> list[BrainVisionFileRunSource]:
-    corrections = _index_source_corrections(source_corrections)
-    exclusions = _index_source_exclusions(source_exclusions)
-    observed_corrections: set[str] = set()
-    observed_exclusions: set[str] = set()
     selected: list[BrainVisionFileRunSource] = []
-    for header_path in sorted(path for path in candidates if not path.name.startswith("._")):
+    candidates = sorted(
+        (path, participant_subject_id)
+        for path, participant_subject_id in candidates
+        if not path.name.startswith("._")
+    )
+    for header_path, participant_subject_id in candidates:
         if header_path.name in exclusions:
+            subject_id, _ = _parse_run_name(header_path.name, filename_pattern)
+            _validate_participant_subject(
+                subject_id,
+                participant_subject_id,
+                source=str(header_path),
+            )
             observed_exclusions.add(header_path.name)
             continue
         correction = corrections.get(header_path.name)
@@ -246,6 +247,11 @@ def _discover_file_sources(
         else:
             observed_corrections.add(header_path.name)
             subject_id, run_id = correction.subject_id, correction.run_id
+        _validate_participant_subject(
+            subject_id,
+            participant_subject_id,
+            source=str(header_path),
+        )
         if not _subject_is_selected(
             subject_id,
             excluded_subjects=excluded_subjects,
@@ -277,9 +283,115 @@ def _discover_file_sources(
                 source_correction=correction.reason if correction is not None else None,
             )
         )
-    _validate_manifest_entries(corrections, observed_corrections, "corrections")
-    _validate_manifest_entries(exclusions, observed_exclusions, "exclusions")
     return selected
+
+
+def _discover_archive_sources(
+    archive_path: Path,
+    *,
+    participant_subject_id: str,
+    excluded_subjects: Sequence[str],
+    requested_subjects: Sequence[str],
+    corrections: dict[str, BrainVisionSourceCorrection],
+    exclusions: dict[str, BrainVisionSourceExclusion],
+    observed_corrections: set[str],
+    observed_exclusions: set[str],
+) -> list[BrainVisionArchiveRunSource]:
+    selected: list[BrainVisionArchiveRunSource] = []
+    with ZipFile(archive_path) as archive:
+        members = set(archive.namelist())
+        header_members = sorted(
+            member
+            for member in members
+            if PurePosixPath(member).name.startswith("ThermalPainEEGFMRI")
+            and PurePosixPath(member).suffix == ".vhdr"
+        )
+        for header_member in header_members:
+            source = _archive_run_source(
+                archive,
+                archive_path=archive_path,
+                header_member=header_member,
+                archive_members=members,
+                participant_subject_id=participant_subject_id,
+                excluded_subjects=excluded_subjects,
+                requested_subjects=requested_subjects,
+                corrections=corrections,
+                exclusions=exclusions,
+                observed_corrections=observed_corrections,
+                observed_exclusions=observed_exclusions,
+            )
+            if source is not None:
+                selected.append(source)
+    return selected
+
+
+def _archive_run_source(
+    archive: ZipFile,
+    *,
+    archive_path: Path,
+    header_member: str,
+    archive_members: set[str],
+    participant_subject_id: str,
+    excluded_subjects: Sequence[str],
+    requested_subjects: Sequence[str],
+    corrections: dict[str, BrainVisionSourceCorrection],
+    exclusions: dict[str, BrainVisionSourceExclusion],
+    observed_corrections: set[str],
+    observed_exclusions: set[str],
+) -> BrainVisionArchiveRunSource | None:
+    header_filename = PurePosixPath(header_member).name
+    if header_filename in exclusions:
+        subject_id, _ = _parse_run_name(header_filename, RAW_RUN_PATTERN)
+        _validate_participant_subject(
+            subject_id,
+            participant_subject_id,
+            source=f"{archive_path}::{header_member}",
+        )
+        observed_exclusions.add(header_filename)
+        return None
+    correction = corrections.get(header_filename)
+    if correction is None:
+        subject_id, run_id = _parse_run_name(header_filename, RAW_RUN_PATTERN)
+    else:
+        observed_corrections.add(header_filename)
+        subject_id, run_id = correction.subject_id, correction.run_id
+    source_path = f"{archive_path}::{header_member}"
+    _validate_participant_subject(
+        subject_id,
+        participant_subject_id,
+        source=source_path,
+    )
+    if not _subject_is_selected(
+        subject_id,
+        excluded_subjects=excluded_subjects,
+        requested_subjects=requested_subjects,
+    ):
+        return None
+    header_text = archive.read(header_member).decode("utf-8-sig")
+    values = _header_values(header_text)
+    data_member, marker_member = _resolve_archive_triplet(
+        header_member,
+        values,
+        archive_members,
+        correction,
+    )
+    _validate_sampling_frequency(
+        header_text,
+        expected_hz=5000.0,
+        source=source_path,
+    )
+    return BrainVisionArchiveRunSource(
+        subject_id=subject_id,
+        run_id=run_id,
+        source_path=source_path,
+        archive_path=archive_path,
+        header_member=header_member,
+        marker_member=marker_member,
+        data_member=data_member,
+        data_reference=values["DataFile"],
+        marker_reference=values["MarkerFile"],
+        source_correction=correction.reason if correction is not None else None,
+    )
 
 
 def discover_mne_runs(
@@ -360,7 +472,19 @@ def _extract_archive_triplet(
             output_path = destination / PurePosixPath(member).name
             with archive.open(member) as input_handle, open(output_path, "wb") as output_handle:
                 copyfileobj(input_handle, output_handle)
-    return destination / PurePosixPath(source.header_member).name
+    header_path = destination / PurePosixPath(source.header_member).name
+    if source.source_correction is None:
+        return header_path
+    data_path = destination / PurePosixPath(source.data_member).name
+    marker_path = destination / PurePosixPath(source.marker_member).name
+    _rewrite_brainvision_references(
+        header_path=header_path,
+        data_path=data_path,
+        marker_path=marker_path,
+        data_reference=source.data_reference,
+        marker_reference=source.marker_reference,
+    )
+    return header_path
 
 
 def _materialize_corrected_file_source(
@@ -371,30 +495,49 @@ def _materialize_corrected_file_source(
     data_path = destination / source.data_path.name
     marker_path = destination / source.marker_path.name
     copy2(source.data_path, data_path)
-    header_bytes = source.header_path.read_bytes()
+    copy2(source.header_path, header_path)
+    copy2(source.marker_path, marker_path)
+    _rewrite_brainvision_references(
+        header_path=header_path,
+        data_path=data_path,
+        marker_path=marker_path,
+        data_reference=source.data_reference,
+        marker_reference=source.marker_reference,
+    )
+    return header_path
+
+
+def _rewrite_brainvision_references(
+    *,
+    header_path: Path,
+    data_path: Path,
+    marker_path: Path,
+    data_reference: str,
+    marker_reference: str,
+) -> None:
+    header_bytes = header_path.read_bytes()
     header_bytes = _replace_reference(
         header_bytes,
         key="DataFile",
-        existing=source.data_reference,
+        existing=data_reference,
         replacement=data_path.name,
     )
     header_bytes = _replace_reference(
         header_bytes,
         key="MarkerFile",
-        existing=source.marker_reference,
+        existing=marker_reference,
         replacement=marker_path.name,
     )
     header_path.write_bytes(header_bytes)
 
-    marker_bytes = source.marker_path.read_bytes()
+    marker_bytes = marker_path.read_bytes()
     marker_bytes = _replace_reference(
         marker_bytes,
         key="DataFile",
-        existing=source.data_reference,
+        existing=data_reference,
         replacement=data_path.name,
     )
     marker_path.write_bytes(marker_bytes)
-    return header_path
 
 
 def _replace_reference(
@@ -424,15 +567,20 @@ def _header_values(header_text: str) -> dict[str, str]:
     }
 
 
-def _archive_triplet_members(
+def _resolve_archive_triplet(
     header_member: str,
-    header_text: str,
+    header_values: dict[str, str],
     archive_members: set[str],
+    correction: BrainVisionSourceCorrection | None,
 ) -> tuple[str, str]:
-    values = _header_values(header_text)
+    if correction is None:
+        filenames = (header_values["DataFile"], header_values["MarkerFile"])
+    else:
+        _validate_correction_references(header_member, header_values, correction)
+        filenames = (correction.data_filename, correction.marker_filename)
     parent = PurePosixPath(header_member).parent
-    data_member = str(parent / values["DataFile"])
-    marker_member = str(parent / values["MarkerFile"])
+    data_member = str(parent / filenames[0])
+    marker_member = str(parent / filenames[1])
     for member in (data_member, marker_member):
         if member not in archive_members:
             raise ValueError(f"{header_member} is missing BrainVision member {member}.")
@@ -447,16 +595,24 @@ def _resolve_file_triplet(
     if correction is None:
         filenames = (header_values["DataFile"], header_values["MarkerFile"])
     else:
-        if header_values["DataFile"] != correction.expected_data_reference:
-            raise ValueError(f"Configured DataFile correction does not match {header_path}.")
-        if header_values["MarkerFile"] != correction.expected_marker_reference:
-            raise ValueError(f"Configured MarkerFile correction does not match {header_path}.")
+        _validate_correction_references(str(header_path), header_values, correction)
         filenames = (correction.data_filename, correction.marker_filename)
     paths = tuple(header_path.parent / filename for filename in filenames)
     for path in paths:
         if not path.is_file():
             raise ValueError(f"{header_path} is missing BrainVision member {path}.")
     return paths[0], paths[1]
+
+
+def _validate_correction_references(
+    source: str,
+    header_values: dict[str, str],
+    correction: BrainVisionSourceCorrection,
+) -> None:
+    if header_values["DataFile"] != correction.expected_data_reference:
+        raise ValueError(f"Configured DataFile correction does not match {source}.")
+    if header_values["MarkerFile"] != correction.expected_marker_reference:
+        raise ValueError(f"Configured MarkerFile correction does not match {source}.")
 
 
 def _index_source_corrections(
@@ -494,6 +650,26 @@ def _participant_directories(source_root: Path) -> tuple[Path, ...]:
             if path.is_dir() and PARTICIPANT_DIRECTORY_PATTERN.fullmatch(path.name)
         )
     )
+
+
+def _participant_subject_id(participant_directory: Path) -> str:
+    match = PARTICIPANT_DIRECTORY_PATTERN.fullmatch(participant_directory.name)
+    if match is None:
+        raise ValueError(f"Invalid canonical participant directory: {participant_directory}")
+    return f"sub-{match.group('subject')}"
+
+
+def _validate_participant_subject(
+    source_subject_id: str,
+    participant_subject_id: str,
+    *,
+    source: str,
+) -> None:
+    if source_subject_id != participant_subject_id:
+        raise ValueError(
+            f"EEG source {source} identifies {source_subject_id}, "
+            f"but participant directory {participant_subject_id}."
+        )
 
 
 def _validate_sampling_frequency(

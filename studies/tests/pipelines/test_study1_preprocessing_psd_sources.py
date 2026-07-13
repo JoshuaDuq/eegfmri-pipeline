@@ -66,6 +66,24 @@ def test_discover_raw_brainvision_runs_reads_directory_triplet(tmp_path: Path) -
     assert sources[0].marker_path == header.with_suffix(".vmrk")
 
 
+def test_raw_archive_discovery_rejects_participant_directory_mismatch(
+    tmp_path: Path,
+) -> None:
+    from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+        discover_raw_brainvision_runs,
+    )
+
+    participant = tmp_path / "sub_0002_2026_03_02"
+    participant.mkdir()
+    with ZipFile(participant / "raw.zip", "w") as archive:
+        archive.writestr(f"raw/{RAW_STEM}.vhdr", _header(RAW_STEM, 200))
+        archive.writestr(f"raw/{RAW_STEM}.vmrk", "marker")
+        archive.writestr(f"raw/{RAW_STEM}.eeg", b"\x00\x00")
+
+    with pytest.raises(ValueError, match="participant directory sub-0002"):
+        discover_raw_brainvision_runs(tmp_path, excluded_subjects=())
+
+
 def test_raw_discovery_uses_only_canonical_fmri_participant_directories(
     tmp_path: Path,
 ) -> None:
@@ -124,6 +142,52 @@ def test_raw_discovery_applies_exact_correction_and_exclusion(tmp_path: Path) ->
     ]
 
 
+def test_raw_archive_discovery_applies_exact_correction_and_exclusion(
+    tmp_path: Path,
+) -> None:
+    from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+        BrainVisionSourceCorrection,
+        BrainVisionSourceExclusion,
+        discover_raw_brainvision_runs,
+    )
+
+    participant = tmp_path / "sub_0003_03_23_2026"
+    participant.mkdir()
+    archive_path = participant / "raw.zip"
+    stems = (RAW_SUB3_ABORTED_STEM, RAW_SUB3_RUN1_STEM, RAW_SUB3_RUN3_STEM)
+    with ZipFile(archive_path, "w") as archive:
+        for stem in stems:
+            archive.writestr(f"raw/{stem}.vhdr", _header(stem, 200))
+            archive.writestr(f"raw/{stem}.vmrk", "marker")
+            archive.writestr(f"raw/{stem}.eeg", b"\x00\x00")
+    correction = BrainVisionSourceCorrection(
+        header_filename=f"{RAW_SUB3_RUN3_STEM}.vhdr",
+        subject_id="sub-0003",
+        run_id="3",
+        data_filename=f"{RAW_SUB3_RUN3_STEM}.eeg",
+        marker_filename=f"{RAW_SUB3_RUN3_STEM}.vmrk",
+        expected_data_reference=f"{RAW_SUB3_RUN3_STEM}.eeg",
+        expected_marker_reference=f"{RAW_SUB3_RUN3_STEM}.vmrk",
+        reason="Known temperature-sequence naming issue.",
+    )
+    exclusion = BrainVisionSourceExclusion(
+        header_filename=f"{RAW_SUB3_ABORTED_STEM}.vhdr",
+        reason="Aborted 8.76-second run start.",
+    )
+
+    sources = discover_raw_brainvision_runs(
+        tmp_path,
+        excluded_subjects=(),
+        source_corrections=(correction,),
+        source_exclusions=(exclusion,),
+    )
+
+    assert [(source.run_id, source.source_correction) for source in sources] == [
+        ("1", None),
+        ("3", correction.reason),
+    ]
+
+
 def test_discover_processed_brainvision_runs_reads_1000_hz_triplet(
     tmp_path: Path,
 ) -> None:
@@ -144,6 +208,22 @@ def test_discover_processed_brainvision_runs_reads_1000_hz_triplet(
     assert source.representation == "brainvision_file"
     assert source.header_path == header
     assert source.source_path == str(header)
+
+
+def test_processed_discovery_rejects_participant_directory_mismatch(
+    tmp_path: Path,
+) -> None:
+    from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+        discover_processed_brainvision_runs,
+    )
+
+    _write_processed_triplet(
+        tmp_path,
+        participant_directory="sub_0002_2026_03_02",
+    )
+
+    with pytest.raises(ValueError, match="participant directory sub-0002"):
+        discover_processed_brainvision_runs(tmp_path, excluded_subjects=())
 
 
 def test_discover_processed_brainvision_runs_requires_1000_hz(tmp_path: Path) -> None:
@@ -382,6 +462,73 @@ def test_estimate_source_spectrum_materializes_corrected_header(
     )
 
     result = module.estimate_source_spectrum(source, _specification(1000.0))
+
+    assert result == source.source_path
+    assert observed_header is not None
+    assert not observed_header.exists()
+    assert raw.closed
+
+
+def test_estimate_source_spectrum_materializes_corrected_archive_header(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mne
+
+    import studies.pain_study.study1.figures.preprocessing_psd_sources as module
+
+    participant = tmp_path / "sub_0003_03_23_2026"
+    participant.mkdir()
+    archive_path = participant / "raw.zip"
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            f"raw/{RAW_SUB3_RUN3_STEM}.vhdr",
+            _header(RAW_SUB3_RUN1_STEM, 200),
+        )
+        archive.writestr(
+            f"raw/{RAW_SUB3_RUN3_STEM}.vmrk",
+            "Brain Vision Data Exchange Marker File\n"
+            "[Common Infos]\n"
+            f"DataFile={RAW_SUB3_RUN1_STEM}.eeg\n",
+        )
+        archive.writestr(f"raw/{RAW_SUB3_RUN3_STEM}.eeg", b"\x00\x00")
+    correction = module.BrainVisionSourceCorrection(
+        header_filename=f"{RAW_SUB3_RUN3_STEM}.vhdr",
+        subject_id="sub-0003",
+        run_id="3",
+        data_filename=f"{RAW_SUB3_RUN3_STEM}.eeg",
+        marker_filename=f"{RAW_SUB3_RUN3_STEM}.vmrk",
+        expected_data_reference=f"{RAW_SUB3_RUN1_STEM}.eeg",
+        expected_marker_reference=f"{RAW_SUB3_RUN1_STEM}.vmrk",
+        reason="Known temperature-sequence naming issue.",
+    )
+    source = module.discover_raw_brainvision_runs(
+        tmp_path,
+        excluded_subjects=(),
+        source_corrections=(correction,),
+    )[0]
+    raw = _ClosableRaw()
+    observed_header = None
+
+    def read_raw_brainvision(path, **kwargs):
+        nonlocal observed_header
+        observed_header = Path(path)
+        header_text = observed_header.read_text(encoding="utf-8-sig")
+        marker_text = observed_header.with_suffix(".vmrk").read_text(encoding="utf-8")
+        assert f"DataFile={RAW_SUB3_RUN3_STEM}.eeg" in header_text
+        assert f"MarkerFile={RAW_SUB3_RUN3_STEM}.vmrk" in header_text
+        assert f"DataFile={RAW_SUB3_RUN3_STEM}.eeg" in marker_text
+        return raw
+
+    monkeypatch.setattr(mne.io, "read_raw_brainvision", read_raw_brainvision)
+    monkeypatch.setattr(module, "set_channel_types", lambda loaded: None)
+    monkeypatch.setattr(
+        module,
+        "estimate_raw_continuous_run_spectrum",
+        lambda loaded, **kwargs: kwargs["source_file"],
+    )
+
+    result = module.estimate_source_spectrum(source, _specification(5000.0))
 
     assert result == source.source_path
     assert observed_header is not None
