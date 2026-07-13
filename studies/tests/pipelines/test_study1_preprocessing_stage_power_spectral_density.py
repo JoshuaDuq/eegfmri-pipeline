@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
+import sys
 from xml.etree import ElementTree
 
 import matplotlib.pyplot as plt
@@ -155,6 +158,174 @@ def test_preprocessing_stage_writer_creates_exact_artifact_family(
         "cohort_power_spectral_density_raw_summary.parquet",
         "cohort_power_spectral_density_raw_summary.tsv",
     ]
+
+
+def test_multi_stage_writer_validates_every_source_before_writing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density as module
+
+    discovered = []
+    written = []
+
+    def discover(**kwargs):
+        stage = kwargs["stage_identifier"]
+        discovered.append(stage)
+        if stage == "mne":
+            raise FileNotFoundError("missing MNE stage")
+        return ()
+
+    monkeypatch.setattr(module, "_discover_stage_sources", discover)
+    monkeypatch.setattr(
+        module,
+        "write_preprocessing_stage_psd",
+        lambda **kwargs: written.append(kwargs),
+    )
+
+    with pytest.raises(FileNotFoundError, match="missing MNE stage"):
+        module.write_preprocessing_stage_psds(
+            stage_identifiers=("raw", "processed", "mne"),
+            kingston_root=tmp_path / "kingston",
+            derivative_root=tmp_path / "derivatives",
+            task="thermalactive",
+            config=load_study1_config(),
+            output_dir=tmp_path / "reports",
+        )
+
+    assert discovered == ["raw", "processed", "mne"]
+    assert written == []
+
+
+def test_multi_stage_writer_preserves_requested_stage_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density as module
+
+    written = []
+    monkeypatch.setattr(module, "_discover_stage_sources", lambda **kwargs: ())
+
+    def write(**kwargs):
+        stage = kwargs["specification"].stage.identifier
+        written.append(stage)
+        path = tmp_path / f"{stage}.svg"
+        return module.PreprocessingStagePsdPaths(
+            svg=path,
+            run_tsv=path.with_suffix(".run.tsv"),
+            run_parquet=path.with_suffix(".run.parquet"),
+            participant_tsv=path.with_suffix(".participant.tsv"),
+            participant_parquet=path.with_suffix(".participant.parquet"),
+            summary_tsv=path.with_suffix(".summary.tsv"),
+            summary_parquet=path.with_suffix(".summary.parquet"),
+        )
+
+    monkeypatch.setattr(module, "write_preprocessing_stage_psd", write)
+
+    paths = module.write_preprocessing_stage_psds(
+        stage_identifiers=("raw", "processed", "mne"),
+        kingston_root=tmp_path / "kingston",
+        derivative_root=tmp_path / "derivatives",
+        task="thermalactive",
+        config=load_study1_config(),
+        output_dir=tmp_path / "reports",
+    )
+
+    assert written == ["raw", "processed", "mne"]
+    assert [path.svg.name for path in paths] == ["raw.svg", "processed.svg", "mne.svg"]
+
+
+def test_multi_stage_writer_rejects_duplicate_stages(tmp_path: Path) -> None:
+    import studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density as module
+
+    with pytest.raises(ValueError, match="Duplicate preprocessing PSD stage"):
+        module.write_preprocessing_stage_psds(
+            stage_identifiers=("raw", "raw"),
+            kingston_root=tmp_path,
+            derivative_root=tmp_path,
+            task="thermalactive",
+            config=load_study1_config(),
+        )
+
+
+def test_preprocessing_stage_psd_main_passes_explicit_roots_and_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density as module
+
+    output_paths = tuple(
+        module.PreprocessingStagePsdPaths(
+            svg=tmp_path / f"{stage}.svg",
+            run_tsv=tmp_path / f"{stage}.run.tsv",
+            run_parquet=tmp_path / f"{stage}.run.parquet",
+            participant_tsv=tmp_path / f"{stage}.participant.tsv",
+            participant_parquet=tmp_path / f"{stage}.participant.parquet",
+            summary_tsv=tmp_path / f"{stage}.summary.tsv",
+            summary_parquet=tmp_path / f"{stage}.summary.parquet",
+        )
+        for stage in ("raw", "processed", "mne")
+    )
+    captured = {}
+    monkeypatch.setattr(module, "load_config", lambda path: load_study1_config())
+    monkeypatch.setattr(module, "apply_study1_config_defaults", lambda *args, **kwargs: None)
+
+    def write(**kwargs):
+        captured.update(kwargs)
+        return output_paths
+
+    monkeypatch.setattr(module, "write_preprocessing_stage_psds", write)
+
+    result = module.main(
+        [
+            "--config",
+            "pipeline.yaml",
+            "--task",
+            "thermalactive",
+            "--kingston-root",
+            str(tmp_path / "kingston"),
+            "--derivative-root",
+            str(tmp_path / "derivatives"),
+            "--stage",
+            "raw",
+            "--stage",
+            "processed",
+            "--stage",
+            "mne",
+            "--output-dir",
+            str(tmp_path / "reports"),
+        ]
+    )
+
+    assert result == output_paths
+    assert captured["stage_identifiers"] == ("raw", "processed", "mne")
+    assert captured["kingston_root"] == tmp_path / "kingston"
+    assert captured["derivative_root"] == tmp_path / "derivatives"
+    assert capsys.readouterr().out.splitlines() == [str(path.svg) for path in output_paths]
+
+
+def test_preprocessing_stage_psd_cli_help_has_no_runtime_warning(tmp_path: Path) -> None:
+    environment = os.environ.copy()
+    environment["MNE_DONTWRITE_HOME"] = "true"
+    environment["MPLCONFIGDIR"] = str(tmp_path / "matplotlib")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-W",
+            "error::RuntimeWarning",
+            "-m",
+            "studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density",
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _assert_table_parity(tsv_path: Path, parquet_path: Path) -> None:

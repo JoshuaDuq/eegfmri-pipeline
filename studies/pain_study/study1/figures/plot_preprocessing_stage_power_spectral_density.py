@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
+import argparse
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from eeg_pipeline.infra.tsv import write_parquet, write_tsv
-from eeg_pipeline.utils.config.loader import require_config_value
+from eeg_pipeline.utils.config.loader import load_config, require_config_value
+from eeg_pipeline.utils.config.roots import resolve_eeg_deriv_root
+from studies.pain_study.study1.config.loader import apply_study1_config_defaults
 from studies.pain_study.study1.figures.cohort_power_spectral_density import (
     CohortPsdSummary,
 )
-from studies.pain_study.study1.figures.preprocessing_psd_sources import EegRunSource
+from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+    EegRunSource,
+    discover_mne_runs,
+    discover_processed_brainvision_runs,
+    discover_raw_brainvision_runs,
+)
 from studies.pain_study.study1.figures.preprocessing_stage_power_spectral_density import (
     PreprocessingStagePsdSpecification,
     build_preprocessing_stage_psd_summary,
+    preprocessing_stage_psd_specification,
 )
 from studies.pain_study.study1.figures.preprocessing_stage_power_spectral_density_plot import (
     build_preprocessing_stage_psd_figure,
@@ -26,6 +36,8 @@ from studies.pain_study.study1.figures.validity_style import (
     save_publication_svg,
     validity_output_dir,
 )
+
+STAGE_IDENTIFIERS = ("raw", "processed", "mne")
 
 
 @dataclass(frozen=True)
@@ -70,6 +82,80 @@ def write_preprocessing_stage_psd(
     return paths
 
 
+def write_preprocessing_stage_psds(
+    *,
+    stage_identifiers: Sequence[str],
+    kingston_root: Path,
+    derivative_root: Path | None,
+    task: str,
+    config: Any,
+    subjects: Sequence[str] = (),
+    output_dir: Path | None = None,
+) -> tuple[PreprocessingStagePsdPaths, ...]:
+    """Validate every requested stage, then write reports in request order."""
+    stages = tuple(stage_identifiers)
+    if not stages:
+        raise ValueError("At least one preprocessing PSD stage is required.")
+    if len(set(stages)) != len(stages):
+        raise ValueError("Duplicate preprocessing PSD stage requested.")
+
+    specifications = tuple(
+        preprocessing_stage_psd_specification(config, stage_identifier)
+        for stage_identifier in stages
+    )
+    source_sets = tuple(
+        _discover_stage_sources(
+            stage_identifier=specification.stage.identifier,
+            kingston_root=Path(kingston_root),
+            derivative_root=Path(derivative_root) if derivative_root is not None else None,
+            task=task,
+            excluded_subjects=specification.excluded_subjects,
+            requested_subjects=subjects,
+        )
+        for specification in specifications
+    )
+    return tuple(
+        write_preprocessing_stage_psd(
+            sources=sources,
+            specification=specification,
+            config=config,
+            output_dir=output_dir,
+        )
+        for specification, sources in zip(specifications, source_sets, strict=True)
+    )
+
+
+def _discover_stage_sources(
+    *,
+    stage_identifier: str,
+    kingston_root: Path,
+    derivative_root: Path | None,
+    task: str,
+    excluded_subjects: Sequence[str],
+    requested_subjects: Sequence[str],
+) -> tuple[EegRunSource, ...]:
+    if stage_identifier == "raw":
+        return discover_raw_brainvision_runs(
+            kingston_root,
+            excluded_subjects=excluded_subjects,
+            requested_subjects=requested_subjects,
+        )
+    if stage_identifier == "processed":
+        return discover_processed_brainvision_runs(
+            kingston_root,
+            excluded_subjects=excluded_subjects,
+            requested_subjects=requested_subjects,
+        )
+    if derivative_root is None:
+        raise ValueError("The MNE preprocessing PSD stage requires an EEG derivative root.")
+    return discover_mne_runs(
+        derivative_root,
+        task=task,
+        excluded_subjects=excluded_subjects,
+        requested_subjects=requested_subjects,
+    )
+
+
 def _build_stage_summary(
     *,
     sources: tuple[EegRunSource, ...],
@@ -108,7 +194,51 @@ def _write_summary_tables(
     write_parquet(summary.cohort_spectrum, paths.summary_parquet)
 
 
+def main(argv: Sequence[str] | None = None) -> tuple[PreprocessingStagePsdPaths, ...]:
+    parser = argparse.ArgumentParser(
+        description="Write Study 1 raw, BrainVision-processed, and MNE-processed PSD reports."
+    )
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--study1-config", type=Path)
+    parser.add_argument("--task", required=True)
+    parser.add_argument("--kingston-root", type=Path, required=True)
+    parser.add_argument("--derivative-root", type=Path)
+    parser.add_argument(
+        "--stage",
+        action="append",
+        choices=STAGE_IDENTIFIERS,
+        required=True,
+    )
+    parser.add_argument("--subject", action="append", default=[])
+    parser.add_argument("--output-dir", type=Path)
+    arguments = parser.parse_args(argv)
+
+    config = load_config(arguments.config)
+    apply_study1_config_defaults(config, arguments.study1_config)
+    derivative_root = arguments.derivative_root
+    if "mne" in arguments.stage and derivative_root is None:
+        derivative_root = resolve_eeg_deriv_root(config)
+    output_paths = write_preprocessing_stage_psds(
+        stage_identifiers=tuple(arguments.stage),
+        kingston_root=arguments.kingston_root,
+        derivative_root=derivative_root,
+        task=arguments.task,
+        config=config,
+        subjects=tuple(arguments.subject),
+        output_dir=arguments.output_dir,
+    )
+    for paths in output_paths:
+        print(paths.svg)
+    return output_paths
+
+
+if __name__ == "__main__":
+    main()
+
+
 __all__ = [
     "PreprocessingStagePsdPaths",
+    "main",
     "write_preprocessing_stage_psd",
+    "write_preprocessing_stage_psds",
 ]
