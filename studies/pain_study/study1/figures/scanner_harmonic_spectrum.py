@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-import re
 from typing import Any
 
 import numpy as np
@@ -22,16 +21,20 @@ from eeg_pipeline.analysis.qc.scanner_harmonics import (
 )
 from eeg_pipeline.utils.config.loader import require_config_value
 from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_RANGES_HZ
+from studies.pain_study.study1.figures.continuous_spectrum import (
+    ContinuousSpectrumSpecification,
+    discover_final_clean_runs,
+    estimate_continuous_run_spectrum,
+)
+from studies.pain_study.study1.figures.spectral_statistics import (
+    ParticipantBootstrapSpecification,
+    paired_participant_bootstrap,
+    validity_bootstrap_specification,
+)
 from studies.pain_study.study1.figures.validity_style import (
     figure_size_inches,
     publication_style,
 )
-
-NUMBERED_SUBJECT_PATTERN = re.compile(r"^sub-\d+$")
-FINAL_CLEAN_FILENAME_PATTERN = re.compile(
-    r"^(?P<subject>sub-\d+)_task-[^_]+_run-(?P<run>[^_]+)_proc-clean_raw\.fif$"
-)
-BOOTSTRAP_BATCH_SIZE = 256
 
 
 @dataclass(frozen=True)
@@ -75,15 +78,6 @@ class RunSpectrum:
 
 
 @dataclass(frozen=True)
-class ParticipantBootstrapSpecification:
-    """Participant-level percentile-bootstrap settings."""
-
-    iterations: int
-    confidence_level: float
-    seed: int
-
-
-@dataclass(frozen=True)
 class ScannerHarmonicSummary:
     """Participant-first spectra, peak offsets, and reproducibility audits."""
 
@@ -106,6 +100,7 @@ class ScannerHarmonicSummary:
 def scanner_harmonic_specification(config: Any) -> ScannerHarmonicSpecification:
     """Load the fixed scanner-harmonic analysis settings."""
     scanner = require_config_value(config, "study1.figures.scanner_harmonics")
+    continuous = require_config_value(config, "study1.figures.continuous_spectrum")
     frequency_range = tuple(float(value) for value in scanner["frequency_range_hz"])
     harmonic_orders = tuple(int(value) for value in scanner["harmonic_orders"])
     if len(frequency_range) != 2:
@@ -123,47 +118,8 @@ def scanner_harmonic_specification(config: Any) -> ScannerHarmonicSpecification:
         peak_distance_bins=int(scanner["peak_distance_bins"]),
         volume_repetition_time_s=float(scanner["volume_repetition_time_s"]),
         harmonic_orders=harmonic_orders,
-        excluded_subjects=tuple(str(value) for value in scanner["excluded_subjects"]),
+        excluded_subjects=tuple(str(value) for value in continuous["excluded_subjects"]),
     )
-
-
-def validity_bootstrap_specification(config: Any) -> ParticipantBootstrapSpecification:
-    """Load participant-bootstrap settings shared by Study 1 validity figures."""
-    bootstrap = require_config_value(config, "study1.figures.validity.bootstrap")
-    return ParticipantBootstrapSpecification(
-        iterations=int(bootstrap["iterations"]),
-        confidence_level=float(bootstrap["confidence_level"]),
-        seed=int(bootstrap["seed"]),
-    )
-
-
-def discover_final_clean_runs(
-    derivative_root: Path,
-    *,
-    task: str,
-    excluded_subjects: Sequence[str],
-    requested_subjects: Sequence[str] = (),
-) -> tuple[Path, ...]:
-    """Discover final-clean FIF runs for numbered, eligible participants."""
-    excluded = set(excluded_subjects)
-    requested = set(requested_subjects)
-    candidates = Path(derivative_root).glob(
-        f"sub-*/eeg/sub-*_task-{task}_run-*_proc-clean_raw.fif"
-    )
-    selected: list[Path] = []
-    for path in candidates:
-        subject = path.parts[-3]
-        if NUMBERED_SUBJECT_PATTERN.fullmatch(subject) is None or subject in excluded:
-            continue
-        if requested and subject not in requested:
-            continue
-        selected.append(path)
-    if not selected:
-        raise FileNotFoundError(
-            "No numbered-participant final-clean FIF files found for task "
-            f"{task!r} in {derivative_root}."
-        )
-    return tuple(sorted(selected))
 
 
 def select_scanner_harmonic_peaks(
@@ -211,83 +167,31 @@ def estimate_run_spectrum(
     specification: ScannerHarmonicSpecification,
 ) -> RunSpectrum:
     """Estimate the robust Welch spectrum and scanner peaks for one run."""
-    import mne
-
-    source_path = Path(path)
-    entities = FINAL_CLEAN_FILENAME_PATTERN.fullmatch(source_path.name)
-    if entities is None:
-        raise ValueError(f"Invalid final-clean EEG filename: {source_path.name}")
-
-    raw = mne.io.read_raw_fif(source_path, preload=False, verbose="ERROR")
-    sampling_frequency = float(raw.info["sfreq"])
-    if sampling_frequency != specification.sampling_frequency_hz:
-        raise ValueError(
-            f"Unexpected sampling frequency in {source_path}: {sampling_frequency} Hz."
-        )
-    lower_frequency, upper_frequency = specification.frequency_range_hz
-    spectrum = raw.compute_psd(
-        method="welch",
-        fmin=lower_frequency,
-        fmax=upper_frequency,
-        n_fft=specification.n_fft,
-        n_per_seg=specification.n_fft,
-        n_overlap=specification.n_overlap,
-        picks="eeg",
-        verbose=False,
+    continuous = estimate_continuous_run_spectrum(
+        path,
+        ContinuousSpectrumSpecification(
+            frequency_range_hz=specification.frequency_range_hz,
+            n_fft=specification.n_fft,
+            n_overlap=specification.n_overlap,
+            sampling_frequency_hz=specification.sampling_frequency_hz,
+        ),
     )
-    frequencies = np.asarray(spectrum.freqs, dtype=float)
-    channel_psd = np.asarray(spectrum.get_data(), dtype=float)
-    if channel_psd.ndim != 2 or channel_psd.shape[1] != frequencies.size:
-        raise ValueError(f"Unexpected PSD shape for {source_path}: {channel_psd.shape}.")
-    median_psd = np.median(channel_psd, axis=0)
-    if not np.isfinite(median_psd).all() or np.any(median_psd <= 0.0):
-        raise ValueError(f"PSD contains nonpositive or non-finite values: {source_path}")
-    median_psd_db = 10.0 * np.log10(median_psd)
+    median_psd_db = 10.0 * np.log10(continuous.median_psd_v2_hz)
     return RunSpectrum(
-        subject_id=entities.group("subject"),
-        run_id=entities.group("run"),
-        source_file=source_path,
-        frequencies_hz=frequencies,
+        subject_id=continuous.subject_id,
+        run_id=continuous.run_id,
+        source_file=continuous.source_file,
+        frequencies_hz=continuous.frequencies_hz,
         median_psd_db=median_psd_db,
-        n_channels=int(channel_psd.shape[0]),
-        sampling_frequency_hz=sampling_frequency,
-        n_samples=int(raw.n_times),
+        n_channels=continuous.n_channels,
+        sampling_frequency_hz=continuous.sampling_frequency_hz,
+        n_samples=continuous.n_samples,
         peaks=select_scanner_harmonic_peaks(
-            frequencies,
+            continuous.frequencies_hz,
             median_psd_db,
             specification,
         ),
     )
-
-
-def paired_participant_bootstrap(
-    values: np.ndarray,
-    *,
-    iterations: int,
-    confidence_level: float,
-    seed: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return cohort medians and paired participant-bootstrap intervals."""
-    value_matrix = np.asarray(values, dtype=float)
-    if value_matrix.ndim != 2 or value_matrix.shape[0] < 1:
-        raise ValueError("Participant bootstrap requires a non-empty two-dimensional matrix.")
-    rng = np.random.default_rng(seed)
-    indices = rng.integers(
-        0,
-        value_matrix.shape[0],
-        size=(iterations, value_matrix.shape[0]),
-    )
-    estimates = np.empty((iterations, value_matrix.shape[1]), dtype=float)
-    for start in range(0, iterations, BOOTSTRAP_BATCH_SIZE):
-        stop = min(start + BOOTSTRAP_BATCH_SIZE, iterations)
-        estimates[start:stop] = np.median(value_matrix[indices[start:stop]], axis=1)
-    alpha = (1.0 - confidence_level) / 2.0
-    return (
-        np.median(value_matrix, axis=0),
-        np.quantile(estimates, alpha, axis=0),
-        np.quantile(estimates, 1.0 - alpha, axis=0),
-    )
-
 
 def build_scanner_harmonic_summary(
     run_spectra: Sequence[RunSpectrum],

@@ -304,6 +304,7 @@ def test_estimate_run_spectrum_uses_channel_median_linear_psd(
         "n_per_seg": 8192,
         "n_overlap": 4096,
         "picks": "eeg",
+        "reject_by_annotation": True,
         "verbose": False,
     }
 
@@ -377,12 +378,20 @@ class _FakeRaw:
     def __init__(self, spectrum: _FakeSpectrum) -> None:
         self.info = {"sfreq": 500.0}
         self.n_times = 50_000
+        self.first_time = 0.0
+        self.annotations = _EmptyAnnotations()
         self._spectrum = spectrum
         self.compute_kwargs: dict[str, object] = {}
 
     def compute_psd(self, **kwargs):
         self.compute_kwargs = kwargs
         return self._spectrum
+
+
+class _EmptyAnnotations:
+    onset = np.asarray([], dtype=float)
+    duration = np.asarray([], dtype=float)
+    description = np.asarray([], dtype=str)
 
 
 def _touch_run(root: Path, subject: str, *, task: str, run: int) -> Path:
