@@ -23,6 +23,12 @@ the Study 1 thermal-task run contract. Read one triplet at a time through a
 temporary extraction directory and record the archive and member path in the
 audit table.
 
+Most participants store the same triplets in an uncompressed `raw` directory;
+the discoverer supports these two explicit source representations. Participant
+directories must follow the canonical fMRI-session naming contract. Acquisition
+folders suffixed `_EXCL` and follow-up folders suffixed `_eeg_only` are not part
+of this cohort.
+
 Every selected header must declare a sampling frequency of 5,000 Hz. Duplicate
 participant/run identifiers, missing triplet members, malformed filenames, and
 unexpected sampling frequencies are errors.
@@ -36,6 +42,23 @@ require every selected header to declare 1,000 Hz.
 Duplicate participant/run identifiers, missing triplet members, malformed
 filenames, and unexpected sampling frequencies are errors. Files inside system
 trash and macOS metadata files are outside the discovery scope.
+
+### Documented source corrections
+
+Two exact `sub-0003` acquisition issues are declared in Study 1 YAML rather than
+handled by permissive filename parsing:
+
+- the full recording at `11h30.23.962` reused the run-1 task sequence and is
+  identified as run 3;
+- the earlier `11h10.39.899` recording is an aborted 8.76-second run-1 start and
+  is excluded from the full-run cohort.
+
+The corresponding processed run is stored under a parenthetical run-3 filename
+while its BrainVision header and marker still reference run-1 filenames. The
+manifest requires the exact observed header, data, marker, and internal-reference
+names. The loader materializes a corrected temporary triplet for MNE without
+modifying Kingston. Any mismatch or missing manifest entry raises an error. The
+run audit records the correction reason for every corrected source.
 
 ### Final MNE-preprocessed recordings
 
@@ -113,9 +136,9 @@ the stage identifier in every filename:
 - `cohort_power_spectral_density_<stage>_summary.tsv` and `.parquet`.
 
 Every table contains the stage identifier. Run audits additionally record the
-source representation, source path, channel count, sampling frequency, sample
-count, durations, Welch segment duration, FFT and overlap sample counts, and
-frequency resolution. The three figures share dimensions, axes, scientific
+source representation, source path, configured source correction, channel count,
+sampling frequency, sample count, durations, Welch segment duration, FFT and
+overlap sample counts, and frequency resolution. The three figures share dimensions, axes, scientific
 annotations, colors, and visual hierarchy with the existing cohort PSD report.
 Each figure states its checkpoint, sampling frequency, participant count, and run
 count.

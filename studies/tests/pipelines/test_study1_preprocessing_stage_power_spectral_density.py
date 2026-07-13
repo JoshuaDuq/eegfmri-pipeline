@@ -43,6 +43,10 @@ def test_preprocessing_stage_psd_specification_uses_equal_time_windows(
     assert specification.spectrum.n_overlap == n_overlap
     assert specification.segment_duration_s == 16.384
     assert specification.overlap_fraction == 0.5
+    expected_corrections = 1 if stage in {"raw", "processed"} else 0
+    assert len(specification.source_corrections) == expected_corrections
+    expected_exclusions = 1 if stage == "raw" else 0
+    assert len(specification.source_exclusions) == expected_exclusions
 
 
 def test_preprocessing_stage_psd_specification_rejects_unknown_stage() -> None:
@@ -78,12 +82,13 @@ def test_label_preprocessing_stage_summary_adds_stage_and_source_provenance() ->
     assert labeled.run_audit.columns[:3].tolist() == [
         "stage",
         "source_representation",
-        "subject_id",
+        "source_correction",
     ]
     assert labeled.participant_spectra.columns[0] == "stage"
     assert labeled.cohort_spectrum.columns[0] == "stage"
     assert labeled.run_audit.loc[0, "stage"] == "mne"
     assert labeled.run_audit.loc[0, "source_representation"] == "fif"
+    assert pd.isna(labeled.run_audit.loc[0, "source_correction"])
     assert pd.api.types.is_integer_dtype(labeled.run_audit["run"])
     assert labeled.run_audit.loc[0, "run"] == 1
     assert labeled.run_audit.loc[0, "segment_duration_s"] == 16.384
@@ -136,9 +141,7 @@ def test_preprocessing_stage_writer_creates_exact_artifact_family(
 
     assert first.svg.name == "cohort_power_spectral_density_raw.svg"
     assert first.run_tsv.name == "cohort_power_spectral_density_raw_by_run.tsv"
-    assert first.participant_tsv.name == (
-        "cohort_power_spectral_density_raw_by_subject.tsv"
-    )
+    assert first.participant_tsv.name == ("cohort_power_spectral_density_raw_by_subject.tsv")
     assert first.summary_tsv.name == "cohort_power_spectral_density_raw_summary.tsv"
     assert first.svg.read_bytes() == second.svg.read_bytes()
     root = ElementTree.parse(first.svg).getroot()

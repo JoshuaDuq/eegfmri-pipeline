@@ -16,6 +16,8 @@ from studies.pain_study.study1.figures.cohort_power_spectral_density import (
     CohortPsdSummary,
 )
 from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+    BrainVisionSourceCorrection,
+    BrainVisionSourceExclusion,
     EegRunSource,
     discover_mne_runs,
     discover_processed_brainvision_runs,
@@ -111,6 +113,8 @@ def write_preprocessing_stage_psds(
             task=task,
             excluded_subjects=specification.excluded_subjects,
             requested_subjects=subjects,
+            source_corrections=specification.source_corrections,
+            source_exclusions=specification.source_exclusions,
         )
         for specification in specifications
     )
@@ -133,18 +137,24 @@ def _discover_stage_sources(
     task: str,
     excluded_subjects: Sequence[str],
     requested_subjects: Sequence[str],
+    source_corrections: Sequence[BrainVisionSourceCorrection],
+    source_exclusions: Sequence[BrainVisionSourceExclusion],
 ) -> tuple[EegRunSource, ...]:
     if stage_identifier == "raw":
         return discover_raw_brainvision_runs(
             kingston_root,
             excluded_subjects=excluded_subjects,
             requested_subjects=requested_subjects,
+            source_corrections=source_corrections,
+            source_exclusions=source_exclusions,
         )
     if stage_identifier == "processed":
         return discover_processed_brainvision_runs(
             kingston_root,
             excluded_subjects=excluded_subjects,
             requested_subjects=requested_subjects,
+            source_corrections=source_corrections,
+            source_exclusions=source_exclusions,
         )
     if derivative_root is None:
         raise ValueError("The MNE preprocessing PSD stage requires an EEG derivative root.")
