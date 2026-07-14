@@ -64,6 +64,20 @@ def test_config_rejects_unknown_keys(tmp_path: Path) -> None:
         load_benchmark_config(path)
 
 
+def test_config_rejects_harmonic_windows_incompatible_with_fixed_gates(
+    tmp_path: Path,
+) -> None:
+    default_path = Path("studies/pain_study/scripts/config/residual_gradient_benchmark.yaml")
+    path = tmp_path / "changed-window.yaml"
+    path.write_text(
+        default_path.read_text(encoding="utf-8").replace("[18.0, 23.0]", "[19.0, 23.0]"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="harmonic_windows_hz must be exactly"):
+        load_benchmark_config(path)
+
+
 def test_reports_are_complete_and_provenance_is_machine_readable(tmp_path: Path) -> None:
     run_rows = [{"run": 1, "n_components": count} for count in range(5)]
     component_rows = [{"run": 1, "channel": "Fz", "fold": 0, "n_components": 1}]
@@ -129,4 +143,18 @@ def test_pilot_run_count_fails_before_loading_data(tmp_path: Path) -> None:
             output_root=tmp_path / "output",
             config=config,
             output_policy=OutputPolicy.ERROR,
+        )
+
+
+def test_pilot_rejects_invalid_output_policy_before_discovery(tmp_path: Path) -> None:
+    config = load_benchmark_config(
+        Path("studies/pain_study/scripts/config/residual_gradient_benchmark.yaml")
+    )
+
+    with pytest.raises(TypeError, match="output_policy must be an OutputPolicy"):
+        run_pilot_benchmark(
+            source_root=tmp_path / "missing",
+            output_root=tmp_path / "output",
+            config=config,
+            output_policy="error",  # type: ignore[arg-type]
         )

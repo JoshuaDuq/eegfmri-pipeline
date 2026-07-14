@@ -36,6 +36,13 @@ from eeg_pipeline.preprocessing.residual_gradient import (
     build_volume_layout,
 )
 
+FIXED_HARMONIC_WINDOWS_HZ = (
+    (18.0, 23.0),
+    (38.0, 43.0),
+    (56.0, 67.0),
+    (77.0, 85.0),
+)
+
 
 @dataclass(frozen=True)
 class WelchSettings:
@@ -67,15 +74,8 @@ class BenchmarkConfig:
             raise ValueError("expected_runs must be exactly 6 for the prespecified pilot.")
         if self.component_counts != (0, 1, 2, 3, 4):
             raise ValueError("component_counts must be exactly [0, 1, 2, 3, 4].")
-        if not self.harmonic_windows_hz:
-            raise ValueError("harmonic_windows_hz must be non-empty.")
-        previous_high = 0.0
-        for low_hz, high_hz in self.harmonic_windows_hz:
-            if not 0 < low_hz < high_hz:
-                raise ValueError("Each harmonic window must have 0 < low_hz < high_hz.")
-            if low_hz <= previous_high:
-                raise ValueError("harmonic_windows_hz must be sorted and non-overlapping.")
-            previous_high = high_hz
+        if self.harmonic_windows_hz != FIXED_HARMONIC_WINDOWS_HZ:
+            raise ValueError(f"harmonic_windows_hz must be exactly {FIXED_HARMONIC_WINDOWS_HZ}.")
 
 
 class OutputPolicy(str, Enum):
@@ -270,8 +270,7 @@ def write_benchmark_reports(
     policy: OutputPolicy,
 ) -> ReportPaths:
     """Write all benchmark audit artifacts with atomic per-file replacement."""
-    if not isinstance(policy, OutputPolicy):
-        raise TypeError("policy must be an OutputPolicy.")
+    _require_output_policy(policy)
     root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
     paths = _report_paths(root)
@@ -304,6 +303,7 @@ def benchmark_run(
     output_policy: OutputPolicy,
 ) -> RunBenchmark:
     """Evaluate every fixed OBS order for one pilot recording."""
+    _require_output_policy(output_policy)
     source_files = brainvision_source_files(vhdr_path)
     source_path = source_files[0]
     raw = mne.io.read_raw_brainvision(source_path, preload=True, verbose="ERROR")
@@ -410,6 +410,7 @@ def run_pilot_benchmark(
     output_policy: OutputPolicy,
 ) -> ComponentDecision:
     """Run and report the prespecified six-run excluded-pilot benchmark."""
+    _require_output_policy(output_policy)
     paths = discover_pilot_files(source_root, config.pilot_subject)
     if len(paths) != config.expected_runs:
         raise ValueError(
@@ -543,8 +544,7 @@ def _preflight_outputs(
     config: BenchmarkConfig,
     policy: OutputPolicy,
 ) -> None:
-    if not isinstance(policy, OutputPolicy):
-        raise TypeError("output_policy must be an OutputPolicy.")
+    _require_output_policy(policy)
     if policy is OutputPolicy.OVERWRITE:
         return
 
@@ -644,6 +644,11 @@ def _sha256(path: Path) -> str:
 def _payload_sha256(payload: dict[str, Any]) -> str:
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(serialized).hexdigest()
+
+
+def _require_output_policy(policy: Any) -> None:
+    if not isinstance(policy, OutputPolicy):
+        raise TypeError("output_policy must be an OutputPolicy.")
 
 
 def _require_exact_keys(mapping: dict[str, Any], expected: set[str], label: str) -> None:

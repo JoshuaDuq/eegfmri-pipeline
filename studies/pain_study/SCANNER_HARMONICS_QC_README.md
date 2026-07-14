@@ -125,6 +125,23 @@ These are benchmark artifacts, not production preprocessing derivatives. They
 must not replace current MNE inputs without a separate approved production
 integration design.
 
+### Pilot Outcome
+
+The six-run `sub-0006` benchmark completed on 2026-07-14 and rejected residual
+OBS at every tested order. Counts 1–4 reduced median scanner-window peak power
+by approximately 0.6–2.4 dB and retained at least 99.4% of injected sinusoid
+amplitude, with less than 0.18 degrees maximum phase error. Those benefits did
+not satisfy the co-primary safety gates:
+
+- worst-run absolute median PSD change outside the harmonic windows was
+  0.70–0.94 dB, exceeding the fixed 0.5 dB limit at every order; and
+- one run's 56–67 Hz peak prominence increased by 1.59–2.28 dB, exceeding the
+  fixed 1 dB limit at every order.
+
+The existing BrainVision preprocessing therefore remains canonical. Do not
+add this residual OBS layer to production, and retain the prespecified
+harmonic-excluded beta and gamma features.
+
 ## References
 
 Allen, P. J., Josephs, O., & Turner, R. (2000). A method for removing imaging
