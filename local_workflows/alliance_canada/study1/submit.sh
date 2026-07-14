@@ -40,6 +40,15 @@ append_optional_memory_arg prepare_args "${STUDY1_PREPARE_SLURM_MEMORY}"
 prepare_args+=("${SCRIPT_DIR}/prepare.sh")
 prepare_job="$(sbatch "${prepare_args[@]}")"
 
+cat > "${JOB_RECORD}" <<EOF
+RUN_ID=${STUDY1_RUN_ID}
+CLUSTER=${ALLIANCE_CLUSTER}
+ACCOUNT=${ALLIANCE_ACCOUNT}
+N_PERM=${STUDY1_N_PERM}
+PREPARE_JOB=${prepare_job}
+JOB_RECORD=${JOB_RECORD}
+EOF
+
 dispatch_args=(
     --parsable
     --account="${ALLIANCE_ACCOUNT}"
@@ -53,15 +62,6 @@ dispatch_args=(
 append_optional_memory_arg dispatch_args "${STUDY1_DISPATCH_SLURM_MEMORY}"
 dispatch_args+=("${SCRIPT_DIR}/dispatch.sh")
 dispatch_job="$(sbatch "${dispatch_args[@]}")"
-
-cat > "${JOB_RECORD}" <<EOF
-RUN_ID=${STUDY1_RUN_ID}
-CLUSTER=${ALLIANCE_CLUSTER}
-ACCOUNT=${ALLIANCE_ACCOUNT}
-N_PERM=${STUDY1_N_PERM}
-PREPARE_JOB=${prepare_job}
-DISPATCH_JOB=${dispatch_job}
-JOB_RECORD=${JOB_RECORD}
-EOF
+echo "DISPATCH_JOB=${dispatch_job}" >> "${JOB_RECORD}"
 
 cat "${JOB_RECORD}"

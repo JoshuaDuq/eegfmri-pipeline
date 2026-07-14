@@ -37,11 +37,8 @@ if [[ ! -f "${FS_LICENSE_FILE}" ]]; then
     exit 1
 fi
 
-module load StdEnv/2023
-module load python/3.11
-module load gcc
-module load arrow
-module load apptainer
+# shellcheck disable=SC2086
+module load ${ALLIANCE_MODULES}
 
 if [[ ! -d "${EEG_PIPELINE_VENV}" ]]; then
     python -m venv "${EEG_PIPELINE_VENV}"

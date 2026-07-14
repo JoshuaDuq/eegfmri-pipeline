@@ -27,10 +27,10 @@ Put one participant ID per line in the ignored personal `subjects.txt`, then:
 ```bash
 bash local_workflows/alliance_canada/setup_alliance_fmriprep.sh
 bash local_workflows/alliance_canada/setup_alliance_runtime.sh
+bash local_workflows/alliance_canada/submit_fmriprep_alliance.sh
 ```
 
-Submit from the synced repository on the cluster and retrieve completed output
-with `fetch_fmriprep_outputs.sh`.
+Retrieve completed output with `fetch_fmriprep_outputs.sh`.
 
 ## Study 1
 

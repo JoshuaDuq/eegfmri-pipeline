@@ -49,10 +49,8 @@ for path in "${REPO_ROOT}" "${EEG_PIPELINE_VENV}" "${BIDS_FMRI_ROOT}" "${FS_LICE
     fi
 done
 
-module load StdEnv/2023
-module load python/3.11
-module load gcc
-module load arrow
+# shellcheck disable=SC2086
+module load ${ALLIANCE_MODULES}
 
 source "${EEG_PIPELINE_VENV}/bin/activate"
 python - <<'PY'

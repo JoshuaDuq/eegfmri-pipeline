@@ -7,6 +7,7 @@ set -euo pipefail
 
 required_vars=(
     SUBJECTS_FILE
+    ALLIANCE_MODULES
     REPO_ROOT
     EEG_PIPELINE_VENV
     BIDS_FMRI_ROOT
@@ -37,11 +38,8 @@ if [[ -z "${subject}" ]]; then
     exit 1
 fi
 
-module load StdEnv/2023
-module load python/3.11
-module load gcc
-module load arrow
-module load apptainer
+# shellcheck disable=SC2086
+module load ${ALLIANCE_MODULES}
 
 unset REQUESTS_CA_BUNDLE
 unset SSL_CERT_FILE

@@ -84,6 +84,7 @@ def test_alliance_workflows_have_generic_entrypoints() -> None:
         "setup_alliance_study1.sh",
         "setup_alliance_study2.sh",
         "setup_alliance_study2_runtime.sh",
+        "submit_fmriprep_alliance.sh",
         "submit_study1_alliance.sh",
         "submit_study2_alliance.sh",
     )
