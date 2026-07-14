@@ -105,6 +105,17 @@ local_workflows/alliance_canada/*
 !local_workflows/alliance_canada/prune_upload_root.py
 !local_workflows/alliance_canada/setup_python_and_container.sh
 !local_workflows/alliance_canada/submit_fmriprep_array.sh
+!local_workflows/alliance_canada/load_cluster_profile.sh
+!local_workflows/alliance_canada/local_env.example.sh
+!local_workflows/alliance_canada/clusters/
+!local_workflows/alliance_canada/clusters/*.sh
+!local_workflows/alliance_canada/lib/
+!local_workflows/alliance_canada/lib/*.sh
+!local_workflows/alliance_canada/study1/
+!local_workflows/alliance_canada/study1/*.sh
+!local_workflows/alliance_canada/study1_subjects.txt
+!local_workflows/alliance_canada/*alliance*.sh
+!local_workflows/alliance_canada/fetch_study1_fmriprep_from_trillium.sh
 
 ### R ###
 .Rhistory
