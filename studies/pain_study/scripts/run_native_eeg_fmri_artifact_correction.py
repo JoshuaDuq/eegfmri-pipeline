@@ -31,9 +31,13 @@ from eeg_pipeline.preprocessing.eeg_fmri.pipeline import (
 )
 from eeg_pipeline.preprocessing.eeg_fmri.plotting import (
     save_cohort_qc_figure,
-    save_run_qc_figure,
+    save_physiology_qc_figure,
+    save_scanner_spectrum_qc_figure,
 )
-from eeg_pipeline.preprocessing.eeg_fmri.qc import CardiacLockedSummary
+from eeg_pipeline.preprocessing.eeg_fmri.qc import (
+    CardiacLockedSummary,
+    HarmonicStageQc,
+)
 
 EXPECTED_RUN_COUNT = 83
 DEFAULT_INPUT_ROOT = Path(
@@ -66,8 +70,10 @@ class RunOutputProvenance:
     fif_sha256: str
     qrs: Path
     qrs_sha256: str
-    diagnostic: Path
-    diagnostic_sha256: str
+    physiology_qc: Path
+    physiology_qc_sha256: str
+    scanner_spectrum_qc: Path
+    scanner_spectrum_qc_sha256: str
     config_sha256: str
 
 
@@ -142,11 +148,11 @@ def _output_stem(recording: InputRecording) -> str:
 
 
 def _harmonic_attenuation(
-    stages: dict[str, dict[str, object]],
+    stages: dict[str, HarmonicStageQc],
 ) -> dict[str, float]:
-    raw_stage = stages["raw"]
-    gradient_stage = stages["gradient_corrected"]
-    final_stage = stages["final"]
+    raw_stage = stages["raw"].summary
+    gradient_stage = stages["gradient_corrected"].summary
+    final_stage = stages["final"].summary
     reference_power_keys = sorted(
         key
         for key in raw_stage
@@ -162,6 +168,23 @@ def _harmonic_attenuation(
             final_stage[reference_power_key]
         )
     return attenuation
+
+
+def _final_harmonic_prominence(
+    stages: dict[str, HarmonicStageQc],
+) -> dict[str, float]:
+    final_stage = stages["final"].summary
+    prominence_keys = sorted(
+        key
+        for key in final_stage
+        if key.startswith("harmonic_") and key.endswith("_reference_local_prominence_db")
+    )
+    return {
+        f"{key.removesuffix('_reference_local_prominence_db')}_final_prominence_db": float(
+            final_stage[key]
+        )
+        for key in prominence_keys
+    }
 
 
 def build_qrs_detector(parameters: NativeEegFmriParameters) -> NeuXusQrsDetector:
@@ -236,8 +259,12 @@ def build_run_qc(
             "fif_sha256": outputs.fif_sha256,
             "qrs": str(Path(recording.subject) / "eeg" / outputs.qrs.name),
             "qrs_sha256": outputs.qrs_sha256,
-            "diagnostic": str(Path(recording.subject) / "eeg" / outputs.diagnostic.name),
-            "diagnostic_sha256": outputs.diagnostic_sha256,
+            "physiology_qc": str(Path(recording.subject) / "eeg" / outputs.physiology_qc.name),
+            "physiology_qc_sha256": outputs.physiology_qc_sha256,
+            "scanner_spectrum_qc": str(
+                Path(recording.subject) / "eeg" / outputs.scanner_spectrum_qc.name
+            ),
+            "scanner_spectrum_qc_sha256": outputs.scanner_spectrum_qc_sha256,
         },
         "config_sha256": outputs.config_sha256,
         "software": {
@@ -296,7 +323,9 @@ def build_run_qc(
             },
         },
         "scanner_harmonics": {
-            "stages": result.harmonic_stages,
+            "stages": {
+                stage: stage_qc.summary for stage, stage_qc in result.harmonic_stages.items()
+            },
             "attenuation": _harmonic_attenuation(result.harmonic_stages),
         },
     }
@@ -343,8 +372,15 @@ def process_recording(
     output_fif = output_dir / f"{stem}_raw.fif"
     output_qc = output_dir / f"{stem}_qc.json"
     output_qrs = output_dir / f"{stem}_qrs.tsv"
-    output_diagnostic = output_dir / f"{stem}_diagnostic.png"
-    outputs = (output_fif, output_qc, output_qrs, output_diagnostic)
+    output_physiology_qc = output_dir / f"{stem}_physiology_qc.png"
+    output_scanner_spectrum_qc = output_dir / f"{stem}_scanner_spectrum_qc.png"
+    outputs = (
+        output_fif,
+        output_qc,
+        output_qrs,
+        output_physiology_qc,
+        output_scanner_spectrum_qc,
+    )
     if any(path.exists() for path in outputs):
         raise FileExistsError(f"Native correction output already exists for {recording.subject}")
 
@@ -357,26 +393,34 @@ def process_recording(
     temporary_fif = output_dir / f".{stem}_raw.fif"
     temporary_qc = output_dir / f".{stem}_qc.json"
     temporary_qrs = output_dir / f".{stem}_qrs.tsv"
-    temporary_diagnostic = output_dir / f".{stem}_diagnostic.png"
+    temporary_physiology_qc = output_dir / f".{stem}_physiology_qc.png"
+    temporary_scanner_spectrum_qc = output_dir / f".{stem}_scanner_spectrum_qc.png"
     temporary_outputs = (
         temporary_fif,
         temporary_qc,
         temporary_qrs,
-        temporary_diagnostic,
+        temporary_physiology_qc,
+        temporary_scanner_spectrum_qc,
     )
     if any(path.exists() for path in temporary_outputs):
         raise FileExistsError(f"Temporary native correction output already exists: {stem}")
     try:
         result.raw.save(temporary_fif, fmt="single", overwrite=False, verbose=False)
         _write_qrs_table(result, temporary_qrs)
-        save_run_qc_figure(
+        save_physiology_qc_figure(
             result,
-            temporary_diagnostic,
+            temporary_physiology_qc,
+            recording_label=f"{recording.subject} run-{recording.run}",
+        )
+        save_scanner_spectrum_qc_figure(
+            result,
+            temporary_scanner_spectrum_qc,
             recording_label=f"{recording.subject} run-{recording.run}",
         )
         output_fif_hash = _sha256(temporary_fif)
         output_qrs_hash = _sha256(temporary_qrs)
-        output_diagnostic_hash = _sha256(temporary_diagnostic)
+        output_physiology_qc_hash = _sha256(temporary_physiology_qc)
+        output_scanner_spectrum_qc_hash = _sha256(temporary_scanner_spectrum_qc)
         qc = build_run_qc(
             recording,
             result,
@@ -386,15 +430,18 @@ def process_recording(
                 fif_sha256=output_fif_hash,
                 qrs=output_qrs,
                 qrs_sha256=output_qrs_hash,
-                diagnostic=output_diagnostic,
-                diagnostic_sha256=output_diagnostic_hash,
+                physiology_qc=output_physiology_qc,
+                physiology_qc_sha256=output_physiology_qc_hash,
+                scanner_spectrum_qc=output_scanner_spectrum_qc,
+                scanner_spectrum_qc_sha256=output_scanner_spectrum_qc_hash,
                 config_sha256=config_sha256,
             ),
         )
         temporary_qc.write_text(json.dumps(qc, indent=2) + "\n", encoding="utf-8")
         temporary_fif.replace(output_fif)
         temporary_qrs.replace(output_qrs)
-        temporary_diagnostic.replace(output_diagnostic)
+        temporary_physiology_qc.replace(output_physiology_qc)
+        temporary_scanner_spectrum_qc.replace(output_scanner_spectrum_qc)
         temporary_qc.replace(output_qc)
     finally:
         for path in temporary_outputs:
@@ -408,7 +455,8 @@ def process_recording(
         "output_fif": str(output_fif),
         "output_qc": str(output_qc),
         "output_qrs": str(output_qrs),
-        "output_diagnostic": str(output_diagnostic),
+        "output_physiology_qc": str(output_physiology_qc),
+        "output_scanner_spectrum_qc": str(output_scanner_spectrum_qc),
         "output_fif_sha256": output_fif_hash,
         "qrs_count": quality.qrs_count,
         "median_heart_rate_bpm": quality.median_heart_rate_bpm,
@@ -424,6 +472,7 @@ def process_recording(
     row.update(
         {key: value for key, value in attenuation.items() if key.endswith("_raw_to_final_db")}
     )
+    row.update(_final_harmonic_prominence(result.harmonic_stages))
     return row
 
 
@@ -477,7 +526,13 @@ def run_cohort(
     published_rows = []
     for row in rows:
         published_row = dict(row)
-        for key in ("output_fif", "output_qc", "output_qrs", "output_diagnostic"):
+        for key in (
+            "output_fif",
+            "output_qc",
+            "output_qrs",
+            "output_physiology_qc",
+            "output_scanner_spectrum_qc",
+        ):
             staged_path = Path(str(row[key]))
             published_row[key] = str(output_root / staged_path.relative_to(incomplete_root))
         published_rows.append(published_row)

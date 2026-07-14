@@ -24,6 +24,7 @@ from eeg_pipeline.preprocessing.eeg_fmri.mne_io import (
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import QrsDetector
 from eeg_pipeline.preprocessing.eeg_fmri.qc import (
     CardiacLockedComparison,
+    HarmonicStageQc,
     compare_cardiac_locked_summaries,
     reference_harmonic_frequencies,
     summarize_cardiac_locked_eeg,
@@ -41,7 +42,7 @@ class NativeCorrectionResult:
     marker_offsets_samples: np.ndarray
     complete_volume_count: int
     discarded_terminal_samples: int
-    harmonic_stages: dict[str, dict[str, object]]
+    harmonic_stages: dict[str, HarmonicStageQc]
     cardiac_qc: CardiacLockedComparison
 
 
@@ -130,7 +131,7 @@ def preprocess_raw_in_place(
         minimum_duration_seconds=parameters.qc_minimum_duration_seconds,
     )
     harmonic_stages = {"raw": raw_harmonics}
-    harmonic_references = reference_harmonic_frequencies(raw_harmonics)
+    harmonic_references = reference_harmonic_frequencies(raw_harmonics.summary)
     observed_volume_samples = extract_volume_samples(
         raw,
         annotation_description=parameters.volume_annotation,

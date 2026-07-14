@@ -9,6 +9,7 @@ import pytest
 from eeg_pipeline.preprocessing.eeg_fmri.qc import (
     compare_cardiac_locked_summaries,
     summarize_cardiac_locked_eeg,
+    summarize_raw_harmonics,
 )
 
 
@@ -32,6 +33,57 @@ def _cardiac_raw(*, artifact_scale: float) -> tuple[mne.io.RawArray, np.ndarray]
         ["eeg", "eeg", "ecg"],
     )
     return mne.io.RawArray(data, info, verbose=False), qrs_times
+
+
+def test_harmonic_qc_retains_the_analyzed_mne_welch_spectrum(monkeypatch) -> None:
+    sampling_frequency = 256.0
+    times = np.arange(10.0 * sampling_frequency) / sampling_frequency
+    data = np.vstack(
+        (
+            np.sin(2.0 * np.pi * 20.0 * times),
+            0.5 * np.sin(2.0 * np.pi * 41.0 * times),
+        )
+    )
+    raw = mne.io.RawArray(
+        data,
+        mne.create_info(["C3", "C4"], sampling_frequency, ["eeg", "eeg"]),
+        verbose=False,
+    )
+    compute_psd = raw.compute_psd
+    calls: list[dict[str, object]] = []
+
+    def record_compute_psd(**kwargs):
+        calls.append(kwargs)
+        return compute_psd(**kwargs)
+
+    monkeypatch.setattr(raw, "compute_psd", record_compute_psd)
+
+    stage = summarize_raw_harmonics(
+        raw,
+        stage="raw",
+        channels=("C3", "C4"),
+        welch_duration_seconds=2.0,
+        minimum_duration_seconds=1.0,
+    )
+
+    assert stage.summary["stage"] == "raw"
+    assert calls == [
+        {
+            "method": "welch",
+            "n_fft": 512,
+            "n_per_seg": 512,
+            "n_overlap": 256,
+            "picks": ["C3", "C4"],
+            "verbose": False,
+        }
+    ]
+    assert stage.spectrum.frequencies_hz.shape == stage.spectrum.median_power_db.shape
+    assert stage.spectrum.frequencies_hz[0] == 0.0
+    assert stage.spectrum.frequencies_hz[-1] == sampling_frequency / 2.0
+    assert not stage.spectrum.frequencies_hz.flags.writeable
+    assert not stage.spectrum.median_power_db.flags.writeable
+    peak_frequency = stage.spectrum.frequencies_hz[np.argmax(stage.spectrum.median_power_db)]
+    assert peak_frequency == pytest.approx(20.0, abs=0.5)
 
 
 def test_cardiac_locked_qc_quantifies_obs_attenuation() -> None:

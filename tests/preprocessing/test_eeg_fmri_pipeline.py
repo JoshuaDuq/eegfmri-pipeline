@@ -159,6 +159,9 @@ def test_preprocess_raw_runs_detection_and_cardiac_qc_around_obs(monkeypatch) ->
     assert result.cardiac_qc.rms_attenuation_db == pytest.approx(20.0 * np.log10(4.0))
     assert result.cardiac_qc.peak_to_peak_attenuation_db == pytest.approx(20.0 * np.log10(4.0))
     assert set(result.harmonic_stages) == {"raw", "gradient_corrected", "final"}
+    for stage in result.harmonic_stages.values():
+        assert stage.summary["stage"] in {"raw", "gradient_corrected", "final"}
+        assert stage.spectrum.frequencies_hz.shape == stage.spectrum.median_power_db.shape
 
 
 def test_preprocess_raw_crops_incomplete_terminal_scanner_interval(monkeypatch) -> None:

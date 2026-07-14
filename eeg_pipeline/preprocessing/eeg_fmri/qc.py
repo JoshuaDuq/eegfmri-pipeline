@@ -7,7 +7,6 @@ from typing import Mapping, Sequence
 
 import mne
 import numpy as np
-from scipy.signal import welch
 
 from eeg_pipeline.analysis.qc.scanner_harmonics import (
     DEFAULT_HARMONIC_WINDOWS,
@@ -18,6 +17,22 @@ CARDIAC_QC_TMIN_SECONDS = -0.2
 CARDIAC_QC_TMAX_SECONDS = 0.6
 CARDIAC_QC_BASELINE_STOP_SECONDS = -0.05
 CARDIAC_QC_MINIMUM_EPOCHS = 3
+
+
+@dataclass(frozen=True)
+class HarmonicSpectrum:
+    """Median Welch spectrum used for scanner-harmonic QC."""
+
+    frequencies_hz: np.ndarray
+    median_power_db: np.ndarray
+
+
+@dataclass(frozen=True)
+class HarmonicStageQc:
+    """Numerical scanner-line metrics and their analyzed spectrum."""
+
+    summary: dict[str, object]
+    spectrum: HarmonicSpectrum
 
 
 @dataclass(frozen=True)
@@ -161,10 +176,9 @@ def reference_harmonic_frequencies(summary: Mapping[str, object]) -> dict[str, f
 def _add_reference_metrics(
     summary: dict[str, object],
     frequencies: np.ndarray,
-    power: np.ndarray,
+    median_power_db: np.ndarray,
     reference_frequencies: Mapping[str, float],
 ) -> None:
-    median_power_db = 10.0 * np.log10(np.maximum(np.median(power, axis=0), np.finfo(float).tiny))
     for prefix, reference_frequency in reference_frequencies.items():
         reference_index = int(np.argmin(np.abs(frequencies - reference_frequency)))
         local_distance = np.abs(frequencies - reference_frequency)
@@ -187,7 +201,7 @@ def summarize_raw_harmonics(
     welch_duration_seconds: float,
     minimum_duration_seconds: float,
     reference_frequencies: Mapping[str, float] | None = None,
-) -> dict[str, object]:
+) -> HarmonicStageQc:
     """Compute the established scanner-harmonic summary for one in-memory stage."""
     sampling_frequency = float(raw.info["sfreq"])
     minimum_samples = int(round(minimum_duration_seconds * sampling_frequency))
@@ -199,16 +213,18 @@ def summarize_raw_harmonics(
     if missing:
         raise ValueError(f"Scanner-harmonic QC channels are missing: {missing}")
 
-    data = raw.get_data(picks=list(channels))
     requested_segment_samples = int(round(welch_duration_seconds * sampling_frequency))
     segment_samples = min(requested_segment_samples, raw.n_times)
-    frequencies, power = welch(
-        data,
-        fs=sampling_frequency,
-        nperseg=segment_samples,
-        noverlap=segment_samples // 2,
-        axis=-1,
+    spectrum = raw.compute_psd(
+        method="welch",
+        n_fft=segment_samples,
+        n_per_seg=segment_samples,
+        n_overlap=segment_samples // 2,
+        picks=list(channels),
+        verbose=False,
     )
+    frequencies = np.asarray(spectrum.freqs, dtype=float)
+    power = np.asarray(spectrum.get_data(), dtype=float)
     if np.isclose(frequencies[-1], sampling_frequency / 2.0):
         frequencies[-1] = sampling_frequency / 2.0
     summary = summarize_scanner_harmonics(
@@ -222,5 +238,17 @@ def summarize_raw_harmonics(
     summary["stage"] = stage
     if reference_frequencies is None:
         reference_frequencies = reference_harmonic_frequencies(summary)
-    _add_reference_metrics(summary, frequencies, power, reference_frequencies)
-    return summary
+    median_power_db = 10.0 * np.log10(np.maximum(np.median(power, axis=0), np.finfo(float).tiny))
+    _add_reference_metrics(
+        summary,
+        frequencies,
+        median_power_db,
+        reference_frequencies,
+    )
+    return HarmonicStageQc(
+        summary=summary,
+        spectrum=HarmonicSpectrum(
+            frequencies_hz=_immutable(frequencies),
+            median_power_db=_immutable(median_power_db),
+        ),
+    )
