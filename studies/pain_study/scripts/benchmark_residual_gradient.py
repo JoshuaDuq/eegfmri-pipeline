@@ -285,12 +285,14 @@ def write_benchmark_reports(
     ):
         if not rows:
             raise ValueError(f"Cannot write an empty benchmark table: {path}")
+    provenance_json = json.dumps(provenance, indent=2, sort_keys=True)
+    decision_json = json.dumps(decision, indent=2, sort_keys=True)
 
     _atomic_tsv(paths.run_audit, run_rows)
     _atomic_tsv(paths.component_audit, component_rows)
     _atomic_tsv(paths.preservation_audit, preservation_rows)
-    _atomic_json(paths.provenance, provenance)
-    _atomic_json(paths.decision, decision)
+    _atomic_text(paths.provenance, provenance_json)
+    _atomic_text(paths.decision, decision_json)
     return paths
 
 
@@ -384,7 +386,7 @@ def benchmark_run(
         "run": run,
         "eligible_epochs": layout.n_epochs,
         "blocks": int(layout.block_ids.max()) + 1,
-        "excluded_samples": raw.n_times - layout.n_epochs * layout.epoch_samples,
+        "excluded_samples": int(raw.n_times - layout.n_epochs * layout.epoch_samples),
         "candidate_paths": [str(path) for path in candidate_paths],
         "mne_version": mne.__version__,
         "numpy_version": np.__version__,
@@ -505,13 +507,10 @@ def _atomic_tsv(path: Path, rows: Sequence[dict[str, Any]]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
+def _atomic_text(path: Path, content: str) -> None:
     temporary = _temporary_path(path)
     try:
-        temporary.write_text(
-            json.dumps(payload, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        temporary.write_text(content, encoding="utf-8")
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)

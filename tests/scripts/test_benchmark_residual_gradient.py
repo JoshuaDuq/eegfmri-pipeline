@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -96,6 +97,21 @@ def test_report_writer_refuses_existing_files(tmp_path: Path) -> None:
             decision={},
             policy=OutputPolicy.ERROR,
         )
+
+
+def test_report_writer_validates_json_before_writing_any_report(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        write_benchmark_reports(
+            output_root=tmp_path,
+            run_rows=[{"run": 1}],
+            component_rows=[{"run": 1}],
+            preservation_rows=[{"run": 1}],
+            provenance={"excluded_samples": np.int64(1)},
+            decision={"status": "accepted"},
+            policy=OutputPolicy.ERROR,
+        )
+
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_pilot_run_count_fails_before_loading_data(tmp_path: Path) -> None:
