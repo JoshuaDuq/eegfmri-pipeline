@@ -35,4 +35,3 @@ if [[ "${ALLIANCE_HOST}" != "${expected_host}" ]]; then
     echo "Cluster profile host mismatch: ${ALLIANCE_HOST} != ${expected_host}" >&2
     return 1 2>/dev/null || exit 1
 fi
-

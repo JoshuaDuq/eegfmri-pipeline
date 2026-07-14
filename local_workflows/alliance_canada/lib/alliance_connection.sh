@@ -10,4 +10,3 @@ require_alliance_connection() {
         return 1
     fi
 }
-

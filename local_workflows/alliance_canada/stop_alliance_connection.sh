@@ -13,4 +13,3 @@ source "${LOCAL_ENV}"
 source "${SCRIPT_DIR}/alliance_env.sh"
 
 ssh -S "${ALLIANCE_SSH_CONTROL_PATH}" -O exit "${ALLIANCE_HOST}"
-

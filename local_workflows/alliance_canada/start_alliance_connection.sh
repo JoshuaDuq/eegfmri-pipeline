@@ -28,4 +28,3 @@ ssh \
 
 ssh -S "${ALLIANCE_SSH_CONTROL_PATH}" -O check "${ALLIANCE_HOST}"
 echo "${ALLIANCE_CLUSTER} SSH control connection is active."
-
