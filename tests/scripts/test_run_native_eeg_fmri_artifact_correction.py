@@ -10,6 +10,10 @@ from PIL import Image
 import pytest
 
 from eeg_pipeline.preprocessing.eeg_fmri.cardiac import QrsDetection, QrsQuality
+from eeg_pipeline.preprocessing.eeg_fmri.cohort_spectrum import (
+    aggregate_cohort_scanner_spectra,
+    extract_run_scanner_spectra,
+)
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import NeuXusQrsDetection
 from eeg_pipeline.preprocessing.eeg_fmri.pipeline import NativeCorrectionResult
 from eeg_pipeline.preprocessing.eeg_fmri.qc import (
@@ -190,6 +194,40 @@ def test_run_qc_uses_separate_publication_scale_figures() -> None:
         "82.0 Hz raw reference",
     ]
     assert all(len(axis.lines) == 4 for axis in local_axes)
+
+
+def test_cohort_scanner_spectrum_qc_matches_run_layout() -> None:
+    result = _native_result()
+    runs = tuple(
+        extract_run_scanner_spectra(
+            subject=f"sub-{subject:04d}",
+            run=1,
+            harmonic_stages=result.harmonic_stages,
+        )
+        for subject in (1, 2)
+    )
+    cohort = aggregate_cohort_scanner_spectra(
+        runs,
+        bootstrap_iterations=20,
+        confidence_level=0.95,
+        bootstrap_seed=42,
+    )
+
+    figure = qc_plotting.build_cohort_scanner_spectrum_qc_figure(cohort)
+
+    assert len(figure.axes) == 5
+    broad_axis, *local_axes = figure.axes
+    assert broad_axis.get_xlim() == pytest.approx((15.0, 90.0))
+    assert broad_axis.get_ylabel() == "PSD (dB V²/Hz)"
+    assert len(broad_axis.collections) >= 3
+    assert [axis.get_title() for axis in local_axes] == [
+        "20.0 Hz raw reference",
+        "41.0 Hz raw reference",
+        "61.0 Hz raw reference",
+        "82.0 Hz raw reference",
+    ]
+    assert all(len(axis.collections) >= 3 for axis in local_axes)
+    assert "Participant-first median across 2 participants | 2 runs" in figure._suptitle.get_text()
 
 
 def test_cohort_qc_prioritizes_residual_prominence_and_qrs_quality() -> None:
