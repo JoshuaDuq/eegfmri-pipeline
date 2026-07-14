@@ -28,18 +28,27 @@ PRIMARY_MODEL_COMPARISON = (
     "model_comparison",
     "model_comparison.tsv",
 )
+STUDY1_EXTERNAL_FILES = (
+    Path("NPS") / "weights_NSF_grouppred_cvpcr.nii.gz",
+    Path("SIIPS1") / "nonnoc_v11_4_137subjmap_weighted_mean.nii.gz",
+    Path("signature_manifest.yaml"),
+    Path("tpl-MNI152NLin2009cAsym_res-02_desc-brain_mask.nii.gz"),
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="mode", required=True)
     _add_fmriprep_parser(subparsers)
+    _add_study1_parser(subparsers)
     _add_study2_parser(subparsers)
     args = parser.parse_args()
 
     try:
         if args.mode == "fmriprep":
             build_fmriprep_manifest(args)
+        elif args.mode == "study1":
+            build_study1_manifests(args)
         elif args.mode == "study2":
             build_study2_manifests(args)
         else:
@@ -71,6 +80,17 @@ def _add_study2_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
     parser.add_argument("--allow-missing-exact-paths", action="store_true")
 
 
+def _add_study1_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("study1")
+    parser.add_argument("--subjects-file", required=True, type=Path)
+    parser.add_argument("--local-fmri-root", required=True, type=Path)
+    parser.add_argument("--local-eeg-root", required=True, type=Path)
+    parser.add_argument("--local-deriv-root", required=True, type=Path)
+    parser.add_argument("--local-external-root", required=True, type=Path)
+    parser.add_argument("--task", required=True)
+    parser.add_argument("--output-dir", required=True, type=Path)
+
+
 def build_fmriprep_manifest(args: argparse.Namespace) -> None:
     fmri_root = _require_dir(args.local_fmri_root, "local fMRI BIDS root")
     subjects = _read_subjects(args.subjects_file)
@@ -83,6 +103,41 @@ def build_fmriprep_manifest(args: argparse.Namespace) -> None:
         files.extend(_optional_subject_dir_files(fmri_root, subject, "fmap"))
 
     _write_manifest(args.output, files)
+
+
+def build_study1_manifests(args: argparse.Namespace) -> None:
+    fmri_root = _require_dir(args.local_fmri_root, "local fMRI BIDS root")
+    eeg_root = _require_dir(args.local_eeg_root, "local EEG BIDS root")
+    deriv_root = _require_dir(args.local_deriv_root, "local derivatives root")
+    external_root = _require_dir(args.local_external_root, "local external data root")
+    subjects = _read_subjects(args.subjects_file)
+    task = _require_text(args.task, "task")
+
+    fmri_files = _root_metadata(fmri_root) + _task_root_metadata(fmri_root, task)
+    eeg_files = _root_metadata(eeg_root) + _task_root_metadata(eeg_root, task)
+    eeg_derivative_files = _root_metadata(deriv_root)
+    fmri_derivative_files: list[Path] = []
+
+    for subject in subjects:
+        fmri_files.extend(_required_fmri_anatomy(fmri_root, subject))
+        fmri_files.extend(_required_task_files(fmri_root, subject, "func", task))
+        fmri_files.extend(_optional_subject_dir_files(fmri_root, subject, "fmap"))
+        eeg_files.extend(_subject_root_metadata(eeg_root, subject))
+        eeg_files.extend(_required_eeg_task_files(eeg_root, subject, task))
+        eeg_derivative_files.extend(_study1_eeg_derivative_files(deriv_root, subject, task))
+        fmri_derivative_files.extend(
+            _study1_fmriprep_derivative_files(deriv_root, fmri_root, subject, task)
+        )
+
+    for relative_path in STUDY1_EXTERNAL_FILES:
+        _require_file(external_root, relative_path, "Study 1 signature asset")
+
+    output_dir = args.output_dir
+    _write_manifest(output_dir / "fmri_bids_files.txt", fmri_files)
+    _write_manifest(output_dir / "eeg_bids_files.txt", eeg_files)
+    _write_manifest(output_dir / "eeg_derivative_files.txt", eeg_derivative_files)
+    _write_manifest(output_dir / "fmri_derivative_files.txt", fmri_derivative_files)
+    _write_manifest(output_dir / "external_files.txt", list(STUDY1_EXTERNAL_FILES))
 
 
 def build_study2_manifests(args: argparse.Namespace) -> None:
@@ -254,6 +309,51 @@ def _required_clean_eeg_derivatives(root: Path, subject: str, task: str) -> list
     return epochs + events
 
 
+def _study1_eeg_derivative_files(root: Path, subject: str, task: str) -> list[Path]:
+    _required_clean_eeg_derivatives(root, subject, task)
+    subject_root = root / "preprocessed" / "eeg" / subject
+    return _visible_relative_files(root, subject_root.rglob("*"))
+
+
+def _study1_fmriprep_derivative_files(
+    root: Path,
+    fmri_bids_root: Path,
+    subject: str,
+    task: str,
+) -> list[Path]:
+    fmriprep_root = root / "preprocessed" / "fmri" / "fmriprep"
+    subject_root = fmriprep_root / subject
+    func_root = subject_root / "func"
+    if not func_root.is_dir():
+        raise FileNotFoundError(f"Missing required fMRIPrep subject directory: {subject_root}")
+
+    raw_bold_files = sorted(
+        (fmri_bids_root / subject / "func").glob(f"{subject}_task-{task}*_bold.nii.gz")
+    )
+    if not raw_bold_files:
+        raise FileNotFoundError(f"Missing required task-{task} BOLD files for {subject}.")
+
+    for raw_bold_file in raw_bold_files:
+        prefix = raw_bold_file.name.removesuffix("_bold.nii.gz")
+        _require_file(
+            func_root,
+            Path(f"{prefix}_desc-confounds_timeseries.tsv"),
+            f"fMRIPrep confounds for {subject}",
+        )
+        _require_glob(
+            func_root,
+            f"{prefix}_space-MNI152NLin2009cAsym*_desc-preproc_bold.nii.gz",
+            f"fMRIPrep preprocessed BOLD for {subject}",
+        )
+        _require_glob(
+            func_root,
+            f"{prefix}_space-MNI152NLin2009cAsym*_desc-brain_mask.nii.gz",
+            f"fMRIPrep brain mask for {subject}",
+        )
+
+    return _visible_relative_files(fmriprep_root, subject_root.rglob("*"))
+
+
 def _required_study1_subject_features(
     root: Path,
     study1_root_name: str,
@@ -338,6 +438,12 @@ def _require_file(root: Path, rel: Path, label: str, *, allow_missing: bool = Fa
         print(message, file=sys.stderr)
         return
     raise FileNotFoundError(message)
+
+
+def _require_glob(root: Path, pattern: str, label: str) -> None:
+    if any(root.glob(pattern)):
+        return
+    raise FileNotFoundError(f"Missing required {label}: {root / pattern}")
 
 
 def _visible_relative_files(root: Path, paths: object) -> list[Path]:

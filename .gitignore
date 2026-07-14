@@ -116,6 +116,7 @@ local_workflows/alliance_canada/*
 !local_workflows/alliance_canada/study1_subjects.txt
 !local_workflows/alliance_canada/*alliance*.sh
 !local_workflows/alliance_canada/fetch_study1_fmriprep_from_trillium.sh
+!local_workflows/alliance_canada/repo_rsync_excludes.txt
 
 ### R ###
 .Rhistory
