@@ -17,4 +17,4 @@ ssh \
     -o ControlPath="${ALLIANCE_SSH_CONTROL_PATH}" \
     -o BatchMode=yes \
     "${ALLIANCE_HOST}" \
-    "cd '${REPO_ROOT}' && bash local_workflows/alliance_canada/setup_python_and_container.sh"
+    "cd '${REPO_ROOT}' && ALLIANCE_CLUSTER=${ALLIANCE_CLUSTER} bash local_workflows/alliance_canada/study1/submit.sh"
