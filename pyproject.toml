@@ -7,7 +7,7 @@ name = "eeg-pipeline"
 version = "1.0.0"
 description = "Modular EEG–fMRI analysis pipeline for paradigm-agnostic research"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "GPL-3.0-only"}
 requires-python = ">=3.11"
 authors = [
     {name = "Joshua Duque"},
@@ -21,13 +21,14 @@ dependencies = [
     "imbalanced-learn>=0.12.0",
     "joblib>=1.5.1",
     "matplotlib>=3.10.3",
-    "mne>=1.9.0",
+    "mne>=1.12.1",
     "mne-bids>=0.16.0",
     "mne-connectivity>=0.7.0",
     "mne-icalabel>=0.7.0",
     "networkx>=3.5",
     "nibabel>=3.2.0,<6.0.0",
     "nilearn>=0.11.1",
+    "numba>=0.62,<1.0",
     "numpy>=1.24.0,<2.0.0",
     "pandas>=2.3.0",
     "pyarrow>=17.0.0",
@@ -46,7 +47,7 @@ dependencies = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
@@ -80,7 +81,12 @@ include = ["eeg_pipeline*", "fmri_pipeline*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-eeg_pipeline = ["plotting/plot_catalog.json", "utils/config/*.yaml"]
+eeg_pipeline = [
+    "plotting/plot_catalog.json",
+    "preprocessing/eeg_fmri/assets/*.npz",
+    "preprocessing/eeg_fmri/assets/*.sha256",
+    "utils/config/*.yaml",
+]
 fmri_pipeline = ["utils/config/*.yaml"]
 
 [tool.black]

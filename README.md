@@ -1,7 +1,7 @@
 # EEG–fMRI Analysis Pipeline
 
 [![Python ≥ 3.11](https://img.shields.io/badge/python-≥3.11-blue.svg)](https://www.python.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![BIDS](https://img.shields.io/badge/data-BIDS-orange.svg)](https://bids-specification.readthedocs.io/)
 [![Docs](https://img.shields.io/badge/docs-Sphinx-blue.svg)](https://joshuaduq.github.io/eegfmri-pipeline/)
 
@@ -43,10 +43,13 @@ MNE-Python, Nilearn, NumPy, SciPy, pandas, and scikit-learn.
 - Behavioral statistics and machine-learning workflows
 - EEG source localization with template and subject-specific paths
 - fMRI preprocessing, GLM analysis, and EEG–fMRI integration workflows
+- Native simultaneous EEG-fMRI gradient and pulse-artifact correction from original 5 kHz recordings
 - Scriptable CLI commands and guided terminal UI workflows
 
 ## Study-Specific Guides
 
+- [Native EEG-fMRI artifact correction](docs/native_eeg_fmri_artifact_correction.md) for the fixed
+  synchronized AAS, NeuXus QRS, MNE PCA-OBS, and qualification boundary
 - [Study 1 run guide](studies/pain_study/study1/RUN_GUIDE.md) for rerunning the
   trial-wise EEG-to-fMRI pain-signature workflow and locating article-ready outputs
 - [Study 1 protocol README](studies/pain_study/study1/README.md) for the scientific
@@ -99,4 +102,7 @@ in the [contributing guide](https://joshuaduq.github.io/eegfmri-pipeline/contrib
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+GPL-3.0-only. See [LICENSE](LICENSE).
+
+The native EEG-fMRI cardiac detector adapts GPL-licensed NeuXus code and model weights.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for provenance and modification details.
