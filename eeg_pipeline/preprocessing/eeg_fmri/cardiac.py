@@ -10,7 +10,7 @@ import numpy as np
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import (
     NeuXusQrsDetection,
     NeuXusQrsDetectionParameters,
-    NeuXusQrsDetector,
+    QrsDetector,
 )
 
 
@@ -148,7 +148,7 @@ def detect_qrs(
     raw: mne.io.BaseRaw,
     *,
     ecg_channel: str,
-    detector: NeuXusQrsDetector,
+    detector: QrsDetector,
     parameters: CardiacArtifactParameters,
 ) -> QrsDetection:
     """Detect R-peaks with NeuXus and classify their correction quality."""

@@ -111,6 +111,18 @@ class NeuXusQrsDetection:
     model_sha256: str
 
 
+class QrsDetector(Protocol):
+    """Automatic QRS detector interface consumed by the offline pipeline."""
+
+    def detect(
+        self,
+        ecg: np.ndarray,
+        *,
+        sampling_frequency_hz: float,
+    ) -> NeuXusQrsDetection:
+        """Return R-peak times and detector diagnostics."""
+
+
 @dataclass(frozen=True)
 class NeuXusQrsPredictor:
     """Validated model exposed through the detector's narrow interface."""
