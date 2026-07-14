@@ -94,7 +94,19 @@ def test_alliance_workflows_have_generic_entrypoints() -> None:
 
 
 def test_tracked_workflows_do_not_use_rorqual_specific_variables() -> None:
-    workflow_files = [*WORKFLOW_DIR.glob("*.sh"), *WORKFLOW_DIR.glob("lib/*.sh")]
+    result = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "local_workflows/alliance_canada/*.sh",
+            "local_workflows/alliance_canada/lib/*.sh",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    workflow_files = [REPO_ROOT / relative_path for relative_path in result.stdout.splitlines()]
     contents = "\n".join(path.read_text() for path in workflow_files)
 
     assert "RORQUAL_HOST" not in contents
