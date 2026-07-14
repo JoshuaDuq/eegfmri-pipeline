@@ -12,12 +12,29 @@ from studies.pain_study.study1.targets import PRIMARY_SIGNATURES
 from studies.tests.test_support import validity_figure_test_config
 
 
+TRIAL_TEMPERATURES = (
+    44.0,
+    44.0,
+    44.0,
+    46.0,
+    46.0,
+    46.0,
+    48.0,
+    48.0,
+    48.0,
+    50.0,
+    50.0,
+    50.0,
+)
+
+
 def test_write_study1_report_writes_article_tables(tmp_path: Path) -> None:
     config = ConfigDict(
         {
             "paths": {"deriv_root": str(tmp_path / "derivatives")},
             "study1": {
                 "outputs": {"root_name": "study1"},
+                "cohort": {"min_subjects": 2},
                 "figures": validity_figure_test_config((44.0, 46.0, 48.0, 50.0)),
                 "feature_benchmark": {
                     "n_perm": 10,
@@ -79,19 +96,20 @@ def test_write_study1_report_writes_article_tables(tmp_path: Path) -> None:
     assert {
         "n_trials",
         "stimulus_temp_r",
-        "vas_rating_r",
+        "within_scale_intensity_r",
         "stimulus_surface_in_sample_r2",
         "official_nuisance_in_sample_r2",
         "residual_target_variance_fraction",
         "split_half_subject_temperature_r",
     }.issubset(diagnostics_table.columns)
+    assert "vas_rating_r" not in diagnostics_table.columns
     residual_variance = diagnostics_table["residual_target_variance_fraction"]
     assert ((residual_variance >= 0.0) & (residual_variance <= 1.0)).all()
 
     with open(manifest_path, encoding="utf-8") as handle:
         manifest = json.load(handle)
     assert manifest["n_subjects"] == len(subjects)
-    assert manifest["n_trials"] == 8
+    assert manifest["n_trials"] == len(subjects) * len(TRIAL_TEMPERATURES)
     assert manifest["included_subjects"] == subjects
     assert set(manifest["tables"]) == {
         "model_results",
@@ -103,18 +121,20 @@ def test_write_study1_report_writes_article_tables(tmp_path: Path) -> None:
 def _write_target_table(study_root: Path, subjects: list[str]) -> None:
     rows = []
     for subject_idx, subject in enumerate(subjects):
-        for trial_idx, temp in enumerate((44.0, 46.0, 48.0, 50.0), start=1):
+        for trial_idx, temp in enumerate(TRIAL_TEMPERATURES, start=1):
             rows.append(
                 {
                     "subject_id": subject,
                     "task": "thermalactive",
-                    "run": 1 if trial_idx <= 2 else 2,
+                    "run": (trial_idx - 1) // 3 + 1,
                     "trial_index": trial_idx,
-                    "within_run_trial": 1 if trial_idx in (1, 3) else 2,
+                    "within_run_trial": (trial_idx - 1) % 3 + 1,
                     "onset": float(trial_idx * 10),
                     "duration": 0.001,
-                    "NPS": float(subject_idx + temp / 10.0),
-                    "SIIPS1": float(subject_idx * 100 + temp * 20.0),
+                    "NPS": float(subject_idx + temp / 10.0 + ((trial_idx * 7) % 5) * 0.13),
+                    "SIIPS1": float(
+                        subject_idx * 100 + temp * 20.0 + ((trial_idx * 11) % 7) * 0.19
+                    ),
                     "NPS_fmri_n_voxels": 1000,
                     "SIIPS1_fmri_n_voxels": 2000,
                     "hrf_weighted_framewise_displacement": 0.01 * trial_idx,
@@ -137,18 +157,23 @@ def _write_target_table(study_root: Path, subjects: list[str]) -> None:
 def _write_clean_events(deriv_root: Path, subjects: list[str]) -> None:
     for subject_idx, subject in enumerate(subjects):
         rows = []
-        for trial_idx, temp in enumerate((44.0, 46.0, 48.0, 50.0), start=1):
+        for trial_idx, temp in enumerate(TRIAL_TEMPERATURES, start=1):
+            within_temperature_trial = (trial_idx - 1) % 3
+            pain_report = within_temperature_trial == 1
+            within_scale_intensity = subject_idx + temp + 2.0 * within_temperature_trial
             rows.append(
                 {
                     "trial_id": trial_idx,
                     "onset": float(trial_idx * 10),
                     "duration": 0.001,
-                    "run": 1 if trial_idx <= 2 else 2,
-                    "trial_number": 1 if trial_idx in (1, 3) else 2,
+                    "run": (trial_idx - 1) // 3 + 1,
+                    "trial_number": within_temperature_trial + 1,
                     "stimulus_temp": temp,
                     "selected_surface": float(1 if trial_idx % 2 else 2),
-                    "pain_binary_coded": float(temp >= 48.0),
-                    "vas_final_coded_rating": float(subject_idx + temp),
+                    "pain_binary_coded": float(pain_report),
+                    "vas_final_coded_rating": float(
+                        within_scale_intensity + (100.0 if pain_report else 0.0)
+                    ),
                     "residual_ecg_coupling": 0.001 * trial_idx,
                     "fp1_fp2_high_frequency_power": 1e-12 * trial_idx,
                 }

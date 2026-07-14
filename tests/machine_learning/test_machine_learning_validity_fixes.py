@@ -2231,6 +2231,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": [0, 1, 2, 3],
+                "run": [0, 1, 0, 1],
                 "block": [0, 1, 0, 1],
             }
         )
@@ -2599,6 +2600,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": [0, 1, 2, 3],
+                "run": [0, 1, 0, 1],
                 "block": [0, 1, 0, 1],
             }
         )
@@ -2708,6 +2710,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": [0, 1, 2, 3],
+                "run": [0, 1, 0, 0],
                 "block": [0, 1, 0, 0],
             }
         )
@@ -2813,6 +2816,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": [0, 1, 2, 3],
+                "run": [0, 0, 1, 1],
                 "block": [0, 0, 1, 1],
             }
         )
@@ -2909,6 +2913,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": [0, 1, 2, 3],
+                "run": [0, 0, 1, 1],
                 "block": [0, 0, 1, 1],
             }
         )
@@ -3007,6 +3012,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": np.arange(len(groups), dtype=int),
+                "run": np.array([0, 0, 1, 1, 0, 0, 1, 1], dtype=int),
                 "block": np.array([0, 0, 1, 1, 0, 0, 1, 1], dtype=int),
             }
         )
@@ -4093,6 +4099,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": np.arange(len(groups), dtype=int),
+                "run": [0, 1, 0, 1],
                 "block": [0, 1, 0, 1],
             }
         )
@@ -4131,6 +4138,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": np.arange(len(groups), dtype=int),
+                "run": [0, 1, 0, 1],
                 "block": [0, 1, 0, 1],
             }
         )
@@ -4175,6 +4183,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": np.arange(len(groups), dtype=int),
+                "run": [0, 1, 0, 1],
                 "block": [0, 1, 0, 1],
             }
         )
@@ -4579,6 +4588,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": [10, 11, 12, 13],
+                "run": [0, 0, 1, 1],
                 "block": [0, 0, 1, 1],
             }
         )
@@ -4644,6 +4654,7 @@ class TestMachineLearningValidityFixes(unittest.TestCase):
             {
                 "subject_id": groups,
                 "trial_id": [10, 11, 12, 13],
+                "run": [0, 0, 1, 1],
                 "block": [0, 0, 1, 1],
             }
         )
