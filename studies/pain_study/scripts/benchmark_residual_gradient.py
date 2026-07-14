@@ -31,7 +31,7 @@ from eeg_pipeline.analysis.qc.residual_gradient import (
 from eeg_pipeline.preprocessing.residual_gradient import (
     ResidualObsSettings,
     VolumeLayout,
-    apply_residual_obs,
+    apply_residual_obs_grid,
     brainvision_source_files,
     build_volume_layout,
 )
@@ -321,19 +321,21 @@ def benchmark_run(
     component_rows: list[dict[str, Any]] = []
     preservation_rows: list[dict[str, Any]] = []
     candidate_paths: list[Path] = []
+    baseline_grid = apply_residual_obs_grid(
+        raw,
+        layout,
+        component_counts=config.component_counts,
+        n_folds=config.obs.n_folds,
+    )
+    injected_grid = apply_residual_obs_grid(
+        injected_raw,
+        layout,
+        component_counts=config.component_counts,
+        n_folds=config.obs.n_folds,
+    )
     for count in config.component_counts:
-        baseline = apply_residual_obs(
-            raw,
-            layout,
-            n_components=count,
-            n_folds=config.obs.n_folds,
-        )
-        injected = apply_residual_obs(
-            injected_raw,
-            layout,
-            n_components=count,
-            n_folds=config.obs.n_folds,
-        )
+        baseline = baseline_grid[count]
+        injected = injected_grid[count]
         _assert_candidate_contract(raw, baseline.raw, layout)
         recovered = np.median(
             injected.raw.get_data(eeg_picks) - baseline.raw.get_data(eeg_picks),

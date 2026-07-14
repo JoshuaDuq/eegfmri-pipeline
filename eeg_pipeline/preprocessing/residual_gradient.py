@@ -135,57 +135,97 @@ def apply_residual_obs(
     n_folds: int,
 ) -> ResidualObsResult:
     """Remove held-out temporal PCA projections from complete EEG volume epochs."""
-    if n_components < 0:
-        raise ValueError("n_components must be non-negative.")
+    return apply_residual_obs_grid(
+        raw,
+        layout,
+        component_counts=(n_components,),
+        n_folds=n_folds,
+    )[n_components]
+
+
+def apply_residual_obs_grid(
+    raw: mne.io.BaseRaw,
+    layout: VolumeLayout,
+    *,
+    component_counts: tuple[int, ...],
+    n_folds: int,
+) -> dict[int, ResidualObsResult]:
+    """Derive multiple OBS orders from one decomposition per channel and fold."""
+    if not component_counts:
+        raise ValueError("component_counts must be non-empty.")
+    if any(type(count) is not int or count < 0 for count in component_counts):
+        raise ValueError("component_counts must contain non-negative integers.")
+    if len(set(component_counts)) != len(component_counts):
+        raise ValueError("component_counts must not contain duplicates.")
     if n_folds < 2 or n_folds > layout.n_epochs:
         raise ValueError("n_folds must be between 2 and the number of volume epochs.")
 
-    corrected = raw.copy().load_data()
-    if n_components == 0:
-        return ResidualObsResult(raw=corrected, component_rows=())
+    source = raw.copy().load_data()
+    corrected_by_count = {
+        count: source if index == 0 else source.copy()
+        for index, count in enumerate(component_counts)
+    }
+    positive_counts = tuple(sorted(count for count in component_counts if count > 0))
+    if not positive_counts:
+        return {
+            count: ResidualObsResult(raw=corrected_by_count[count], component_rows=())
+            for count in component_counts
+        }
 
-    picks = mne.pick_types(corrected.info, eeg=True, exclude=[])
+    picks = mne.pick_types(source.info, eeg=True, exclude=[])
     offsets = np.arange(layout.epoch_samples, dtype=np.int64)
     sample_matrix = layout.starts[:, np.newaxis] + offsets[np.newaxis, :]
     fold_ids = np.arange(layout.n_epochs, dtype=np.int64) % n_folds
-    rows: list[dict[str, float | int | str]] = []
+    rows_by_count: dict[int, list[dict[str, float | int | str]]] = {
+        count: [] for count in positive_counts
+    }
+    maximum_count = max(positive_counts)
 
     for pick in picks:
-        channel_epochs = corrected._data[pick, sample_matrix].copy()
+        channel_epochs = source._data[pick, sample_matrix].copy()
         centered_epochs = channel_epochs - channel_epochs.mean(axis=1, keepdims=True)
-        corrected_epochs = channel_epochs.copy()
+        corrected_epochs_by_count = {count: channel_epochs.copy() for count in positive_counts}
 
         for fold in range(n_folds):
             held_mask = fold_ids == fold
             train = centered_epochs[~held_mask]
             basis_rank = min(train.shape)
-            if n_components > basis_rank:
-                raise ValueError(f"n_components={n_components} exceeds basis rank {basis_rank}.")
+            if maximum_count > basis_rank:
+                raise ValueError(f"n_components={maximum_count} exceeds basis rank {basis_rank}.")
 
             _, singular_values, right_vectors = np.linalg.svd(train, full_matrices=False)
             total_variance = float(np.sum(singular_values**2))
             if total_variance == 0.0:
-                channel = corrected.ch_names[pick]
+                channel = source.ch_names[pick]
                 raise ValueError(f"Training data have zero variance for channel {channel!r}.")
 
-            basis = _normalize_component_signs(right_vectors[:n_components])
+            basis = _normalize_component_signs(right_vectors[:maximum_count])
             held = centered_epochs[held_mask]
-            fitted = (held @ basis.T) @ basis
-            corrected_epochs[held_mask] -= fitted
-            explained_variance = float(np.sum(singular_values[:n_components] ** 2) / total_variance)
-            rows.append(
-                {
-                    "channel": corrected.ch_names[pick],
-                    "fold": fold,
-                    "n_components": n_components,
-                    "training_variance_explained": explained_variance,
-                    "held_removed_rms_v": float(np.sqrt(np.mean(fitted**2))),
-                }
-            )
+            for count in positive_counts:
+                count_basis = basis[:count]
+                fitted = (held @ count_basis.T) @ count_basis
+                corrected_epochs_by_count[count][held_mask] -= fitted
+                explained_variance = float(np.sum(singular_values[:count] ** 2) / total_variance)
+                rows_by_count[count].append(
+                    {
+                        "channel": source.ch_names[pick],
+                        "fold": fold,
+                        "n_components": count,
+                        "training_variance_explained": explained_variance,
+                        "held_removed_rms_v": float(np.sqrt(np.mean(fitted**2))),
+                    }
+                )
 
-        corrected._data[pick, sample_matrix] = corrected_epochs
+        for count in positive_counts:
+            corrected_by_count[count]._data[pick, sample_matrix] = corrected_epochs_by_count[count]
 
-    return ResidualObsResult(raw=corrected, component_rows=tuple(rows))
+    return {
+        count: ResidualObsResult(
+            raw=corrected_by_count[count],
+            component_rows=tuple(rows_by_count.get(count, ())),
+        )
+        for count in component_counts
+    }
 
 
 def _normalize_component_signs(components: NDArray[np.float64]) -> NDArray[np.float64]:

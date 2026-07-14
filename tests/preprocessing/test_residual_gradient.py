@@ -9,6 +9,7 @@ import pytest
 from eeg_pipeline.preprocessing.residual_gradient import (
     ResidualObsSettings,
     apply_residual_obs,
+    apply_residual_obs_grid,
     brainvision_source_files,
     build_volume_layout,
     validate_brainvision_source,
@@ -158,3 +159,33 @@ def test_obs_preserves_non_eeg_and_samples_outside_epochs() -> None:
     np.testing.assert_array_equal(result.raw.annotations.duration, raw.annotations.duration)
     np.testing.assert_array_equal(result.raw.annotations.description, raw.annotations.description)
     assert result.raw.annotations.orig_time == raw.annotations.orig_time
+
+
+def test_component_grid_matches_individual_corrections() -> None:
+    raw = _make_artifact_raw()
+    layout = build_volume_layout(raw, ResidualObsSettings())
+
+    grid = apply_residual_obs_grid(raw, layout, component_counts=(0, 1, 2), n_folds=5)
+
+    for count in (0, 1, 2):
+        individual = apply_residual_obs(raw, layout, n_components=count, n_folds=5)
+        np.testing.assert_array_equal(grid[count].raw.get_data(), individual.raw.get_data())
+        assert grid[count].component_rows == individual.component_rows
+
+
+def test_component_grid_reuses_each_channel_fold_decomposition(monkeypatch) -> None:
+    raw = _make_artifact_raw()
+    layout = build_volume_layout(raw, ResidualObsSettings())
+    original_svd = np.linalg.svd
+    calls = 0
+
+    def counted_svd(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_svd(*args, **kwargs)
+
+    monkeypatch.setattr(np.linalg, "svd", counted_svd)
+
+    apply_residual_obs_grid(raw, layout, component_counts=(1, 2, 3, 4), n_folds=5)
+
+    assert calls == 2 * 5
