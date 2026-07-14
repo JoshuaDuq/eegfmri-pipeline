@@ -50,6 +50,9 @@ class NativeEegFmriParameters:
     qc_channels: tuple[str, ...]
     qc_welch_duration_seconds: float
     qc_minimum_duration_seconds: float
+    qc_bootstrap_iterations: int
+    qc_bootstrap_confidence_level: float
+    qc_bootstrap_seed: int
 
     def __post_init__(self) -> None:
         if self.acquisition_sampling_frequency_hz <= 0:
@@ -82,6 +85,12 @@ class NativeEegFmriParameters:
             raise ValueError("qc_welch_duration_seconds must be positive")
         if self.qc_minimum_duration_seconds <= 0:
             raise ValueError("qc_minimum_duration_seconds must be positive")
+        if self.qc_bootstrap_iterations < 1:
+            raise ValueError("qc_bootstrap_iterations must be positive")
+        if not 0.0 < self.qc_bootstrap_confidence_level < 1.0:
+            raise ValueError("qc_bootstrap_confidence_level must be between 0 and 1")
+        if self.qc_bootstrap_seed < 0:
+            raise ValueError("qc_bootstrap_seed must be non-negative")
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> NativeEegFmriParameters:
@@ -156,12 +165,23 @@ class NativeEegFmriParameters:
         qc = _require_mapping(value["qc"], "qc")
         _require_exact_keys(
             qc,
-            {"channels", "welch_duration_seconds", "minimum_duration_seconds"},
+            {
+                "channels",
+                "welch_duration_seconds",
+                "minimum_duration_seconds",
+                "bootstrap",
+            },
             "qc",
         )
         channels = qc["channels"]
         if not isinstance(channels, list):
             raise TypeError("qc.channels must be a list")
+        bootstrap = _require_mapping(qc["bootstrap"], "qc.bootstrap")
+        _require_exact_keys(
+            bootstrap,
+            {"iterations", "confidence_level", "seed"},
+            "qc.bootstrap",
+        )
 
         repetition_time = float(acquisition["repetition_time_seconds"])
         return cls(
@@ -201,6 +221,9 @@ class NativeEegFmriParameters:
             qc_channels=tuple(str(channel) for channel in channels),
             qc_welch_duration_seconds=float(qc["welch_duration_seconds"]),
             qc_minimum_duration_seconds=float(qc["minimum_duration_seconds"]),
+            qc_bootstrap_iterations=int(bootstrap["iterations"]),
+            qc_bootstrap_confidence_level=float(bootstrap["confidence_level"]),
+            qc_bootstrap_seed=int(bootstrap["seed"]),
         )
 
 

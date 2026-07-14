@@ -19,6 +19,12 @@ from eeg_pipeline.preprocessing.eeg_fmri.config import (
     NativeEegFmriParameters,
     load_native_eeg_fmri_parameters,
 )
+from eeg_pipeline.preprocessing.eeg_fmri.cohort_spectrum import (
+    RunScannerSpectra,
+    aggregate_cohort_scanner_spectra,
+    extract_run_scanner_spectra,
+    write_cohort_scanner_spectra_tsv,
+)
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import (
     NeuXusQrsDetector,
     NeuXusQrsPredictor,
@@ -31,6 +37,7 @@ from eeg_pipeline.preprocessing.eeg_fmri.pipeline import (
 )
 from eeg_pipeline.preprocessing.eeg_fmri.plotting import (
     save_cohort_qc_figure,
+    save_cohort_scanner_spectrum_qc_figure,
     save_physiology_qc_figure,
     save_scanner_spectrum_qc_figure,
 )
@@ -44,7 +51,7 @@ DEFAULT_INPUT_ROOT = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1"
 )
 DEFAULT_OUTPUT_ROOT = Path(
-    "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_eeg_fmri_correction-v2"
+    "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_eeg_fmri_correction-v3"
 )
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config/native_eeg_fmri_artifact_correction.yaml"
 
@@ -75,6 +82,14 @@ class RunOutputProvenance:
     scanner_spectrum_qc: Path
     scanner_spectrum_qc_sha256: str
     config_sha256: str
+
+
+@dataclass(frozen=True)
+class CompletedRun:
+    """Manifest values and cropped spectra retained from one completed correction."""
+
+    manifest_row: dict[str, object]
+    scanner_spectra: RunScannerSpectra
 
 
 def _sha256(path: Path) -> str:
@@ -364,7 +379,7 @@ def process_recording(
     parameters: NativeEegFmriParameters,
     config_sha256: str,
     qrs_detector: QrsDetector,
-) -> dict[str, object]:
+) -> CompletedRun:
     """Correct, save, hash, and report one recording."""
     output_dir = output_root / recording.subject / "eeg"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -473,7 +488,14 @@ def process_recording(
         {key: value for key, value in attenuation.items() if key.endswith("_raw_to_final_db")}
     )
     row.update(_final_harmonic_prominence(result.harmonic_stages))
-    return row
+    return CompletedRun(
+        manifest_row=row,
+        scanner_spectra=extract_run_scanner_spectra(
+            subject=recording.subject,
+            run=recording.run,
+            harmonic_stages=result.harmonic_stages,
+        ),
+    )
 
 
 def _write_manifest(output_root: Path, rows: list[dict[str, object]]) -> None:
@@ -505,24 +527,25 @@ def run_cohort(
     config_copy = incomplete_root / "native_eeg_fmri_artifact_correction.yaml"
     shutil.copy2(config_path, config_copy)
     config_sha256 = _sha256(config_copy)
-    rows = []
+    completed_runs = []
     for index, recording in enumerate(recordings, start=1):
         print(
             f"[{index}/{len(recordings)}] Correcting {recording.subject} run-{recording.run}",
             flush=True,
         )
-        row = process_recording(
+        completed = process_recording(
             recording,
             incomplete_root,
             parameters=parameters,
             config_sha256=config_sha256,
             qrs_detector=qrs_detector,
         )
-        rows.append(row)
+        completed_runs.append(completed)
         print(
             f"[{index}/{len(recordings)}] Completed {recording.subject} run-{recording.run}",
             flush=True,
         )
+    rows = [completed.manifest_row for completed in completed_runs]
     published_rows = []
     for row in rows:
         published_row = dict(row)
@@ -538,6 +561,20 @@ def run_cohort(
         published_rows.append(published_row)
     _write_manifest(incomplete_root, published_rows)
     save_cohort_qc_figure(rows, incomplete_root / "cohort_mriartifact_qc.png")
+    cohort_spectra = aggregate_cohort_scanner_spectra(
+        [completed.scanner_spectra for completed in completed_runs],
+        bootstrap_iterations=parameters.qc_bootstrap_iterations,
+        confidence_level=parameters.qc_bootstrap_confidence_level,
+        bootstrap_seed=parameters.qc_bootstrap_seed,
+    )
+    write_cohort_scanner_spectra_tsv(
+        cohort_spectra,
+        incomplete_root / "cohort_scanner_spectrum_qc.tsv",
+    )
+    save_cohort_scanner_spectrum_qc_figure(
+        cohort_spectra,
+        incomplete_root / "cohort_scanner_spectrum_qc.png",
+    )
     (incomplete_root / "dataset_description.json").write_text(
         json.dumps(
             {
@@ -547,7 +584,7 @@ def run_cohort(
                 "GeneratedBy": [
                     {
                         "Name": "EEG_fMRI_Pipeline native correction",
-                        "Version": "2",
+                        "Version": "3",
                         "Description": (
                             "Synchronized 21-volume average artifact subtraction with sub-sample "
                             "alignment, NeuXus v0.0.4-derived LSTM QRS detection, and MNE PCA-OBS "

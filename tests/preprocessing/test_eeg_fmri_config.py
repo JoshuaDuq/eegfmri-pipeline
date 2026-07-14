@@ -57,6 +57,9 @@ def test_native_eeg_fmri_config_encodes_the_fixed_study_pipeline() -> None:
         "PO7",
     )
     assert parameters.qc_welch_duration_seconds == 16.384
+    assert parameters.qc_bootstrap_iterations == 10_000
+    assert parameters.qc_bootstrap_confidence_level == 0.95
+    assert parameters.qc_bootstrap_seed == 42
 
 
 def test_native_eeg_fmri_config_rejects_unknown_settings(tmp_path: Path) -> None:

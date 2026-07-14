@@ -325,13 +325,14 @@ def test_process_recording_writes_atomic_qrs_and_separate_qc_figures(
     monkeypatch.setattr(runner, "preprocess_raw_in_place", fake_preprocess)
     parameters = runner.load_native_eeg_fmri_parameters(CONFIG_PATH)
 
-    row = runner.process_recording(
+    completed = runner.process_recording(
         recording,
         tmp_path / "derivative",
         parameters=parameters,
         config_sha256="e" * 64,
         qrs_detector=detector,
     )
+    row = completed.manifest_row
 
     assert detector_arguments == [detector]
     qrs_path = Path(row["output_qrs"])
@@ -352,6 +353,10 @@ def test_process_recording_writes_atomic_qrs_and_separate_qc_figures(
     assert qc["cardiac"]["qrs_detector"]["model_sha256"] == "d" * 64
     assert row["qrs_model_sha256"] == "d" * 64
     assert row["harmonic_18_23_final_prominence_db"] == 7.0
+    assert completed.scanner_spectra.subject == "sub-0001"
+    assert completed.scanner_spectra.raw.frequencies_hz[[0, -1]] == pytest.approx(
+        [15.0, 90.0]
+    )
 
 
 def test_run_cohort_publishes_organized_derivative_atomically(
@@ -359,7 +364,7 @@ def test_run_cohort_publishes_organized_derivative_atomically(
     monkeypatch,
 ) -> None:
     input_root = _input_root(tmp_path)
-    output_root = tmp_path / "native-v2"
+    output_root = tmp_path / "native-v3"
     detector = object()
     detector_ids = []
 
@@ -383,7 +388,7 @@ def test_run_cohort_publishes_organized_derivative_atomically(
         output_qrs.write_text("onset_seconds\n", encoding="utf-8")
         output_physiology_qc.write_bytes(b"png")
         output_scanner_spectrum_qc.write_bytes(b"png")
-        return {
+        manifest_row = {
             "subject": recording.subject,
             "run": recording.run,
             "source_vhdr": str(recording.vhdr_path),
@@ -411,6 +416,15 @@ def test_run_cohort_publishes_organized_derivative_atomically(
             "harmonic_77_85_final_prominence_db": 11.0,
             "complete_volume_count": 20,
         }
+        result = _native_result()
+        return runner.CompletedRun(
+            manifest_row=manifest_row,
+            scanner_spectra=extract_run_scanner_spectra(
+                subject=recording.subject,
+                run=recording.run,
+                harmonic_stages=result.harmonic_stages,
+            ),
+        )
 
     monkeypatch.setattr(runner, "process_recording", fake_process)
 
@@ -427,6 +441,16 @@ def test_run_cohort_publishes_organized_derivative_atomically(
     with Image.open(cohort_figure) as image:
         assert image.width >= 3_600
         assert image.info["dpi"] == pytest.approx((300.0, 300.0), abs=0.1)
+    cohort_spectrum_figure = output_root / "cohort_scanner_spectrum_qc.png"
+    with Image.open(cohort_spectrum_figure) as image:
+        assert image.width >= 3_600
+        assert image.height >= 3_000
+        assert image.info["dpi"] == pytest.approx((300.0, 300.0), abs=0.1)
+    cohort_spectrum_tsv = output_root / "cohort_scanner_spectrum_qc.tsv"
+    assert cohort_spectrum_tsv.is_file()
+    assert cohort_spectrum_tsv.read_text(encoding="utf-8").startswith(
+        "stage\tfrequency_hz\tmedian_psd_db_v2_hz"
+    )
     assert (output_root / "native_eeg_fmri_artifact_correction.yaml").is_file()
     manifest_text = (output_root / "native_correction_manifest.tsv").read_text(encoding="utf-8")
     assert str(output_root / "sub-0001" / "eeg") in manifest_text
@@ -457,4 +481,4 @@ def test_run_cohort_refuses_to_overwrite_a_derivative_root(tmp_path: Path) -> No
 
 def test_fixed_cohort_boundary_and_default_output_are_versioned() -> None:
     assert runner.EXPECTED_RUN_COUNT == 83
-    assert runner.DEFAULT_OUTPUT_ROOT.name == "native_eeg_fmri_correction-v2"
+    assert runner.DEFAULT_OUTPUT_ROOT.name == "native_eeg_fmri_correction-v3"
