@@ -196,7 +196,7 @@ Integration tests will establish:
 - injected neural signals remain within the predefined preservation tolerance;
 - incomplete cohort output is not published.
 
-The qualification run will cover all 77 available recordings and regenerate the cohort
+The qualification run will cover all 83 verified recordings and regenerate the cohort
 scanner-harmonic and cardiac-locked summaries before the native pipeline is described as a
 replacement for BrainVision Analyzer.
 
