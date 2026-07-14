@@ -17,7 +17,7 @@ fi
 study2_require_var STUDY2_LOG_ROOT
 mkdir -p "${STUDY2_LOG_ROOT}"
 
-recon_job="$(sbatch \
+recon_job="$(study2_submit \
     --parsable \
     --account "${ALLIANCE_ACCOUNT}" \
     --output "${STUDY2_LOG_ROOT}/s2_recon_%A_%a.submit.out" \
@@ -26,7 +26,7 @@ recon_job="$(sbatch \
     "${SCRIPT_DIR}/sbatch/01_recon_all.sbatch" \
     "$1")"
 
-bem_job="$(sbatch \
+bem_job="$(study2_submit \
     --parsable \
     --account "${ALLIANCE_ACCOUNT}" \
     --dependency "afterok:${recon_job}" \
@@ -36,7 +36,7 @@ bem_job="$(sbatch \
     "${SCRIPT_DIR}/sbatch/02_bem_trans.sbatch" \
     "$1")"
 
-adjacency_job="$(sbatch \
+adjacency_job="$(study2_submit \
     --parsable \
     --account "${ALLIANCE_ACCOUNT}" \
     --dependency "afterok:${bem_job}" \
@@ -45,7 +45,7 @@ adjacency_job="$(sbatch \
     "${SCRIPT_DIR}/sbatch/03_prepare_adjacency.sbatch" \
     "$1")"
 
-source_power_job="$(sbatch \
+source_power_job="$(study2_submit \
     --parsable \
     --account "${ALLIANCE_ACCOUNT}" \
     --dependency "afterok:${bem_job}" \
@@ -55,7 +55,7 @@ source_power_job="$(sbatch \
     "${SCRIPT_DIR}/sbatch/04_source_power.sbatch" \
     "$1")"
 
-gate_job="$(sbatch \
+gate_job="$(study2_submit \
     --parsable \
     --account "${ALLIANCE_ACCOUNT}" \
     --time "01:00:00" \
@@ -66,7 +66,7 @@ gate_job="$(sbatch \
     "$1" \
     gate)"
 
-source_stage_job="$(sbatch \
+source_stage_job="$(study2_submit \
     --parsable \
     --account "${ALLIANCE_ACCOUNT}" \
     --time "06:00:00" \
@@ -77,7 +77,7 @@ source_stage_job="$(sbatch \
     "$1" \
     source-stage)"
 
-target_permutations_job="$(sbatch \
+target_permutations_job="$(study2_submit \
     --parsable \
     --account "${ALLIANCE_ACCOUNT}" \
     --time "06:00:00" \
@@ -88,7 +88,7 @@ target_permutations_job="$(sbatch \
     "$1" \
     target-permutations)"
 
-inference_job="$(sbatch \
+inference_job="$(study2_submit \
     --parsable \
     --account "${ALLIANCE_ACCOUNT}" \
     --time "06:00:00" \

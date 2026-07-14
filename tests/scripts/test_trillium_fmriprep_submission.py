@@ -4,11 +4,18 @@ from pathlib import Path
 WORKFLOW_DIR = Path("local_workflows/alliance_canada")
 
 
-def test_trillium_fmriprep_submission_does_not_request_slurm_memory() -> None:
+def test_fmriprep_submission_uses_profile_memory() -> None:
     submit_script = (WORKFLOW_DIR / "submit_fmriprep_array.sh").read_text()
 
-    assert "ALLIANCE_MEM" not in submit_script
-    assert '--mem="' not in submit_script
+    assert 'append_optional_memory_arg sbatch_args "${FMRIPREP_SLURM_MEMORY}"' in submit_script
+
+
+def test_cluster_profiles_define_fmriprep_memory() -> None:
+    rorqual_profile = (WORKFLOW_DIR / "clusters" / "rorqual.sh").read_text()
+    trillium_profile = (WORKFLOW_DIR / "clusters" / "trillium.sh").read_text()
+
+    assert 'FMRIPREP_SLURM_MEMORY="700G"' in rorqual_profile
+    assert 'FMRIPREP_SLURM_MEMORY=""' in trillium_profile
 
 
 def test_trillium_fmriprep_requests_six_hours() -> None:
@@ -18,10 +25,10 @@ def test_trillium_fmriprep_requests_six_hours() -> None:
 
 
 def test_trillium_fmriprep_uses_explicit_fmriprep_memory_mb() -> None:
-    env_file = (WORKFLOW_DIR / "alliance_env.sh").read_text()
+    profile = (WORKFLOW_DIR / "clusters" / "trillium.sh").read_text()
     job_script = (WORKFLOW_DIR / "fmriprep_array.sbatch").read_text()
 
-    assert 'export FMRIPREP_MEM_MB="700000"' in env_file
+    assert 'export FMRIPREP_MEM_MB="700000"' in profile
     assert "FMRIPREP_MEM_MB" in job_script
     assert "SLURM_MEM_PER_NODE" not in job_script
     assert '--mem-mb "${FMRIPREP_MEM_MB}"' in job_script
@@ -44,7 +51,7 @@ def test_trillium_fmriprep_writes_derivatives_to_scratch() -> None:
     env_file = (WORKFLOW_DIR / "alliance_env.sh").read_text()
     job_script = (WORKFLOW_DIR / "fmriprep_array.sbatch").read_text()
 
-    assert 'export FMRIPREP_DERIV_ROOT="/scratch/joshduq/derivatives"' in env_file
+    assert 'export FMRIPREP_DERIV_ROOT="${ALLIANCE_SCRATCH_ROOT}/derivatives"' in env_file
     assert "FMRIPREP_DERIV_ROOT" in job_script
     assert '--deriv-root "${FMRIPREP_DERIV_ROOT}"' in job_script
 
@@ -52,7 +59,7 @@ def test_trillium_fmriprep_writes_derivatives_to_scratch() -> None:
 def test_trillium_fmriprep_uses_scratch_templateflow_cache() -> None:
     env_file = (WORKFLOW_DIR / "alliance_env.sh").read_text()
 
-    assert 'export TEMPLATEFLOW_HOME="/scratch/joshduq/templateflow"' in env_file
+    assert 'export TEMPLATEFLOW_HOME="${ALLIANCE_SCRATCH_ROOT}/templateflow"' in env_file
 
 
 def test_trillium_runtime_setup_creates_container_directory() -> None:

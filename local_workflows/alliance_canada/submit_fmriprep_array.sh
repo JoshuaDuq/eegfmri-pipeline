@@ -12,6 +12,8 @@ if [[ ! -f "${ENV_FILE}" ]]; then
 fi
 
 source "${ENV_FILE}"
+# shellcheck source=lib/slurm_args.sh
+source "${SCRIPT_DIR}/lib/slurm_args.sh"
 
 required_vars=(
     ALLIANCE_ACCOUNT
@@ -75,15 +77,19 @@ mkdir -p "${FMRIPREP_LOG_ROOT}" "${DERIV_ROOT}" "${FMRIPREP_DERIV_ROOT}" "${FMRI
 
 export SUBJECTS_FILE
 
-job_id="$(sbatch \
-    --parsable \
-    --account="${ALLIANCE_ACCOUNT}" \
-    --time="${ALLIANCE_TIME}" \
-    --cpus-per-task="${ALLIANCE_CPUS}" \
-    --array="1-${subject_count}" \
-    --export="ALL,SUBJECTS_FILE=${SUBJECTS_FILE}" \
-    --output="${FMRIPREP_LOG_ROOT}/fmriprep_%A_%a.out" \
-    --error="${FMRIPREP_LOG_ROOT}/fmriprep_%A_%a.err" \
-    "${JOB_SCRIPT}")"
+sbatch_args=(
+    --parsable
+    --account="${ALLIANCE_ACCOUNT}"
+    --time="${ALLIANCE_TIME}"
+    --cpus-per-task="${ALLIANCE_CPUS}"
+    --array="1-${subject_count}"
+    --export="ALL,SUBJECTS_FILE=${SUBJECTS_FILE}"
+    --output="${FMRIPREP_LOG_ROOT}/fmriprep_%A_%a.out"
+    --error="${FMRIPREP_LOG_ROOT}/fmriprep_%A_%a.err"
+)
+append_optional_memory_arg sbatch_args "${FMRIPREP_SLURM_MEMORY}"
+sbatch_args+=("${JOB_SCRIPT}")
+
+job_id="$(sbatch "${sbatch_args[@]}")"
 
 echo "${job_id}"

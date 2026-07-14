@@ -18,6 +18,14 @@ study2_require_var() {
     fi
 }
 
+study2_require_declared_var() {
+    local name="$1"
+    if ! declare -p "${name}" >/dev/null 2>&1; then
+        echo "Missing required environment variable: ${name}" >&2
+        exit 2
+    fi
+}
+
 study2_load_env() {
     if [[ "$#" -ne 1 ]]; then
         echo "Usage: ${0##*/} /path/to/study2_alliance.env" >&2
@@ -51,6 +59,17 @@ study2_load_env() {
     study2_require_var STUDY2_RECON_ARRAY_LIMIT
     study2_require_var STUDY2_BEM_ARRAY_LIMIT
     study2_require_var STUDY2_SOURCE_POWER_ARRAY_LIMIT
+    study2_require_declared_var STUDY2_SLURM_MEMORY
+}
+
+study2_submit() {
+    local -a arguments=("$@")
+
+    if [[ -n "${STUDY2_SLURM_MEMORY}" ]]; then
+        arguments=("--mem=${STUDY2_SLURM_MEMORY}" "${arguments[@]}")
+    fi
+
+    sbatch "${arguments[@]}"
 }
 
 study2_load_modules() {

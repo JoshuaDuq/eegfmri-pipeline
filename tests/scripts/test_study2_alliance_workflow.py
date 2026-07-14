@@ -77,6 +77,20 @@ def test_study2_alliance_defaults_match_bem_valid_oct6_source_space():
     assert "STUDY2_EXPECTED_VERTICES=8196" in env_example.read_text()
 
 
+def test_study2_submission_uses_profile_memory():
+    submit_script = ALLIANCE_ROOT / "run_full_study2_alliance.sh"
+    rorqual_profile = (
+        REPO_ROOT / "local_workflows" / "alliance_canada" / "clusters" / "rorqual.sh"
+    )
+    trillium_profile = (
+        REPO_ROOT / "local_workflows" / "alliance_canada" / "clusters" / "trillium.sh"
+    )
+
+    assert "study2_submit" in submit_script.read_text()
+    assert 'STUDY2_SLURM_MEMORY="64G"' in rorqual_profile.read_text()
+    assert 'STUDY2_SLURM_MEMORY=""' in trillium_profile.read_text()
+
+
 def test_study2_source_power_preserves_bids_subject_label():
     source_power_script = ALLIANCE_ROOT / "sbatch" / "04_source_power.sbatch"
 
