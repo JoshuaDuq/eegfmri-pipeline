@@ -139,9 +139,7 @@ def test_select_scanner_harmonic_peaks_rejects_window_without_peak() -> None:
 
 
 def test_paired_participant_bootstrap_matches_seeded_median_resampling() -> None:
-    from studies.pain_study.study1.figures.scanner_harmonic_spectrum import (
-        paired_participant_bootstrap,
-    )
+    from eeg_pipeline.analysis.participant_bootstrap import paired_participant_bootstrap
 
     values = np.asarray(
         [

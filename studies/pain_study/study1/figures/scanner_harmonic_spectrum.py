@@ -19,6 +19,7 @@ from eeg_pipeline.analysis.qc.scanner_harmonics import (
     DEFAULT_HARMONIC_WINDOWS,
     FrequencyWindow,
 )
+from eeg_pipeline.analysis.participant_bootstrap import paired_participant_bootstrap
 from eeg_pipeline.utils.config.loader import require_config_value
 from studies.pain_study.scanner_contamination import SCANNER_CLEAN_GAMMA_RANGES_HZ
 from studies.pain_study.study1.figures.continuous_spectrum import (
@@ -28,7 +29,6 @@ from studies.pain_study.study1.figures.continuous_spectrum import (
 )
 from studies.pain_study.study1.figures.spectral_statistics import (
     ParticipantBootstrapSpecification,
-    paired_participant_bootstrap,
     validity_bootstrap_specification,
 )
 from studies.pain_study.study1.figures.validity_style import (
