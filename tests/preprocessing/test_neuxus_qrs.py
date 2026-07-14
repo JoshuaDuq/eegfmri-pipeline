@@ -131,3 +131,99 @@ def test_inference_rejects_invalid_windows(window: np.ndarray, message: str) -> 
 
     with pytest.raises(ValueError, match=message):
         module.predict_neuxus_qrs(window, model)
+
+
+class _ThresholdPredictor:
+    window_samples = 500
+    model_sha256 = "test-model"
+
+    def predict(self, window: np.ndarray) -> np.ndarray:
+        probabilities = np.zeros(window.size, dtype=np.float32)
+        probabilities[window > 0.25] = 0.9
+        return probabilities
+
+
+def _synthetic_ecg(
+    peak_times: np.ndarray,
+    *,
+    amplitudes: np.ndarray | None = None,
+) -> tuple[np.ndarray, float]:
+    sampling_frequency = 1_000.0
+    time = np.arange(7_000) / sampling_frequency
+    if amplitudes is None:
+        amplitudes = np.ones(peak_times.size)
+    ecg = 0.01 * np.sin(2 * np.pi * 2.0 * time)
+    for peak_time, amplitude in zip(peak_times, amplitudes, strict=True):
+        ecg += amplitude * np.exp(-0.5 * ((time - peak_time) / 0.025) ** 2)
+    return ecg, sampling_frequency
+
+
+def _detection_parameters(module):
+    return module.NeuXusQrsDetectionParameters(
+        sampling_frequency_hz=250.0,
+        low_frequency_hz=0.5,
+        high_frequency_hz=30.0,
+        window_stride_samples=50,
+        probability_threshold=0.05,
+        minimum_support_samples=5,
+        refractory_period_seconds=0.4,
+        edge_margin_seconds=0.1,
+    )
+
+
+def test_detection_recovers_peaks_from_overlapping_windows() -> None:
+    module = _module()
+    expected_times = np.arange(1.0, 6.0)
+    ecg, sampling_frequency = _synthetic_ecg(expected_times)
+    detector = module.NeuXusQrsDetector(
+        predictor=_ThresholdPredictor(),
+        parameters=_detection_parameters(module),
+    )
+
+    detection = detector.detect(ecg, sampling_frequency_hz=sampling_frequency)
+
+    np.testing.assert_allclose(detection.times, expected_times, atol=0.02)
+    assert detection.sampling_frequency_hz == 250.0
+    assert detection.probabilities.shape == detection.filtered_ecg.shape
+    assert np.all(detection.probability_support[detection.probability_support > 0] >= 1)
+    assert detection.model_sha256 == "test-model"
+
+
+def test_detection_refractory_period_keeps_the_stronger_peak() -> None:
+    module = _module()
+    peak_times = np.array([1.0, 1.2, 2.0, 3.0, 4.0, 5.0])
+    amplitudes = np.array([1.0, 0.5, 1.0, 1.0, 1.0, 1.0])
+    ecg, sampling_frequency = _synthetic_ecg(peak_times, amplitudes=amplitudes)
+    detector = module.NeuXusQrsDetector(
+        predictor=_ThresholdPredictor(),
+        parameters=_detection_parameters(module),
+    )
+
+    detection = detector.detect(ecg, sampling_frequency_hz=sampling_frequency)
+
+    assert np.min(np.abs(detection.times - 1.0)) <= 0.02
+    assert np.min(np.abs(detection.times - 1.2)) > 0.1
+
+
+@pytest.mark.parametrize(
+    "ecg, sampling_frequency, message",
+    [
+        (np.zeros(7_000), 1_000.0, "flat"),
+        (np.full(7_000, np.nan), 1_000.0, "finite"),
+        (np.zeros((1, 7_000)), 1_000.0, "one-dimensional"),
+        (np.zeros(7_000), 999.0, "integer multiple"),
+    ],
+)
+def test_detection_rejects_invalid_ecg(
+    ecg: np.ndarray,
+    sampling_frequency: float,
+    message: str,
+) -> None:
+    module = _module()
+    detector = module.NeuXusQrsDetector(
+        predictor=_ThresholdPredictor(),
+        parameters=_detection_parameters(module),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        detector.detect(ecg, sampling_frequency_hz=sampling_frequency)

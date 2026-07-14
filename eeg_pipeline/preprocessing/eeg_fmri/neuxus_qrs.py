@@ -12,10 +12,11 @@ from dataclasses import dataclass
 from importlib.resources import as_file, files
 from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, Protocol
 
 import numpy as np
 from numba import njit
+from scipy.signal import butter, resample_poly, sosfiltfilt
 
 NEUXUS_MODEL_WINDOW_SAMPLES = 500
 NEUXUS_MODEL_HIDDEN_UNITS = 64
@@ -51,6 +52,81 @@ class NeuXusQrsModel:
     sha256: str
     window_samples: int = NEUXUS_MODEL_WINDOW_SAMPLES
     hidden_units: int = NEUXUS_MODEL_HIDDEN_UNITS
+
+
+class QrsWindowPredictor(Protocol):
+    """Probability-model interface consumed by the offline detector."""
+
+    window_samples: int
+    model_sha256: str
+
+    def predict(self, window: np.ndarray) -> np.ndarray:
+        """Return one R-peak probability per input sample."""
+
+
+@dataclass(frozen=True)
+class NeuXusQrsDetectionParameters:
+    """Fixed signal-conditioning and peak-consolidation parameters."""
+
+    sampling_frequency_hz: float = 250.0
+    low_frequency_hz: float = 0.5
+    high_frequency_hz: float = 30.0
+    window_stride_samples: int = 50
+    probability_threshold: float = 0.05
+    minimum_support_samples: int = 5
+    refractory_period_seconds: float = 0.4
+    edge_margin_seconds: float = 0.1
+
+    def __post_init__(self) -> None:
+        if self.sampling_frequency_hz <= 0:
+            raise ValueError("sampling_frequency_hz must be positive")
+        if self.low_frequency_hz <= 0:
+            raise ValueError("low_frequency_hz must be positive")
+        if self.high_frequency_hz <= self.low_frequency_hz:
+            raise ValueError("high_frequency_hz must exceed low_frequency_hz")
+        if self.high_frequency_hz >= self.sampling_frequency_hz / 2.0:
+            raise ValueError("high_frequency_hz must be below the detection Nyquist frequency")
+        if self.window_stride_samples <= 0:
+            raise ValueError("window_stride_samples must be positive")
+        if not 0.0 < self.probability_threshold < 1.0:
+            raise ValueError("probability_threshold must be between zero and one")
+        if self.minimum_support_samples < 1:
+            raise ValueError("minimum_support_samples must be positive")
+        if self.refractory_period_seconds <= 0:
+            raise ValueError("refractory_period_seconds must be positive")
+        if self.edge_margin_seconds < 0:
+            raise ValueError("edge_margin_seconds must be non-negative")
+
+
+@dataclass(frozen=True)
+class NeuXusQrsDetection:
+    """R-peak times and complete detection diagnostics."""
+
+    times: np.ndarray
+    peak_samples: np.ndarray
+    filtered_ecg: np.ndarray
+    probabilities: np.ndarray
+    probability_support: np.ndarray
+    sampling_frequency_hz: float
+    model_sha256: str
+
+
+@dataclass(frozen=True)
+class NeuXusQrsPredictor:
+    """Validated model exposed through the detector's narrow interface."""
+
+    model: NeuXusQrsModel
+
+    @property
+    def window_samples(self) -> int:
+        return self.model.window_samples
+
+    @property
+    def model_sha256(self) -> str:
+        return self.model.sha256
+
+    def predict(self, window: np.ndarray) -> np.ndarray:
+        return predict_neuxus_qrs(window, self.model)
 
 
 def _sha256(path: Path) -> str:
@@ -421,3 +497,194 @@ def predict_neuxus_qrs(window: np.ndarray, model: NeuXusQrsModel) -> np.ndarray:
         weights["bd"],
     )
     return np.asarray(probabilities, dtype=np.float32)
+
+
+def _window_starts(n_samples: int, window_samples: int, stride_samples: int) -> np.ndarray:
+    if n_samples < window_samples:
+        raise ValueError(
+            f"NeuXus detection requires at least {window_samples} samples, found {n_samples}"
+        )
+    starts = list(range(0, n_samples - window_samples + 1, stride_samples))
+    final_start = n_samples - window_samples
+    if starts[-1] != final_start:
+        starts.append(final_start)
+    return np.asarray(starts, dtype=int)
+
+
+def _normalize_window(window: np.ndarray) -> np.ndarray:
+    minimum = float(np.min(window))
+    span = float(np.max(window) - minimum)
+    if span <= np.finfo(np.float32).eps:
+        raise ValueError("NeuXus ECG window is flat")
+    return np.asarray(2.0 * (window - minimum) / span - 1.0, dtype=np.float32)
+
+
+def _average_probabilities(
+    ecg: np.ndarray,
+    predictor: QrsWindowPredictor,
+    parameters: NeuXusQrsDetectionParameters,
+) -> tuple[np.ndarray, np.ndarray]:
+    probability_sum = np.zeros(ecg.size, dtype=np.float64)
+    support = np.zeros(ecg.size, dtype=np.int32)
+    margin_samples = int(round(parameters.edge_margin_seconds * parameters.sampling_frequency_hz))
+    valid_window_samples = predictor.window_samples - margin_samples
+    if valid_window_samples <= 0:
+        raise ValueError("edge_margin_seconds excludes the complete NeuXus window")
+    starts = _window_starts(
+        ecg.size,
+        predictor.window_samples,
+        parameters.window_stride_samples,
+    )
+    for start in starts:
+        window = _normalize_window(ecg[start : start + predictor.window_samples])
+        probabilities = np.asarray(predictor.predict(window))
+        if probabilities.shape != (predictor.window_samples,):
+            raise ValueError(
+                "NeuXus predictor returned shape "
+                f"{probabilities.shape}, expected {(predictor.window_samples,)}"
+            )
+        if not np.all(np.isfinite(probabilities)):
+            raise ValueError("NeuXus predictor returned non-finite probabilities")
+        if np.any((probabilities < 0.0) | (probabilities > 1.0)):
+            raise ValueError("NeuXus predictor returned probabilities outside zero to one")
+        stop = start + valid_window_samples
+        probability_sum[start:stop] += probabilities[:valid_window_samples]
+        support[start:stop] += 1
+    averaged = np.zeros(ecg.size, dtype=np.float32)
+    observed = support > 0
+    averaged[observed] = (probability_sum[observed] / support[observed]).astype(np.float32)
+    return averaged, support
+
+
+def _supported_regions(mask: np.ndarray, minimum_samples: int) -> list[tuple[int, int]]:
+    padded = np.pad(mask.astype(np.int8), (1, 1))
+    transitions = np.diff(padded)
+    starts = np.flatnonzero(transitions == 1)
+    stops = np.flatnonzero(transitions == -1)
+    return [
+        (int(start), int(stop))
+        for start, stop in zip(starts, stops, strict=True)
+        if stop - start >= minimum_samples
+    ]
+
+
+def _snap_to_local_maximum(ecg: np.ndarray, candidate: int, radius: int) -> int:
+    start = max(0, candidate - radius)
+    stop = min(ecg.size, candidate + radius + 1)
+    return start + int(np.argmax(ecg[start:stop]))
+
+
+def _enforce_refractory_period(
+    candidates: np.ndarray,
+    probabilities: np.ndarray,
+    ecg: np.ndarray,
+    minimum_distance_samples: int,
+) -> np.ndarray:
+    retained: list[int] = []
+    for candidate in candidates:
+        if not retained or candidate - retained[-1] >= minimum_distance_samples:
+            retained.append(int(candidate))
+            continue
+        previous = retained[-1]
+        previous_score = (float(probabilities[previous]), float(ecg[previous]))
+        candidate_score = (float(probabilities[candidate]), float(ecg[candidate]))
+        if candidate_score > previous_score:
+            retained[-1] = int(candidate)
+    return np.asarray(retained, dtype=int)
+
+
+def _consolidate_peaks(
+    ecg: np.ndarray,
+    probabilities: np.ndarray,
+    parameters: NeuXusQrsDetectionParameters,
+) -> np.ndarray:
+    regions = _supported_regions(
+        probabilities > parameters.probability_threshold,
+        parameters.minimum_support_samples,
+    )
+    candidates = []
+    for start, stop in regions:
+        probability_peak = start + int(np.argmax(probabilities[start:stop]))
+        candidates.append(_snap_to_local_maximum(ecg, probability_peak, radius=5))
+    if not candidates:
+        return np.empty(0, dtype=int)
+    unique_candidates = np.unique(np.asarray(candidates, dtype=int))
+    minimum_distance = int(
+        round(parameters.refractory_period_seconds * parameters.sampling_frequency_hz)
+    )
+    return _enforce_refractory_period(
+        unique_candidates,
+        probabilities,
+        ecg,
+        minimum_distance,
+    )
+
+
+def _immutable(values: np.ndarray) -> np.ndarray:
+    result = np.asarray(values)
+    result.setflags(write=False)
+    return result
+
+
+@dataclass(frozen=True)
+class NeuXusQrsDetector:
+    """Condition ECG and detect R-peaks with overlapping NeuXus windows."""
+
+    predictor: QrsWindowPredictor
+    parameters: NeuXusQrsDetectionParameters
+
+    def __post_init__(self) -> None:
+        if self.parameters.window_stride_samples >= self.predictor.window_samples:
+            raise ValueError("window_stride_samples must be smaller than the model window")
+
+    def detect(
+        self,
+        ecg: np.ndarray,
+        *,
+        sampling_frequency_hz: float,
+    ) -> NeuXusQrsDetection:
+        values = np.asarray(ecg)
+        if values.ndim != 1:
+            raise ValueError("ECG must be one-dimensional")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("ECG must contain only finite values")
+        ratio = sampling_frequency_hz / self.parameters.sampling_frequency_hz
+        downsampling = int(round(ratio))
+        if downsampling < 1 or not np.isclose(ratio, downsampling, rtol=0.0, atol=1e-9):
+            raise ValueError(
+                "ECG sampling frequency must be an integer multiple of the NeuXus rate"
+            )
+        if np.ptp(values) <= np.finfo(float).eps:
+            raise ValueError("ECG is flat")
+        sos = butter(
+            4,
+            [
+                self.parameters.low_frequency_hz,
+                self.parameters.high_frequency_hz,
+            ],
+            btype="bandpass",
+            fs=sampling_frequency_hz,
+            output="sos",
+        )
+        filtered = sosfiltfilt(sos, values)
+        detection_ecg = resample_poly(filtered, up=1, down=downsampling)
+        probabilities, support = _average_probabilities(
+            detection_ecg,
+            self.predictor,
+            self.parameters,
+        )
+        peak_samples = _consolidate_peaks(
+            detection_ecg,
+            probabilities,
+            self.parameters,
+        )
+        times = peak_samples.astype(float) / self.parameters.sampling_frequency_hz
+        return NeuXusQrsDetection(
+            times=_immutable(times),
+            peak_samples=_immutable(peak_samples),
+            filtered_ecg=_immutable(detection_ecg),
+            probabilities=_immutable(probabilities),
+            probability_support=_immutable(support),
+            sampling_frequency_hz=self.parameters.sampling_frequency_hz,
+            model_sha256=self.predictor.model_sha256,
+        )
