@@ -6,6 +6,8 @@ from pathlib import Path
 
 import mne
 import numpy as np
+from PIL import Image
+import pytest
 
 from eeg_pipeline.preprocessing.eeg_fmri.cardiac import QrsDetection, QrsQuality
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import NeuXusQrsDetection
@@ -106,11 +108,18 @@ def _native_result() -> NativeCorrectionResult:
         channel_rms=np.array([0.5]),
         channel_peak_to_peak=np.array([1.5]),
     )
-    harmonic_stages = {
-        "raw": {"harmonic_1_reference_power_db": 20.0},
-        "gradient_corrected": {"harmonic_1_reference_power_db": 3.0},
-        "final": {"harmonic_1_reference_power_db": 1.0},
-    }
+    harmonic_stages = {stage: {} for stage in ("raw", "gradient_corrected", "final")}
+    for index, (prefix, frequency) in enumerate(
+        zip(
+            ("harmonic_18_23", "harmonic_38_43", "harmonic_56_67", "harmonic_77_85"),
+            (20.0, 41.0, 61.0, 82.0),
+            strict=True,
+        )
+    ):
+        harmonic_stages["raw"][f"{prefix}_reference_hz"] = frequency
+        harmonic_stages["raw"][f"{prefix}_reference_power_db"] = 20.0 + index
+        harmonic_stages["gradient_corrected"][f"{prefix}_reference_power_db"] = 3.0 + index
+        harmonic_stages["final"][f"{prefix}_reference_power_db"] = 1.0 + index
     return NativeCorrectionResult(
         raw=raw,
         qrs=qrs,
@@ -207,6 +216,10 @@ def test_process_recording_writes_atomic_qrs_and_diagnostic_outputs(
         "onset_seconds\tdetector_sample\tprobability\twindow_support"
     )
     assert diagnostic_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    with Image.open(diagnostic_path) as image:
+        assert image.width >= 3_600
+        assert image.height >= 2_400
+        assert image.info["dpi"] == pytest.approx((300.0, 300.0), abs=0.1)
     assert qc["cardiac"]["qrs_detector"]["model_sha256"] == "d" * 64
     assert row["qrs_model_sha256"] == "d" * 64
 
@@ -252,6 +265,11 @@ def test_run_cohort_publishes_organized_derivative_atomically(
             "qrs_model_sha256": "d" * 64,
             "cardiac_rms_attenuation_db": 12.0,
             "cardiac_peak_to_peak_attenuation_db": 11.0,
+            "abnormal_rr_fraction": 0.0,
+            "harmonic_18_23_raw_to_final_db": 25.0,
+            "harmonic_38_43_raw_to_final_db": 24.0,
+            "harmonic_56_67_raw_to_final_db": 26.0,
+            "harmonic_77_85_raw_to_final_db": 25.5,
             "complete_volume_count": 20,
         }
 
@@ -266,6 +284,10 @@ def test_run_cohort_publishes_organized_derivative_atomically(
 
     assert published == output_root
     assert (output_root / "dataset_description.json").is_file()
+    cohort_figure = output_root / "cohort_mriartifact_qc.png"
+    with Image.open(cohort_figure) as image:
+        assert image.width >= 3_600
+        assert image.info["dpi"] == pytest.approx((300.0, 300.0), abs=0.1)
     assert (output_root / "native_eeg_fmri_artifact_correction.yaml").is_file()
     manifest_text = (output_root / "native_correction_manifest.tsv").read_text(encoding="utf-8")
     assert str(output_root / "sub-0001" / "eeg") in manifest_text

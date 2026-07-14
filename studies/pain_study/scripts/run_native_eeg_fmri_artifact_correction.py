@@ -10,7 +10,6 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from matplotlib.figure import Figure
 import mne
 import numpy as np
 import numba
@@ -29,6 +28,10 @@ from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import (
 from eeg_pipeline.preprocessing.eeg_fmri.pipeline import (
     NativeCorrectionResult,
     preprocess_raw_in_place,
+)
+from eeg_pipeline.preprocessing.eeg_fmri.plotting import (
+    save_cohort_qc_figure,
+    save_run_qc_figure,
 )
 from eeg_pipeline.preprocessing.eeg_fmri.qc import CardiacLockedSummary
 
@@ -325,46 +328,6 @@ def _write_qrs_table(result: NativeCorrectionResult, path: Path) -> None:
             )
 
 
-def _write_diagnostic_figure(result: NativeCorrectionResult, path: Path) -> None:
-    diagnostics = result.qrs.diagnostics
-    detection_times = np.arange(diagnostics.filtered_ecg.size) / diagnostics.sampling_frequency_hz
-    figure = Figure(figsize=(12, 9), layout="constrained")
-    ecg_axis, probability_axis, cardiac_axis = figure.subplots(3, 1)
-    ecg_axis.plot(detection_times, diagnostics.filtered_ecg, color="black", linewidth=0.6)
-    ecg_axis.scatter(
-        result.qrs.times,
-        diagnostics.filtered_ecg[diagnostics.peak_samples],
-        color="#c43b32",
-        s=8,
-        label="Accepted R peaks",
-    )
-    ecg_axis.set(ylabel="Filtered ECG", title="NeuXus QRS detection")
-    ecg_axis.legend(loc="upper right")
-
-    probability_axis.plot(
-        detection_times,
-        diagnostics.probabilities,
-        color="#315b8a",
-        linewidth=0.7,
-    )
-    probability_axis.set(xlabel="Time (s)", ylabel="R-peak probability")
-
-    before = result.cardiac_qc.before
-    after = result.cardiac_qc.after
-    before_rms = np.sqrt(np.mean(before.median_evoked**2, axis=0))
-    after_rms = np.sqrt(np.mean(after.median_evoked**2, axis=0))
-    cardiac_axis.plot(before.times, before_rms, label="Before OBS", color="#c43b32")
-    cardiac_axis.plot(after.times, after_rms, label="After OBS", color="#315b8a")
-    cardiac_axis.set(
-        xlabel="Time from R peak (s)",
-        ylabel="Across-channel RMS",
-        title="Cardiac-locked EEG",
-    )
-    cardiac_axis.legend(loc="upper right")
-    figure.savefig(path, dpi=140)
-    figure.clear()
-
-
 def process_recording(
     recording: InputRecording,
     output_root: Path,
@@ -406,7 +369,11 @@ def process_recording(
     try:
         result.raw.save(temporary_fif, fmt="single", overwrite=False, verbose=False)
         _write_qrs_table(result, temporary_qrs)
-        _write_diagnostic_figure(result, temporary_diagnostic)
+        save_run_qc_figure(
+            result,
+            temporary_diagnostic,
+            recording_label=f"{recording.subject} run-{recording.run}",
+        )
         output_fif_hash = _sha256(temporary_fif)
         output_qrs_hash = _sha256(temporary_qrs)
         output_diagnostic_hash = _sha256(temporary_diagnostic)
@@ -434,7 +401,7 @@ def process_recording(
             path.unlink(missing_ok=True)
 
     quality = result.qrs.quality
-    return {
+    row = {
         "subject": recording.subject,
         "run": recording.run,
         "source_vhdr": str(recording.vhdr_path),
@@ -450,8 +417,14 @@ def process_recording(
         "qrs_model_sha256": result.qrs.diagnostics.model_sha256,
         "cardiac_rms_attenuation_db": result.cardiac_qc.rms_attenuation_db,
         "cardiac_peak_to_peak_attenuation_db": (result.cardiac_qc.peak_to_peak_attenuation_db),
+        "abnormal_rr_fraction": quality.abnormal_rr_fraction,
         "complete_volume_count": result.complete_volume_count,
     }
+    attenuation = _harmonic_attenuation(result.harmonic_stages)
+    row.update(
+        {key: value for key, value in attenuation.items() if key.endswith("_raw_to_final_db")}
+    )
+    return row
 
 
 def _write_manifest(output_root: Path, rows: list[dict[str, object]]) -> None:
@@ -509,6 +482,7 @@ def run_cohort(
             published_row[key] = str(output_root / staged_path.relative_to(incomplete_root))
         published_rows.append(published_row)
     _write_manifest(incomplete_root, published_rows)
+    save_cohort_qc_figure(rows, incomplete_root / "cohort_mriartifact_qc.png")
     (incomplete_root / "dataset_description.json").write_text(
         json.dumps(
             {
