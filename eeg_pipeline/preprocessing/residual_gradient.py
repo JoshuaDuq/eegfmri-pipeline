@@ -46,6 +46,14 @@ class VolumeLayout:
         return int(self.starts.size)
 
 
+@dataclass(frozen=True)
+class ResidualObsResult:
+    """Corrected recording and fold-level component audit records."""
+
+    raw: mne.io.BaseRaw
+    component_rows: tuple[dict[str, float | int | str], ...]
+
+
 def validate_brainvision_source(vhdr_path: str | Path) -> Path:
     """Validate one Analyzer-corrected BrainVision triplet."""
     path = Path(vhdr_path)
@@ -95,8 +103,7 @@ def build_volume_layout(
     if np.any(intervals < epoch_samples):
         interval = int(intervals[intervals < epoch_samples][0])
         raise ValueError(
-            f"Volume marker interval {interval} is shorter than the "
-            f"{epoch_samples}-sample TR."
+            f"Volume marker interval {interval} is shorter than the {epoch_samples}-sample TR."
         )
 
     starts = starts[starts + epoch_samples <= raw.n_times]
@@ -113,6 +120,75 @@ def build_volume_layout(
     starts.setflags(write=False)
     block_ids.setflags(write=False)
     return VolumeLayout(starts=starts, block_ids=block_ids, epoch_samples=epoch_samples)
+
+
+def apply_residual_obs(
+    raw: mne.io.BaseRaw,
+    layout: VolumeLayout,
+    *,
+    n_components: int,
+    n_folds: int,
+) -> ResidualObsResult:
+    """Remove held-out temporal PCA projections from complete EEG volume epochs."""
+    if n_components < 0:
+        raise ValueError("n_components must be non-negative.")
+    if n_folds < 2 or n_folds > layout.n_epochs:
+        raise ValueError("n_folds must be between 2 and the number of volume epochs.")
+
+    corrected = raw.copy().load_data()
+    if n_components == 0:
+        return ResidualObsResult(raw=corrected, component_rows=())
+
+    picks = mne.pick_types(corrected.info, eeg=True, exclude=[])
+    offsets = np.arange(layout.epoch_samples, dtype=np.int64)
+    sample_matrix = layout.starts[:, np.newaxis] + offsets[np.newaxis, :]
+    fold_ids = np.arange(layout.n_epochs, dtype=np.int64) % n_folds
+    rows: list[dict[str, float | int | str]] = []
+
+    for pick in picks:
+        channel_epochs = corrected._data[pick, sample_matrix].copy()
+        centered_epochs = channel_epochs - channel_epochs.mean(axis=1, keepdims=True)
+        corrected_epochs = channel_epochs.copy()
+
+        for fold in range(n_folds):
+            held_mask = fold_ids == fold
+            train = centered_epochs[~held_mask]
+            basis_rank = min(train.shape)
+            if n_components > basis_rank:
+                raise ValueError(f"n_components={n_components} exceeds basis rank {basis_rank}.")
+
+            _, singular_values, right_vectors = np.linalg.svd(train, full_matrices=False)
+            total_variance = float(np.sum(singular_values**2))
+            if total_variance == 0.0:
+                channel = corrected.ch_names[pick]
+                raise ValueError(f"Training data have zero variance for channel {channel!r}.")
+
+            basis = _normalize_component_signs(right_vectors[:n_components])
+            held = centered_epochs[held_mask]
+            fitted = (held @ basis.T) @ basis
+            corrected_epochs[held_mask] -= fitted
+            explained_variance = float(np.sum(singular_values[:n_components] ** 2) / total_variance)
+            rows.append(
+                {
+                    "channel": corrected.ch_names[pick],
+                    "fold": fold,
+                    "n_components": n_components,
+                    "training_variance_explained": explained_variance,
+                    "held_removed_rms_v": float(np.sqrt(np.mean(fitted**2))),
+                }
+            )
+
+        corrected._data[pick, sample_matrix] = corrected_epochs
+
+    return ResidualObsResult(raw=corrected, component_rows=tuple(rows))
+
+
+def _normalize_component_signs(components: NDArray[np.float64]) -> NDArray[np.float64]:
+    normalized = components.copy()
+    maxima = np.argmax(np.abs(normalized), axis=1)
+    signs = np.sign(normalized[np.arange(normalized.shape[0]), maxima])
+    signs[signs == 0] = 1
+    return normalized * signs[:, np.newaxis]
 
 
 def _read_header_entries(path: Path) -> dict[str, str]:
