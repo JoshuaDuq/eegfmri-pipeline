@@ -43,10 +43,13 @@ MNE-Python, Nilearn, NumPy, SciPy, pandas, and scikit-learn.
 - Behavioral statistics and machine-learning workflows
 - EEG source localization with template and subject-specific paths
 - fMRI preprocessing, GLM analysis, and EEG–fMRI integration workflows
+- Native simultaneous EEG-fMRI gradient and pulse-artifact correction from original 5 kHz recordings
 - Scriptable CLI commands and guided terminal UI workflows
 
 ## Study-Specific Guides
 
+- [Native EEG-fMRI artifact correction](docs/native_eeg_fmri_artifact_correction.md) for the fixed
+  synchronized AAS, NeuXus QRS, MNE PCA-OBS, and qualification boundary
 - [Study 1 run guide](studies/pain_study/study1/RUN_GUIDE.md) for rerunning the
   trial-wise EEG-to-fMRI pain-signature workflow and locating article-ready outputs
 - [Study 1 protocol README](studies/pain_study/study1/README.md) for the scientific

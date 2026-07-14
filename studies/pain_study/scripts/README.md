@@ -39,6 +39,23 @@ python studies/pain_study/scripts/run_paradigm_specific.py <command> [options]
 
 Converts BrainVision (`.vhdr`) source files to BIDS EEG format using `mne-bids`.
 
+### Native EEG-fMRI artifact correction
+
+`run_native_eeg_fmri_artifact_correction.py` is the native candidate replacement for the BrainVision
+Analyzer scanner-gradient and pulse-artifact stages. It reads the original 5 kHz recordings from the
+versioned marker-sanitized derivative, applies synchronized phase-aligned AAS, automatic NeuXus LSTM
+R-peak detection, and MNE PCA-OBS, then writes a separate 1 kHz derivative with per-run spectral,
+QRS, and cardiac-locked QC. Each run has separate physiological and scanner-spectrum figures; the
+latter combines the full 15–90 Hz comb with four stage-resolved local PSD windows. The fixed
+qualification boundary is all 83 verified runs.
+
+```bash
+python -m studies.pain_study.scripts.run_native_eeg_fmri_artifact_correction
+```
+
+See [`docs/native_eeg_fmri_artifact_correction.md`](../../../docs/native_eeg_fmri_artifact_correction.md)
+for the fixed method, literature basis, and qualification criteria.
+
 **Source layout expected:**
 ```
 <source-root>/
