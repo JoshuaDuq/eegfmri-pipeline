@@ -8,11 +8,30 @@ import pytest
 
 from studies.pain_study.scripts.benchmark_residual_gradient import (
     OutputPolicy,
+    build_parser,
     discover_pilot_files,
     load_benchmark_config,
     run_pilot_benchmark,
     write_benchmark_reports,
 )
+
+
+def test_cli_requires_source_output_and_config() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--source-root",
+            "/data/source_data",
+            "--output-root",
+            "/data/derivatives/qc/residual_gradient_obs_benchmark",
+            "--config",
+            "config.yaml",
+            "--output-policy",
+            "error",
+        ]
+    )
+
+    assert args.output_policy == "error"
 
 
 def test_default_config_has_fixed_pilot_and_component_grid() -> None:

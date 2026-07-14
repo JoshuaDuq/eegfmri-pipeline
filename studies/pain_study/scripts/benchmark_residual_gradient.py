@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
@@ -455,6 +456,35 @@ def run_pilot_benchmark(
     return decision
 
 
+def build_parser() -> argparse.ArgumentParser:
+    """Build the deliberately narrow benchmark command-line interface."""
+    parser = argparse.ArgumentParser(
+        description="Benchmark residual OBS on BrainVision scanner- and pulse-corrected EEG."
+    )
+    parser.add_argument("--source-root", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument(
+        "--output-policy",
+        choices=[policy.value for policy in OutputPolicy],
+        default=OutputPolicy.ERROR.value,
+    )
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    config = load_benchmark_config(args.config)
+    decision = run_pilot_benchmark(
+        source_root=args.source_root,
+        output_root=args.output_root,
+        config=config,
+        output_policy=OutputPolicy(args.output_policy),
+    )
+    print(json.dumps(decision.to_dict(), indent=2))
+    return 0
+
+
 def _temporary_path(destination: Path) -> Path:
     handle = tempfile.NamedTemporaryFile(
         prefix=f".{destination.stem}.",
@@ -673,3 +703,7 @@ def _frequency_windows(value: Any) -> tuple[tuple[float, float], ...]:
             raise ValueError(f"harmonic_windows_hz[{index}] must contain exactly two bounds.")
         parsed.append(bounds)
     return tuple(parsed)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

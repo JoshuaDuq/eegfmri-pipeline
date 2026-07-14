@@ -91,6 +91,40 @@ windows from confirmatory gamma measures. This test does not prove that all
 pain-related high-frequency activity is absent from the excluded windows; it
 establishes that those windows cannot be interpreted as clean neural gamma.
 
+## Residual OBS Pilot Benchmark
+
+The BrainVision `*_scannerpulse_corrected` files have already undergone
+21-volume scanner average-artifact subtraction, 100 Hz low-pass filtering,
+downsampling from 5 kHz to 1 kHz, R-peak detection, and 21-beat pulse
+correction. The residual benchmark therefore retains the BrainVision result
+and does not run full FASTR, repeat average-artifact subtraction, synthesize
+volume triggers, or redo pulse correction.
+
+The native Python layer cross-fits temporal optimal-basis components across
+complete 900-sample volume epochs. It evaluates component counts 0–4 on the
+prespecified excluded pilot `sub-0006`. A nonzero count is accepted only when
+all four scanner windows improve and every injected-signal preservation gate
+passes across all six runs. This conservative use reflects the literature's
+warning that additional OBS components can remove EEG as well as artifact
+(Niazy et al., 2005).
+
+```bash
+uv run --python 3.11 --extra dev python \
+  studies/pain_study/scripts/benchmark_residual_gradient.py \
+  --source-root /Volumes/KINGSTON/EEG_fMRI_data/source_data \
+  --output-root \
+    /Volumes/KINGSTON/EEG_fMRI_data/derivatives/qc/residual_gradient_obs_benchmark \
+  --config \
+    studies/pain_study/scripts/config/residual_gradient_benchmark.yaml \
+  --output-policy error
+```
+
+The output includes candidate FIF files and machine-readable harmonic,
+component-variance, signal-preservation, provenance, and decision audits.
+These are benchmark artifacts, not production preprocessing derivatives. They
+must not replace current MNE inputs without a separate approved production
+integration design.
+
 ## References
 
 Allen, P. J., Josephs, O., & Turner, R. (2000). A method for removing imaging
@@ -100,3 +134,8 @@ artifact from continuous EEG recorded during functional MRI. *NeuroImage, 12*,
 Mullinger, K. J., Yan, W. X., & Bowtell, R. (2011). Reducing the gradient
 artefact in simultaneous EEG-fMRI by adjusting the subject's axial position.
 *NeuroImage, 54*, 1942–1950. https://doi.org/10.1016/j.neuroimage.2010.09.079
+
+Niazy, R. K., Beckmann, C. F., Iannetti, G. D., Brady, J. M., & Smith, S. M.
+(2005). Removal of FMRI environment artifacts from EEG data using optimal
+basis sets. *NeuroImage, 28*, 720–737.
+https://doi.org/10.1016/j.neuroimage.2005.06.067
