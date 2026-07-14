@@ -1,5 +1,34 @@
 # Study 1 - Run Guide
 
+## Alliance Canada
+
+The repository-owned Alliance workflow selects infrastructure with
+`ALLIANCE_CLUSTER=rorqual|trillium`. From the repository root on the local Mac:
+
+```bash
+export ALLIANCE_CLUSTER=rorqual
+bash local_workflows/alliance_canada/start_alliance_connection.sh
+bash local_workflows/alliance_canada/setup_alliance_study1.sh
+bash local_workflows/alliance_canada/setup_alliance_runtime.sh
+bash local_workflows/alliance_canada/submit_study1_alliance.sh
+```
+
+The tracked subject manifest includes `0000`, `0001`, `0003`, `0004`, `0005`,
+`0007`, `0008`, `0009`, `0010`, `0011`, `0012`, `0013`, and `0014`; `0006` is
+excluded. The workflow requires all 13 participants, uses 5,000 confirmatory
+permutations, and fails before transfer when required BIDS, cleaned EEG,
+fMRIPrep, or signature inputs are absent.
+
+Before migrating a run from Trillium to Rorqual, retrieve any Trillium-only
+fMRIPrep subjects with:
+
+```bash
+bash local_workflows/alliance_canada/fetch_study1_fmriprep_from_trillium.sh
+```
+
+Job records and logs are written under `/scratch/$USER/study1_logs` on the
+selected cluster. Monitor the recorded IDs with `squeue` and `sacct`.
+
 This guide runs the Study 1 signature-prediction workflow from prepared EEG/fMRI derivatives.
 Study 1 does not run fMRIPrep itself. It expects the task fMRI BIDS data, cleaned EEG/event
 derivatives, external signature maps, a fixed a-priori scoring mask, and fMRIPrep preprocessed BOLD

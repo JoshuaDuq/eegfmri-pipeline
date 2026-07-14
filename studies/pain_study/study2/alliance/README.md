@@ -1,5 +1,20 @@
 # Study 2 on Alliance Canada
 
+The local orchestration uses the same strict cluster selector as fMRIPrep and
+Study 1:
+
+```bash
+export ALLIANCE_CLUSTER=rorqual  # or trillium
+bash local_workflows/alliance_canada/start_alliance_connection.sh
+bash local_workflows/alliance_canada/setup_alliance_study2.sh
+bash local_workflows/alliance_canada/setup_alliance_study2_runtime.sh
+bash local_workflows/alliance_canada/submit_study2_alliance.sh
+```
+
+The selected profile supplies the host, storage roots, account, and Slurm
+memory policy. `write_study2_env.sh` generates `study2_alliance.env`; do not
+maintain a second set of cluster paths manually.
+
 This directory contains the Alliance Canada/Slurm workflow for running Study 2
 from anatomical reconstruction through source-family inference. It deliberately
 does not use the local Docker BEM helper: Docker is not available on Alliance

@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from tests import REPO_ROOT
 
 
