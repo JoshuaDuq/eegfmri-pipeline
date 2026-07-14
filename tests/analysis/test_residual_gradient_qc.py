@@ -66,6 +66,7 @@ def test_outside_harmonic_psd_change_is_zero_for_identity() -> None:
         data,
         sfreq=1_000.0,
         nperseg=4_096,
+        overlap_fraction=0.5,
         harmonic_windows_hz=((18.0, 23.0), (38.0, 43.0)),
     )
 

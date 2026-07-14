@@ -56,6 +56,11 @@ class ResidualObsResult:
 
 def validate_brainvision_source(vhdr_path: str | Path) -> Path:
     """Validate one Analyzer-corrected BrainVision triplet."""
+    return brainvision_source_files(vhdr_path)[0]
+
+
+def brainvision_source_files(vhdr_path: str | Path) -> tuple[Path, Path, Path]:
+    """Return the validated header, data, and marker files in source order."""
     path = Path(vhdr_path)
     if path.suffix.lower() != ".vhdr":
         raise ValueError(f"Expected a .vhdr BrainVision header, got: {path}")
@@ -65,9 +70,9 @@ def validate_brainvision_source(vhdr_path: str | Path) -> Path:
         raise FileNotFoundError(f"BrainVision header does not exist: {path}")
 
     entries = _read_header_entries(path)
-    _require_referenced_file(path, entries, "DataFile", "data")
-    _require_referenced_file(path, entries, "MarkerFile", "marker")
-    return path
+    data_path = _require_referenced_file(path, entries, "DataFile", "data")
+    marker_path = _require_referenced_file(path, entries, "MarkerFile", "marker")
+    return path, data_path, marker_path
 
 
 def validate_residual_obs_raw(raw: mne.io.BaseRaw, settings: ResidualObsSettings) -> None:
@@ -206,7 +211,7 @@ def _require_referenced_file(
     entries: dict[str, str],
     key: str,
     label: str,
-) -> None:
+) -> Path:
     if key not in entries:
         raise ValueError(f"BrainVision header has no {key} entry: {header_path}")
     referenced_path = header_path.parent / entries[key]
@@ -214,3 +219,4 @@ def _require_referenced_file(
         raise FileNotFoundError(
             f"BrainVision referenced {label} file does not exist: {referenced_path}"
         )
+    return referenced_path

@@ -9,6 +9,7 @@ import pytest
 from eeg_pipeline.preprocessing.residual_gradient import (
     ResidualObsSettings,
     apply_residual_obs,
+    brainvision_source_files,
     build_volume_layout,
     validate_brainvision_source,
     validate_residual_obs_raw,
@@ -101,6 +102,20 @@ def test_validate_brainvision_source_requires_referenced_files(tmp_path: Path) -
 
     with pytest.raises(FileNotFoundError, match="referenced data file"):
         validate_brainvision_source(header)
+
+
+def test_brainvision_source_files_returns_validated_triplet(tmp_path: Path) -> None:
+    header = tmp_path / "run_scannerpulse_corrected.vhdr"
+    data = tmp_path / "samples.eeg"
+    markers = tmp_path / "events.vmrk"
+    data.touch()
+    markers.touch()
+    header.write_text(
+        "DataFile=samples.eeg\nMarkerFile=events.vmrk\n",
+        encoding="utf-8",
+    )
+
+    assert brainvision_source_files(header) == (header, data, markers)
 
 
 def test_validate_brainvision_source_rejects_uncorrected_name(tmp_path: Path) -> None:

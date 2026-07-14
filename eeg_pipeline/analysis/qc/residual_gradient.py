@@ -224,6 +224,7 @@ def compute_outside_harmonic_psd_change(
     *,
     sfreq: float,
     nperseg: int,
+    overlap_fraction: float,
     harmonic_windows_hz: Sequence[tuple[float, float]],
 ) -> PsdChangeMetrics:
     """Measure channel-wise median PSD change outside scanner windows."""
@@ -235,9 +236,22 @@ def compute_outside_harmonic_psd_change(
         raise ValueError("PSD inputs must contain only finite values.")
     if nperseg <= 0 or nperseg > before.shape[1]:
         raise ValueError("nperseg must be positive and no greater than the sample count.")
+    noverlap = _welch_overlap(nperseg, overlap_fraction)
 
-    frequencies, before_psd = welch(before, fs=sfreq, nperseg=nperseg, axis=-1)
-    _, after_psd = welch(after, fs=sfreq, nperseg=nperseg, axis=-1)
+    frequencies, before_psd = welch(
+        before,
+        fs=sfreq,
+        nperseg=nperseg,
+        noverlap=noverlap,
+        axis=-1,
+    )
+    _, after_psd = welch(
+        after,
+        fs=sfreq,
+        nperseg=nperseg,
+        noverlap=noverlap,
+        axis=-1,
+    )
     retained = (frequencies >= 13.0) & (frequencies <= 95.0)
     for low_hz, high_hz in harmonic_windows_hz:
         retained &= ~((frequencies >= low_hz) & (frequencies <= high_hz))
@@ -262,12 +276,22 @@ def summarize_candidate(
     run: int,
     n_components: int,
     nperseg: int,
+    overlap_fraction: float,
     harmonic_windows_hz: Sequence[tuple[float, float]],
 ) -> dict[str, Any]:
     """Summarize harmonic peaks and volume-locked RMS for one candidate."""
     picks = mne.pick_types(raw.info, eeg=True, exclude=[])
     data = raw.get_data(picks)
-    frequencies, psd = welch(data, fs=raw.info["sfreq"], nperseg=nperseg, axis=-1)
+    if nperseg <= 0 or nperseg > raw.n_times:
+        raise ValueError("nperseg must be positive and no greater than the sample count.")
+    noverlap = _welch_overlap(nperseg, overlap_fraction)
+    frequencies, psd = welch(
+        data,
+        fs=raw.info["sfreq"],
+        nperseg=nperseg,
+        noverlap=noverlap,
+        axis=-1,
+    )
     windows = tuple(
         FrequencyWindow(f"scanner_{low_hz:g}_{high_hz:g}", low_hz, high_hz)
         for low_hz, high_hz in harmonic_windows_hz
@@ -351,6 +375,12 @@ def _passes_preservation_gates(
         and max(abs(row["outside_harmonic_psd_change_db"]) for row in rows)
         <= thresholds.maximum_outside_harmonic_psd_change_db
     )
+
+
+def _welch_overlap(nperseg: int, overlap_fraction: float) -> int:
+    if not np.isfinite(overlap_fraction) or not 0 <= overlap_fraction < 1:
+        raise ValueError("overlap_fraction must be in [0, 1).")
+    return int(nperseg * overlap_fraction)
 
 
 def _improves_harmonic_window(
