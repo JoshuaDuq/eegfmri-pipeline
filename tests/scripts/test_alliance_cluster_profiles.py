@@ -76,3 +76,26 @@ def test_unknown_cluster_profile_fails() -> None:
 
     assert result.returncode != 0
     assert "Unsupported ALLIANCE_CLUSTER: cedar" in result.stderr
+
+
+def test_alliance_workflows_have_generic_entrypoints() -> None:
+    expected = (
+        "setup_alliance_fmriprep.sh",
+        "setup_alliance_runtime.sh",
+        "setup_alliance_study1.sh",
+        "setup_alliance_study2.sh",
+        "setup_alliance_study2_runtime.sh",
+        "submit_study1_alliance.sh",
+        "submit_study2_alliance.sh",
+    )
+
+    for filename in expected:
+        assert (WORKFLOW_DIR / filename).is_file(), filename
+
+
+def test_tracked_workflows_do_not_use_rorqual_specific_variables() -> None:
+    workflow_files = [*WORKFLOW_DIR.glob("*.sh"), *WORKFLOW_DIR.glob("lib/*.sh")]
+    contents = "\n".join(path.read_text() for path in workflow_files)
+
+    assert "RORQUAL_HOST" not in contents
+    assert "RORQUAL_SSH_CONTROL_PATH" not in contents
