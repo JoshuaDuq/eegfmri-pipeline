@@ -34,8 +34,9 @@ def _write_workflow_config(workflow_dir: Path, tmp_path: Path) -> tuple[Path, Pa
     (workflow_dir / "local_env.sh").write_text(
         "\n".join(
             [
-                'export RORQUAL_HOST="fake-rorqual"',
-                f'export RORQUAL_SSH_CONTROL_PATH="{tmp_path / "ssh-control"}"',
+                'export ALLIANCE_CLUSTER="rorqual"',
+                'export ALLIANCE_HOST="fake-rorqual"',
+                f'export ALLIANCE_SSH_CONTROL_PATH="{tmp_path / "ssh-control"}"',
                 f'export LOCAL_BIDS_FMRI_ROOT="{local_bids_root}"',
                 (
                     'export LOCAL_FMRIPREP_OUTPUT_ROOT="'

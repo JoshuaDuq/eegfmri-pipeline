@@ -15,12 +15,12 @@ if [[ ! -f "${LOCAL_ENV}" ]]; then
     exit 1
 fi
 
-source "${ALLIANCE_ENV}"
 source "${LOCAL_ENV}"
+source "${ALLIANCE_ENV}"
 
 required_vars=(
-    RORQUAL_HOST
-    RORQUAL_SSH_CONTROL_PATH
+    ALLIANCE_HOST
+    ALLIANCE_SSH_CONTROL_PATH
     FMRIPREP_DERIV_ROOT
     FMRIPREP_OUTPUT_SPACES
     FMRIPREP_TASK_ID
@@ -35,10 +35,10 @@ for var_name in "${required_vars[@]}"; do
     fi
 done
 
-if ! ssh -S "${RORQUAL_SSH_CONTROL_PATH}" -O check "${RORQUAL_HOST}" 2>/dev/null; then
-    echo "No active Rorqual SSH control connection." >&2
+if ! ssh -S "${ALLIANCE_SSH_CONTROL_PATH}" -O check "${ALLIANCE_HOST}" 2>/dev/null; then
+    echo "No active ${ALLIANCE_CLUSTER} SSH control connection." >&2
     echo "Run this in your local terminal first:" >&2
-    echo "  bash ${SCRIPT_DIR}/start_rorqual_connection.sh" >&2
+    echo "  bash ${SCRIPT_DIR}/start_alliance_connection.sh" >&2
     exit 1
 fi
 
@@ -65,23 +65,23 @@ if [[ "${#subjects[@]}" -lt 1 ]]; then
 fi
 
 ssh \
-    -o ControlPath="${RORQUAL_SSH_CONTROL_PATH}" \
+    -o ControlPath="${ALLIANCE_SSH_CONTROL_PATH}" \
     -o BatchMode=yes \
-    "${RORQUAL_HOST}" \
+    "${ALLIANCE_HOST}" \
     "test -d '${remote_output_root}'"
 
 echo "Creating remote fMRIPrep archive: ${remote_archive}"
 ssh \
-    -o ControlPath="${RORQUAL_SSH_CONTROL_PATH}" \
+    -o ControlPath="${ALLIANCE_SSH_CONTROL_PATH}" \
     -o BatchMode=yes \
-    "${RORQUAL_HOST}" \
+    "${ALLIANCE_HOST}" \
     "rm -f '${remote_archive}' && cd '${remote_output_root}' && tar -cf '${remote_archive}' . && test -s '${remote_archive}'"
 
 mkdir -p "${local_derivatives_root}" "${LOCAL_FMRIPREP_OUTPUT_ROOT}"
 
 rsync -avh --progress \
-    -e "ssh -o ControlPath=${RORQUAL_SSH_CONTROL_PATH} -o BatchMode=yes" \
-    "${RORQUAL_HOST}:${remote_archive}" \
+    -e "ssh -o ControlPath=${ALLIANCE_SSH_CONTROL_PATH} -o BatchMode=yes" \
+    "${ALLIANCE_HOST}:${remote_archive}" \
     "${local_archive}"
 
 rm -rf "${local_fmriprep_root}"
@@ -149,9 +149,9 @@ fi
 
 rm -f "${local_archive}"
 ssh \
-    -o ControlPath="${RORQUAL_SSH_CONTROL_PATH}" \
+    -o ControlPath="${ALLIANCE_SSH_CONTROL_PATH}" \
     -o BatchMode=yes \
-    "${RORQUAL_HOST}" \
+    "${ALLIANCE_HOST}" \
     "rm -f '${remote_archive}'"
 
 echo "Verified fMRIPrep outputs in ${local_fmriprep_root}."
