@@ -46,10 +46,56 @@ study1:
       peak_distance_bins: 4
       volume_repetition_time_s: 0.9
       harmonic_orders: [18, 37, 55, 74]
-      excluded_subjects: ["sub-0006"]
       colors:
         excluded: "#D55E00"
         retained: "#0072B2"
+    continuous_spectrum:
+      excluded_subjects: ["sub-0006"]
+    cohort_power_spectral_density:
+      dimensions_mm:
+        width: 183.0
+        height: 92.0
+      frequency_range_hz: [1.0, 90.0]
+      n_fft: 8192
+      n_overlap: 4096
+      sampling_frequency_hz: 500.0
+      colors:
+        scanner_window: "#D55E00"
+        neural_band: "#0072B2"
+    preprocessing_stage_power_spectral_density:
+      segment_duration_s: 16.384
+      overlap_fraction: 0.5
+      stages:
+        raw:
+          label: "Original BrainVision"
+          sampling_frequency_hz: 5000.0
+          source_corrections:
+            - header_filename: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962.vhdr"
+              subject_id: "sub-0003"
+              run_id: "3"
+              data_filename: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962.eeg"
+              marker_filename: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962.vmrk"
+              expected_data_reference: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962.eeg"
+              expected_marker_reference: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962.vmrk"
+              reason: "Run 3 reused the run-1 temperature sequence; tracked Study 1 acquisition issue."
+          source_exclusions:
+            - header_filename: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h10.39.899.vhdr"
+              reason: "Aborted 8.76-second run-1 start."
+        processed:
+          label: "BrainVision processed"
+          sampling_frequency_hz: 1000.0
+          source_corrections:
+            - header_filename: "ThermalPainEEGFMRI_run3 (1)_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.vhdr"
+              subject_id: "sub-0003"
+              run_id: "3"
+              data_filename: "ThermalPainEEGFMRI_run3 (1)_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.eeg"
+              marker_filename: "ThermalPainEEGFMRI_run3 (1)_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.vmrk"
+              expected_data_reference: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.eeg"
+              expected_marker_reference: "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962_scannerpulse_corrected.vmrk"
+              reason: "Run 3 reused the run-1 temperature sequence; tracked Study 1 acquisition issue."
+        mne:
+          label: "Final MNE processed"
+          sampling_frequency_hz: 500.0
     temporal_specificity:
       dimensions_mm:
         width: 183.0

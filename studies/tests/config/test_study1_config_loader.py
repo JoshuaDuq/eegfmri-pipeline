@@ -583,10 +583,31 @@ def test_load_study1_config_includes_scanner_harmonic_figure_defaults() -> None:
         "peak_distance_bins": 4,
         "volume_repetition_time_s": 0.9,
         "harmonic_orders": [18, 37, 55, 74],
-        "excluded_subjects": ["sub-0006"],
         "colors": {
             "excluded": "#D55E00",
             "retained": "#0072B2",
+        },
+    }
+
+
+def test_load_study1_config_includes_cohort_psd_figure_defaults() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+    figures = config["study1"]["figures"]
+
+    assert figures["continuous_spectrum"] == {
+        "excluded_subjects": ["sub-0006"],
+    }
+    assert figures["cohort_power_spectral_density"] == {
+        "dimensions_mm": {"width": 183.0, "height": 92.0},
+        "frequency_range_hz": [1.0, 90.0],
+        "n_fft": 8192,
+        "n_overlap": 4096,
+        "sampling_frequency_hz": 500.0,
+        "colors": {
+            "scanner_window": "#D55E00",
+            "neural_band": "#0072B2",
         },
     }
 
