@@ -39,6 +39,10 @@ def test_coefficient_figure_draws_scientific_layers(tmp_path: Path) -> None:
     assert any(np.allclose(line.get_xdata(), [0.0, 0.0]) for line in axis.lines)
     assert len(axis.collections) >= 4
     assert [text.get_text() for text in axis.texts].count("n = 3") == 2
+    figure.canvas.draw()
+    assert axis.get_legend() is None
+    assert len(figure.legends) == 1
+    assert figure.legends[0].get_window_extent().y0 >= axis.get_window_extent().y1
     plt.close(figure)
 
 
