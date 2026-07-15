@@ -10,12 +10,13 @@ from typing import Iterator
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib import font_manager
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 
-MILLIMETERS_PER_INCH = 25.4
+from studies.pain_study.figure_style import figure_size_inches, publication_rc_params
+
 EMBEDDED_RASTER_DPI = 600
+SVG_HASH_SALT = "study2-publication"
 
 
 def study2_diverging_color_map() -> LinearSegmentedColormap:
@@ -26,41 +27,10 @@ def study2_diverging_color_map() -> LinearSegmentedColormap:
     )
 
 
-def figure_size_inches(dimensions_mm: Mapping[str, float]) -> tuple[float, float]:
-    return (
-        float(dimensions_mm["width"]) / MILLIMETERS_PER_INCH,
-        float(dimensions_mm["height"]) / MILLIMETERS_PER_INCH,
-    )
-
-
 @contextmanager
 def publication_style(font_family: str) -> Iterator[None]:
-    try:
-        font_manager.findfont(
-            font_manager.FontProperties(family=font_family),
-            fallback_to_default=False,
-        )
-    except ValueError as exc:
-        raise ValueError(f"Required figure font {font_family!r} is unavailable.") from exc
-    with mpl.rc_context(
-        {
-            "font.family": font_family,
-            "font.size": 6.0,
-            "axes.labelsize": 7.0,
-            "axes.titlesize": 7.0,
-            "xtick.labelsize": 6.0,
-            "ytick.labelsize": 6.0,
-            "legend.fontsize": 6.0,
-            "axes.linewidth": 0.6,
-            "axes.grid": False,
-            "axes.spines.top": False,
-            "axes.spines.right": False,
-            "xtick.direction": "out",
-            "ytick.direction": "out",
-            "svg.fonttype": "none",
-            "svg.hashsalt": "study2-haufe-forward-patterns",
-        }
-    ):
+    rc_params = publication_rc_params(font_family, svg_hash_salt=SVG_HASH_SALT)
+    with mpl.rc_context(rc_params):
         yield
 
 
