@@ -57,8 +57,10 @@ def test_primary_source_figure_has_fixed_publication_structure(tmp_path: Path) -
         assert "Alpha" in text
         assert "Beta" in text
         assert "Scanner-clean gamma" in text
-        assert "Holm q = 0.030" in text
-        assert text.count("no family-corrected cluster") == 2
+        assert "Holm-adjusted p = 0.030" in text
+        assert text.count("Holm-adjusted p = 1.000") == 2
+        assert "Holm q" not in text
+        assert {label.get_text() for label in figure.texts}.issuperset({"a", "b", "c"})
     finally:
         plt.close(figure)
 

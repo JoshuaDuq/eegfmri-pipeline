@@ -201,7 +201,6 @@ def build_primary_source_associations_figure(
                 band_spec=band_spec,
                 n_subjects=summary.n_subjects,
                 holm_adjusted_p_value=result.holm_adjusted_p_value,
-                significant=result.significant,
             )
 
         _add_shared_colorbar(
@@ -310,13 +309,17 @@ def _add_band_header(
     band_spec: Mapping[str, object],
     n_subjects: int,
     holm_adjusted_p_value: float,
-    significant: bool,
 ) -> None:
     x_position = (band_index + 0.5) / 3.0
-    status = (
-        f"Holm q = {holm_adjusted_p_value:.3f}"
-        if significant
-        else "no family-corrected cluster"
+    status = f"Holm-adjusted p = {holm_adjusted_p_value:.3f}"
+    figure.text(
+        0.023 + band_index * 0.321,
+        0.908,
+        chr(ord("a") + band_index),
+        ha="left",
+        va="top",
+        fontsize=8.0,
+        fontweight="bold",
     )
     figure.text(
         x_position,
