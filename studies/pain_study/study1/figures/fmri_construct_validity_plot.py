@@ -150,7 +150,7 @@ def build_fmri_construct_validity_figure(
             0.5,
             0.008,
             (
-                "Unthresholded participant-mean effects; dark outlines indicate "
+                "Unthresholded participant-mean nonzero effects; dark outlines indicate "
                 f"two-sided voxelwise max-T FWE p < {alpha:.2f}."
             ),
             ha="center",
@@ -278,7 +278,7 @@ def _draw_axial_views(
         cmap=color_map,
         colorbar=False,
         symmetric_cbar=True,
-        threshold=None,
+        threshold=0.0,
         vmin=-limit,
         vmax=limit,
         annotate=False,
