@@ -1,5 +1,6 @@
 import os
 from collections import Counter
+import warnings
 
 import mne
 import pyprep
@@ -25,6 +26,29 @@ def _majority_bad_channels(repeated_bads):
     threshold = (len(repeated_bads) // 2) + 1
     counts = Counter(channel for bads in repeated_bads for channel in set(bads))
     return sorted(channel for channel, count in counts.items() if count >= threshold)
+
+
+def _find_bad_channels_by_ransac(noisy_channels):
+    """Run PyPREP RANSAC without verified spurious matmul warnings."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"^(divide by zero|overflow|invalid value) encountered in matmul$",
+            category=RuntimeWarning,
+            module=(r"^(scipy\.linalg\._basic|mne\.channels\.interpolation|" r"pyprep\.ransac)$"),
+        )
+        noisy_channels.find_bad_by_ransac()
+
+    try:
+        correlations = np.asarray(
+            noisy_channels._extra_info["bad_by_ransac"]["ransac_correlations"]
+        )
+    except (AttributeError, KeyError, TypeError) as error:
+        raise RuntimeError("PyPREP did not return RANSAC correlations.") from error
+    if correlations.ndim != 2 or correlations.size == 0:
+        raise RuntimeError("PyPREP returned a malformed RANSAC correlation matrix.")
+    if not np.all(np.isfinite(correlations)):
+        raise FloatingPointError("PyPREP returned non-finite RANSAC correlations.")
 
 
 def _mark_breaks_bad(
@@ -230,7 +254,7 @@ def run_bads_detection_single_file(
                 nc.find_bad_by_deviation()
                 nc.find_bad_by_correlation()
                 if ransac:
-                    nc.find_bad_by_ransac()
+                    _find_bad_channels_by_ransac(nc)
                 repeated_bads.append(nc.get_bads())
 
             pyprep_bads = _majority_bad_channels(repeated_bads)
