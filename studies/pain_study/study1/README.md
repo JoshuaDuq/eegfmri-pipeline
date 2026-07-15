@@ -445,6 +445,37 @@ high-frequency artifact proxy. Fp1/Fp2 inclusion is configured explicitly and de
 the complementary channel sensitivity is always retained in audit tables when enabled. Trials are
 never treated as independent inferential units.
 
+Two standalone sensor-space figures resolve the same power construct at individual electrodes.
+Both use the five prespecified bands: alpha, beta, low gamma (`gamma_low_clean`), mid gamma
+(`gamma_mid_clean`), and high gamma (`gamma_high_clean`). `sensor_power_topographies.svg` shows
+participant-level temperature slopes in dB per degree Celsius in its first row and partial
+correlations with within-scale subjective intensity in its second row. The temperature slopes are
+fit to each participant's six temperature-cell means. The intensity association adjusts
+categorical temperature, task run, and thermode surface plus within-run trial order, residual ECG
+coupling, and the Fp1/Fp2 high-frequency artifact proxy. Its primary channel scope follows the
+power-construct configuration; the complementary Fp1/Fp2 scope is retained as a descriptive
+sensitivity audit.
+
+`signature_power_topographies.svg` shows participant-level partial correlations between each
+electrode's power and NPS or SIIPS1 expression. Power and the target are residualized using the
+target-specific nuisance design before their correlation is calculated; the SIIPS1 design
+additionally includes NPS. The signature maps use the feature-benchmark channel scope and
+therefore exclude the configured Fp1/Fp2 channels. These maps are univariate nuisance-adjusted
+associations, not predictive-model importance measures.
+
+Each figure is an independent 10-map inferential family. Cohort maps display the unthresholded
+participant mean (with Fisher-z averaging and back-transformation for correlations). Dark sensor
+rings mark clusters surviving a two-sided cluster-forming threshold of `p = 0.01` and joint
+max-cluster-mass family-wise correction at `alpha = 0.05` across both rows and all five bands.
+Adjacency is defined by Delaunay triangulation of the exact top-view montage positions, and cluster
+mass is the sum of absolute one-sample t statistics. Participant sign flips are synchronized
+across all 10 maps: the procedure enumerates the sign-symmetric exact space when it contains at
+most 10,000 patterns and otherwise draws 10,000 unique nonobserved patterns with the configured
+deterministic seed. Participants, never trials or sensors, are the independent inferential units.
+No 30-participant article-readiness gate or preliminary label is applied; non-estimable data and
+inferential designs instead fail explicitly. The figures remain sensor-space results and do not
+imply cortical source localization.
+
 The standalone `fmri_construct_validity.svg` supplies the whole-brain spatial manipulation check
 that cannot be represented adequately by the signature summaries. Panel a shows the unthresholded
 participant-mean BOLD effect per 1 °C increase in delivered temperature. Panel b shows the
