@@ -295,12 +295,38 @@ def _summarize_harmonic_window(
     median_psd_db: np.ndarray,
     window: FrequencyWindow,
 ) -> dict[str, float]:
-    mask = (freqs >= window.low_hz) & (freqs <= window.high_hz)
+    peak_hz, peak_power_db, prominence_db = select_harmonic_peak(
+        freqs,
+        median_psd_db,
+        window,
+    )
+    prefix = window.column_prefix
+    return {
+        f"{prefix}_peak_hz": peak_hz,
+        f"{prefix}_peak_power_db": peak_power_db,
+        f"{prefix}_prominence_db": prominence_db,
+    }
+
+
+def select_harmonic_peak(
+    freqs: Sequence[float],
+    spectrum_db: Sequence[float],
+    window: FrequencyWindow,
+) -> tuple[float, float, float]:
+    """Select the strongest prominent peak inside one harmonic window."""
+    frequency_array = _validate_freqs(freqs)
+    spectrum_array = np.asarray(spectrum_db, dtype=float)
+    if spectrum_array.shape != frequency_array.shape:
+        raise ValueError("spectrum_db must match the one-dimensional frequency grid.")
+    if not np.all(np.isfinite(spectrum_array)):
+        raise ValueError("spectrum_db must contain only finite values.")
+
+    mask = (frequency_array >= window.low_hz) & (frequency_array <= window.high_hz)
     if not np.any(mask):
         raise ValueError(f"No PSD frequencies fall inside harmonic window {window.label} Hz.")
 
-    window_freqs = freqs[mask]
-    window_db = median_psd_db[mask]
+    window_freqs = frequency_array[mask]
+    window_db = spectrum_array[mask]
     max_index = int(np.argmax(window_db))
     peaks, properties = find_peaks(window_db, prominence=0)
     if len(peaks):
@@ -310,13 +336,11 @@ def _summarize_harmonic_window(
     else:
         peak_index = max_index
         prominence_db = 0.0
-
-    prefix = window.column_prefix
-    return {
-        f"{prefix}_peak_hz": float(window_freqs[peak_index]),
-        f"{prefix}_peak_power_db": float(window_db[peak_index]),
-        f"{prefix}_prominence_db": prominence_db,
-    }
+    return (
+        float(window_freqs[peak_index]),
+        float(window_db[peak_index]),
+        prominence_db,
+    )
 
 
 def _validate_freqs(freqs: Sequence[float]) -> np.ndarray:
