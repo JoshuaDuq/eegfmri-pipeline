@@ -17,10 +17,7 @@ from eeg_pipeline.analysis.qc.scanner_harmonic_comb import (
 
 def _signal(sfreq: float, duration_seconds: float) -> np.ndarray:
     times = np.arange(int(sfreq * duration_seconds)) / sfreq
-    return (
-        2e-6 * np.sin(2.0 * np.pi * 20.0 * times)
-        + 1e-6 * np.sin(2.0 * np.pi * 41.0 * times)
-    )
+    return 2e-6 * np.sin(2.0 * np.pi * 20.0 * times) + 1e-6 * np.sin(2.0 * np.pi * 41.0 * times)
 
 
 def _raw(sfreq: float = 400.0) -> mne.io.RawArray:

@@ -12,6 +12,7 @@ from eeg_pipeline.analysis.qc.scanner_harmonic_comb import (
     Spectrum,
 )
 from eeg_pipeline.preprocessing.pipeline import scanner_harmonic_qc as module
+from tests.pipelines_test_utils import DotConfig
 
 
 def _parameters() -> ScannerCombParameters:
@@ -119,3 +120,53 @@ def test_run_scanner_harmonic_qc_rejects_duplicate_subjects(tmp_path: Path) -> N
             input_extension=".vhdr",
             parameters=_parameters(),
         )
+
+
+def test_scanner_comb_parameters_from_config_maps_required_values() -> None:
+    config = DotConfig(
+        {
+            "project": {"random_state": 17},
+            "preprocessing": {
+                "scanner_harmonic_qc": {
+                    "frequency_range_hz": [15.0, 90.0],
+                    "welch_duration_seconds": 4.0,
+                    "frequency_resolution_hz": 0.25,
+                    "bootstrap_resamples": 10_000,
+                    "confidence_level": 0.95,
+                }
+            },
+        }
+    )
+
+    parameters = module.scanner_comb_parameters_from_config(config)
+
+    assert parameters == ScannerCombParameters(
+        frequency_min_hz=15.0,
+        frequency_max_hz=90.0,
+        welch_duration_seconds=4.0,
+        frequency_resolution_hz=0.25,
+        bootstrap_resamples=10_000,
+        confidence_level=0.95,
+        random_seed=17,
+    )
+
+
+def test_scanner_comb_parameters_from_config_rejects_unknown_keys() -> None:
+    config = DotConfig(
+        {
+            "project": {"random_state": 17},
+            "preprocessing": {
+                "scanner_harmonic_qc": {
+                    "frequency_range_hz": [15.0, 90.0],
+                    "welch_duration_seconds": 4.0,
+                    "frequency_resolution_hz": 0.25,
+                    "bootstrap_resamples": 10_000,
+                    "confidence_level": 0.95,
+                    "enabled": True,
+                }
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="Unknown scanner harmonic QC config keys: enabled"):
+        module.scanner_comb_parameters_from_config(config)

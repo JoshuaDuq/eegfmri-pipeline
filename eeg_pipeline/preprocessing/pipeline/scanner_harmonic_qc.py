@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import mne
 from mne_bids import find_matching_paths, read_raw_bids
@@ -27,6 +28,48 @@ class ScannerHarmonicQcOutputs:
 
     png_path: Path
     tsv_path: Path
+
+
+def scanner_comb_parameters_from_config(config: Any) -> ScannerCombParameters:
+    """Build validated scanner-comb parameters from the pipeline config."""
+    values = config.get("preprocessing.scanner_harmonic_qc")
+    if not isinstance(values, Mapping):
+        raise ValueError("Missing required config mapping: preprocessing.scanner_harmonic_qc")
+
+    expected_keys = {
+        "frequency_range_hz",
+        "welch_duration_seconds",
+        "frequency_resolution_hz",
+        "bootstrap_resamples",
+        "confidence_level",
+    }
+    unknown_keys = sorted(set(values) - expected_keys)
+    if unknown_keys:
+        joined_keys = ", ".join(unknown_keys)
+        raise ValueError(f"Unknown scanner harmonic QC config keys: {joined_keys}")
+
+    missing_keys = sorted(expected_keys - set(values))
+    if missing_keys:
+        joined_keys = ", ".join(missing_keys)
+        raise ValueError(f"Missing scanner harmonic QC config keys: {joined_keys}")
+
+    frequency_range = values["frequency_range_hz"]
+    if not isinstance(frequency_range, (list, tuple)) or len(frequency_range) != 2:
+        raise ValueError("frequency_range_hz must contain exactly two values.")
+
+    random_seed = config.get("project.random_state")
+    if random_seed is None:
+        raise ValueError("Missing required config value: project.random_state")
+
+    return ScannerCombParameters(
+        frequency_min_hz=float(frequency_range[0]),
+        frequency_max_hz=float(frequency_range[1]),
+        welch_duration_seconds=float(values["welch_duration_seconds"]),
+        frequency_resolution_hz=float(values["frequency_resolution_hz"]),
+        bootstrap_resamples=values["bootstrap_resamples"],
+        confidence_level=float(values["confidence_level"]),
+        random_seed=random_seed,
+    )
 
 
 def run_scanner_harmonic_qc(
@@ -91,9 +134,7 @@ def _load_input_participant(
         ignore_json=True,
     )
     visible_paths = [
-        path
-        for path in bids_paths
-        if path.fpath.is_file() and not path.fpath.name.startswith("._")
+        path for path in bids_paths if path.fpath.is_file() and not path.fpath.name.startswith("._")
     ]
     if not visible_paths:
         raise FileNotFoundError(
@@ -125,9 +166,7 @@ def _load_final_participant(
         deriv_root=deriv_root,
     )
     if epochs_path is None or not epochs_path.is_file():
-        raise FileNotFoundError(
-            f"sub-{participant}, task-{task} is missing final clean epochs."
-        )
+        raise FileNotFoundError(f"sub-{participant}, task-{task} is missing final clean epochs.")
     epochs = mne.read_epochs(epochs_path, preload=False, verbose=False)
     spectrum = compute_epoch_comb_spectrum(epochs, parameters)
     return ParticipantSpectrum(
@@ -172,4 +211,8 @@ def _run_sort_key(bids_path: object) -> tuple[int, str]:
     return (int(run), run) if run.isdigit() else (0, run)
 
 
-__all__ = ["ScannerHarmonicQcOutputs", "run_scanner_harmonic_qc"]
+__all__ = [
+    "ScannerHarmonicQcOutputs",
+    "run_scanner_harmonic_qc",
+    "scanner_comb_parameters_from_config",
+]

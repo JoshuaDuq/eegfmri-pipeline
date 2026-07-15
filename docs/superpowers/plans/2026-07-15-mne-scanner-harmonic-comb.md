@@ -18,7 +18,7 @@
 - Modify `eeg_pipeline/pipelines/preprocessing.py`: add the final task-based QC step and run-metadata outputs.
 - Modify `eeg_pipeline/utils/config/eeg_config.yaml`: add the minimal fixed QC settings.
 - Create `tests/analysis/test_scanner_harmonic_comb.py`: numerical and validation tests.
-- Create `tests/plotting/test_scanner_harmonic_comb.py`: figure-content and export tests.
+- Create `tests/plotting/test_scanner_harmonic_comb_plot.py`: figure-content and export tests.
 - Create `tests/preprocessing/test_scanner_harmonic_qc.py`: discovery/orchestration tests.
 - Modify `tests/pipelines/test_pipeline_preprocessing.py`: step-selection and metadata integration tests.
 
@@ -156,7 +156,7 @@ git commit -m "feat: compute MNE scanner harmonic comb spectra"
 
 **Files:**
 - Create: `eeg_pipeline/plotting/scanner_harmonic_comb.py`
-- Create: `tests/plotting/test_scanner_harmonic_comb.py`
+- Create: `tests/plotting/test_scanner_harmonic_comb_plot.py`
 
 - [ ] **Step 1: Write failing figure and output tests**
 
@@ -180,7 +180,7 @@ def test_write_scanner_harmonic_comb_outputs_png_and_tsv(tmp_path: Path) -> None
 
 - [ ] **Step 2: Run plotting tests and verify RED**
 
-Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m pytest tests/plotting/test_scanner_harmonic_comb.py -q`
+Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m pytest tests/plotting/test_scanner_harmonic_comb_plot.py -q`
 
 Expected: collection failure because the plotting module does not exist.
 
@@ -218,7 +218,7 @@ Use the native QC visual language: neutral input, blue final, translucent bootst
 
 - [ ] **Step 4: Run plotting tests and commit**
 
-Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m pytest tests/plotting/test_scanner_harmonic_comb.py -q`
+Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m pytest tests/plotting/test_scanner_harmonic_comb_plot.py -q`
 
 Expected: all tests pass.
 
@@ -390,7 +390,7 @@ Make `_execute_steps` return an output dictionary. Pass it unchanged to `_write_
 
 - [ ] **Step 5: Run focused integration tests and commit**
 
-Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m pytest tests/pipelines/test_pipeline_preprocessing.py tests/preprocessing/test_scanner_harmonic_qc.py tests/analysis/test_scanner_harmonic_comb.py tests/plotting/test_scanner_harmonic_comb.py -q`
+Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m pytest tests/pipelines/test_pipeline_preprocessing.py tests/preprocessing/test_scanner_harmonic_qc.py tests/analysis/test_scanner_harmonic_comb.py tests/plotting/test_scanner_harmonic_comb_plot.py -q`
 
 Expected: all tests pass.
 
@@ -408,11 +408,11 @@ git commit -m "feat: run scanner harmonic QC after MNE preprocessing"
 
 - [ ] **Step 1: Format changed Python files**
 
-Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m black eeg_pipeline/analysis/qc/scanner_harmonic_comb.py eeg_pipeline/plotting/scanner_harmonic_comb.py eeg_pipeline/preprocessing/pipeline/scanner_harmonic_qc.py eeg_pipeline/pipelines/preprocessing.py tests/analysis/test_scanner_harmonic_comb.py tests/plotting/test_scanner_harmonic_comb.py tests/preprocessing/test_scanner_harmonic_qc.py tests/pipelines/test_pipeline_preprocessing.py`
+Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m black eeg_pipeline/analysis/qc/scanner_harmonic_comb.py eeg_pipeline/plotting/scanner_harmonic_comb.py eeg_pipeline/preprocessing/pipeline/scanner_harmonic_qc.py eeg_pipeline/pipelines/preprocessing.py tests/analysis/test_scanner_harmonic_comb.py tests/plotting/test_scanner_harmonic_comb_plot.py tests/preprocessing/test_scanner_harmonic_qc.py tests/pipelines/test_pipeline_preprocessing.py`
 
 - [ ] **Step 2: Run Ruff on changed Python files**
 
-Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m ruff check eeg_pipeline/analysis/qc/scanner_harmonic_comb.py eeg_pipeline/plotting/scanner_harmonic_comb.py eeg_pipeline/preprocessing/pipeline/scanner_harmonic_qc.py eeg_pipeline/pipelines/preprocessing.py tests/analysis/test_scanner_harmonic_comb.py tests/plotting/test_scanner_harmonic_comb.py tests/preprocessing/test_scanner_harmonic_qc.py tests/pipelines/test_pipeline_preprocessing.py`
+Run: `/Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m ruff check eeg_pipeline/analysis/qc/scanner_harmonic_comb.py eeg_pipeline/plotting/scanner_harmonic_comb.py eeg_pipeline/preprocessing/pipeline/scanner_harmonic_qc.py eeg_pipeline/pipelines/preprocessing.py tests/analysis/test_scanner_harmonic_comb.py tests/plotting/test_scanner_harmonic_comb_plot.py tests/preprocessing/test_scanner_harmonic_qc.py tests/pipelines/test_pipeline_preprocessing.py`
 
 Expected: no errors.
 
@@ -424,7 +424,7 @@ Run:
 /Users/joduq24/Desktop/EEG_fMRI_Pipeline/.venv/bin/python -m pytest \
   tests/analysis/test_scanner_harmonics.py \
   tests/analysis/test_scanner_harmonic_comb.py \
-  tests/plotting/test_scanner_harmonic_comb.py \
+  tests/plotting/test_scanner_harmonic_comb_plot.py \
   tests/preprocessing/test_scanner_harmonic_qc.py \
   tests/pipelines/test_pipeline_preprocessing.py -q
 make verify-architecture

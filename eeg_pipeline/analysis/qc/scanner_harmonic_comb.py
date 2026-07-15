@@ -52,9 +52,7 @@ class ScannerCombParameters:
             raise ValueError("The frequency span must contain an integer number of bins.")
         expected_resolution = 1.0 / self.welch_duration_seconds
         if not np.isclose(self.frequency_resolution_hz, expected_resolution):
-            raise ValueError(
-                "frequency_resolution_hz must equal 1 / welch_duration_seconds."
-            )
+            raise ValueError("frequency_resolution_hz must equal 1 / welch_duration_seconds.")
         if isinstance(self.bootstrap_resamples, bool) or self.bootstrap_resamples < 1:
             raise ValueError("bootstrap_resamples must be a positive integer.")
         if int(self.bootstrap_resamples) != self.bootstrap_resamples:
@@ -227,10 +225,9 @@ def summarize_scanner_comb(
     participant_ids = tuple(sorted(input_by_participant))
     if not participant_ids:
         raise ValueError("Scanner-comb cohort requires at least one participant.")
-    ordered_spectra = [
-        input_by_participant[participant]
-        for participant in participant_ids
-    ] + [final_by_participant[participant] for participant in participant_ids]
+    ordered_spectra = [input_by_participant[participant] for participant in participant_ids] + [
+        final_by_participant[participant] for participant in participant_ids
+    ]
     frequencies = _require_identical_grids(ordered_spectra)
     input_values = np.stack(
         [input_by_participant[participant].power_db for participant in participant_ids]
@@ -269,9 +266,7 @@ def _index_participants(
     indexed: dict[str, ParticipantSpectrum] = {}
     for spectrum in spectra:
         if spectrum.participant in indexed:
-            raise ValueError(
-                f"Duplicate {stage} spectrum for sub-{spectrum.participant}."
-            )
+            raise ValueError(f"Duplicate {stage} spectrum for sub-{spectrum.participant}.")
         indexed[spectrum.participant] = spectrum
     return indexed
 
