@@ -1,4 +1,4 @@
-"""Publication style and SVG output for Study 1 validity figures."""
+"""Publication style and SVG/PNG output for Study 1 validity figures."""
 
 from __future__ import annotations
 
@@ -110,6 +110,45 @@ def save_publication_svg(
     return output_path
 
 
+def save_publication_png(
+    figure: Figure,
+    output_path: Path,
+    config: Any,
+    *,
+    dimensions_mm: Mapping[str, float],
+    dpi: int,
+) -> Path:
+    if output_path.suffix != ".png":
+        raise ValueError(f"Study 1 publication figures require an .png path: {output_path}")
+    if isinstance(dpi, bool) or not isinstance(dpi, int):
+        raise TypeError("Study 1 publication PNG DPI must be an integer.")
+    if dpi < 300:
+        raise ValueError("Study 1 publication PNG DPI must be at least 300.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.set_size_inches(*figure_size_inches(dimensions_mm), forward=False)
+    with NamedTemporaryFile(
+        dir=output_path.parent,
+        prefix=f".{output_path.stem}.",
+        suffix=".png",
+        delete=False,
+    ) as handle:
+        temporary_path = Path(handle.name)
+    try:
+        with publication_style(config):
+            figure.savefig(
+                temporary_path,
+                format="png",
+                dpi=dpi,
+                metadata={"Software": "EEG_fMRI_Pipeline"},
+            )
+        temporary_path.replace(output_path)
+    finally:
+        plt.close(figure)
+        temporary_path.unlink(missing_ok=True)
+    return output_path
+
+
 def save_validity_svg(figure: Figure, output_path: Path, config: Any) -> Path:
     dimensions = require_config_value(config, "study1.figures.validity.dimensions_mm")
     return save_publication_svg(
@@ -125,6 +164,7 @@ __all__ = [
     "figure_size_inches",
     "publication_style",
     "require_configured_font",
+    "save_publication_png",
     "save_publication_svg",
     "save_validity_svg",
     "validity_output_dir",
