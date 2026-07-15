@@ -9,6 +9,7 @@ from eeg_pipeline.analysis.qc.scanner_harmonics import (
     analyze_brainvision_file,
     build_frequency_mask,
     discover_brainvision_files,
+    select_harmonic_peak,
     summarize_scanner_harmonics,
     write_scanner_harmonic_reports,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "analyze_brainvision_file",
     "build_frequency_mask",
     "discover_brainvision_files",
+    "select_harmonic_peak",
     "summarize_scanner_harmonics",
     "write_scanner_harmonic_reports",
 ]

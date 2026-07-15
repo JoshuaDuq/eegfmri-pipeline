@@ -250,6 +250,12 @@ preprocessing:
       channels: ["Fp1", "Fp2", "FT9", "FT10", "TP9", "TP10"]
       band: [30.0, 45.0]
       window: *active_window
+  scanner_harmonic_qc:
+    frequency_range_hz: [15.0, 90.0]
+    welch_duration_seconds: 4.0
+    frequency_resolution_hz: 0.25
+    bootstrap_resamples: 10000
+    confidence_level: 0.95
 
 pyprep:
   ransac: true

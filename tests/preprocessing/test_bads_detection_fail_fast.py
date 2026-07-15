@@ -2,14 +2,80 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import Mock, patch
+import warnings
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from eeg_pipeline.preprocessing.pipeline.preprocess import (
+    _find_bad_channels_by_ransac,
     run_bads_detection,
     run_bads_detection_single_file,
 )
+
+
+class _FakeRansacDetector:
+    def __init__(
+        self,
+        correlations: np.ndarray,
+        warning_messages: tuple[str, ...] = (),
+    ) -> None:
+        self._correlations = correlations
+        self._warning_messages = warning_messages
+        self._extra_info: dict[str, object] = {}
+
+    def find_bad_by_ransac(self) -> None:
+        for message in self._warning_messages:
+            warnings.warn_explicit(
+                message,
+                RuntimeWarning,
+                filename="pyprep/ransac.py",
+                lineno=398,
+                module="pyprep.ransac",
+            )
+        self._extra_info["bad_by_ransac"] = {
+            "ransac_correlations": self._correlations,
+        }
+
+
+def test_ransac_warning_boundary_suppresses_verified_matmul_warnings() -> None:
+    detector = _FakeRansacDetector(
+        correlations=np.ones((3, 2)),
+        warning_messages=(
+            "divide by zero encountered in matmul",
+            "overflow encountered in matmul",
+            "invalid value encountered in matmul",
+        ),
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _find_bad_channels_by_ransac(detector)
+
+    assert caught == []
+
+
+def test_ransac_warning_boundary_preserves_unrelated_runtime_warnings() -> None:
+    detector = _FakeRansacDetector(
+        correlations=np.ones((3, 2)),
+        warning_messages=("unexpected numerical condition",),
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _find_bad_channels_by_ransac(detector)
+
+    assert [str(item.message) for item in caught] == ["unexpected numerical condition"]
+
+
+def test_ransac_warning_boundary_rejects_nonfinite_correlations() -> None:
+    detector = _FakeRansacDetector(
+        correlations=np.array([[1.0, np.nan]]),
+    )
+
+    with pytest.raises(FloatingPointError, match="non-finite RANSAC correlations"):
+        _find_bad_channels_by_ransac(detector)
 
 
 def test_bads_detection_surfaces_bids_read_errors(tmp_path: Path) -> None:
