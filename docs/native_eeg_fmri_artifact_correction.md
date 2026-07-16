@@ -114,8 +114,8 @@ python -m studies.pain_study.scripts.run_native_eeg_fmri_artifact_correction
 ```
 
 The default output is
-`/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_eeg_fmri_correction-v2`. An existing v2 output or
-incomplete v2 staging tree is never reused.
+`/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz`. An existing output or
+incomplete staging tree is never reused.
 
 `mne.preprocessing.annotate_amplitude` remains a downstream generic bad-segment detector. It can
 identify sustained flat or extreme consecutive-sample changes after MRI correction, but it cannot

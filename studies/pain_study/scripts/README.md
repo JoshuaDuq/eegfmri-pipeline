@@ -65,6 +65,10 @@ writes `cohort_scanner_spectrum_qc.png` with the same five-panel spectral layout
 runs are aggregated within participant before the equally weighted cohort median and deterministic
 95% participant-bootstrap interval are calculated.
 
+The output root is
+`/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz`, with participant files
+under `sub-*/eeg/` and cohort manifests/QC at the dataset root.
+
 ```bash
 python -m studies.pain_study.scripts.run_native_eeg_fmri_artifact_correction
 ```

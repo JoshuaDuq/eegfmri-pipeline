@@ -53,7 +53,7 @@ DEFAULT_INPUT_ROOT = Path(
 )
 DEFAULT_BOLD_ROOT = Path("/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri")
 DEFAULT_OUTPUT_ROOT = Path(
-    "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_eeg_fmri_correction-v4"
+    "/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz"
 )
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config/native_eeg_fmri_artifact_correction.yaml"
 

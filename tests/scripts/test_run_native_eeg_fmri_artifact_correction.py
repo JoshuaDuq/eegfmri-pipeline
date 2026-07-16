@@ -537,4 +537,6 @@ def test_run_cohort_refuses_to_overwrite_a_derivative_root(tmp_path: Path) -> No
 
 def test_fixed_cohort_boundary_and_default_output_are_versioned() -> None:
     assert runner.EXPECTED_RUN_COUNT == 83
-    assert runner.DEFAULT_OUTPUT_ROOT.name == "native_eeg_fmri_correction-v4"
+    assert runner.DEFAULT_OUTPUT_ROOT == Path(
+        "/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz"
+    )
