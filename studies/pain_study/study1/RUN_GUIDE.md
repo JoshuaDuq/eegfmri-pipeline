@@ -41,7 +41,8 @@ Run the workflow in this order:
    fixed MNI scoring mask.
 3. Run fMRIPrep for the Study 1 fMRI subjects if preprocessed BOLD files are missing.
 4. Run the Study 1 stages: `prepare-targets`, `prepare-features`, `feature-benchmark`, then
-   `report`.
+   `report`. The two standalone sensor-topography families can be generated immediately after
+   `prepare-features`; they do not require `feature-benchmark` or `report` outputs.
 
 The command list must include `signature-prediction`. If it does not, install the private studies
 package that exposes `studies.pain_study.cli.command_registry:signature_prediction_command`.
@@ -329,6 +330,20 @@ COMMON_ARGS=(
   "${SUBJECT_ARGS[@]}" \
   "${COMMON_ARGS[@]}"
 
+"$PYTHON" -m studies.pain_study.study1.figures.plot_sensor_power_topographies \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --deriv-root "$DERIV_ROOT" \
+  --task "$TASK" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/sensor_power_topographies.svg"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_signature_power_topographies \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --deriv-root "$DERIV_ROOT" \
+  --task "$TASK" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/signature_power_topographies.svg"
+
 "$EEG_PIPELINE" signature-prediction feature-benchmark \
   "${SUBJECT_ARGS[@]}" \
   "${COMMON_ARGS[@]}"
@@ -396,6 +411,8 @@ $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validi
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum_by_run.tsv
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum_by_subject.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/sensor_power_topographies.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/signature_power_topographies.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/siips1_behavioral_validity.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/siips1_dose_response.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/spectral_specificity.svg
@@ -407,6 +424,38 @@ $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validi
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/full_picture/behavior_signature_validity_by_subject.tsv
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/full_picture/behavior_signature_validity_summary.tsv
 ```
+
+Each sensor-topography prefix (`sensor_power_topographies` and
+`signature_power_topographies`) publishes this exact core family in the same directory:
+
+```text
+<prefix>.svg
+<prefix>.png
+<prefix>_by_subject.tsv
+<prefix>_by_subject.parquet
+<prefix>_sensors.tsv
+<prefix>_sensors.parquet
+<prefix>_clusters.tsv
+<prefix>_family.tsv
+<prefix>_caption.txt
+<prefix>_manifest.json
+```
+
+The construct prefix `sensor_power_topographies` additionally publishes the complementary
+Fp1/Fp2 channel-scope audit:
+
+```text
+sensor_power_topographies_sensitivity_by_subject.tsv
+sensor_power_topographies_sensitivity_by_subject.parquet
+sensor_power_topographies_sensitivity_summary.tsv
+sensor_power_topographies_sensitivity_summary.parquet
+```
+
+The SVG and 600-dpi PNG are the two figure formats. The by-subject files contain the participant
+estimands used for inference; the sensor and cluster files contain unthresholded cohort values,
+one-sample t statistics, cluster membership, and corrected p-values. The family table records the
+joint sign-flip procedure, and the manifest records source and output checksums. Publication is
+atomic: an invalid or incomplete family is not promoted.
 
 Run `report` again with sensitivity roots when you want one article-ready comparison table across
 previous runs:
@@ -628,6 +677,33 @@ Run stages in this order.
    `[-0.2, -0.01]`. The raw-active-power sensitivity is a separate sibling run with active
    log-power features left unnormalized and `-5.0` to `-0.01` s reference power included as a
    covariate.
+
+   Once both required outputs from stages 1 and 2 exist, generate the two standalone sensor-space
+   families. No benchmark or report output is read by these commands:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_sensor_power_topographies \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --deriv-root "$DERIV_ROOT" \
+     --task "$TASK" \
+     --output "$STUDY1_ROOT/reports/figures/supplementary/validity/sensor_power_topographies.svg"
+
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_signature_power_topographies \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --deriv-root "$DERIV_ROOT" \
+     --task "$TASK" \
+     --output "$STUDY1_ROOT/reports/figures/supplementary/validity/signature_power_topographies.svg"
+   ```
+
+   Both commands reconstruct channel-level active-versus-baseline dB power from the trial-ML-safe
+   power features and align it exactly to retained clean events and the prepared target table.
+   `sensor_power_topographies.svg` contains temperature-slope and subjective-intensity rows;
+   `signature_power_topographies.svg` contains NPS and SIIPS1 partial-correlation rows. Columns are
+   alpha, beta, low gamma, mid gamma, and high gamma. Unthresholded maps remain visible, and dark
+   rings identify sensors in clusters surviving the separate joint 10-map family correction for
+   that figure.
 
 3. Run the feature benchmark:
 

@@ -2,6 +2,20 @@
 
 Scripts specific to the simultaneous EEG–fMRI pain paradigm. These raw-conversion and event-merging utilities are **not integrated into the TUI or `eeg-pipeline` CLI** and must be run manually before downstream analysis.
 
+Organize newly acquired EEG source recordings with:
+
+```bash
+python -m studies.pain_study.scripts.organize_source_eeg \
+  --kingston-root /Volumes/KINGSTON \
+  --source-data-root /Volumes/KINGSTON/EEG_fMRI_data/source_data
+```
+
+This copies original 5 kHz triplets into `sub-*/eeg/original_5khz/`. If legacy
+BrainVision-processed 1 kHz files are present, it also moves them into
+`sub-*/eeg/brainvision_processed_1khz/`; they are not required by the native pipeline. By default
+the organizer discovers every unorganized `sub-*` EEG directory. Repeat `--subject <ID>` to
+restrict a run.
+
 These scripts cover raw conversion and event merging only. The EEG coupling workflow lives under
 `studies/pain_study/eeg_coupling/` and is integrated in the main CLI as
 `eeg-pipeline coupling compute`.
@@ -45,13 +59,25 @@ Converts BrainVision (`.vhdr`) source files to BIDS EEG format using `mne-bids`.
 Analyzer scanner-gradient and pulse-artifact stages. It reads the original 5 kHz recordings from the
 versioned marker-sanitized derivative, applies synchronized phase-aligned AAS, automatic NeuXus LSTM
 R-peak detection, and MNE PCA-OBS, then writes a separate 1 kHz derivative with per-run spectral,
-QRS, and cardiac-locked QC. Each run has separate physiological and scanner-spectrum figures; the
-latter combines the full 15–90 Hz comb with four stage-resolved local PSD windows. The fixed
-qualification boundary is all 83 verified runs. After every run succeeds, the pipeline automatically
-writes `cohort_scanner_spectrum_qc.png` with the same five-panel spectral layout and
-`cohort_scanner_spectrum_qc.tsv` with every plotted value. Cohort spectra are participant-first:
+QRS, and cardiac-locked QC. The source inventory is discovered directly from every matching
+`sub-*/eeg/original_5khz/*.vhdr`; no BrainVision-processed file or fixed subject/run count defines
+the cohort. Each run has separate physiological and scanner-spectrum figures; the
+latter combines the full 15–90 Hz comb with four stage-resolved local PSD windows. The qualification
+boundary is every recording in the verified discovery manifest. After every run succeeds, the
+pipeline automatically writes `cohort_scanner_spectrum_qc.png` with the same five-panel spectral
+layout and `cohort_scanner_spectrum_qc.tsv` with every plotted value. Cohort spectra are
+participant-first:
 runs are aggregated within participant before the equally weighted cohort median and deterministic
 95% participant-bootstrap interval are calculated.
+
+Exceptional acquisition filenames are resolved in
+`config/native_eeg_fmri_recording_overrides.tsv`. This file is used only for explicit exclusions or
+logical run-number corrections; all ordinary recordings and newly added participants are discovered
+without an inventory update.
+
+The output root is
+`/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz`, with participant files
+under `sub-*/eeg/` and cohort manifests/QC at the dataset root.
 
 ```bash
 python -m studies.pain_study.scripts.run_native_eeg_fmri_artifact_correction
@@ -65,9 +91,10 @@ for the fixed method, literature basis, and qualification criteria.
 <source-root>/
   sub-<ID>/
     eeg/
-      sub-<ID>_task-<task>_run-<N>.vhdr
-      sub-<ID>_task-<task>_run-<N>.vmrk
-      sub-<ID>_task-<task>_run-<N>.eeg
+      brainvision_processed_1khz/
+        sub-<ID>_task-<task>_run-<N>.vhdr
+        sub-<ID>_task-<task>_run-<N>.vmrk
+        sub-<ID>_task-<task>_run-<N>.eeg
 ```
 
 **Usage:**
@@ -84,7 +111,7 @@ python studies/pain_study/scripts/run_paradigm_specific.py eeg-raw-to-bids \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source-root` | *(required)* | Root directory containing raw `sub-*/eeg/*.vhdr` files |
+| `--source-root` | *(required)* | Root containing `sub-*/eeg/brainvision_processed_1khz/*.vhdr` |
 | `--bids-root` | *(required)* | Output BIDS root for EEG data |
 | `--task` | *(required)* | BIDS task label (e.g. `task`) |
 | `--subject` | all found | Subject ID(s) to process (repeat flag for multiple) |

@@ -129,6 +129,53 @@ class TestIcaFailFast(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "write boom"):
             self.ica.run_ica_label_single_file("/tmp/sub-0001_task-task_proc-icafit_ica.fif")
 
+    def test_run_ica_label_rebuilds_stale_component_table(self):
+        fitted_ica = types.SimpleNamespace(n_components_=2, exclude=[])
+        self.ica.io.load_ica = Mock(return_value=fitted_ica)
+        self.ica.io.read_components_tsv = Mock(
+            return_value=pd.DataFrame(
+                {
+                    "component": [0, 1, 2],
+                    "status": ["bad", "bad", "bad"],
+                    "status_description": ["old", "old", "old"],
+                }
+            )
+        )
+        self.ica.io.create_empty_components_tsv = Mock(
+            return_value=pd.DataFrame(
+                {
+                    "component": [0, 1],
+                    "status": [None, None],
+                    "status_description": [None, None],
+                }
+            )
+        )
+
+        with unittest.mock.patch.object(
+            self.ica,
+            "label_components",
+            return_value={
+                "labels": ["brain", "eye blink"],
+                "y_pred_proba": np.array([0.1, 0.95]),
+            },
+        ):
+            self.ica.run_ica_label_single_file(
+                "/tmp/sub-0001_task-task_proc-icafit_ica.fif",
+                keep_mnebids_bads=True,
+            )
+
+        written = self.ica.io.write_components_tsv.call_args.args[0]
+        self.assertEqual(written["component"].tolist(), [0, 1])
+        self.assertEqual(
+            written["mne_icalabel_labels"].tolist(), ["brain", "eye blink"]
+        )
+        self.assertEqual(written["status"].tolist(), ["good", "bad"])
+        self.assertEqual(
+            written["status_description"].tolist(),
+            ["", "Bad component detected by mne_icalabel"],
+        )
+        self.assertEqual(fitted_ica.exclude, [1])
+
     def test_run_ica_label_discovers_subject_level_ica_when_task_is_selected(self):
         with tempfile.TemporaryDirectory() as pipeline_path:
             ica_path = f"{pipeline_path}/sub-0001/eeg/sub-0001_proc-icafit_ica.fif"

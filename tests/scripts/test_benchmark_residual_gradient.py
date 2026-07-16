@@ -46,7 +46,7 @@ def test_default_config_has_fixed_pilot_and_component_grid() -> None:
 
 
 def test_discovery_returns_only_corrected_pilot_headers(tmp_path: Path) -> None:
-    eeg_dir = tmp_path / "sub-0006" / "eeg"
+    eeg_dir = tmp_path / "sub-0006" / "eeg" / "brainvision_processed_1khz"
     eeg_dir.mkdir(parents=True)
     accepted = eeg_dir / "run1_sub0006_scannerpulse_corrected.vhdr"
     accepted.touch()
@@ -130,7 +130,7 @@ def test_report_writer_validates_json_before_writing_any_report(tmp_path: Path) 
 
 def test_pilot_run_count_fails_before_loading_data(tmp_path: Path) -> None:
     source_root = tmp_path / "source"
-    eeg_dir = source_root / "sub-0006" / "eeg"
+    eeg_dir = source_root / "sub-0006" / "eeg" / "brainvision_processed_1khz"
     eeg_dir.mkdir(parents=True)
     (eeg_dir / "run1_sub0006_scannerpulse_corrected.vhdr").touch()
     config = load_benchmark_config(

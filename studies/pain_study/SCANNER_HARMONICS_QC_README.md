@@ -93,7 +93,8 @@ establishes that those windows cannot be interpreted as clean neural gamma.
 
 ## Residual OBS Pilot Benchmark
 
-The BrainVision `*_scannerpulse_corrected` files have already undergone
+The BrainVision `*_scannerpulse_corrected` files in
+`source_data/sub-*/eeg/brainvision_processed_1khz/` have already undergone
 21-volume scanner average-artifact subtraction, 100 Hz low-pass filtering,
 downsampling from 5 kHz to 1 kHz, R-peak detection, and 21-beat pulse
 correction. The residual benchmark therefore retains the BrainVision result

@@ -1,4 +1,4 @@
-"""Run native scanner-gradient and pulse correction on the fixed 5 kHz cohort."""
+"""Run native scanner-gradient and pulse correction on discovered 5 kHz recordings."""
 
 from __future__ import annotations
 
@@ -47,13 +47,12 @@ from eeg_pipeline.preprocessing.eeg_fmri.qc import (
 )
 from eeg_pipeline.preprocessing.eeg_fmri.sequence import load_multiband_slice_schedule
 
-EXPECTED_RUN_COUNT = 83
 DEFAULT_INPUT_ROOT = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1"
 )
 DEFAULT_BOLD_ROOT = Path("/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri")
 DEFAULT_OUTPUT_ROOT = Path(
-    "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_eeg_fmri_correction-v4"
+    "/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz"
 )
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config/native_eeg_fmri_artifact_correction.yaml"
 
@@ -123,8 +122,6 @@ def _require_manifest_fields(row: dict[str, str], line_number: int) -> None:
 def read_input_recordings(
     input_root: Path,
     bold_root: Path,
-    *,
-    expected_count: int = EXPECTED_RUN_COUNT,
 ) -> list[InputRecording]:
     """Read and validate the marker-sanitized cohort manifest."""
     manifest_path = input_root / "marker_sanitization_manifest.tsv"
@@ -166,8 +163,8 @@ def read_input_recordings(
                     source_eeg_mtime_ns=int(row["source_eeg_mtime_ns"]),
                 )
             )
-    if len(recordings) != expected_count:
-        raise ValueError(f"Expected {expected_count} input recordings, found {len(recordings)}")
+    if not recordings:
+        raise ValueError(f"Marker-sanitization manifest contains no recordings: {manifest_path}")
     subject_runs = [(recording.subject, recording.run) for recording in recordings]
     if len(set(subject_runs)) != len(subject_runs):
         raise ValueError("Input manifest contains duplicate subject/run recordings")
@@ -552,10 +549,8 @@ def run_cohort(
     bold_root: Path,
     output_root: Path,
     config_path: Path,
-    *,
-    expected_count: int = EXPECTED_RUN_COUNT,
 ) -> Path:
-    """Run the fixed cohort into an atomically published derivative root."""
+    """Run the discovered cohort into an atomically published derivative root."""
     if output_root.exists():
         raise FileExistsError(f"Output root already exists: {output_root}")
     incomplete_root = output_root.parent / f".{output_root.name}.incomplete"
@@ -566,7 +561,6 @@ def run_cohort(
     recordings = read_input_recordings(
         input_root,
         bold_root,
-        expected_count=expected_count,
     )
     qrs_detector = build_qrs_detector(parameters)
     incomplete_root.mkdir(parents=True)

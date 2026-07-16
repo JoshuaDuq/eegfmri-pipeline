@@ -111,6 +111,36 @@ study1:
       model: "elasticnet"
       feature_spec: "alpha_beta_gamma"
       targets: ["NPS", "SIIPS1"]
+    sensor_topographies:
+      dimensions_mm:
+        width: 183.0
+        height: 86.0
+      png_dpi: 600
+      bands:
+        - name: "alpha"
+          label: "Alpha"
+          frequency_hz: [8.0, 12.9]
+        - name: "beta"
+          label: "Beta"
+          frequency_hz: [13.0, 30.0]
+        - name: "gamma_low_clean"
+          label: "Low gamma"
+          frequency_hz: [30.1, 38.0]
+        - name: "gamma_mid_clean"
+          label: "Mid gamma"
+          frequency_hz: [43.0, 56.0]
+        - name: "gamma_high_clean"
+          label: "High gamma"
+          frequency_hz: [67.0, 77.0]
+      signature_model:
+        rank_tolerance: 1.0e-10
+        max_condition_number: 100.0
+        minimum_residual_standard_deviation: 1.0e-12
+      inference:
+        cluster_forming_p: 0.01
+        family_alpha: 0.05
+        max_null_draws: 10000
+        seed: 20260715
     spectral_specificity:
       dimensions_mm:
         width: 183.0
@@ -166,4 +196,5 @@ study1:
         random_state: 20260711
       display:
         robust_percentile: 99.5
+        overlay_alpha: 0.72
       minimum_article_subjects: 30

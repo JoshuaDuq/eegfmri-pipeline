@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_brainvision_vhdrs(source_root: Path) -> List[Path]:
-    vhdrs = sorted(source_root.glob("sub-*/eeg/*.vhdr"))
+    vhdrs = sorted(source_root.glob("sub-*/eeg/brainvision_processed_1khz/**/*.vhdr"))
     return [p for p in vhdrs if p.is_file() and not p.name.startswith("._")]
 
 

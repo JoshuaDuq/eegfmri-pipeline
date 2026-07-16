@@ -62,6 +62,10 @@ def test_build_dose_response_figure_draws_scientific_layers(tmp_path: Path) -> N
     )
     assert len(axis.lines) >= 4
     assert len(axis.collections) >= 1
+    figure.canvas.draw()
+    assert axis.get_legend() is None
+    assert len(figure.legends) == 1
+    assert figure.legends[0].get_window_extent().y0 >= axis.get_window_extent().y1
     plt.close(figure)
 
 

@@ -189,7 +189,7 @@ def test_multi_stage_writer_validates_every_source_before_writing(
     with pytest.raises(FileNotFoundError, match="missing MNE stage"):
         module.write_preprocessing_stage_psds(
             stage_identifiers=("raw", "processed", "mne"),
-            kingston_root=tmp_path / "kingston",
+            source_data_root=tmp_path / "source_data",
             derivative_root=tmp_path / "derivatives",
             task="thermalactive",
             config=load_study1_config(),
@@ -228,7 +228,7 @@ def test_multi_stage_writer_builds_every_summary_before_publishing(
     with pytest.raises(ValueError, match="invalid MNE spectrum"):
         module.write_preprocessing_stage_psds(
             stage_identifiers=("raw", "processed", "mne"),
-            kingston_root=tmp_path / "kingston",
+            source_data_root=tmp_path / "source_data",
             derivative_root=tmp_path / "derivatives",
             task="thermalactive",
             config=load_study1_config(),
@@ -274,7 +274,7 @@ def test_multi_stage_writer_does_not_publish_partial_staged_artifacts(
     with pytest.raises(OSError, match="processed render failed"):
         module.write_preprocessing_stage_psds(
             stage_identifiers=("raw", "processed"),
-            kingston_root=tmp_path,
+            source_data_root=tmp_path,
             derivative_root=None,
             task="thermalactive",
             config=load_study1_config(),
@@ -292,7 +292,7 @@ def test_multi_stage_writer_rejects_nonthermal_brainvision_task(
     with pytest.raises(ValueError, match="require task 'thermalactive'"):
         module.write_preprocessing_stage_psds(
             stage_identifiers=("raw", "processed"),
-            kingston_root=tmp_path,
+            source_data_root=tmp_path,
             derivative_root=None,
             task="rest",
             config=load_study1_config(),
@@ -334,7 +334,7 @@ def test_multi_stage_writer_preserves_requested_stage_order(
 
     paths = module.write_preprocessing_stage_psds(
         stage_identifiers=("raw", "processed", "mne"),
-        kingston_root=tmp_path / "kingston",
+        source_data_root=tmp_path / "source_data",
         derivative_root=tmp_path / "derivatives",
         task="thermalactive",
         config=load_study1_config(),
@@ -351,7 +351,7 @@ def test_multi_stage_writer_rejects_duplicate_stages(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Duplicate preprocessing PSD stage"):
         module.write_preprocessing_stage_psds(
             stage_identifiers=("raw", "raw"),
-            kingston_root=tmp_path,
+            source_data_root=tmp_path,
             derivative_root=tmp_path,
             task="thermalactive",
             config=load_study1_config(),
@@ -393,8 +393,8 @@ def test_preprocessing_stage_psd_main_passes_explicit_roots_and_order(
             "pipeline.yaml",
             "--task",
             "thermalactive",
-            "--kingston-root",
-            str(tmp_path / "kingston"),
+            "--source-data-root",
+            str(tmp_path / "source_data"),
             "--derivative-root",
             str(tmp_path / "derivatives"),
             "--stage",
@@ -410,7 +410,7 @@ def test_preprocessing_stage_psd_main_passes_explicit_roots_and_order(
 
     assert result == output_paths
     assert captured["stage_identifiers"] == ("raw", "processed", "mne")
-    assert captured["kingston_root"] == tmp_path / "kingston"
+    assert captured["source_data_root"] == tmp_path / "source_data"
     assert captured["derivative_root"] == tmp_path / "derivatives"
     assert capsys.readouterr().out.splitlines() == [str(path.svg) for path in output_paths]
 

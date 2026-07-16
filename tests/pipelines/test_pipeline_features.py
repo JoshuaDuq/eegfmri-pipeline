@@ -2309,6 +2309,51 @@ class TestFeatureHelpers(_FeatureImportMixin, unittest.TestCase):
                 ]
             )
 
+    def test_accumulate_features_keeps_power_columns_owned_by_current_window(self):
+        from eeg_pipeline.pipelines.features import _accumulate_features
+
+        baseline = pd.DataFrame(
+            {
+                "trial_id": [1, 2],
+                "power_baseline_alpha_ch_Cz_mean": [0.1, 0.2],
+            }
+        )
+        active = pd.DataFrame(
+            {
+                "trial_id": [1, 2],
+                "power_baseline_alpha_ch_Cz_mean": [0.1, 0.2],
+                "power_active_alpha_ch_Cz_db": [1.0, 2.0],
+            }
+        )
+
+        accumulated = {"power": [baseline]}
+        _accumulate_features(
+            accumulated,
+            {},
+            SimpleNamespace(
+                ratios_df=None,
+                asymmetry_df=None,
+                quality_df=None,
+            ),
+            {
+                "pow_df_aligned": active,
+                "baseline_df_aligned": baseline,
+                "range_name": "active",
+            },
+        )
+
+        merged = pd.concat(accumulated["power"], axis="columns")
+        self.assertEqual(
+            merged.columns.tolist(),
+            [
+                "trial_id",
+                "power_baseline_alpha_ch_Cz_mean",
+                "trial_id",
+                "power_active_alpha_ch_Cz_db",
+            ],
+        )
+        self.assertEqual(accumulated["baseline"], [])
+
     def test_pac_trials_alignment_round_trip(self):
         from eeg_pipeline.pipelines.features import _build_extra_blocks, _update_from_aligned_extra
 

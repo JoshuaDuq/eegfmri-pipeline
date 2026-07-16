@@ -38,6 +38,7 @@ STEP_ICA_FIT = "ica-fit"
 STEP_ICA_LABEL = "ica-label"
 STEP_EPOCHS = "epochs"
 STEP_STATS = "stats"
+STEP_SCANNER_HARMONIC_QC = "scanner-harmonic-qc"
 
 
 def _is_events_tsv(path: Path) -> bool:
@@ -174,7 +175,7 @@ class PreprocessingPipeline(PipelineBase):
         progress.subject_start(f"sub-{subject}")
 
         try:
-            steps = self._get_steps_for_mode(mode)
+            steps = self._get_steps_for_run(mode, task_is_rest)
 
             self._execute_steps(
                 steps=steps,
@@ -226,13 +227,14 @@ class PreprocessingPipeline(PipelineBase):
         run_error: Optional[str] = None
         caught_error: Optional[Exception] = None
         result: Optional[List[Dict[str, Any]]] = None
+        run_outputs: Dict[str, str] = {}
 
         try:
             progress.start("preprocessing", subjects)
 
-            steps = self._get_steps_for_mode(mode)
+            steps = self._get_steps_for_run(mode, task_is_rest)
 
-            self._execute_steps(
+            run_outputs = self._execute_steps(
                 steps=steps,
                 subjects=subjects,
                 task=resolved_task,
@@ -264,7 +266,7 @@ class PreprocessingPipeline(PipelineBase):
                     run_context,
                     status=run_status,
                     error=run_error,
-                    outputs={},
+                    outputs=run_outputs,
                     summary={
                         "n_subjects": len(subjects),
                         "mode": mode,
@@ -304,6 +306,13 @@ class PreprocessingPipeline(PipelineBase):
 
         return mode_steps[mode]
 
+    def _get_steps_for_run(self, mode: str, task_is_rest: bool) -> List[str]:
+        """Append cohort QC only when task epoch outputs are produced."""
+        steps = self._get_steps_for_mode(mode)
+        if not task_is_rest and mode in {"full", "epochs"}:
+            steps.append(STEP_SCANNER_HARMONIC_QC)
+        return steps
+
     def _execute_steps(
         self,
         steps: List[str],
@@ -314,9 +323,10 @@ class PreprocessingPipeline(PipelineBase):
         task_is_rest: bool,
         n_jobs: int,
         progress: Any,
-    ) -> None:
+    ) -> Dict[str, str]:
         """Execute preprocessing steps in sequence."""
         total_steps = len(steps)
+        outputs: Dict[str, str] = {}
 
         for i, step in enumerate(steps, 1):
             progress.step(step, current=i, total=total_steps)
@@ -352,6 +362,19 @@ class PreprocessingPipeline(PipelineBase):
                 )
             elif step == STEP_STATS:
                 self._collect_stats(task=task)
+            elif step == STEP_SCANNER_HARMONIC_QC:
+                if task is None:
+                    raise ValueError("Scanner harmonic QC requires a task name.")
+                outputs.update(
+                    self._run_scanner_harmonic_qc(
+                        subjects=subjects,
+                        task=task,
+                    )
+                )
+            else:
+                raise ValueError(f"Unknown preprocessing step: {step}")
+
+        return outputs
 
     def _run_bad_channel_detection(
         self,
@@ -814,6 +837,32 @@ class PreprocessingPipeline(PipelineBase):
         )
 
         self.logger.info("Statistics collection complete")
+
+    def _run_scanner_harmonic_qc(
+        self,
+        *,
+        subjects: List[str],
+        task: str,
+    ) -> Dict[str, str]:
+        """Write the input-versus-final cohort scanner-harmonic comb."""
+        from eeg_pipeline.preprocessing.pipeline.scanner_harmonic_qc import (
+            run_scanner_harmonic_qc,
+            scanner_comb_parameters_from_config,
+        )
+
+        parameters = scanner_comb_parameters_from_config(self.config)
+        outputs = run_scanner_harmonic_qc(
+            subjects=subjects,
+            task=task,
+            bids_root=self.bids_root,
+            deriv_root=self.deriv_root,
+            input_extension=self.config.get("pyprep.file_extension"),
+            parameters=parameters,
+        )
+        return {
+            "scanner_harmonic_comb_png": str(outputs.png_path),
+            "scanner_harmonic_comb_tsv": str(outputs.tsv_path),
+        }
 
     def _run_mne_bids_pipeline(
         self,

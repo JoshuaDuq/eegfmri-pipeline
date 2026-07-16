@@ -526,6 +526,11 @@ def test_renderer_has_fixed_multimodal_structure(tmp_path: Path) -> None:
             "beta": "#CC79A7",
             "gamma": "#009E73",
         }
+        expected_band_labels = {
+            "alpha": "Alpha",
+            "beta": "Beta",
+            "gamma": "Scanner-clean gamma",
+        }
         for axis, band in zip(null_axes, BANDS, strict=True):
             result = summary.band_results[band]
             observed_lines = [
@@ -538,11 +543,21 @@ def test_renderer_has_fixed_multimodal_structure(tmp_path: Path) -> None:
                 expected_band_colors[band]
             )
             assert len([line for line in axis.lines if line.get_gid() == "zero-reference"]) == 1
-            assert axis.get_title() == (
-                f"r = {result.spatial_r:.3f}   plus-one two-sided p = "
-                f"{result.p_value:.4f}   "
-                f"Holm p = {result.holm_adjusted_p_value:.4f}"
+            annotation_text = {text.get_text() for text in axis.texts}
+            assert f"Observed r = {result.spatial_r:.3f}" in annotation_text
+            assert (
+                f"Plus-one two-sided p = {result.p_value:.4f}\n"
+                f"Holm-adjusted p = {result.holm_adjusted_p_value:.4f}"
+                in annotation_text
             )
+            band_labels = [
+                text for text in axis.texts if text.get_gid() == "null-band-label"
+            ]
+            assert [text.get_text() for text in band_labels] == [
+                expected_band_labels[band]
+            ]
+            figure.canvas.draw()
+            assert band_labels[0].get_window_extent().y1 <= axis.get_window_extent().y1
             histogram_patches = [
                 patch for patch in axis.patches if patch.get_gid() == "null-histogram"
             ]

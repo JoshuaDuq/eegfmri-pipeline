@@ -524,17 +524,46 @@ def _build_feature_qc(features: FeatureExtractionResult, ctx: FeatureContext) ->
     return qc
 
 
+def _power_features_for_range(
+    power: Optional[pd.DataFrame],
+    range_name: Any,
+) -> Optional[pd.DataFrame]:
+    """Keep only power columns owned by the current named time range."""
+    if power is None or power.empty or not isinstance(range_name, str):
+        return power
+
+    normalized_name = range_name.strip()
+    if not normalized_name:
+        return power
+
+    owned_prefix = f"power_{normalized_name}_"
+    columns = [
+        column
+        for column in power.columns
+        if column == TRIAL_ID_COLUMN
+        or not str(column).startswith("power_")
+        or str(column).startswith(owned_prefix)
+    ]
+    return power.loc[:, columns]
+
+
 def _accumulate_features(
     accumulated: Dict[str, List[pd.DataFrame]],
     unpacked: Dict[str, Any],
     features: FeatureExtractionResult,
-    aligned: Dict[str, pd.DataFrame],
+    aligned: Dict[str, Any],
     aligned_events: Optional[pd.DataFrame] = None,
 ) -> None:
     """Accumulate aligned features for later merging."""
+    range_name = aligned.get("range_name")
     feature_mapping = {
-        "power": aligned.get("pow_df_aligned"),
-        "baseline": aligned.get("baseline_df_aligned"),
+        "power": _power_features_for_range(
+            aligned.get("pow_df_aligned"),
+            range_name,
+        ),
+        "baseline": (
+            None if isinstance(range_name, str) else aligned.get("baseline_df_aligned")
+        ),
         "connectivity": aligned.get("conn_df_aligned"),
         "directedconnectivity": unpacked.get("dconn_df"),
         "sourcelocalization": unpacked.get("source_df"),
@@ -1438,6 +1467,7 @@ class FeaturePipeline(PipelineBase):
                         "baseline_df_aligned": baseline_df_aligned,
                         "conn_df_aligned": conn_df_aligned,
                         "aper_df_aligned": aper_df_aligned,
+                        "range_name": name,
                     }
                     _accumulate_features(
                         accumulated_features,

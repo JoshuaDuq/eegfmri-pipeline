@@ -279,6 +279,28 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown preprocessing mode"):
             p._get_steps_for_mode("bogus")
 
+    def test_scanner_harmonic_qc_runs_only_after_task_epoch_outputs(self):
+        from eeg_pipeline.pipelines.preprocessing import (
+            STEP_SCANNER_HARMONIC_QC,
+            PreprocessingPipeline,
+        )
+
+        pipeline = object.__new__(PreprocessingPipeline)
+
+        full_steps = pipeline._get_steps_for_run("full", task_is_rest=False)
+        epoch_steps = pipeline._get_steps_for_run("epochs", task_is_rest=False)
+
+        self.assertEqual(full_steps[-1], STEP_SCANNER_HARMONIC_QC)
+        self.assertEqual(epoch_steps[-1], STEP_SCANNER_HARMONIC_QC)
+        self.assertNotIn(
+            STEP_SCANNER_HARMONIC_QC,
+            pipeline._get_steps_for_run("full", task_is_rest=True),
+        )
+        self.assertNotIn(
+            STEP_SCANNER_HARMONIC_QC,
+            pipeline._get_steps_for_run("ica", task_is_rest=False),
+        )
+
     def test_detect_conditions_from_bids(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -895,7 +917,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         self.assertEqual(p.bids_root.as_posix(), "/tmp/bids-task")
         self.assertEqual(p.deriv_root.as_posix(), "/tmp/derivatives-task")
 
-        with patch.object(PreprocessingPipeline, "_execute_steps"):
+        with patch.object(PreprocessingPipeline, "_execute_steps", return_value={}):
             p.run_batch(
                 subjects=["0001"],
                 task="rest",
@@ -917,7 +939,15 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         p.bids_root = Path(tempfile.mkdtemp()) / "bids"
         p.deriv_root = Path(tempfile.mkdtemp())
 
-        with patch.object(PreprocessingPipeline, "_execute_steps"):
+        qc_outputs = {
+            "scanner_harmonic_comb_png": "/tmp/comb.png",
+            "scanner_harmonic_comb_tsv": "/tmp/comb.tsv",
+        }
+        with patch.object(
+            PreprocessingPipeline,
+            "_execute_steps",
+            return_value=qc_outputs,
+        ):
             out = p.run_batch(
                 subjects=["0001"],
                 task="task",
@@ -933,6 +963,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         payload = json.loads(metadata_files[-1].read_text(encoding="utf-8"))
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["specifications"]["mode"], "epochs")
+        self.assertEqual(payload["outputs"], qc_outputs)
 
     def test_run_batch_preserves_primary_failure_when_metadata_write_also_fails(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -1002,7 +1033,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         p.bids_root = Path(tempfile.mkdtemp()) / "bids"
         p.deriv_root = Path(tempfile.mkdtemp())
 
-        with patch.object(PreprocessingPipeline, "_execute_steps"):
+        with patch.object(PreprocessingPipeline, "_execute_steps", return_value={}):
             out = p.run_batch(
                 subjects=["0001", "0002"],
                 task="task",
@@ -1136,6 +1167,41 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 ["bad-channels"], ["0001"], "t", False, True, False, 1, _NoopProgress()
             )
         m1.assert_not_called()
+
+    def test_execute_steps_returns_scanner_harmonic_qc_outputs(self):
+        from eeg_pipeline.pipelines.preprocessing import (
+            STEP_SCANNER_HARMONIC_QC,
+            PreprocessingPipeline,
+        )
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.logger = Mock()
+        expected = {
+            "scanner_harmonic_comb_png": "/tmp/comb.png",
+            "scanner_harmonic_comb_tsv": "/tmp/comb.tsv",
+        }
+
+        with patch.object(
+            PreprocessingPipeline,
+            "_run_scanner_harmonic_qc",
+            return_value=expected,
+        ) as run_qc:
+            observed = pipeline._execute_steps(
+                [STEP_SCANNER_HARMONIC_QC],
+                ["0001", "0002"],
+                "thermalactive",
+                True,
+                True,
+                False,
+                1,
+                _NoopProgress(),
+            )
+
+        self.assertEqual(observed, expected)
+        run_qc.assert_called_once_with(
+            subjects=["0001", "0002"],
+            task="thermalactive",
+        )
 
     def test_run_epoch_creation_and_collect_stats(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline

@@ -284,7 +284,6 @@ def test_read_input_recordings_requires_verified_manifest_inventory(tmp_path: Pa
     recordings = runner.read_input_recordings(
         input_root,
         _bold_root(tmp_path),
-        expected_count=1,
     )
 
     assert len(recordings) == 1
@@ -300,15 +299,27 @@ def test_read_input_recordings_requires_matching_bold_metadata(tmp_path: Path) -
         runner.read_input_recordings(
             _input_root(tmp_path),
             tmp_path / "missing-bids-fmri",
-            expected_count=1,
         )
+
+
+def test_read_input_recordings_rejects_empty_manifest(tmp_path: Path) -> None:
+    input_root = tmp_path / "marker-sanitized"
+    input_root.mkdir()
+    manifest = input_root / "marker_sanitization_manifest.tsv"
+    manifest.write_text(
+        "subject\trun\tstaged_vhdr\tsource_vhdr_sha256\t"
+        "source_vmrk_sha256\tsource_eeg_size\tsource_eeg_mtime_ns\tverified\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="contains no recordings"):
+        runner.read_input_recordings(input_root, tmp_path / "bids-fmri")
 
 
 def test_build_run_qc_serializes_complete_methods_and_cardiac_quality(tmp_path: Path) -> None:
     recording = runner.read_input_recordings(
         _input_root(tmp_path),
         _bold_root(tmp_path),
-        expected_count=1,
     )[0]
     qc = runner.build_run_qc(
         recording,
@@ -354,7 +365,6 @@ def test_process_recording_writes_atomic_qrs_and_separate_qc_figures(
     recording = runner.read_input_recordings(
         _input_root(tmp_path),
         _bold_root(tmp_path),
-        expected_count=1,
     )[0]
     result = _native_result()
     detector = object()
@@ -480,7 +490,6 @@ def test_run_cohort_publishes_organized_derivative_atomically(
         bold_root,
         output_root,
         CONFIG_PATH,
-        expected_count=1,
     )
 
     assert published == output_root
@@ -527,7 +536,6 @@ def test_run_cohort_refuses_to_overwrite_a_derivative_root(tmp_path: Path) -> No
             bold_root,
             output_root,
             CONFIG_PATH,
-            expected_count=1,
         )
     except FileExistsError as error:
         assert str(output_root) in str(error)
@@ -535,6 +543,7 @@ def test_run_cohort_refuses_to_overwrite_a_derivative_root(tmp_path: Path) -> No
         raise AssertionError("run_cohort must refuse existing derivative roots")
 
 
-def test_fixed_cohort_boundary_and_default_output_are_versioned() -> None:
-    assert runner.EXPECTED_RUN_COUNT == 83
-    assert runner.DEFAULT_OUTPUT_ROOT.name == "native_eeg_fmri_correction-v4"
+def test_default_output_matches_organized_source() -> None:
+    assert runner.DEFAULT_OUTPUT_ROOT == Path(
+        "/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz"
+    )

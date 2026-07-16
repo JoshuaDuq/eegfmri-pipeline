@@ -11,17 +11,17 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import mne
 import numpy as np
 
 from eeg_pipeline.preprocessing.brainvision_markers import sanitize_vas_marker_text
 
-DEFAULT_SUBJECTS = ("0001",) + tuple(f"{subject:04d}" for subject in range(3, 16))
-EXPECTED_RUN_COUNT = 83
-CORRECTED_SUFFIX = "_scannerpulse_corrected.vhdr"
 RUN_PATTERN = re.compile(r"^ThermalPainEEGFMRI_run(?P<run>\d+)_sub(?P<subject>[^_]+)_")
+DEFAULT_RECORDING_OVERRIDES_PATH = (
+    Path(__file__).parent / "config/native_eeg_fmri_recording_overrides.tsv"
+)
 
 
 @dataclass(frozen=True)
@@ -81,62 +81,130 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _parse_reference(reference: Path) -> tuple[str, int, str]:
-    if not reference.name.endswith(CORRECTED_SUFFIX):
-        raise ValueError(f"Unexpected corrected reference filename: {reference}")
-    original_basename = reference.name.removesuffix(CORRECTED_SUFFIX)
-    match = RUN_PATTERN.match(original_basename)
+def _parse_source_header(source_vhdr: Path) -> tuple[str, int]:
+    match = RUN_PATTERN.match(source_vhdr.stem)
     if match is None:
-        raise ValueError(f"Cannot parse subject and run from {reference.name}")
-    return match.group("subject"), int(match.group("run")), original_basename
+        raise ValueError(f"Cannot parse subject and run from {source_vhdr.name}")
+    return match.group("subject"), int(match.group("run"))
+
+
+def load_recording_overrides(path: Path) -> dict[str, int | None]:
+    """Load explicit exclusions and logical run identities for exceptional acquisitions."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Recording overrides do not exist: {path}")
+    overrides: dict[str, int | None] = {}
+    with path.open("r", encoding="utf-8", newline="") as stream:
+        for line_number, row in enumerate(csv.DictReader(stream, delimiter="\t"), start=2):
+            required = {"subject", "source_vhdr", "action", "run"}
+            missing = sorted(required - set(row))
+            if missing:
+                raise ValueError(f"Recording override line {line_number} is missing: {missing}")
+            source_name = row["source_vhdr"].strip()
+            if Path(source_name).name != source_name or not source_name.endswith(".vhdr"):
+                raise ValueError(
+                    f"Recording override line {line_number} has an invalid source_vhdr"
+                )
+            subject, _ = _parse_source_header(Path(source_name))
+            if row["subject"].strip() != subject:
+                raise ValueError(f"Recording override line {line_number} has a subject mismatch")
+            if source_name in overrides:
+                raise ValueError(f"Duplicate recording override for {source_name}")
+
+            action = row["action"].strip()
+            run_text = row["run"].strip()
+            if action == "exclude":
+                if run_text:
+                    raise ValueError(
+                        f"Excluded recording override line {line_number} must not define a run"
+                    )
+                overrides[source_name] = None
+            elif action == "include":
+                run = int(run_text)
+                if run < 1:
+                    raise ValueError(f"Recording override line {line_number} has invalid run {run}")
+                overrides[source_name] = run
+            else:
+                raise ValueError(
+                    f"Recording override line {line_number} has invalid action {action!r}"
+                )
+    return overrides
 
 
 def discover_cohort_recordings(
-    kingston_root: Path,
     source_data_root: Path,
     *,
-    subjects: Sequence[str] = DEFAULT_SUBJECTS,
-    expected_count: int = EXPECTED_RUN_COUNT,
+    subjects: Sequence[str] | None = None,
+    recording_overrides: Mapping[str, int | None] | None = None,
 ) -> list[CohortRecording]:
-    """Map the fixed corrected-source inventory to unique original recordings."""
-    subject_set = set(subjects)
-    references = sorted(
-        reference
-        for reference in source_data_root.glob(
-            "sub-*/eeg/ThermalPainEEGFMRI_run*_scannerpulse_corrected.vhdr"
+    """Discover unique original 5 kHz recordings for all or selected subjects."""
+    source_headers = sorted(
+        source_vhdr
+        for source_vhdr in source_data_root.glob(
+            "sub-*/eeg/original_5khz/ThermalPainEEGFMRI_run*_sub*_*.vhdr"
         )
-        if not reference.name.startswith("._")
-        and reference.parent.parent.name.removeprefix("sub-") in subject_set
+        if not source_vhdr.name.startswith("._")
     )
-    if len(references) != expected_count:
-        raise ValueError(
-            f"Expected {expected_count} corrected cohort references, found {len(references)}"
+    if not source_headers:
+        raise FileNotFoundError(
+            f"No original 5 kHz thermal EEG-fMRI recordings found in {source_data_root}"
         )
 
     recordings: list[CohortRecording] = []
     seen_subject_runs: set[tuple[str, int]] = set()
-    for reference in references:
-        subject, run, original_basename = _parse_reference(reference)
-        reference_subject = reference.parent.parent.name.removeprefix("sub-")
-        if subject != reference_subject:
+    overrides = dict(recording_overrides or {})
+    matched_overrides: set[str] = set()
+    requested_subjects = set(subjects) if subjects is not None else None
+    discovered_subjects: set[str] = set()
+    for source_vhdr in source_headers:
+        subject, run = _parse_source_header(source_vhdr)
+        directory_subject = source_vhdr.parent.parent.parent.name.removeprefix("sub-")
+        if subject != directory_subject:
             raise ValueError(
-                f"Reference subject mismatch for {reference}: {subject} != {reference_subject}"
+                f"Source subject mismatch for {source_vhdr}: {subject} != {directory_subject}"
             )
+        discovered_subjects.add(subject)
+        if requested_subjects is not None and subject not in requested_subjects:
+            continue
 
-        source_name = f"{original_basename}.vhdr"
-        matches = sorted(
-            path
-            for path in kingston_root.glob(f"sub_{subject}_*/raw/{source_name}")
-            if not path.name.startswith("._")
-        )
-        if len(matches) != 1:
-            raise ValueError(f"Expected exactly one original for {reference}, found {len(matches)}")
+        _source_files(source_vhdr)
+        logical_run = run
+        if source_vhdr.name in overrides:
+            matched_overrides.add(source_vhdr.name)
+            override_run = overrides[source_vhdr.name]
+            if override_run is None:
+                continue
+            logical_run = override_run
 
-        subject_run = (subject, run)
+        subject_run = (subject, logical_run)
         if subject_run in seen_subject_runs:
-            raise ValueError(f"Duplicate cohort subject/run mapping: sub-{subject} run-{run}")
+            raise ValueError(
+                f"Ambiguous original recordings map to sub-{subject} run-{logical_run}; "
+                "add explicit recording overrides"
+            )
         seen_subject_runs.add(subject_run)
-        recordings.append(CohortRecording(subject=subject, run=run, source_vhdr=matches[0]))
+        recordings.append(
+            CohortRecording(subject=subject, run=logical_run, source_vhdr=source_vhdr)
+        )
+
+    if requested_subjects is not None:
+        missing_subjects = sorted(requested_subjects - discovered_subjects)
+        if missing_subjects:
+            raise FileNotFoundError(
+                f"No original 5 kHz recordings found for subjects: {missing_subjects}"
+            )
+    if not recordings:
+        raise FileNotFoundError("Subject selection contains no original 5 kHz recordings")
+    relevant_overrides = {
+        source_name
+        for source_name in overrides
+        if requested_subjects is None
+        or _parse_source_header(Path(source_name))[0] in requested_subjects
+    }
+    unmatched_overrides = sorted(relevant_overrides - matched_overrides)
+    if unmatched_overrides:
+        raise FileNotFoundError(
+            f"Recording overrides do not match discovered source headers: {unmatched_overrides}"
+        )
 
     return sorted(recordings, key=lambda recording: (recording.subject, recording.run))
 
@@ -277,14 +345,13 @@ def _remove_appledouble_files(root: Path) -> None:
 
 
 def run_sanitization(
-    kingston_root: Path,
     source_data_root: Path,
     output_root: Path,
     *,
-    subjects: Sequence[str] = DEFAULT_SUBJECTS,
-    expected_count: int = EXPECTED_RUN_COUNT,
+    subjects: Sequence[str] | None = None,
+    recording_overrides: Mapping[str, int | None] | None = None,
 ) -> Path:
-    """Create and atomically publish the complete sanitized cohort metadata."""
+    """Create and atomically publish sanitized metadata for discovered recordings."""
     if output_root.exists():
         raise FileExistsError(f"Output root already exists: {output_root}")
     temporary_root = output_root.parent / f".{output_root.name}.tmp"
@@ -292,10 +359,9 @@ def run_sanitization(
         raise FileExistsError(f"Temporary output root already exists: {temporary_root}")
 
     recordings = discover_cohort_recordings(
-        kingston_root,
         source_data_root,
         subjects=subjects,
-        expected_count=expected_count,
+        recording_overrides=recording_overrides,
     )
     succeeded = False
     try:
@@ -339,7 +405,6 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Stage unambiguous VAS markers for the 5 kHz BrainVision cohort."
     )
-    parser.add_argument("--kingston-root", type=Path, default=Path("/Volumes/KINGSTON"))
     parser.add_argument(
         "--source-data-root",
         type=Path,
@@ -350,15 +415,28 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1"),
     )
+    parser.add_argument(
+        "--subject",
+        action="append",
+        default=None,
+        help="Subject label without 'sub-'; repeat to select subjects. Defaults to all discovered.",
+    )
+    parser.add_argument(
+        "--recording-overrides",
+        type=Path,
+        default=DEFAULT_RECORDING_OVERRIDES_PATH,
+        help="TSV containing explicit exclusions and logical run overrides.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
     output_root = run_sanitization(
-        kingston_root=args.kingston_root,
         source_data_root=args.source_data_root,
         output_root=args.output_root,
+        subjects=args.subject,
+        recording_overrides=load_recording_overrides(args.recording_overrides),
     )
     print(output_root)
 

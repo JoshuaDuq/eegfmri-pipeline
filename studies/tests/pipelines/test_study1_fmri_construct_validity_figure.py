@@ -78,6 +78,56 @@ def test_fmri_construct_display_limits_are_symmetric_and_robust() -> None:
     assert np.isfinite(limit)
 
 
+def test_fmri_axial_views_leave_exact_zero_voxels_transparent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nilearn import datasets, plotting
+
+    from studies.pain_study.study1.figures.fmri_construct_validity_plot import (
+        _diverging_color_map,
+        _draw_axial_views,
+    )
+
+    effect_image = nib.Nifti1Image(np.ones((3, 3, 3), dtype=np.float32), np.eye(4))
+    significance_mask = nib.Nifti1Image(
+        np.ones((3, 3, 3), dtype=np.uint8),
+        np.eye(4),
+    )
+    plot_calls: list[dict[str, object]] = []
+
+    class Display:
+        contour_calls = 0
+
+        def add_contours(self, *args, **kwargs) -> None:
+            self.contour_calls += 1
+
+    display = Display()
+
+    def record_plot(*args, **kwargs):
+        plot_calls.append(kwargs)
+        return display
+
+    monkeypatch.setattr(datasets, "load_mni152_template", lambda **kwargs: effect_image)
+    monkeypatch.setattr(plotting, "plot_stat_map", record_plot)
+    figure, axis = plt.subplots()
+
+    _draw_axial_views(
+        axis,
+        effect_image=effect_image,
+        significance_mask=significance_mask,
+        slices=(-12.0, 0.0, 12.0, 24.0, 36.0, 48.0),
+        color_map=_diverging_color_map(),
+        limit=1.0,
+        overlay_alpha=0.72,
+    )
+
+    assert len(plot_calls) == 1
+    assert plot_calls[0]["threshold"] == 0.0
+    assert plot_calls[0]["transparency"] == 0.72
+    assert display.contour_calls == 1
+    plt.close(figure)
+
+
 def test_fmri_construct_writer_creates_exact_reproducibility_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
