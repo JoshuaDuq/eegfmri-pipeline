@@ -47,7 +47,11 @@ versioned marker-sanitized derivative, applies synchronized phase-aligned AAS, a
 R-peak detection, and MNE PCA-OBS, then writes a separate 1 kHz derivative with per-run spectral,
 QRS, and cardiac-locked QC. Each run has separate physiological and scanner-spectrum figures; the
 latter combines the full 15–90 Hz comb with four stage-resolved local PSD windows. The fixed
-qualification boundary is all 83 verified runs.
+qualification boundary is all 83 verified runs. After every run succeeds, the pipeline automatically
+writes `cohort_scanner_spectrum_qc.png` with the same five-panel spectral layout and
+`cohort_scanner_spectrum_qc.tsv` with every plotted value. Cohort spectra are participant-first:
+runs are aggregated within participant before the equally weighted cohort median and deterministic
+95% participant-bootstrap interval are calculated.
 
 ```bash
 python -m studies.pain_study.scripts.run_native_eeg_fmri_artifact_correction

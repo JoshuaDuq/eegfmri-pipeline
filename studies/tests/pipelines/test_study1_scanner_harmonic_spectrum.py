@@ -174,10 +174,7 @@ def test_build_scanner_harmonic_summary_weights_participants_equally() -> None:
 
     frequencies = np.asarray([15.0, 30.0, 45.0])
     run_spectra = tuple(
-        [
-            _run_spectrum("sub-01", run, frequencies, [0.0, 10.0, 20.0])
-            for run in range(1, 7)
-        ]
+        [_run_spectrum("sub-01", run, frequencies, [0.0, 10.0, 20.0]) for run in range(1, 7)]
         + [
             _run_spectrum("sub-02", 1, frequencies, [100.0, 140.0, 180.0]),
             _run_spectrum("sub-02", 2, frequencies, [120.0, 160.0, 200.0]),
@@ -393,12 +390,7 @@ class _EmptyAnnotations:
 
 
 def _touch_run(root: Path, subject: str, *, task: str, run: int) -> Path:
-    path = (
-        root
-        / subject
-        / "eeg"
-        / f"{subject}_task-{task}_run-{run}_proc-clean_raw.fif"
-    )
+    path = root / subject / "eeg" / f"{subject}_task-{task}_run-{run}_proc-clean_raw.fif"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch()
     return path

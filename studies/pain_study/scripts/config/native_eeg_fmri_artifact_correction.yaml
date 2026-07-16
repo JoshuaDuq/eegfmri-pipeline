@@ -1,4 +1,4 @@
-version: 2
+version: 3
 
 acquisition:
   sampling_frequency_hz: 5000.0
@@ -12,6 +12,11 @@ gradient:
   moving_average_volumes: 21
   alignment_upsampling: 4
   maximum_alignment_shift_samples: 2.0
+  # Disabled: the fixed study-data audit found no scanner-line improvement and
+  # measurable non-harmonic signal distortion for 1-4 components.
+  residual_obs_components: 0
+  residual_obs_folds: 5
+  residual_obs_seed: 42
 
 resampling:
   low_pass_frequency_hz: 100.0

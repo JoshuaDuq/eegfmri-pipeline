@@ -28,6 +28,9 @@ def test_native_eeg_fmri_config_encodes_the_fixed_study_pipeline() -> None:
     assert parameters.maximum_marker_deviation_samples == 1
     assert parameters.gradient.moving_average_volumes == 21
     assert parameters.gradient.alignment_upsampling == 4
+    assert parameters.gradient.residual_obs_components == 0
+    assert parameters.gradient.residual_obs_folds == 5
+    assert parameters.gradient.residual_obs_seed == 42
     assert parameters.low_pass_frequency_hz == 100.0
     assert parameters.output_sampling_frequency_hz == 1_000.0
     assert parameters.cardiac.obs_components == 4
@@ -76,7 +79,7 @@ def test_native_eeg_fmri_config_rejects_unknown_settings(tmp_path: Path) -> None
 def test_native_eeg_fmri_config_rejects_version_one(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        CONFIG_PATH.read_text(encoding="utf-8").replace("version: 2", "version: 1", 1),
+        CONFIG_PATH.read_text(encoding="utf-8").replace("version: 3", "version: 1", 1),
         encoding="utf-8",
     )
 

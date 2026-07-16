@@ -85,9 +85,7 @@ def _crop_spectrum(spectrum: HarmonicSpectrum, stage: str) -> HarmonicSpectrum:
         raise ValueError(f"{stage} scanner spectrum frequencies must be strictly increasing")
     if not np.isfinite(frequencies).all() or not np.isfinite(power).all():
         raise ValueError(f"{stage} scanner spectrum must contain only finite values")
-    selected = (frequencies >= SCANNER_SPECTRUM_LOW_HZ) & (
-        frequencies <= SCANNER_SPECTRUM_HIGH_HZ
-    )
+    selected = (frequencies >= SCANNER_SPECTRUM_LOW_HZ) & (frequencies <= SCANNER_SPECTRUM_HIGH_HZ)
     if np.count_nonzero(selected) < 2:
         raise ValueError(f"{stage} scanner spectrum does not cover 15–90 Hz")
     return HarmonicSpectrum(
@@ -173,10 +171,7 @@ def _aggregate_stage(
         spectra = dict(run.stages)
         subject_runs[run.subject].append(spectra[stage].median_power_db)
     participant_matrix = np.stack(
-        [
-            np.median(np.stack(subject_runs[subject]), axis=0)
-            for subject in sorted(subject_runs)
-        ]
+        [np.median(np.stack(subject_runs[subject]), axis=0) for subject in sorted(subject_runs)]
     )
     median, confidence_low, confidence_high = paired_participant_bootstrap(
         participant_matrix,

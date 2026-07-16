@@ -56,6 +56,15 @@ def _representative_samples(n_samples: int, sampling_frequency_hz: float) -> sli
 
 def _plot_qrs_window(axis, result: NativeCorrectionResult) -> None:
     diagnostics = result.qrs.diagnostics
+    if diagnostics.model_sha256.startswith("mne.preprocessing.ecg.qrs_detector"):
+        score_label = "MNE normalized ECG score"
+        score_axis_label = "Normalized ECG score"
+    elif diagnostics.model_sha256.startswith("pan-tompkins"):
+        score_label = "Pan-Tompkins energy score"
+        score_axis_label = "Normalized QRS energy"
+    else:
+        score_label = "NeuXus probability"
+        score_axis_label = "R-peak probability"
     if diagnostics.filtered_ecg.shape != diagnostics.probabilities.shape:
         raise ValueError("ECG and NeuXus probability timelines must have equal length")
     samples = _representative_samples(
@@ -93,9 +102,9 @@ def _plot_qrs_window(axis, result: NativeCorrectionResult) -> None:
         color=AFTER_COLOR,
         linewidth=0.7,
         alpha=0.7,
-        label="NeuXus probability",
+        label=score_label,
     )[0]
-    probability_axis.set(ylabel="R-peak probability", ylim=(-0.02, 1.02))
+    probability_axis.set(ylabel=score_axis_label, ylim=(-0.02, 1.02))
     probability_axis.spines["top"].set_visible(False)
     axis.set(
         xlabel="Time (s)",
@@ -104,7 +113,7 @@ def _plot_qrs_window(axis, result: NativeCorrectionResult) -> None:
     )
     axis.legend(
         [ecg_line, peak_points, probability_line],
-        ["Filtered ECG", "Accepted R peak", "NeuXus probability"],
+        ["Filtered ECG", "Accepted R peak", score_label],
         loc="upper right",
         frameon=False,
         fontsize=8,

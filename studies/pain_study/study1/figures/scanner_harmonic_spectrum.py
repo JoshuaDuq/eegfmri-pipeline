@@ -106,9 +106,7 @@ def scanner_harmonic_specification(config: Any) -> ScannerHarmonicSpecification:
     if len(frequency_range) != 2:
         raise ValueError("Scanner-harmonic frequency_range_hz must contain two values.")
     if len(harmonic_orders) != len(DEFAULT_HARMONIC_WINDOWS):
-        raise ValueError(
-            "Scanner-harmonic order count must match the fixed harmonic-window count."
-        )
+        raise ValueError("Scanner-harmonic order count must match the fixed harmonic-window count.")
     return ScannerHarmonicSpecification(
         frequency_range_hz=(frequency_range[0], frequency_range[1]),
         n_fft=int(scanner["n_fft"]),
@@ -143,13 +141,11 @@ def select_scanner_harmonic_peaks(
     selected: list[HarmonicPeak] = []
     for window in specification.harmonic_windows:
         eligible = np.flatnonzero(
-            (peak_frequencies >= window.low_hz)
-            & (peak_frequencies <= window.high_hz)
+            (peak_frequencies >= window.low_hz) & (peak_frequencies <= window.high_hz)
         )
         if eligible.size == 0:
             raise ValueError(
-                "No qualifying spectral peak in scanner-harmonic window "
-                f"{window.label} Hz."
+                "No qualifying spectral peak in scanner-harmonic window " f"{window.label} Hz."
             )
         strongest = int(eligible[np.argmax(prominences[eligible])])
         selected.append(
@@ -192,6 +188,7 @@ def estimate_run_spectrum(
             specification,
         ),
     )
+
 
 def build_scanner_harmonic_summary(
     run_spectra: Sequence[RunSpectrum],
@@ -331,8 +328,8 @@ def _run_audit_table(runs: Sequence[RunSpectrum]) -> pd.DataFrame:
             row[f"{peak.window_name}_peak_frequency_hz"] = peak.peak_frequency_hz
             row[f"{peak.window_name}_prominence_db"] = peak.prominence_db
         rows.append(row)
-    return pd.DataFrame(rows).sort_values(["subject_id", "run"], kind="stable").reset_index(
-        drop=True
+    return (
+        pd.DataFrame(rows).sort_values(["subject_id", "run"], kind="stable").reset_index(drop=True)
     )
 
 
@@ -460,9 +457,7 @@ def _draw_spectrum_panel(axis, summary: ScannerHarmonicSummary, config: Any) -> 
         ha="left",
         va="top",
         transform=axis.transAxes,
-        fontsize=float(
-            require_config_value(config, "study1.figures.validity.font.annotation_pt")
-        ),
+        fontsize=float(require_config_value(config, "study1.figures.validity.font.annotation_pt")),
     )
     return (
         Line2D(
@@ -569,9 +564,7 @@ def _draw_offset_panel(axis, summary: ScannerHarmonicSummary, config: Any) -> No
         va="top",
         color=retained_color,
         transform=axis.transAxes,
-        fontsize=float(
-            require_config_value(config, "study1.figures.validity.font.annotation_pt")
-        ),
+        fontsize=float(require_config_value(config, "study1.figures.validity.font.annotation_pt")),
     )
 
 

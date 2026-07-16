@@ -100,7 +100,7 @@ class NativeEegFmriParameters:
             {"version", "acquisition", "gradient", "resampling", "cardiac", "qc"},
             "top-level configuration",
         )
-        if value["version"] != 2:
+        if value["version"] != 3:
             raise ValueError(f"Unsupported native EEG-fMRI config version: {value['version']!r}")
 
         acquisition = _require_mapping(value["acquisition"], "acquisition")
@@ -123,6 +123,9 @@ class NativeEegFmriParameters:
                 "moving_average_volumes",
                 "alignment_upsampling",
                 "maximum_alignment_shift_samples",
+                "residual_obs_components",
+                "residual_obs_folds",
+                "residual_obs_seed",
             },
             "gradient",
         )
@@ -196,6 +199,9 @@ class NativeEegFmriParameters:
                 moving_average_volumes=int(gradient["moving_average_volumes"]),
                 alignment_upsampling=int(gradient["alignment_upsampling"]),
                 maximum_alignment_shift_samples=float(gradient["maximum_alignment_shift_samples"]),
+                residual_obs_components=int(gradient["residual_obs_components"]),
+                residual_obs_folds=int(gradient["residual_obs_folds"]),
+                residual_obs_seed=int(gradient["residual_obs_seed"]),
             ),
             low_pass_frequency_hz=float(resampling["low_pass_frequency_hz"]),
             output_sampling_frequency_hz=float(resampling["output_sampling_frequency_hz"]),

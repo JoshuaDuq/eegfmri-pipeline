@@ -19,9 +19,7 @@ def _harmonic_stages(
     offset_db: float,
     frequencies_hz: np.ndarray | None = None,
 ) -> dict[str, HarmonicStageQc]:
-    frequencies = (
-        np.arange(10.0, 101.0, 1.0) if frequencies_hz is None else frequencies_hz
-    )
+    frequencies = np.arange(10.0, 101.0, 1.0) if frequencies_hz is None else frequencies_hz
     return {
         stage: HarmonicStageQc(
             summary={"n_channels": 12},

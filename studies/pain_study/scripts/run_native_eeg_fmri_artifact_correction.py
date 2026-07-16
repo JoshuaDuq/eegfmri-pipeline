@@ -45,13 +45,15 @@ from eeg_pipeline.preprocessing.eeg_fmri.qc import (
     CardiacLockedSummary,
     HarmonicStageQc,
 )
+from eeg_pipeline.preprocessing.eeg_fmri.sequence import load_multiband_slice_schedule
 
 EXPECTED_RUN_COUNT = 83
 DEFAULT_INPUT_ROOT = Path(
     "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1"
 )
+DEFAULT_BOLD_ROOT = Path("/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri")
 DEFAULT_OUTPUT_ROOT = Path(
-    "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_eeg_fmri_correction-v3"
+    "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_eeg_fmri_correction-v4"
 )
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config/native_eeg_fmri_artifact_correction.yaml"
 
@@ -63,6 +65,8 @@ class InputRecording:
     subject: str
     run: int
     vhdr_path: Path
+    bold_json_path: Path
+    bold_json_sha256: str
     source_vhdr_sha256: str
     source_vmrk_sha256: str
     source_eeg_size: int
@@ -118,6 +122,7 @@ def _require_manifest_fields(row: dict[str, str], line_number: int) -> None:
 
 def read_input_recordings(
     input_root: Path,
+    bold_root: Path,
     *,
     expected_count: int = EXPECTED_RUN_COUNT,
 ) -> list[InputRecording]:
@@ -139,11 +144,22 @@ def read_input_recordings(
             subject = row["subject"]
             if not subject.startswith("sub-"):
                 raise ValueError(f"Invalid subject label on manifest line {line_number}: {subject}")
+            run = int(row["run"])
+            bold_json_path = (
+                bold_root
+                / subject
+                / "func"
+                / f"{subject}_task-thermalactive_run-{run:02d}_bold.json"
+            )
+            if not bold_json_path.is_file():
+                raise FileNotFoundError(f"Matching BOLD metadata does not exist: {bold_json_path}")
             recordings.append(
                 InputRecording(
                     subject=subject,
-                    run=int(row["run"]),
+                    run=run,
                     vhdr_path=vhdr_path,
+                    bold_json_path=bold_json_path.resolve(),
+                    bold_json_sha256=_sha256(bold_json_path),
                     source_vhdr_sha256=row["source_vhdr_sha256"],
                     source_vmrk_sha256=row["source_vmrk_sha256"],
                     source_eeg_size=int(row["source_eeg_size"]),
@@ -260,12 +276,19 @@ def build_run_qc(
 ) -> dict[str, object]:
     """Build one JSON-serializable correction and provenance report."""
     shifts = result.volume_shifts_samples
+    group_shifts = result.group_shifts_samples
     marker_offsets = result.marker_offsets_samples
+    slice_schedule = load_multiband_slice_schedule(recording.bold_json_path)
+    gradient_method = "whole_volume_phase_aligned_adaptive_AAS"
+    if parameters.gradient.residual_obs_components:
+        gradient_method += "_cross_fitted_residual_OBS"
     return {
         "subject": recording.subject,
         "run": recording.run,
         "source_vhdr": str(recording.vhdr_path),
         "source_vhdr_sha256": recording.source_vhdr_sha256,
+        "source_bold_json": str(recording.bold_json_path),
+        "source_bold_json_sha256": recording.bold_json_sha256,
         "source_vmrk_sha256": recording.source_vmrk_sha256,
         "source_eeg_size": recording.source_eeg_size,
         "source_eeg_mtime_ns": recording.source_eeg_mtime_ns,
@@ -295,12 +318,22 @@ def build_run_qc(
             "channel_count": len(result.raw.ch_names),
         },
         "gradient": {
-            "method": "synchronized_average_artifact_subtraction",
+            "method": gradient_method,
+            "bold_json": str(recording.bold_json_path),
+            "bold_json_sha256": recording.bold_json_sha256,
+            "multiband_factor": slice_schedule.multiband_factor,
+            "slice_count": slice_schedule.slice_count,
+            "slice_group_count": slice_schedule.group_count,
+            "slice_group_times_seconds": slice_schedule.group_times_seconds.tolist(),
             "moving_average_volumes": parameters.gradient.moving_average_volumes,
             "alignment_upsampling": parameters.gradient.alignment_upsampling,
             "maximum_alignment_shift_samples": (
                 parameters.gradient.maximum_alignment_shift_samples
             ),
+            "residual_obs_components": parameters.gradient.residual_obs_components,
+            "residual_obs_folds": parameters.gradient.residual_obs_folds,
+            "residual_obs_seed": parameters.gradient.residual_obs_seed,
+            "residual_obs_removed_rms_v": result.residual_obs_removed_rms,
             "complete_volume_count": result.complete_volume_count,
             "discarded_terminal_samples_at_5khz": result.discarded_terminal_samples,
             "marker_offset_nonzero_count": int(np.count_nonzero(marker_offsets)),
@@ -308,6 +341,9 @@ def build_run_qc(
             "alignment_shift_median_samples": float(np.median(shifts)),
             "alignment_shift_p95_abs_samples": float(np.percentile(np.abs(shifts), 95)),
             "alignment_shift_max_abs_samples": float(np.max(np.abs(shifts))),
+            "group_alignment_shift_median_samples": float(np.median(group_shifts)),
+            "group_alignment_shift_p95_abs_samples": float(np.percentile(np.abs(group_shifts), 95)),
+            "group_alignment_shift_max_abs_samples": float(np.max(np.abs(group_shifts))),
         },
         "cardiac": {
             "qrs_detector": {
@@ -400,10 +436,12 @@ def process_recording(
         raise FileExistsError(f"Native correction output already exists for {recording.subject}")
 
     raw = mne.io.read_raw_brainvision(recording.vhdr_path, preload=True, verbose=False)
+    slice_schedule = load_multiband_slice_schedule(recording.bold_json_path)
     result = preprocess_raw_in_place(
         raw,
         parameters=parameters,
         qrs_detector=qrs_detector,
+        slice_schedule=slice_schedule,
     )
     temporary_fif = output_dir / f".{stem}_raw.fif"
     temporary_qc = output_dir / f".{stem}_qc.json"
@@ -467,6 +505,8 @@ def process_recording(
         "subject": recording.subject,
         "run": recording.run,
         "source_vhdr": str(recording.vhdr_path),
+        "source_bold_json": str(recording.bold_json_path),
+        "source_bold_json_sha256": recording.bold_json_sha256,
         "output_fif": str(output_fif),
         "output_qc": str(output_qc),
         "output_qrs": str(output_qrs),
@@ -482,6 +522,7 @@ def process_recording(
         "cardiac_peak_to_peak_attenuation_db": (result.cardiac_qc.peak_to_peak_attenuation_db),
         "abnormal_rr_fraction": quality.abnormal_rr_fraction,
         "complete_volume_count": result.complete_volume_count,
+        "residual_obs_removed_rms_v": result.residual_obs_removed_rms,
     }
     attenuation = _harmonic_attenuation(result.harmonic_stages)
     row.update(
@@ -508,6 +549,7 @@ def _write_manifest(output_root: Path, rows: list[dict[str, object]]) -> None:
 
 def run_cohort(
     input_root: Path,
+    bold_root: Path,
     output_root: Path,
     config_path: Path,
     *,
@@ -521,7 +563,11 @@ def run_cohort(
         raise FileExistsError(f"Incomplete output root already exists: {incomplete_root}")
 
     parameters = load_native_eeg_fmri_parameters(config_path)
-    recordings = read_input_recordings(input_root, expected_count=expected_count)
+    recordings = read_input_recordings(
+        input_root,
+        bold_root,
+        expected_count=expected_count,
+    )
     qrs_detector = build_qrs_detector(parameters)
     incomplete_root.mkdir(parents=True)
     config_copy = incomplete_root / "native_eeg_fmri_artifact_correction.yaml"
@@ -584,11 +630,12 @@ def run_cohort(
                 "GeneratedBy": [
                     {
                         "Name": "EEG_fMRI_Pipeline native correction",
-                        "Version": "3",
+                        "Version": "4",
                         "Description": (
-                            "Synchronized 21-volume average artifact subtraction with sub-sample "
-                            "alignment, NeuXus v0.0.4-derived LSTM QRS detection, and MNE PCA-OBS "
-                            "pulse correction"
+                            "Run-specific whole-volume adaptive average artifact subtraction "
+                            "with sub-sample alignment and exact BIDS multiband-sequence "
+                            "validation, followed by NeuXus v0.0.4-derived LSTM QRS detection "
+                            "and MNE PCA-OBS pulse correction"
                         ),
                     }
                 ],
@@ -607,6 +654,7 @@ def _parse_args() -> argparse.Namespace:
         description="Replace BrainVision Analyzer MRI-artifact preprocessing natively."
     )
     parser.add_argument("--input-root", type=Path, default=DEFAULT_INPUT_ROOT)
+    parser.add_argument("--bold-root", type=Path, default=DEFAULT_BOLD_ROOT)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     return parser.parse_args()
@@ -614,7 +662,12 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    output_root = run_cohort(args.input_root, args.output_root, args.config)
+    output_root = run_cohort(
+        args.input_root,
+        args.bold_root,
+        args.output_root,
+        args.config,
+    )
     print(f"Published native EEG-fMRI correction: {output_root}")
 
 
