@@ -1,0 +1,4 @@
+subject	source_vhdr	action	run
+0003	ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h10.39.899.vhdr	exclude	
+0003	ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h11.33.962.vhdr	include	1
+0003	ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962.vhdr	include	3

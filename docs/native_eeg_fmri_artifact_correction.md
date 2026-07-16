@@ -5,8 +5,8 @@ the immutable original 5 kHz BrainVision signal from `source_data/sub-*/eeg/orig
 through the marker-sanitized metadata derivative and writes a separate 1 kHz FIF derivative. It
 never reads `source_data/sub-*/eeg/brainvision_processed_1khz`, which contains the existing
 BrainVision Analyzer-corrected 1 kHz recordings.
-The candidate is not considered a validated replacement until the fixed 83-run qualification
-finishes successfully.
+The candidate is not considered a validated replacement until every dynamically discovered and
+verified recording finishes successfully.
 
 ## Fixed processing sequence
 
@@ -95,7 +95,7 @@ mistaken for independent endpoints.
 Each run also records the pinned NeuXus model checksum, peak probabilities and window support, all RR
 summary fields and warnings, and the RMS and peak-to-peak cardiac-locked EEG before and after OBS.
 Hard QRS failures stop that run; warning-level RR intervals do not. The complete cohort is published
-only if every one of the 83 verified marker-sanitized recordings finishes.
+only if every recording in the marker-sanitization manifest finishes.
 
 Until the v2 cohort QC demonstrates otherwise, downstream spectral features retain the established
 scanner-aware frequency boundaries:
@@ -107,7 +107,7 @@ These exclusions are not evidence that correction failed. They prevent narrow re
 from dominating band summaries while absolute attenuation and local prominence are evaluated
 separately.
 
-Run the fixed cohort with:
+Run every discovered recording with:
 
 ```bash
 python -m studies.pain_study.scripts.run_native_eeg_fmri_artifact_correction
