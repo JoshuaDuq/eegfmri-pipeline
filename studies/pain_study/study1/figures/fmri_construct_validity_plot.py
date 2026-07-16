@@ -54,6 +54,7 @@ def build_fmri_construct_validity_figure(
     dimensions = figure_config["dimensions_mm"]
     slices = tuple(float(value) for value in figure_config["axial_slices_mm"])
     percentile = float(figure_config["display"]["robust_percentile"])
+    overlay_alpha = float(figure_config["display"]["overlay_alpha"])
     mesh = datasets.load_fsaverage(str(figure_config["surface_mesh"]))
     sulcal = datasets.load_fsaverage_data(
         str(figure_config["surface_mesh"]),
@@ -93,6 +94,7 @@ def build_fmri_construct_validity_figure(
                 sulcal=sulcal,
                 color_map=color_map,
                 limit=limit,
+                overlay_alpha=overlay_alpha,
             )
             volume_axis = figure.add_subplot(panel_grid[2, :])
             _draw_axial_views(
@@ -150,7 +152,7 @@ def build_fmri_construct_validity_figure(
             0.5,
             0.008,
             (
-                "Unthresholded participant-mean effects; dark outlines indicate "
+                "Unthresholded participant-mean nonzero effects; dark outlines indicate "
                 f"two-sided voxelwise max-T FWE p < {alpha:.2f}."
             ),
             ha="center",
@@ -187,6 +189,7 @@ def _draw_surface_views(
     sulcal,
     color_map: LinearSegmentedColormap,
     limit: float,
+    overlay_alpha: float,
 ) -> None:
     from nilearn import plotting, surface
 
@@ -278,7 +281,8 @@ def _draw_axial_views(
         cmap=color_map,
         colorbar=False,
         symmetric_cbar=True,
-        threshold=None,
+        threshold=0.0,
+        transparency=overlay_alpha,
         vmin=-limit,
         vmax=limit,
         annotate=False,
@@ -368,6 +372,9 @@ def _validate_summary(
     slices = tuple(float(value) for value in figure_config["axial_slices_mm"])
     if slices != (-12.0, 0.0, 12.0, 24.0, 36.0, 48.0):
         raise ValueError("fMRI construct-validity axial slices must match the fixed design.")
+    overlay_alpha = float(figure_config["display"]["overlay_alpha"])
+    if not 0.0 < overlay_alpha <= 1.0:
+        raise ValueError("fMRI construct-validity overlay alpha must be within (0, 1].")
     for estimand in ESTIMANDS:
         group = summary.group_maps[estimand]
         if group.estimand != estimand or group.n_subjects != summary.n_subjects:

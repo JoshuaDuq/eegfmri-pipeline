@@ -349,22 +349,44 @@ def _draw_null_distribution(
     )
     axis.set_xlim(*null_limits)
     axis.set_ylim(0.0, observed_height * 1.18)
-    axis.set_title(
-        f"r = {result.spatial_r:.3f}   plus-one two-sided p = {result.p_value:.4f}   "
-        f"Holm p = {result.holm_adjusted_p_value:.4f}",
-        fontsize=5.1,
-        pad=3.0,
-    )
     axis.text(
-        0.02,
-        0.94,
+        0.5,
+        0.95,
         band_label,
         transform=axis.transAxes,
-        ha="left",
+        ha="center",
         va="top",
         color=color,
         fontsize=6.2,
         fontweight="bold",
+        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.82, "pad": 0.8},
+        gid="null-band-label",
+        zorder=5,
+    )
+    axis.text(
+        0.0,
+        1.025,
+        f"Observed r = {result.spatial_r:.3f}",
+        transform=axis.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=5.2,
+        fontweight="bold",
+        clip_on=False,
+    )
+    axis.text(
+        1.0,
+        1.025,
+        (
+            f"Plus-one two-sided p = {result.p_value:.4f}\n"
+            f"Holm-adjusted p = {result.holm_adjusted_p_value:.4f}"
+        ),
+        transform=axis.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=5.0,
+        linespacing=1.15,
+        clip_on=False,
     )
     if result.holm_significant:
         outline = Rectangle(

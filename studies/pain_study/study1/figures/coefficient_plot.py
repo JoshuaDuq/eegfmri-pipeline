@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib.figure import Figure
 
 from eeg_pipeline.utils.config.loader import require_config_value
+from studies.pain_study.figure_style import outside_top_legend
 from studies.pain_study.study1.figures.behavioral_validity import (
     BehavioralValiditySummary,
 )
@@ -43,6 +44,7 @@ def build_behavioral_validity_figure(
         _draw_participants(axis, summary, config)
         _draw_cohort(axis, summary, target_color, config)
         _format_axis(axis, summary)
+        outside_top_legend(figure, axis)
     return figure
 
 
@@ -131,7 +133,6 @@ def _format_axis(axis, summary: BehavioralValiditySummary) -> None:
     axis.spines["top"].set_visible(False)
     axis.spines["right"].set_visible(False)
     axis.tick_params(direction="out")
-    axis.legend(frameon=False, loc="lower left", handlelength=1.5)
 
 
 def _estimable_participants(summary: BehavioralValiditySummary):

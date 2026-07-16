@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+from matplotlib.colors import to_hex
+from matplotlib.patches import Ellipse
 
 from studies.pain_study.study2.config import load_study2_config
 from studies.pain_study.study2.sensor_patterns import SensorPatternSummary
@@ -69,6 +71,19 @@ def test_build_haufe_figure_has_fixed_scientific_structure() -> None:
         assert figure.axes[5].get_title(loc="left") == "Descriptive fold stability"
         assert figure.axes[6].get_ylabel() == ("Normalized Haufe forward-pattern loading (a.u.)")
         assert any("Preliminary cohort" in text.get_text() for text in figure.texts)
+        assert len(figure.legends) == 1
+        assert [text.get_text() for text in figure.legends[0].get_texts()] == [
+            "Fold-pair correlation",
+            "Median",
+        ]
+        assert {axis.title.get_fontweight() for axis in figure.axes[:5]} == {"bold"}
+        for axis in figure.axes[:5]:
+            image = axis.images[0]
+            assert tuple(to_hex(image.get_cmap()(value)) for value in (0.0, 1.0)) == (
+                "#2166ac",
+                "#d95f0e",
+            )
+            assert isinstance(image.get_clip_path()._patch, Ellipse)
     finally:
         plt.close(figure)
 

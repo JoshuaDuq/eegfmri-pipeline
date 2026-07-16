@@ -713,7 +713,7 @@ def test_load_study1_config_includes_fmri_construct_validity_defaults() -> None:
             "alpha": 0.05,
             "random_state": 20260711,
         },
-        "display": {"robust_percentile": 99.5},
+        "display": {"robust_percentile": 99.5, "overlay_alpha": 0.72},
         "minimum_article_subjects": 30,
     }
 

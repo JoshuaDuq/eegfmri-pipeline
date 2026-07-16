@@ -10,6 +10,7 @@ import numpy as np
 from matplotlib.figure import Figure
 
 from eeg_pipeline.utils.config.loader import require_config_value
+from studies.pain_study.figure_style import outside_top_legend
 from studies.pain_study.study1.figures.validity_data import DoseResponseSummary
 from studies.pain_study.study1.figures.validity_style import (
     configured_figure_size,
@@ -50,6 +51,7 @@ def build_dose_response_figure(
         _draw_participants(axis, summary, style)
         _draw_cohort(axis, summary, style, cohort_color)
         _format_axis(axis, summary, specification, config)
+        outside_top_legend(figure, axis)
     return figure
 
 
@@ -115,7 +117,6 @@ def _format_axis(
     axis.spines["top"].set_visible(False)
     axis.spines["right"].set_visible(False)
     axis.tick_params(direction="out")
-    axis.legend(frameon=False, loc="best", handlelength=1.5)
     if specification.y_limits is None:
         axis.set_ylim(_data_limits(summary))
     else:

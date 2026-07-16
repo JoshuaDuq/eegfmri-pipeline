@@ -8,10 +8,15 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 from matplotlib.ticker import MultipleLocator
 
 from eeg_pipeline.utils.config.loader import require_config_value
-from studies.pain_study.study2.figures.style import figure_size_inches, publication_style
+from studies.pain_study.study2.figures.style import (
+    figure_size_inches,
+    publication_style,
+    study2_diverging_color_map,
+)
 from studies.pain_study.study2.sensor_patterns import SensorPatternSummary
 
 FIGURE_CONFIG_KEY = "study2.figures.haufe_forward_patterns"
@@ -48,8 +53,11 @@ def build_haufe_forward_patterns_figure(
         )
         topomap_axes = [figure.add_subplot(grid[0, index]) for index in range(5)]
         image = None
-        for index, (axis, band, band_spec) in enumerate(
-            zip(topomap_axes, summary.bands, figure_config["bands"], strict=True)
+        for axis, band, band_spec in zip(
+            topomap_axes,
+            summary.bands,
+            figure_config["bands"],
+            strict=True,
         ):
             image, _ = mne.viz.plot_topomap(
                 _map_values(summary, band),
@@ -58,9 +66,9 @@ def build_haufe_forward_patterns_figure(
                 show=False,
                 sensors=True,
                 contours=0,
-                cmap="RdBu_r",
+                cmap=study2_diverging_color_map(),
                 vlim=(-half_range, half_range),
-                extrapolate="local",
+                extrapolate="head",
                 border="mean",
                 image_interp="cubic",
                 sphere=(0.0, 0.0, 0.0, 0.095),
@@ -70,7 +78,7 @@ def build_haufe_forward_patterns_figure(
             axis.set_title(
                 f"{band_spec['label']}\n{low:g}–{high:g} Hz",
                 pad=5.0,
-                fontweight="bold" if index < 2 else "normal",
+                fontweight="bold",
             )
         if image is None:
             raise RuntimeError("No Study 2 Haufe topomap was created.")
@@ -81,6 +89,15 @@ def build_haufe_forward_patterns_figure(
             summary,
             color=str(figure_config["nps_color"]),
             labels=[str(spec["label"]) for spec in figure_config["bands"]],
+        )
+        figure.legend(
+            handles=_stability_legend_handles(str(figure_config["nps_color"])),
+            loc="center",
+            bbox_to_anchor=(0.72, 0.425),
+            ncol=2,
+            handlelength=1.3,
+            handletextpad=0.4,
+            columnspacing=1.0,
         )
         color_axis = figure.add_axes((0.905, 0.49, 0.012, 0.27))
         colorbar = figure.colorbar(image, cax=color_axis)
@@ -110,7 +127,10 @@ def build_haufe_forward_patterns_figure(
         figure.text(
             0.5,
             0.018,
-            "Sensor-level multivariate forward patterns; not cortical source localization",
+            (
+                "Scalp colors are interpolated within the head outline; sensor-level "
+                "forward patterns are not cortical source localization"
+            ),
             ha="center",
             va="bottom",
             fontsize=5.5,
@@ -187,6 +207,33 @@ def _draw_stability(
     axis.set_title("Descriptive fold stability", pad=5.0, loc="left", fontweight="bold")
     axis.spines[["top", "right"]].set_visible(False)
     axis.grid(axis="x", color="#DDDDDD", linewidth=0.35, zorder=0)
+
+
+def _stability_legend_handles(color: str) -> tuple[Line2D, Line2D]:
+    return (
+        Line2D(
+            [],
+            [],
+            color="none",
+            marker="o",
+            markersize=3.0,
+            markerfacecolor="#777777",
+            markeredgewidth=0.0,
+            alpha=0.35,
+            label="Fold-pair correlation",
+        ),
+        Line2D(
+            [],
+            [],
+            color="none",
+            marker="D",
+            markersize=4.0,
+            markerfacecolor="white",
+            markeredgecolor=color,
+            markeredgewidth=0.9,
+            label="Median",
+        ),
+    )
 
 
 def _validate_summary(summary: SensorPatternSummary, figure_config: Mapping[str, object]) -> None:
