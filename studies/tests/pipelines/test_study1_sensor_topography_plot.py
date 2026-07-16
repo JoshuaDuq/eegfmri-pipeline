@@ -146,6 +146,33 @@ def test_figure_omits_significance_mask_when_no_corrected_cluster_survives(
     plt.close(figure)
 
 
+def test_figure_renders_single_participant_descriptive_maps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studies.pain_study.study1.figures.sensor_topography_plot import (
+        SensorTopographyPlotSummary,
+        build_sensor_topography_figure,
+    )
+
+    result = replace(
+        _cluster_result(estimands=("NPS", "SIIPS1"), row_limits=(0.35, 0.8)),
+        participant_order=("sub-0001",),
+    )
+    summary = SensorTopographyPlotSummary.from_cluster_result(
+        result,
+        positions_xy=POSITIONS_XY,
+    )
+    calls = _capture_topomap_calls(monkeypatch)
+
+    figure = build_sensor_topography_figure(summary, load_study1_config())
+
+    assert len(calls) == 10
+    assert "EEG sensor power signature associations (n = 1)" in {
+        artist.get_text() for artist in figure.texts
+    }
+    plt.close(figure)
+
+
 @pytest.mark.parametrize("invalid_value", [0.0, float("nan"), float("inf")])
 def test_figure_rejects_zero_or_nonfinite_display_range(
     invalid_value: float,

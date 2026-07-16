@@ -116,13 +116,14 @@ def test_reconstruct_channel_power_rejects_malformed_power_feature_names(column:
         reconstruct_channel_power(table, subject_id="sub-01", bands=BANDS)
 
 
-def test_reconstruct_channel_power_rejects_unexpected_extra_band_columns() -> None:
+def test_reconstruct_channel_power_selects_configured_bands_from_superset() -> None:
     table = _power_table()
     table["power_baseline_delta_ch_Cz_mean"] = 1.0
     table["power_active_delta_ch_Cz_logratio"] = 0.1
 
-    with pytest.raises(ValueError, match="unexpected band 'delta'"):
-        reconstruct_channel_power(table, subject_id="sub-01", bands=BANDS)
+    result = reconstruct_channel_power(table, subject_id="sub-01", bands=BANDS)
+
+    assert set(result["band"]) == set(BANDS)
 
 
 def test_reconstruct_channel_power_rejects_unsupported_channel_statistic() -> None:
@@ -207,19 +208,21 @@ def test_build_sensor_power_data_returns_exact_aligned_tidy_boundary() -> None:
         data.channels = ("Cz",)  # type: ignore[misc]
 
 
-def test_build_sensor_power_data_rejects_cross_subject_channel_disagreement() -> None:
+def test_build_sensor_power_data_uses_cross_subject_channel_intersection() -> None:
     validity = _validity_data()
     feature_tables = {
         "sub-01": _power_table(),
         "sub-02": _power_table(channels=("Cz", "Pz")),
     }
 
-    with pytest.raises(ValueError, match="identical channel sets across subjects"):
-        build_sensor_power_data(
-            validity=validity,
-            feature_tables=feature_tables,
-            config=_config(),
-        )
+    data = build_sensor_power_data(
+        validity=validity,
+        feature_tables=feature_tables,
+        config=_config(),
+    )
+
+    assert data.channels == ("Cz",)
+    assert set(data.trials["channel"]) == {"Cz"}
 
 
 def test_build_sensor_power_data_rejects_feature_trial_misalignment() -> None:
@@ -360,7 +363,7 @@ def _config(
 ) -> ConfigDict:
     return ConfigDict(
         {
-            "preprocessing": {"montage": montage},
+            "eeg": {"montage": montage},
             "study1": {
                 "figures": {
                     "sensor_topographies": {

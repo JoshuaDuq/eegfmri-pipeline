@@ -26,7 +26,7 @@ TARGET_REQUIRED_COLUMNS = (
     "selected_surface",
 )
 EVENT_REQUIRED_COLUMNS = (
-    "run",
+    "run_id",
     "trial_number",
     "stimulus_temp",
     "selected_surface",
@@ -175,7 +175,7 @@ def _load_clean_events(*, subjects: list[str], task: str, config: Any) -> pd.Dat
             EVENT_REQUIRED_COLUMNS,
             table_name=f"clean events for {subject_id}",
         )
-        events = events.copy()
+        events = events.rename(columns={"run_id": "run"})
         events["subject_id"] = subject_id
         events["_run_key"] = _integer_series(events, "run", table_name="clean events")
         events["_within_run_trial_key"] = _integer_series(

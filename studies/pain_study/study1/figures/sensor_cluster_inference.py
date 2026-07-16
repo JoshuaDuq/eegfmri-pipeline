@@ -66,6 +66,8 @@ class SensorClusterResult:
     observed_included: bool
     exact_enumeration: bool
     seed: int
+    inference_available: bool = True
+    inference_reason: str = ""
 
     def sensor_frame(self) -> pd.DataFrame:
         """Return one tidy observed-result row per map and sensor."""
@@ -123,6 +125,8 @@ class SensorClusterResult:
                     "n_maps": len(self.map_order),
                     "n_sensors": len(self.sensor_order),
                     "degrees_of_freedom": len(self.participant_order) - 1,
+                    "inference_available": self.inference_available,
+                    "inference_reason": self.inference_reason,
                     "cluster_forming_p": self.cluster_forming_p,
                     "positive_threshold": self.positive_threshold,
                     "negative_threshold": self.negative_threshold,
@@ -227,11 +231,18 @@ def compute_sensor_cluster_inference(
 
     tensor, cohort_values = _validated_effect_tensor(effects)
     settings = _inference_settings(config)
+    adjacency = build_delaunay_adjacency(effects.sensor_order, positions_xy)
+    if tensor.shape[0] == 1:
+        return _descriptive_sensor_result(
+            effects=effects,
+            cohort_values=cohort_values,
+            adjacency=adjacency,
+            settings=settings,
+        )
     selection = _select_sign_patterns(
         n_participants=tensor.shape[0],
         settings=settings,
     )
-    adjacency = build_delaunay_adjacency(effects.sensor_order, positions_xy)
     degrees_of_freedom = tensor.shape[0] - 1
     positive_threshold = float(
         stats.t.ppf(1.0 - settings.cluster_forming_p / 2.0, degrees_of_freedom)
@@ -284,8 +295,6 @@ def _validated_effect_tensor(effects: ParticipantEffects) -> tuple[np.ndarray, n
     participants = _validated_names(effects.participant_order, "Participant order")
     sensors = _validated_names(effects.sensor_order, "Sensor order")
     map_order = _validated_map_order(effects.map_order)
-    if len(participants) < 2:
-        raise ValueError("Sensor-cluster inference requires at least two participants.")
     if len(sensors) < 3:
         raise ValueError("Sensor-cluster inference requires at least three sensors.")
     if effects.inference_value_column != "inference_value":
@@ -424,12 +433,6 @@ def _select_sign_patterns(
 ) -> _SignPatternSelection:
     total_exact_patterns = 2 ** (n_participants - 1)
     exact_enumeration = total_exact_patterns <= settings.max_null_draws
-    denominator = total_exact_patterns if exact_enumeration else settings.max_null_draws + 1
-    if 1.0 / denominator > settings.family_alpha:
-        raise ValueError(
-            "Canonical sign space cannot resolve family_alpha: "
-            f"minimum_p={1.0 / denominator}, family_alpha={settings.family_alpha}."
-        )
     if exact_enumeration:
         patterns = tuple((1, *tail) for tail in product((1, -1), repeat=n_participants - 1))
         return _SignPatternSelection(
@@ -447,6 +450,47 @@ def _select_sign_patterns(
         total_exact_patterns=total_exact_patterns,
         observed_included=False,
         exact_enumeration=False,
+    )
+
+
+def _descriptive_sensor_result(
+    *,
+    effects: ParticipantEffects,
+    cohort_values: np.ndarray,
+    adjacency: np.ndarray,
+    settings: _InferenceSettings,
+) -> SensorClusterResult:
+    map_results = tuple(
+        SensorMapResult(
+            estimand=estimand,
+            band=band,
+            cohort_values=tuple(float(value) for value in cohort_values[index]),
+            t_statistics=tuple(float("nan") for _sensor in effects.sensor_order),
+            clusters=(),
+            significant_sensors=(),
+        )
+        for index, (estimand, band) in enumerate(effects.map_order)
+    )
+    return SensorClusterResult(
+        participant_order=effects.participant_order,
+        map_order=effects.map_order,
+        sensor_order=effects.sensor_order,
+        adjacency=tuple(tuple(bool(value) for value in row) for row in adjacency),
+        map_results=map_results,
+        null_max_cluster_masses=(),
+        sign_patterns=(),
+        cluster_forming_p=settings.cluster_forming_p,
+        family_alpha=settings.family_alpha,
+        positive_threshold=float("nan"),
+        negative_threshold=float("nan"),
+        requested_max_null_draws=settings.max_null_draws,
+        sampled_null_draws=0,
+        total_exact_patterns=1,
+        observed_included=False,
+        exact_enumeration=False,
+        seed=settings.seed,
+        inference_available=False,
+        inference_reason="At least two participants are required for one-sample inference.",
     )
 
 

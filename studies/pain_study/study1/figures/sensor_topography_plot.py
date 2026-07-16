@@ -275,9 +275,7 @@ def _validate_summary(
 ) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(summary, SensorTopographyPlotSummary):
         raise TypeError("Sensor topography rendering requires SensorTopographyPlotSummary.")
-    participants = _unique_names(summary.participant_order, "Participant order")
-    if len(participants) < 2:
-        raise ValueError("Sensor topography rendering requires at least two participants.")
+    _unique_names(summary.participant_order, "Participant order")
     sensors = _unique_names(summary.sensor_order, "Sensor order")
     if len(sensors) < 3:
         raise ValueError("Sensor topography rendering requires at least three sensors.")

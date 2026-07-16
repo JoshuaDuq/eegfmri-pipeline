@@ -126,6 +126,8 @@ FAMILY_COLUMNS = (
     "n_maps",
     "n_sensors",
     "degrees_of_freedom",
+    "inference_available",
+    "inference_reason",
     "cluster_forming_p",
     "positive_threshold",
     "negative_threshold",
@@ -485,6 +487,8 @@ def _write_manifest(
             "connected": True,
         },
         "inference": {
+            "available": inference.inference_available,
+            "reason": inference.inference_reason,
             "permutation_method": "synchronized participant sign flip",
             "correction_method": "joint maximum cluster mass across all ten maps",
             "requested_sign_count": inference.requested_max_null_draws,
@@ -502,7 +506,7 @@ def _write_manifest(
 def _manifest_config(config: Any, family: FigureFamily) -> dict[str, object]:
     values: dict[str, object] = {
         "sensor_topographies": require_config_value(config, FIGURE_CONFIG_PATH),
-        "montage": require_config_value(config, "preprocessing.montage"),
+        "montage": require_config_value(config, "eeg.montage"),
     }
     if family == "construct":
         values["construct_channels"] = require_config_value(

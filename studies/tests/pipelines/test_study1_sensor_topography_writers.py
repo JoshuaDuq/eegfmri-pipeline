@@ -410,7 +410,7 @@ def _fake_save(figure: object, path: Path, config: object, **kwargs: object) -> 
 
 def _config() -> dict[str, object]:
     config = load_study1_config()
-    config["preprocessing"] = {"montage": "standard_1020"}
+    config["eeg"] = {"montage": "standard_1020"}
     return config
 
 
@@ -421,7 +421,7 @@ def _write_cli_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
         yaml.safe_dump(
             {
                 "paths": {"deriv_root": str(derivative_root)},
-                "preprocessing": {"montage": "standard_1020"},
+                "eeg": {"montage": "standard_1020"},
             }
         ),
         encoding="utf-8",
@@ -535,7 +535,7 @@ def _synthetic_subject(
         events.append(
             {
                 "trial_id": trial_index + 1,
-                "run": run,
+                "run_id": run,
                 "trial_number": within_run_trial,
                 "stimulus_temp": temperature,
                 "selected_surface": selected_surface,

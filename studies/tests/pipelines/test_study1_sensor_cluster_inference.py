@@ -283,24 +283,44 @@ def test_inference_settings_are_strict(field: str, value: object, message: str) 
         )
 
 
-def test_inference_requires_family_alpha_resolution() -> None:
+def test_inference_does_not_gate_small_sign_spaces() -> None:
     from studies.pain_study.study1.figures.sensor_cluster_inference import (
         compute_sensor_cluster_inference,
     )
 
-    with pytest.raises(ValueError, match="resolve family_alpha"):
-        compute_sensor_cluster_inference(
-            effects=_participant_effects(_effect_tensor(5, seed=7)),
-            positions_xy=POSITIONS_XY,
-            config=_config(family_alpha=0.05, max_null_draws=100),
-        )
+    exact = compute_sensor_cluster_inference(
+        effects=_participant_effects(_effect_tensor(5, seed=7)),
+        positions_xy=POSITIONS_XY,
+        config=_config(family_alpha=0.05, max_null_draws=100),
+    )
+    sampled = compute_sensor_cluster_inference(
+        effects=_participant_effects(_effect_tensor(10, seed=9)),
+        positions_xy=POSITIONS_XY,
+        config=_config(family_alpha=0.01, max_null_draws=50),
+    )
 
-    with pytest.raises(ValueError, match="resolve family_alpha"):
-        compute_sensor_cluster_inference(
-            effects=_participant_effects(_effect_tensor(10, seed=9)),
-            positions_xy=POSITIONS_XY,
-            config=_config(family_alpha=0.01, max_null_draws=50),
-        )
+    assert exact.inference_available is True
+    assert exact.sampled_null_draws == 16
+    assert sampled.inference_available is True
+    assert sampled.sampled_null_draws == 50
+
+
+def test_single_participant_returns_descriptive_maps_without_inference() -> None:
+    from studies.pain_study.study1.figures.sensor_cluster_inference import (
+        compute_sensor_cluster_inference,
+    )
+
+    result = compute_sensor_cluster_inference(
+        effects=_participant_effects(_effect_tensor(1, seed=11)),
+        positions_xy=POSITIONS_XY,
+        config=_config(),
+    )
+
+    assert result.inference_available is False
+    assert result.sampled_null_draws == 0
+    assert result.sign_patterns == ()
+    assert all(not map_result.significant_sensors for map_result in result.map_results)
+    assert result.family_frame().loc[0, "inference_reason"]
 
 
 def _participant_effects(tensor: np.ndarray) -> ParticipantEffects:

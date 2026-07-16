@@ -92,7 +92,7 @@ def build_sensor_power_data(
         )
 
     power_frames: list[pd.DataFrame] = []
-    expected_channels: tuple[str, ...] | None = None
+    channel_sets: list[set[str]] = []
     for subject_id in subjects:
         subject_power = reconstruct_channel_power(
             normalized_tables[subject_id],
@@ -100,18 +100,18 @@ def build_sensor_power_data(
             bands=bands,
         )
         _require_exact_trial_alignment(subject_power, event_targets, subject_id=subject_id)
-        channels = tuple(subject_power["channel"].drop_duplicates())
-        if expected_channels is None:
-            expected_channels = channels
-        elif channels != expected_channels:
-            raise ValueError(
-                "Power feature tables must contain identical channel sets across subjects: "
-                f"expected={list(expected_channels)}, {subject_id}={list(channels)}."
-            )
+        channel_sets.append(set(subject_power["channel"]))
         power_frames.append(subject_power)
 
-    if expected_channels is None:
+    if not channel_sets:
         raise ValueError("Sensor-power reconstruction requires at least one retained subject.")
+    expected_channels = tuple(sorted(set.intersection(*channel_sets)))
+    if not expected_channels:
+        raise ValueError("Power feature tables have no channels shared across subjects.")
+    power_frames = [
+        frame.loc[frame["channel"].isin(expected_channels)].copy()
+        for frame in power_frames
+    ]
     power = pd.concat(power_frames, ignore_index=True)
     trials = power.merge(
         event_targets,
@@ -177,7 +177,7 @@ def load_sensor_montage(channels: Sequence[str], config: Any) -> SensorMontage:
     """Resolve exact configured montage positions for analyzed EEG channels only."""
 
     analyzed_channels = _validated_channels(channels)
-    montage_name = str(require_config_value(config, "preprocessing.montage")).strip()
+    montage_name = str(require_config_value(config, "eeg.montage")).strip()
     montage = mne.channels.make_standard_montage(montage_name)
     channel_positions = montage.get_positions()["ch_pos"]
     missing = [channel for channel in analyzed_channels if channel not in channel_positions]
@@ -248,7 +248,7 @@ def _discover_channel_power_columns(
 
         band = str(parsed["band"])
         if band not in discovered:
-            raise ValueError(f"Channel-power column uses unexpected band {band!r}: {column!r}.")
+            continue
         segment_statistic = (str(parsed["segment"]), str(parsed["stat"]))
         kind = POWER_SEGMENT_STATISTICS.get(segment_statistic)
         if kind is None:

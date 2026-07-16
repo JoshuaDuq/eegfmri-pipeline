@@ -22,6 +22,8 @@ def test_load_validity_trial_data_uses_only_retained_target_trials(tmp_path: Pat
     assert len(data.targets) == 12
     assert len(data.enriched_targets) == 12
     assert set(data.enriched_targets["trial_index"]) == {1, 2, 3, 4}
+    assert "run" in data.clean_events
+    assert "run_id" not in data.clean_events
     assert data.clean_events["trial_number"].max() == 3
     assert data.enriched_targets["within_scale_intensity"].tolist() == [
         20.0,
@@ -274,7 +276,7 @@ def _event_row(
     rating: float,
 ) -> dict[str, object]:
     return {
-        "run": run,
+        "run_id": run,
         "trial_number": trial_number,
         "stimulus_temp": temperature,
         "selected_surface": 1,
