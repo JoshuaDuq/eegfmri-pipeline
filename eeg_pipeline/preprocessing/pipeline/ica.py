@@ -62,13 +62,36 @@ def run_ica_label_single_file(
 
         try:
             components_path = utils.get_derived_path(p, "_proc-icafit_ica.fif", "_proc-ica_components.tsv")
-            ica_frame = io.read_components_tsv(components_path)
-            
-            if ica_frame is None:
-                n_components = ica.n_components_
+            n_components = ica.n_components_
+            ica_frame = (
+                io.read_components_tsv(components_path)
+                if keep_mnebids_bads
+                else None
+            )
+
+            expected_components = np.arange(n_components)
+            component_table_matches_ica = (
+                ica_frame is not None
+                and "component" in ica_frame
+                and np.array_equal(
+                    ica_frame["component"].to_numpy(), expected_components
+                )
+            )
+            if not component_table_matches_ica:
+                if ica_frame is not None:
+                    logger.warning(
+                        **gen_log_kwargs(
+                            message=(
+                                "Existing component metadata does not match the "
+                                "current ICA fit; rebuilding it without stale statuses."
+                            ),
+                            subject=sub_num,
+                            session=ses_num,
+                        )
+                    )
                 ica_frame = io.create_empty_components_tsv(n_components)
             
-            if not keep_mnebids_bads:
+            if not keep_mnebids_bads or not component_table_matches_ica:
                 ica_frame["status"] = "good"
                 ica_frame["status_description"] = ""
 
@@ -173,4 +196,3 @@ def run_ica_label(
     bad_ica_frame.to_csv(
         os.path.join(pipeline_path, f"icalabel_task_{task}_log.csv"), sep="\t", index=False
     )
-

@@ -17,6 +17,12 @@ INPUT_COLOR = "#6B6B6B"
 FINAL_COLOR = "#0072B2"
 WINDOW_COLOR = "#BDBDBD"
 REFERENCE_COLOR = "#777777"
+SCANNER_REFERENCE_FREQUENCIES_HZ = (
+    20.01953125,
+    41.1376953125,
+    61.09619140625,
+    82.21435546875,
+)
 SCANNER_COMB_COLUMNS = (
     "frequency_hz",
     "input_median_db",
@@ -34,14 +40,50 @@ def build_scanner_harmonic_comb_figure(
     *,
     task: str,
 ) -> Figure:
-    """Build the single-panel MNE scanner-harmonic cohort comb."""
+    """Build full and harmonic-local MNE scanner-comb cohort panels."""
     task_label = _validate_task(task)
     _summary_frame(summary)
 
-    figure = Figure(figsize=(12.0, 5.5), layout="constrained", facecolor="white")
-    axis = figure.subplots()
+    figure = Figure(figsize=(13.0, 11.0), layout="constrained", facecolor="white")
+    grid = figure.add_gridspec(3, 2, height_ratios=(1.15, 1.0, 1.0))
+    axes = (
+        figure.add_subplot(grid[0, :]),
+        figure.add_subplot(grid[1, 0]),
+        figure.add_subplot(grid[1, 1]),
+        figure.add_subplot(grid[2, 0]),
+        figure.add_subplot(grid[2, 1]),
+    )
 
-    for window in DEFAULT_HARMONIC_WINDOWS:
+    _plot_full_comb(axes[0], summary)
+    local_limits = _shared_local_power_limits(summary)
+    for index, axis in enumerate(axes[1:]):
+        _plot_local_comb(
+            axis,
+            summary,
+            index=index,
+            y_limits=local_limits,
+        )
+    for axis, label in zip(axes, ("A", "B", "C", "D", "E"), strict=True):
+        _style_axis(axis, label)
+
+    figure.suptitle(
+        f"Task-{task_label} MNE preprocessing | Cohort scanner-gradient spectral QC\n"
+        f"Participant-first median across {summary.participant_count} participants | "
+        "MRI-corrected input vs final cleaned epochs",
+        fontsize=15,
+        fontweight="bold",
+    )
+    return figure
+
+
+def _plot_full_comb(axis, summary: ScannerCombSummary) -> None:
+    _plot_stage_spectra(axis, summary, low_hz=15.0, high_hz=90.0)
+
+    for window, frequency in zip(
+        DEFAULT_HARMONIC_WINDOWS,
+        SCANNER_REFERENCE_FREQUENCIES_HZ,
+        strict=True,
+    ):
         axis.axvspan(
             window.low_hz,
             window.high_hz,
@@ -49,27 +91,6 @@ def build_scanner_harmonic_comb_figure(
             alpha=0.12,
             linewidth=0,
         )
-
-    _plot_stage(
-        axis,
-        summary.frequencies_hz,
-        summary.input_median_db,
-        summary.input_ci_low_db,
-        summary.input_ci_high_db,
-        color=INPUT_COLOR,
-        label="MRI-corrected BIDS input",
-    )
-    _plot_stage(
-        axis,
-        summary.frequencies_hz,
-        summary.final_median_db,
-        summary.final_ci_low_db,
-        summary.final_ci_high_db,
-        color=FINAL_COLOR,
-        label="Final MNE-cleaned epochs",
-    )
-
-    for frequency in summary.harmonic_frequencies_hz:
         axis.axvline(
             frequency,
             color=REFERENCE_COLOR,
@@ -81,16 +102,126 @@ def build_scanner_harmonic_comb_figure(
         xlim=(15.0, 90.0),
         xlabel="Frequency (Hz)",
         ylabel="PSD (dB V²/Hz)",
-        title=(
-            f"Task-{task_label} scanner-harmonic comb | "
-            f"n = {summary.participant_count} participants"
-        ),
+        title="Full scanner-harmonic comb",
     )
+    axis.legend(loc="upper right", frameon=False, ncols=2, fontsize=8)
+
+
+def _plot_local_comb(
+    axis,
+    summary: ScannerCombSummary,
+    *,
+    index: int,
+    y_limits: tuple[float, float],
+) -> None:
+    window = DEFAULT_HARMONIC_WINDOWS[index]
+    reference_frequency = SCANNER_REFERENCE_FREQUENCIES_HZ[index]
+    reference_index = int(
+        np.argmin(np.abs(summary.frequencies_hz - reference_frequency))
+    )
+    attenuation = float(
+        summary.input_median_db[reference_index]
+        - summary.final_median_db[reference_index]
+    )
+    distance = np.abs(summary.frequencies_hz - reference_frequency)
+    background = (distance >= 0.35) & (distance <= 2.0)
+    final_prominence = float(
+        summary.final_median_db[reference_index]
+        - np.median(summary.final_median_db[background])
+    )
+
+    _plot_stage_spectra(
+        axis,
+        summary,
+        low_hz=window.low_hz,
+        high_hz=window.high_hz,
+    )
+    axis.axvline(
+        reference_frequency,
+        color=REFERENCE_COLOR,
+        linestyle=":",
+        linewidth=0.8,
+    )
+    axis.text(
+        0.02,
+        0.96,
+        f"MNE attenuation {attenuation:.1f} dB\n"
+        f"Final prominence {final_prominence:.1f} dB",
+        transform=axis.transAxes,
+        fontsize=7.5,
+        va="top",
+    )
+    axis.set(
+        xlim=(window.low_hz, window.high_hz),
+        ylim=y_limits,
+        xlabel="Frequency (Hz)",
+        ylabel="PSD (dB V²/Hz)",
+        title=f"{reference_frequency:.1f} Hz input reference",
+    )
+
+
+def _plot_stage_spectra(
+    axis,
+    summary: ScannerCombSummary,
+    *,
+    low_hz: float,
+    high_hz: float,
+) -> None:
+    mask = (summary.frequencies_hz >= low_hz) & (
+        summary.frequencies_hz <= high_hz
+    )
+    _plot_stage(
+        axis,
+        summary.frequencies_hz[mask],
+        summary.input_median_db[mask],
+        summary.input_ci_low_db[mask],
+        summary.input_ci_high_db[mask],
+        color=INPUT_COLOR,
+        label="MRI-corrected BIDS input",
+    )
+    _plot_stage(
+        axis,
+        summary.frequencies_hz[mask],
+        summary.final_median_db[mask],
+        summary.final_ci_low_db[mask],
+        summary.final_ci_high_db[mask],
+        color=FINAL_COLOR,
+        label="Final MNE-cleaned epochs",
+    )
+
+
+def _shared_local_power_limits(summary: ScannerCombSummary) -> tuple[float, float]:
+    selected_power = []
+    for window in DEFAULT_HARMONIC_WINDOWS:
+        mask = (summary.frequencies_hz >= window.low_hz) & (
+            summary.frequencies_hz <= window.high_hz
+        )
+        selected_power.extend(
+            (
+                summary.input_ci_low_db[mask],
+                summary.input_ci_high_db[mask],
+                summary.final_ci_low_db[mask],
+                summary.final_ci_high_db[mask],
+            )
+        )
+    values = np.concatenate(selected_power)
+    padding = max(1.0, 0.05 * float(np.ptp(values)))
+    return float(np.min(values) - padding), float(np.max(values) + padding)
+
+
+def _style_axis(axis, panel_label: str) -> None:
     axis.spines["top"].set_visible(False)
     axis.spines["right"].set_visible(False)
     axis.grid(axis="y", color="#D9D9D9", linewidth=0.5, alpha=0.7)
-    axis.legend(loc="upper right", frameon=False)
-    return figure
+    axis.text(
+        -0.12,
+        1.08,
+        panel_label,
+        transform=axis.transAxes,
+        fontsize=13,
+        fontweight="bold",
+        va="top",
+    )
 
 
 def _plot_stage(
