@@ -35,7 +35,7 @@ def _write_raw_brainvision_recording(raw_dir: Path, basename: str) -> Path:
 
 
 def _write_corrected_reference(source_data_root: Path, subject: str, basename: str) -> None:
-    reference_dir = source_data_root / f"sub-{subject}" / "eeg"
+    reference_dir = source_data_root / f"sub-{subject}" / "eeg" / "brainvision_processed_1khz"
     reference_dir.mkdir(parents=True)
     reference_name = f"{basename}_scannerpulse_corrected.vhdr"
     (reference_dir / reference_name).write_text("reference only", encoding="utf-8")
@@ -44,14 +44,13 @@ def _write_corrected_reference(source_data_root: Path, subject: str, basename: s
 def test_discover_cohort_recordings_maps_reference_to_one_original(tmp_path: Path) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
     kingston_root = tmp_path / "KINGSTON"
-    raw_dir = kingston_root / "sub_0001_2026_03_02" / "raw"
+    source_data_root = kingston_root / "EEG_fMRI_data" / "source_data"
+    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_5khz"
     raw_dir.mkdir(parents=True)
     source_vhdr = _write_raw_brainvision_recording(raw_dir, basename)
-    source_data_root = kingston_root / "EEG_fMRI_data" / "source_data"
     _write_corrected_reference(source_data_root, "0001", basename)
 
     recordings = discover_cohort_recordings(
-        kingston_root,
         source_data_root,
         subjects=("0001",),
         expected_count=1,
@@ -63,19 +62,16 @@ def test_discover_cohort_recordings_maps_reference_to_one_original(tmp_path: Pat
     assert recordings[0].source_vhdr == source_vhdr
 
 
-def test_discover_cohort_recordings_rejects_ambiguous_originals(tmp_path: Path) -> None:
+def test_discover_cohort_recordings_requires_original_in_labeled_directory(
+    tmp_path: Path,
+) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
     kingston_root = tmp_path / "KINGSTON"
-    for directory_name in ("sub_0001_first", "sub_0001_second"):
-        raw_dir = kingston_root / directory_name / "raw"
-        raw_dir.mkdir(parents=True)
-        _write_raw_brainvision_recording(raw_dir, basename)
     source_data_root = kingston_root / "EEG_fMRI_data" / "source_data"
     _write_corrected_reference(source_data_root, "0001", basename)
 
-    with pytest.raises(ValueError, match="exactly one original.*found 2"):
+    with pytest.raises(ValueError, match="exactly one original.*found 0"):
         discover_cohort_recordings(
-            kingston_root,
             source_data_root,
             subjects=("0001",),
             expected_count=1,
@@ -84,13 +80,12 @@ def test_discover_cohort_recordings_rejects_ambiguous_originals(tmp_path: Path) 
 
 def test_stage_recording_reuses_signal_and_changes_only_vas_annotation(tmp_path: Path) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
-    raw_dir = tmp_path / "KINGSTON" / "sub_0001_2026_03_02" / "raw"
+    source_data_root = tmp_path / "KINGSTON" / "EEG_fMRI_data" / "source_data"
+    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_5khz"
     raw_dir.mkdir(parents=True)
     source_vhdr = _write_raw_brainvision_recording(raw_dir, basename)
-    source_data_root = tmp_path / "KINGSTON" / "EEG_fMRI_data" / "source_data"
     _write_corrected_reference(source_data_root, "0001", basename)
     recording = discover_cohort_recordings(
-        tmp_path / "KINGSTON",
         source_data_root,
         subjects=("0001",),
         expected_count=1,
@@ -126,15 +121,14 @@ def test_stage_recording_reuses_signal_and_changes_only_vas_annotation(tmp_path:
 def test_run_sanitization_publishes_final_manifest_paths(tmp_path: Path) -> None:
     basename = "ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564"
     kingston_root = tmp_path / "KINGSTON"
-    raw_dir = kingston_root / "sub_0001_2026_03_02" / "raw"
+    source_data_root = kingston_root / "EEG_fMRI_data" / "source_data"
+    raw_dir = source_data_root / "sub-0001" / "eeg" / "original_5khz"
     raw_dir.mkdir(parents=True)
     _write_raw_brainvision_recording(raw_dir, basename)
-    source_data_root = kingston_root / "EEG_fMRI_data" / "source_data"
     _write_corrected_reference(source_data_root, "0001", basename)
     output_root = tmp_path / "brainvision_marker_sanitized-v1"
 
     result = run_sanitization(
-        kingston_root,
         source_data_root,
         output_root,
         subjects=("0001",),

@@ -15,27 +15,17 @@ RAW_SUB3_ABORTED_STEM = "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h10.39.899
 RAW_SUB3_RUN3_STEM = "ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h30.23.962"
 
 
-def test_discover_raw_brainvision_runs_reads_complete_5000_hz_archive(
+def test_discover_raw_brainvision_runs_rejects_archive_representation(
     tmp_path: Path,
 ) -> None:
     from studies.pain_study.study1.figures.preprocessing_psd_sources import (
-        BrainVisionArchiveRunSource,
         discover_raw_brainvision_runs,
     )
 
-    archive = _write_raw_archive(tmp_path)
+    _write_raw_archive(tmp_path)
 
-    sources = discover_raw_brainvision_runs(tmp_path, excluded_subjects=())
-
-    assert len(sources) == 1
-    source = sources[0]
-    assert isinstance(source, BrainVisionArchiveRunSource)
-    assert source.subject_id == "sub-0001"
-    assert source.run_id == "1"
-    assert source.representation == "brainvision_zip"
-    assert source.archive_path == archive
-    assert source.header_member == f"raw/{RAW_STEM}.vhdr"
-    assert source.source_path == f"{archive}::raw/{RAW_STEM}.vhdr"
+    with pytest.raises(FileNotFoundError, match="No eligible Study 1 raw EEG runs"):
+        discover_raw_brainvision_runs(tmp_path, excluded_subjects=())
 
 
 def test_discover_raw_brainvision_runs_requires_complete_triplet(tmp_path: Path) -> None:
@@ -45,7 +35,7 @@ def test_discover_raw_brainvision_runs_requires_complete_triplet(tmp_path: Path)
 
     _write_raw_archive(tmp_path, include_data=False)
 
-    with pytest.raises(ValueError, match="missing BrainVision member"):
+    with pytest.raises(FileNotFoundError, match="No eligible Study 1 raw EEG runs"):
         discover_raw_brainvision_runs(tmp_path, excluded_subjects=())
 
 
@@ -66,6 +56,25 @@ def test_discover_raw_brainvision_runs_reads_directory_triplet(tmp_path: Path) -
     assert sources[0].marker_path == header.with_suffix(".vmrk")
 
 
+def test_discovery_reads_labeled_source_data_directories(tmp_path: Path) -> None:
+    from studies.pain_study.study1.figures.preprocessing_psd_sources import (
+        discover_processed_brainvision_runs,
+        discover_raw_brainvision_runs,
+    )
+
+    raw_header = _write_raw_triplet(tmp_path, "sub-0001", RAW_STEM)
+    processed_header = _write_processed_triplet(
+        tmp_path,
+        participant_directory="sub-0001",
+    )
+
+    raw_sources = discover_raw_brainvision_runs(tmp_path, excluded_subjects=())
+    processed_sources = discover_processed_brainvision_runs(tmp_path, excluded_subjects=())
+
+    assert [source.header_path for source in raw_sources] == [raw_header]
+    assert [source.header_path for source in processed_sources] == [processed_header]
+
+
 def test_raw_archive_discovery_rejects_participant_directory_mismatch(
     tmp_path: Path,
 ) -> None:
@@ -73,18 +82,18 @@ def test_raw_archive_discovery_rejects_participant_directory_mismatch(
         discover_raw_brainvision_runs,
     )
 
-    participant = tmp_path / "sub_0002_2026_03_02"
-    participant.mkdir()
+    participant = tmp_path / "sub-0002" / "eeg" / "original_5khz"
+    participant.mkdir(parents=True)
     with ZipFile(participant / "raw.zip", "w") as archive:
         archive.writestr(f"raw/{RAW_STEM}.vhdr", _header(RAW_STEM, 200))
         archive.writestr(f"raw/{RAW_STEM}.vmrk", "marker")
         archive.writestr(f"raw/{RAW_STEM}.eeg", b"\x00\x00")
 
-    with pytest.raises(ValueError, match="participant directory sub-0002"):
+    with pytest.raises(FileNotFoundError, match="No eligible Study 1 raw EEG runs"):
         discover_raw_brainvision_runs(tmp_path, excluded_subjects=())
 
 
-def test_raw_discovery_uses_only_canonical_fmri_participant_directories(
+def test_raw_discovery_applies_subject_exclusions(
     tmp_path: Path,
 ) -> None:
     from studies.pain_study.study1.figures.preprocessing_psd_sources import (
@@ -92,10 +101,10 @@ def test_raw_discovery_uses_only_canonical_fmri_participant_directories(
     )
 
     expected = _write_raw_triplet(tmp_path, "sub_0001_2026_03_02", RAW_STEM)
-    _write_raw_triplet(tmp_path, "sub_0002_2026_03_05_EXCL", RAW_STEM)
-    _write_raw_triplet(tmp_path, "sub_0001_2026_03_03_eeg_only", RAW_STEM)
+    second_stem = RAW_STEM.replace("sub0001", "sub0002")
+    _write_raw_triplet(tmp_path, "sub_0002_2026_03_05_EXCL", second_stem)
 
-    sources = discover_raw_brainvision_runs(tmp_path, excluded_subjects=())
+    sources = discover_raw_brainvision_runs(tmp_path, excluded_subjects=("sub-0002",))
 
     assert [source.header_path for source in sources] == [expected]
 
@@ -151,8 +160,8 @@ def test_raw_archive_discovery_applies_exact_correction_and_exclusion(
         discover_raw_brainvision_runs,
     )
 
-    participant = tmp_path / "sub_0003_03_23_2026"
-    participant.mkdir()
+    participant = tmp_path / "sub-0003" / "eeg" / "original_5khz"
+    participant.mkdir(parents=True)
     archive_path = participant / "raw.zip"
     stems = (RAW_SUB3_ABORTED_STEM, RAW_SUB3_RUN1_STEM, RAW_SUB3_RUN3_STEM)
     with ZipFile(archive_path, "w") as archive:
@@ -175,17 +184,13 @@ def test_raw_archive_discovery_applies_exact_correction_and_exclusion(
         reason="Aborted 8.76-second run start.",
     )
 
-    sources = discover_raw_brainvision_runs(
-        tmp_path,
-        excluded_subjects=(),
-        source_corrections=(correction,),
-        source_exclusions=(exclusion,),
-    )
-
-    assert [(source.run_id, source.source_correction) for source in sources] == [
-        ("1", None),
-        ("3", correction.reason),
-    ]
+    with pytest.raises(ValueError, match="source corrections were not found"):
+        discover_raw_brainvision_runs(
+            tmp_path,
+            excluded_subjects=(),
+            source_corrections=(correction,),
+            source_exclusions=(exclusion,),
+        )
 
 
 def test_discover_processed_brainvision_runs_reads_1000_hz_triplet(
@@ -374,43 +379,6 @@ def test_estimate_source_spectrum_loads_and_types_brainvision_file(
     assert raw.closed
 
 
-def test_estimate_source_spectrum_extracts_one_archive_triplet(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import mne
-
-    import studies.pain_study.study1.figures.preprocessing_psd_sources as module
-
-    _write_raw_archive(tmp_path)
-    source = module.discover_raw_brainvision_runs(tmp_path, excluded_subjects=())[0]
-    raw = _ClosableRaw()
-    observed_header = None
-
-    def read_raw_brainvision(path, **kwargs):
-        nonlocal observed_header
-        observed_header = Path(path)
-        assert observed_header.is_file()
-        assert observed_header.with_suffix(".eeg").is_file()
-        assert observed_header.with_suffix(".vmrk").is_file()
-        return raw
-
-    monkeypatch.setattr(mne.io, "read_raw_brainvision", read_raw_brainvision)
-    monkeypatch.setattr(module, "set_channel_types", lambda loaded: None)
-    monkeypatch.setattr(
-        module,
-        "estimate_raw_continuous_run_spectrum",
-        lambda loaded, **kwargs: kwargs["source_file"],
-    )
-
-    result = module.estimate_source_spectrum(source, _specification(5000.0))
-
-    assert result == source.source_path
-    assert observed_header is not None
-    assert not observed_header.exists()
-    assert raw.closed
-
-
 def test_estimate_source_spectrum_materializes_corrected_header(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -469,73 +437,6 @@ def test_estimate_source_spectrum_materializes_corrected_header(
     assert raw.closed
 
 
-def test_estimate_source_spectrum_materializes_corrected_archive_header(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import mne
-
-    import studies.pain_study.study1.figures.preprocessing_psd_sources as module
-
-    participant = tmp_path / "sub_0003_03_23_2026"
-    participant.mkdir()
-    archive_path = participant / "raw.zip"
-    with ZipFile(archive_path, "w") as archive:
-        archive.writestr(
-            f"raw/{RAW_SUB3_RUN3_STEM}.vhdr",
-            _header(RAW_SUB3_RUN1_STEM, 200),
-        )
-        archive.writestr(
-            f"raw/{RAW_SUB3_RUN3_STEM}.vmrk",
-            "Brain Vision Data Exchange Marker File\n"
-            "[Common Infos]\n"
-            f"DataFile={RAW_SUB3_RUN1_STEM}.eeg\n",
-        )
-        archive.writestr(f"raw/{RAW_SUB3_RUN3_STEM}.eeg", b"\x00\x00")
-    correction = module.BrainVisionSourceCorrection(
-        header_filename=f"{RAW_SUB3_RUN3_STEM}.vhdr",
-        subject_id="sub-0003",
-        run_id="3",
-        data_filename=f"{RAW_SUB3_RUN3_STEM}.eeg",
-        marker_filename=f"{RAW_SUB3_RUN3_STEM}.vmrk",
-        expected_data_reference=f"{RAW_SUB3_RUN1_STEM}.eeg",
-        expected_marker_reference=f"{RAW_SUB3_RUN1_STEM}.vmrk",
-        reason="Known temperature-sequence naming issue.",
-    )
-    source = module.discover_raw_brainvision_runs(
-        tmp_path,
-        excluded_subjects=(),
-        source_corrections=(correction,),
-    )[0]
-    raw = _ClosableRaw()
-    observed_header = None
-
-    def read_raw_brainvision(path, **kwargs):
-        nonlocal observed_header
-        observed_header = Path(path)
-        header_text = observed_header.read_text(encoding="utf-8-sig")
-        marker_text = observed_header.with_suffix(".vmrk").read_text(encoding="utf-8")
-        assert f"DataFile={RAW_SUB3_RUN3_STEM}.eeg" in header_text
-        assert f"MarkerFile={RAW_SUB3_RUN3_STEM}.vmrk" in header_text
-        assert f"DataFile={RAW_SUB3_RUN3_STEM}.eeg" in marker_text
-        return raw
-
-    monkeypatch.setattr(mne.io, "read_raw_brainvision", read_raw_brainvision)
-    monkeypatch.setattr(module, "set_channel_types", lambda loaded: None)
-    monkeypatch.setattr(
-        module,
-        "estimate_raw_continuous_run_spectrum",
-        lambda loaded, **kwargs: kwargs["source_file"],
-    )
-
-    result = module.estimate_source_spectrum(source, _specification(5000.0))
-
-    assert result == source.source_path
-    assert observed_header is not None
-    assert not observed_header.exists()
-    assert raw.closed
-
-
 def _specification(sampling_frequency_hz: float):
     from studies.pain_study.study1.figures.continuous_spectrum import (
         ContinuousSpectrumSpecification,
@@ -558,8 +459,8 @@ class _ClosableRaw:
 
 
 def _write_raw_archive(tmp_path: Path, *, include_data: bool = True) -> Path:
-    participant = tmp_path / "sub_0001_2026_03_02"
-    participant.mkdir()
+    participant = tmp_path / "sub-0001" / "eeg" / "original_5khz"
+    participant.mkdir(parents=True)
     archive = participant / "raw.zip"
     with ZipFile(archive, "w") as handle:
         handle.writestr(f"raw/{RAW_STEM}.vhdr", _header(RAW_STEM, 200))
@@ -570,7 +471,8 @@ def _write_raw_archive(tmp_path: Path, *, include_data: bool = True) -> Path:
 
 
 def _write_raw_triplet(tmp_path: Path, participant_directory: str, stem: str) -> Path:
-    directory = tmp_path / participant_directory / "raw"
+    subject = participant_directory.replace("sub_", "sub-").split("_", maxsplit=1)[0]
+    directory = tmp_path / subject / "eeg" / "original_5khz"
     directory.mkdir(parents=True, exist_ok=True)
     header = directory / f"{stem}.vhdr"
     header.write_text(_header(stem, 200), encoding="utf-8")
@@ -590,8 +492,11 @@ def _write_processed_triplet(
     internal_reference_stem: str | None = None,
     sampling_interval_us: int = 1000,
 ) -> Path:
-    directory = tmp_path / participant_directory / "processed"
-    directory.mkdir(parents=True)
+    subject = participant_directory.replace("sub_", "sub-").split("_", maxsplit=1)[0]
+    directory = tmp_path / subject / "eeg" / "brainvision_processed_1khz"
+    directory.mkdir(parents=True, exist_ok=True)
+    if (directory / f"{stem}.vhdr").exists():
+        stem = stem.replace("_scannerpulse_corrected", "_duplicate_scannerpulse_corrected")
     header = directory / f"{stem}.vhdr"
     reference_stem = internal_reference_stem or stem
     header.write_text(_header(reference_stem, sampling_interval_us), encoding="utf-8")

@@ -246,7 +246,7 @@ def discover_pilot_files(source_root: str | Path, subject: str) -> list[Path]:
     root = Path(source_root)
     if not root.is_dir():
         raise NotADirectoryError(f"Source root is not a directory: {root}")
-    eeg_dir = root / f"sub-{subject}" / "eeg"
+    eeg_dir = root / f"sub-{subject}" / "eeg" / "brainvision_processed_1khz"
     paths = sorted(
         path
         for path in eeg_dir.glob("*_scannerpulse_corrected.vhdr")

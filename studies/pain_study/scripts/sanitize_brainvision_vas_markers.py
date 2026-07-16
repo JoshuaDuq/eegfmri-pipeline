@@ -92,7 +92,6 @@ def _parse_reference(reference: Path) -> tuple[str, int, str]:
 
 
 def discover_cohort_recordings(
-    kingston_root: Path,
     source_data_root: Path,
     *,
     subjects: Sequence[str] = DEFAULT_SUBJECTS,
@@ -103,10 +102,11 @@ def discover_cohort_recordings(
     references = sorted(
         reference
         for reference in source_data_root.glob(
-            "sub-*/eeg/ThermalPainEEGFMRI_run*_scannerpulse_corrected.vhdr"
+            "sub-*/eeg/brainvision_processed_1khz/"
+            "ThermalPainEEGFMRI_run*_scannerpulse_corrected.vhdr"
         )
         if not reference.name.startswith("._")
-        and reference.parent.parent.name.removeprefix("sub-") in subject_set
+        and reference.parent.parent.parent.name.removeprefix("sub-") in subject_set
     )
     if len(references) != expected_count:
         raise ValueError(
@@ -117,7 +117,7 @@ def discover_cohort_recordings(
     seen_subject_runs: set[tuple[str, int]] = set()
     for reference in references:
         subject, run, original_basename = _parse_reference(reference)
-        reference_subject = reference.parent.parent.name.removeprefix("sub-")
+        reference_subject = reference.parent.parent.parent.name.removeprefix("sub-")
         if subject != reference_subject:
             raise ValueError(
                 f"Reference subject mismatch for {reference}: {subject} != {reference_subject}"
@@ -126,7 +126,7 @@ def discover_cohort_recordings(
         source_name = f"{original_basename}.vhdr"
         matches = sorted(
             path
-            for path in kingston_root.glob(f"sub_{subject}_*/raw/{source_name}")
+            for path in source_data_root.glob(f"sub-{subject}/eeg/original_5khz/{source_name}")
             if not path.name.startswith("._")
         )
         if len(matches) != 1:
@@ -277,7 +277,6 @@ def _remove_appledouble_files(root: Path) -> None:
 
 
 def run_sanitization(
-    kingston_root: Path,
     source_data_root: Path,
     output_root: Path,
     *,
@@ -292,7 +291,6 @@ def run_sanitization(
         raise FileExistsError(f"Temporary output root already exists: {temporary_root}")
 
     recordings = discover_cohort_recordings(
-        kingston_root,
         source_data_root,
         subjects=subjects,
         expected_count=expected_count,
@@ -339,7 +337,6 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Stage unambiguous VAS markers for the 5 kHz BrainVision cohort."
     )
-    parser.add_argument("--kingston-root", type=Path, default=Path("/Volumes/KINGSTON"))
     parser.add_argument(
         "--source-data-root",
         type=Path,
@@ -356,7 +353,6 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     output_root = run_sanitization(
-        kingston_root=args.kingston_root,
         source_data_root=args.source_data_root,
         output_root=args.output_root,
     )

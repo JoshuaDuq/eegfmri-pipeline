@@ -104,7 +104,7 @@ def _write_preprocessing_stage_psd_summary(
 def write_preprocessing_stage_psds(
     *,
     stage_identifiers: Sequence[str],
-    kingston_root: Path,
+    source_data_root: Path,
     derivative_root: Path | None,
     task: str,
     config: Any,
@@ -127,7 +127,7 @@ def write_preprocessing_stage_psds(
     source_sets = tuple(
         _discover_stage_sources(
             stage_identifier=specification.stage.identifier,
-            kingston_root=Path(kingston_root),
+            source_data_root=Path(source_data_root),
             derivative_root=Path(derivative_root) if derivative_root is not None else None,
             task=task,
             excluded_subjects=specification.excluded_subjects,
@@ -165,7 +165,7 @@ def write_preprocessing_stage_psds(
 def _discover_stage_sources(
     *,
     stage_identifier: str,
-    kingston_root: Path,
+    source_data_root: Path,
     derivative_root: Path | None,
     task: str,
     excluded_subjects: Sequence[str],
@@ -175,7 +175,7 @@ def _discover_stage_sources(
 ) -> tuple[EegRunSource, ...]:
     if stage_identifier == "raw":
         return discover_raw_brainvision_runs(
-            kingston_root,
+            source_data_root,
             excluded_subjects=excluded_subjects,
             requested_subjects=requested_subjects,
             source_corrections=source_corrections,
@@ -183,7 +183,7 @@ def _discover_stage_sources(
         )
     if stage_identifier == "processed":
         return discover_processed_brainvision_runs(
-            kingston_root,
+            source_data_root,
             excluded_subjects=excluded_subjects,
             requested_subjects=requested_subjects,
             source_corrections=source_corrections,
@@ -257,7 +257,7 @@ def main(argv: Sequence[str] | None = None) -> tuple[PreprocessingStagePsdPaths,
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--study1-config", type=Path)
     parser.add_argument("--task", required=True)
-    parser.add_argument("--kingston-root", type=Path, required=True)
+    parser.add_argument("--source-data-root", type=Path, required=True)
     parser.add_argument("--derivative-root", type=Path)
     parser.add_argument(
         "--stage",
@@ -276,7 +276,7 @@ def main(argv: Sequence[str] | None = None) -> tuple[PreprocessingStagePsdPaths,
         derivative_root = resolve_eeg_deriv_root(config)
     output_paths = write_preprocessing_stage_psds(
         stage_identifiers=tuple(arguments.stage),
-        kingston_root=arguments.kingston_root,
+        source_data_root=arguments.source_data_root,
         derivative_root=derivative_root,
         task=arguments.task,
         config=config,

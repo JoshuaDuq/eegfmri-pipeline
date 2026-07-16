@@ -2,6 +2,18 @@
 
 Scripts specific to the simultaneous EEG–fMRI pain paradigm. These raw-conversion and event-merging utilities are **not integrated into the TUI or `eeg-pipeline` CLI** and must be run manually before downstream analysis.
 
+For the fixed main cohort, organize the EEG source recordings once with:
+
+```bash
+python -m studies.pain_study.scripts.organize_source_eeg \
+  --kingston-root /Volumes/KINGSTON \
+  --source-data-root /Volumes/KINGSTON/EEG_fMRI_data/source_data
+```
+
+This copies original 5 kHz triplets into `sub-*/eeg/original_5khz/` and moves the existing
+BrainVision-processed 1 kHz tree into `sub-*/eeg/brainvision_processed_1khz/`. It includes only
+`sub-0000`, `sub-0001`, and `sub-0003` through `sub-0015`.
+
 These scripts cover raw conversion and event merging only. The EEG coupling workflow lives under
 `studies/pain_study/eeg_coupling/` and is integrated in the main CLI as
 `eeg-pipeline coupling compute`.
@@ -61,9 +73,10 @@ for the fixed method, literature basis, and qualification criteria.
 <source-root>/
   sub-<ID>/
     eeg/
-      sub-<ID>_task-<task>_run-<N>.vhdr
-      sub-<ID>_task-<task>_run-<N>.vmrk
-      sub-<ID>_task-<task>_run-<N>.eeg
+      brainvision_processed_1khz/
+        sub-<ID>_task-<task>_run-<N>.vhdr
+        sub-<ID>_task-<task>_run-<N>.vmrk
+        sub-<ID>_task-<task>_run-<N>.eeg
 ```
 
 **Usage:**
@@ -80,7 +93,7 @@ python studies/pain_study/scripts/run_paradigm_specific.py eeg-raw-to-bids \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source-root` | *(required)* | Root directory containing raw `sub-*/eeg/*.vhdr` files |
+| `--source-root` | *(required)* | Root containing `sub-*/eeg/brainvision_processed_1khz/*.vhdr` |
 | `--bids-root` | *(required)* | Output BIDS root for EEG data |
 | `--task` | *(required)* | BIDS task label (e.g. `task`) |
 | `--subject` | all found | Subject ID(s) to process (repeat flag for multiple) |

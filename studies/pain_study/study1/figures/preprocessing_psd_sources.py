@@ -29,9 +29,7 @@ HEADER_VALUE_PATTERN = re.compile(
     r"^(?P<key>[^\r\n=]+)=(?P<value>[^\r\n]+)$",
     re.MULTILINE,
 )
-PARTICIPANT_DIRECTORY_PATTERN = re.compile(
-    r"^sub_(?P<subject>\d{4})_(?:\d{4}_\d{2}_\d{2}|\d{2}_\d{2}_\d{4})$"
-)
+PARTICIPANT_DIRECTORY_PATTERN = re.compile(r"^sub-(?P<subject>\d{4})$")
 
 
 @dataclass(frozen=True)
@@ -124,7 +122,7 @@ def discover_raw_brainvision_runs(
     source_corrections: Sequence[BrainVisionSourceCorrection] = (),
     source_exclusions: Sequence[BrainVisionSourceExclusion] = (),
 ) -> tuple[BrainVisionArchiveRunSource | BrainVisionFileRunSource, ...]:
-    """Discover original 5,000-Hz thermal runs in raw directories or ZIP archives."""
+    """Discover original 5,000-Hz thermal runs in labeled source-data directories."""
     corrections = _index_source_corrections(source_corrections)
     exclusions = _index_source_exclusions(source_exclusions)
     observed_corrections: set[str] = set()
@@ -133,32 +131,9 @@ def discover_raw_brainvision_runs(
     file_candidates: list[tuple[Path, str]] = []
     for participant_directory in _participant_directories(source_root):
         participant_subject_id = _participant_subject_id(participant_directory)
-        archive_path = participant_directory / "raw.zip"
-        raw_directory = participant_directory / "raw"
-        if archive_path.is_file() and raw_directory.is_dir():
-            raise ValueError(
-                f"Participant has both raw.zip and raw directory: {participant_directory}"
-            )
-        if raw_directory.is_dir():
-            file_candidates.extend(
-                (path, participant_subject_id)
-                for path in raw_directory.glob("ThermalPainEEGFMRI*.vhdr")
-            )
-            continue
-        if not archive_path.is_file():
-            continue
-        selected.extend(
-            _discover_archive_sources(
-                archive_path,
-                participant_subject_id=participant_subject_id,
-                excluded_subjects=excluded_subjects,
-                requested_subjects=requested_subjects,
-                corrections=corrections,
-                exclusions=exclusions,
-                observed_corrections=observed_corrections,
-                observed_exclusions=observed_exclusions,
-            )
-        )
+        raw_directory = participant_directory / "eeg" / "original_5khz"
+        headers = tuple(raw_directory.glob("ThermalPainEEGFMRI*.vhdr"))
+        file_candidates.extend((path, participant_subject_id) for path in headers)
     selected.extend(
         _discover_file_sources(
             file_candidates,
@@ -194,7 +169,9 @@ def discover_processed_brainvision_runs(
     candidates = (
         (path, _participant_subject_id(participant_directory))
         for participant_directory in _participant_directories(source_root)
-        for path in (participant_directory / "processed").rglob("ThermalPainEEGFMRI*.vhdr")
+        for path in (participant_directory / "eeg" / "brainvision_processed_1khz").rglob(
+            "ThermalPainEEGFMRI*.vhdr"
+        )
     )
     selected = _discover_file_sources(
         candidates,
