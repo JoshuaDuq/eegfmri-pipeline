@@ -5,10 +5,14 @@ import pytest
 
 from eeg_pipeline.preprocessing.eeg_fmri.gradient import (
     GradientArtifactParameters,
+    correct_gradient_average,
     correct_gradient_artifact,
     resolve_volume_boundary,
+    resolve_volume_segments,
+    subtract_gradient_average,
     validate_volume_samples,
 )
+from eeg_pipeline.preprocessing.eeg_fmri.sequence import MultibandSliceSchedule
 
 
 def _fractional_delay(waveform: np.ndarray, delay_samples: float) -> np.ndarray:
@@ -52,6 +56,57 @@ def _synthetic_recording() -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         contaminated[:, start:stop] += channel_scales[:, np.newaxis] * artifact
 
     return contaminated, neural, volume_samples, sampling_frequency
+
+
+def _multiband_recording() -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    float,
+    MultibandSliceSchedule,
+]:
+    sampling_frequency = 1_000.0
+    samples_per_volume = 100
+    volume_count = 41
+    volume_samples = 20 + np.arange(volume_count) * samples_per_volume
+    n_samples = int(volume_samples[-1] + samples_per_volume + 20)
+    schedule = MultibandSliceSchedule(
+        repetition_time_seconds=0.1,
+        slice_times_seconds=np.repeat([0.0, 0.025, 0.05, 0.075], 2),
+        multiband_factor=2,
+    )
+
+    time = np.arange(n_samples) / sampling_frequency
+    neural = np.vstack(
+        (
+            1.2 * np.sin(2 * np.pi * 13.7 * time + 0.3),
+            0.9 * np.cos(2 * np.pi * 8.3 * time),
+            1.5 * np.sin(2 * np.pi * 5.1 * time + 0.2),
+        )
+    )
+    group_samples = schedule.group_boundaries_samples(sampling_frequency)
+    contaminated = neural.copy()
+    for volume_index, volume_start in enumerate(volume_samples):
+        for group_index, (group_start, group_stop) in enumerate(
+            zip(group_samples[:-1], group_samples[1:], strict=True)
+        ):
+            sample_count = group_stop - group_start
+            phase = np.linspace(0.0, 1.0, sample_count, endpoint=False)
+            template = 70.0 * np.sin(2 * np.pi * (group_index + 2) * phase) + 25.0 * np.cos(
+                2 * np.pi * (group_index + 5) * phase
+            )
+            residual_shape = 12.0 * np.sin(2 * np.pi * 3 * phase + 0.7)
+            residual_weight = np.sin(2 * np.pi * volume_index / 7 + group_index)
+            delay = 0.35 * np.sin(2 * np.pi * volume_index / 11 + group_index)
+            amplitude = 1.0 + 0.12 * np.cos(2 * np.pi * volume_index / 9 + group_index)
+            artifact = amplitude * _fractional_delay(template, delay)
+            artifact += residual_weight * residual_shape
+            start = volume_start + group_start
+            stop = volume_start + group_stop
+            contaminated[0, start:stop] += artifact
+            contaminated[1, start:stop] -= 0.65 * artifact
+            contaminated[2, start:stop] += 0.4 * artifact
+    return contaminated, neural, volume_samples, sampling_frequency, schedule
 
 
 def test_validate_volume_samples_requires_exact_fixed_repetition_time() -> None:
@@ -122,6 +177,27 @@ def test_resolve_volume_boundary_rejects_marker_deviation_above_tolerance() -> N
         )
 
 
+def test_resolve_volume_segments_preserves_internal_scanner_restart() -> None:
+    segments = resolve_volume_segments(
+        np.array([10, 110, 210, 500, 600, 700]),
+        n_samples=850,
+        sampling_frequency=1_000.0,
+        repetition_time_seconds=0.1,
+        maximum_marker_deviation_samples=0,
+    )
+
+    assert len(segments) == 2
+    np.testing.assert_array_equal(
+        segments[0].complete_volume_samples,
+        np.array([10, 110, 210]),
+    )
+    np.testing.assert_array_equal(
+        segments[1].complete_volume_samples,
+        np.array([500, 600, 700]),
+    )
+    assert all(segment.crop_stop_sample is None for segment in segments)
+
+
 def test_gradient_correction_suppresses_jittered_artifact_and_preserves_boundaries() -> None:
     contaminated, neural, volume_samples, sampling_frequency = _synthetic_recording()
     parameters = GradientArtifactParameters(
@@ -136,6 +212,12 @@ def test_gradient_correction_suppresses_jittered_artifact_and_preserves_boundari
         volume_samples,
         sampling_frequency=sampling_frequency,
         alignment_picks=np.array([0, 1]),
+        residual_obs_picks=np.array([0, 1, 2]),
+        slice_schedule=MultibandSliceSchedule(
+            repetition_time_seconds=0.1,
+            slice_times_seconds=np.array([0.0]),
+            multiband_factor=1,
+        ),
         parameters=parameters,
     )
 
@@ -166,6 +248,12 @@ def test_gradient_correction_preserves_neural_projection() -> None:
         volume_samples,
         sampling_frequency=sampling_frequency,
         alignment_picks=np.array([0, 1]),
+        residual_obs_picks=np.array([0, 1, 2]),
+        slice_schedule=MultibandSliceSchedule(
+            repetition_time_seconds=0.1,
+            slice_times_seconds=np.array([0.0]),
+            multiband_factor=1,
+        ),
         parameters=parameters,
     )
 
@@ -181,12 +269,139 @@ def test_gradient_correction_preserves_neural_projection() -> None:
         assert 0.85 < retained_projection < 1.15
 
 
+def test_optional_cross_fitted_obs_removes_group_locked_residuals() -> None:
+    contaminated, neural, volume_samples, sampling_frequency, schedule = _multiband_recording()
+    without_obs = GradientArtifactParameters(
+        repetition_time_seconds=0.1,
+        moving_average_volumes=11,
+        alignment_upsampling=4,
+        maximum_alignment_shift_samples=1.0,
+        residual_obs_components=0,
+        residual_obs_folds=5,
+        residual_obs_seed=42,
+    )
+    with_obs = GradientArtifactParameters(
+        repetition_time_seconds=0.1,
+        moving_average_volumes=11,
+        alignment_upsampling=4,
+        maximum_alignment_shift_samples=1.0,
+        residual_obs_components=2,
+        residual_obs_folds=5,
+        residual_obs_seed=42,
+    )
+
+    aas = correct_gradient_artifact(
+        contaminated,
+        volume_samples,
+        sampling_frequency=sampling_frequency,
+        alignment_picks=np.array([0, 1]),
+        residual_obs_picks=np.array([0, 1]),
+        slice_schedule=schedule,
+        parameters=without_obs,
+    )
+    obs = correct_gradient_artifact(
+        contaminated,
+        volume_samples,
+        sampling_frequency=sampling_frequency,
+        alignment_picks=np.array([0, 1]),
+        residual_obs_picks=np.array([0, 1]),
+        slice_schedule=schedule,
+        parameters=with_obs,
+    )
+
+    scan = slice(volume_samples[0], volume_samples[-1] + 100)
+    aas_error = np.sqrt(np.mean((aas.data[:2, scan] - neural[:2, scan]) ** 2))
+    obs_error = np.sqrt(np.mean((obs.data[:2, scan] - neural[:2, scan]) ** 2))
+    assert obs_error < 0.6 * aas_error
+    np.testing.assert_allclose(obs.data[2], aas.data[2], atol=1e-12)
+    assert obs.group_shifts_samples.shape == (volume_samples.size, 4)
+    assert obs.residual_obs_removed_rms > 0.0
+
+
+def test_gradient_average_exposes_the_reusable_pre_obs_boundary() -> None:
+    contaminated, _, volume_samples, sampling_frequency, schedule = _multiband_recording()
+    parameters = GradientArtifactParameters(
+        repetition_time_seconds=0.1,
+        moving_average_volumes=11,
+        alignment_upsampling=4,
+        maximum_alignment_shift_samples=1.0,
+        residual_obs_components=0,
+        residual_obs_folds=5,
+        residual_obs_seed=42,
+    )
+
+    average = correct_gradient_average(
+        contaminated,
+        volume_samples,
+        sampling_frequency=sampling_frequency,
+        alignment_picks=np.array([0, 1]),
+        slice_schedule=schedule,
+        parameters=parameters,
+    )
+    complete = correct_gradient_artifact(
+        contaminated,
+        volume_samples,
+        sampling_frequency=sampling_frequency,
+        alignment_picks=np.array([0, 1]),
+        residual_obs_picks=np.array([0, 1]),
+        slice_schedule=schedule,
+        parameters=parameters,
+    )
+
+    np.testing.assert_allclose(average.data, complete.data, atol=1e-12)
+    expected = subtract_gradient_average(
+        contaminated,
+        volume_samples,
+        samples_per_volume=100,
+        volume_shifts_samples=average.volume_shifts_samples,
+        moving_average_volumes=parameters.moving_average_volumes,
+    )
+    np.testing.assert_allclose(average.data, expected, atol=1e-12)
+    np.testing.assert_allclose(
+        average.group_shifts_samples,
+        complete.group_shifts_samples,
+        atol=1e-12,
+    )
+
+
+def test_cross_fitted_obs_preserves_non_scanner_locked_neural_projection() -> None:
+    contaminated, neural, volume_samples, sampling_frequency, schedule = _multiband_recording()
+    parameters = GradientArtifactParameters(
+        repetition_time_seconds=0.1,
+        moving_average_volumes=11,
+        alignment_upsampling=4,
+        maximum_alignment_shift_samples=1.0,
+        residual_obs_components=1,
+        residual_obs_folds=5,
+        residual_obs_seed=42,
+    )
+
+    result = correct_gradient_artifact(
+        contaminated,
+        volume_samples,
+        sampling_frequency=sampling_frequency,
+        alignment_picks=np.array([0, 1]),
+        residual_obs_picks=np.array([0, 1]),
+        slice_schedule=schedule,
+        parameters=parameters,
+    )
+
+    scan = slice(volume_samples[0], volume_samples[-1] + 100)
+    for channel_index in (0, 1):
+        retained_projection = np.dot(
+            result.data[channel_index, scan], neural[channel_index, scan]
+        ) / np.dot(neural[channel_index, scan], neural[channel_index, scan])
+        assert 0.85 < retained_projection < 1.15
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
         ("moving_average_volumes", 10, "odd"),
         ("alignment_upsampling", 1, "at least 2"),
         ("maximum_alignment_shift_samples", 0.0, "positive"),
+        ("residual_obs_components", 5, "between 0 and 4"),
+        ("residual_obs_folds", 1, "at least 2"),
     ],
 )
 def test_gradient_parameters_reject_invalid_values(
@@ -199,6 +414,9 @@ def test_gradient_parameters_reject_invalid_values(
         "moving_average_volumes": 21,
         "alignment_upsampling": 4,
         "maximum_alignment_shift_samples": 2.0,
+        "residual_obs_components": 2,
+        "residual_obs_folds": 5,
+        "residual_obs_seed": 42,
     }
     values[field] = value
 

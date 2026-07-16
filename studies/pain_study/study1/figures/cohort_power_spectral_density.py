@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.analysis.participant_bootstrap import paired_participant_bootstrap
 from eeg_pipeline.utils.config.loader import require_config_value
 from studies.pain_study.study1.figures.continuous_spectrum import (
     ContinuousRunSpectrum,
@@ -16,7 +17,6 @@ from studies.pain_study.study1.figures.continuous_spectrum import (
 )
 from studies.pain_study.study1.figures.spectral_statistics import (
     ParticipantBootstrapSpecification,
-    paired_participant_bootstrap,
 )
 
 VOLT_SQUARED_TO_MICROVOLT_SQUARED = 1e12

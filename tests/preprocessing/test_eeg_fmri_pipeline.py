@@ -8,6 +8,7 @@ from eeg_pipeline.preprocessing.eeg_fmri.config import NativeEegFmriParameters
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import NeuXusQrsDetection
 from eeg_pipeline.preprocessing.eeg_fmri.pipeline import preprocess_raw_in_place
 from eeg_pipeline.preprocessing.eeg_fmri.qc import summarize_cardiac_locked_eeg
+from eeg_pipeline.preprocessing.eeg_fmri.sequence import MultibandSliceSchedule
 
 
 class _FixedQrsDetector:
@@ -38,7 +39,7 @@ class _FixedQrsDetector:
 def _parameters() -> NativeEegFmriParameters:
     return NativeEegFmriParameters.from_mapping(
         {
-            "version": 2,
+            "version": 3,
             "acquisition": {
                 "sampling_frequency_hz": 1_000.0,
                 "repetition_time_seconds": 0.1,
@@ -51,6 +52,9 @@ def _parameters() -> NativeEegFmriParameters:
                 "moving_average_volumes": 11,
                 "alignment_upsampling": 4,
                 "maximum_alignment_shift_samples": 1.0,
+                "residual_obs_components": 0,
+                "residual_obs_folds": 5,
+                "residual_obs_seed": 42,
             },
             "resampling": {
                 "low_pass_frequency_hz": 80.0,
@@ -76,6 +80,11 @@ def _parameters() -> NativeEegFmriParameters:
                 "maximum_warning_rr_seconds": 1.5,
             },
             "qc": {
+                "bootstrap": {
+                    "iterations": 100,
+                    "confidence_level": 0.95,
+                    "seed": 42,
+                },
                 "channels": ["C3", "C4"],
                 "welch_duration_seconds": 2.048,
                 "minimum_duration_seconds": 0.256,
@@ -84,9 +93,23 @@ def _parameters() -> NativeEegFmriParameters:
     )
 
 
-def _raw(*, incomplete_terminal_volume: bool) -> mne.io.RawArray:
+def _schedule() -> MultibandSliceSchedule:
+    return MultibandSliceSchedule(
+        repetition_time_seconds=0.1,
+        slice_times_seconds=np.array([0.0, 0.025, 0.05, 0.075]),
+        multiband_factor=1,
+    )
+
+
+def _raw(
+    *,
+    incomplete_terminal_volume: bool,
+    internal_scanner_restart: bool = False,
+) -> mne.io.RawArray:
     sampling_frequency = 1_000.0
     volume_samples = 25 + np.arange(31) * 100
+    if internal_scanner_restart:
+        volume_samples[16:] += 50
     terminal_samples = 50 if incomplete_terminal_volume else 125
     n_samples = int(volume_samples[-1] + terminal_samples)
     time = np.arange(n_samples) / sampling_frequency
@@ -143,6 +166,7 @@ def test_preprocess_raw_runs_detection_and_cardiac_qc_around_obs(monkeypatch) ->
         raw,
         parameters=_parameters(),
         qrs_detector=detector,
+        slice_schedule=_schedule(),
     )
 
     assert result.raw is raw
@@ -153,6 +177,8 @@ def test_preprocess_raw_runs_detection_and_cardiac_qc_around_obs(monkeypatch) ->
     np.testing.assert_array_equal(raw.get_data(picks=["ECG"])[0], ecg_before_obs[0])
     assert result.complete_volume_count == 31
     assert result.discarded_terminal_samples == 0
+    assert result.group_shifts_samples.shape == (31, 4)
+    assert result.residual_obs_removed_rms == 0.0
     assert result.qrs.quality.correction_permitted
     assert result.qrs.quality.warnings
     assert result.qrs.diagnostics.model_sha256 == "test-model-sha256"
@@ -175,11 +201,42 @@ def test_preprocess_raw_crops_incomplete_terminal_scanner_interval(monkeypatch) 
         raw,
         parameters=_parameters(),
         qrs_detector=_FixedQrsDetector(),
+        slice_schedule=_schedule(),
     )
 
     assert result.complete_volume_count == 30
     assert result.discarded_terminal_samples == 50
     assert raw.n_times == pytest.approx(3_025 * 500 / 1_000, abs=1)
+
+
+def test_preprocess_raw_corrects_contiguous_blocks_across_scanner_restart(monkeypatch) -> None:
+    raw = _raw(
+        incomplete_terminal_volume=False,
+        internal_scanner_restart=True,
+    )
+    gap_before = raw.get_data(start=1_625, stop=1_675).copy()
+    monkeypatch.setattr(
+        "eeg_pipeline.preprocessing.eeg_fmri.pipeline.apply_cardiac_obs_in_place",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "eeg_pipeline.preprocessing.eeg_fmri.pipeline._low_pass_and_resample",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = preprocess_raw_in_place(
+        raw,
+        parameters=_parameters(),
+        qrs_detector=_FixedQrsDetector(),
+        slice_schedule=_schedule(),
+    )
+
+    assert result.complete_volume_count == 31
+    np.testing.assert_allclose(
+        result.raw.get_data(start=1_625, stop=1_675),
+        gap_before,
+        atol=1e-10,
+    )
 
 
 def test_preprocess_raw_rejects_task_event_inside_discarded_terminal_interval() -> None:
@@ -194,4 +251,5 @@ def test_preprocess_raw_rejects_task_event_inside_discarded_terminal_interval() 
             raw,
             parameters=_parameters(),
             qrs_detector=_FixedQrsDetector(),
+            slice_schedule=_schedule(),
         )

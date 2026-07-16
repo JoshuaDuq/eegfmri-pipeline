@@ -10,6 +10,10 @@ from matplotlib.ticker import ScalarFormatter
 import numpy as np
 
 from eeg_pipeline.analysis.qc.scanner_harmonics import DEFAULT_HARMONIC_WINDOWS
+from eeg_pipeline.preprocessing.eeg_fmri.cohort_spectrum import (
+    CohortScannerSpectra,
+    CohortStageSpectrum,
+)
 from eeg_pipeline.preprocessing.eeg_fmri.pipeline import NativeCorrectionResult
 
 FIGURE_DPI = 300
@@ -52,6 +56,15 @@ def _representative_samples(n_samples: int, sampling_frequency_hz: float) -> sli
 
 def _plot_qrs_window(axis, result: NativeCorrectionResult) -> None:
     diagnostics = result.qrs.diagnostics
+    if diagnostics.model_sha256.startswith("mne.preprocessing.ecg.qrs_detector"):
+        score_label = "MNE normalized ECG score"
+        score_axis_label = "Normalized ECG score"
+    elif diagnostics.model_sha256.startswith("pan-tompkins"):
+        score_label = "Pan-Tompkins energy score"
+        score_axis_label = "Normalized QRS energy"
+    else:
+        score_label = "NeuXus probability"
+        score_axis_label = "R-peak probability"
     if diagnostics.filtered_ecg.shape != diagnostics.probabilities.shape:
         raise ValueError("ECG and NeuXus probability timelines must have equal length")
     samples = _representative_samples(
@@ -89,9 +102,9 @@ def _plot_qrs_window(axis, result: NativeCorrectionResult) -> None:
         color=AFTER_COLOR,
         linewidth=0.7,
         alpha=0.7,
-        label="NeuXus probability",
+        label=score_label,
     )[0]
-    probability_axis.set(ylabel="R-peak probability", ylim=(-0.02, 1.02))
+    probability_axis.set(ylabel=score_axis_label, ylim=(-0.02, 1.02))
     probability_axis.spines["top"].set_visible(False)
     axis.set(
         xlabel="Time (s)",
@@ -100,7 +113,7 @@ def _plot_qrs_window(axis, result: NativeCorrectionResult) -> None:
     )
     axis.legend(
         [ecg_line, peak_points, probability_line],
-        ["Filtered ECG", "Accepted R peak", "NeuXus probability"],
+        ["Filtered ECG", "Accepted R peak", score_label],
         loc="upper right",
         frameon=False,
         fontsize=8,
@@ -371,6 +384,194 @@ def save_scanner_spectrum_qc_figure(
         build_scanner_spectrum_qc_figure(result, recording_label=recording_label),
         path,
     )
+
+
+def _cohort_stage_display(
+    cohort: CohortScannerSpectra,
+) -> tuple[tuple[str, str, CohortStageSpectrum], ...]:
+    return (
+        ("raw", "Raw", cohort.raw),
+        ("gradient_corrected", "Gradient-corrected", cohort.gradient_corrected),
+        ("final", "Final", cohort.final),
+    )
+
+
+def _plot_cohort_stage_spectra(
+    axis,
+    cohort: CohortScannerSpectra,
+    *,
+    low_hz: float,
+    high_hz: float,
+) -> None:
+    for stage_key, stage_label, spectrum in _cohort_stage_display(cohort):
+        mask = _frequency_mask(spectrum.frequencies_hz, low_hz, high_hz)
+        color = STAGE_COLORS[stage_label]
+        axis.fill_between(
+            spectrum.frequencies_hz[mask],
+            spectrum.confidence_low_power_db[mask],
+            spectrum.confidence_high_power_db[mask],
+            color=color,
+            alpha=0.12,
+            linewidth=0,
+        )
+        axis.plot(
+            spectrum.frequencies_hz[mask],
+            spectrum.median_power_db[mask],
+            color=color,
+            linewidth=1.2 if stage_key != "final" else 1.6,
+            label=stage_label,
+        )
+
+
+def _cohort_reference_index(
+    cohort: CohortScannerSpectra,
+    index: int,
+) -> int:
+    window = DEFAULT_HARMONIC_WINDOWS[index]
+    frequencies = cohort.raw.frequencies_hz
+    mask = _frequency_mask(frequencies, window.low_hz, window.high_hz)
+    selected_indices = np.flatnonzero(mask)
+    return int(selected_indices[np.argmax(cohort.raw.median_power_db[mask])])
+
+
+def _cohort_local_metrics(
+    cohort: CohortScannerSpectra,
+    index: int,
+) -> tuple[float, float, float]:
+    reference_index = _cohort_reference_index(cohort, index)
+    reference_frequency = float(cohort.raw.frequencies_hz[reference_index])
+    gradient_attenuation = float(
+        cohort.raw.median_power_db[reference_index]
+        - cohort.gradient_corrected.median_power_db[reference_index]
+    )
+    distance = np.abs(cohort.final.frequencies_hz - reference_frequency)
+    background = (distance >= 0.35) & (distance <= 2.0)
+    if np.count_nonzero(background) < 2:
+        raise ValueError(f"Insufficient cohort PSD bins around {reference_frequency:g} Hz")
+    final_prominence = float(
+        cohort.final.median_power_db[reference_index]
+        - np.median(cohort.final.median_power_db[background])
+    )
+    return reference_frequency, gradient_attenuation, final_prominence
+
+
+def _cohort_local_power_limits(cohort: CohortScannerSpectra) -> tuple[float, float]:
+    selected_power = []
+    for window in DEFAULT_HARMONIC_WINDOWS:
+        for _, _, spectrum in _cohort_stage_display(cohort):
+            mask = _frequency_mask(
+                spectrum.frequencies_hz,
+                window.low_hz,
+                window.high_hz,
+            )
+            selected_power.extend(
+                (
+                    spectrum.confidence_low_power_db[mask],
+                    spectrum.confidence_high_power_db[mask],
+                )
+            )
+    values = np.concatenate(selected_power)
+    if not np.all(np.isfinite(values)):
+        raise ValueError("Cohort scanner spectra contain non-finite PSD values")
+    padding = max(1.0, 0.05 * float(np.ptp(values)))
+    return float(np.min(values) - padding), float(np.max(values) + padding)
+
+
+def _plot_cohort_full_scanner_spectrum(axis, cohort: CohortScannerSpectra) -> None:
+    _plot_cohort_stage_spectra(axis, cohort, low_hz=15.0, high_hz=90.0)
+    for index, window in enumerate(DEFAULT_HARMONIC_WINDOWS):
+        reference_frequency, _, _ = _cohort_local_metrics(cohort, index)
+        axis.axvspan(window.low_hz, window.high_hz, color="#BDBDBD", alpha=0.12, linewidth=0)
+        axis.axvline(
+            reference_frequency,
+            color="#777777",
+            linestyle=":",
+            linewidth=0.7,
+        )
+    axis.set(
+        xlim=(15.0, 90.0),
+        xlabel="Frequency (Hz)",
+        ylabel="PSD (dB V²/Hz)",
+        title="Full scanner-harmonic comb",
+    )
+    axis.legend(loc="upper right", frameon=False, ncols=3, fontsize=8)
+
+
+def _plot_cohort_local_scanner_spectrum(
+    axis,
+    cohort: CohortScannerSpectra,
+    *,
+    index: int,
+    y_limits: tuple[float, float],
+) -> None:
+    window = DEFAULT_HARMONIC_WINDOWS[index]
+    reference_frequency, gradient_attenuation, final_prominence = _cohort_local_metrics(
+        cohort,
+        index,
+    )
+    _plot_cohort_stage_spectra(
+        axis,
+        cohort,
+        low_hz=window.low_hz,
+        high_hz=window.high_hz,
+    )
+    axis.axvline(reference_frequency, color="#777777", linestyle=":", linewidth=0.8)
+    axis.text(
+        0.02,
+        0.96,
+        f"AAS attenuation {gradient_attenuation:.1f} dB\n"
+        f"Final prominence {final_prominence:.1f} dB",
+        transform=axis.transAxes,
+        fontsize=7.5,
+        va="top",
+    )
+    axis.set(
+        xlim=(window.low_hz, window.high_hz),
+        ylim=y_limits,
+        xlabel="Frequency (Hz)",
+        ylabel="PSD (dB V²/Hz)",
+        title=f"{reference_frequency:.1f} Hz raw reference",
+    )
+
+
+def build_cohort_scanner_spectrum_qc_figure(cohort: CohortScannerSpectra) -> Figure:
+    """Build the participant-first cohort analogue of the run spectral QC figure."""
+    figure = Figure(figsize=(13, 11), layout="constrained", facecolor="white")
+    grid = figure.add_gridspec(3, 2, height_ratios=(1.15, 1.0, 1.0))
+    axes = (
+        figure.add_subplot(grid[0, :]),
+        figure.add_subplot(grid[1, 0]),
+        figure.add_subplot(grid[1, 1]),
+        figure.add_subplot(grid[2, 0]),
+        figure.add_subplot(grid[2, 1]),
+    )
+    _plot_cohort_full_scanner_spectrum(axes[0], cohort)
+    local_limits = _cohort_local_power_limits(cohort)
+    for index, axis in enumerate(axes[1:]):
+        _plot_cohort_local_scanner_spectrum(
+            axis,
+            cohort,
+            index=index,
+            y_limits=local_limits,
+        )
+    for axis, label in zip(axes, ("A", "B", "C", "D", "E"), strict=True):
+        _style_axis(axis, label)
+    figure.suptitle(
+        "Native EEG–fMRI correction | Cohort scanner-gradient spectral QC\n"
+        f"Participant-first median across {cohort.participant_count} participants | "
+        f"{cohort.run_count} runs | {cohort.channel_count} prespecified EEG channels",
+        fontsize=15,
+        fontweight="bold",
+    )
+    return figure
+
+
+def save_cohort_scanner_spectrum_qc_figure(
+    cohort: CohortScannerSpectra,
+    path: str | Path,
+) -> None:
+    """Save participant-first cohort scanner spectra at 300 dpi."""
+    _save_figure(build_cohort_scanner_spectrum_qc_figure(cohort), path)
 
 
 def _row_values(rows: Sequence[Mapping[str, object]], key: str) -> np.ndarray:

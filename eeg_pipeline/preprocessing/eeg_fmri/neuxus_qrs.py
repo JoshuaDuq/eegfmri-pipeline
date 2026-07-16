@@ -16,7 +16,8 @@ from typing import Mapping, Protocol
 
 import numpy as np
 from numba import njit
-from scipy.signal import butter, resample_poly, sosfiltfilt
+from mne.preprocessing.ecg import qrs_detector
+from scipy.signal import butter, find_peaks, resample_poly, sosfiltfilt
 
 NEUXUS_MODEL_WINDOW_SAMPLES = 500
 NEUXUS_MODEL_HIDDEN_UNITS = 64
@@ -699,4 +700,170 @@ class NeuXusQrsDetector:
             probability_support=_immutable(support),
             sampling_frequency_hz=self.parameters.sampling_frequency_hz,
             model_sha256=self.predictor.model_sha256,
+        )
+
+
+@dataclass(frozen=True)
+class MneQrsDetector:
+    """Deterministic MNE QRS fallback with explicit refractory consolidation."""
+
+    parameters: NeuXusQrsDetectionParameters
+
+    def detect(
+        self,
+        ecg: np.ndarray,
+        *,
+        sampling_frequency_hz: float,
+    ) -> NeuXusQrsDetection:
+        values = np.asarray(ecg)
+        if values.ndim != 1:
+            raise ValueError("ECG must be one-dimensional")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("ECG must contain only finite values")
+        ratio = sampling_frequency_hz / self.parameters.sampling_frequency_hz
+        downsampling = int(round(ratio))
+        if downsampling < 1 or not np.isclose(ratio, downsampling, rtol=0.0, atol=1e-9):
+            raise ValueError("ECG sampling frequency must be an integer multiple of the MNE rate")
+
+        sos = butter(
+            4,
+            [
+                self.parameters.low_frequency_hz,
+                self.parameters.high_frequency_hz,
+            ],
+            btype="bandpass",
+            fs=sampling_frequency_hz,
+            output="sos",
+        )
+        filtered = sosfiltfilt(sos, values)
+        detection_ecg = resample_poly(filtered, up=1, down=downsampling)
+        candidates = np.asarray(
+            qrs_detector(
+                self.parameters.sampling_frequency_hz,
+                detection_ecg,
+                thresh_value="auto",
+                l_freq=max(5.0, self.parameters.low_frequency_hz),
+                h_freq=self.parameters.high_frequency_hz,
+                verbose=False,
+            ),
+            dtype=int,
+        )
+        amplitude_score = np.abs(detection_ecg)
+        maximum_score = float(np.max(amplitude_score))
+        if maximum_score > 0:
+            amplitude_score = amplitude_score / maximum_score
+        minimum_distance = int(
+            round(self.parameters.refractory_period_seconds * self.parameters.sampling_frequency_hz)
+        )
+        peak_samples = _enforce_refractory_period(
+            candidates,
+            amplitude_score,
+            amplitude_score,
+            minimum_distance,
+        )
+        edge_samples = int(
+            round(self.parameters.edge_margin_seconds * self.parameters.sampling_frequency_hz)
+        )
+        peak_samples = peak_samples[
+            (peak_samples >= edge_samples) & (peak_samples < detection_ecg.size - edge_samples)
+        ]
+        times = peak_samples.astype(float) / self.parameters.sampling_frequency_hz
+        return NeuXusQrsDetection(
+            times=_immutable(times),
+            peak_samples=_immutable(peak_samples),
+            filtered_ecg=_immutable(detection_ecg),
+            probabilities=_immutable(amplitude_score),
+            probability_support=_immutable(np.ones(detection_ecg.size, dtype=int)),
+            sampling_frequency_hz=self.parameters.sampling_frequency_hz,
+            model_sha256="mne.preprocessing.ecg.qrs_detector:auto-refractory-v1",
+        )
+
+
+@dataclass(frozen=True)
+class PanTompkinsQrsDetector:
+    """Pan-Tompkins-style energy fallback for atypical ECG morphology."""
+
+    parameters: NeuXusQrsDetectionParameters
+    energy_percentile: float = 75.0
+    integration_window_seconds: float = 0.12
+
+    def detect(
+        self,
+        ecg: np.ndarray,
+        *,
+        sampling_frequency_hz: float,
+    ) -> NeuXusQrsDetection:
+        values = np.asarray(ecg)
+        if values.ndim != 1:
+            raise ValueError("ECG must be one-dimensional")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("ECG must contain only finite values")
+        ratio = sampling_frequency_hz / self.parameters.sampling_frequency_hz
+        downsampling = int(round(ratio))
+        if downsampling < 1 or not np.isclose(ratio, downsampling, rtol=0.0, atol=1e-9):
+            raise ValueError(
+                "ECG sampling frequency must be an integer multiple of the Pan-Tompkins rate"
+            )
+
+        sos = butter(
+            4,
+            [5.0, self.parameters.high_frequency_hz],
+            btype="bandpass",
+            fs=sampling_frequency_hz,
+            output="sos",
+        )
+        filtered = sosfiltfilt(sos, values)
+        detection_ecg = resample_poly(filtered, up=1, down=downsampling)
+        derivative_energy = np.square(np.gradient(detection_ecg))
+        integration_samples = max(
+            1,
+            int(round(self.integration_window_seconds * self.parameters.sampling_frequency_hz)),
+        )
+        integrated_energy = np.convolve(
+            derivative_energy,
+            np.ones(integration_samples) / integration_samples,
+            mode="same",
+        )
+        threshold = float(np.percentile(integrated_energy, self.energy_percentile))
+        minimum_distance = int(
+            round(self.parameters.refractory_period_seconds * self.parameters.sampling_frequency_hz)
+        )
+        energy_peaks, _ = find_peaks(
+            integrated_energy,
+            height=threshold,
+            prominence=0.25 * threshold,
+            distance=minimum_distance,
+        )
+        snap_radius = int(round(0.15 * self.parameters.sampling_frequency_hz))
+        candidates = []
+        for peak in energy_peaks:
+            start = max(0, int(peak) - snap_radius)
+            stop = min(detection_ecg.size, int(peak) + snap_radius + 1)
+            candidates.append(start + int(np.argmax(np.abs(detection_ecg[start:stop]))))
+        candidates_array = np.unique(np.asarray(candidates, dtype=int))
+        maximum_energy = float(np.max(integrated_energy))
+        probability_score = (
+            integrated_energy / maximum_energy if maximum_energy > 0 else integrated_energy
+        )
+        peak_samples = _enforce_refractory_period(
+            candidates_array,
+            probability_score,
+            np.abs(detection_ecg),
+            minimum_distance,
+        )
+        edge_samples = int(
+            round(self.parameters.edge_margin_seconds * self.parameters.sampling_frequency_hz)
+        )
+        peak_samples = peak_samples[
+            (peak_samples >= edge_samples) & (peak_samples < detection_ecg.size - edge_samples)
+        ]
+        times = peak_samples.astype(float) / self.parameters.sampling_frequency_hz
+        return NeuXusQrsDetection(
+            times=_immutable(times),
+            peak_samples=_immutable(peak_samples),
+            filtered_ecg=_immutable(detection_ecg),
+            probabilities=_immutable(probability_score),
+            probability_support=_immutable(np.ones(detection_ecg.size, dtype=int)),
+            sampling_frequency_hz=self.parameters.sampling_frequency_hz,
+            model_sha256="pan-tompkins-energy:percentile75-refractory-v1",
         )

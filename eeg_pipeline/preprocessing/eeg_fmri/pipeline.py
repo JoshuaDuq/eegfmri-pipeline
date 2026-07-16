@@ -15,13 +15,17 @@ from eeg_pipeline.preprocessing.eeg_fmri.cardiac import (
 from eeg_pipeline.preprocessing.eeg_fmri.config import NativeEegFmriParameters
 from eeg_pipeline.preprocessing.eeg_fmri.gradient import (
     correct_gradient_artifact,
-    resolve_volume_boundary,
+    resolve_volume_segments,
 )
 from eeg_pipeline.preprocessing.eeg_fmri.mne_io import (
     extract_volume_samples,
     validate_acquisition,
 )
-from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import QrsDetector
+from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import (
+    MneQrsDetector,
+    PanTompkinsQrsDetector,
+    QrsDetector,
+)
 from eeg_pipeline.preprocessing.eeg_fmri.qc import (
     CardiacLockedComparison,
     HarmonicStageQc,
@@ -30,6 +34,7 @@ from eeg_pipeline.preprocessing.eeg_fmri.qc import (
     summarize_cardiac_locked_eeg,
     summarize_raw_harmonics,
 )
+from eeg_pipeline.preprocessing.eeg_fmri.sequence import MultibandSliceSchedule
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,8 @@ class NativeCorrectionResult:
     raw: mne.io.BaseRaw
     qrs: QrsDetection
     volume_shifts_samples: np.ndarray
+    group_shifts_samples: np.ndarray
+    residual_obs_removed_rms: float
     marker_offsets_samples: np.ndarray
     complete_volume_count: int
     discarded_terminal_samples: int
@@ -113,6 +120,7 @@ def preprocess_raw_in_place(
     *,
     parameters: NativeEegFmriParameters,
     qrs_detector: QrsDetector,
+    slice_schedule: MultibandSliceSchedule,
 ) -> NativeCorrectionResult:
     """Apply the complete native EEG-fMRI artifact pipeline in place."""
     if not raw.preload:
@@ -136,25 +144,41 @@ def preprocess_raw_in_place(
         raw,
         annotation_description=parameters.volume_annotation,
     )
-    boundary = resolve_volume_boundary(
+    boundaries = resolve_volume_segments(
         observed_volume_samples,
         n_samples=raw.n_times,
         sampling_frequency=float(raw.info["sfreq"]),
         repetition_time_seconds=parameters.repetition_time_seconds,
         maximum_marker_deviation_samples=parameters.maximum_marker_deviation_samples,
     )
-    if boundary.crop_stop_sample is not None:
-        _crop_incomplete_terminal_volume(raw, boundary.crop_stop_sample)
+    crop_boundaries = [boundary for boundary in boundaries if boundary.crop_stop_sample is not None]
+    if len(crop_boundaries) > 1 or (crop_boundaries and crop_boundaries[0] is not boundaries[-1]):
+        raise RuntimeError("Only the final scanner block may require terminal cropping")
+    if crop_boundaries:
+        _crop_incomplete_terminal_volume(raw, crop_boundaries[0].crop_stop_sample)
 
     eeg_picks = mne.pick_types(raw.info, eeg=True, ecg=False, exclude=[])
-    gradient = correct_gradient_artifact(
-        raw._data,
-        boundary.complete_volume_samples,
-        sampling_frequency=float(raw.info["sfreq"]),
-        alignment_picks=eeg_picks,
-        parameters=parameters.gradient,
-    )
-    raw._data = gradient.data
+    corrected_data = raw._data
+    volume_shifts = []
+    group_shifts = []
+    residual_obs_rms = []
+    residual_obs_weights = []
+    for boundary in boundaries:
+        gradient = correct_gradient_artifact(
+            corrected_data,
+            boundary.complete_volume_samples,
+            sampling_frequency=float(raw.info["sfreq"]),
+            alignment_picks=eeg_picks,
+            residual_obs_picks=eeg_picks,
+            slice_schedule=slice_schedule,
+            parameters=parameters.gradient,
+        )
+        corrected_data = gradient.data
+        volume_shifts.append(gradient.volume_shifts_samples)
+        group_shifts.append(gradient.group_shifts_samples)
+        residual_obs_rms.append(gradient.residual_obs_removed_rms)
+        residual_obs_weights.append(boundary.complete_volume_samples.size)
+    raw._data = corrected_data
     harmonic_stages["gradient_corrected"] = summarize_raw_harmonics(
         raw,
         stage="gradient_corrected",
@@ -168,6 +192,10 @@ def preprocess_raw_in_place(
         raw,
         ecg_channel=parameters.ecg_channel,
         detector=qrs_detector,
+        fallback_detectors=(
+            MneQrsDetector(parameters.cardiac.detection),
+            PanTompkinsQrsDetector(parameters.cardiac.detection),
+        ),
         parameters=parameters.cardiac,
     )
     cardiac_before = summarize_cardiac_locked_eeg(raw, qrs_times=qrs.times)
@@ -189,10 +217,23 @@ def preprocess_raw_in_place(
     return NativeCorrectionResult(
         raw=raw,
         qrs=qrs,
-        volume_shifts_samples=gradient.volume_shifts_samples,
-        marker_offsets_samples=boundary.marker_offsets_samples,
-        complete_volume_count=boundary.complete_volume_samples.size,
-        discarded_terminal_samples=boundary.discarded_terminal_samples,
+        volume_shifts_samples=np.concatenate(volume_shifts),
+        group_shifts_samples=np.concatenate(group_shifts, axis=0),
+        residual_obs_removed_rms=float(
+            np.sqrt(
+                np.average(
+                    np.square(residual_obs_rms),
+                    weights=residual_obs_weights,
+                )
+            )
+        ),
+        marker_offsets_samples=np.concatenate(
+            [boundary.marker_offsets_samples for boundary in boundaries]
+        ),
+        complete_volume_count=sum(boundary.complete_volume_samples.size for boundary in boundaries),
+        discarded_terminal_samples=sum(
+            boundary.discarded_terminal_samples for boundary in boundaries
+        ),
         harmonic_stages=harmonic_stages,
         cardiac_qc=cardiac_qc,
     )

@@ -11,8 +11,10 @@ from eeg_pipeline.preprocessing.eeg_fmri.cardiac import (
     detect_qrs,
 )
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import (
+    MneQrsDetector,
     NeuXusQrsDetection,
     NeuXusQrsDetectionParameters,
+    PanTompkinsQrsDetector,
 )
 from eeg_pipeline.preprocessing.eeg_fmri.mne_io import (
     extract_volume_samples,
@@ -138,6 +140,64 @@ def test_detect_qrs_finds_physiologic_heart_rate() -> None:
     assert detection.quality.warnings == ()
     assert detection.times.size == expected_times.size
     np.testing.assert_array_equal(detection.times, expected_times)
+
+
+def test_detect_qrs_uses_validated_fallback_when_primary_is_unusable() -> None:
+    raw, expected_times = _raw_with_cardiac_artifact()
+    missed_alternate_peaks = expected_times[::2]
+
+    detection = detect_qrs(
+        raw,
+        ecg_channel="ECG",
+        detector=_FixedDetector(missed_alternate_peaks),
+        fallback_detectors=(
+            _FixedDetector(missed_alternate_peaks),
+            _FixedDetector(expected_times),
+        ),
+        parameters=_cardiac_parameters(),
+    )
+
+    np.testing.assert_array_equal(detection.times, expected_times)
+    assert detection.quality.median_heart_rate_bpm == pytest.approx(60.0)
+    assert any("fallback" in warning.lower() for warning in detection.quality.warnings)
+
+
+def test_mne_qrs_fallback_enforces_refractory_period() -> None:
+    sampling_frequency = 1_000.0
+    time = np.arange(int(30 * sampling_frequency)) / sampling_frequency
+    ecg = 0.01 * np.sin(2 * np.pi * 1.0 * time)
+    for peak_time in np.arange(1.0, 29.0, 1.0):
+        center = int(peak_time * sampling_frequency)
+        offsets = np.arange(-12, 13)
+        ecg[center + offsets] += np.exp(-0.5 * (offsets / 3.0) ** 2)
+
+    detection = MneQrsDetector(NeuXusQrsDetectionParameters()).detect(
+        ecg,
+        sampling_frequency_hz=sampling_frequency,
+    )
+
+    assert detection.model_sha256.startswith("mne.preprocessing.ecg.qrs_detector")
+    assert detection.times.size == 28
+    assert np.min(np.diff(detection.times)) >= 0.4
+
+
+def test_pan_tompkins_fallback_detects_regular_qrs_energy() -> None:
+    sampling_frequency = 1_000.0
+    time = np.arange(int(30 * sampling_frequency)) / sampling_frequency
+    ecg = 0.01 * np.sin(2 * np.pi * 1.0 * time)
+    for peak_time in np.arange(1.0, 29.0, 1.0):
+        center = int(peak_time * sampling_frequency)
+        offsets = np.arange(-12, 13)
+        ecg[center + offsets] += np.exp(-0.5 * (offsets / 3.0) ** 2)
+
+    detection = PanTompkinsQrsDetector(NeuXusQrsDetectionParameters()).detect(
+        ecg,
+        sampling_frequency_hz=sampling_frequency,
+    )
+
+    assert detection.model_sha256.startswith("pan-tompkins")
+    assert detection.times.size == 28
+    assert np.min(np.diff(detection.times)) >= 0.4
 
 
 def test_qrs_quality_warns_without_blocking_isolated_bad_intervals() -> None:

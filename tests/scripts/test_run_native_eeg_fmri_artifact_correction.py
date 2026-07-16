@@ -10,6 +10,10 @@ from PIL import Image
 import pytest
 
 from eeg_pipeline.preprocessing.eeg_fmri.cardiac import QrsDetection, QrsQuality
+from eeg_pipeline.preprocessing.eeg_fmri.cohort_spectrum import (
+    aggregate_cohort_scanner_spectra,
+    extract_run_scanner_spectra,
+)
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import NeuXusQrsDetection
 from eeg_pipeline.preprocessing.eeg_fmri.pipeline import NativeCorrectionResult
 from eeg_pipeline.preprocessing.eeg_fmri.qc import (
@@ -53,6 +57,23 @@ def _input_root(tmp_path: Path) -> Path:
         writer.writeheader()
         writer.writerow(row)
     return input_root
+
+
+def _bold_root(tmp_path: Path) -> Path:
+    bold_root = tmp_path / "bids-fmri"
+    metadata = bold_root / "sub-0001" / "func" / ("sub-0001_task-thermalactive_run-01_bold.json")
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text(
+        json.dumps(
+            {
+                "RepetitionTime": 0.9,
+                "SliceTiming": [0.0, 0.0, 0.0, 0.05, 0.05, 0.05],
+                "MultibandAccelerationFactor": 3,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return bold_root
 
 
 def _native_result() -> NativeCorrectionResult:
@@ -150,6 +171,8 @@ def _native_result() -> NativeCorrectionResult:
         raw=raw,
         qrs=qrs,
         volume_shifts_samples=np.array([0.0, 0.25]),
+        group_shifts_samples=np.array([[0.0, 0.1], [0.2, 0.3]]),
+        residual_obs_removed_rms=2.5e-6,
         marker_offsets_samples=np.array([0, 1]),
         complete_volume_count=20,
         discarded_terminal_samples=0,
@@ -192,6 +215,40 @@ def test_run_qc_uses_separate_publication_scale_figures() -> None:
     assert all(len(axis.lines) == 4 for axis in local_axes)
 
 
+def test_cohort_scanner_spectrum_qc_matches_run_layout() -> None:
+    result = _native_result()
+    runs = tuple(
+        extract_run_scanner_spectra(
+            subject=f"sub-{subject:04d}",
+            run=1,
+            harmonic_stages=result.harmonic_stages,
+        )
+        for subject in (1, 2)
+    )
+    cohort = aggregate_cohort_scanner_spectra(
+        runs,
+        bootstrap_iterations=20,
+        confidence_level=0.95,
+        bootstrap_seed=42,
+    )
+
+    figure = qc_plotting.build_cohort_scanner_spectrum_qc_figure(cohort)
+
+    assert len(figure.axes) == 5
+    broad_axis, *local_axes = figure.axes
+    assert broad_axis.get_xlim() == pytest.approx((15.0, 90.0))
+    assert broad_axis.get_ylabel() == "PSD (dB V²/Hz)"
+    assert len(broad_axis.collections) >= 3
+    assert [axis.get_title() for axis in local_axes] == [
+        "20.0 Hz raw reference",
+        "41.0 Hz raw reference",
+        "61.0 Hz raw reference",
+        "82.0 Hz raw reference",
+    ]
+    assert all(len(axis.collections) >= 3 for axis in local_axes)
+    assert "Participant-first median across 2 participants | 2 runs" in figure._suptitle.get_text()
+
+
 def test_cohort_qc_prioritizes_residual_prominence_and_qrs_quality() -> None:
     row = {
         "harmonic_18_23_raw_to_final_db": 25.0,
@@ -224,16 +281,35 @@ def test_cohort_qc_prioritizes_residual_prominence_and_qrs_quality() -> None:
 def test_read_input_recordings_requires_verified_manifest_inventory(tmp_path: Path) -> None:
     input_root = _input_root(tmp_path)
 
-    recordings = runner.read_input_recordings(input_root, expected_count=1)
+    recordings = runner.read_input_recordings(
+        input_root,
+        _bold_root(tmp_path),
+        expected_count=1,
+    )
 
     assert len(recordings) == 1
     assert recordings[0].subject == "sub-0001"
     assert recordings[0].run == 1
     assert recordings[0].vhdr_path.name == "recording.vhdr"
+    assert recordings[0].bold_json_path.name.endswith("run-01_bold.json")
+    assert len(recordings[0].bold_json_sha256) == 64
+
+
+def test_read_input_recordings_requires_matching_bold_metadata(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="BOLD metadata"):
+        runner.read_input_recordings(
+            _input_root(tmp_path),
+            tmp_path / "missing-bids-fmri",
+            expected_count=1,
+        )
 
 
 def test_build_run_qc_serializes_complete_methods_and_cardiac_quality(tmp_path: Path) -> None:
-    recording = runner.read_input_recordings(_input_root(tmp_path), expected_count=1)[0]
+    recording = runner.read_input_recordings(
+        _input_root(tmp_path),
+        _bold_root(tmp_path),
+        expected_count=1,
+    )[0]
     qc = runner.build_run_qc(
         recording,
         _native_result(),
@@ -251,7 +327,12 @@ def test_build_run_qc_serializes_complete_methods_and_cardiac_quality(tmp_path: 
         ),
     )
 
-    assert qc["gradient"]["method"] == "synchronized_average_artifact_subtraction"
+    assert qc["gradient"]["method"] == "whole_volume_phase_aligned_adaptive_AAS"
+    assert qc["gradient"]["multiband_factor"] == 3
+    assert qc["gradient"]["slice_group_count"] == 2
+    assert qc["gradient"]["residual_obs_components"] == 0
+    assert qc["gradient"]["residual_obs_removed_rms_v"] == 2.5e-6
+    assert qc["gradient"]["bold_json_sha256"] == recording.bold_json_sha256
     cardiac = qc["cardiac"]
     assert cardiac["qrs_detector"]["method"] == "NeuXus_v0.0.4_bidirectional_LSTM"
     assert cardiac["qrs_detector"]["model_sha256"] == "d" * 64
@@ -270,7 +351,11 @@ def test_process_recording_writes_atomic_qrs_and_separate_qc_figures(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    recording = runner.read_input_recordings(_input_root(tmp_path), expected_count=1)[0]
+    recording = runner.read_input_recordings(
+        _input_root(tmp_path),
+        _bold_root(tmp_path),
+        expected_count=1,
+    )[0]
     result = _native_result()
     detector = object()
     detector_arguments = []
@@ -280,20 +365,22 @@ def test_process_recording_writes_atomic_qrs_and_separate_qc_figures(
         lambda *args, **kwargs: result.raw.copy(),
     )
 
-    def fake_preprocess(raw, *, parameters, qrs_detector):
+    def fake_preprocess(raw, *, parameters, qrs_detector, slice_schedule):
         detector_arguments.append(qrs_detector)
+        assert slice_schedule.multiband_factor == 3
         return result
 
     monkeypatch.setattr(runner, "preprocess_raw_in_place", fake_preprocess)
     parameters = runner.load_native_eeg_fmri_parameters(CONFIG_PATH)
 
-    row = runner.process_recording(
+    completed = runner.process_recording(
         recording,
         tmp_path / "derivative",
         parameters=parameters,
         config_sha256="e" * 64,
         qrs_detector=detector,
     )
+    row = completed.manifest_row
 
     assert detector_arguments == [detector]
     qrs_path = Path(row["output_qrs"])
@@ -314,6 +401,8 @@ def test_process_recording_writes_atomic_qrs_and_separate_qc_figures(
     assert qc["cardiac"]["qrs_detector"]["model_sha256"] == "d" * 64
     assert row["qrs_model_sha256"] == "d" * 64
     assert row["harmonic_18_23_final_prominence_db"] == 7.0
+    assert completed.scanner_spectra.subject == "sub-0001"
+    assert completed.scanner_spectra.raw.frequencies_hz[[0, -1]] == pytest.approx([15.0, 90.0])
 
 
 def test_run_cohort_publishes_organized_derivative_atomically(
@@ -321,7 +410,8 @@ def test_run_cohort_publishes_organized_derivative_atomically(
     monkeypatch,
 ) -> None:
     input_root = _input_root(tmp_path)
-    output_root = tmp_path / "native-v2"
+    bold_root = _bold_root(tmp_path)
+    output_root = tmp_path / "native-v3"
     detector = object()
     detector_ids = []
 
@@ -345,7 +435,7 @@ def test_run_cohort_publishes_organized_derivative_atomically(
         output_qrs.write_text("onset_seconds\n", encoding="utf-8")
         output_physiology_qc.write_bytes(b"png")
         output_scanner_spectrum_qc.write_bytes(b"png")
-        return {
+        manifest_row = {
             "subject": recording.subject,
             "run": recording.run,
             "source_vhdr": str(recording.vhdr_path),
@@ -373,11 +463,21 @@ def test_run_cohort_publishes_organized_derivative_atomically(
             "harmonic_77_85_final_prominence_db": 11.0,
             "complete_volume_count": 20,
         }
+        result = _native_result()
+        return runner.CompletedRun(
+            manifest_row=manifest_row,
+            scanner_spectra=extract_run_scanner_spectra(
+                subject=recording.subject,
+                run=recording.run,
+                harmonic_stages=result.harmonic_stages,
+            ),
+        )
 
     monkeypatch.setattr(runner, "process_recording", fake_process)
 
     published = runner.run_cohort(
         input_root,
+        bold_root,
         output_root,
         CONFIG_PATH,
         expected_count=1,
@@ -389,6 +489,16 @@ def test_run_cohort_publishes_organized_derivative_atomically(
     with Image.open(cohort_figure) as image:
         assert image.width >= 3_600
         assert image.info["dpi"] == pytest.approx((300.0, 300.0), abs=0.1)
+    cohort_spectrum_figure = output_root / "cohort_scanner_spectrum_qc.png"
+    with Image.open(cohort_spectrum_figure) as image:
+        assert image.width >= 3_600
+        assert image.height >= 3_000
+        assert image.info["dpi"] == pytest.approx((300.0, 300.0), abs=0.1)
+    cohort_spectrum_tsv = output_root / "cohort_scanner_spectrum_qc.tsv"
+    assert cohort_spectrum_tsv.is_file()
+    assert cohort_spectrum_tsv.read_text(encoding="utf-8").startswith(
+        "stage\tfrequency_hz\tmedian_psd_db_v2_hz"
+    )
     assert (output_root / "native_eeg_fmri_artifact_correction.yaml").is_file()
     manifest_text = (output_root / "native_correction_manifest.tsv").read_text(encoding="utf-8")
     assert str(output_root / "sub-0001" / "eeg") in manifest_text
@@ -397,7 +507,8 @@ def test_run_cohort_publishes_organized_derivative_atomically(
     description = json.loads(
         (output_root / "dataset_description.json").read_text(encoding="utf-8")
     )["GeneratedBy"][0]["Description"]
-    assert "21-volume" in description
+    assert "whole-volume" in description
+    assert "BIDS multiband-sequence" in description
     assert "NeuXus" in description
     assert "MNE PCA-OBS" in description
     assert detector_ids == [id(detector)]
@@ -406,11 +517,18 @@ def test_run_cohort_publishes_organized_derivative_atomically(
 
 def test_run_cohort_refuses_to_overwrite_a_derivative_root(tmp_path: Path) -> None:
     input_root = _input_root(tmp_path)
+    bold_root = _bold_root(tmp_path)
     output_root = tmp_path / "native-v1"
     output_root.mkdir()
 
     try:
-        runner.run_cohort(input_root, output_root, CONFIG_PATH, expected_count=1)
+        runner.run_cohort(
+            input_root,
+            bold_root,
+            output_root,
+            CONFIG_PATH,
+            expected_count=1,
+        )
     except FileExistsError as error:
         assert str(output_root) in str(error)
     else:
@@ -419,4 +537,4 @@ def test_run_cohort_refuses_to_overwrite_a_derivative_root(tmp_path: Path) -> No
 
 def test_fixed_cohort_boundary_and_default_output_are_versioned() -> None:
     assert runner.EXPECTED_RUN_COUNT == 83
-    assert runner.DEFAULT_OUTPUT_ROOT.name == "native_eeg_fmri_correction-v2"
+    assert runner.DEFAULT_OUTPUT_ROOT.name == "native_eeg_fmri_correction-v4"

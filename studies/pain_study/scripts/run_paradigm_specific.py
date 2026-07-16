@@ -23,10 +23,15 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     sub = p.add_subparsers(dest="command", required=True)
 
-    eeg = sub.add_parser("eeg-raw-to-bids", help="Convert BrainVision EEG raw data to BIDS")
+    eeg = sub.add_parser("eeg-raw-to-bids", help="Convert EEG raw data to BIDS")
     eeg.add_argument("--source-root", required=True)
     eeg.add_argument("--bids-root", required=True)
     eeg.add_argument("--task", required=True)
+    eeg.add_argument(
+        "--source-format",
+        choices=["brainvision", "native-fif"],
+        default="brainvision",
+    )
     eeg.add_argument("--subject", action="append", default=None)
     eeg.add_argument("--montage", default="easycap-M1")
     eeg.add_argument("--line-freq", type=float, default=60.0)
@@ -82,6 +87,7 @@ def main() -> int:
             do_trim_to_first_volume=bool(args.trim_to_first_volume),
             event_prefixes=args.event_prefix,
             keep_all_annotations=bool(args.keep_all_annotations),
+            source_format=args.source_format,
         )
         print(f"Converted EEG files: {n}")
         return 0

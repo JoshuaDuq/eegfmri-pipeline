@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import mne
 import numpy as np
+from collections.abc import Sequence
 
 from eeg_pipeline.preprocessing.eeg_fmri.neuxus_qrs import (
     NeuXusQrsDetection,
@@ -149,24 +150,42 @@ def detect_qrs(
     *,
     ecg_channel: str,
     detector: QrsDetector,
+    fallback_detectors: Sequence[QrsDetector] = (),
     parameters: CardiacArtifactParameters,
 ) -> QrsDetection:
     """Detect R-peaks with NeuXus and classify their correction quality."""
     _validate_ecg_channel(raw, ecg_channel)
     ecg = raw.get_data(picks=[ecg_channel])[0]
-    diagnostics = detector.detect(
-        ecg,
-        sampling_frequency_hz=float(raw.info["sfreq"]),
-    )
     duration_seconds = float(raw.times[-1])
-    quality = classify_qrs_quality(
-        diagnostics.times,
-        duration_seconds=duration_seconds,
-        parameters=parameters,
-    )
-    times = np.array(diagnostics.times, dtype=float, copy=True)
-    times.setflags(write=False)
-    return QrsDetection(times=times, quality=quality, diagnostics=diagnostics)
+    rejection_messages = []
+    for detector_index, candidate_detector in enumerate((detector, *fallback_detectors)):
+        diagnostics = candidate_detector.detect(
+            ecg,
+            sampling_frequency_hz=float(raw.info["sfreq"]),
+        )
+        try:
+            quality = classify_qrs_quality(
+                diagnostics.times,
+                duration_seconds=duration_seconds,
+                parameters=parameters,
+            )
+        except ValueError as error:
+            rejection_messages.append(str(error))
+            continue
+        if detector_index:
+            quality = replace(
+                quality,
+                warnings=(
+                    "Primary QRS detection rejected; validated fallback used: "
+                    + " | ".join(rejection_messages),
+                    *quality.warnings,
+                ),
+            )
+        times = np.array(diagnostics.times, dtype=float, copy=True)
+        times.setflags(write=False)
+        return QrsDetection(times=times, quality=quality, diagnostics=diagnostics)
+
+    raise ValueError("All QRS detectors failed validation: " + " | ".join(rejection_messages))
 
 
 def apply_cardiac_obs_in_place(
