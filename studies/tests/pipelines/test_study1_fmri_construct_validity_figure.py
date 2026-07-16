@@ -118,10 +118,12 @@ def test_fmri_axial_views_leave_exact_zero_voxels_transparent(
         slices=(-12.0, 0.0, 12.0, 24.0, 36.0, 48.0),
         color_map=_diverging_color_map(),
         limit=1.0,
+        overlay_alpha=0.72,
     )
 
     assert len(plot_calls) == 1
     assert plot_calls[0]["threshold"] == 0.0
+    assert plot_calls[0]["transparency"] == 0.72
     assert display.contour_calls == 1
     plt.close(figure)
 

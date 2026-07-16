@@ -349,13 +349,19 @@ def _draw_null_distribution(
     )
     axis.set_xlim(*null_limits)
     axis.set_ylim(0.0, observed_height * 1.18)
-    axis.set_title(
+    axis.text(
+        0.5,
+        0.95,
         band_label,
-        loc="left",
+        transform=axis.transAxes,
+        ha="center",
+        va="top",
         color=color,
         fontsize=6.2,
         fontweight="bold",
-        pad=28.0,
+        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.82, "pad": 0.8},
+        gid="null-band-label",
+        zorder=5,
     )
     axis.text(
         0.0,

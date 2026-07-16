@@ -166,4 +166,5 @@ study1:
         random_state: 20260711
       display:
         robust_percentile: 99.5
+        overlay_alpha: 0.72
       minimum_article_subjects: 30
