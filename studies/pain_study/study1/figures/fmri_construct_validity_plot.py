@@ -104,6 +104,7 @@ def build_fmri_construct_validity_figure(
                 slices=slices,
                 color_map=color_map,
                 limit=limit,
+                overlay_alpha=overlay_alpha,
             )
             title_x = 0.025 + panel_index * 0.52
             figure.text(
@@ -269,6 +270,7 @@ def _draw_axial_views(
     slices: tuple[float, ...],
     color_map: LinearSegmentedColormap,
     limit: float,
+    overlay_alpha: float,
 ) -> None:
     from nilearn import datasets, plotting
 
