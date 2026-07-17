@@ -24,6 +24,8 @@ def test_build_cohort_psd_figure_has_publication_structure() -> None:
 
     assert len(figure.axes) == 2
     spectrum_axis, band_axis = figure.axes
+    assert spectrum_axis.get_label() == "spectrum"
+    assert band_axis.get_label() == "frequency-bands"
     assert spectrum_axis.get_ylabel() == "PSD (dB µV²/Hz)"
     assert band_axis.get_xlabel() == "Frequency (Hz)"
     assert spectrum_axis.get_xlim() == pytest.approx((1.0, 90.0))
@@ -82,10 +84,78 @@ def test_build_cohort_psd_figure_keeps_legend_outside_data_axes() -> None:
     figure = build_cohort_psd_figure(_summary(), load_study1_config())
 
     assert len(figure.legends) == 1
-    assert figure.legends[0]._ncols == 4
+    assert figure.legends[0]._ncols == 2
+    assert [text.get_text() for text in figure.legends[0].get_texts()] == [
+        "Participant spectrum",
+        "Cohort median",
+        "Pointwise 95% participant-bootstrap CI",
+        "Scanner-harmonic exclusion window",
+    ]
     assert all(axis.get_legend() is None for axis in figure.axes)
-    assert max(axis.get_position().y1 for axis in figure.axes) < 0.86
+    assert max(axis.get_position().y1 for axis in figure.axes) < 0.76
     plt.close(figure)
+
+
+def test_cohort_psd_figure_states_sample_and_aggregation_estimands() -> None:
+    from studies.pain_study.study1.figures.cohort_power_spectral_density_plot import (
+        build_cohort_psd_figure,
+    )
+
+    figure = build_cohort_psd_figure(_summary(), load_study1_config())
+
+    try:
+        figure_text = [text.get_text() for text in figure.texts]
+        assert "Continuous EEG power spectrum after preprocessing" in figure_text
+        assert (
+            "Participant spectra: median across runs in linear power, then dB · "
+            "cohort: median across participants"
+        ) in figure_text
+        assert ("n=3 participants · 3 runs · runs/participant: median 1, range 1–1") in figure_text
+        assert len(figure.axes[0].texts) == 0
+    finally:
+        plt.close(figure)
+
+
+def test_cohort_psd_figure_rejects_incomplete_participant_frequency_grid() -> None:
+    from studies.pain_study.study1.figures.cohort_power_spectral_density_plot import (
+        build_cohort_psd_figure,
+    )
+
+    summary = _summary()
+    summary.participant_spectra.drop(index=0, inplace=True)
+
+    with pytest.raises(ValueError, match="complete participant-frequency grid"):
+        build_cohort_psd_figure(summary, load_study1_config())
+
+
+def test_cohort_psd_figure_rejects_nonfinite_or_misordered_intervals() -> None:
+    from studies.pain_study.study1.figures.cohort_power_spectral_density_plot import (
+        build_cohort_psd_figure,
+    )
+
+    nonfinite = _summary()
+    nonfinite.cohort_spectrum.loc[0, "median_psd_db_uv2_hz"] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        build_cohort_psd_figure(nonfinite, load_study1_config())
+
+    misordered = _summary()
+    misordered.cohort_spectrum.loc[0, "ci_low_psd_db_uv2_hz"] = (
+        misordered.cohort_spectrum.loc[0, "median_psd_db_uv2_hz"] + 0.1
+    )
+    with pytest.raises(ValueError, match="ordered around the cohort median"):
+        build_cohort_psd_figure(misordered, load_study1_config())
+
+
+def test_cohort_psd_figure_rejects_inconsistent_cohort_counts() -> None:
+    from studies.pain_study.study1.figures.cohort_power_spectral_density_plot import (
+        build_cohort_psd_figure,
+    )
+
+    summary = _summary()
+    summary.cohort_spectrum["n_subjects"] = summary.n_subjects + 1
+
+    with pytest.raises(ValueError, match="cohort participant count"):
+        build_cohort_psd_figure(summary, load_study1_config())
 
 
 def test_cohort_psd_writer_creates_exact_svg_and_audits(

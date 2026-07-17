@@ -203,7 +203,8 @@ def apply_residual_obs_grid(
             held = centered_epochs[held_mask]
             for count in positive_counts:
                 count_basis = basis[:count]
-                fitted = (held @ count_basis.T) @ count_basis
+                scores = np.einsum("ij,kj->ik", held, count_basis, optimize=True)
+                fitted = np.einsum("ik,kj->ij", scores, count_basis, optimize=True)
                 corrected_epochs_by_count[count][held_mask] -= fitted
                 explained_variance = float(np.sum(singular_values[:count] ** 2) / total_variance)
                 rows_by_count[count].append(

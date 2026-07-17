@@ -166,7 +166,7 @@ def _write_clean_events(deriv_root: Path, subjects: list[str]) -> None:
                     "trial_id": trial_idx,
                     "onset": float(trial_idx * 10),
                     "duration": 0.001,
-                    "run": (trial_idx - 1) // 3 + 1,
+                    "run_id": (trial_idx - 1) // 3 + 1,
                     "trial_number": within_temperature_trial + 1,
                     "stimulus_temp": temp,
                     "selected_surface": float(1 if trial_idx % 2 else 2),

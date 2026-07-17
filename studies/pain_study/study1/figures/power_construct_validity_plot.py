@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 from matplotlib.ticker import MultipleLocator
 
 from eeg_pipeline.utils.config.loader import require_config_value
@@ -21,6 +20,7 @@ from studies.pain_study.study1.figures.validity_style import (
 )
 
 FIGURE_CONFIG_KEY = "study1.figures.power_construct_validity"
+LABEL_BACKGROUND = {"facecolor": "white", "edgecolor": "none", "alpha": 0.9, "pad": 0.6}
 
 
 def build_power_construct_validity_figure(
@@ -42,17 +42,26 @@ def build_power_construct_validity_figure(
         figure = plt.figure(figsize=figure_size_inches(dimensions))
         figure.set_size_inches(*figure_size_inches(dimensions), forward=False)
         grid = figure.add_gridspec(
-            2,
             5,
-            left=0.08,
+            2,
+            left=0.105,
             right=0.965,
-            bottom=0.15,
-            top=0.78,
-            height_ratios=(1.0, 0.95),
-            hspace=0.72,
-            wspace=0.26,
+            bottom=0.11,
+            top=0.72,
+            width_ratios=(1.35, 1.0),
+            hspace=0.12,
+            wspace=0.34,
         )
-        temperature_axes = [figure.add_subplot(grid[0, index]) for index in range(5)]
+        temperature_axes = []
+        for index in range(len(summary.bands)):
+            shared_axis = temperature_axes[0] if temperature_axes else None
+            temperature_axes.append(
+                figure.add_subplot(
+                    grid[index, 0],
+                    sharex=shared_axis,
+                    sharey=shared_axis,
+                )
+            )
         y_limits = _temperature_y_limits(summary)
         for index, (axis, band, band_spec) in enumerate(
             zip(temperature_axes, summary.bands, figure_config["bands"], strict=True)
@@ -63,14 +72,12 @@ def build_power_construct_validity_figure(
                 band=band,
                 color=color,
                 style=style,
-                show_y_labels=index == 0,
+                band_spec=band_spec,
+                show_x_labels=index == len(temperature_axes) - 1,
                 y_limits=y_limits,
             )
-            low, high = band_spec["frequency_hz"]
-            axis.set_title(f"{band_spec['label']}\n{low:g}–{high:g} Hz", pad=5.0)
-        temperature_axes[2].set_xlabel("Temperature (°C)")
 
-        rating_axis = figure.add_subplot(grid[1, :])
+        rating_axis = figure.add_subplot(grid[:, 1], label="adjusted-intensity")
         _draw_rating_panel(
             rating_axis,
             summary,
@@ -82,33 +89,71 @@ def build_power_construct_validity_figure(
         figure.legend(
             handles=_legend_handles(color, style),
             loc="upper center",
-            bbox_to_anchor=(0.5, 0.895),
+            bbox_to_anchor=(0.5, 0.86),
             ncol=2,
             frameon=False,
             handlelength=1.8,
             handletextpad=0.5,
             columnspacing=1.4,
         )
-        readiness = (
-            f"Article-ready cohort (n={summary.n_subjects})"
-            if summary.article_ready
-            else f"Preliminary cohort; descriptive associations (n={summary.n_subjects})"
-        )
-        channel_text = "Fp1/Fp2 included" if summary.primary_include_fp1_fp2 else "Fp1/Fp2 excluded"
         figure.text(
-            0.5,
+            0.105,
             0.965,
-            f"EEG power construct validity · {readiness} · {channel_text}",
-            ha="center",
+            "EEG band-power construct validity",
+            ha="left",
             va="top",
             fontsize=7.0,
             fontweight="bold",
         )
-        figure.text(0.02, 0.82, "a", ha="left", va="top", fontsize=8.0, fontweight="bold")
-        figure.text(0.02, 0.43, "b", ha="left", va="top", fontsize=8.0, fontweight="bold")
         figure.text(
-            0.012,
-            0.60,
+            0.105,
+            0.925,
+            _sample_metadata(summary),
+            ha="left",
+            va="top",
+            fontsize=6.0,
+        )
+        left_position = temperature_axes[0].get_position()
+        right_position = rating_axis.get_position()
+        figure.text(
+            left_position.x0,
+            0.79,
+            "a  Temperature response",
+            ha="left",
+            va="top",
+            fontsize=6.5,
+            fontweight="bold",
+        )
+        figure.text(
+            left_position.x0,
+            0.76,
+            "Simultaneous 95% participant-bootstrap band across 30 band-temperature cells",
+            ha="left",
+            va="top",
+            fontsize=5.5,
+            color="#444444",
+        )
+        figure.text(
+            right_position.x0,
+            0.79,
+            "b  Adjusted intensity association",
+            ha="left",
+            va="top",
+            fontsize=6.5,
+            fontweight="bold",
+        )
+        figure.text(
+            right_position.x0,
+            0.76,
+            "Pointwise 95% participant-bootstrap CI across participants",
+            ha="left",
+            va="top",
+            fontsize=5.5,
+            color="#444444",
+        )
+        figure.text(
+            0.025,
+            0.415,
             "Within-participant centered global power (dB)",
             rotation=90,
             ha="center",
@@ -125,7 +170,8 @@ def _draw_temperature_panel(
     band: str,
     color: str,
     style: Mapping[str, object],
-    show_y_labels: bool,
+    band_spec: Mapping[str, object],
+    show_x_labels: bool,
     y_limits: tuple[float, float],
 ) -> None:
     participant = summary.temperature_by_subject.loc[
@@ -173,8 +219,33 @@ def _draw_temperature_panel(
     axis.set_xlim(temperatures[0] - 0.25, temperatures[-1] + 0.25)
     axis.set_ylim(y_limits)
     axis.set_xticks(temperatures)
-    axis.tick_params(axis="x", labelrotation=55.0)
-    axis.tick_params(axis="y", labelleft=show_y_labels)
+    axis.tick_params(axis="x", labelbottom=show_x_labels, labelrotation=0.0)
+    axis.set_xlabel("Temperature (°C)" if show_x_labels else "")
+    axis.set_label(f"temperature:{band}")
+    low, high = band_spec["frequency_hz"]
+    axis.text(
+        0.012,
+        0.89,
+        str(band_spec["label"]),
+        transform=axis.transAxes,
+        ha="left",
+        va="top",
+        fontsize=6.0,
+        fontweight="bold",
+        color=color,
+        bbox=LABEL_BACKGROUND,
+    )
+    axis.text(
+        0.22,
+        0.89,
+        f"{float(low):g}–{float(high):g} Hz",
+        transform=axis.transAxes,
+        ha="left",
+        va="top",
+        fontsize=5.5,
+        color="#555555",
+        bbox=LABEL_BACKGROUND,
+    )
     axis.spines[["top", "right"]].set_visible(False)
     axis.grid(False)
 
@@ -227,7 +298,7 @@ def _draw_rating_panel(
             zorder=3,
         )
         axis.text(
-            1.015,
+            1.025,
             band_index,
             f"n={int(estimate['n_subjects'])}",
             transform=axis.get_yaxis_transform(),
@@ -241,13 +312,7 @@ def _draw_rating_panel(
     axis.set_ylim(len(summary.bands) - 0.5, -0.5)
     axis.set_yticks(range(len(summary.bands)), labels=labels)
     axis.xaxis.set_major_locator(MultipleLocator(0.25))
-    axis.set_xlabel("Partial within-participant correlation, r")
-    axis.set_title(
-        "Subjective intensity association beyond temperature and nuisance structure",
-        loc="left",
-        pad=5.0,
-        fontweight="bold",
-    )
+    axis.set_xlabel("Adjusted within-participant correlation, partial r")
     axis.spines[["top", "right"]].set_visible(False)
     axis.grid(axis="x", color="#DDDDDD", linewidth=0.35, zorder=0)
 
@@ -283,15 +348,42 @@ def _legend_handles(color: str, style: Mapping[str, object]) -> list[object]:
             marker="o",
             linewidth=float(style["participant_line_width_pt"]),
             markersize=3.0,
-            label="Participants",
+            label="Participant estimate",
         ),
-        Patch(
-            facecolor=color,
-            edgecolor=color,
-            alpha=0.18,
-            label="Equal-weight mean and 95% CI",
+        Line2D(
+            [],
+            [],
+            color=color,
+            linewidth=float(style["cohort_line_width_pt"]),
+            marker="D",
+            markerfacecolor="white",
+            markeredgecolor=color,
+            markersize=3.0,
+            label="Equal-weight cohort mean",
         ),
     ]
+
+
+def _sample_metadata(summary: PowerConstructValiditySummary) -> str:
+    required = {"subject_id", "trial_id"}
+    missing = sorted(required.difference(summary.trials.columns))
+    if missing:
+        raise ValueError(
+            f"Power construct-validity trials are missing metadata columns: {missing}."
+        )
+    unique_trials = summary.trials.loc[:, ["subject_id", "trial_id"]].drop_duplicates()
+    counts = unique_trials.groupby("subject_id", sort=True).size().to_numpy(dtype=int)
+    if len(counts) != summary.n_subjects or np.any(counts < 1):
+        raise ValueError("Power construct-validity sample metadata is inconsistent.")
+    readiness = (
+        "Article-ready cohort" if summary.article_ready else "Preliminary descriptive analysis"
+    )
+    channel_text = "Fp1/Fp2 included" if summary.primary_include_fp1_fp2 else "Fp1/Fp2 excluded"
+    median_trials = float(np.median(counts))
+    return (
+        f"{readiness} · n={summary.n_subjects} participants · retained trials/participant: "
+        f"median {median_trials:g}, range {counts.min()}–{counts.max()} · {channel_text}"
+    )
 
 
 def _validate_summary(
@@ -305,6 +397,15 @@ def _validate_summary(
         raise ValueError("Power construct-validity figure requires six temperature levels.")
     if summary.n_subjects < 2:
         raise ValueError("Power construct-validity figure requires at least two participants.")
+    if "interval_type" not in summary.temperature_summary:
+        raise ValueError("Power construct-validity temperature summary requires interval metadata.")
+    interval_types = set(summary.temperature_summary["interval_type"].astype(str))
+    expected_interval = {"simultaneous_max_studentized_participant_bootstrap"}
+    if interval_types != expected_interval:
+        raise ValueError(
+            "Power construct-validity temperature intervals must be simultaneous max-studentized "
+            "participant-bootstrap bands."
+        )
     if set(summary.rating_summary["band"].astype(str)) != set(summary.bands):
         raise ValueError("Power construct-validity rating summary is incomplete.")
 

@@ -664,7 +664,7 @@ def test_load_study1_config_includes_power_construct_validity_defaults() -> None
     config = load_study1_config()
 
     assert config["study1"]["figures"]["power_construct_validity"] == {
-        "dimensions_mm": {"width": 183.0, "height": 108.0},
+        "dimensions_mm": {"width": 183.0, "height": 145.0},
         "bands": [
             {"name": "alpha", "label": "Alpha", "frequency_hz": [8.0, 12.9]},
             {"name": "beta", "label": "Beta", "frequency_hz": [13.0, 30.0]},

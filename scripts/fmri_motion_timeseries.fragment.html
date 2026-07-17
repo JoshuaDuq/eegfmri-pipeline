@@ -1,0 +1,224 @@
+<div id="fmri-motion-timeseries">
+  <div class="viz-controls" aria-label="Motion time-series controls">
+    <label class="form-label" for="motion-subject">
+      Participant
+      <select class="form-select" id="motion-subject"></select>
+    </label>
+    <label class="form-label" for="motion-run">
+      Run
+      <select class="form-select" id="motion-run"></select>
+    </label>
+  </div>
+  <div class="motion-legend text-small" aria-label="Axis legend">
+    <span><i class="motion-swatch motion-x"></i>x</span>
+    <span><i class="motion-swatch motion-y"></i>y</span>
+    <span><i class="motion-swatch motion-z"></i>z</span>
+  </div>
+  <section class="motion-plot">
+    <h3>Translation</h3>
+    <canvas id="translation-chart" role="img" aria-label="Translation in millimetres by fMRI volume">
+      Translation in millimetres by fMRI volume.
+    </canvas>
+  </section>
+  <section class="motion-plot">
+    <h3>Rotation</h3>
+    <canvas id="rotation-chart" role="img" aria-label="Rotation in degrees by fMRI volume">
+      Rotation in degrees by fMRI volume.
+    </canvas>
+  </section>
+  <p class="motion-detail text-small text-muted" id="motion-detail" aria-live="polite"></p>
+</div>
+
+<style>
+  #fmri-motion-timeseries {
+    color: var(--foreground);
+    width: 100%;
+  }
+  #fmri-motion-timeseries .motion-legend {
+    display: flex;
+    gap: 1rem;
+    margin: 0.5rem 0 0.25rem;
+  }
+  #fmri-motion-timeseries .motion-legend span {
+    align-items: center;
+    display: inline-flex;
+    gap: 0.35rem;
+  }
+  #fmri-motion-timeseries .motion-swatch {
+    display: inline-block;
+    height: 2px;
+    width: 1.5rem;
+  }
+  #fmri-motion-timeseries .motion-x { background: var(--viz-series-1); }
+  #fmri-motion-timeseries .motion-y { background: var(--viz-series-2); }
+  #fmri-motion-timeseries .motion-z { background: var(--viz-series-3); }
+  #fmri-motion-timeseries .motion-plot { margin-top: 0.5rem; }
+  #fmri-motion-timeseries .motion-plot h3 { margin-bottom: 0.25rem; }
+  #fmri-motion-timeseries canvas {
+    display: block;
+    height: 230px;
+    max-width: 100%;
+    width: 100%;
+  }
+  #fmri-motion-timeseries .motion-detail {
+    min-height: 1.5rem;
+    margin-top: 0.25rem;
+  }
+  @media (max-width: 480px) {
+    #fmri-motion-timeseries canvas { height: 190px; }
+  }
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById("fmri-motion-timeseries");
+  const data = __MOTION_DATA__;
+  const subjectSelect = root.querySelector("#motion-subject");
+  const runSelect = root.querySelector("#motion-run");
+  const translationCanvas = root.querySelector("#translation-chart");
+  const rotationCanvas = root.querySelector("#rotation-chart");
+  const detail = root.querySelector("#motion-detail");
+  const subjects = Object.keys(data);
+  const preferredSubject = subjects.includes("sub-0009") ? "sub-0009" : subjects[0];
+  let plotBounds = null;
+
+  subjects.forEach((subject) => {
+    const option = document.createElement("option");
+    option.value = subject;
+    option.textContent = subject;
+    subjectSelect.appendChild(option);
+  });
+  subjectSelect.value = preferredSubject;
+
+  function setRunOptions() {
+    const runs = Object.keys(data[subjectSelect.value]);
+    const currentRun = runSelect.value;
+    runSelect.replaceChildren();
+    runs.forEach((run) => {
+      const option = document.createElement("option");
+      option.value = run;
+      option.textContent = `Run ${run}`;
+      runSelect.appendChild(option);
+    });
+    runSelect.value = runs.includes(currentRun) ? currentRun : runs.includes("5") ? "5" : runs[0];
+  }
+
+  function themeColors() {
+    const style = getComputedStyle(root);
+    return {
+      axes: style.getPropertyValue("--muted-foreground").trim(),
+      grid: style.getPropertyValue("--border").trim(),
+      series: [1, 2, 3].map((index) =>
+        style.getPropertyValue(`--viz-series-${index}`).trim()
+      ),
+    };
+  }
+
+  function drawChart(canvas, rows, startColumn, unit) {
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    const context = canvas.getContext("2d");
+    context.scale(ratio, ratio);
+
+    const colors = themeColors();
+    const margin = {top: 8, right: 18, bottom: 38, left: 58};
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+    const values = rows.flatMap((row) => row.slice(startColumn, startColumn + 3));
+    let minimum = Math.min(...values);
+    let maximum = Math.max(...values);
+    const padding = Math.max((maximum - minimum) * 0.08, 0.01);
+    minimum -= padding;
+    maximum += padding;
+    const lastVolume = rows[rows.length - 1][0];
+    const x = (volume) => margin.left + (volume / lastVolume) * plotWidth;
+    const y = (value) => margin.top + ((maximum - value) / (maximum - minimum)) * plotHeight;
+
+    context.font = `${getComputedStyle(root).fontSize} ${getComputedStyle(root).fontFamily}`;
+    context.lineWidth = 1;
+    context.strokeStyle = colors.grid;
+    context.fillStyle = colors.axes;
+    context.textAlign = "right";
+    context.textBaseline = "middle";
+    for (let tick = 0; tick <= 4; tick += 1) {
+      const value = minimum + ((maximum - minimum) * tick) / 4;
+      const pixelY = y(value);
+      context.beginPath();
+      context.moveTo(margin.left, pixelY);
+      context.lineTo(width - margin.right, pixelY);
+      context.stroke();
+      context.fillText(value.toFixed(2), margin.left - 8, pixelY);
+    }
+
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    for (let tick = 0; tick <= 5; tick += 1) {
+      const volume = Math.round((lastVolume * tick) / 5);
+      context.fillText(String(volume), x(volume), height - margin.bottom + 9);
+    }
+    context.fillText("fMRI volume", margin.left + plotWidth / 2, height - 17);
+
+    context.save();
+    context.translate(15, margin.top + plotHeight / 2);
+    context.rotate(-Math.PI / 2);
+    context.fillText(unit, 0, 0);
+    context.restore();
+
+    for (let axis = 0; axis < 3; axis += 1) {
+      context.beginPath();
+      context.strokeStyle = colors.series[axis];
+      context.lineWidth = 1.5;
+      rows.forEach((row, index) => {
+        const pixelX = x(row[0]);
+        const pixelY = y(row[startColumn + axis]);
+        if (index === 0) context.moveTo(pixelX, pixelY);
+        else context.lineTo(pixelX, pixelY);
+      });
+      context.stroke();
+    }
+    return {margin, plotWidth, lastVolume};
+  }
+
+  function draw() {
+    const rows = data[subjectSelect.value][runSelect.value];
+    plotBounds = drawChart(translationCanvas, rows, 1, "Translation (mm)");
+    drawChart(rotationCanvas, rows, 4, "Rotation (degrees)");
+    detail.textContent = `${subjectSelect.value}, run ${runSelect.value} · trajectories shown every 2 volumes`;
+  }
+
+  function showNearestVolume(event) {
+    if (!plotBounds) return;
+    const rectangle = translationCanvas.getBoundingClientRect();
+    const relativeX = event.clientX - rectangle.left - plotBounds.margin.left;
+    const fraction = Math.max(0, Math.min(1, relativeX / plotBounds.plotWidth));
+    const targetVolume = fraction * plotBounds.lastVolume;
+    const rows = data[subjectSelect.value][runSelect.value];
+    const row = rows.reduce((nearest, candidate) =>
+      Math.abs(candidate[0] - targetVolume) < Math.abs(nearest[0] - targetVolume)
+        ? candidate
+        : nearest
+    );
+    detail.textContent = `Volume ${row[0]} · translation x ${row[1].toFixed(3)}, y ${row[2].toFixed(3)}, z ${row[3].toFixed(3)} mm · rotation x ${row[4].toFixed(3)}, y ${row[5].toFixed(3)}, z ${row[6].toFixed(3)}°`;
+  }
+
+  subjectSelect.addEventListener("change", () => {
+    setRunOptions();
+    draw();
+  });
+  runSelect.addEventListener("change", draw);
+  translationCanvas.addEventListener("pointermove", showNearestVolume);
+  rotationCanvas.addEventListener("pointermove", (event) => {
+    const translatedEvent = new PointerEvent(event.type, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    showNearestVolume(translatedEvent);
+  });
+  new ResizeObserver(draw).observe(root);
+  setRunOptions();
+  draw();
+})();
+</script>

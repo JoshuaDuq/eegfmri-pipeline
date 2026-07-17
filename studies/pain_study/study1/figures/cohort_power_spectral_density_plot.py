@@ -7,6 +7,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
@@ -54,12 +55,16 @@ def build_cohort_psd_figure(summary: CohortPsdSummary, config: Any) -> Figure:
             height_ratios=(1.0, 0.075),
             left=0.085,
             right=0.985,
-            bottom=0.20,
-            top=0.80,
+            bottom=0.18,
+            top=0.72,
             hspace=0.10,
         )
-        spectrum_axis = figure.add_subplot(grid[0, 0])
-        band_axis = figure.add_subplot(grid[1, 0], sharex=spectrum_axis)
+        spectrum_axis = figure.add_subplot(grid[0, 0], label="spectrum")
+        band_axis = figure.add_subplot(
+            grid[1, 0],
+            sharex=spectrum_axis,
+            label="frequency-bands",
+        )
         _draw_spectrum(
             spectrum_axis,
             summary,
@@ -77,13 +82,42 @@ def build_cohort_psd_figure(summary: CohortPsdSummary, config: Any) -> Figure:
                 config=config,
             ),
             loc="upper center",
-            bbox_to_anchor=(0.5, 0.985),
-            ncol=4,
+            bbox_to_anchor=(0.5, 0.835),
+            ncol=2,
             frameon=False,
             handlelength=1.8,
             handletextpad=0.5,
-            columnspacing=1.2,
+            columnspacing=1.6,
         )
+        title = figure.text(
+            0.085,
+            0.965,
+            "Continuous EEG power spectrum after preprocessing",
+            ha="left",
+            va="top",
+            fontsize=7.0,
+            fontweight="bold",
+        )
+        title.set_gid("cohort-psd-title")
+        method = figure.text(
+            0.085,
+            0.925,
+            "Participant spectra: median across runs in linear power, then dB · "
+            "cohort: median across participants",
+            ha="left",
+            va="top",
+            fontsize=6.0,
+        )
+        method.set_gid("cohort-psd-method")
+        sample = figure.text(
+            0.085,
+            0.89,
+            _sample_metadata(summary),
+            ha="left",
+            va="top",
+            fontsize=6.0,
+        )
+        sample.set_gid("cohort-psd-sample")
     return figure
 
 
@@ -95,9 +129,6 @@ def _draw_spectrum(
     config: Any,
 ) -> None:
     style = require_config_value(config, "study1.figures.validity.style")
-    annotation_size = float(
-        require_config_value(config, "study1.figures.validity.font.annotation_pt")
-    )
     for window in DEFAULT_HARMONIC_WINDOWS:
         axis.axvspan(
             window.low_hz,
@@ -143,15 +174,6 @@ def _draw_spectrum(
     axis.set_ylabel("PSD (dB µV²/Hz)")
     axis.tick_params(axis="x", labelbottom=False)
     axis.margins(y=0.08)
-    axis.text(
-        0.01,
-        0.98,
-        f"n = {summary.n_subjects}; {summary.n_runs} runs",
-        ha="left",
-        va="top",
-        transform=axis.transAxes,
-        fontsize=annotation_size,
-    )
 
 
 def _draw_band_strip(axis, *, neural_color: str) -> None:
@@ -188,7 +210,7 @@ def _legend_handles(*, scanner_color: str, config: Any) -> tuple:
             [],
             color=str(style["participant_color"]),
             linewidth=float(style["participant_line_width_pt"]),
-            label="Participant median",
+            label="Participant spectrum",
         ),
         Line2D(
             [],
@@ -197,13 +219,47 @@ def _legend_handles(*, scanner_color: str, config: Any) -> tuple:
             linewidth=float(style["cohort_line_width_pt"]),
             label="Cohort median",
         ),
-        Patch(facecolor="#202020", alpha=0.12, label="95% bootstrap CI"),
-        Patch(facecolor=scanner_color, alpha=0.10, label="Scanner-harmonic window"),
+        Patch(
+            facecolor="#202020",
+            alpha=0.12,
+            label="Pointwise 95% participant-bootstrap CI",
+        ),
+        Patch(
+            facecolor=scanner_color,
+            alpha=0.10,
+            label="Scanner-harmonic exclusion window",
+        ),
+    )
+
+
+def _sample_metadata(summary: CohortPsdSummary) -> str:
+    metadata = summary.participant_spectra.loc[:, ["subject_id", "n_runs"]].drop_duplicates()
+    if metadata["subject_id"].duplicated().any():
+        raise ValueError("Cohort PSD run counts must be constant within participants.")
+    run_counts = pd.to_numeric(metadata["n_runs"], errors="coerce").to_numpy(dtype=float)
+    if not np.isfinite(run_counts).all() or np.any(run_counts < 1.0):
+        raise ValueError("Cohort PSD participant run counts must be positive and finite.")
+    if not np.equal(run_counts, np.floor(run_counts)).all():
+        raise ValueError("Cohort PSD participant run counts must be integers.")
+    run_counts = run_counts.astype(int)
+    if int(run_counts.sum()) != summary.n_runs:
+        raise ValueError("Cohort PSD participant run counts do not match the run audit.")
+    median_runs = float(np.median(run_counts))
+    return (
+        f"n={summary.n_subjects} participants · {summary.n_runs} runs · "
+        f"runs/participant: median {median_runs:g}, range {run_counts.min()}–{run_counts.max()}"
     )
 
 
 def _validate_summary(summary: CohortPsdSummary) -> None:
     cohort_frequencies = summary.cohort_spectrum["frequency_hz"].to_numpy(dtype=float)
+    if (
+        cohort_frequencies.ndim != 1
+        or cohort_frequencies.size < 2
+        or not np.isfinite(cohort_frequencies).all()
+        or np.any(np.diff(cohort_frequencies) <= 0.0)
+    ):
+        raise ValueError("Cohort PSD frequency axis must be finite and strictly increasing.")
     participant_frequencies = np.sort(
         summary.participant_spectra["frequency_hz"].unique().astype(float)
     )
@@ -211,6 +267,32 @@ def _validate_summary(summary: CohortPsdSummary) -> None:
         raise ValueError("Cohort and participant PSD frequency axes must match.")
     if summary.n_subjects < 1 or summary.n_runs < 1:
         raise ValueError("Cohort PSD figure requires participants and runs.")
+    if summary.participant_spectra.duplicated(["subject_id", "frequency_hz"]).any():
+        raise ValueError("Cohort PSD requires a complete participant-frequency grid.")
+    participant_matrix = summary.participant_spectra.pivot(
+        index="subject_id",
+        columns="frequency_hz",
+        values="psd_db_uv2_hz",
+    ).reindex(columns=cohort_frequencies)
+    if participant_matrix.isna().any().any():
+        raise ValueError("Cohort PSD requires a complete participant-frequency grid.")
+    participant_values = participant_matrix.to_numpy(dtype=float)
+    cohort_values = summary.cohort_spectrum[
+        ["median_psd_db_uv2_hz", "ci_low_psd_db_uv2_hz", "ci_high_psd_db_uv2_hz"]
+    ].to_numpy(dtype=float)
+    if not np.isfinite(participant_values).all() or not np.isfinite(cohort_values).all():
+        raise ValueError("Cohort PSD spectra and intervals must be finite.")
+    median = cohort_values[:, 0]
+    ci_low = cohort_values[:, 1]
+    ci_high = cohort_values[:, 2]
+    if np.any(ci_low > median) or np.any(median > ci_high):
+        raise ValueError("Cohort PSD intervals must be ordered around the cohort median.")
+    cohort_counts = pd.to_numeric(
+        summary.cohort_spectrum["n_subjects"],
+        errors="coerce",
+    ).to_numpy(dtype=float)
+    if not np.all(cohort_counts == summary.n_subjects):
+        raise ValueError("Cohort PSD cohort participant count is inconsistent.")
 
 
 __all__ = ["build_cohort_psd_figure"]

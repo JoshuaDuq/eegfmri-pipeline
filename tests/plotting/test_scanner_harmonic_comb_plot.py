@@ -39,12 +39,14 @@ def test_comb_figure_contains_two_lines_four_windows_and_references() -> None:
     figure = build_scanner_harmonic_comb_figure(_summary(), task="thermalactive")
     axis = figure.axes[0]
 
+    assert len(figure.axes) == 5
     assert len(axis.lines) == 6
     assert len(axis.patches) == 4
     assert axis.get_xlim() == pytest.approx((15.0, 90.0))
     assert axis.get_xlabel() == "Frequency (Hz)"
     assert axis.get_ylabel() == "PSD (dB V²/Hz)"
-    assert "n = 3 participants" in axis.get_title()
+    assert axis.get_title() == "Full scanner-harmonic comb"
+    assert "3 participants" in figure.get_suptitle()
 
 
 def test_write_scanner_harmonic_comb_outputs_png_and_tsv(tmp_path: Path) -> None:

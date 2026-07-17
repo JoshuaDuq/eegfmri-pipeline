@@ -1,159 +1,181 @@
-# Residual Scanner-Harmonics QC
+# Scanner-Harmonic QC: Native Correction and Final MNE Data
 
 ## Decision
 
-For simultaneous EEG-fMRI analyses, define gamma from the retained intervals
-30.1–38.0, 43.0–56.0, and 67.0–77.0 Hz. Exclude 38.0–43.0, 56.0–67.0, and
-77.0–85.0 Hz from confirmatory gamma estimands. This restriction removes
-empirically demonstrated residual scanner-harmonic structure; it does not
-imply that gamma is absent outside the excluded windows.
+The new native EEG-fMRI pipeline is functioning correctly, but it does not completely remove the
+scanner-gradient comb. Whole-volume adaptive average artifact subtraction (AAS) removes
+approximately 26–29 dB at the four dominant raw scanner lines. Final MNE preprocessing suppresses
+most of those dominant lines further, but several narrower scanner-linked residuals remain.
 
-## Scope
+- With respect to scanner-gradient contamination, the corrected data are suitable for conventional
+  low-frequency analyses.
+- Retain beta at 13–18 Hz and 23–30 Hz. The strong approximately 20 Hz scanner cluster remains
+  excluded.
+- Do not treat the current combined gamma intervals (30.1–38, 43–56, and 67–77 Hz) as a clean
+  confirmatory gamma estimand. The 43–56 Hz interval contains reproducible residuals at 51.57 and
+  52.80 Hz after final MNE preprocessing.
+- Keep gamma exploratory unless scanner-linked bins are explicitly masked and the result is shown
+  to be robust to reasonable mask widths.
+- Do not replace AAS with ordinary notch filters. Keep residual gradient OBS disabled: both
+  cross-fitted native-boundary formulations failed the cohort qualification.
 
-This QC was rerun on 2026-07-09 at the final-clean processing boundary:
+The `Vas_on/V  1` marker defect was not the cause of the scanner harmonics. The gradient correction
+uses the `Volume/V  1` markers, not VAS events. Sanitizing the VAS label was necessary for event
+parsing and EEG-BIDS conversion, but it cannot explain the spectral correction result.
 
-```text
-/Volumes/KINGSTON/EEG_fMRI_data/derivatives/preprocessed/eeg/
-```
+## Data and estimators
 
-The analytic set comprised all numbered participants with final-clean thermal
-task EEG, excluding the prespecified pilot `sub-0006`. `sub-0002` has no
-final-clean recordings because its MRI experiment was incomplete. The result
-therefore covers 77 runs from 13 participants:
+This review covers the complete current numbered cohort: 90 thermal-task runs from 15 participants,
+with six runs per participant (`sub-0000`, `sub-0001`, and `sub-0003` through `sub-0015`).
 
-```text
-sub-0000: 6    sub-0001: 6    sub-0003: 5    sub-0004: 6
-sub-0005: 6    sub-0007: 6    sub-0008: 6    sub-0009: 6
-sub-0010: 6    sub-0011: 6    sub-0012: 6    sub-0013: 6
-sub-0014: 6
-```
+The native QC compares:
 
-## Test
+1. original 5 kHz EEG;
+2. 5 kHz phase-aligned whole-volume AAS output; and
+3. final 1 kHz output after low-pass filtering, resampling, and cardiac OBS.
 
-For every `*_proc-clean_raw.fif` file, the test:
+Native spectra use 16.384-second Welch segments (0.0610 Hz bins), 50% overlap, and the median across
+12 prespecified EEG channels. Runs are aggregated within participant before the cohort median and
+participant bootstrap confidence interval are calculated.
 
-1. verified the 500 Hz sampling rate;
-2. estimated Welch PSDs from 15 to 90 Hz over all EEG channels with
-   `n_fft=n_per_seg=8192` and `n_overlap=4096`;
-3. converted the across-channel median PSD to dB;
-4. detected peaks with `scipy.signal.find_peaks(prominence=1.0, distance=4)`;
-5. selected the most prominent peak in each fixed window: 38–43, 56–67, and
-   77–85 Hz.
+The standard end-of-MNE plot uses 4-second segments (0.25 Hz bins). Because this grid under-resolves
+the narrow residual lines, the final clean epochs were also audited with 16.384-second segments,
+0.0610 Hz bins, and the same 12 channels. Local prominence is the line power minus the median power
+0.35–2.0 Hz on either side. The 3 dB counts below are descriptive prevalence summaries, not a
+preregistered pass/fail threshold.
 
-The test fails if any run has no peak with at least 1 dB prominence in any
-window. It completed without such a failure. Values below are participant
-medians across runs, followed by the minimum run-level prominence. The latter
-shows that the residual peak was present in every tested run, not only in a
-participant average.
+## Timing integrity
 
-| Participant | Runs | 38–43 Hz: peak; median/min prominence | 56–67 Hz: peak; median/min prominence | 77–85 Hz: peak; median/min prominence |
-|---|---:|---|---|---|
-| `sub-0000` | 6 | 41.14 Hz; 23.6/21.4 dB | 61.10 Hz; 29.9/26.2 dB | 82.21 Hz; 25.9/21.0 dB |
-| `sub-0001` | 6 | 41.14 Hz; 17.9/17.3 dB | 61.10 Hz; 23.5/18.2 dB | 82.21 Hz; 22.1/19.5 dB |
-| `sub-0003` | 5 | 41.14 Hz; 24.9/22.5 dB | 61.10 Hz; 31.0/25.4 dB | 82.21 Hz; 24.7/22.4 dB |
-| `sub-0004` | 6 | 41.14 Hz; 23.2/22.3 dB | 61.10 Hz; 28.2/25.1 dB | 82.21 Hz; 23.4/21.0 dB |
-| `sub-0005` | 6 | 41.14 Hz; 23.5/21.7 dB | 61.10 Hz; 26.9/23.6 dB | 82.21 Hz; 24.3/20.4 dB |
-| `sub-0007` | 6 | 41.14 Hz; 22.3/21.8 dB | 61.10 Hz; 26.8/23.4 dB | 82.21 Hz; 25.3/21.5 dB |
-| `sub-0008` | 6 | 41.14 Hz; 25.5/22.7 dB | 61.10 Hz; 25.7/21.9 dB | 82.21 Hz; 25.0/23.3 dB |
-| `sub-0009` | 6 | 41.14 Hz; 15.9/13.3 dB | 57.19 Hz; 24.6/23.5 dB | 82.21 Hz; 19.0/17.0 dB |
-| `sub-0010` | 6 | 41.14 Hz; 25.1/20.5 dB | 61.10 Hz; 31.8/30.0 dB | 82.21 Hz; 24.2/21.1 dB |
-| `sub-0011` | 6 | 41.14 Hz; 24.9/22.3 dB | 61.10 Hz; 29.7/27.7 dB | 82.21 Hz; 25.0/23.7 dB |
-| `sub-0012` | 6 | 41.14 Hz; 18.6/17.1 dB | 61.10 Hz; 26.8/26.1 dB | 82.21 Hz; 23.4/21.1 dB |
-| `sub-0013` | 6 | 41.14 Hz; 21.2/18.4 dB | 61.10 Hz; 24.3/20.2 dB | 82.21 Hz; 23.7/20.2 dB |
-| `sub-0014` | 6 | 41.14 Hz; 23.4/19.6 dB | 61.10 Hz; 28.2/25.9 dB | 82.21 Hz; 25.9/21.6 dB |
+All 90 runs use the same verified acquisition parameters: TR = 0.9 seconds, 54 slices, multiband
+factor 3, 5 kHz input, and 1 kHz native output. The volume-marker grid is internally consistent:
 
-## Scanner-Timing Consistency Check
+- 89 runs had no marker offset;
+- `sub-0009` run 5 had one marker offset of one 5 kHz sample (0.2 ms), within tolerance;
+- the largest estimated AAS alignment shift was 0.556 input samples (0.111 ms); and
+- only the incomplete terminal fraction after the final complete 0.9-second volume was discarded.
 
-The fMRI volume repetition time was 0.9 s, so the volume frequency is
-1.111 Hz. The cohort peak centres closely match integer multiples of this
-frequency:
+These results rule out gross volume-marker or synchronization failure.
 
-| Observed centre | Harmonic | Predicted centre | Difference |
-|---:|---:|---:|---:|
-| 41.138 Hz | 37 × 1.111 Hz | 41.111 Hz | +0.027 Hz |
-| 61.096 Hz | 55 × 1.111 Hz | 61.111 Hz | −0.015 Hz |
-| 82.214 Hz | 74 × 1.111 Hz | 82.222 Hz | −0.008 Hz |
+## Native correction
 
-The Welch-bin width was 500 / 8192 = 0.061 Hz. Each mismatch is smaller than
-one bin, which is strong sequence-specific evidence for scanner-locked
-residuals. The 82 Hz peak lies above the nominal 80 Hz gamma upper bound, but
-the contaminated 77–85 Hz window overlaps the 77–80 Hz edge of broad gamma;
-the exclusion removes that edge.
+| Raw reference | Raw PSD | Native final PSD | Total attenuation | Native final prominence | Runs above 1 dB |
+|---:|---:|---:|---:|---:|---:|
+| 20.02 Hz | -82.90 dB | -110.19 dB | 27.29 dB | 8.18 dB | 89/90 |
+| 41.14 Hz | -72.93 dB | -99.05 dB | 26.12 dB | 16.49 dB | 90/90 |
+| 61.10 Hz | -68.64 dB | -95.28 dB | 26.64 dB | 20.93 dB | 90/90 |
+| 82.21 Hz | -70.20 dB | -99.10 dB | 28.90 dB | 17.98 dB | 90/90 |
 
-## Interpretation
+AAS accounts for most of the attenuation: 25.23–26.32 dB at these four references. The remaining
+native operations add only approximately 0.6–2.6 dB. The correction is therefore substantial and
+stable, but the residual is still periodic and locally prominent, especially near 41, 61, and
+82 Hz.
 
-Gradient artifacts in simultaneous EEG-fMRI are deterministic signals driven
-by MRI gradient switching. They are expected at harmonics of slice and volume
-acquisition timing and can remain after average-artifact subtraction (Allen,
-Josephs, & Turner, 2000; Mullinger, Yan, & Bowtell, 2011). The observed
-cohort-wide, narrow-band, TR-harmonic peaks therefore justify excluding these
-windows from confirmatory gamma measures. This test does not prove that all
-pain-related high-frequency activity is absent from the excluded windows; it
-establishes that those windows cannot be interpreted as clean neural gamma.
+Run-level median attenuation was 26.38–27.26 dB across the four windows. Every run retained more
+than 1 dB prominence at the 41, 61, and 82 Hz references; all 90 runs retained more than 6 dB at
+61 and 82 Hz. This is a cohort-wide residual, not an isolated-participant failure.
 
-## Residual OBS Pilot Benchmark
+## Final MNE boundary
 
-The BrainVision `*_scannerpulse_corrected` files in
-`source_data/sub-*/eeg/brainvision_processed_1khz/` have already undergone
-21-volume scanner average-artifact subtraction, 100 Hz low-pass filtering,
-downsampling from 5 kHz to 1 kHz, R-peak detection, and 21-beat pulse
-correction. The residual benchmark therefore retains the BrainVision result
-and does not run full FASTR, repeat average-artifact subtraction, synthesize
-volume triggers, or redo pulse correction.
+At matched 0.0610 Hz resolution, final MNE preprocessing largely suppresses the original dominant
+20.02, 41.14, and 82.21 Hz references. The 61.10 Hz reference remains visible at 4.01 dB cohort
+prominence. More importantly, the final spectrum retains other peaks that coincide with lines in
+the original scanner comb:
 
-The native Python layer cross-fits temporal optimal-basis components across
-complete 900-sample volume epochs. It evaluates component counts 0–4 on the
-prespecified excluded pilot `sub-0006`. A nonzero count is accepted only when
-all four scanner windows improve and every injected-signal preservation gate
-passes across all six runs. This conservative use reflects the literature's
-warning that additional OBS components can remove EEG as well as artifact
-(Niazy et al., 2005).
+| Scanner-linked frequency | Final cohort prominence | Participants above 3 dB | Current interval |
+|---:|---:|---:|---|
+| 37.17 Hz | 3.82 dB | 7/15 | retained gamma |
+| 38.39 Hz | 4.36 dB | 12/15 | excluded gamma |
+| 51.57 Hz | 8.85 dB | 15/15 | retained gamma |
+| 52.80 Hz | 5.30 dB | 12/15 | retained gamma |
+| 57.19 Hz | 12.85 dB | 13/15 | excluded gamma |
+| 61.10 Hz | 4.01 dB | 8/15 | excluded gamma |
+| 83.98 Hz | 4.71 dB | 12/15 | excluded gamma |
 
-```bash
-uv run --python 3.11 --extra dev python \
-  studies/pain_study/scripts/benchmark_residual_gradient.py \
-  --source-root /Volumes/KINGSTON/EEG_fMRI_data/source_data \
-  --output-root \
-    /Volumes/KINGSTON/EEG_fMRI_data/derivatives/qc/residual_gradient_obs_benchmark \
-  --config \
-    studies/pain_study/scripts/config/residual_gradient_benchmark.yaml \
-  --output-policy error
-```
+The 0.25 Hz standard MNE QC plot visually attenuates these narrow lines through frequency-bin
+averaging. It remains useful as a broadband preprocessing comparison, but it must not be used alone
+to declare the scanner comb absent.
 
-The output includes candidate FIF files and machine-readable harmonic,
-component-variance, signal-preservation, provenance, and decision audits.
-These are benchmark artifacts, not production preprocessing derivatives. They
-must not replace current MNE inputs without a separate approved production
-integration design.
+## Feature implications
 
-### Pilot Outcome
+The final matched-resolution audit found no cohort scanner-linked peak above 3 dB in 13–18 or
+23–30 Hz. The existing beta restriction is therefore supported.
 
-The six-run `sub-0006` benchmark completed on 2026-07-14 and rejected residual
-OBS at every tested order. Counts 1–4 reduced median scanner-window peak power
-by approximately 0.6–2.4 dB and retained at least 99.4% of injected sinusoid
-amplitude, with less than 0.18 degrees maximum phase error. Those benefits did
-not satisfy the co-primary safety gates:
+The gamma decision is different:
 
-- worst-run absolute median PSD change outside the harmonic windows was
-  0.70–0.94 dB, exceeding the fixed 0.5 dB limit at every order; and
-- one run's 56–67 Hz peak prominence increased by 1.59–2.28 dB, exceeding the
-  fixed 1 dB limit at every order.
+- 30.1–38 Hz contains the 37.17 Hz residual;
+- 43–56 Hz contains the reproducible 51.57 and 52.80 Hz residuals; and
+- 67–77 Hz has no cohort scanner-linked peak above 3 dB, although participant-specific residuals
+  remain.
 
-The existing BrainVision preprocessing therefore remains canonical. Do not
-add this residual OBS layer to production, and retain the prespecified
-harmonic-excluded beta and gamma features.
+Consequently, joining all three intervals into one confirmatory gamma feature is not justified by
+the new data. A gamma analysis should either remain exploratory or use an explicitly documented
+frequency mask with participant-level sensitivity analyses. The 60 Hz notch is not a solution:
+scanner lines occur beside 60 Hz and throughout the comb, while a conventional notch removes only
+the nominal line-frequency neighborhood.
+
+## Residual OBS
+
+Residual OBS was tested at the correct native boundary: 5 kHz data immediately after native AAS
+and before low-pass filtering, resampling, or cardiac OBS. The benchmark used run 1 from all 15
+participants, the 12 prespecified QC channels, exact BOLD timing, fivefold cross-fitting, and nested
+component orders 1–4. Candidate selection required at least 1 dB reduction in both power and local
+prominence at every fixed residual line, at least 1% reduction in volume-locked RMS, and preservation
+of injected non-volume-locked sinusoids, transients, and non-line PSD.
+
+Two formulations were tested independently:
+
+| Model | Order | 51.57 Hz power reduction | 57.19 Hz power reduction | 61.10 Hz power reduction | Minimum injected-sinusoid ratio | Maximum channel non-line PSD change | Decision |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Slice-group OBS | 1 | -0.02 dB | -0.13 dB | 0.00 dB | 0.440 | 2.38 dB | Reject |
+| Slice-group OBS | 4 | -0.40 dB | 0.57 dB | 0.00 dB | 0.087 | 4.34 dB | Reject |
+| Whole-volume OBS | 1 | -0.00 dB | -0.00 dB | 0.00 dB | 0.985 | 0.13 dB | Reject |
+| Whole-volume OBS | 4 | -0.04 dB | -0.05 dB | 0.00 dB | 0.961 | 0.27 dB | Reject |
+
+Positive values denote attenuation; negative values denote increased power. Slice-group OBS removed
+9.34–10.91 µV RMS from the data but did not reduce the dominant 61.10 Hz line and materially altered
+valid EEG. Whole-volume OBS preserved the injected signals and non-line spectrum, but it produced
+essentially no scanner-line or volume-locked RMS improvement. No component order passed.
+
+This is strong evidence against enabling top-variance residual PCA/OBS in production. The failure is
+not merely a poor component-count choice: one formulation was unsafe, while the safer formulation
+was ineffective across every tested order. Production therefore correctly remains at zero residual
+gradient-OBS components. If additional correction is pursued, it should test a different mechanism—
+for example, faster adaptive or motion-stratified AAS templates—under the same signal-preservation
+gates, not add more unconstrained PCA components.
+
+## Conclusion
+
+The acquisition is usable and the new pipeline performs a valid, substantial scanner-gradient
+correction. The remaining problem is incomplete suppression of a narrow, reproducible residual
+comb—not failed synchronization and not the VAS marker label. Cross-fitted residual OBS does not fix
+that residual and must remain disabled. Beta is adequately protected by the current exclusion around
+20 Hz. Gamma is improved but is not yet clean enough for an unrestricted confirmatory interpretation.
+
+## Evidence files
+
+- Native cohort spectrum:
+  `/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz/cohort_scanner_spectrum_qc.tsv`
+- Native run manifest:
+  `/Volumes/KINGSTON/EEG_fMRI_data/source_data/native_eeg_fmri_processed_1khz/native_correction_manifest.tsv`
+- MNE cohort spectrum:
+  `/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_mne_preprocessing/preprocessed/eeg/qc/task-thermalactive_desc-scannerharmoniccomb_qc.tsv`
+- Final clean epochs:
+  `/Volumes/KINGSTON/EEG_fMRI_data/derivatives/native_mne_preprocessing/preprocessed/eeg/sub-*/eeg/*_proc-clean_epo.fif`
+- Slice-group native residual-OBS benchmark:
+  `outputs/native_residual_obs_benchmark/`
+- Whole-volume native residual-OBS benchmark:
+  `outputs/native_residual_obs_whole_volume_benchmark/`
 
 ## References
 
-Allen, P. J., Josephs, O., & Turner, R. (2000). A method for removing imaging
-artifact from continuous EEG recorded during functional MRI. *NeuroImage, 12*,
-230–239. https://doi.org/10.1006/nimg.2000.0599
+Allen, P. J., Josephs, O., & Turner, R. (2000). A method for removing imaging artifact from
+continuous EEG recorded during functional MRI. *NeuroImage, 12*, 230–239.
+https://doi.org/10.1006/nimg.2000.0599
 
-Mullinger, K. J., Yan, W. X., & Bowtell, R. (2011). Reducing the gradient
-artefact in simultaneous EEG-fMRI by adjusting the subject's axial position.
-*NeuroImage, 54*, 1942–1950. https://doi.org/10.1016/j.neuroimage.2010.09.079
+Mullinger, K. J., Yan, W. X., & Bowtell, R. (2011). Reducing the gradient artefact in simultaneous
+EEG-fMRI by adjusting the subject's axial position. *NeuroImage, 54*, 1942–1950.
+https://doi.org/10.1016/j.neuroimage.2010.09.079
 
-Niazy, R. K., Beckmann, C. F., Iannetti, G. D., Brady, J. M., & Smith, S. M.
-(2005). Removal of FMRI environment artifacts from EEG data using optimal
-basis sets. *NeuroImage, 28*, 720–737.
+Niazy, R. K., Beckmann, C. F., Iannetti, G. D., Brady, J. M., & Smith, S. M. (2005). Removal of
+fMRI environment artifacts from EEG data using optimal basis sets. *NeuroImage, 28*, 720–737.
 https://doi.org/10.1016/j.neuroimage.2005.06.067

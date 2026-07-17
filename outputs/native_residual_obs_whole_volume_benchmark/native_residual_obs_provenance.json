@@ -1,0 +1,154 @@
+{
+  "method": "native_post_AAS_cross_fitted_whole_volume_locked_residual_OBS",
+  "basis_scope": "whole_volume",
+  "stage": "5_kHz_after_native_gradient_AAS_before_resampling_and_cardiac_OBS",
+  "input_root": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1",
+  "bold_root": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri",
+  "native_config": "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/scripts/config/native_eeg_fmri_artifact_correction.yaml",
+  "native_config_sha256": "19abc1a8db1fcce52a722f5f3645615a60bc921efb2a8d065234598ad61f4a72",
+  "benchmark_config": "/Users/joduq24/Desktop/EEG_fMRI_Pipeline/studies/pain_study/scripts/config/native_residual_obs_benchmark.yaml",
+  "benchmark_config_sha256": "fb0a0b556a1f31a0534b41ab7f84d54638189418d30b3778219e8493b759be42",
+  "qc_channels": [
+    "Fp1",
+    "F3",
+    "C3",
+    "O1",
+    "Fz",
+    "Cz",
+    "Pz",
+    "Oz",
+    "POz",
+    "FC3",
+    "PO3",
+    "PO7"
+  ],
+  "residual_obs_folds": 5,
+  "residual_obs_seed": 42,
+  "software": {
+    "mne": "1.12.1",
+    "numpy": "1.26.4",
+    "scipy": "1.17.1"
+  },
+  "recordings": [
+    {
+      "recording_id": "sub-0000_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0000/eeg/ThermalPainEEGFMRI_run1_sub0000_2026-02-09_11h11.44.706.vhdr",
+      "source_vhdr_sha256": "b91942009e0993e462c3b0d75facd65f8893e569e4875b844024c41c208bb2d7",
+      "source_vmrk_sha256": "fedefe8bb1a9341c344f1b5894f71b04ec3cbc59dce10c396367d497e6de859d",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0000/func/sub-0000_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "c1fadc7482d8eaf0854d642d68575ab6d3e6095ab77a8e725382b25660d0500c"
+    },
+    {
+      "recording_id": "sub-0001_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0001/eeg/ThermalPainEEGFMRI_run1_sub0001_2026-03-02_10h55.27.564.vhdr",
+      "source_vhdr_sha256": "8ea95066f5b2a012a05f48c8115a41117b66b891f9cca9ce6e6158c87d436614",
+      "source_vmrk_sha256": "8da5bcc36e399159327f04515bba27aae62036a5f5e0b5dd34abcfebf3bbb58f",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0001/func/sub-0001_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "4a6b44fd7fdf0f35ed620e1e9446c968322cfc1b644be804905952215d82229e"
+    },
+    {
+      "recording_id": "sub-0003_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0003/eeg/ThermalPainEEGFMRI_run1_sub0003_2026-03-23_11h11.33.962.vhdr",
+      "source_vhdr_sha256": "cda7974b0ce4cc0bd486be76ebed801fd9099882a3dee90e7d513c4142898986",
+      "source_vmrk_sha256": "5cb3693dc5edf84e13af373d0ac0a200b2fe598e1599eddcdd83ae02a16cfa50",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0003/func/sub-0003_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "e2b764127b881aa07f5d989ff24b5eae2523069a929eae635875806e3f44dabc"
+    },
+    {
+      "recording_id": "sub-0004_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0004/eeg/ThermalPainEEGFMRI_run1_sub0004_2026-05-11_10h59.27.891.vhdr",
+      "source_vhdr_sha256": "e06c3f7409282bc3947523d7ce08dad020b2a795bbce0d8cacd927d57d8c7ed3",
+      "source_vmrk_sha256": "8e8c31df2fb30a84edb16acb5763a89f466c7ab2c770c767452a6a7e7066381c",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0004/func/sub-0004_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "6872fe017153b77f16007f614fb319c6458952d36e75e6889c4d39dbb6b35b22"
+    },
+    {
+      "recording_id": "sub-0005_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0005/eeg/ThermalPainEEGFMRI_run1_sub0005_2026-05-13_11h01.07.608.vhdr",
+      "source_vhdr_sha256": "c7375618dfdf87990e1f47860d7d0a80b824e84fad72bbf74c59ef002e7e6e76",
+      "source_vmrk_sha256": "90f4452248ec7703484699d9aca41d1e5cd9425640542a7dad2dbcb0c70a667f",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0005/func/sub-0005_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "f32594de8321f96d9ab83ff2861b41cfea6f3063ee055414fb70c22325416aac"
+    },
+    {
+      "recording_id": "sub-0006_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0006/eeg/ThermalPainEEGFMRI_run1_sub0006_2026-05-15_09h00.09.475.vhdr",
+      "source_vhdr_sha256": "4224822ebe83c9852bf420bc8357da31fc5f8a88a9fcf5efa2c1115625bd01d2",
+      "source_vmrk_sha256": "3d54fb66d99774ebac1d898b1a3b17f2143039878d14a1ca660aede867b80c80",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0006/func/sub-0006_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "cd2c2f7c125f349aa53f0f43f5fb10c3a3fd0252907b73cc9285684a6478170d"
+    },
+    {
+      "recording_id": "sub-0007_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0007/eeg/ThermalPainEEGFMRI_run1_sub0007_2026-06-17_14h52.16.748.vhdr",
+      "source_vhdr_sha256": "8c8b169e4ae0d27aea793fcb7fa26f2be7ea85c004b90093239ee1715b1ffabd",
+      "source_vmrk_sha256": "8793a51b2762de8138dd4f20ba609aca8aa37cc1b9aba7a672334ce885d67e91",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0007/func/sub-0007_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "9e9eefe25e768e107b32f54ae8cfa208ab1aff3922e16eb8deae7a9e839d77af"
+    },
+    {
+      "recording_id": "sub-0008_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0008/eeg/ThermalPainEEGFMRI_run1_sub0008_2026-06-18_11h19.22.566.vhdr",
+      "source_vhdr_sha256": "81a5fe298803007913e5e714afc9901e3472ab689bde61171b9885e922a19495",
+      "source_vmrk_sha256": "e283d81e3e4def273f442a596f7bf4ac4644d13b8c759107976ac2f525477618",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0008/func/sub-0008_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "fdcbd4439e6ffb1b46eed06eca1f91b7865544f0b0accc008a43c28f1ff2886b"
+    },
+    {
+      "recording_id": "sub-0009_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0009/eeg/ThermalPainEEGFMRI_run1_sub0009_2026-06-22_10h48.12.121.vhdr",
+      "source_vhdr_sha256": "c16d2fedebed3ec2f9c82ff4b1cf26cd031d6022a77b76a4928e7a7f911e6eac",
+      "source_vmrk_sha256": "87e2e9d9a83fe5404226cfb12f975e8e86b0823ef635bad4e294dfb935ae1dfe",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0009/func/sub-0009_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "9e109809f9509c13321185d6c9840b926176458aa4a0225bd695c887eb29149f"
+    },
+    {
+      "recording_id": "sub-0010_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0010/eeg/ThermalPainEEGFMRI_run1_sub0010_2026-06-25_11h05.09.532.vhdr",
+      "source_vhdr_sha256": "4e74c79fc7150cd978de9d1fcede49f4a21dd6798e58e068accbbe150f4efcc6",
+      "source_vmrk_sha256": "fa24aa0f3ce10968a31b3a03f1809abb73ec9e343cd4f12676a11faa63b335ed",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0010/func/sub-0010_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "59a1fffd0736c1132e66ff5e4c3395ef4c68ecae48dd9bf91faacfb1f312c9c8"
+    },
+    {
+      "recording_id": "sub-0011_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0011/eeg/ThermalPainEEGFMRI_run1_sub0011_2026-06-26_10h33.54.874.vhdr",
+      "source_vhdr_sha256": "4bf7f2623959c73d373bc20f56c41847b8541c3bb5dd527d1a9a63ec36c4e736",
+      "source_vmrk_sha256": "534e7681df2e4d50091cbcd59fbf1d4dd45e6151ec2cdd4f29500575c608b687",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0011/func/sub-0011_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "2dccf076ae4423e438f9e82761004a4db56834f9384bb1bf3023d69188c85ad7"
+    },
+    {
+      "recording_id": "sub-0012_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0012/eeg/ThermalPainEEGFMRI_run1_sub0012_2026-06-29_11h04.41.871.vhdr",
+      "source_vhdr_sha256": "d09f754621990524ba2c91bf5390cce3c62583ff1ced47209ac3b61c7486cbe5",
+      "source_vmrk_sha256": "1be65966e1cb682f80422ecb29caeb470cf9295234a64ba10c395c6e2781b9fe",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0012/func/sub-0012_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "67484beab15b3bd8412d1e3fd02a856ce3e51e1abaab6b2d32389293a6a9fdb9"
+    },
+    {
+      "recording_id": "sub-0013_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0013/eeg/ThermalPainEEGFMRI_run1_sub0013_2026-07-02_10h53.37.338.vhdr",
+      "source_vhdr_sha256": "7732c03050b5e9ff9b0273aa2eac9e8c304a0a5670ddb88141d75187107d3c8a",
+      "source_vmrk_sha256": "87abfb474e8a6bc1a8bb9f292bcc6bf3c02ac3ee4e1b4a81ca5d3fe1620098c1",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0013/func/sub-0013_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "79711e103f8c64de48efb6e02832244d109435f9ec3f941bd579ff40bd75be37"
+    },
+    {
+      "recording_id": "sub-0014_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0014/eeg/ThermalPainEEGFMRI_run1_sub0014_2026-07-03_10h49.05.133.vhdr",
+      "source_vhdr_sha256": "c2e31a0c090cd1d7a8062b2fa3fd0f62688536c07a0cbe1d1eeebb10f10f635d",
+      "source_vmrk_sha256": "f48d075573e5dbf63b925df698bfdf896c9245dd71bcbda672c91c121bf11941",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0014/func/sub-0014_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "d1c785877670a11de7402f1c4b06ca786694ee1f58d481d65ed6966f8fba7351"
+    },
+    {
+      "recording_id": "sub-0015_run-1",
+      "source_vhdr": "/Volumes/KINGSTON/EEG_fMRI_data/derivatives/brainvision_marker_sanitized-v1/sub-0015/eeg/ThermalPainEEGFMRI_run1_sub0015_2026-07-13_10h50.22.477.vhdr",
+      "source_vhdr_sha256": "b7285ae1292a264c6edf3668bfc2be2a954b13352c6ce6d37a82da4bd7f824c8",
+      "source_vmrk_sha256": "d8ef412026597e0c9a05a0cefed2f03bdecf54c82fd3183de4c9a83701359275",
+      "bold_json": "/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri/sub-0015/func/sub-0015_task-thermalactive_run-01_bold.json",
+      "bold_json_sha256": "c0c91fe1fb69281c30f88ef410c7ae7004d153a6f55817064ccbbd2c3a766b30"
+    }
+  ]
+}

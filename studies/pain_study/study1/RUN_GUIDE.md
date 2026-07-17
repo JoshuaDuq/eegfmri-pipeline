@@ -293,6 +293,7 @@ STUDY1_RUN_ID="study1_$(date +%Y%m%d)"
 
 EEG_BIDS_ROOT="/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg"
 FMRI_BIDS_ROOT="/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri"
+SOURCE_DATA_ROOT="/Volumes/KINGSTON/EEG_fMRI_data/source_data"
 DERIV_ROOT="/Volumes/KINGSTON/EEG_fMRI_data/derivatives"
 SIGNATURE_DIR="/Volumes/KINGSTON/EEG_fMRI_data/external"
 TASK="thermalactive"
@@ -371,6 +372,13 @@ COMMON_ARGS=(
   --task "$TASK" \
   --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/power_construct_validity.svg"
 
+"$PYTHON" -m studies.pain_study.study1.figures.plot_band_power_epoch_evolution \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --deriv-root "$DERIV_ROOT" \
+  --task "$TASK" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution.svg"
+
 "$PYTHON" -m studies.pain_study.study1.figures.plot_fmri_construct_validity \
   --config eeg_pipeline/utils/config/eeg_config.yaml \
   --study1-config "$STUDY1_CONFIG" \
@@ -390,6 +398,24 @@ COMMON_ARGS=(
   --task "$TASK" \
   --derivative-root "$DERIV_ROOT/preprocessed/eeg" \
   --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/scanner_harmonic_spectrum.svg"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_cohort_power_spectral_density \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --task "$TASK" \
+  --derivative-root "$DERIV_ROOT/preprocessed/eeg" \
+  --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density.svg"
+
+"$PYTHON" -m studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --task "$TASK" \
+  --source-data-root "$SOURCE_DATA_ROOT" \
+  --derivative-root "$DERIV_ROOT/preprocessed/eeg" \
+  --stage raw \
+  --stage processed \
+  --stage mne \
+  --output-dir "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity"
 ```
 
 The main outputs are:
@@ -399,7 +425,17 @@ $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/targets/primary_targets.parquet
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/study1_report.tsv
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/article_tables/
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/full_picture/
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution_by_subject.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution_summary.tsv
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/behavioral_dose_response.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density_by_run.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density_by_subject.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density_summary.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density_raw.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density_processed.svg
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density_mne.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/fmri_construct_validity.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/fmri_construct_validity_provenance.json
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/nps_behavioral_validity.svg
@@ -510,6 +546,7 @@ Set the study roots explicitly. The Kingston layout used during local testing is
 ```bash
 EEG_BIDS_ROOT="/Volumes/KINGSTON/EEG_fMRI_data/bids_output/eeg"
 FMRI_BIDS_ROOT="/Volumes/KINGSTON/EEG_fMRI_data/bids_output/fmri"
+SOURCE_DATA_ROOT="/Volumes/KINGSTON/EEG_fMRI_data/source_data"
 DERIV_ROOT="/Volumes/KINGSTON/EEG_fMRI_data/derivatives"
 SIGNATURE_DIR="/Volumes/KINGSTON/EEG_fMRI_data/external"
 TASK="thermalactive"
@@ -825,7 +862,32 @@ The default Study 1 config enables the theoretically prioritized exploratory fea
    temperature estimates, participant and cohort rating estimates, and the complementary Fp1/Fp2
    sensitivity. The primary figure includes Fp1/Fp2 when
    `study1.figures.power_construct_validity.channels.include_fp1_fp2` is true. The alternative
-   channel scope is computed without selecting results by appearance.
+   channel scope is computed without selecting results by appearance. Its five aligned temperature
+   rows use a shared scale and a simultaneous 95% participant-bootstrap band across the 30
+   prespecified band-temperature cells. The adjacent adjusted-intensity forest plot uses pointwise
+   95% participant-bootstrap intervals and reports its estimable participant count for each band.
+
+   Generate the time-resolved global band-power figure from the retained target cohort and clean
+   epochs:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_band_power_epoch_evolution \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --deriv-root "$DERIV_ROOT" \
+     --task "$TASK" \
+     --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution.svg"
+   ```
+
+   The five vertically aligned panels show alpha, beta, and the three scanner-clean gamma intervals
+   from −5 to 14.5 s. The final 0.5 s is omitted to limit right-edge Morlet convolution effects. Each
+   thin line is one participant's retained-trial mean; the colored curve is the equally weighted
+   cohort mean with a pointwise 95% percentile interval obtained by resampling participants as
+   complete trajectories. Linear wavelet power is frequency-weighted and averaged across
+   non-Fp1/Fp2 EEG channels before conversion to dB relative to the complete −5.0 to −0.01 s
+   baseline. A direct protocol bar marks the five epoch intervals, and the header reports cohort,
+   retained-trial, and channel counts. Display downsampling occurs only after normalization. The
+   writer adds participant- and cohort-level TSV/parquet audits beside the editable SVG.
 
    Generate the whole-brain fMRI construct-validity figure directly from the retained cohort,
    current clean events, and MNI-space fMRIPrep runs:
@@ -861,6 +923,44 @@ The default Study 1 config enables the theoretically prioritized exploratory fea
    SIIPS1, verifies every cohort mean against its held-out-subject fold table, and writes
    subject-level and cohort-level TSV/parquet audits beside the editable SVG. Legacy temporal
    window names fail validation and produce no figure.
+
+   Generate the cohort PSD from final-clean continuous EEG:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_cohort_power_spectral_density \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --task "$TASK" \
+     --derivative-root "$DERIV_ROOT/preprocessed/eeg" \
+     --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density.svg"
+   ```
+
+   Run spectra are aggregated within participants as medians in linear power before conversion to
+   dB. The cohort curve is the participant median, with a pointwise 95% participant-bootstrap
+   interval. The command writes run-, participant-, and cohort-level TSV/parquet audits beside the
+   SVG and fails on incomplete frequency grids, non-finite spectra, invalid intervals, or
+   inconsistent cohort counts.
+
+   Generate descriptive PSD checks at the raw BrainVision, BrainVision-processed, and final MNE
+   checkpoints:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_preprocessing_stage_power_spectral_density \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --task "$TASK" \
+     --source-data-root "$SOURCE_DATA_ROOT" \
+     --derivative-root "$DERIV_ROOT/preprocessed/eeg" \
+     --stage raw \
+     --stage processed \
+     --stage mne \
+     --output-dir "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity"
+   ```
+
+   Each stage is written as a separate SVG with run-, participant-, and cohort-level TSV/parquet
+   audits. Headers state the exact checkpoint, source sampling frequency, and common 16.384 s
+   Welch duration with 50% overlap. These are descriptive QC views; compare stages inferentially
+   only after matching their participant-run inputs.
 
    Generate the scanner-harmonic spectrum separately after the report because it reads continuous
    final-clean EEG rather than report tables:

@@ -11,6 +11,8 @@ from sklearn.utils.extmath import randomized_svd
 
 from eeg_pipeline.preprocessing.eeg_fmri.sequence import MultibandSliceSchedule
 
+MAXIMUM_RESIDUAL_OBS_COMPONENTS = 4
+
 
 @dataclass(frozen=True)
 class GradientArtifactParameters:
@@ -65,6 +67,25 @@ class GradientAverageResult:
     volume_shifts_samples: np.ndarray
     group_shifts_samples: np.ndarray
     group_boundaries_samples: np.ndarray
+
+
+@dataclass(frozen=True)
+class _ResidualObsFoldModel:
+    group_start_sample: int
+    group_stop_sample: int
+    channel_index: int
+    held_volume_indices: np.ndarray
+    temporal_basis: np.ndarray
+
+
+@dataclass(frozen=True)
+class FittedResidualObs:
+    """Cross-fitted temporal bases shared by a nested component grid."""
+
+    data_shape: tuple[int, int]
+    volume_samples: np.ndarray
+    maximum_components: int
+    fold_models: tuple[_ResidualObsFoldModel, ...]
 
 
 @dataclass(frozen=True)
@@ -490,51 +511,131 @@ def apply_cross_fitted_residual_obs(
     """Remove held-out temporal OBS projections from group-locked residuals."""
     if n_components == 0:
         return np.array(data, dtype=float, copy=True), 0.0
-    if n_folds > volume_samples.size:
-        raise ValueError("residual_obs_folds cannot exceed the number of volumes")
+    model = fit_cross_fitted_residual_obs(
+        data,
+        volume_samples,
+        group_boundaries=group_boundaries,
+        picks=picks,
+        maximum_components=MAXIMUM_RESIDUAL_OBS_COMPONENTS,
+        n_folds=n_folds,
+        seed=seed,
+    )
+    return apply_fitted_residual_obs(data, model=model, n_components=n_components)
 
-    corrected = np.array(data, dtype=float, copy=True)
-    fold_ids = np.arange(volume_samples.size) % n_folds
-    removed_sum_squares = 0.0
-    removed_sample_count = 0
-    for group_index, (group_start, group_stop) in enumerate(
-        zip(group_boundaries[:-1], group_boundaries[1:], strict=True)
-    ):
-        sample_indices = volume_samples[:, np.newaxis] + np.arange(
-            group_start,
-            group_stop,
+
+def fit_cross_fitted_residual_obs(
+    data: np.ndarray,
+    volume_samples: np.ndarray,
+    *,
+    group_boundaries: np.ndarray,
+    picks: np.ndarray,
+    maximum_components: int,
+    n_folds: int,
+    seed: int,
+) -> FittedResidualObs:
+    """Fit one nested, held-out OBS basis grid for later candidate evaluation."""
+    sample_data = _validate_data(data)
+    volumes = np.asarray(volume_samples)
+    boundaries = np.asarray(group_boundaries)
+    channel_indices = _validate_picks(picks, sample_data.shape[0])
+    if volumes.ndim != 1 or not np.issubdtype(volumes.dtype, np.integer):
+        raise TypeError("volume_samples must be a one-dimensional integer array")
+    if volumes.size < 2 or volumes[0] < 0 or np.any(np.diff(volumes) <= 0):
+        raise ValueError("volume_samples must be non-negative and strictly increasing")
+    if boundaries.ndim != 1 or not np.issubdtype(boundaries.dtype, np.integer):
+        raise TypeError("group_boundaries must be a one-dimensional integer array")
+    if boundaries.size < 2 or boundaries[0] != 0 or np.any(np.diff(boundaries) <= 0):
+        raise ValueError("group_boundaries must start at zero and strictly increase")
+    if volumes[-1] + boundaries[-1] > sample_data.shape[1]:
+        raise ValueError("Residual OBS epochs exceed the data boundary")
+    if not 1 <= maximum_components <= MAXIMUM_RESIDUAL_OBS_COMPONENTS:
+        raise ValueError(
+            f"maximum_components must be between 1 and {MAXIMUM_RESIDUAL_OBS_COMPONENTS}"
         )
-        for pick in picks:
-            epochs = corrected[pick, sample_indices].copy()
+    if n_folds < 2 or n_folds > volumes.size:
+        raise ValueError("n_folds must be between 2 and the number of volumes")
+    if seed < 0:
+        raise ValueError("seed must be non-negative")
+
+    fold_ids = np.arange(volumes.size) % n_folds
+    models = []
+    for group_index, (group_start, group_stop) in enumerate(
+        zip(boundaries[:-1], boundaries[1:], strict=True)
+    ):
+        sample_indices = volumes[:, np.newaxis] + np.arange(group_start, group_stop)
+        for pick in channel_indices:
+            epochs = sample_data[pick, sample_indices]
             centered_epochs = epochs - epochs.mean(axis=1, keepdims=True)
             for fold in range(n_folds):
-                held_mask = fold_ids == fold
-                train = centered_epochs[~held_mask]
-                if n_components > min(train.shape):
-                    raise ValueError(
-                        "residual_obs_components exceeds the cross-fitted training rank"
-                    )
+                held_indices = np.flatnonzero(fold_ids == fold)
+                train = centered_epochs[fold_ids != fold]
+                if maximum_components > min(train.shape):
+                    raise ValueError("maximum_components exceeds the cross-fitted training rank")
                 with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
                     _, _, temporal_basis = randomized_svd(
                         train,
-                        n_components=n_components,
+                        n_components=maximum_components,
                         n_iter=4,
                         random_state=(seed + 10_000 * group_index + 100 * int(pick) + fold),
                         flip_sign=True,
                     )
                 if not np.all(np.isfinite(temporal_basis)):
                     raise FloatingPointError("Residual OBS produced a non-finite basis")
-                held = centered_epochs[held_mask]
-                with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-                    fitted = (held @ temporal_basis.T) @ temporal_basis
-                if not np.all(np.isfinite(fitted)):
-                    raise FloatingPointError(
-                        "Residual OBS produced a non-finite held-out projection"
+                held_indices.setflags(write=False)
+                temporal_basis.setflags(write=False)
+                models.append(
+                    _ResidualObsFoldModel(
+                        group_start_sample=int(group_start),
+                        group_stop_sample=int(group_stop),
+                        channel_index=int(pick),
+                        held_volume_indices=held_indices,
+                        temporal_basis=temporal_basis,
                     )
-                epochs[held_mask] -= fitted
-                removed_sum_squares += float(np.sum(np.square(fitted)))
-                removed_sample_count += fitted.size
-            corrected[pick, sample_indices] = epochs
+                )
+    stored_volumes = volumes.astype(int, copy=True)
+    stored_volumes.setflags(write=False)
+    return FittedResidualObs(
+        data_shape=sample_data.shape,
+        volume_samples=stored_volumes,
+        maximum_components=maximum_components,
+        fold_models=tuple(models),
+    )
+
+
+def apply_fitted_residual_obs(
+    data: np.ndarray,
+    *,
+    model: FittedResidualObs,
+    n_components: int,
+) -> tuple[np.ndarray, float]:
+    """Apply a prefix of a fitted nested OBS basis to every held-out epoch."""
+    sample_data = _validate_data(data)
+    if sample_data.shape != model.data_shape:
+        raise ValueError("data shape does not match the fitted residual OBS model")
+    if not 1 <= n_components <= model.maximum_components:
+        raise ValueError("n_components exceeds the fitted residual OBS model")
+
+    corrected = np.array(sample_data, dtype=float, copy=True)
+    removed_sum_squares = 0.0
+    removed_sample_count = 0
+    for fold_model in model.fold_models:
+        starts = model.volume_samples[fold_model.held_volume_indices]
+        offsets = np.arange(
+            fold_model.group_start_sample,
+            fold_model.group_stop_sample,
+        )
+        sample_indices = starts[:, np.newaxis] + offsets
+        epochs = corrected[fold_model.channel_index, sample_indices].copy()
+        centered_epochs = epochs - epochs.mean(axis=1, keepdims=True)
+        temporal_basis = fold_model.temporal_basis[:n_components]
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            fitted = (centered_epochs @ temporal_basis.T) @ temporal_basis
+        if not np.all(np.isfinite(fitted)):
+            raise FloatingPointError("Residual OBS produced a non-finite held-out projection")
+        epochs -= fitted
+        corrected[fold_model.channel_index, sample_indices] = epochs
+        removed_sum_squares += float(np.sum(np.square(fitted)))
+        removed_sample_count += fitted.size
     removed_rms = float(np.sqrt(removed_sum_squares / removed_sample_count))
     return corrected, removed_rms
 

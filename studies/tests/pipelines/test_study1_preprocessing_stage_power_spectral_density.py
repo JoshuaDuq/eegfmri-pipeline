@@ -106,11 +106,92 @@ def test_build_preprocessing_stage_psd_figure_labels_checkpoint() -> None:
     config = load_study1_config()
     specification = preprocessing_stage_psd_specification(config, "raw")
 
-    figure = build_preprocessing_stage_psd_figure(_summary(), specification, config)
+    figure = build_preprocessing_stage_psd_figure(_summary(stage="raw"), specification, config)
 
-    labels = [text.get_text() for text in figure.axes[0].texts]
-    assert "Original BrainVision · 5000 Hz" in labels
-    plt.close(figure)
+    try:
+        figure_text = [text.get_text() for text in figure.texts]
+        assert "Continuous EEG power spectrum · Original BrainVision checkpoint" in figure_text
+        assert (
+            "Participant spectra: median across runs in linear power, then dB · "
+            "cohort: median across participants"
+        ) in figure_text
+        assert (
+            "Raw checkpoint · 5000 Hz source · Welch 16.384 s, 50% overlap · "
+            "n=1 participant · 1 run"
+        ) in figure_text
+        assert len(figure.axes[0].texts) == 0
+    finally:
+        plt.close(figure)
+
+
+def test_preprocessing_stage_psd_figure_preserves_mne_acronym() -> None:
+    from studies.pain_study.study1.figures.preprocessing_stage_power_spectral_density import (
+        preprocessing_stage_psd_specification,
+    )
+    from studies.pain_study.study1.figures.preprocessing_stage_power_spectral_density_plot import (
+        build_preprocessing_stage_psd_figure,
+    )
+
+    config = load_study1_config()
+    specification = preprocessing_stage_psd_specification(config, "mne")
+
+    figure = build_preprocessing_stage_psd_figure(_summary(stage="mne"), specification, config)
+
+    try:
+        figure_text = [text.get_text() for text in figure.texts]
+        assert any(text.startswith("MNE checkpoint ·") for text in figure_text)
+    finally:
+        plt.close(figure)
+
+
+@pytest.mark.parametrize("stage", ("raw", "processed", "mne"))
+def test_preprocessing_stage_psd_figure_requires_matching_stage_metadata(stage: str) -> None:
+    from studies.pain_study.study1.figures.preprocessing_stage_power_spectral_density import (
+        preprocessing_stage_psd_specification,
+    )
+    from studies.pain_study.study1.figures.preprocessing_stage_power_spectral_density_plot import (
+        build_preprocessing_stage_psd_figure,
+    )
+
+    config = load_study1_config()
+    specification = preprocessing_stage_psd_specification(config, stage)
+    wrong_stage = "processed" if stage == "raw" else "raw"
+
+    with pytest.raises(ValueError, match="stage metadata"):
+        build_preprocessing_stage_psd_figure(
+            _summary(stage=wrong_stage),
+            specification,
+            config,
+        )
+
+
+@pytest.mark.parametrize(
+    ("column", "invalid_value", "message"),
+    (
+        ("sampling_frequency_hz", 999.0, "sampling frequency"),
+        ("segment_duration_s", 8.0, "segment duration"),
+        ("overlap_fraction", 0.25, "overlap fraction"),
+    ),
+)
+def test_preprocessing_stage_psd_figure_requires_matching_spectral_settings(
+    column: str,
+    invalid_value: float,
+    message: str,
+) -> None:
+    from studies.pain_study.study1.figures.preprocessing_stage_power_spectral_density import (
+        preprocessing_stage_psd_specification,
+    )
+    from studies.pain_study.study1.figures.preprocessing_stage_power_spectral_density_plot import (
+        build_preprocessing_stage_psd_figure,
+    )
+
+    config = load_study1_config()
+    specification = preprocessing_stage_psd_specification(config, "raw")
+    summary = _summary(stage="raw")
+    summary.run_audit[column] = invalid_value
+
+    with pytest.raises(ValueError, match=message):
+        build_preprocessing_stage_psd_figure(summary, specification, config)
 
 
 def test_preprocessing_stage_writer_creates_exact_artifact_family(
@@ -488,7 +569,17 @@ def _summary(stage: str | None = None):
         }
     )
     if stage is not None:
+        stage_settings = {
+            "raw": (5000.0, 81_920, 40_960),
+            "processed": (1000.0, 16_384, 8_192),
+            "mne": (500.0, 8_192, 4_096),
+        }
+        sampling_frequency_hz, n_fft, n_overlap = stage_settings[stage]
         run["run"] = run["run"].astype(int)
+        run["sampling_frequency_hz"] = sampling_frequency_hz
+        run["n_fft"] = n_fft
+        run["n_overlap"] = n_overlap
+        run["frequency_resolution_hz"] = sampling_frequency_hz / n_fft
         participant.insert(0, "stage", stage)
         cohort.insert(0, "stage", stage)
         run.insert(0, "stage", stage)

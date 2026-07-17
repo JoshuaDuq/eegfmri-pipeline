@@ -184,8 +184,10 @@ def evaluate_injection_recovery(
         phase_error = np.angle(np.exp(1j * (recovered_phase - expected_phase)), deg=True)
         phase_errors.append(abs(float(phase_error)))
 
-    expected_residual = expected.signal_v - design @ expected_coefficients
-    recovered_residual = recovered - design @ recovered_coefficients
+    expected_fit = np.einsum("ij,j->i", design, expected_coefficients, optimize=True)
+    recovered_fit = np.einsum("ij,j->i", design, recovered_coefficients, optimize=True)
+    expected_residual = expected.signal_v - expected_fit
+    recovered_residual = recovered - recovered_fit
     expected_peak = max(expected_residual[sample] for sample in expected.transient_samples)
     recovered_peak = max(recovered_residual[sample] for sample in expected.transient_samples)
     return RecoveryMetrics(
@@ -212,9 +214,10 @@ def compute_volume_locked_rms(
     if np.any(starts_array < 0) or np.any(starts_array + epoch_samples > data.shape[1]):
         raise ValueError("Volume epochs must fall within data_v.")
 
-    offsets = np.arange(epoch_samples, dtype=np.int64)
-    epochs = data[:, starts_array[:, np.newaxis] + offsets[np.newaxis, :]]
-    phase_locked_mean = epochs.mean(axis=1)
+    phase_locked_sum = np.zeros((data.shape[0], epoch_samples), dtype=float)
+    for start in starts_array:
+        phase_locked_sum += data[:, start : start + epoch_samples]
+    phase_locked_mean = phase_locked_sum / starts_array.size
     return float(np.sqrt(np.mean(phase_locked_mean**2)))
 
 

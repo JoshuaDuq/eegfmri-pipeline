@@ -426,6 +426,22 @@ display code. Participant coefficients, explicit non-estimability status, and co
 are written to `reports/full_picture/behavior_signature_validity_by_subject.tsv` and
 `reports/full_picture/behavior_signature_validity_summary.tsv`.
 
+The standalone outcome-blind `cohort_power_spectral_density.svg` summarizes final-clean continuous
+EEG from 1 to 90 Hz. Run spectra are combined within each participant by taking the median in
+linear power before conversion to dB; the cohort curve is the median of participant spectra. The
+shaded interval is a pointwise 95% percentile interval from paired participant-bootstrap
+resampling. Participant trajectories remain visible, exact scanner-harmonic exclusion windows are
+overlaid on the linear frequency axis, and a separate strip marks conventional and scanner-clean
+frequency bands. The header reports participants, total runs, and the participant run-count
+distribution.
+
+The preprocessing-checkpoint PSD command writes separate `raw`, `processed`, and `mne` versions
+of that figure and their run-, participant-, and cohort-level audits. Each header names the exact
+stored checkpoint, source sampling frequency, and the common 16.384 s Welch duration with 50%
+overlap. The three artifacts are descriptive QC views rather than a combined inferential contrast:
+cohort or run availability may differ between checkpoints, so apparent stage differences must not
+be attributed to preprocessing without a matched-run analysis.
+
 The outcome-blind scanner-harmonic spectrum is generated separately because it reads all
 continuous final-clean EEG runs and should not be recomputed whenever the model report is rebuilt.
 It writes `scanner_harmonic_spectrum.svg`, `scanner_harmonic_spectrum_by_run.tsv`, and
@@ -437,13 +453,31 @@ summary tracks delivered temperature and subjective intensity. For each band and
 power is reconstructed as
 `10 × log10(mean(active linear channel power) / mean(baseline linear channel power))`; linear
 power is averaged before the logarithm. Panel a shows participant-centered temperature
-trajectories for alpha, beta, and the three scanner-clean gamma intervals, with an equally weighted
-cohort trajectory and a simultaneous participant-bootstrap band. Panel b shows participant-level
-partial correlations between power and the within-scale 0–100 intensity score after adjusting
-temperature, run, thermode surface, within-run trial order, residual ECG coupling, and the Fp1/Fp2
-high-frequency artifact proxy. Fp1/Fp2 inclusion is configured explicitly and defaults to true;
-the complementary channel sensitivity is always retained in audit tables when enabled. Trials are
-never treated as independent inferential units.
+trajectories for alpha, beta, and the three scanner-clean gamma intervals in five vertically
+aligned rows with a shared temperature and dB scale. The equally weighted cohort trajectory has a
+simultaneous 95% max-studentized participant-bootstrap band across all 30 prespecified
+band-temperature cells. Panel b is an aligned forest plot of participant-level partial
+correlations between power and the within-scale 0–100 intensity score after adjusting temperature,
+run, thermode surface, within-run trial order, residual ECG coupling, and the Fp1/Fp2 high-frequency
+artifact proxy. Diamonds show equal-weight means and bars show pointwise 95% percentile
+participant-bootstrap intervals. The header reports cohort and retained-trial counts. Fp1/Fp2
+inclusion is configured explicitly and defaults to true; the complementary channel sensitivity is
+always retained in audit tables when enabled. Trials are never treated as independent inferential
+units.
+
+The standalone `band_power_epoch_evolution.svg` shows the time-resolved global power construct
+underlying those windowed summaries. Five vertically aligned panels contain alpha, beta, and the
+three scanner-clean gamma intervals from −5 to 14.5 s around stimulus onset. The final 0.5 s of the
+epoch is omitted to limit right-edge Morlet convolution effects. For every retained trial,
+Morlet power is frequency-weighted within band and averaged in linear units across EEG channels
+after excluding Fp1/Fp2; it is then converted to dB relative to that trial's complete −5.0 to
+−0.01 s baseline. Thin curves show participant retained-trial means, and the colored curve shows
+the equally weighted participant mean with a pointwise 95% percentile interval obtained by
+resampling participants as complete trajectories. The shared symmetric dB scale supports direct
+comparison across bands, and the figure reports cohort size, retained-trial median and range, and
+the common channel count. Display downsampling is applied only after baseline normalization. A
+direct protocol bar marks baseline, ramp-up, plateau, ramp-down, and post-stimulus intervals; the
+figure adds no timepoint-wise hypothesis tests.
 
 Two standalone sensor-space figures resolve the same power construct at individual electrodes.
 Both use the five prespecified bands: alpha, beta, low gamma (`gamma_low_clean`), mid gamma

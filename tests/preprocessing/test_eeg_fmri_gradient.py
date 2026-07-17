@@ -5,8 +5,10 @@ import pytest
 
 from eeg_pipeline.preprocessing.eeg_fmri.gradient import (
     GradientArtifactParameters,
+    apply_fitted_residual_obs,
     correct_gradient_average,
     correct_gradient_artifact,
+    fit_cross_fitted_residual_obs,
     resolve_volume_boundary,
     resolve_volume_segments,
     subtract_gradient_average,
@@ -392,6 +394,52 @@ def test_cross_fitted_obs_preserves_non_scanner_locked_neural_projection() -> No
             result.data[channel_index, scan], neural[channel_index, scan]
         ) / np.dot(neural[channel_index, scan], neural[channel_index, scan])
         assert 0.85 < retained_projection < 1.15
+
+
+def test_fitted_obs_model_produces_nested_component_candidates() -> None:
+    contaminated, _, volume_samples, sampling_frequency, schedule = _multiband_recording()
+    parameters = GradientArtifactParameters(
+        repetition_time_seconds=0.1,
+        moving_average_volumes=11,
+        alignment_upsampling=4,
+        maximum_alignment_shift_samples=1.0,
+        residual_obs_components=0,
+        residual_obs_folds=5,
+        residual_obs_seed=42,
+    )
+    average = correct_gradient_average(
+        contaminated,
+        volume_samples,
+        sampling_frequency=sampling_frequency,
+        alignment_picks=np.array([0, 1]),
+        slice_schedule=schedule,
+        parameters=parameters,
+    )
+    model = fit_cross_fitted_residual_obs(
+        average.data,
+        volume_samples,
+        group_boundaries=average.group_boundaries_samples,
+        picks=np.array([0, 1]),
+        maximum_components=4,
+        n_folds=5,
+        seed=42,
+    )
+
+    one_component, one_removed_rms = apply_fitted_residual_obs(
+        average.data,
+        model=model,
+        n_components=1,
+    )
+    two_components, two_removed_rms = apply_fitted_residual_obs(
+        average.data,
+        model=model,
+        n_components=2,
+    )
+
+    assert one_component.shape == average.data.shape
+    two_component_difference = np.linalg.norm(two_components - one_component)
+    assert two_component_difference > 0
+    assert two_removed_rms >= one_removed_rms > 0
 
 
 @pytest.mark.parametrize(

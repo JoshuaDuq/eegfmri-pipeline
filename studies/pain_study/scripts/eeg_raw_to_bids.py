@@ -50,9 +50,7 @@ def _find_source_files(
         raise ValueError(f"Unsupported EEG source format: {source_format}")
 
     if not source_files:
-        raise FileNotFoundError(
-            f"No {source_format} EEG files found under {source_root}"
-        )
+        raise FileNotFoundError(f"No {source_format} EEG files found under {source_root}")
     return source_files
 
 
@@ -98,7 +96,7 @@ def _discard_unrecorded_terminal_volumes(
         len(raw.annotations),
     )
     sampling_period = 1.0 / float(raw.info["sfreq"])
-    final_sample_time = float(raw.times[-1])
+    final_annotation_time = float(raw.first_time + raw.times[-1])
     invalid_descriptions = raw.annotations.description[invalid_indices]
     invalid_onsets = raw.annotations.onset[invalid_indices]
     invalid_durations = raw.annotations.duration[invalid_indices]
@@ -107,8 +105,8 @@ def _discard_unrecorded_terminal_volumes(
         np.array_equal(invalid_indices, expected_indices)
         and np.all(invalid_descriptions == "Volume/V  1")
         and np.all(invalid_durations == 0.0)
-        and np.all(invalid_onsets > final_sample_time)
-        and np.all(invalid_onsets <= final_sample_time + sampling_period)
+        and np.all(invalid_onsets > final_annotation_time)
+        and np.all(invalid_onsets <= final_annotation_time + sampling_period)
     )
     if not removable:
         details = ", ".join(
@@ -154,9 +152,7 @@ def run_raw_to_bids(
 
     if subjects:
         subj_set = set(subjects)
-        source_files = [
-            path for path in source_files if parse_subject_id(path) in subj_set
-        ]
+        source_files = [path for path in source_files if parse_subject_id(path) in subj_set]
         if not source_files:
             raise FileNotFoundError(
                 f"No matching {source_format} files for subjects: {sorted(subj_set)}"
