@@ -10,16 +10,17 @@ component time-frequency representation (TFR) plotting.
 ## Scope Boundary
 
 The authoritative removal boundary is the dedicated **Plotting** utility selected from the
-TUI main menu and backed by `eeg_pipeline/plotting/plot_catalog.json`. Every plot selectable
-through that utility is removed. Plot-related controls embedded in other pipelines are not
-part of this request.
+TUI main menu and backed by `eeg_pipeline/plotting/plot_catalog.json`. In addition, all
+behavior plotting owned by `eeg_pipeline` and the `behavior visualize` command path are
+removed. Plot-related controls embedded in other pipelines remain out of scope.
 
 The following are explicitly preserved:
 
 - preprocessing plots, including native EEG-fMRI correction and scanner-harmonic QC;
 - component-TFR computation and plotting;
 - machine-learning plots and fMRI-analysis plots exposed by their own pipelines;
-- study-specific figures and plotting code not listed in the dedicated TUI Plotting utility;
+- feature visualization reached through `features visualize`;
+- every study-specific figure and plotting module under `studies/`;
 - shared plotting helpers still imported by any preserved plotting path.
 
 No fallback command, compatibility alias, deprecated entry point, or empty plotting screen
@@ -42,6 +43,8 @@ Remove registration and exports for `eeg-pipeline plotting`. Remove its parser,
 orchestrator, runner helpers, selection/configuration helpers, catalog loader, and plot
 catalog. Remove `info plotters` only if dependency tracing confirms it has no consumer after
 the TUI removal; otherwise remove the obsolete consumer first and then the unused mode.
+Remove the `behavior visualize` parser surface and orchestration while retaining behavior
+computation and analysis.
 
 ### Plot implementations
 
@@ -54,6 +57,9 @@ cleaned at the same time so missing references surface immediately.
 
 `eeg_pipeline/plotting/` is not deleted wholesale because it contains preprocessing,
 component-TFR, scanner-harmonic, and potentially other non-TUI plotting paths.
+The `eeg_pipeline/plotting/behavioral/` implementation tree is deleted because the user
+explicitly removed EEG-pipeline behavior plots. No file under `studies/` is deleted or
+rewritten as part of that removal.
 
 ### Configuration and documentation
 
@@ -83,6 +89,7 @@ Plotting utility and CLI command still exist. The tests must establish that:
 - the TUI main menu and pipeline registry no longer contain Plotting;
 - TUI command construction and discovery no longer support the plotting pipeline;
 - the Python top-level parser no longer registers `plotting`;
+- the behavior parser no longer accepts `visualize` and its plotting modules are absent;
 - the removed catalog and exclusive entry-point modules are absent;
 - representative preprocessing plotting, scanner-harmonic plotting, and component-TFR
   plotting modules remain importable or structurally present as appropriate to the branch.
@@ -100,13 +107,15 @@ Verification includes:
 - repository-wide searches for removed pipeline identifiers, catalog IDs, command imports,
   and stale documentation;
 - a final diff audit confirming protected plot paths were not deleted.
+- a `studies/` diff audit confirming no study-owned figure was changed or deleted.
 
 ## Success Criteria
 
 - No dedicated Plotting entry or workflow is visible or executable in the TUI.
 - `eeg-pipeline plotting` is not a registered CLI command.
 - All implementations and support code used only by the TUI-listed plots are removed.
+- EEG-pipeline behavior plots and the `behavior visualize` mode are removed.
 - Preprocessing, component-TFR, and non-TUI plot paths remain intact.
+- Study-owned figures remain intact.
 - No compatibility or fallback behavior masks stale calls.
 - Relevant tests and repository validation gates pass.
-
