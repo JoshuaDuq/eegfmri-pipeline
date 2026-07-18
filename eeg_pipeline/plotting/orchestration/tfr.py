@@ -155,6 +155,7 @@ def _load_subject_data(
         deriv_root=effective_deriv_root,
         config=config,
         logger=logger,
+        required_event_groups=[],
     )
 
     if epochs is None:

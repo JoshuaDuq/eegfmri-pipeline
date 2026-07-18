@@ -159,6 +159,7 @@ def validate_min_subjects(
 def get_deriv_root(config: Any, *, command: Optional[str] = None) -> Path:
     """Get derivatives root path from config."""
     eeg_derivative_commands = {
+        "component-tfr",
         "features",
         "info",
         "preprocessing",

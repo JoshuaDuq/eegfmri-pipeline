@@ -124,6 +124,24 @@ def test_load_study1_config_uses_readme_bootstrap_iterations() -> None:
     assert config["machine_learning"]["evaluation"]["bootstrap_iterations"] == 10000
 
 
+def test_load_study1_config_defines_band_time_frequency_figure() -> None:
+    from studies.pain_study.study1.config.loader import load_study1_config
+
+    config = load_study1_config()
+
+    assert config["study1"]["figures"]["band_time_frequency"] == {
+        "dimensions_mm": {"width": 183.0, "height": 105.0},
+        "display_window_s": [-5.0, 14.5],
+        "frequency_step_hz": 1.0,
+        "n_cycles": 7.0,
+        "time_step_s": 0.05,
+        "analysis_sampling_frequency_hz": 200.0,
+        "trial_batch_size": 4,
+        "color_percentile": 99.0,
+        "excluded_subjects": ["sub-0006"],
+    }
+
+
 def test_load_study1_config_resolves_explicit_path() -> None:
     from studies.pain_study.study1.config.loader import load_study1_config
 

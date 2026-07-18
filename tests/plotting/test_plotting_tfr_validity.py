@@ -372,3 +372,35 @@ def test_band_power_summary_uses_sample_standard_deviation_for_sem(
     means = logratio_to_pct(np.array([np.log10(2.0), np.log10(3.0), np.log10(4.0)], dtype=float))
     expected_sem = float(np.nanstd(means, ddof=1) / np.sqrt(3.0))
     assert sem_value == pytest.approx(expected_sem)
+
+
+def test_tfr_loading_defers_event_column_validation_to_requested_plotters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    epochs = object()
+    events = pd.DataFrame({"trial_id": [1], "condition": ["A"]})
+
+    def fake_load_epochs_for_analysis(*args, **kwargs):
+        del args
+        captured.update(kwargs)
+        return epochs, events
+
+    monkeypatch.setattr(
+        tfr_orchestration,
+        "load_epochs_for_analysis",
+        fake_load_epochs_for_analysis,
+    )
+
+    loaded_epochs, loaded_events = tfr_orchestration._load_subject_data(
+        "0001",
+        "task",
+        {},
+        tmp_path,
+        logging.getLogger("test.tfr.loading"),
+    )
+
+    assert loaded_epochs is epochs
+    assert loaded_events is events
+    assert captured["required_event_groups"] == []

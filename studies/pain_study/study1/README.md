@@ -479,6 +479,20 @@ the common channel count. Display downsampling is applied only after baseline no
 direct protocol bar marks baseline, ramp-up, plateau, ramp-down, and post-stimulus intervals; the
 figure adds no timepoint-wise hypothesis tests.
 
+The `band_time_frequency/` family provides a complementary frequency-resolved view. It writes one
+SVG per participant and band plus one equally weighted cohort SVG per band, using each participant's
+newest final-clean epoch file. Power is estimated with the FieldTrip-style `mtmconvol` convention:
+one symmetric Hanning taper, frequency-dependent 7-cycle windows, 0.05 s steps, trial-wide DC
+removal, and 1 Hz resolution. Each trial, channel, and frequency is converted to dB using only
+complete Hanning windows inside the −5.0 to −0.01 s baseline. All EEG channels are retained through
+normalization and then averaged. Participant maps show the delivered-temperature OLS slope in dB/°C,
+adjusted for run, thermode surface, and within-run trial order; cohort maps give participant slopes
+equal weight. Trials missing required model metadata are excluded explicitly and reconciled against
+the clean epoch count in the source audit. Participant maps share a robust per-band family scale,
+whereas each cohort map uses its own robust scale. TSV/parquet audits retain exact slopes, matched
+event and epoch paths, source timestamps, modelled and excluded trial counts, design diagnostics,
+sampling frequencies, and the full participant-specific EEG channel lists.
+
 Two standalone sensor-space figures resolve the same power construct at individual electrodes.
 Both use the five prespecified bands: alpha, beta, low gamma (`gamma_low_clean`), mid gamma
 (`gamma_mid_clean`), and high gamma (`gamma_high_clean`). `sensor_power_topographies.svg` shows

@@ -379,6 +379,13 @@ COMMON_ARGS=(
   --task "$TASK" \
   --output "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution.svg"
 
+"$PYTHON" -m studies.pain_study.study1.figures.plot_band_time_frequency \
+  --config eeg_pipeline/utils/config/eeg_config.yaml \
+  --study1-config "$STUDY1_CONFIG" \
+  --derivative-root "$DERIV_ROOT" \
+  --task "$TASK" \
+  --output-dir "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_time_frequency"
+
 "$PYTHON" -m studies.pain_study.study1.figures.plot_fmri_construct_validity \
   --config eeg_pipeline/utils/config/eeg_config.yaml \
   --study1-config "$STUDY1_CONFIG" \
@@ -428,6 +435,7 @@ $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/full_picture/
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution_by_subject.tsv
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_power_epoch_evolution_summary.tsv
+$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_time_frequency/
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/behavioral_dose_response.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density.svg
 $DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/cohort_power_spectral_density_by_run.tsv
@@ -888,6 +896,30 @@ The default Study 1 config enables the theoretically prioritized exploratory fea
    baseline. A direct protocol bar marks the five epoch intervals, and the header reports cohort,
    retained-trial, and channel counts. Display downsampling occurs only after normalization. The
    writer adds participant- and cohort-level TSV/parquet audits beside the editable SVG.
+
+   Generate the frequency-resolved Hanning TFR family from every participant's newest final-clean
+   epoch file:
+
+   ```bash
+   "$PYTHON" -m studies.pain_study.study1.figures.plot_band_time_frequency \
+     --config eeg_pipeline/utils/config/eeg_config.yaml \
+     --study1-config "$STUDY1_CONFIG" \
+     --derivative-root "$DERIV_ROOT" \
+     --task "$TASK" \
+     --output-dir "$DERIV_ROOT/group/multimodal/$STUDY1_RUN_ID/reports/figures/supplementary/validity/band_time_frequency"
+   ```
+
+   The writer produces one participant SVG per band and one equally weighted cohort SVG per band.
+   It follows the FieldTrip `mtmconvol` convention with one symmetric Hanning taper,
+   frequency-dependent 7-cycle windows, 0.05 s steps, trial-wide DC removal, and 1 Hz resolution.
+   Trial/channel/frequency power is converted to dB using complete Hanning windows inside the −5.0
+   to −0.01 s baseline, after which all EEG channels are averaged. Participant maps show the
+   delivered-temperature OLS slope in dB/°C adjusted for run, thermode surface, and within-run trial
+   order; cohort maps average participant slopes equally. Trials lacking required model metadata are
+   excluded explicitly and reconciled in the source audit. Participant maps share a robust per-band
+   family scale, while cohort maps use a cohort-specific robust scale. TSV/parquet audits retain the
+   exact slopes, matched source/event files, timestamps, trial reconciliation, design diagnostics,
+   sampling frequencies, and channel lists.
 
    Generate the whole-brain fMRI construct-validity figure directly from the retained cohort,
    current clean events, and MNI-space fMRIPrep runs:

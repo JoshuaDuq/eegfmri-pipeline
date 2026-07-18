@@ -349,6 +349,27 @@ time_frequency_analysis:
     min_samples_for_stats: 5
     min_samples_for_baseline_validation: 10
 
+# 4.2a ICA Component Time-Frequency Analysis
+component_time_frequency:
+  condition_column: "stimulus_temp"
+  minimum_epochs_per_condition: 1
+  n_jobs: 1
+  ica:
+    band: [6.0, 14.0]
+    fit_window: *active_window
+    max_iterations: 2000
+    random_state: 42
+  tfr:
+    frequency_range: [1.0, 30.0]
+    frequency_step: 1.0
+    window_duration: 1.0
+    frequency_smoothing: 2.0
+    time_step: 0.1
+    baseline_window: *baseline_window_tfr
+    baseline_mode: "logratio"
+  plotting:
+    components_per_page: 6
+
 power:
   bands_to_use: ["delta", "theta", "alpha", "beta", "gamma"]
 

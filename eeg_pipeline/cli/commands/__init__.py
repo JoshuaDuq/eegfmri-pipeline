@@ -30,6 +30,7 @@ class Command:
 
 
 from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
+from eeg_pipeline.cli.commands.component_tfr import setup_component_tfr, run_component_tfr
 from eeg_pipeline.cli.commands.features import setup_features, run_features
 from eeg_pipeline.cli.commands.harmonics import setup_harmonics, run_harmonics
 from eeg_pipeline.cli.commands.info import setup_info, run_info
@@ -48,6 +49,11 @@ def _builtin_commands() -> list[Command]:
             name="behavior",
             setup=setup_behavior,
             run=run_behavior,
+        ),
+        Command(
+            name="component-tfr",
+            setup=setup_component_tfr,
+            run=run_component_tfr,
         ),
         Command(
             name="features",

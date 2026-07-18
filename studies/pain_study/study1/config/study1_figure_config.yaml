@@ -102,6 +102,18 @@ study1:
         height: 88.0
       model: "elasticnet"
       targets: ["NPS", "SIIPS1"]
+    band_time_frequency:
+      dimensions_mm:
+        width: 183.0
+        height: 105.0
+      display_window_s: [-5.0, 14.5]
+      frequency_step_hz: 1.0
+      n_cycles: 7.0
+      time_step_s: 0.05
+      analysis_sampling_frequency_hz: 200.0
+      trial_batch_size: 4
+      color_percentile: 99.0
+      excluded_subjects: ["sub-0006"]
     band_power_epoch_evolution:
       dimensions_mm:
         width: 183.0
