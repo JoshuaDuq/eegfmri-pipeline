@@ -7,15 +7,12 @@ import re
 from typing import Any, List
 
 from eeg_pipeline.pipelines.constants import FEATURE_CATEGORIES
-from eeg_pipeline.cli.commands.base import FEATURE_VISUALIZE_CATEGORIES
 from eeg_pipeline.utils.parsing import (
     parse_frequency_band_definitions,
     parse_roi_definitions,
 )
 
-FEATURE_CATEGORY_CHOICES = FEATURE_CATEGORIES + [
-    category for category in FEATURE_VISUALIZE_CATEGORIES if category not in FEATURE_CATEGORIES
-]
+FEATURE_CATEGORY_CHOICES = FEATURE_CATEGORIES
 
 _COMPONENT_RANGE_RE = re.compile(
     r"^\s*([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s*-\s*([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s*$"

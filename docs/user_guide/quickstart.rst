@@ -357,8 +357,6 @@ Use the tabs below for the full command matrix and focused examples.
            - Purpose
          * - ``compute``
            - Extract features and write derivative tables.
-         * - ``visualize``
-           - Render summary plots from already-computed feature tables.
 
       Feature families:
 
@@ -422,7 +420,6 @@ Use the tabs below for the full command matrix and focused examples.
          eeg-pipeline features compute --subject 0001 --categories power connectivity aperiodic
          eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
          eeg-pipeline features compute --subject 0001 --iaf-enabled
-         eeg-pipeline features visualize --subject 0001
 
       See :doc:`../methods/eeg/features` for formulas, spatial modes, and
       CV hygiene details.
@@ -448,8 +445,6 @@ Use the tabs below for the full command matrix and focused examples.
            - Purpose
          * - ``compute``
            - Run the behavioral analysis DAG and write numerical outputs.
-         * - ``visualize``
-           - Render standardized plots from computed results.
 
       Analysis stages (``--computations`` selects a subset):
 
@@ -483,7 +478,6 @@ Use the tabs below for the full command matrix and focused examples.
          eeg-pipeline behavior compute --all-subjects
          eeg-pipeline behavior compute --subject 0001 \
            --computations correlations condition temporal
-         eeg-pipeline behavior visualize --subject 0001
 
       See :doc:`../methods/eeg/behavior` for the full DAG, partial correlation
       formulas, and permutation scheme.
@@ -619,38 +613,6 @@ Use the tabs below for the full command matrix and focused examples.
 
       See :doc:`../methods/fmri/pipeline` for the GLM specification,
       confound strategy, and signature readout methods.
-
-   .. tab-item:: Plotting
-
-      .. note::
-
-         The plotting pipeline is **still under active development**. Plot
-         catalog entries, CLI flags, and default figure styles may change.
-
-      Renders visualization suites from computed features and statistical results.
-
-      **Output:** formats from ``plotting.defaults.formats`` (default config:
-      PNG + SVG). Add ``--formats`` to override per run.
-
-      Modes:
-
-      .. list-table::
-         :header-rows: 1
-         :widths: 18 82
-
-         * - Mode
-           - Purpose
-         * - ``visualize``
-           - Render the configured plot suites for a subject or at group level.
-         * - ``tfr``
-           - Time–frequency representations for a single subject.
-
-      .. code-block:: bash
-
-         eeg-pipeline plotting visualize --subject 0001 --all-plots
-         eeg-pipeline plotting visualize --all-subjects --analysis-scope group
-         eeg-pipeline plotting visualize --subject 0001 --formats png svg pdf
-         eeg-pipeline plotting tfr --subject 0001
 
 .. _qs-full-workflow:
 

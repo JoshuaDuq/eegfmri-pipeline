@@ -139,24 +139,6 @@ class TestBehaviorValidityFixes(unittest.TestCase):
         self.assertIn(StageRegistry.RESOURCE_EFFECT_SIZES, primary_spec.requires)
         self.assertNotIn(StageRegistry.RESOURCE_PVALUES, primary_spec.requires)
 
-    def test_temporal_roi_annotation_explicitly_labels_uncorrected_p_values(self):
-        from eeg_pipeline.plotting.behavioral.temporal.topomaps import _format_roi_label
-
-        label = _format_roi_label(
-            roi="central",
-            mean_corr=0.32,
-            roi_p_uncorr=0.012,
-            roi_primary=None,
-            n_roi=8,
-            n_sig_primary=0,
-            correction_method="fdr",
-            alpha=0.05,
-            primary_value_label="q",
-        )
-
-        self.assertIn("uncorr p=0.012", label)
-        self.assertNotIn("(p=0.012)", label)
-
     def test_feature_inference_surfaces_registry_failures(self):
         from eeg_pipeline.analysis.behavior.feature_inference import (
             infer_feature_band_impl,

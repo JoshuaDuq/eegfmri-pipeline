@@ -167,7 +167,7 @@ func formatBannerLines(label, value string, labelStyle, valueStyle lipgloss.Styl
 		return []string{inline}
 	}
 	valueIndent := strings.Repeat(" ", 2+reviewLabelWidth)
-	lines := []string{styles.TruncateLine("  " + labelStyle.Render(label), width)}
+	lines := []string{styles.TruncateLine("  "+labelStyle.Render(label), width)}
 	lines = append(lines, wrapBannerValueLines(valueIndent, renderedValue, width)...)
 	return lines
 }
@@ -500,12 +500,6 @@ func (m Model) reviewSelectionRows() []reviewRow {
 		return []reviewRow{
 			{label: "Stages", value: countLabel(countSelectedItems(m.prepStageSelected), len(m.prepStages))},
 		}
-	case types.PipelinePlotting:
-		return []reviewRow{
-			{label: "Categories", value: countLabel(countSelectedItems(m.selected), len(m.categories))},
-			{label: "Plots", value: countLabel(m.countSelectedVisiblePlots(), len(m.plotItems))},
-			{label: "Formats", value: countLabel(countSelectedStringItems(m.plotFormatSelected), len(m.plotFormats))},
-		}
 	default:
 		return nil
 	}
@@ -585,9 +579,6 @@ func (m Model) subjectReviewLabel() string {
 			continue
 		}
 		isValid, _ := m.Pipeline.ValidateSubject(subject)
-		if m.Pipeline == types.PipelinePlotting {
-			isValid, _ = m.validatePlottingSubject(subject)
-		}
 		if isValid {
 			valid++
 		}

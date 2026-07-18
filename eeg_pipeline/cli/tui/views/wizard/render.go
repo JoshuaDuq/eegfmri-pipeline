@@ -55,10 +55,6 @@ var stepDisplayNames = map[types.WizardStep]string{
 	types.StepSelectSpatial:             "Spatial",
 	types.StepTimeRange:                 "Time",
 	types.StepAdvancedConfig:            "Advanced",
-	types.StepSelectPlots:               "Plots",
-	types.StepSelectFeaturePlotters:     "Feature Plots",
-	types.StepSelectPlotCategories:      "Categories",
-	types.StepPlotConfig:                "Output",
 	types.StepSelectSubjects:            "Subjects",
 	types.StepSelectPreprocessingStages: "Stages",
 	types.StepPreprocessingFiltering:    "Filtering",
@@ -470,8 +466,8 @@ func (m Model) getStepHints() []footerHint {
 			}
 		}
 		return m.standardSelectionHints()
-	case types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectROIs, types.StepSelectSpatial,
-		types.StepSelectFeatureFiles, types.StepSelectPlots, types.StepSelectFeaturePlotters,
+	case types.StepSelectBands, types.StepSelectROIs, types.StepSelectSpatial,
+		types.StepSelectFeatureFiles,
 		types.StepSelectPreprocessingStages:
 		return m.standardSelectionHints()
 	case types.StepPreprocessingFiltering, types.StepPreprocessingICA, types.StepPreprocessingEpochs:
@@ -486,13 +482,6 @@ func (m Model) getStepHints() []footerHint {
 			{key: "↑/↓", label: "Navigate", compact: "Nav", priority: 0},
 			{key: "Enter", label: "Edit", compact: "Edit", priority: 0},
 			{key: "Space", label: "Toggle", compact: "Toggle", priority: 1},
-			{key: "Esc", label: "Back", compact: "Back", priority: 0},
-		}
-	case types.StepPlotConfig:
-		return []footerHint{
-			{key: "Space", label: "Toggle/Cycle", compact: "Toggle", priority: 0},
-			{key: "↑/↓", label: "Navigate", compact: "Nav", priority: 0},
-			{key: "Enter", label: "Next", compact: "Next", priority: 0},
 			{key: "Esc", label: "Back", compact: "Back", priority: 0},
 		}
 	case types.StepTimeRange:

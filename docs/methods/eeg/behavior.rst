@@ -25,7 +25,7 @@ Behavioral Statistics
 
    .. grid-item-card:: CLI
 
-      ``eeg-pipeline behavior [compute | visualize]``
+      ``eeg-pipeline behavior compute``
 
    .. grid-item-card:: Config
 

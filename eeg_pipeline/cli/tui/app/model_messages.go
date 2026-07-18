@@ -6,7 +6,6 @@ import (
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/types"
-	"github.com/eeg-pipeline/tui/views/wizard"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -32,19 +31,6 @@ func (m Model) handleSubjectsLoaded(msg messages.SubjectsLoadedMsg) (tea.Model, 
 		m.wizard.SetAvailableWindowsByFeature(msg.AvailableWindowsByFeature)
 	}
 	m.wizard.SetChannelInfo(msg.AvailableChannels, msg.UnavailableChannels)
-
-	// Trigger condition effects discovery for plotting pipeline
-	if m.selectedPipeline == types.PipelinePlotting && len(subjects) > 0 {
-		// Use first subject for discovery
-		subjectID := ""
-		for _, subj := range subjects {
-			if subj.ID != "" {
-				subjectID = subj.ID
-				break
-			}
-		}
-		return m, executor.DiscoverConditionEffectsColumns(m.repoRoot, m.task, subjectID)
-	}
 
 	// Trigger fMRI condition discovery for fMRI analysis pipeline (for contrast pickers)
 	if m.selectedPipeline == types.PipelineFmriAnalysis && len(subjects) > 0 {
@@ -122,52 +108,7 @@ func (m *Model) convertAvailabilityInfo(v messages.AvailabilityInfo) types.Avail
 	}
 }
 
-func (m *Model) handlePlottersLoaded(msg messages.PlottersLoadedMsg) {
-	if msg.Error != nil {
-		m.wizard.SetFeaturePlottersError(msg.Error)
-		return
-	}
-
-	if msg.FeaturePlotters == nil {
-		return
-	}
-
-	converted := m.convertPlotters(msg.FeaturePlotters)
-	m.wizard.SetFeaturePlotters(converted)
-}
-
-func (m *Model) convertPlotters(source map[string][]messages.PlotterInfo) map[string][]wizard.PlotterInfo {
-	converted := make(map[string][]wizard.PlotterInfo, len(source))
-	for category, entries := range source {
-		list := make([]wizard.PlotterInfo, 0, len(entries))
-		for _, p := range entries {
-			list = append(list, wizard.PlotterInfo{
-				ID:       p.ID,
-				Category: p.Category,
-				Name:     p.Name,
-			})
-		}
-		converted[category] = list
-	}
-	return converted
-}
-
 func (m *Model) handleColumnsDiscovered(msg messages.ColumnsDiscoveredMsg) {
-	// Check if this is condition effects discovery (source will be "condition_effects")
-	if msg.Source == "condition_effects" {
-		if msg.Error != nil {
-			m.wizard.SetConditionEffectsDiscoveryError(msg.Error)
-			return
-		}
-		// Extract windows from the response if available
-		windows := []string{}
-		if msg.Windows != nil {
-			windows = msg.Windows
-		}
-		m.wizard.SetConditionEffectsColumns(msg.Columns, msg.Values, windows)
-		return
-	}
-
 	// Trial-table discovery is used for feature column dropdowns (e.g., dose-response response_column).
 	// Keep it separate from the primary discovered columns (events) to avoid polluting event-column dropdowns.
 	if msg.Source == "trial_table" {

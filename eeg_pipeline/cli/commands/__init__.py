@@ -35,7 +35,6 @@ from eeg_pipeline.cli.commands.features import setup_features, run_features
 from eeg_pipeline.cli.commands.harmonics import setup_harmonics, run_harmonics
 from eeg_pipeline.cli.commands.info import setup_info, run_info
 from eeg_pipeline.cli.commands.machine_learning import setup_ml, run_ml
-from eeg_pipeline.cli.commands.plotting import setup_plotting, run_plotting
 from eeg_pipeline.cli.commands.preprocessing import setup_preprocessing, run_preprocessing
 from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
@@ -88,11 +87,6 @@ def _builtin_commands() -> list[Command]:
             name="ml",
             setup=setup_ml,
             run=run_ml,
-        ),
-        Command(
-            name="plotting",
-            setup=setup_plotting,
-            run=run_plotting,
         ),
         Command(
             name="preprocessing",

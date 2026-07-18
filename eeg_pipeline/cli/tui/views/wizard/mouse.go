@@ -82,16 +82,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.handleSpace()
 			}
 		}
-	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
-			if idx := m.matchAdvancedRowIndex(line, contentLines); idx >= 0 {
-				m.globalStylingCursor = idx
-				if activate {
-					m.handleSpace()
-				}
-			}
-			return m, nil
-		}
+	case types.StepConfigureOptions:
 		if idx := m.matchCategoryLine(line); idx >= 0 {
 			m.categoryIndex = idx
 			if activate {
@@ -109,8 +100,6 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			switch m.Pipeline {
 			case types.PipelineML:
 				m.mlScope = MLCVScope(scope)
-			case types.PipelinePlotting:
-				m.plottingScope = PlottingScope(scope)
 			}
 			return m, nil
 		}
@@ -151,27 +140,6 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case types.StepSelectFeatureFiles:
 		if idx := m.matchFeatureFileLine(line); idx >= 0 {
 			m.featureFileCursor = idx
-			if activate {
-				m.handleSpace()
-			}
-		}
-	case types.StepSelectPlots:
-		if idx := m.matchPlotLine(line); idx >= 0 {
-			m.plotCursor = idx
-			if activate {
-				m.handleSpace()
-			}
-		}
-	case types.StepSelectFeaturePlotters:
-		if idx := m.matchFeaturePlotterLine(line); idx >= 0 {
-			m.featurePlotterCursor = idx
-			if activate {
-				m.handleSpace()
-			}
-		}
-	case types.StepPlotConfig:
-		if idx := m.matchPlotConfigLine(line); idx >= 0 {
-			m.plotConfigCursor = idx
 			if activate {
 				m.handleSpace()
 			}
@@ -279,13 +247,6 @@ func (m Model) matchSubjectScopeSelection(line string, x int) int {
 		if hitRange(text, x, "Subject (within)") {
 			return int(MLCVScopeSubject)
 		}
-	case types.PipelinePlotting:
-		if hitRange(text, x, "Group") {
-			return int(PlottingScopeGroup)
-		}
-		if hitRange(text, x, "Subject") {
-			return int(PlottingScopeSubject)
-		}
 	}
 	return -1
 }
@@ -328,36 +289,6 @@ func (m Model) matchFeatureFileLine(line string) int {
 		names[i] = file.Name
 	}
 	return indexOfContains(line, names)
-}
-
-func (m Model) matchPlotLine(line string) int {
-	names := make([]string, len(m.plotItems))
-	for i, plot := range m.plotItems {
-		names[i] = plot.Name
-	}
-	return indexOfContains(line, names)
-}
-
-func (m Model) matchFeaturePlotterLine(line string) int {
-	items := m.featurePlotterItems()
-	names := make([]string, len(items))
-	for i, item := range items {
-		names[i] = item.Name
-	}
-	return indexOfContains(line, names)
-}
-
-func (m Model) matchPlotConfigLine(line string) int {
-	labels := []string{
-		"PNG",
-		"SVG",
-		"PDF",
-		"Figure DPI",
-		"Savefig DPI",
-		"Shared Colorbar",
-		"Overwrite",
-	}
-	return indexOfContains(line, labels)
 }
 
 func (m Model) matchTimeRangeLine(line string) int {

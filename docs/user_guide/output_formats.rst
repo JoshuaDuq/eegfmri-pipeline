@@ -18,11 +18,6 @@ Outputs & Advanced Workflows
       optional auxiliary tables (for example PAC trial/time tables), each with
       metadata sidecars.
 
-   .. grid-item-card:: Plot Exports
-
-      Format set comes from ``plotting.defaults.formats`` (default config:
-      PNG + SVG) · override with ``--formats``.
-
    .. grid-item-card:: EEG–fMRI Fusion
 
       Trial-wise EEG → fMRI signature prediction using beta-series or LSS.
@@ -69,15 +64,6 @@ Outputs & Advanced Workflows
       ``sourcelocalization/<method>/source_estimates/``. The final mode-specific
       subdirectory is ``eeg_only/`` or ``fmri_informed/`` depending on
       ``feature_engineering.sourcelocalization.mode``.
-
-      .. rubric:: Plot Exports
-
-      Plot formats come from ``plotting.defaults.formats``. Use ``--formats``
-      to override per run:
-
-      .. code-block:: bash
-
-         eeg-pipeline plotting visualize --subject 0001 --formats png svg pdf
 
       .. rubric:: Source Localization
 

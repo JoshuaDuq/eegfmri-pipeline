@@ -138,8 +138,8 @@ Explore the Documentation
 .. raw:: html
 
    <p class="dev-status">
-     <strong>Status</strong> — the fMRI pipeline and the plotting command
-     surface remain under active development. Validate critical workflows
+     <strong>Status</strong> — the fMRI pipeline remains under active
+     development. Validate critical workflows
      after upgrades and confirm derivative paths before downstream use.
    </p>
 

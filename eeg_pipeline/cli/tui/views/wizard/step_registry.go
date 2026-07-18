@@ -53,22 +53,6 @@ var stepDefinitions = map[types.WizardStep]stepDefinition{
 	types.StepAdvancedConfig: {
 		render: Model.renderAdvancedConfig,
 	},
-	types.StepSelectPlots: {
-		render:   Model.renderPlotSelection,
-		validate: (*Model).validatePlotSelectionStep,
-	},
-	types.StepSelectFeaturePlotters: {
-		render:   Model.renderFeaturePlotterSelection,
-		validate: (*Model).validateFeaturePlotterSelectionStep,
-	},
-	types.StepSelectPlotCategories: {
-		render:   Model.renderCategorySelection,
-		validate: (*Model).validateCategorySelectionStep,
-	},
-	types.StepPlotConfig: {
-		render:   Model.renderPlotConfig,
-		validate: (*Model).validatePlotConfigStep,
-	},
 	types.StepSelectSubjects: {
 		render:   Model.renderSubjectSelection,
 		validate: (*Model).validateSubjectSelectionStep,

@@ -16,7 +16,6 @@ from eeg_pipeline.utils.config.overrides import apply_set_overrides
 def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the behavior command."""
     from eeg_pipeline.pipelines.behavior import BehaviorPipeline
-    from eeg_pipeline.plotting.orchestration.behavior import visualize_behavior_for_subjects
     from eeg_pipeline.analysis.behavior.orchestration import StageRegistry, config_to_stage_names
     
     # Handle discoverability options first
@@ -84,35 +83,4 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             task=task,
             bands=getattr(args, "bands", None),
             progress=progress,
-        )
-    elif args.mode == "visualize":
-        apply_set_overrides(config, getattr(args, "set_overrides", None))
-        task = resolve_task(args.task, config)
-        selected_plots = getattr(args, "plots", None)
-        run_all_plots = bool(getattr(args, "all_plots", False))
-        skip_scatter = bool(getattr(args, "skip_scatter", False))
-
-        if selected_plots is not None:
-            visualize_categories = None
-            plots = selected_plots
-        elif skip_scatter:
-            visualize_categories = None
-            plots = [
-                "psychometrics",
-                "temporal_topomaps",
-                "dose_response",
-            ]
-        elif run_all_plots:
-            visualize_categories = None
-            plots = []
-        else:
-            visualize_categories = categories
-            plots = None
-
-        visualize_behavior_for_subjects(
-            subjects=subjects,
-            task=task,
-            config=config,
-            visualize_categories=visualize_categories,
-            plots=plots,
         )

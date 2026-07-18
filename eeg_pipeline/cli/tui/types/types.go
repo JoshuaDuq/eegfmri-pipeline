@@ -8,7 +8,6 @@ const (
 	PipelineFeatures
 	PipelineBehavior
 	PipelineML
-	PipelinePlotting
 	PipelineFmri
 	PipelineFmriAnalysis
 	pipelineCount // Sentinel for bounds checking
@@ -27,7 +26,6 @@ var pipelineNames = [pipelineCount]string{
 	PipelineFeatures:      "Features",
 	PipelineBehavior:      "Behavior",
 	PipelineML:            "Machine Learning",
-	PipelinePlotting:      "Plotting",
 	PipelineFmri:          "fMRI",
 	PipelineFmriAnalysis:  "fMRI Analysis",
 }
@@ -38,7 +36,6 @@ var pipelineCommands = [pipelineCount]string{
 	PipelineFeatures:      "features",
 	PipelineBehavior:      "behavior",
 	PipelineML:            "ml",
-	PipelinePlotting:      "plotting",
 	PipelineFmri:          "fmri",
 	PipelineFmriAnalysis:  "fmri-analysis",
 }
@@ -49,7 +46,6 @@ var pipelineDescriptions = [pipelineCount]string{
 	PipelineFeatures:      "Extract EEG features (power, connectivity...)",
 	PipelineBehavior:      "EEG-behavior analysis",
 	PipelineML:            "Machine learning: LOSO regression & time generalization",
-	PipelinePlotting:      "Generate curated visualization suites",
 	PipelineFmri:          "Preprocess fMRI (fMRIPrep-style)",
 	PipelineFmriAnalysis:  "First-level contrasts + trial-wise signatures",
 }
@@ -97,10 +93,6 @@ const (
 	StepSelectSpatial
 	StepTimeRange
 	StepAdvancedConfig
-	StepSelectPlots
-	StepSelectFeaturePlotters
-	StepSelectPlotCategories
-	StepPlotConfig
 	StepSelectSubjects
 	StepSelectPreprocessingStages
 	StepPreprocessingFiltering
@@ -120,10 +112,6 @@ var wizardStepNames = [wizardStepCount]string{
 	StepSelectSpatial:             "Select Spatial",
 	StepTimeRange:                 "Time Range",
 	StepAdvancedConfig:            "Advanced Config",
-	StepSelectPlots:               "Select Plots",
-	StepSelectFeaturePlotters:     "Select Feature Plotters",
-	StepSelectPlotCategories:      "Select Plot Categories",
-	StepPlotConfig:                "Plot Config",
 	StepSelectSubjects:            "Subjects",
 	StepSelectPreprocessingStages: "Stages",
 	StepPreprocessingFiltering:    "Filtering",
@@ -202,8 +190,6 @@ func (p Pipeline) GetDataSource() string {
 		return "epochs"
 	case PipelineML:
 		return "features"
-	case PipelinePlotting:
-		return "all"
 	case PipelineFmri:
 		return "bids_fmri"
 	case PipelineFmriAnalysis:

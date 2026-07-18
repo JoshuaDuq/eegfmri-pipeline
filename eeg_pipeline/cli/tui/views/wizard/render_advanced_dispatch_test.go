@@ -30,11 +30,6 @@ func TestRenderAdvancedConfigDispatchesToPipelineRenderers(t *testing.T) {
 			want:     "Execution",
 		},
 		{
-			name:     "plotting",
-			pipeline: types.PipelinePlotting,
-			want:     "Plot-Specific Settings",
-		},
-		{
 			name:     "machine-learning",
 			pipeline: types.PipelineML,
 			want:     "Data & Features",
@@ -88,11 +83,6 @@ func TestRenderAdvancedConfigUsesDefaultViewWhenEnabled(t *testing.T) {
 			name:     "behavior",
 			pipeline: types.PipelineBehavior,
 			want:     "Using defaults for behavior analysis.",
-		},
-		{
-			name:     "plotting",
-			pipeline: types.PipelinePlotting,
-			want:     "Using defaults. Space to customize.",
 		},
 		{
 			name:     "machine-learning",

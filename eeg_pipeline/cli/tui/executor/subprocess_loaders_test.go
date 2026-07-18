@@ -150,7 +150,7 @@ func TestJSONLoadersAndProgressStreamer(t *testing.T) {
 		}
 	})
 
-	t.Run("discover rois and plotters", func(t *testing.T) {
+	t.Run("discover rois", func(t *testing.T) {
 		t.Setenv("FAKE_EXECUTOR_MODE", "rois_ok")
 
 		msg := DiscoverROIs(repoRoot, "task")()
@@ -160,19 +160,6 @@ func TestJSONLoadersAndProgressStreamer(t *testing.T) {
 		}
 		if rois.Error != nil || len(rois.ROIs) != 2 {
 			t.Fatalf("unexpected rois payload: %#v", rois)
-		}
-
-		t.Setenv("FAKE_EXECUTOR_MODE", "plotters")
-		msg = LoadPlotters(repoRoot)()
-		plotters, ok := msg.(messages.PlottersLoadedMsg)
-		if !ok {
-			t.Fatalf("expected PlottersLoadedMsg, got %T", msg)
-		}
-		if plotters.Error != nil {
-			t.Fatalf("expected no plotter error, got %v", plotters.Error)
-		}
-		if len(plotters.FeaturePlotters["power"]) != 1 {
-			t.Fatalf("unexpected plotter payload: %#v", plotters.FeaturePlotters)
 		}
 	})
 
@@ -297,8 +284,6 @@ func main() {
 		printLine("{\"available\":true,\"groups\":[\"control\",\"treated\"],\"n_features\":12,\"n_significant\":3,\"file\":\"stats.json\"}")
 	case "rois_ok":
 		printLine("{\"rois\":[\"roi-1\",\"roi-2\"]}")
-	case "plotters":
-		printLine("{\"feature_plotters\":{\"power\":[{\"id\":\"power.topo\",\"category\":\"power\",\"name\":\"Power Topography\"}]}}")
 	case "progress":
 		printLine("{\"event\":\"start\",\"operation\":\"analyze\",\"subjects\":[\"sub-01\"],\"total_subjects\":1}")
 		printLine("{\"event\":\"subject_start\",\"subject\":\"sub-01\"}")

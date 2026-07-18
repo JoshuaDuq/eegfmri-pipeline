@@ -572,11 +572,6 @@ Where to use it:
      --set behavior_analysis.statistics.fdr_alpha=0.01 \
      --set behavior_analysis.cluster.n_permutations=5000
 
-   # Override plotting style defaults
-   eeg-pipeline plotting visualize --subject 0001 --all-plots \
-     --set plotting.defaults.dpi=400 \
-     --set plotting.styling.colors.significant=\"#D62728\"
-
    # Override ML data/feature filters
    eeg-pipeline ml regression --all-subjects \
      --set machine_learning.data.feature_harmonization=union_impute \

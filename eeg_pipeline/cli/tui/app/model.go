@@ -187,8 +187,6 @@ func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case messages.SubjectsLoadedMsg:
 		return m.handleSubjectsLoaded(msg)
-	case messages.PlottersLoadedMsg:
-		m.handlePlottersLoaded(msg)
 		return m, nil
 	case messages.ColumnsDiscoveredMsg:
 		m.handleColumnsDiscovered(msg)

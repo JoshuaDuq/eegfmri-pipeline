@@ -29,7 +29,7 @@ from eeg_pipeline.infra.logging import (
     get_logger,
     get_subject_logger,
 )
-from eeg_pipeline.plotting.io.figures import setup_matplotlib
+from eeg_pipeline.infra.matplotlib import setup_matplotlib
 from eeg_pipeline.infra.paths import (
     ensure_derivatives_dataset_description,
     resolve_deriv_root,

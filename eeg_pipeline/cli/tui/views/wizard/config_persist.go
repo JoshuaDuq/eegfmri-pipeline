@@ -1,9 +1,5 @@
 package wizard
 
-import (
-	"encoding/json"
-)
-
 // ExportConfig exports all advanced configuration options to a map for persistence.
 // This includes all pipeline-specific settings (features, behavior, preprocessing, fMRI, plotting, ML).
 func (m Model) ExportConfig() map[string]interface{} {
@@ -15,9 +11,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["categorySelected"] = mapToIntList(m.selected)
 	cfg["prepStageSelected"] = mapToIntList(m.prepStageSelected)
 	cfg["featureFileSelected"] = stringsMapToBoolMap(m.featureFileSelected)
-	cfg["plotSelected"] = mapToIntList(m.plotSelected)
-	cfg["featurePlotterSelected"] = stringsMapToBoolMap(m.featurePlotterSelected)
-	cfg["plotFormatSelected"] = stringsMapToBoolMap(m.plotFormatSelected)
 	cfg["connectivityMeasures"] = mapToIntList(m.connectivityMeasures)
 	cfg["directedConnMeasures"] = mapToIntList(m.directedConnMeasures)
 
@@ -57,31 +50,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fmriGroupReproExpanded"] = m.fmriGroupReproExpanded
 	cfg["fmriGroupValidationExpanded"] = m.fmriGroupValidationExpanded
 	cfg["fmriGroupAdvancedExpanded"] = m.fmriGroupAdvancedExpanded
-
-	// Plotting UI State
-	cfg["plotGroupDefaultsExpanded"] = m.plotGroupDefaultsExpanded
-	cfg["plotGroupFontsExpanded"] = m.plotGroupFontsExpanded
-	cfg["plotGroupLayoutExpanded"] = m.plotGroupLayoutExpanded
-	cfg["plotGroupFigureSizesExpanded"] = m.plotGroupFigureSizesExpanded
-	cfg["plotGroupColorsExpanded"] = m.plotGroupColorsExpanded
-	cfg["plotGroupAlphaExpanded"] = m.plotGroupAlphaExpanded
-	cfg["plotGroupScatterExpanded"] = m.plotGroupScatterExpanded
-	cfg["plotGroupBarExpanded"] = m.plotGroupBarExpanded
-	cfg["plotGroupLineExpanded"] = m.plotGroupLineExpanded
-	cfg["plotGroupHistogramExpanded"] = m.plotGroupHistogramExpanded
-	cfg["plotGroupTopomapExpanded"] = m.plotGroupTopomapExpanded
-	cfg["plotGroupTFRExpanded"] = m.plotGroupTFRExpanded
-	cfg["plotGroupSizingExpanded"] = m.plotGroupSizingExpanded
-	cfg["plotGroupSelectionExpanded"] = m.plotGroupSelectionExpanded
-	cfg["plotGroupComparisonsExpanded"] = m.plotGroupComparisonsExpanded
-	cfg["plotGroupKDEExpanded"] = m.plotGroupKDEExpanded
-	cfg["plotGroupErrorbarExpanded"] = m.plotGroupErrorbarExpanded
-	cfg["plotGroupTextExpanded"] = m.plotGroupTextExpanded
-	cfg["plotGroupValidationExpanded"] = m.plotGroupValidationExpanded
-	cfg["plotGroupTFRMiscExpanded"] = m.plotGroupTFRMiscExpanded
-	// Plotting per-plot config + UI expansion state
-	cfg["plotItemConfigs"] = m.plotItemConfigs
-	cfg["plotItemConfigExpanded"] = stringsMapToBoolMap(m.plotItemConfigExpanded)
 
 	// PAC/CFC configuration
 	cfg["pacPhaseMin"] = m.pacPhaseMin
@@ -757,175 +725,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["rfMaxDepthGrid"] = m.rfMaxDepthGrid
 	cfg["varianceThresholdGrid"] = m.varianceThresholdGrid
 
-	// Plotting Detailed Config
-	cfg["plottingScope"] = int(m.plottingScope)
-	cfg["plotDpiIndex"] = m.plotDpiIndex
-	cfg["plotSavefigDpiIndex"] = m.plotSavefigDpiIndex
-	cfg["plotSharedColorbar"] = m.plotSharedColorbar
-	cfg["plotBboxInches"] = m.plotBboxInches
-	cfg["plotPadInches"] = m.plotPadInches
-	cfg["plotFontFamily"] = m.plotFontFamily
-	cfg["plotFontWeight"] = m.plotFontWeight
-	cfg["plotFontSizeSmall"] = m.plotFontSizeSmall
-	cfg["plotFontSizeMedium"] = m.plotFontSizeMedium
-	cfg["plotFontSizeLarge"] = m.plotFontSizeLarge
-	cfg["plotFontSizeTitle"] = m.plotFontSizeTitle
-	cfg["plotFontSizeAnnotation"] = m.plotFontSizeAnnotation
-	cfg["plotFontSizeLabel"] = m.plotFontSizeLabel
-	cfg["plotFontSizeYLabel"] = m.plotFontSizeYLabel
-	cfg["plotFontSizeSuptitle"] = m.plotFontSizeSuptitle
-	cfg["plotFontSizeFigureTitle"] = m.plotFontSizeFigureTitle
-	cfg["plotLayoutTightRectSpec"] = m.plotLayoutTightRectSpec
-	cfg["plotLayoutTightRectMicrostateSpec"] = m.plotLayoutTightRectMicrostateSpec
-	cfg["plotGridSpecWidthRatiosSpec"] = m.plotGridSpecWidthRatiosSpec
-	cfg["plotGridSpecHeightRatiosSpec"] = m.plotGridSpecHeightRatiosSpec
-	cfg["plotGridSpecHspace"] = m.plotGridSpecHspace
-	cfg["plotGridSpecWspace"] = m.plotGridSpecWspace
-	cfg["plotGridSpecLeft"] = m.plotGridSpecLeft
-	cfg["plotGridSpecRight"] = m.plotGridSpecRight
-	cfg["plotGridSpecTop"] = m.plotGridSpecTop
-	cfg["plotGridSpecBottom"] = m.plotGridSpecBottom
-	cfg["plotFigureSizeStandardSpec"] = m.plotFigureSizeStandardSpec
-	cfg["plotFigureSizeMediumSpec"] = m.plotFigureSizeMediumSpec
-	cfg["plotFigureSizeSmallSpec"] = m.plotFigureSizeSmallSpec
-	cfg["plotFigureSizeSquareSpec"] = m.plotFigureSizeSquareSpec
-	cfg["plotFigureSizeWideSpec"] = m.plotFigureSizeWideSpec
-	cfg["plotFigureSizeTFRSpec"] = m.plotFigureSizeTFRSpec
-	cfg["plotFigureSizeTopomapSpec"] = m.plotFigureSizeTopomapSpec
-	cfg["plotColorCondB"] = m.plotColorCondB
-	cfg["plotColorCondA"] = m.plotColorCondA
-	cfg["plotColorSignificant"] = m.plotColorSignificant
-	cfg["plotColorNonsignificant"] = m.plotColorNonsignificant
-	cfg["plotColorGray"] = m.plotColorGray
-	cfg["plotColorLightGray"] = m.plotColorLightGray
-	cfg["plotColorBlack"] = m.plotColorBlack
-	cfg["plotColorBlue"] = m.plotColorBlue
-	cfg["plotColorRed"] = m.plotColorRed
-	cfg["plotColorNetworkNode"] = m.plotColorNetworkNode
-	cfg["plotAlphaGrid"] = m.plotAlphaGrid
-	cfg["plotAlphaFill"] = m.plotAlphaFill
-	cfg["plotAlphaCI"] = m.plotAlphaCI
-	cfg["plotAlphaCILine"] = m.plotAlphaCILine
-	cfg["plotAlphaTextBox"] = m.plotAlphaTextBox
-	cfg["plotAlphaViolinBody"] = m.plotAlphaViolinBody
-	cfg["plotAlphaRidgeFill"] = m.plotAlphaRidgeFill
-	cfg["plotScatterMarkerSizeSmall"] = m.plotScatterMarkerSizeSmall
-	cfg["plotScatterMarkerSizeLarge"] = m.plotScatterMarkerSizeLarge
-	cfg["plotScatterMarkerSizeDefault"] = m.plotScatterMarkerSizeDefault
-	cfg["plotScatterAlpha"] = m.plotScatterAlpha
-	cfg["plotScatterEdgeColor"] = m.plotScatterEdgeColor
-	cfg["plotScatterEdgeWidth"] = m.plotScatterEdgeWidth
-	cfg["plotBarAlpha"] = m.plotBarAlpha
-	cfg["plotBarWidth"] = m.plotBarWidth
-	cfg["plotBarCapsize"] = m.plotBarCapsize
-	cfg["plotBarCapsizeLarge"] = m.plotBarCapsizeLarge
-	cfg["plotLineWidthThin"] = m.plotLineWidthThin
-	cfg["plotLineWidthStandard"] = m.plotLineWidthStandard
-	cfg["plotLineWidthThick"] = m.plotLineWidthThick
-	cfg["plotLineWidthBold"] = m.plotLineWidthBold
-	cfg["plotLineAlphaStandard"] = m.plotLineAlphaStandard
-	cfg["plotLineAlphaDim"] = m.plotLineAlphaDim
-	cfg["plotLineAlphaZeroLine"] = m.plotLineAlphaZeroLine
-	cfg["plotLineAlphaFitLine"] = m.plotLineAlphaFitLine
-	cfg["plotLineAlphaDiagonal"] = m.plotLineAlphaDiagonal
-	cfg["plotLineAlphaReference"] = m.plotLineAlphaReference
-	cfg["plotLineRegressionWidth"] = m.plotLineRegressionWidth
-	cfg["plotLineResidualWidth"] = m.plotLineResidualWidth
-	cfg["plotLineQQWidth"] = m.plotLineQQWidth
-	cfg["plotHistBins"] = m.plotHistBins
-	cfg["plotHistBinsBehavioral"] = m.plotHistBinsBehavioral
-	cfg["plotHistBinsResidual"] = m.plotHistBinsResidual
-	cfg["plotHistBinsTFR"] = m.plotHistBinsTFR
-	cfg["plotHistEdgeColor"] = m.plotHistEdgeColor
-	cfg["plotHistEdgeWidth"] = m.plotHistEdgeWidth
-	cfg["plotHistAlpha"] = m.plotHistAlpha
-	cfg["plotHistAlphaResidual"] = m.plotHistAlphaResidual
-	cfg["plotHistAlphaTFR"] = m.plotHistAlphaTFR
-	cfg["plotKdePoints"] = m.plotKdePoints
-	cfg["plotKdeColor"] = m.plotKdeColor
-	cfg["plotKdeLinewidth"] = m.plotKdeLinewidth
-	cfg["plotKdeAlpha"] = m.plotKdeAlpha
-	cfg["plotErrorbarMarkerSize"] = m.plotErrorbarMarkerSize
-	cfg["plotErrorbarCapsize"] = m.plotErrorbarCapsize
-	cfg["plotErrorbarCapsizeLarge"] = m.plotErrorbarCapsizeLarge
-	cfg["plotTextStatsX"] = m.plotTextStatsX
-	cfg["plotTextStatsY"] = m.plotTextStatsY
-	cfg["plotTextPvalueX"] = m.plotTextPvalueX
-	cfg["plotTextPvalueY"] = m.plotTextPvalueY
-	cfg["plotTextBootstrapX"] = m.plotTextBootstrapX
-	cfg["plotTextBootstrapY"] = m.plotTextBootstrapY
-	cfg["plotTextChannelAnnotationX"] = m.plotTextChannelAnnotationX
-	cfg["plotTextChannelAnnotationY"] = m.plotTextChannelAnnotationY
-	cfg["plotTextTitleY"] = m.plotTextTitleY
-	cfg["plotTextResidualQcTitleY"] = m.plotTextResidualQcTitleY
-	cfg["plotValidationMinBinsForCalibration"] = m.plotValidationMinBinsForCalibration
-	cfg["plotValidationMaxBinsForCalibration"] = m.plotValidationMaxBinsForCalibration
-	cfg["plotValidationSamplesPerBin"] = m.plotValidationSamplesPerBin
-	cfg["plotValidationMinRoisForFDR"] = m.plotValidationMinRoisForFDR
-	cfg["plotValidationMinPvaluesForFDR"] = m.plotValidationMinPvaluesForFDR
-	cfg["plotTfrDefaultBaselineWindowSpec"] = m.plotTfrDefaultBaselineWindowSpec
-	cfg["plotTopomapContours"] = m.plotTopomapContours
-	cfg["plotTopomapColormap"] = m.plotTopomapColormap
-	cfg["plotTopomapColorbarFraction"] = m.plotTopomapColorbarFraction
-	cfg["plotTopomapColorbarPad"] = m.plotTopomapColorbarPad
-	cfg["plotTopomapDiffAnnotation"] = m.plotTopomapDiffAnnotation
-	cfg["plotTopomapAnnotateDesc"] = m.plotTopomapAnnotateDesc
-	cfg["plotTopomapSigMaskMarker"] = m.plotTopomapSigMaskMarker
-	cfg["plotTopomapSigMaskMarkerFaceColor"] = m.plotTopomapSigMaskMarkerFaceColor
-	cfg["plotTopomapSigMaskMarkerEdgeColor"] = m.plotTopomapSigMaskMarkerEdgeColor
-	cfg["plotTopomapSigMaskLinewidth"] = m.plotTopomapSigMaskLinewidth
-	cfg["plotTopomapSigMaskMarkerSize"] = m.plotTopomapSigMaskMarkerSize
-	cfg["plotTFRLogBase"] = m.plotTFRLogBase
-	cfg["plotTFRPercentageMultiplier"] = m.plotTFRPercentageMultiplier
-	cfg["plotTFRTopomapWindowSizeMs"] = m.plotTFRTopomapWindowSizeMs
-	cfg["plotTFRTopomapWindowCount"] = m.plotTFRTopomapWindowCount
-	cfg["plotTFRTopomapLabelXPosition"] = m.plotTFRTopomapLabelXPosition
-	cfg["plotTFRTopomapLabelYPositionBottom"] = m.plotTFRTopomapLabelYPositionBottom
-	cfg["plotTFRTopomapLabelYPosition"] = m.plotTFRTopomapLabelYPosition
-	cfg["plotTFRTopomapTitleY"] = m.plotTFRTopomapTitleY
-	cfg["plotTFRTopomapTitlePad"] = m.plotTFRTopomapTitlePad
-	cfg["plotTFRTopomapSubplotsRight"] = m.plotTFRTopomapSubplotsRight
-	cfg["plotTFRTopomapTemporalHspace"] = m.plotTFRTopomapTemporalHspace
-	cfg["plotTFRTopomapTemporalWspace"] = m.plotTFRTopomapTemporalWspace
-	cfg["plotRoiWidthPerBand"] = m.plotRoiWidthPerBand
-	cfg["plotRoiWidthPerMetric"] = m.plotRoiWidthPerMetric
-	cfg["plotRoiHeightPerRoi"] = m.plotRoiHeightPerRoi
-	cfg["plotPowerWidthPerBand"] = m.plotPowerWidthPerBand
-	cfg["plotPowerHeightPerSegment"] = m.plotPowerHeightPerSegment
-	cfg["plotItpcWidthPerBin"] = m.plotItpcWidthPerBin
-	cfg["plotItpcHeightPerBand"] = m.plotItpcHeightPerBand
-	cfg["plotItpcWidthPerBandBox"] = m.plotItpcWidthPerBandBox
-	cfg["plotItpcHeightBox"] = m.plotItpcHeightBox
-	cfg["plotPacCmap"] = m.plotPacCmap
-	cfg["plotPacWidthPerRoi"] = m.plotPacWidthPerRoi
-	cfg["plotPacHeightBox"] = m.plotPacHeightBox
-	cfg["plotAperiodicWidthPerColumn"] = m.plotAperiodicWidthPerColumn
-	cfg["plotAperiodicHeightPerRow"] = m.plotAperiodicHeightPerRow
-	cfg["plotComplexityWidthPerMeasure"] = m.plotComplexityWidthPerMeasure
-	cfg["plotComplexityHeightPerSegment"] = m.plotComplexityHeightPerSegment
-	cfg["plotConnectivityWidthPerCircle"] = m.plotConnectivityWidthPerCircle
-	cfg["plotConnectivityWidthPerBand"] = m.plotConnectivityWidthPerBand
-	cfg["plotConnectivityHeightPerMeasure"] = m.plotConnectivityHeightPerMeasure
-	cfg["plotConnectivityCircleTopFraction"] = m.plotConnectivityCircleTopFraction
-	cfg["plotConnectivityCircleMinLines"] = m.plotConnectivityCircleMinLines
-	cfg["plotConnectivityNetworkTopFraction"] = m.plotConnectivityNetworkTopFraction
-	cfg["plotConnectivityMeasuresSpec"] = m.plotConnectivityMeasuresSpec
-	cfg["plotPacPairsSpec"] = m.plotPacPairsSpec
-	cfg["plotSpectralMetricsSpec"] = m.plotSpectralMetricsSpec
-	cfg["plotBurstsMetricsSpec"] = m.plotBurstsMetricsSpec
-	cfg["plotAsymmetryStatSpec"] = m.plotAsymmetryStatSpec
-	cfg["plotCompareWindows"] = m.plotCompareWindows
-	cfg["plotComparisonWindowsSpec"] = m.plotComparisonWindowsSpec
-	cfg["plotCompareColumns"] = m.plotCompareColumns
-	cfg["plotComparisonSegment"] = m.plotComparisonSegment
-	cfg["plotComparisonColumn"] = m.plotComparisonColumn
-	cfg["plotComparisonValuesSpec"] = m.plotComparisonValuesSpec
-	cfg["plotComparisonLabelsSpec"] = m.plotComparisonLabelsSpec
-	cfg["plotComparisonROIsSpec"] = m.plotComparisonROIsSpec
-	if m.plotOverwrite != nil {
-		cfg["plotOverwrite"] = *m.plotOverwrite
-	}
-
 	// System
 	cfg["configSetOverrides"] = m.configSetOverrides
 	cfg["systemNJobs"] = m.systemNJobs
@@ -1160,15 +959,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 		if v, ok := cfg["featureFileSelected"]; ok {
 			m.featureFileSelected = boolMapToStringsMap(v)
 		}
-		if v, ok := cfg["plotSelected"]; ok {
-			m.plotSelected = listToMap(v)
-		}
-		if v, ok := cfg["featurePlotterSelected"]; ok {
-			m.featurePlotterSelected = boolMapToStringsMap(v)
-		}
-		if v, ok := cfg["plotFormatSelected"]; ok {
-			m.plotFormatSelected = boolMapToStringsMap(v)
-		}
 		if v, ok := cfg["connectivityMeasures"]; ok {
 			m.connectivityMeasures = listToMap(v)
 		}
@@ -1213,50 +1003,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.fmriGroupReproExpanded = getBool("fmriGroupReproExpanded", m.fmriGroupReproExpanded)
 	m.fmriGroupValidationExpanded = getBool("fmriGroupValidationExpanded", m.fmriGroupValidationExpanded)
 	m.fmriGroupAdvancedExpanded = getBool("fmriGroupAdvancedExpanded", m.fmriGroupAdvancedExpanded)
-
-	// Plotting UI State
-	m.plotGroupDefaultsExpanded = getBool("plotGroupDefaultsExpanded", m.plotGroupDefaultsExpanded)
-	m.plotGroupFontsExpanded = getBool("plotGroupFontsExpanded", m.plotGroupFontsExpanded)
-	m.plotGroupLayoutExpanded = getBool("plotGroupLayoutExpanded", m.plotGroupLayoutExpanded)
-	m.plotGroupFigureSizesExpanded = getBool("plotGroupFigureSizesExpanded", m.plotGroupFigureSizesExpanded)
-	m.plotGroupColorsExpanded = getBool("plotGroupColorsExpanded", m.plotGroupColorsExpanded)
-	m.plotGroupAlphaExpanded = getBool("plotGroupAlphaExpanded", m.plotGroupAlphaExpanded)
-	m.plotGroupScatterExpanded = getBool("plotGroupScatterExpanded", m.plotGroupScatterExpanded)
-	m.plotGroupBarExpanded = getBool("plotGroupBarExpanded", m.plotGroupBarExpanded)
-	m.plotGroupLineExpanded = getBool("plotGroupLineExpanded", m.plotGroupLineExpanded)
-	m.plotGroupHistogramExpanded = getBool("plotGroupHistogramExpanded", m.plotGroupHistogramExpanded)
-	m.plotGroupTopomapExpanded = getBool("plotGroupTopomapExpanded", m.plotGroupTopomapExpanded)
-	m.plotGroupTFRExpanded = getBool("plotGroupTFRExpanded", m.plotGroupTFRExpanded)
-	m.plotGroupSizingExpanded = getBool("plotGroupSizingExpanded", m.plotGroupSizingExpanded)
-	m.plotGroupSelectionExpanded = getBool("plotGroupSelectionExpanded", m.plotGroupSelectionExpanded)
-	m.plotGroupComparisonsExpanded = getBool("plotGroupComparisonsExpanded", m.plotGroupComparisonsExpanded)
-	m.plotGroupKDEExpanded = getBool("plotGroupKDEExpanded", m.plotGroupKDEExpanded)
-	m.plotGroupErrorbarExpanded = getBool("plotGroupErrorbarExpanded", m.plotGroupErrorbarExpanded)
-	m.plotGroupTextExpanded = getBool("plotGroupTextExpanded", m.plotGroupTextExpanded)
-	m.plotGroupValidationExpanded = getBool("plotGroupValidationExpanded", m.plotGroupValidationExpanded)
-	m.plotGroupTFRMiscExpanded = getBool("plotGroupTFRMiscExpanded", m.plotGroupTFRMiscExpanded)
-
-	// Plotting per-plot config + UI expansion state
-	if v, ok := cfg["plotItemConfigExpanded"]; ok {
-		m.plotItemConfigExpanded = boolMapToStringsMap(v)
-	}
-	if v, ok := cfg["plotItemConfigs"]; ok {
-		raw, ok := v.(map[string]interface{})
-		if ok {
-			m.plotItemConfigs = make(map[string]PlotItemConfig, len(raw))
-			for plotID, rawCfg := range raw {
-				blob, err := json.Marshal(rawCfg)
-				if err != nil {
-					continue
-				}
-				var pc PlotItemConfig
-				if err := json.Unmarshal(blob, &pc); err != nil {
-					continue
-				}
-				m.plotItemConfigs[plotID] = pc
-			}
-		}
-	}
 
 	// PAC/CFC
 	m.pacPhaseMin = getFloat("pacPhaseMin", m.pacPhaseMin)
@@ -1937,183 +1683,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.rfNEstimators = getInt("rfNEstimators", m.rfNEstimators)
 	m.rfMaxDepthGrid = getString("rfMaxDepthGrid", m.rfMaxDepthGrid)
 	m.varianceThresholdGrid = getString("varianceThresholdGrid", m.varianceThresholdGrid)
-
-	// Plotting
-	m.plottingScope = PlottingScope(getInt("plottingScope", int(m.plottingScope)))
-	m.plotDpiIndex = getInt("plotDpiIndex", m.plotDpiIndex)
-	m.plotSavefigDpiIndex = getInt("plotSavefigDpiIndex", m.plotSavefigDpiIndex)
-	m.plotSharedColorbar = getBool("plotSharedColorbar", m.plotSharedColorbar)
-	m.plotBboxInches = getString("plotBboxInches", m.plotBboxInches)
-	m.plotPadInches = getFloat("plotPadInches", m.plotPadInches)
-	m.plotFontFamily = getString("plotFontFamily", m.plotFontFamily)
-	m.plotFontWeight = getString("plotFontWeight", m.plotFontWeight)
-	m.plotFontSizeSmall = getInt("plotFontSizeSmall", m.plotFontSizeSmall)
-	m.plotFontSizeMedium = getInt("plotFontSizeMedium", m.plotFontSizeMedium)
-	m.plotFontSizeLarge = getInt("plotFontSizeLarge", m.plotFontSizeLarge)
-	m.plotFontSizeTitle = getInt("plotFontSizeTitle", m.plotFontSizeTitle)
-	m.plotFontSizeAnnotation = getInt("plotFontSizeAnnotation", m.plotFontSizeAnnotation)
-	m.plotFontSizeLabel = getInt("plotFontSizeLabel", m.plotFontSizeLabel)
-	m.plotFontSizeYLabel = getInt("plotFontSizeYLabel", m.plotFontSizeYLabel)
-	m.plotFontSizeSuptitle = getInt("plotFontSizeSuptitle", m.plotFontSizeSuptitle)
-	m.plotFontSizeFigureTitle = getInt("plotFontSizeFigureTitle", m.plotFontSizeFigureTitle)
-	m.plotLayoutTightRectSpec = getString("plotLayoutTightRectSpec", m.plotLayoutTightRectSpec)
-	m.plotLayoutTightRectMicrostateSpec = getString("plotLayoutTightRectMicrostateSpec", m.plotLayoutTightRectMicrostateSpec)
-	m.plotGridSpecWidthRatiosSpec = getString("plotGridSpecWidthRatiosSpec", m.plotGridSpecWidthRatiosSpec)
-	m.plotGridSpecHeightRatiosSpec = getString("plotGridSpecHeightRatiosSpec", m.plotGridSpecHeightRatiosSpec)
-	m.plotGridSpecHspace = getFloat("plotGridSpecHspace", m.plotGridSpecHspace)
-	m.plotGridSpecWspace = getFloat("plotGridSpecWspace", m.plotGridSpecWspace)
-	m.plotGridSpecLeft = getFloat("plotGridSpecLeft", m.plotGridSpecLeft)
-	m.plotGridSpecRight = getFloat("plotGridSpecRight", m.plotGridSpecRight)
-	m.plotGridSpecTop = getFloat("plotGridSpecTop", m.plotGridSpecTop)
-	m.plotGridSpecBottom = getFloat("plotGridSpecBottom", m.plotGridSpecBottom)
-	m.plotFigureSizeStandardSpec = getString("plotFigureSizeStandardSpec", m.plotFigureSizeStandardSpec)
-	m.plotFigureSizeMediumSpec = getString("plotFigureSizeMediumSpec", m.plotFigureSizeMediumSpec)
-	m.plotFigureSizeSmallSpec = getString("plotFigureSizeSmallSpec", m.plotFigureSizeSmallSpec)
-	m.plotFigureSizeSquareSpec = getString("plotFigureSizeSquareSpec", m.plotFigureSizeSquareSpec)
-	m.plotFigureSizeWideSpec = getString("plotFigureSizeWideSpec", m.plotFigureSizeWideSpec)
-	m.plotFigureSizeTFRSpec = getString("plotFigureSizeTFRSpec", m.plotFigureSizeTFRSpec)
-	m.plotFigureSizeTopomapSpec = getString("plotFigureSizeTopomapSpec", m.plotFigureSizeTopomapSpec)
-	m.plotColorCondB = getString("plotColorCondB", m.plotColorCondB)
-	m.plotColorCondA = getString("plotColorCondA", m.plotColorCondA)
-	m.plotColorSignificant = getString("plotColorSignificant", m.plotColorSignificant)
-	m.plotColorNonsignificant = getString("plotColorNonsignificant", m.plotColorNonsignificant)
-	m.plotColorGray = getString("plotColorGray", m.plotColorGray)
-	m.plotColorLightGray = getString("plotColorLightGray", m.plotColorLightGray)
-	m.plotColorBlack = getString("plotColorBlack", m.plotColorBlack)
-	m.plotColorBlue = getString("plotColorBlue", m.plotColorBlue)
-	m.plotColorRed = getString("plotColorRed", m.plotColorRed)
-	m.plotColorNetworkNode = getString("plotColorNetworkNode", m.plotColorNetworkNode)
-	m.plotAlphaGrid = getFloat("plotAlphaGrid", m.plotAlphaGrid)
-	m.plotAlphaFill = getFloat("plotAlphaFill", m.plotAlphaFill)
-	m.plotAlphaCI = getFloat("plotAlphaCI", m.plotAlphaCI)
-	m.plotAlphaCILine = getFloat("plotAlphaCILine", m.plotAlphaCILine)
-	m.plotAlphaTextBox = getFloat("plotAlphaTextBox", m.plotAlphaTextBox)
-	m.plotAlphaViolinBody = getFloat("plotAlphaViolinBody", m.plotAlphaViolinBody)
-	m.plotAlphaRidgeFill = getFloat("plotAlphaRidgeFill", m.plotAlphaRidgeFill)
-	m.plotScatterMarkerSizeSmall = getInt("plotScatterMarkerSizeSmall", m.plotScatterMarkerSizeSmall)
-	m.plotScatterMarkerSizeLarge = getInt("plotScatterMarkerSizeLarge", m.plotScatterMarkerSizeLarge)
-	m.plotScatterMarkerSizeDefault = getInt("plotScatterMarkerSizeDefault", m.plotScatterMarkerSizeDefault)
-	m.plotScatterAlpha = getFloat("plotScatterAlpha", m.plotScatterAlpha)
-	m.plotScatterEdgeColor = getString("plotScatterEdgeColor", m.plotScatterEdgeColor)
-	m.plotScatterEdgeWidth = getFloat("plotScatterEdgeWidth", m.plotScatterEdgeWidth)
-	m.plotBarAlpha = getFloat("plotBarAlpha", m.plotBarAlpha)
-	m.plotBarWidth = getFloat("plotBarWidth", m.plotBarWidth)
-	m.plotBarCapsize = getInt("plotBarCapsize", m.plotBarCapsize)
-	m.plotBarCapsizeLarge = getInt("plotBarCapsizeLarge", m.plotBarCapsizeLarge)
-	m.plotLineWidthThin = getFloat("plotLineWidthThin", m.plotLineWidthThin)
-	m.plotLineWidthStandard = getFloat("plotLineWidthStandard", m.plotLineWidthStandard)
-	m.plotLineWidthThick = getFloat("plotLineWidthThick", m.plotLineWidthThick)
-	m.plotLineWidthBold = getFloat("plotLineWidthBold", m.plotLineWidthBold)
-	m.plotLineAlphaStandard = getFloat("plotLineAlphaStandard", m.plotLineAlphaStandard)
-	m.plotLineAlphaDim = getFloat("plotLineAlphaDim", m.plotLineAlphaDim)
-	m.plotLineAlphaZeroLine = getFloat("plotLineAlphaZeroLine", m.plotLineAlphaZeroLine)
-	m.plotLineAlphaFitLine = getFloat("plotLineAlphaFitLine", m.plotLineAlphaFitLine)
-	m.plotLineAlphaDiagonal = getFloat("plotLineAlphaDiagonal", m.plotLineAlphaDiagonal)
-	m.plotLineAlphaReference = getFloat("plotLineAlphaReference", m.plotLineAlphaReference)
-	m.plotLineRegressionWidth = getFloat("plotLineRegressionWidth", m.plotLineRegressionWidth)
-	m.plotLineResidualWidth = getFloat("plotLineResidualWidth", m.plotLineResidualWidth)
-	m.plotLineQQWidth = getFloat("plotLineQQWidth", m.plotLineQQWidth)
-	m.plotHistBins = getInt("plotHistBins", m.plotHistBins)
-	m.plotHistBinsBehavioral = getInt("plotHistBinsBehavioral", m.plotHistBinsBehavioral)
-	m.plotHistBinsResidual = getInt("plotHistBinsResidual", m.plotHistBinsResidual)
-	m.plotHistBinsTFR = getInt("plotHistBinsTFR", m.plotHistBinsTFR)
-	m.plotHistEdgeColor = getString("plotHistEdgeColor", m.plotHistEdgeColor)
-	m.plotHistEdgeWidth = getFloat("plotHistEdgeWidth", m.plotHistEdgeWidth)
-	m.plotHistAlpha = getFloat("plotHistAlpha", m.plotHistAlpha)
-	m.plotHistAlphaResidual = getFloat("plotHistAlphaResidual", m.plotHistAlphaResidual)
-	m.plotHistAlphaTFR = getFloat("plotHistAlphaTFR", m.plotHistAlphaTFR)
-	m.plotKdePoints = getInt("plotKdePoints", m.plotKdePoints)
-	m.plotKdeColor = getString("plotKdeColor", m.plotKdeColor)
-	m.plotKdeLinewidth = getFloat("plotKdeLinewidth", m.plotKdeLinewidth)
-	m.plotKdeAlpha = getFloat("plotKdeAlpha", m.plotKdeAlpha)
-	m.plotErrorbarMarkerSize = getInt("plotErrorbarMarkerSize", m.plotErrorbarMarkerSize)
-	m.plotErrorbarCapsize = getInt("plotErrorbarCapsize", m.plotErrorbarCapsize)
-	m.plotErrorbarCapsizeLarge = getInt("plotErrorbarCapsizeLarge", m.plotErrorbarCapsizeLarge)
-	m.plotTextStatsX = getFloat("plotTextStatsX", m.plotTextStatsX)
-	m.plotTextStatsY = getFloat("plotTextStatsY", m.plotTextStatsY)
-	m.plotTextPvalueX = getFloat("plotTextPvalueX", m.plotTextPvalueX)
-	m.plotTextPvalueY = getFloat("plotTextPvalueY", m.plotTextPvalueY)
-	m.plotTextBootstrapX = getFloat("plotTextBootstrapX", m.plotTextBootstrapX)
-	m.plotTextBootstrapY = getFloat("plotTextBootstrapY", m.plotTextBootstrapY)
-	m.plotTextChannelAnnotationX = getFloat("plotTextChannelAnnotationX", m.plotTextChannelAnnotationX)
-	m.plotTextChannelAnnotationY = getFloat("plotTextChannelAnnotationY", m.plotTextChannelAnnotationY)
-	m.plotTextTitleY = getFloat("plotTextTitleY", m.plotTextTitleY)
-	m.plotTextResidualQcTitleY = getFloat("plotTextResidualQcTitleY", m.plotTextResidualQcTitleY)
-	m.plotValidationMinBinsForCalibration = getInt("plotValidationMinBinsForCalibration", m.plotValidationMinBinsForCalibration)
-	m.plotValidationMaxBinsForCalibration = getInt("plotValidationMaxBinsForCalibration", m.plotValidationMaxBinsForCalibration)
-	m.plotValidationSamplesPerBin = getInt("plotValidationSamplesPerBin", m.plotValidationSamplesPerBin)
-	m.plotValidationMinRoisForFDR = getInt("plotValidationMinRoisForFDR", m.plotValidationMinRoisForFDR)
-	m.plotValidationMinPvaluesForFDR = getInt("plotValidationMinPvaluesForFDR", m.plotValidationMinPvaluesForFDR)
-	m.plotTfrDefaultBaselineWindowSpec = getString("plotTfrDefaultBaselineWindowSpec", m.plotTfrDefaultBaselineWindowSpec)
-	m.plotTopomapContours = getInt("plotTopomapContours", m.plotTopomapContours)
-	m.plotTopomapColormap = getString("plotTopomapColormap", m.plotTopomapColormap)
-	m.plotTopomapColorbarFraction = getFloat("plotTopomapColorbarFraction", m.plotTopomapColorbarFraction)
-	m.plotTopomapColorbarPad = getFloat("plotTopomapColorbarPad", m.plotTopomapColorbarPad)
-	if v, ok := cfg["plotTopomapDiffAnnotation"].(bool); ok {
-		m.plotTopomapDiffAnnotation = &v
-	}
-	if v, ok := cfg["plotTopomapAnnotateDesc"].(bool); ok {
-		m.plotTopomapAnnotateDesc = &v
-	}
-	m.plotTopomapSigMaskMarker = getString("plotTopomapSigMaskMarker", m.plotTopomapSigMaskMarker)
-	m.plotTopomapSigMaskMarkerFaceColor = getString("plotTopomapSigMaskMarkerFaceColor", m.plotTopomapSigMaskMarkerFaceColor)
-	m.plotTopomapSigMaskMarkerEdgeColor = getString("plotTopomapSigMaskMarkerEdgeColor", m.plotTopomapSigMaskMarkerEdgeColor)
-	m.plotTopomapSigMaskLinewidth = getFloat("plotTopomapSigMaskLinewidth", m.plotTopomapSigMaskLinewidth)
-	m.plotTopomapSigMaskMarkerSize = getFloat("plotTopomapSigMaskMarkerSize", m.plotTopomapSigMaskMarkerSize)
-	m.plotTFRLogBase = getFloat("plotTFRLogBase", m.plotTFRLogBase)
-	m.plotTFRPercentageMultiplier = getFloat("plotTFRPercentageMultiplier", m.plotTFRPercentageMultiplier)
-	m.plotTFRTopomapWindowSizeMs = getFloat("plotTFRTopomapWindowSizeMs", m.plotTFRTopomapWindowSizeMs)
-	m.plotTFRTopomapWindowCount = getInt("plotTFRTopomapWindowCount", m.plotTFRTopomapWindowCount)
-	m.plotTFRTopomapLabelXPosition = getFloat("plotTFRTopomapLabelXPosition", m.plotTFRTopomapLabelXPosition)
-	m.plotTFRTopomapLabelYPositionBottom = getFloat("plotTFRTopomapLabelYPositionBottom", m.plotTFRTopomapLabelYPositionBottom)
-	m.plotTFRTopomapLabelYPosition = getFloat("plotTFRTopomapLabelYPosition", m.plotTFRTopomapLabelYPosition)
-	m.plotTFRTopomapTitleY = getFloat("plotTFRTopomapTitleY", m.plotTFRTopomapTitleY)
-	m.plotTFRTopomapTitlePad = getInt("plotTFRTopomapTitlePad", m.plotTFRTopomapTitlePad)
-	m.plotTFRTopomapSubplotsRight = getFloat("plotTFRTopomapSubplotsRight", m.plotTFRTopomapSubplotsRight)
-	m.plotTFRTopomapTemporalHspace = getFloat("plotTFRTopomapTemporalHspace", m.plotTFRTopomapTemporalHspace)
-	m.plotTFRTopomapTemporalWspace = getFloat("plotTFRTopomapTemporalWspace", m.plotTFRTopomapTemporalWspace)
-	m.plotRoiWidthPerBand = getFloat("plotRoiWidthPerBand", m.plotRoiWidthPerBand)
-	m.plotRoiWidthPerMetric = getFloat("plotRoiWidthPerMetric", m.plotRoiWidthPerMetric)
-	m.plotRoiHeightPerRoi = getFloat("plotRoiHeightPerRoi", m.plotRoiHeightPerRoi)
-	m.plotPowerWidthPerBand = getFloat("plotPowerWidthPerBand", m.plotPowerWidthPerBand)
-	m.plotPowerHeightPerSegment = getFloat("plotPowerHeightPerSegment", m.plotPowerHeightPerSegment)
-	m.plotItpcWidthPerBin = getFloat("plotItpcWidthPerBin", m.plotItpcWidthPerBin)
-	m.plotItpcHeightPerBand = getFloat("plotItpcHeightPerBand", m.plotItpcHeightPerBand)
-	m.plotItpcWidthPerBandBox = getFloat("plotItpcWidthPerBandBox", m.plotItpcWidthPerBandBox)
-	m.plotItpcHeightBox = getFloat("plotItpcHeightBox", m.plotItpcHeightBox)
-	m.plotPacCmap = getString("plotPacCmap", m.plotPacCmap)
-	m.plotPacWidthPerRoi = getFloat("plotPacWidthPerRoi", m.plotPacWidthPerRoi)
-	m.plotPacHeightBox = getFloat("plotPacHeightBox", m.plotPacHeightBox)
-	m.plotAperiodicWidthPerColumn = getFloat("plotAperiodicWidthPerColumn", m.plotAperiodicWidthPerColumn)
-	m.plotAperiodicHeightPerRow = getFloat("plotAperiodicHeightPerRow", m.plotAperiodicHeightPerRow)
-	m.plotComplexityWidthPerMeasure = getFloat("plotComplexityWidthPerMeasure", m.plotComplexityWidthPerMeasure)
-	m.plotComplexityHeightPerSegment = getFloat("plotComplexityHeightPerSegment", m.plotComplexityHeightPerSegment)
-	m.plotConnectivityWidthPerCircle = getFloat("plotConnectivityWidthPerCircle", m.plotConnectivityWidthPerCircle)
-	m.plotConnectivityWidthPerBand = getFloat("plotConnectivityWidthPerBand", m.plotConnectivityWidthPerBand)
-	m.plotConnectivityHeightPerMeasure = getFloat("plotConnectivityHeightPerMeasure", m.plotConnectivityHeightPerMeasure)
-	m.plotConnectivityCircleTopFraction = getFloat("plotConnectivityCircleTopFraction", m.plotConnectivityCircleTopFraction)
-	m.plotConnectivityCircleMinLines = getInt("plotConnectivityCircleMinLines", m.plotConnectivityCircleMinLines)
-	m.plotConnectivityNetworkTopFraction = getFloat("plotConnectivityNetworkTopFraction", m.plotConnectivityNetworkTopFraction)
-	m.plotConnectivityMeasuresSpec = getString("plotConnectivityMeasuresSpec", m.plotConnectivityMeasuresSpec)
-	m.plotPacPairsSpec = getString("plotPacPairsSpec", m.plotPacPairsSpec)
-	m.plotSpectralMetricsSpec = getString("plotSpectralMetricsSpec", m.plotSpectralMetricsSpec)
-	m.plotBurstsMetricsSpec = getString("plotBurstsMetricsSpec", m.plotBurstsMetricsSpec)
-	m.plotAsymmetryStatSpec = getString("plotAsymmetryStatSpec", m.plotAsymmetryStatSpec)
-	if v, ok := cfg["plotCompareWindows"].(bool); ok {
-		m.plotCompareWindows = &v
-	}
-	m.plotComparisonWindowsSpec = getString("plotComparisonWindowsSpec", m.plotComparisonWindowsSpec)
-	if v, ok := cfg["plotCompareColumns"].(bool); ok {
-		m.plotCompareColumns = &v
-	}
-	m.plotComparisonSegment = getString("plotComparisonSegment", m.plotComparisonSegment)
-	m.plotComparisonColumn = getString("plotComparisonColumn", m.plotComparisonColumn)
-	m.plotComparisonValuesSpec = getString("plotComparisonValuesSpec", m.plotComparisonValuesSpec)
-	m.plotComparisonLabelsSpec = getString("plotComparisonLabelsSpec", m.plotComparisonLabelsSpec)
-	m.plotComparisonROIsSpec = getString("plotComparisonROIsSpec", m.plotComparisonROIsSpec)
-	if v, ok := cfg["plotOverwrite"].(bool); ok {
-		m.plotOverwrite = &v
-	}
 
 	// System
 	m.configSetOverrides = getString("configSetOverrides", m.configSetOverrides)

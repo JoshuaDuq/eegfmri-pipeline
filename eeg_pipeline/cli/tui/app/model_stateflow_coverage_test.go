@@ -23,16 +23,16 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 
 	t.Run("main menu", func(t *testing.T) {
 		m := Model{
-			state:            StateMainMenu,
-			mainMenu:         mainmenu.New(),
-			repoRoot:         repoRoot,
-			subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
-			pipelineSmoke:    pipelinesmoke.New(""),
-			wizard:           wizard.New(types.PipelineBehavior, repoRoot),
-			global:           globalsetup.New(repoRoot),
-			execution:        execution.New("echo test"),
-			dashboard:        dashboard.New(repoRoot),
-			quickActions:     quickactions.New(),
+			state:         StateMainMenu,
+			mainMenu:      mainmenu.New(),
+			repoRoot:      repoRoot,
+			subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
+			pipelineSmoke: pipelinesmoke.New(""),
+			wizard:        wizard.New(types.PipelineBehavior, repoRoot),
+			global:        globalsetup.New(repoRoot),
+			execution:     execution.New("echo test"),
+			dashboard:     dashboard.New(repoRoot),
+			quickActions:  quickactions.New(),
 		}
 
 		next, cmd := m.delegateToCurrentView(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -49,7 +49,7 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 			state:         AppState(-1),
 			repoRoot:      repoRoot,
 			subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
-			quickActions:   quickactions.New(),
+			quickActions:  quickactions.New(),
 		}
 		m.quickActions.Show()
 		m.quickActions.Done = true
@@ -70,16 +70,16 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 
 	t.Run("pipeline smoke", func(t *testing.T) {
 		m := Model{
-			state:            StatePipelineSmoke,
-			navStack:         []AppState{StateMainMenu},
-			repoRoot:         repoRoot,
-			subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
-			pipelineSmoke:    pipelinesmoke.New("task"),
-			wizard:           wizard.New(types.PipelineBehavior, repoRoot),
-			global:           globalsetup.New(repoRoot),
-			execution:        execution.New("echo test"),
-			dashboard:        dashboard.New(repoRoot),
-			quickActions:     quickactions.New(),
+			state:         StatePipelineSmoke,
+			navStack:      []AppState{StateMainMenu},
+			repoRoot:      repoRoot,
+			subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
+			pipelineSmoke: pipelinesmoke.New("task"),
+			wizard:        wizard.New(types.PipelineBehavior, repoRoot),
+			global:        globalsetup.New(repoRoot),
+			execution:     execution.New("echo test"),
+			dashboard:     dashboard.New(repoRoot),
+			quickActions:  quickactions.New(),
 		}
 
 		next, cmd := m.delegateToCurrentView(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -93,16 +93,16 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 
 	t.Run("global setup", func(t *testing.T) {
 		m := Model{
-			state:            StateGlobalSetup,
-			navStack:         []AppState{StateMainMenu},
-			repoRoot:         repoRoot,
-			subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
-			pipelineSmoke:    pipelinesmoke.New("task"),
-			wizard:           wizard.New(types.PipelineBehavior, repoRoot),
-			global:           globalsetup.New(repoRoot),
-			execution:        execution.New("echo test"),
-			dashboard:        dashboard.New(repoRoot),
-			quickActions:     quickactions.New(),
+			state:         StateGlobalSetup,
+			navStack:      []AppState{StateMainMenu},
+			repoRoot:      repoRoot,
+			subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
+			pipelineSmoke: pipelinesmoke.New("task"),
+			wizard:        wizard.New(types.PipelineBehavior, repoRoot),
+			global:        globalsetup.New(repoRoot),
+			execution:     execution.New("echo test"),
+			dashboard:     dashboard.New(repoRoot),
+			quickActions:  quickactions.New(),
 		}
 
 		next, cmd := m.delegateToCurrentView(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -116,16 +116,16 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 
 	t.Run("execution", func(t *testing.T) {
 		m := Model{
-			state:            StateExecution,
-			navStack:         []AppState{StateMainMenu},
-			repoRoot:         repoRoot,
-			subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
-			pipelineSmoke:    pipelinesmoke.New("task"),
-			wizard:           wizard.New(types.PipelineBehavior, repoRoot),
-			global:           globalsetup.New(repoRoot),
-			execution:        execution.New("echo test"),
-			dashboard:        dashboard.New(repoRoot),
-			quickActions:     quickactions.New(),
+			state:         StateExecution,
+			navStack:      []AppState{StateMainMenu},
+			repoRoot:      repoRoot,
+			subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
+			pipelineSmoke: pipelinesmoke.New("task"),
+			wizard:        wizard.New(types.PipelineBehavior, repoRoot),
+			global:        globalsetup.New(repoRoot),
+			execution:     execution.New("echo test"),
+			dashboard:     dashboard.New(repoRoot),
+			quickActions:  quickactions.New(),
 		}
 
 		next, cmd := m.delegateToCurrentView(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -139,16 +139,16 @@ func TestDelegateToCurrentViewRoutesAndOverlay(t *testing.T) {
 
 	t.Run("dashboard", func(t *testing.T) {
 		m := Model{
-			state:            StateDashboard,
-			navStack:         []AppState{StateMainMenu},
-			repoRoot:         repoRoot,
-			subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
-			pipelineSmoke:    pipelinesmoke.New("task"),
-			wizard:           wizard.New(types.PipelineBehavior, repoRoot),
-			global:           globalsetup.New(repoRoot),
-			execution:        execution.New("echo test"),
-			dashboard:        dashboard.New(repoRoot),
-			quickActions:     quickactions.New(),
+			state:         StateDashboard,
+			navStack:      []AppState{StateMainMenu},
+			repoRoot:      repoRoot,
+			subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
+			pipelineSmoke: pipelinesmoke.New("task"),
+			wizard:        wizard.New(types.PipelineBehavior, repoRoot),
+			global:        globalsetup.New(repoRoot),
+			execution:     execution.New("echo test"),
+			dashboard:     dashboard.New(repoRoot),
+			quickActions:  quickactions.New(),
 		}
 
 		next, cmd := m.delegateToCurrentView(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -167,16 +167,16 @@ func TestHandlePipelineSmokeUpdate_CompletesOrCancels(t *testing.T) {
 
 	t.Run("cancelled", func(t *testing.T) {
 		m := Model{
-			state:            StatePipelineSmoke,
-			navStack:         []AppState{StateMainMenu},
-			repoRoot:         repoRoot,
-			pipelineSmoke:    pipelinesmoke.New("task"),
-			subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
-			wizard:           wizard.New(types.PipelineBehavior, repoRoot),
-			global:           globalsetup.New(repoRoot),
-			execution:        execution.New("echo test"),
-			dashboard:        dashboard.New(repoRoot),
-			quickActions:     quickactions.New(),
+			state:         StatePipelineSmoke,
+			navStack:      []AppState{StateMainMenu},
+			repoRoot:      repoRoot,
+			pipelineSmoke: pipelinesmoke.New("task"),
+			subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
+			wizard:        wizard.New(types.PipelineBehavior, repoRoot),
+			global:        globalsetup.New(repoRoot),
+			execution:     execution.New("echo test"),
+			dashboard:     dashboard.New(repoRoot),
+			quickActions:  quickactions.New(),
 		}
 		m.pipelineSmoke.Done = true
 		m.pipelineSmoke.Cancelled = true
@@ -194,16 +194,16 @@ func TestHandlePipelineSmokeUpdate_CompletesOrCancels(t *testing.T) {
 
 	t.Run("start execution", func(t *testing.T) {
 		m := Model{
-			state:            StatePipelineSmoke,
-			navStack:         []AppState{StateMainMenu},
-			repoRoot:         repoRoot,
-			pipelineSmoke:    pipelinesmoke.New("task"),
-			subjectsCache:    make(map[string]messages.SubjectsLoadedMsg),
-			wizard:           wizard.New(types.PipelineBehavior, repoRoot),
-			global:           globalsetup.New(repoRoot),
-			execution:        execution.New("echo test"),
-			dashboard:        dashboard.New(repoRoot),
-			quickActions:     quickactions.New(),
+			state:         StatePipelineSmoke,
+			navStack:      []AppState{StateMainMenu},
+			repoRoot:      repoRoot,
+			pipelineSmoke: pipelinesmoke.New("task"),
+			subjectsCache: make(map[string]messages.SubjectsLoadedMsg),
+			wizard:        wizard.New(types.PipelineBehavior, repoRoot),
+			global:        globalsetup.New(repoRoot),
+			execution:     execution.New("echo test"),
+			dashboard:     dashboard.New(repoRoot),
+			quickActions:  quickactions.New(),
 		}
 		m.pipelineSmoke.Done = true
 		m.pipelineSmoke.RunCommand = "eeg-pipeline validate --all-subjects"

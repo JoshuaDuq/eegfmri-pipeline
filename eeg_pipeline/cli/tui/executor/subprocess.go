@@ -56,10 +56,6 @@ type ConfigSummaryResponse struct {
 	PreprocessingNJobs int    `json:"preprocessing_n_jobs"`
 }
 
-type PlottersResponse struct {
-	FeaturePlotters map[string][]messages.PlotterInfo `json:"feature_plotters"`
-}
-
 // DiscoverColumnsResponse from eeg-pipeline discover --json
 type DiscoverColumnsResponse struct {
 	Columns []string            `json:"columns"`
@@ -463,24 +459,6 @@ func LoadSubjectsRefresh(repoRoot string, task string, pipeline types.Pipeline) 
 			AvailableChannels:         response.AvailableChannels,
 			UnavailableChannels:       response.UnavailableChannels,
 		}
-	}
-}
-
-func LoadPlotters(repoRoot string) tea.Cmd {
-	return func() tea.Msg {
-		args := []string{"-m", "eeg_pipeline", "info", "plotters", "--json"}
-
-		output, err := runPythonJSONCommand(repoRoot, args)
-		if err != nil {
-			return messages.PlottersLoadedMsg{Error: err}
-		}
-
-		var response PlottersResponse
-		if err := json.Unmarshal(output, &response); err != nil {
-			return messages.PlottersLoadedMsg{Error: err}
-		}
-
-		return messages.PlottersLoadedMsg{FeaturePlotters: response.FeaturePlotters}
 	}
 }
 

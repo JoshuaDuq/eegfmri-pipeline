@@ -253,10 +253,8 @@ def _feature_import_stubs() -> dict[str, types.ModuleType]:
             "eeg_pipeline.pipelines.progress",
             ensure_progress_reporter=lambda progress=None: progress or _NoopProgress(),
         ),
-        "eeg_pipeline.plotting": _make_package("eeg_pipeline.plotting"),
-        "eeg_pipeline.plotting.io": _make_package("eeg_pipeline.plotting.io"),
-        "eeg_pipeline.plotting.io.figures": _make_module(
-            "eeg_pipeline.plotting.io.figures",
+        "eeg_pipeline.infra.matplotlib": _make_module(
+            "eeg_pipeline.infra.matplotlib",
             setup_matplotlib=lambda *args, **kwargs: None,
         ),
         "eeg_pipeline.types": _make_module(

@@ -2,7 +2,6 @@ package wizard
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/eeg-pipeline/tui/types"
 )
@@ -29,9 +28,6 @@ func (m *Model) validateSubjectSelectionStep() []string {
 				continue
 			}
 			valid, _ := m.Pipeline.ValidateSubject(subject)
-			if m.Pipeline == types.PipelinePlotting {
-				valid, _ = m.validatePlottingSubject(subject)
-			}
 			if valid {
 				validCount++
 			}
@@ -41,9 +37,6 @@ func (m *Model) validateSubjectSelectionStep() []string {
 
 	minRequired := minSubjectsRequired
 	if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
-		minRequired = minSubjectsForGroupCV
-	}
-	if m.Pipeline == types.PipelinePlotting && m.plottingScope == PlottingScopeGroup {
 		minRequired = minSubjectsForGroupCV
 	}
 	if selectedCount < minRequired {
@@ -89,44 +82,6 @@ func (m *Model) validateBandSelectionStep() []string {
 	return nil
 }
 
-func (m *Model) validatePlotSelectionStep() []string {
-	if m.countSelectedVisiblePlots() == 0 {
-		return []string{"Select at least one plot to generate"}
-	}
-	if taskOnlyPlots := m.selectedRestTaskOnlyPlots(); len(taskOnlyPlots) > 0 {
-		return []string{
-			fmt.Sprintf(
-				"Resting-state plotting does not support task-only plot(s): %s",
-				strings.Join(taskOnlyPlots, ", "),
-			),
-		}
-	}
-	return nil
-}
-
-func (m *Model) validateFeaturePlotterSelectionStep() []string {
-	if len(m.selectedFeaturePlotterCategories()) == 0 {
-		return nil
-	}
-	if m.featurePlotters == nil && strings.TrimSpace(m.featurePlotterError) == "" {
-		return []string{"Feature plot list is still loading"}
-	}
-	if m.featurePlotters == nil && strings.TrimSpace(m.featurePlotterError) != "" {
-		return nil
-	}
-
-	count := 0
-	for _, plotter := range m.featurePlotterItems() {
-		if m.featurePlotterSelected[plotter.ID] {
-			count++
-		}
-	}
-	if count == 0 {
-		return []string{"Select at least one feature plot"}
-	}
-	return nil
-}
-
 func (m *Model) validateSpatialSelectionStep() []string {
 	if countSelectedItems(m.spatialSelected) == 0 {
 		return []string{"Select at least one spatial mode"}
@@ -143,11 +98,4 @@ func (m *Model) validatePreprocessingStageSelectionStep() []string {
 
 func (m *Model) validateTimeRangeStep() []string {
 	return m.validateTimeRanges()
-}
-
-func (m *Model) validatePlotConfigStep() []string {
-	if countSelectedStringItems(m.plotFormatSelected) == 0 {
-		return []string{"Select at least one output format (PNG, SVG, or PDF)"}
-	}
-	return nil
 }

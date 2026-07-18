@@ -28,14 +28,6 @@ const (
 	timeRangeFieldCount   = 3
 )
 
-var groupSupportedPlotIDs = map[string]struct{}{
-	"band_power_topomaps":               {},
-	"cross_frequency_power_correlation": {},
-	"power_by_condition":                {},
-	"power_spectral_density":            {},
-	"power_timecourse":                  {},
-}
-
 ///////////////////////////////////////////////////////////////////
 // Cursor Reset Helper
 ///////////////////////////////////////////////////////////////////
@@ -55,18 +47,6 @@ func (m *Model) resetCursorsForStep() {
 	m.cmdScrollOffset = 0
 	m.subCursor = 0
 	m.expandedOption = expandedNone
-	m.plotCursor = 0
-	m.plotOffset = 0
-	if m.CurrentStep == types.StepSelectPlots {
-		m.plotCursor = m.findNextVisiblePlot(-1, 1)
-	}
-	m.featurePlotterCursor = 0
-	m.featurePlotterOffset = 0
-	if m.CurrentStep == types.StepSelectFeaturePlotters {
-		m.featurePlotterCursor = m.findNextFeaturePlotter(-1, 1)
-	}
-	m.plotConfigCursor = 0
-
 	m.filteringSubject = false
 	m.subjectFilter = ""
 	m.editingNumber = false
@@ -74,8 +54,6 @@ func (m *Model) resetCursorsForStep() {
 	m.editingText = false
 	m.textBuffer = ""
 	m.editingTextField = textFieldNone
-	m.editingPlotID = ""
-	m.editingPlotField = plotItemConfigFieldNone
 	m.editingRangeIdx = -1
 	m.editingField = 0
 }
@@ -122,10 +100,6 @@ func (m *Model) shouldSkipStep(step types.WizardStep) bool {
 			// For visualize, skip computations selection, features selection, and advanced config
 			return step == types.StepSelectComputations || step == types.StepSelectFeatureFiles || step == types.StepAdvancedConfig
 		}
-	case types.PipelinePlotting:
-		if step == types.StepSelectFeaturePlotters && len(m.selectedFeaturePlotterCategories()) == 0 {
-			return true
-		}
 	}
 	return false
 }
@@ -137,15 +111,8 @@ func (m *Model) handleUp() {
 
 	case types.StepSelectComputations:
 		m.computationCursor = moveCursorInList(m.computationCursor, -1, len(m.computations))
-	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
-			options := m.getGlobalStylingOptions()
-			if len(options) > 0 {
-				m.globalStylingCursor = moveCursorInList(m.globalStylingCursor, -1, len(options))
-			}
-		} else {
-			m.categoryIndex = moveCursorInList(m.categoryIndex, -1, len(m.categories))
-		}
+	case types.StepConfigureOptions:
+		m.categoryIndex = moveCursorInList(m.categoryIndex, -1, len(m.categories))
 	case types.StepSelectSubjects:
 		if len(m.subjects) > 0 {
 			m.subjectCursor = moveCursorInList(m.subjectCursor, -1, len(m.subjects))
@@ -158,15 +125,6 @@ func (m *Model) handleUp() {
 		applicable := m.GetApplicableFeatureFiles()
 		if len(applicable) > 0 {
 			m.featureFileCursor = moveCursorInList(m.featureFileCursor, -1, len(applicable))
-		}
-	case types.StepSelectPlots:
-		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, -1)
-	case types.StepSelectFeaturePlotters:
-		m.featurePlotterCursor = m.findNextFeaturePlotter(m.featurePlotterCursor, -1)
-	case types.StepPlotConfig:
-		options := m.getPlotConfigOptions()
-		if len(options) > 0 {
-			m.plotConfigCursor = moveCursorInList(m.plotConfigCursor, -1, len(options))
 		}
 	case types.StepSelectSpatial:
 		m.spatialCursor = moveCursorInList(m.spatialCursor, -1, len(spatialModes))
@@ -188,12 +146,8 @@ func (m *Model) handleUp() {
 			}
 			m.UpdateAdvancedOffset()
 		} else {
-			if m.Pipeline == types.PipelinePlotting {
-				m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, -1)
-			} else {
-				optCount := m.getAdvancedOptionCount()
-				m.advancedCursor = moveCursorInList(m.advancedCursor, -1, optCount)
-			}
+			optCount := m.getAdvancedOptionCount()
+			m.advancedCursor = moveCursorInList(m.advancedCursor, -1, optCount)
 			m.UpdateAdvancedOffset()
 		}
 	}
@@ -206,15 +160,8 @@ func (m *Model) handleDown() {
 
 	case types.StepSelectComputations:
 		m.computationCursor = moveCursorInList(m.computationCursor, 1, len(m.computations))
-	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
-			options := m.getGlobalStylingOptions()
-			if len(options) > 0 {
-				m.globalStylingCursor = moveCursorInList(m.globalStylingCursor, 1, len(options))
-			}
-		} else {
-			m.categoryIndex = moveCursorInList(m.categoryIndex, 1, len(m.categories))
-		}
+	case types.StepConfigureOptions:
+		m.categoryIndex = moveCursorInList(m.categoryIndex, 1, len(m.categories))
 	case types.StepSelectSubjects:
 		m.subjectCursor = moveCursorInList(m.subjectCursor, 1, len(m.subjects))
 	case types.StepSelectBands:
@@ -224,15 +171,6 @@ func (m *Model) handleDown() {
 	case types.StepSelectFeatureFiles:
 		applicable := m.GetApplicableFeatureFiles()
 		m.featureFileCursor = moveCursorInList(m.featureFileCursor, 1, len(applicable))
-	case types.StepSelectPlots:
-		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, 1)
-	case types.StepSelectFeaturePlotters:
-		m.featurePlotterCursor = m.findNextFeaturePlotter(m.featurePlotterCursor, 1)
-	case types.StepPlotConfig:
-		options := m.getPlotConfigOptions()
-		if len(options) > 0 {
-			m.plotConfigCursor = moveCursorInList(m.plotConfigCursor, 1, len(options))
-		}
 	case types.StepSelectSpatial:
 		m.spatialCursor = moveCursorInList(m.spatialCursor, 1, len(spatialModes))
 	case types.StepTimeRange:
@@ -253,12 +191,8 @@ func (m *Model) handleDown() {
 			}
 			m.UpdateAdvancedOffset()
 		} else {
-			if m.Pipeline == types.PipelinePlotting {
-				m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, 1)
-			} else {
-				optCount := m.getAdvancedOptionCount()
-				m.advancedCursor = moveCursorInList(m.advancedCursor, 1, optCount)
-			}
+			optCount := m.getAdvancedOptionCount()
+			m.advancedCursor = moveCursorInList(m.advancedCursor, 1, optCount)
 			m.UpdateAdvancedOffset()
 		}
 	}
@@ -275,20 +209,10 @@ func (m *Model) handleTab() {
 			}
 			return
 		}
-		if m.Pipeline == types.PipelinePlotting {
-			if m.plottingScope == PlottingScopeGroup {
-				m.plottingScope = PlottingScopeSubject
-			} else {
-				m.plottingScope = PlottingScopeGroup
-			}
-			return
-		}
 	case types.StepAdvancedConfig:
 		if m.expandedOption >= 0 {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
-			m.editingPlotID = ""
-			m.editingPlotField = plotItemConfigFieldNone
 			optCount := m.getAdvancedOptionCount()
 			if m.advancedCursor < optCount-1 {
 				m.advancedCursor++
@@ -365,20 +289,8 @@ func (m *Model) handleSpace() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
 		m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
-	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
-			// Handle space in global styling panel - toggle group expansion
-			options := m.getGlobalStylingOptions()
-			if m.globalStylingCursor < len(options) {
-				opt := options[m.globalStylingCursor]
-				m.togglePlotGroupExpansion(opt)
-				m.globalStylingOptions = m.getGlobalStylingOptions()
-			}
-		} else if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
-			m.togglePlotCategory(m.categoryIndex)
-		} else {
-			m.selected[m.categoryIndex] = !m.selected[m.categoryIndex]
-		}
+	case types.StepConfigureOptions:
+		m.selected[m.categoryIndex] = !m.selected[m.categoryIndex]
 	case types.StepSelectSubjects:
 		if m.subjectCursor < len(m.subjects) {
 			subj := m.subjects[m.subjectCursor].ID
@@ -395,76 +307,6 @@ func (m *Model) handleSpace() {
 			key := applicable[m.featureFileCursor].Key
 			m.featureFileSelected[key] = !m.featureFileSelected[key]
 		}
-	case types.StepSelectPlots:
-		if m.plotCursor < len(m.plotItems) {
-			if !m.IsPlotVisibleForSelection(m.plotItems[m.plotCursor]) {
-				m.plotCursor = m.findNextVisiblePlot(m.plotCursor, 1)
-				if m.plotCursor < 0 || m.plotCursor >= len(m.plotItems) {
-					break
-				}
-				if !m.IsPlotVisibleForSelection(m.plotItems[m.plotCursor]) {
-					break
-				}
-			}
-			m.plotSelected[m.plotCursor] = !m.plotSelected[m.plotCursor]
-			plotID := m.plotItems[m.plotCursor].ID
-			if m.plotSelected[m.plotCursor] {
-				_ = m.ensurePlotItemConfig(plotID)
-				if m.plotItemConfigExpanded == nil {
-					m.plotItemConfigExpanded = make(map[string]bool)
-				}
-				if _, ok := m.plotItemConfigExpanded[plotID]; !ok {
-					m.plotItemConfigExpanded[plotID] = false
-				}
-			} else {
-				delete(m.plotItemConfigs, plotID)
-				delete(m.plotItemConfigExpanded, plotID)
-			}
-		}
-	case types.StepSelectFeaturePlotters:
-		items := m.featurePlotterItems()
-		if len(items) == 0 {
-			break
-		}
-		if m.featurePlotterCursor < 0 || m.featurePlotterCursor >= len(items) {
-			break
-		}
-		id := items[m.featurePlotterCursor].ID
-		m.featurePlotterSelected[id] = !m.featurePlotterSelected[id]
-
-	case types.StepPlotConfig:
-		options := m.getPlotConfigOptions()
-		if m.plotConfigCursor < 0 || m.plotConfigCursor >= len(options) {
-			break
-		}
-		opt := options[m.plotConfigCursor]
-		switch opt {
-		case optPlotPNG:
-			m.plotFormatSelected["png"] = !m.plotFormatSelected["png"]
-		case optPlotSVG:
-			m.plotFormatSelected["svg"] = !m.plotFormatSelected["svg"]
-		case optPlotPDF:
-			m.plotFormatSelected["pdf"] = !m.plotFormatSelected["pdf"]
-		case optPlotDPI:
-			if len(m.plotDpiOptions) > 0 {
-				m.plotDpiIndex = (m.plotDpiIndex + 1) % len(m.plotDpiOptions)
-			}
-		case optPlotSaveDPI:
-			if len(m.plotDpiOptions) > 0 {
-				m.plotSavefigDpiIndex = (m.plotSavefigDpiIndex + 1) % len(m.plotDpiOptions)
-			}
-		case optPlotSharedColorbar:
-			m.plotSharedColorbar = !m.plotSharedColorbar
-		case optPlotOverwrite:
-			if m.plotOverwrite == nil {
-				val := true
-				m.plotOverwrite = &val
-			} else {
-				val := !*m.plotOverwrite
-				m.plotOverwrite = &val
-			}
-		}
-
 	case types.StepSelectSpatial:
 		m.spatialSelected[m.spatialCursor] = !m.spatialSelected[m.spatialCursor]
 	case types.StepSelectPreprocessingStages:
@@ -501,15 +343,9 @@ func (m *Model) selectAll() {
 		for i := range m.computations {
 			m.computationSelected[i] = true
 		}
-	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		// Features pipeline or Plotting categories selection
+	case types.StepConfigureOptions:
 		for i := range m.categories {
 			m.selected[i] = true
-		}
-		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
-			for i := range m.plotItems {
-				m.plotSelected[i] = true
-			}
 		}
 	case types.StepSelectSubjects:
 		for _, s := range m.subjects {
@@ -536,16 +372,6 @@ func (m *Model) selectAll() {
 		for _, f := range m.featureFiles {
 			m.featureFileSelected[f.Key] = true
 		}
-	case types.StepSelectPlots:
-		for i, plot := range m.plotItems {
-			if m.IsPlotVisibleForSelection(plot) {
-				m.plotSelected[i] = true
-			}
-		}
-	case types.StepSelectFeaturePlotters:
-		for _, p := range m.featurePlotterItems() {
-			m.featurePlotterSelected[p.ID] = true
-		}
 	}
 }
 
@@ -553,14 +379,8 @@ func (m *Model) selectNone() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
 		m.computationSelected = make(map[int]bool)
-	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		// Features pipeline or Plotting categories selection
+	case types.StepConfigureOptions:
 		m.selected = make(map[int]bool)
-		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
-			for i := range m.plotItems {
-				m.plotSelected[i] = false
-			}
-		}
 	case types.StepSelectSubjects:
 		m.subjectSelected = make(map[string]bool)
 		m.updateFeatureAvailability()
@@ -574,16 +394,6 @@ func (m *Model) selectNone() {
 		m.prepStageSelected = make(map[int]bool)
 	case types.StepSelectFeatureFiles:
 		m.featureFileSelected = make(map[string]bool)
-	case types.StepSelectPlots:
-		for i, plot := range m.plotItems {
-			if m.IsPlotVisibleForSelection(plot) {
-				m.plotSelected[i] = false
-			}
-		}
-	case types.StepSelectFeaturePlotters:
-		for _, p := range m.featurePlotterItems() {
-			m.featurePlotterSelected[p.ID] = false
-		}
 	}
 }
 
@@ -592,8 +402,6 @@ func (m *Model) GoBack() bool {
 	if m.CurrentStep == types.StepAdvancedConfig && m.expandedOption >= 0 {
 		m.expandedOption = expandedNone
 		m.subCursor = 0
-		m.editingPlotID = ""
-		m.editingPlotField = plotItemConfigFieldNone
 		m.UpdateAdvancedOffset()
 		return true
 	}
@@ -639,9 +447,6 @@ func (m *Model) validate() []string {
 				continue
 			}
 			valid, reason := m.Pipeline.ValidateSubject(s)
-			if m.Pipeline == types.PipelinePlotting {
-				valid, reason = m.validatePlottingSubject(s)
-			}
 			if !valid {
 				errors = append(errors, fmt.Sprintf("Subject %s: %s", subjID, reason))
 			} else {
@@ -653,9 +458,6 @@ func (m *Model) validate() []string {
 
 	minRequired := minSubjectsRequired
 	if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
-		minRequired = minSubjectsForGroupCV
-	}
-	if m.Pipeline == types.PipelinePlotting && m.plottingScope == PlottingScopeGroup {
 		minRequired = minSubjectsForGroupCV
 	}
 	if m.Pipeline == types.PipelineFmriAnalysis {
@@ -707,16 +509,6 @@ func (m *Model) validate() []string {
 					strings.Join(invalid, ", "),
 				),
 			)
-		}
-	}
-
-	if m.Pipeline == types.PipelinePlotting {
-		if len(m.SelectedPlotIDs()) == 0 {
-			errors = append(errors, "No plots selected")
-		}
-		formatCount := countSelectedStringItems(m.plotFormatSelected)
-		if formatCount == 0 {
-			errors = append(errors, "No output formats selected")
 		}
 	}
 
@@ -917,48 +709,6 @@ func (m *Model) validateTimeRanges() []string {
 	return errors
 }
 
-func (m Model) plotRequirements() (requiresEpochs bool, requiresFeatures bool, requiresStats bool) {
-	for i, plot := range m.plotItems {
-		if !m.plotSelected[i] || !m.IsPlotVisibleForSelection(plot) {
-			continue
-		}
-		if plot.RequiresEpochs {
-			requiresEpochs = true
-		}
-		if plot.RequiresFeatures {
-			requiresFeatures = true
-		}
-		if plot.RequiresStats {
-			requiresStats = true
-		}
-	}
-	return requiresEpochs, requiresFeatures, requiresStats
-}
-
-func (m Model) validatePlottingSubject(s types.SubjectStatus) (bool, string) {
-	// During subject selection (the first plotting step), keep validation permissive
-	// so users can choose subjects before narrowing the plot set.
-	if m.CurrentStep == types.StepSelectSubjects {
-		if !s.HasEpochs && !s.HasFeatures && !s.HasStats {
-			return false, "no derivatives"
-		}
-		return true, ""
-	}
-
-	requiresEpochs, requiresFeatures, requiresStats := m.plotRequirements()
-	if requiresEpochs && !s.HasEpochs {
-		return false, "missing epochs"
-	}
-	if requiresFeatures && !s.HasFeatures {
-		return false, "missing features"
-	}
-	if requiresStats && !s.HasStats {
-		return false, "missing stats"
-	}
-	return true, ""
-}
-
-///////////////////////////////////////////////////////////////////
 // Advanced Configuration Helpers
 ///////////////////////////////////////////////////////////////////
 
@@ -969,9 +719,6 @@ func (m *Model) getAdvancedOptionCount() int {
 		return len(m.getFeaturesOptions())
 	case types.PipelineBehavior:
 		return len(m.getBehaviorOptions())
-	case types.PipelinePlotting:
-		return len(m.getPlottingAdvancedRows())
-
 	case types.PipelineML:
 		return len(m.getMLOptions())
 	case types.PipelinePreprocessing:
@@ -985,171 +732,12 @@ func (m *Model) getAdvancedOptionCount() int {
 	}
 }
 
-func (m *Model) findNextPlottingAdvancedRow(current int, delta int) int {
-	rows := m.getPlottingAdvancedRows()
-	if len(rows) == 0 {
-		return 0
-	}
-	next := current
-	maxIterations := len(rows)
-	for i := 0; i < maxIterations; i++ {
-		next = moveCursorInList(next, delta, len(rows))
-		rowKind := rows[next].kind
-		isNonSelectableRow := rowKind == plottingRowSection || rowKind == plottingRowPlotInfo
-		if !isNonSelectableRow {
-			return next
-		}
-	}
-	return current
-}
-
-func (m Model) findNextVisiblePlot(current int, delta int) int {
-	if len(m.plotItems) == 0 {
-		return 0
-	}
-
-	next := current
-	if next < 0 {
-		next = len(m.plotItems) - 1
-	}
-
-	maxIterations := len(m.plotItems)
-	for i := 0; i < maxIterations; i++ {
-		next = moveCursorInList(next, delta, len(m.plotItems))
-		if m.IsPlotVisibleForSelection(m.plotItems[next]) {
-			return next
-		}
-	}
-	return current
-}
-
-func (m Model) findNextFeaturePlotter(current int, delta int) int {
-	items := m.featurePlotterItems()
-	if len(items) == 0 {
-		return 0
-	}
-	next := current
-	if next < 0 {
-		next = len(items) - 1
-	}
-	return moveCursorInList(next, delta, len(items))
-}
-
 // startNumberEdit enters editing mode for the current field
 func (m *Model) startNumberEdit() {
 	m.editingNumber = true
 	m.numberBuffer = ""
 }
 
-func (m *Model) togglePlotCategory(idx int) {
-	if idx < 0 || idx >= len(m.categories) {
-		return
-	}
-	m.selected[idx] = !m.selected[idx]
-
-	categories := m.plotCategories
-	if len(categories) == 0 {
-		categories = defaultPlotCategories
-	}
-	if idx >= len(categories) {
-		return
-	}
-	categoryKey := categories[idx].Key
-	for i, plot := range m.plotItems {
-		if strings.EqualFold(plot.Group, categoryKey) {
-			m.plotSelected[i] = m.selected[idx]
-		}
-	}
-}
-
-// IsPlotCategorySelected checks if a plot group/category is selected
-func (m Model) IsPlotCategorySelected(group string) bool {
-	// If not in Plotting pipeline or no Categories step, assume all selected
-	hasCategoryStep := false
-	for _, s := range m.steps {
-		if s == types.StepSelectPlotCategories {
-			hasCategoryStep = true
-			break
-		}
-	}
-
-	if m.Pipeline != types.PipelinePlotting || !hasCategoryStep {
-		return true
-	}
-
-	categories := m.plotCategories
-	if len(categories) == 0 {
-		categories = defaultPlotCategories
-	}
-	for i, cat := range categories {
-		if strings.EqualFold(cat.Key, group) {
-			return m.selected[i]
-		}
-	}
-	return false
-}
-
-func (m Model) isPlotSupportedForScope(plot PlotItem) bool {
-	if m.Pipeline != types.PipelinePlotting || m.plottingScope != PlottingScopeGroup {
-		return true
-	}
-	_, ok := groupSupportedPlotIDs[strings.TrimSpace(plot.ID)]
-	return ok
-}
-
-func (m Model) IsPlotVisibleForSelection(plot PlotItem) bool {
-	if !m.IsPlotCategorySelected(plot.Group) {
-		return false
-	}
-	return m.isPlotSupportedForScope(plot)
-}
-
-func (m Model) countSelectedVisiblePlots() int {
-	count := 0
-	for i, plot := range m.plotItems {
-		if !m.IsPlotVisibleForSelection(plot) {
-			continue
-		}
-		if m.plotSelected[i] {
-			count++
-		}
-	}
-	return count
-}
-
-func (m Model) selectedRestTaskOnlyPlots() []string {
-	if m.Pipeline != types.PipelinePlotting || !m.prepTaskIsRest {
-		return nil
-	}
-
-	var plotIDs []string
-	for i, plot := range m.plotItems {
-		if !m.plotSelected[i] || !m.IsPlotVisibleForSelection(plot) {
-			continue
-		}
-		if plot.RestCompatibility == plotRestTaskOnly {
-			plotIDs = append(plotIDs, strings.TrimSpace(plot.ID))
-		}
-	}
-	return plotIDs
-}
-
-// SelectedPlotCategoryKeys returns the keys of selected plot categories
-func (m Model) SelectedPlotCategoryKeys() []string {
-	var keys []string
-	categories := m.plotCategories
-	if len(categories) == 0 {
-		categories = defaultPlotCategories
-	}
-	for i, cat := range categories {
-		if m.selected[i] {
-			keys = append(keys, cat.Key)
-		}
-	}
-	return keys
-}
-
-// initBandEditBuffer initializes the edit buffer with the current field value
 func (m *Model) initBandEditBuffer() {
 	if m.editingBandIdx < 0 || m.editingBandIdx >= len(m.bands) {
 		return
@@ -1371,49 +959,3 @@ func (m *Model) removeROI() {
 }
 
 // togglePlotGroupExpansion toggles the expansion state of a plot group option
-func (m *Model) togglePlotGroupExpansion(opt optionType) {
-	switch opt {
-	case optPlotGroupDefaults:
-		m.plotGroupDefaultsExpanded = !m.plotGroupDefaultsExpanded
-	case optPlotGroupFonts:
-		m.plotGroupFontsExpanded = !m.plotGroupFontsExpanded
-	case optPlotGroupLayout:
-		m.plotGroupLayoutExpanded = !m.plotGroupLayoutExpanded
-	case optPlotGroupFigureSizes:
-		m.plotGroupFigureSizesExpanded = !m.plotGroupFigureSizesExpanded
-	case optPlotGroupColors:
-		m.plotGroupColorsExpanded = !m.plotGroupColorsExpanded
-	case optPlotGroupAlpha:
-		m.plotGroupAlphaExpanded = !m.plotGroupAlphaExpanded
-	case optPlotGroupScatter:
-		m.plotGroupScatterExpanded = !m.plotGroupScatterExpanded
-	case optPlotGroupBar:
-		m.plotGroupBarExpanded = !m.plotGroupBarExpanded
-	case optPlotGroupLine:
-		m.plotGroupLineExpanded = !m.plotGroupLineExpanded
-	case optPlotGroupHistogram:
-		m.plotGroupHistogramExpanded = !m.plotGroupHistogramExpanded
-	case optPlotGroupKDE:
-		m.plotGroupKDEExpanded = !m.plotGroupKDEExpanded
-	case optPlotGroupErrorbar:
-		m.plotGroupErrorbarExpanded = !m.plotGroupErrorbarExpanded
-	case optPlotGroupText:
-		m.plotGroupTextExpanded = !m.plotGroupTextExpanded
-	case optPlotGroupValidation:
-		m.plotGroupValidationExpanded = !m.plotGroupValidationExpanded
-	case optPlotGroupTopomap:
-		m.plotGroupTopomapExpanded = !m.plotGroupTopomapExpanded
-	case optPlotGroupTFR:
-		m.plotGroupTFRExpanded = !m.plotGroupTFRExpanded
-	case optPlotGroupTFRMisc:
-		m.plotGroupTFRMiscExpanded = !m.plotGroupTFRMiscExpanded
-	case optPlotGroupSizing:
-		m.plotGroupSizingExpanded = !m.plotGroupSizingExpanded
-	case optPlotGroupSourceLoc:
-		m.plotGroupSourceLocExpanded = !m.plotGroupSourceLocExpanded
-	case optPlotGroupSelection:
-		m.plotGroupSelectionExpanded = !m.plotGroupSelectionExpanded
-	case optPlotGroupComparisons:
-		m.plotGroupComparisonsExpanded = !m.plotGroupComparisonsExpanded
-	}
-}

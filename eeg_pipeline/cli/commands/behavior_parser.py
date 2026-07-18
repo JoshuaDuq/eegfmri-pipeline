@@ -10,23 +10,37 @@ from eeg_pipeline.cli.common import (
     add_output_format_args,
     add_path_args,
 )
-from eeg_pipeline.cli.commands.base import (
-    BEHAVIOR_COMPUTATIONS,
-    BEHAVIOR_VISUALIZE_CATEGORIES,
-)
+from eeg_pipeline.cli.commands.base import BEHAVIOR_COMPUTATIONS
 from eeg_pipeline.utils.data.feature_discovery import STANDARD_FEATURE_FILES
 
 FEATURE_FILE_CHOICES = list(STANDARD_FEATURE_FILES.keys())
+FEATURE_CATEGORY_CHOICES = [
+    "power",
+    "connectivity",
+    "directedconnectivity",
+    "sourcelocalization",
+    "aperiodic",
+    "erp",
+    "bursts",
+    "itpc",
+    "pac",
+    "complexity",
+    "quality",
+    "erds",
+    "spectral",
+    "ratios",
+    "asymmetry",
+]
 
 def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Configure the behavior command parser."""
     parser = subparsers.add_parser(
         "behavior",
-        help="Behavior analysis: compute correlations or visualize",
-        description="Behavior pipeline: compute correlations or visualize",
+        help="Compute behavior analyses",
+        description="Compute behavior analyses",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("mode", choices=["compute", "visualize"], help="Pipeline mode")
+    parser.add_argument("mode", choices=["compute"], help="Pipeline mode")
     
     # Discoverability options
     parser.add_argument(
@@ -41,7 +55,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument(
         "--categories",
         nargs="+",
-        choices=BEHAVIOR_VISUALIZE_CATEGORIES,
+        choices=FEATURE_CATEGORY_CHOICES,
         default=None,
         metavar="CATEGORY",
         help="Feature categories to process (e.g., power, connectivity, itpc)",
@@ -172,25 +186,20 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         ),
     )
     
-    feature_choices = [
-        "power", "connectivity", "directedconnectivity", "sourcelocalization",
-        "aperiodic", "erp", "bursts", "itpc", "pac",
-        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry",
-    ]
     compute_group.add_argument(
-        "--correlations-features", nargs="+", choices=feature_choices, default=None,
+        "--correlations-features", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None,
         help="Feature categories for correlations analysis"
     )
     compute_group.add_argument(
-        "--condition-features", nargs="+", choices=feature_choices, default=None,
+        "--condition-features", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None,
         help="Feature categories for condition comparison"
     )
     compute_group.add_argument(
-        "--temporal-features", nargs="+", choices=feature_choices, default=None,
+        "--temporal-features", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None,
         help="Feature categories for temporal analysis"
     )
     compute_group.add_argument(
-        "--cluster-features", nargs="+", choices=feature_choices, default=None,
+        "--cluster-features", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None,
         help="Feature categories for cluster permutation tests"
     )
     compute_group.add_argument(
@@ -543,12 +552,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         dest="overwrite",
         help="Append timestamp to output folders instead of overwriting",
     )
-
-    visualize_group = parser.add_argument_group("Visualize mode options")
-    plot_group = visualize_group.add_mutually_exclusive_group()
-    plot_group.add_argument("--plots", nargs="+", metavar="PLOT")
-    plot_group.add_argument("--all-plots", action="store_true")
-    visualize_group.add_argument("--skip-scatter", action="store_true")
 
     add_path_args(parser)
 

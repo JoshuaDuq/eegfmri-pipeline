@@ -103,7 +103,6 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 		"statistics",
 		"validation",
 		"io",
-		"plotting",
 		"fmri_preprocessing",
 		"fmri_resting_state",
 		"fmri_contrast",
@@ -126,19 +125,12 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 		m.wizard.Init(),
 		func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 		subjectCmd,
-		executor.LoadPlotters(m.repoRoot),
 		executor.LoadConfigSummary(m.repoRoot),
 		executor.LoadConfigKeys(m.repoRoot, configKeys),
 		executor.DiscoverColumns(m.repoRoot, m.task),
 		executor.DiscoverTrialTableColumns(m.repoRoot, m.task),
 		executor.DiscoverFmriColumns(m.repoRoot, m.task),
 		executor.DiscoverROIs(m.repoRoot, m.task),
-	}
-
-	// Also discover condition effects columns for plotting (if subjects available)
-	if m.selectedPipeline == types.PipelinePlotting {
-		// Will be triggered when subjects are loaded
-		cmds = append(cmds, executor.DiscoverConditionEffectsColumns(m.repoRoot, m.task, ""))
 	}
 
 	return m, tea.Batch(cmds...)

@@ -126,15 +126,6 @@ func (m Model) renderComputationSelection() string {
 func (m Model) renderCategorySelection() string {
 	var b strings.Builder
 
-	if m.CurrentStep == types.StepSelectPlotCategories {
-		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-		b.WriteString(hintStyle.Render("Toggle categories. Press 'g' for global styling.") + "\n")
-	}
-
-	if m.showGlobalStyling && m.CurrentStep == types.StepSelectPlotCategories {
-		return m.renderGlobalStylingPanel()
-	}
-
 	count := 0
 	for _, sel := range m.selected {
 		if sel {
@@ -167,16 +158,7 @@ func (m Model) renderCategorySelection() string {
 		if i < len(m.categoryDescs) && m.categoryDescs[i] != "" {
 			line += sep + descStyle.Render(m.categoryDescs[i])
 		}
-		if m.Pipeline == types.PipelinePlotting {
-			categories := m.plotCategories
-			if len(categories) == 0 {
-				categories = defaultPlotCategories
-			}
-			if i < len(categories) {
-				total, selected := m.plotCountsForGroup(categories[i].Key)
-				line += sep + descStyle.Render(fmt.Sprintf("%d/%d", selected, total))
-			}
-		} else if m.featureAvailability != nil {
+		if m.featureAvailability != nil {
 			if m.featureAvailability[cat] {
 				timestamp := m.featureLastModified[cat]
 				relTime := formatRelativeTime(timestamp)
@@ -188,27 +170,6 @@ func (m Model) renderCategorySelection() string {
 			}
 		}
 		b.WriteString(styles.TruncateLine(line, m.contentWidth) + "\n")
-	}
-
-	return b.String()
-}
-
-func (m Model) renderGlobalStylingPanel() string {
-	var b strings.Builder
-
-	b.WriteString(styles.RenderStepHeader("Global styling", m.contentWidth) + "\n")
-	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
-	b.WriteString(hintStyle.Render("Configure styling for all plots. Press 'g' or Esc to return.") + "\n\n")
-
-	options := m.getGlobalStylingOptions()
-	labelWidth := 24
-	for i, opt := range options {
-		isFocused := i == m.globalStylingCursor
-		lines := m.renderOption(opt, labelWidth, isFocused)
-		for _, line := range lines {
-			b.WriteString(line.text)
-			b.WriteString("\n")
-		}
 	}
 
 	return b.String()
@@ -604,17 +565,6 @@ func (m Model) renderSubjectSelection() string {
 		sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
 		b.WriteString("  " + labelStyle.Render("Scope:") + " " + groupOpt + sep + subjectOpt + sep +
 			hintStyle.Render("[Tab]") + "\n")
-	case types.PipelinePlotting:
-		groupOpt := dimStyle.Render("Group")
-		subjectOpt := dimStyle.Render("Subject")
-		if m.plottingScope == PlottingScopeGroup {
-			groupOpt = valueStyle.Render("Group")
-		} else {
-			subjectOpt = valueStyle.Render("Subject")
-		}
-		sep := lipgloss.NewStyle().Foreground(styles.Border).Render(" · ")
-		b.WriteString("  " + labelStyle.Render("Level:") + " " + groupOpt + sep + subjectOpt + sep +
-			hintStyle.Render("[Tab]") + "\n")
 	}
 
 	if m.subjectsLoading && len(m.subjects) > 0 {
@@ -650,12 +600,7 @@ func (m Model) renderSubjectSelection() string {
 			selectedCount++
 			for _, s := range m.subjects {
 				if s.ID == subjID {
-					valid := false
-					if m.Pipeline == types.PipelinePlotting {
-						valid, _ = m.validatePlottingSubject(s)
-					} else if ok, _ := m.Pipeline.ValidateSubject(s); ok {
-						valid = true
-					}
+					valid, _ := m.Pipeline.ValidateSubject(s)
 					if valid {
 						validCount++
 					}
@@ -690,7 +635,7 @@ func (m Model) renderSubjectSelection() string {
 	}
 
 	overhead := 12
-	if m.Pipeline == types.PipelineML || m.Pipeline == types.PipelinePlotting {
+	if m.Pipeline == types.PipelineML {
 		overhead += 2
 	}
 	layout := styles.CalculateListLayout(m.height, m.subjectCursor, len(filteredSubjects), overhead)
@@ -714,9 +659,6 @@ func (m Model) renderSubjectSelection() string {
 		line := marker + " " + nameStyle.Render(s.ID)
 
 		valid, reason := m.Pipeline.ValidateSubject(s)
-		if m.Pipeline == types.PipelinePlotting {
-			valid, reason = m.validatePlottingSubject(s)
-		}
 
 		statusLine := m.buildSubjectStatusFlags(s.HasSourceData, s.HasBids, s.HasDerivatives)
 		line += bracketStyle.Render(" [") + statusLine + bracketStyle.Render("]")

@@ -96,19 +96,6 @@ type ROIsDiscoveredMsg struct {
 	Error error    // Error if discovery failed
 }
 
-// PlotterInfo describes a single plotting option exposed by the backend
-type PlotterInfo struct {
-	ID       string `json:"id"`
-	Category string `json:"category"`
-	Name     string `json:"name"`
-}
-
-// PlottersLoadedMsg is sent when plotter discovery completes
-type PlottersLoadedMsg struct {
-	FeaturePlotters map[string][]PlotterInfo
-	Error           error
-}
-
 // ConfigSummary holds key configuration values for the TUI
 type ConfigSummary struct {
 	Task               string `json:"task"`

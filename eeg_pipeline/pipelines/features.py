@@ -54,7 +54,7 @@ from eeg_pipeline.infra.paths import (
 from eeg_pipeline.infra.tsv import write_parquet
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.pipelines.progress import ensure_progress_reporter
-from eeg_pipeline.plotting.io.figures import setup_matplotlib
+from eeg_pipeline.infra.matplotlib import setup_matplotlib
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.tfr import compute_complex_tfr, compute_tfr_morlet
 from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
