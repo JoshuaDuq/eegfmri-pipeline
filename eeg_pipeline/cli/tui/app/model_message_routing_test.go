@@ -134,18 +134,6 @@ func TestHandleGlobalMessagesRoutesDiscoveryAndConfigUpdates(t *testing.T) {
 		quickActions:     quickactions.New(),
 	}
 
-	plottersNext, plottersCmd := m.handleGlobalMessages(messages.PlottersLoadedMsg{
-		FeaturePlotters: map[string][]messages.PlotterInfo{
-			"power": {
-				{ID: "power.topo", Category: "power", Name: "Power Topography"},
-			},
-		},
-	})
-	if plottersCmd != nil {
-		t.Fatalf("expected nil cmd, got %T", plottersCmd)
-	}
-	_ = plottersNext.(Model)
-
 	m.handleGlobalMessages(messages.ColumnsDiscoveredMsg{
 		Source:  "condition_effects",
 		Columns: []string{"condition"},

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/eeg-pipeline/tui/executor"
@@ -227,28 +226,6 @@ func (m Model) GetApplicableFeatureFiles() []FeatureFile {
 	return result
 }
 
-func (m Model) SelectedPlotIDs() []string {
-	var result []string
-	for i, plot := range m.plotItems {
-		if m.plotSelected[i] && m.IsPlotVisibleForSelection(plot) {
-			result = append(result, plot.ID)
-		}
-	}
-	sort.Strings(result)
-	return result
-}
-
-func (m Model) SelectedPlotFormats() []string {
-	var result []string
-	for _, format := range m.plotFormats {
-		if m.plotFormatSelected[format] {
-			result = append(result, format)
-		}
-	}
-	sort.Strings(result)
-	return result
-}
-
 func (m Model) SelectedPreprocessingStages() []string {
 	var result []string
 	for i, sel := range m.prepStageSelected {
@@ -268,10 +245,6 @@ func (m Model) selectedConnectivityMeasures() []string {
 		}
 	}
 	return result
-}
-
-func (m Model) selectedPlotConnectivityMeasures() []string {
-	return normalizeConnectivityMeasureTokens(strings.Fields(m.plotConnectivityMeasuresSpec))
 }
 
 func (m Model) selectedDirectedConnectivityMeasures() []string {
@@ -312,10 +285,6 @@ func (m Model) getFilteredSubjects() []types.SubjectStatus {
 }
 
 func (m Model) isSubjectValid(s types.SubjectStatus) bool {
-	if m.Pipeline == types.PipelinePlotting {
-		valid, _ := m.validatePlottingSubject(s)
-		return valid
-	}
 	valid, _ := m.Pipeline.ValidateSubject(s)
 	return valid
 }
@@ -407,7 +376,6 @@ func (m Model) BuildCommandArgs() []string {
 	needsMode := m.Pipeline == types.PipelinePreprocessing ||
 		m.Pipeline == types.PipelineFeatures ||
 		m.Pipeline == types.PipelineBehavior ||
-		m.Pipeline == types.PipelinePlotting ||
 		m.Pipeline == types.PipelineML ||
 		m.Pipeline == types.PipelineFmri ||
 		m.Pipeline == types.PipelineFmriAnalysis
@@ -416,22 +384,6 @@ func (m Model) BuildCommandArgs() []string {
 	modeToUse := ""
 	if needsMode && hasValidModeIndex {
 		modeToUse = m.modeOptions[m.modeIndex]
-
-		// Auto-switch to "tfr" mode if TFR plots are selected
-		if m.Pipeline == types.PipelinePlotting {
-			selectedPlots := m.SelectedPlotIDs()
-			for _, plotID := range selectedPlots {
-				for _, plot := range m.plotItems {
-					if plot.ID == plotID && plot.Group == "tfr" {
-						modeToUse = "tfr"
-						break
-					}
-				}
-				if modeToUse == "tfr" {
-					break
-				}
-			}
-		}
 
 		cliMode := modeToUse
 		if m.Pipeline == types.PipelineFmriAnalysis && modeToUse == "trial-signatures" {
@@ -450,54 +402,6 @@ func (m Model) BuildCommandArgs() []string {
 
 	if m.Pipeline == types.PipelineML {
 		parts = append(parts, "--cv-scope", m.mlScope.CLIValue())
-	}
-
-	if m.Pipeline == types.PipelinePlotting {
-		if m.plottingScope == PlottingScopeGroup {
-			parts = append(parts, "--analysis-scope", m.plottingScope.CLIValue())
-		}
-
-		// Always pass --plots to enable independent plot execution
-		selectedPlots := m.SelectedPlotIDs()
-		if len(selectedPlots) > 0 && len(selectedPlots) < len(m.plotItems) {
-			parts = append(parts, "--plots")
-			parts = append(parts, selectedPlots...)
-		}
-
-		// Per-feature plotter filtering (e.g. select specific Power plots)
-		plotters := m.featurePlotterItems()
-		if len(plotters) > 0 {
-			selected := make([]string, 0, len(plotters))
-			for _, p := range plotters {
-				if m.featurePlotterSelected[p.ID] {
-					selected = append(selected, p.ID)
-				}
-			}
-			if len(selected) > 0 && len(selected) < len(plotters) {
-				sort.Strings(selected)
-				parts = append(parts, "--feature-plotters")
-				parts = append(parts, selected...)
-			}
-		}
-
-		formats := m.SelectedPlotFormats()
-		if len(formats) > 0 {
-			parts = append(parts, "--formats")
-			parts = append(parts, formats...)
-		}
-
-		if m.plotDpiIndex >= 0 && m.plotDpiIndex < len(m.plotDpiOptions) {
-			parts = append(parts, "--dpi", fmt.Sprintf("%d", m.plotDpiOptions[m.plotDpiIndex]))
-		}
-
-		if m.plotSavefigDpiIndex >= 0 && m.plotSavefigDpiIndex < len(m.plotDpiOptions) {
-			parts = append(parts, "--savefig-dpi", fmt.Sprintf("%d", m.plotDpiOptions[m.plotSavefigDpiIndex]))
-		}
-
-		if !m.plotSharedColorbar {
-			parts = append(parts, "--no-shared-colorbar")
-		}
-
 	}
 
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
@@ -528,7 +432,7 @@ func (m Model) BuildCommandArgs() []string {
 				parts[len(parts)-1] = "full"
 			}
 		}
-	} else if m.Pipeline != types.PipelinePlotting {
+	} else {
 		cats := m.SelectedCategories()
 		if len(cats) > 0 && len(cats) < len(m.categories) {
 			parts = append(parts, "--categories")
@@ -560,7 +464,6 @@ func (m Model) BuildCommandArgs() []string {
 		m.Pipeline == types.PipelineFeatures ||
 		m.Pipeline == types.PipelineBehavior ||
 		m.Pipeline == types.PipelineML ||
-		m.Pipeline == types.PipelinePlotting ||
 		m.Pipeline == types.PipelineFmri ||
 		m.Pipeline == types.PipelineFmriAnalysis
 
@@ -616,8 +519,6 @@ func (m Model) BuildCommandArgs() []string {
 			parts = append(parts, m.buildFeaturesAdvancedArgs()...)
 		case types.PipelineBehavior:
 			parts = append(parts, m.buildBehaviorAdvancedArgs()...)
-		case types.PipelinePlotting:
-			parts = append(parts, m.buildPlottingAdvancedArgs()...)
 		case types.PipelineML:
 			parts = append(parts, m.buildMLAdvancedArgs()...)
 		case types.PipelinePreprocessing:
@@ -654,417 +555,6 @@ func (m Model) BuildCommandArgs() []string {
 	return parts
 }
 
-func (m Model) buildPlottingAdvancedArgs() []string {
-	ab := newArgBuilder()
-
-	// Plot defaults / styling overrides (mirrors eeg_pipeline/cli/commands/plotting.py)
-	ab.addIfNonEmpty("--bbox-inches", m.plotBboxInches)
-	ab.addIfNonZero("--pad-inches", m.plotPadInches, "%.4f")
-
-	// Fonts
-	ab.addIfNonEmpty("--font-family", m.plotFontFamily)
-	ab.addIfNonEmpty("--font-weight", m.plotFontWeight)
-	ab.addIfNonZeroInt("--font-size-small", m.plotFontSizeSmall)
-	ab.addIfNonZeroInt("--font-size-medium", m.plotFontSizeMedium)
-	ab.addIfNonZeroInt("--font-size-large", m.plotFontSizeLarge)
-	ab.addIfNonZeroInt("--font-size-title", m.plotFontSizeTitle)
-	ab.addIfNonZeroInt("--font-size-annotation", m.plotFontSizeAnnotation)
-	ab.addIfNonZeroInt("--font-size-label", m.plotFontSizeLabel)
-	ab.addIfNonZeroInt("--font-size-ylabel", m.plotFontSizeYLabel)
-	ab.addIfNonZeroInt("--font-size-suptitle", m.plotFontSizeSuptitle)
-	ab.addIfNonZeroInt("--font-size-figure-title", m.plotFontSizeFigureTitle)
-
-	// Layout
-	ab.addSpaceListFlagWithLengthCheck("--layout-tight-rect", m.plotLayoutTightRectSpec, 4)
-	ab.addSpaceListFlagWithLengthCheck("--layout-tight-rect-microstate", m.plotLayoutTightRectMicrostateSpec, 4)
-	ab.addSpaceListFlag("--gridspec-width-ratios", m.plotGridSpecWidthRatiosSpec)
-	ab.addSpaceListFlag("--gridspec-height-ratios", m.plotGridSpecHeightRatiosSpec)
-	ab.addIfNonZero("--gridspec-hspace", m.plotGridSpecHspace, "%.4f")
-	ab.addIfNonZero("--gridspec-wspace", m.plotGridSpecWspace, "%.4f")
-	ab.addIfNonZero("--gridspec-left", m.plotGridSpecLeft, "%.4f")
-	ab.addIfNonZero("--gridspec-right", m.plotGridSpecRight, "%.4f")
-	ab.addIfNonZero("--gridspec-top", m.plotGridSpecTop, "%.4f")
-	ab.addIfNonZero("--gridspec-bottom", m.plotGridSpecBottom, "%.4f")
-
-	// Figure sizes
-	ab.addSpaceListFlagWithLengthCheck("--figure-size-standard", m.plotFigureSizeStandardSpec, 2)
-	ab.addSpaceListFlagWithLengthCheck("--figure-size-medium", m.plotFigureSizeMediumSpec, 2)
-	ab.addSpaceListFlagWithLengthCheck("--figure-size-small", m.plotFigureSizeSmallSpec, 2)
-	ab.addSpaceListFlagWithLengthCheck("--figure-size-square", m.plotFigureSizeSquareSpec, 2)
-	ab.addSpaceListFlagWithLengthCheck("--figure-size-wide", m.plotFigureSizeWideSpec, 2)
-	ab.addSpaceListFlagWithLengthCheck("--figure-size-tfr", m.plotFigureSizeTFRSpec, 2)
-	ab.addSpaceListFlagWithLengthCheck("--figure-size-topomap", m.plotFigureSizeTopomapSpec, 2)
-
-	// Colors
-	ab.addIfNonEmpty("--color-condition-2", m.plotColorCondB)
-	ab.addIfNonEmpty("--color-condition-1", m.plotColorCondA)
-	ab.addIfNonEmpty("--color-significant", m.plotColorSignificant)
-	ab.addIfNonEmpty("--color-nonsignificant", m.plotColorNonsignificant)
-	ab.addIfNonEmpty("--color-gray", m.plotColorGray)
-	ab.addIfNonEmpty("--color-light-gray", m.plotColorLightGray)
-	ab.addIfNonEmpty("--color-black", m.plotColorBlack)
-	ab.addIfNonEmpty("--color-blue", m.plotColorBlue)
-	ab.addIfNonEmpty("--color-red", m.plotColorRed)
-	ab.addIfNonEmpty("--color-network-node", m.plotColorNetworkNode)
-
-	// Alpha
-	ab.addIfNonZero("--alpha-grid", m.plotAlphaGrid, "%.4f")
-	ab.addIfNonZero("--alpha-fill", m.plotAlphaFill, "%.4f")
-	ab.addIfNonZero("--alpha-ci", m.plotAlphaCI, "%.4f")
-	ab.addIfNonZero("--alpha-ci-line", m.plotAlphaCILine, "%.4f")
-	ab.addIfNonZero("--alpha-text-box", m.plotAlphaTextBox, "%.4f")
-	ab.addIfNonZero("--alpha-violin-body", m.plotAlphaViolinBody, "%.4f")
-	ab.addIfNonZero("--alpha-ridge-fill", m.plotAlphaRidgeFill, "%.4f")
-
-	// Scatter
-	ab.addIfNonZeroInt("--scatter-marker-size-small", m.plotScatterMarkerSizeSmall)
-	ab.addIfNonZeroInt("--scatter-marker-size-large", m.plotScatterMarkerSizeLarge)
-	ab.addIfNonZeroInt("--scatter-marker-size-default", m.plotScatterMarkerSizeDefault)
-	ab.addIfNonZero("--scatter-alpha", m.plotScatterAlpha, "%.4f")
-	ab.addIfNonEmpty("--scatter-edgecolor", m.plotScatterEdgeColor)
-	ab.addIfNonZero("--scatter-edgewidth", m.plotScatterEdgeWidth, "%.4f")
-
-	// Bar
-	ab.addIfNonZero("--bar-alpha", m.plotBarAlpha, "%.4f")
-	ab.addIfNonZero("--bar-width", m.plotBarWidth, "%.4f")
-	ab.addIfNonZeroInt("--bar-capsize", m.plotBarCapsize)
-	ab.addIfNonZeroInt("--bar-capsize-large", m.plotBarCapsizeLarge)
-
-	// Line
-	ab.addIfNonZero("--line-width-thin", m.plotLineWidthThin, "%.4f")
-	ab.addIfNonZero("--line-width-standard", m.plotLineWidthStandard, "%.4f")
-	ab.addIfNonZero("--line-width-thick", m.plotLineWidthThick, "%.4f")
-	ab.addIfNonZero("--line-width-bold", m.plotLineWidthBold, "%.4f")
-	ab.addIfNonZero("--line-alpha-standard", m.plotLineAlphaStandard, "%.4f")
-	ab.addIfNonZero("--line-alpha-dim", m.plotLineAlphaDim, "%.4f")
-	ab.addIfNonZero("--line-alpha-zero-line", m.plotLineAlphaZeroLine, "%.4f")
-	ab.addIfNonZero("--line-alpha-fit-line", m.plotLineAlphaFitLine, "%.4f")
-	ab.addIfNonZero("--line-alpha-diagonal", m.plotLineAlphaDiagonal, "%.4f")
-	ab.addIfNonZero("--line-alpha-reference", m.plotLineAlphaReference, "%.4f")
-	ab.addIfNonZero("--line-regression-width", m.plotLineRegressionWidth, "%.4f")
-	ab.addIfNonZero("--line-residual-width", m.plotLineResidualWidth, "%.4f")
-	ab.addIfNonZero("--line-qq-width", m.plotLineQQWidth, "%.4f")
-
-	// Histogram
-	ab.addIfNonZeroInt("--hist-bins", m.plotHistBins)
-	ab.addIfNonZeroInt("--hist-bins-behavioral", m.plotHistBinsBehavioral)
-	ab.addIfNonZeroInt("--hist-bins-residual", m.plotHistBinsResidual)
-	ab.addIfNonZeroInt("--hist-bins-tfr", m.plotHistBinsTFR)
-	ab.addIfNonEmpty("--hist-edgecolor", m.plotHistEdgeColor)
-	ab.addIfNonZero("--hist-edgewidth", m.plotHistEdgeWidth, "%.4f")
-	ab.addIfNonZero("--hist-alpha", m.plotHistAlpha, "%.4f")
-	ab.addIfNonZero("--hist-alpha-residual", m.plotHistAlphaResidual, "%.4f")
-	ab.addIfNonZero("--hist-alpha-tfr", m.plotHistAlphaTFR, "%.4f")
-
-	// KDE
-	ab.addIfNonZeroInt("--kde-points", m.plotKdePoints)
-	ab.addIfNonEmpty("--kde-color", m.plotKdeColor)
-	ab.addIfNonZero("--kde-linewidth", m.plotKdeLinewidth, "%.4f")
-	ab.addIfNonZero("--kde-alpha", m.plotKdeAlpha, "%.4f")
-
-	// Errorbar
-	ab.addIfNonZeroInt("--errorbar-markersize", m.plotErrorbarMarkerSize)
-	ab.addIfNonZeroInt("--errorbar-capsize", m.plotErrorbarCapsize)
-	ab.addIfNonZeroInt("--errorbar-capsize-large", m.plotErrorbarCapsizeLarge)
-
-	// Text positions
-	ab.addIfNonZero("--text-stats-x", m.plotTextStatsX, "%.4f")
-	ab.addIfNonZero("--text-stats-y", m.plotTextStatsY, "%.4f")
-	ab.addIfNonZero("--text-pvalue-x", m.plotTextPvalueX, "%.4f")
-	ab.addIfNonZero("--text-pvalue-y", m.plotTextPvalueY, "%.4f")
-	ab.addIfNonZero("--text-bootstrap-x", m.plotTextBootstrapX, "%.4f")
-	ab.addIfNonZero("--text-bootstrap-y", m.plotTextBootstrapY, "%.4f")
-	ab.addIfNonZero("--text-channel-annotation-x", m.plotTextChannelAnnotationX, "%.4f")
-	ab.addIfNonZero("--text-channel-annotation-y", m.plotTextChannelAnnotationY, "%.4f")
-	ab.addIfNonZero("--text-title-y", m.plotTextTitleY, "%.4f")
-	ab.addIfNonZero("--text-residual-qc-title-y", m.plotTextResidualQcTitleY, "%.4f")
-
-	// Validation
-	ab.addIfNonZeroInt("--validation-min-bins-for-calibration", m.plotValidationMinBinsForCalibration)
-	ab.addIfNonZeroInt("--validation-max-bins-for-calibration", m.plotValidationMaxBinsForCalibration)
-	ab.addIfNonZeroInt("--validation-samples-per-bin", m.plotValidationSamplesPerBin)
-	ab.addIfNonZeroInt("--validation-min-rois-for-fdr", m.plotValidationMinRoisForFDR)
-	ab.addIfNonZeroInt("--validation-min-pvalues-for-fdr", m.plotValidationMinPvaluesForFDR)
-
-	// Topomap controls
-	ab.addIfNonZeroInt("--topomap-contours", m.plotTopomapContours)
-	ab.addIfNonEmpty("--topomap-colormap", m.plotTopomapColormap)
-	ab.addIfNonZero("--topomap-colorbar-fraction", m.plotTopomapColorbarFraction, "%.4f")
-	ab.addIfNonZero("--topomap-colorbar-pad", m.plotTopomapColorbarPad, "%.4f")
-	ab.addOptionalBoolFlag("--topomap-diff-annotation-enabled", m.plotTopomapDiffAnnotation)
-	ab.addOptionalBoolFlag("--topomap-annotate-descriptive", m.plotTopomapAnnotateDesc)
-	ab.addIfNonEmpty("--topomap-sig-mask-marker", m.plotTopomapSigMaskMarker)
-	ab.addIfNonEmpty("--topomap-sig-mask-markerfacecolor", m.plotTopomapSigMaskMarkerFaceColor)
-	ab.addIfNonEmpty("--topomap-sig-mask-markeredgecolor", m.plotTopomapSigMaskMarkerEdgeColor)
-	ab.addIfNonZero("--topomap-sig-mask-linewidth", m.plotTopomapSigMaskLinewidth, "%.4f")
-	ab.addIfNonZero("--topomap-sig-mask-markersize", m.plotTopomapSigMaskMarkerSize, "%.4f")
-
-	// TFR controls
-	ab.addIfNonZero("--tfr-log-base", m.plotTFRLogBase, "%.4f")
-	ab.addIfNonZero("--tfr-percentage-multiplier", m.plotTFRPercentageMultiplier, "%.4f")
-
-	// TFR Topomap controls
-	ab.addIfNonZero("--tfr-topomap-window-size-ms", m.plotTFRTopomapWindowSizeMs, "%.1f")
-	ab.addIfNonZeroInt("--tfr-topomap-window-count", m.plotTFRTopomapWindowCount)
-	ab.addIfNonZero("--tfr-topomap-label-x-position", m.plotTFRTopomapLabelXPosition, "%.2f")
-	ab.addIfNonZero("--tfr-topomap-label-y-position-bottom", m.plotTFRTopomapLabelYPositionBottom, "%.2f")
-	ab.addIfNonZero("--tfr-topomap-label-y-position", m.plotTFRTopomapLabelYPosition, "%.2f")
-	ab.addIfNonZero("--tfr-topomap-title-y", m.plotTFRTopomapTitleY, "%.2f")
-	ab.addIfNonZeroInt("--tfr-topomap-title-pad", m.plotTFRTopomapTitlePad)
-	ab.addIfNonZero("--tfr-topomap-subplots-right", m.plotTFRTopomapSubplotsRight, "%.2f")
-	ab.addIfNonZero("--tfr-topomap-temporal-hspace", m.plotTFRTopomapTemporalHspace, "%.2f")
-	ab.addIfNonZero("--tfr-topomap-temporal-wspace", m.plotTFRTopomapTemporalWspace, "%.2f")
-
-	// Sizing controls
-	ab.addIfNonZero("--roi-width-per-band", m.plotRoiWidthPerBand, "%.4f")
-	ab.addIfNonZero("--roi-width-per-metric", m.plotRoiWidthPerMetric, "%.4f")
-	ab.addIfNonZero("--roi-height-per-roi", m.plotRoiHeightPerRoi, "%.4f")
-	ab.addIfNonZero("--power-width-per-band", m.plotPowerWidthPerBand, "%.4f")
-	ab.addIfNonZero("--power-height-per-segment", m.plotPowerHeightPerSegment, "%.4f")
-	ab.addIfNonZero("--itpc-width-per-bin", m.plotItpcWidthPerBin, "%.4f")
-	ab.addIfNonZero("--itpc-height-per-band", m.plotItpcHeightPerBand, "%.4f")
-	ab.addIfNonZero("--itpc-width-per-band-box", m.plotItpcWidthPerBandBox, "%.4f")
-	ab.addIfNonZero("--itpc-height-box", m.plotItpcHeightBox, "%.4f")
-	ab.addIfNonEmpty("--pac-cmap", m.plotPacCmap)
-	ab.addIfNonZero("--pac-width-per-roi", m.plotPacWidthPerRoi, "%.4f")
-	ab.addIfNonZero("--pac-height-box", m.plotPacHeightBox, "%.4f")
-	ab.addIfNonZero("--aperiodic-width-per-column", m.plotAperiodicWidthPerColumn, "%.4f")
-	ab.addIfNonZero("--aperiodic-height-per-row", m.plotAperiodicHeightPerRow, "%.4f")
-	ab.addIfNonZero("--complexity-width-per-measure", m.plotComplexityWidthPerMeasure, "%.4f")
-	ab.addIfNonZero("--complexity-height-per-segment", m.plotComplexityHeightPerSegment, "%.4f")
-	ab.addIfNonZero("--connectivity-width-per-circle", m.plotConnectivityWidthPerCircle, "%.4f")
-	ab.addIfNonZero("--connectivity-width-per-band", m.plotConnectivityWidthPerBand, "%.4f")
-	ab.addIfNonZero("--connectivity-height-per-measure", m.plotConnectivityHeightPerMeasure, "%.4f")
-	ab.addIfNonZero("--connectivity-circle-top-fraction", m.plotConnectivityCircleTopFraction, "%.4f")
-	ab.addIfNonZeroInt("--connectivity-circle-min-lines", m.plotConnectivityCircleMinLines)
-	ab.addIfNonZero("--connectivity-network-top-fraction", m.plotConnectivityNetworkTopFraction, "%.4f")
-
-	// Source Localization Plotting Overrides
-	ab.addIfNonEmpty("--source-subjects-dir", m.plotSourceSubjectsDir)
-
-	// Selection overrides
-	ab.addSpaceListFlag("--pac-pairs", m.plotPacPairsSpec)
-	measures := m.selectedPlotConnectivityMeasures()
-	ab.addListFlag("--connectivity-measures", measures)
-	ab.addSpaceListFlag("--spectral-metrics", m.plotSpectralMetricsSpec)
-	ab.addSpaceListFlag("--bursts-metrics", m.plotBurstsMetricsSpec)
-	ab.addIfNonEmpty("--asymmetry-stat", m.plotAsymmetryStatSpec)
-
-	// Comparisons
-	ab.addOptionalBoolFlag("--compare-windows", m.plotCompareWindows)
-	ab.addSpaceListFlag("--comparison-windows", m.plotComparisonWindowsSpec)
-	ab.addOptionalBoolFlag("--compare-columns", m.plotCompareColumns)
-	ab.addIfNonEmpty("--comparison-segment", m.plotComparisonSegment)
-	ab.addIfNonEmpty("--comparison-column", m.plotComparisonColumn)
-	ab.addSpaceListFlag("--comparison-values", m.plotComparisonValuesSpec)
-	ab.addSpaceListFlagWithLengthCheck("--comparison-labels", m.plotComparisonLabelsSpec, 2)
-	ab.addSpaceListFlag("--comparison-rois", m.plotComparisonROIsSpec)
-	ab.addOptionalBoolFlag("--overwrite", m.plotOverwrite)
-
-	// Per-plot overrides
-	ab.args = append(ab.args, m.buildPlotItemConfigArgs()...)
-
-	return ab.build()
-}
-
-func (m Model) selectedFeaturePlotterIDs() []string {
-	items := m.featurePlotterItems()
-	ids := make([]string, 0, len(items))
-	for _, p := range items {
-		if m.featurePlotterSelected[p.ID] {
-			ids = append(ids, p.ID)
-		}
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-func (m Model) buildPlotItemConfigArgs() []string {
-	var args []string
-	plotIDs := append(m.SelectedPlotIDs(), m.selectedFeaturePlotterIDs()...)
-	for _, plotID := range plotIDs {
-		cfg := m.plotItemConfigs[plotID]
-
-		if cfg.CompareWindows != nil {
-			args = append(args, "--plot-item-config", plotID, "compare_windows", strconv.FormatBool(*cfg.CompareWindows))
-		}
-		if plotID != "band_power_topomaps" && strings.TrimSpace(cfg.ComparisonWindowsSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "comparison_windows")
-			args = append(args, splitSpaceList(cfg.ComparisonWindowsSpec)...)
-		}
-
-		if cfg.CompareColumns != nil {
-			args = append(args, "--plot-item-config", plotID, "compare_columns", strconv.FormatBool(*cfg.CompareColumns))
-		}
-		if strings.TrimSpace(cfg.ComparisonSegment) != "" {
-			args = append(args, "--plot-item-config", plotID, "comparison_segment", strings.TrimSpace(cfg.ComparisonSegment))
-		}
-		if strings.TrimSpace(cfg.ComparisonColumn) != "" {
-			args = append(args, "--plot-item-config", plotID, "comparison_column", strings.TrimSpace(cfg.ComparisonColumn))
-		}
-		if strings.TrimSpace(cfg.ComparisonValuesSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "comparison_values")
-			args = append(args, splitSpaceList(cfg.ComparisonValuesSpec)...)
-		}
-		if strings.TrimSpace(cfg.ComparisonLabelsSpec) != "" {
-			vals := splitSpaceList(cfg.ComparisonLabelsSpec)
-			if len(vals) == 2 {
-				args = append(args, "--plot-item-config", plotID, "comparison_labels")
-				args = append(args, vals...)
-			}
-		}
-		if strings.TrimSpace(cfg.ComparisonROIsSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "comparison_rois")
-			args = append(args, splitSpaceList(cfg.ComparisonROIsSpec)...)
-		}
-		topomapSpec := strings.TrimSpace(cfg.TopomapWindowsSpec)
-		if topomapSpec == "" && plotID == "band_power_topomaps" {
-			if strings.TrimSpace(m.plotComparisonWindowsSpec) != "" {
-				topomapSpec = strings.TrimSpace(m.plotComparisonWindowsSpec)
-			}
-		}
-		if topomapSpec != "" {
-			args = append(args, "--plot-item-config", plotID, "topomap_windows")
-			args = append(args, splitSpaceList(topomapSpec)...)
-		}
-		if strings.TrimSpace(cfg.TfrTopomapActiveWindow) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_active_window", strings.TrimSpace(cfg.TfrTopomapActiveWindow))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapWindowSizeMs) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_window_size_ms", strings.TrimSpace(cfg.TfrTopomapWindowSizeMs))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapWindowCount) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_window_count", strings.TrimSpace(cfg.TfrTopomapWindowCount))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapLabelXPosition) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_label_x_position", strings.TrimSpace(cfg.TfrTopomapLabelXPosition))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapLabelYPositionBottom) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_label_y_position_bottom", strings.TrimSpace(cfg.TfrTopomapLabelYPositionBottom))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapLabelYPosition) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_label_y_position", strings.TrimSpace(cfg.TfrTopomapLabelYPosition))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapTitleY) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_title_y", strings.TrimSpace(cfg.TfrTopomapTitleY))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapTitlePad) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_title_pad", strings.TrimSpace(cfg.TfrTopomapTitlePad))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapSubplotsRight) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_subplots_right", strings.TrimSpace(cfg.TfrTopomapSubplotsRight))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapTemporalHspace) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_temporal_hspace", strings.TrimSpace(cfg.TfrTopomapTemporalHspace))
-		}
-		if strings.TrimSpace(cfg.TfrTopomapTemporalWspace) != "" {
-			args = append(args, "--plot-item-config", plotID, "tfr_topomap_temporal_wspace", strings.TrimSpace(cfg.TfrTopomapTemporalWspace))
-		}
-		if strings.TrimSpace(cfg.ConnectivityCircleTopFraction) != "" {
-			args = append(args, "--plot-item-config", plotID, "connectivity_circle_top_fraction", strings.TrimSpace(cfg.ConnectivityCircleTopFraction))
-		}
-		if strings.TrimSpace(cfg.ConnectivityCircleMinLines) != "" {
-			args = append(args, "--plot-item-config", plotID, "connectivity_circle_min_lines", strings.TrimSpace(cfg.ConnectivityCircleMinLines))
-		}
-		if strings.TrimSpace(cfg.ConnectivityNetworkTopFraction) != "" {
-			args = append(args, "--plot-item-config", plotID, "connectivity_network_top_fraction", strings.TrimSpace(cfg.ConnectivityNetworkTopFraction))
-		}
-		if strings.TrimSpace(cfg.SourceSegment) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_segment", strings.TrimSpace(cfg.SourceSegment))
-		}
-		if strings.TrimSpace(cfg.SourceSubjectsDir) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_subjects_dir", strings.TrimSpace(cfg.SourceSubjectsDir))
-		}
-		if strings.TrimSpace(cfg.SourceCondition) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_condition", strings.TrimSpace(cfg.SourceCondition))
-		}
-		if strings.TrimSpace(cfg.SourceConditionA) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_condition_a", strings.TrimSpace(cfg.SourceConditionA))
-		}
-		if strings.TrimSpace(cfg.SourceConditionB) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_condition_b", strings.TrimSpace(cfg.SourceConditionB))
-		}
-		if strings.TrimSpace(cfg.SourceBandsSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "source_bands")
-			args = append(args, splitSpaceList(cfg.SourceBandsSpec)...)
-		}
-		if cfg.ItpcSharedColorbar != nil {
-			args = append(args, "--plot-item-config", plotID, "itpc_shared_colorbar", strconv.FormatBool(*cfg.ItpcSharedColorbar))
-		}
-		// Behavior scatter config
-		if strings.TrimSpace(cfg.BehaviorScatterFeaturesSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "scatter_features")
-			args = append(args, splitSpaceList(cfg.BehaviorScatterFeaturesSpec)...)
-		}
-		if strings.TrimSpace(cfg.BehaviorScatterColumnsSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "scatter_columns")
-			args = append(args, splitSpaceList(cfg.BehaviorScatterColumnsSpec)...)
-		}
-		if strings.TrimSpace(cfg.BehaviorScatterAggregationModesSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "scatter_aggregation_modes")
-			args = append(args, splitSpaceList(cfg.BehaviorScatterAggregationModesSpec)...)
-		}
-		if strings.TrimSpace(cfg.BehaviorScatterSegmentSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "scatter_segment", strings.TrimSpace(cfg.BehaviorScatterSegmentSpec))
-		}
-		if cfg.BehaviorScatterControlPredictor != nil {
-			args = append(args, "--plot-item-config", plotID, "scatter_control_predictor", strconv.FormatBool(*cfg.BehaviorScatterControlPredictor))
-		}
-		if cfg.BehaviorScatterControlTrialOrder != nil {
-			args = append(args, "--plot-item-config", plotID, "scatter_control_trial_order", strconv.FormatBool(*cfg.BehaviorScatterControlTrialOrder))
-		}
-		if strings.TrimSpace(cfg.BehaviorScatterPredictorControlMode) != "" {
-			args = append(args, "--plot-item-config", plotID, "scatter_predictor_control_mode", strings.TrimSpace(cfg.BehaviorScatterPredictorControlMode))
-		}
-		if strings.TrimSpace(cfg.PsychometricsPredictorColumn) != "" {
-			args = append(args, "--plot-item-config", plotID, "psychometrics_predictor_column", strings.TrimSpace(cfg.PsychometricsPredictorColumn))
-		}
-		if strings.TrimSpace(cfg.PsychometricsOutcomeColumn) != "" {
-			args = append(args, "--plot-item-config", plotID, "psychometrics_outcome_column", strings.TrimSpace(cfg.PsychometricsOutcomeColumn))
-		}
-		// Behavior dose-response config
-		if strings.TrimSpace(cfg.DoseResponseDoseColumn) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_dose_column", strings.TrimSpace(cfg.DoseResponseDoseColumn))
-		}
-		if strings.TrimSpace(cfg.DoseResponseResponseColumn) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_response_column")
-			args = append(args, splitSpaceList(strings.TrimSpace(cfg.DoseResponseResponseColumn))...)
-		}
-		if strings.TrimSpace(cfg.DoseResponseBinaryOutcomeColumn) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_binary_outcome_column", strings.TrimSpace(cfg.DoseResponseBinaryOutcomeColumn))
-		}
-		if strings.TrimSpace(cfg.DoseResponseSegment) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_segment", strings.TrimSpace(cfg.DoseResponseSegment))
-		}
-		if strings.TrimSpace(cfg.DoseResponseBandsSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_bands")
-			args = append(args, splitSpaceList(cfg.DoseResponseBandsSpec)...)
-		}
-		if strings.TrimSpace(cfg.DoseResponseROIsSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_rois")
-			args = append(args, splitSpaceList(cfg.DoseResponseROIsSpec)...)
-		}
-		if strings.TrimSpace(cfg.DoseResponseScopesSpec) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_scopes")
-			args = append(args, splitSpaceList(cfg.DoseResponseScopesSpec)...)
-		}
-		if strings.TrimSpace(cfg.DoseResponseStat) != "" {
-			args = append(args, "--plot-item-config", plotID, "dose_response_stat", strings.TrimSpace(cfg.DoseResponseStat))
-		}
-		if strings.TrimSpace(cfg.BehaviorTemporalStatsFeatureFolder) != "" {
-			args = append(
-				args,
-				"--plot-item-config",
-				plotID,
-				"temporal_stats_feature_folder",
-				strings.TrimSpace(cfg.BehaviorTemporalStatsFeatureFolder),
-			)
-		}
-	}
-	return args
-}
-
-// buildFeaturesAdvancedArgs returns CLI args for features pipeline advanced options
 func splitCSVList(raw string) []string {
 	parts := strings.FieldsFunc(raw, func(r rune) bool {
 		return r == ',' || r == ';' || r == '\t' || r == '\n'

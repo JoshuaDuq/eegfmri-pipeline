@@ -24,7 +24,6 @@ MODE_SUBJECTS = "subjects"
 MODE_FEATURES = "features"
 MODE_CONFIG = "config"
 MODE_VERSION = "version"
-MODE_PLOTTERS = "plotters"
 MODE_DISCOVER = "discover"
 MODE_ROIS = "rois"
 MODE_FMRI_CONDITIONS = "fmri-conditions"
@@ -396,32 +395,6 @@ def _print_json_output(data: dict) -> None:
     """Print data as formatted JSON."""
     print(json_module.dumps(data, indent=2))
 
-
-def _handle_plotters_mode(output_json: bool) -> None:
-    """Handle plotters mode: list available feature plotters."""
-    from eeg_pipeline.plotting.features import registrations as _feature_plotters  # noqa: F401
-    from eeg_pipeline.plotting.features.context import VisualizationRegistry
-
-    feature_plotters = {}
-    for category in sorted(VisualizationRegistry.get_categories()):
-        plotters = []
-        for name, _func in VisualizationRegistry.get_plotters(category):
-            plotters.append(
-                {
-                    "id": f"{category}.{name}",
-                    "category": category,
-                    "name": name,
-                }
-            )
-        feature_plotters[category] = plotters
-
-    if output_json:
-        _print_json_output({"feature_plotters": feature_plotters})
-    else:
-        for category, plotters in feature_plotters.items():
-            print(f"{category}:")
-            for plotter in plotters:
-                print(f"  - {plotter['name']}")
 
 def _read_feature_header_columns(feature_path: Path) -> List[str]:
     import pandas as pd

@@ -89,7 +89,6 @@ BACKEND_OVERRIDE_SOURCES: Sequence[str] = (
     "eeg_pipeline/cli/commands/features_helpers.py",
     "eeg_pipeline/cli/commands/behavior_config.py",
     "eeg_pipeline/cli/commands/machine_learning_overrides.py",
-    "eeg_pipeline/cli/commands/plotting_config_overrides.py",
 )
 
 BACKEND_RUNTIME_SOURCES: Sequence[str] = (
@@ -113,7 +112,6 @@ CLI_SET_PARSER_SOURCES: Sequence[str] = (
     "eeg_pipeline/cli/commands/behavior_parser.py",
     "eeg_pipeline/cli/commands/preprocessing_parser.py",
     "eeg_pipeline/cli/commands/machine_learning_parser.py",
-    "eeg_pipeline/cli/commands/plotting_parser.py",
     "fmri_pipeline/cli/commands/fmri.py",
     "fmri_pipeline/cli/commands/fmri_analysis.py",
 )
@@ -124,7 +122,6 @@ TUI_SET_OPTION_SOURCES: Sequence[str] = (
     "eeg_pipeline/cli/tui/views/wizard/model_options_ml.go",
     "eeg_pipeline/cli/tui/views/wizard/model_options_stage_preprocessing.go",
     "eeg_pipeline/cli/tui/views/wizard/model_options_stage_fmri.go",
-    "eeg_pipeline/cli/tui/views/wizard/model_options_plotting.go",
 )
 
 SET_PRECEDENCE_RULES: Sequence[Tuple[str, str, str]] = (
@@ -146,11 +143,6 @@ SET_PRECEDENCE_RULES: Sequence[Tuple[str, str, str]] = (
     (
         "eeg_pipeline/cli/commands/machine_learning_orchestrator.py",
         "config[\"feature_engineering.analysis_mode\"] = \"trial_ml_safe\"",
-        "apply_set_overrides(config, getattr(args, \"set_overrides\", None))",
-    ),
-    (
-        "eeg_pipeline/cli/commands/plotting_orchestrator.py",
-        "apply_all_config_overrides(args, config)",
         "apply_set_overrides(config, getattr(args, \"set_overrides\", None))",
     ),
     (

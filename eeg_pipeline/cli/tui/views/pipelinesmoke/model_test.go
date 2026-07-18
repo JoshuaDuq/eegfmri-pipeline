@@ -21,10 +21,10 @@ func TestBuildCommandInsertsTaskAndPipelines(t *testing.T) {
 	m := New("task")
 	m.ToggleAll(false)
 	m.ToggleByID("features")
-	m.ToggleByID("plotting")
+	m.ToggleByID("behavior")
 
 	cmd := m.BuildCommand()
-	want := "scripts/tui_pipeline_smoke.py --task task --pipelines features,plotting"
+	want := "scripts/tui_pipeline_smoke.py --task task --pipelines features,behavior"
 	if cmd != want {
 		t.Fatalf("expected %q, got %q", want, cmd)
 	}
@@ -105,7 +105,7 @@ func TestViewAndReset(t *testing.T) {
 	if !strings.Contains(view, "task") {
 		t.Fatalf("expected task line in view, got %q", view)
 	}
-	if !strings.Contains(view, "11/11 selected") {
+	if !strings.Contains(view, "10/10 selected") {
 		t.Fatalf("expected selected count in view, got %q", view)
 	}
 

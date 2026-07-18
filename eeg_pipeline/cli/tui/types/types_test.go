@@ -4,14 +4,14 @@ import "testing"
 
 func TestPipelineMetadata(t *testing.T) {
 	tests := []struct {
-		name          string
-		pipeline      Pipeline
-		wantName      string
-		wantCommand   string
-		wantDesc      string
+		name           string
+		pipeline       Pipeline
+		wantName       string
+		wantCommand    string
+		wantDesc       string
 		wantDataSource string
-		wantEpochs    bool
-		wantFeatures  bool
+		wantEpochs     bool
+		wantFeatures   bool
 	}{
 		{
 			name:           "preprocessing",
@@ -110,8 +110,8 @@ func TestPipelineMetadataDoesNotExposePlotting(t *testing.T) {
 
 func TestValidateSubject(t *testing.T) {
 	subject := SubjectStatus{
-		ID:         "sub-01",
-		HasEpochs:  true,
+		ID:          "sub-01",
+		HasEpochs:   true,
 		HasFeatures: true,
 	}
 

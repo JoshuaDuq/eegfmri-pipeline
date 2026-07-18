@@ -52,23 +52,9 @@ func (m *Model) SetRepoRoot(repoRoot string) {
 func (m *Model) startTextEdit(field textField) {
 	m.editingTextField = field
 	m.textBuffer = m.getTextFieldValue(field)
-	m.editingPlotID = ""
-	m.editingPlotField = plotItemConfigFieldNone
 	m.editingText = true
 }
 
 func (m *Model) commitTextInput() {
-	if m.editingPlotID != "" && m.editingPlotField != plotItemConfigFieldNone {
-		m.setPlotItemTextFieldValue(m.editingPlotID, m.editingPlotField, m.textBuffer)
-		return
-	}
 	m.setTextFieldValue(m.editingTextField, m.textBuffer)
-}
-
-func (m *Model) startPlotTextEdit(plotID string, field plotItemConfigField) {
-	m.editingTextField = textFieldNone
-	m.editingPlotID = plotID
-	m.editingPlotField = field
-	m.textBuffer = m.getPlotItemTextFieldValue(plotID, field)
-	m.editingText = true
 }

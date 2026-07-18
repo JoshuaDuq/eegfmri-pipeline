@@ -70,15 +70,6 @@ Outputs & Advanced Workflows
       subdirectory is ``eeg_only/`` or ``fmri_informed/`` depending on
       ``feature_engineering.sourcelocalization.mode``.
 
-      .. rubric:: Plot Exports
-
-      Plot formats come from ``plotting.defaults.formats``. Use ``--formats``
-      to override per run:
-
-      .. code-block:: bash
-
-         eeg-pipeline plotting visualize --subject 0001 --formats png svg pdf
-
       .. rubric:: Source Localization
 
       Supports a template-based path (fsaverage, no MRI needed) and a

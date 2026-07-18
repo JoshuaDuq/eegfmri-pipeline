@@ -17,8 +17,6 @@ func (m Model) renderAdvancedConfig() string {
 		return m.renderFeaturesAdvancedConfig()
 	case types.PipelineBehavior:
 		return m.renderBehaviorAdvancedConfig()
-	case types.PipelinePlotting:
-		return m.renderPlottingAdvancedConfigV2()
 	case types.PipelineML:
 		return m.renderMLAdvancedConfig()
 	case types.PipelinePreprocessing:

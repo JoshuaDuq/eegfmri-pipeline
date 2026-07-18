@@ -29,47 +29,7 @@ func (m Model) getExpandedListLength() int {
 			return 0
 		}
 		return len(m.GetDiscoveredColumnValues(m.clusterConditionColumn))
-	case expandedPlotComparisonColumn:
-		if m.editingPlotField == plotItemConfigFieldDoseResponseResponseColumn {
-			return len(m.GetTrialTableFeatureCategories())
-		}
-		return len(m.GetPlottingComparisonColumns())
-	case expandedPlotComparisonValues:
-		// Check plot-specific column first, then fall back to global
-		col := ""
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok && cfg.ComparisonColumn != "" {
-				col = cfg.ComparisonColumn
-			}
-		}
-		if col == "" {
-			col = m.plotComparisonColumn
-		}
-		if col == "" {
-			return 0
-		}
-		return len(m.GetPlottingComparisonColumnValues(col))
-	case expandedPlotComparisonWindows:
-		if m.editingPlotID != "" {
-			if m.editingPlotField == plotItemConfigFieldDoseResponseSegment {
-				// Dose-response segment uses global windows list (same as renderer),
-				// not feature-group-specific windows.
-				return len(m.GetPlottingComparisonWindows())
-			}
-			featureGroup := m.getFeatureGroupForPlot(m.editingPlotID)
-			return len(m.GetPlottingComparisonWindows(featureGroup))
-		}
-		return len(m.GetPlottingComparisonWindows())
-	case expandedPlotComparisonROIs:
-		return len(m.discoveredROIs)
-	case expandedDoseResponseBands:
-		return len(m.GetDoseResponseBands(m.getDoseResponseCategoriesForEditingPlot()))
-	case expandedDoseResponseROIs:
-		return len(m.GetDoseResponseROIs(m.getDoseResponseCategoriesForEditingPlot()))
-	case expandedDoseResponseScopes:
-		return len(m.GetDoseResponseScopes(m.getDoseResponseCategoriesForEditingPlot()))
-	case expandedDoseResponseStat:
-		return len(m.GetDoseResponseStats(m.getDoseResponseCategoriesForEditingPlot()))
+
 	case expandedRunAdjustmentColumn:
 		return len(m.GetAvailableColumns())
 	case expandedBehaviorOutcomeColumn:
@@ -213,25 +173,7 @@ func (m Model) getExpandedListLength() int {
 			return 0
 		}
 		return len(m.GetDiscoveredColumnValues(m.itpcConditionColumn))
-	case expandedBehaviorScatterFeatures:
-		return len(behaviorScatterFeatureTypes)
-	case expandedBehaviorScatterColumns:
-		return len(m.GetPlottingComparisonColumns())
-	case expandedBehaviorScatterAggregation:
-		return len(behaviorScatterAggregationModes)
-	case expandedBehaviorScatterSegment:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				return len(m.GetBehaviorScatterSegments(cfg.BehaviorScatterFeaturesSpec))
-			}
-		}
-		return len(m.GetBehaviorScatterSegments(""))
-	case expandedBehaviorScatterPredictorControlMode:
-		return len(behaviorScatterPredictorControlModes)
-	case expandedSourcePlotCondition:
-		return len(m.GetSourcePlotConditions())
-	case expandedSourcePlotBands:
-		return len(m.GetSourcePlotBands())
+
 	case expandedFmriSecondLevelContrastNames:
 		n := len(m.GetFmriSecondLevelDiscoveredContrastNames())
 		if n == 0 {
@@ -252,8 +194,7 @@ func (m Model) getExpandedListLength() int {
 			return 1
 		}
 		return n
-	case expandedTemporalTopomapsFeatureDir:
-		return len(m.temporalTopomapsStatsFeatureFolders)
+
 	case expandedPredictorResidualCrossfitGroupColumn:
 		if len(m.GetAvailableColumns()) == 0 {
 			return 2
@@ -303,47 +244,7 @@ func (m Model) getExpandedListItems() []string {
 			return nil
 		}
 		return m.GetDiscoveredColumnValues(m.clusterConditionColumn)
-	case expandedPlotComparisonColumn:
-		if m.editingPlotField == plotItemConfigFieldDoseResponseResponseColumn {
-			return m.GetTrialTableFeatureCategories()
-		}
-		return m.GetPlottingComparisonColumns()
-	case expandedPlotComparisonValues:
-		// Check plot-specific column first, then fall back to global
-		col := ""
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok && cfg.ComparisonColumn != "" {
-				col = cfg.ComparisonColumn
-			}
-		}
-		if col == "" {
-			col = m.plotComparisonColumn
-		}
-		if col == "" {
-			return nil
-		}
-		return m.GetPlottingComparisonColumnValues(col)
-	case expandedPlotComparisonWindows:
-		if m.editingPlotID != "" {
-			if m.editingPlotField == plotItemConfigFieldDoseResponseSegment {
-				// Dose-response segment uses global windows list (same as renderer),
-				// not feature-group-specific windows.
-				return m.GetPlottingComparisonWindows()
-			}
-			featureGroup := m.getFeatureGroupForPlot(m.editingPlotID)
-			return m.GetPlottingComparisonWindows(featureGroup)
-		}
-		return m.GetPlottingComparisonWindows()
-	case expandedPlotComparisonROIs:
-		return m.discoveredROIs
-	case expandedDoseResponseBands:
-		return m.GetDoseResponseBands(m.getDoseResponseCategoriesForEditingPlot())
-	case expandedDoseResponseROIs:
-		return m.GetDoseResponseROIs(m.getDoseResponseCategoriesForEditingPlot())
-	case expandedDoseResponseScopes:
-		return m.GetDoseResponseScopes(m.getDoseResponseCategoriesForEditingPlot())
-	case expandedDoseResponseStat:
-		return m.GetDoseResponseStats(m.getDoseResponseCategoriesForEditingPlot())
+
 	case expandedRunAdjustmentColumn:
 		return m.GetAvailableColumns()
 	case expandedBehaviorOutcomeColumn:
@@ -535,25 +436,7 @@ func (m Model) getExpandedListItems() []string {
 			return nil
 		}
 		return m.GetDiscoveredColumnValues(m.sourceLocContrastCondition)
-	case expandedBehaviorScatterFeatures:
-		return behaviorScatterFeatureTypes
-	case expandedBehaviorScatterColumns:
-		return m.GetPlottingComparisonColumns()
-	case expandedBehaviorScatterAggregation:
-		return behaviorScatterAggregationModes
-	case expandedBehaviorScatterSegment:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				return m.GetBehaviorScatterSegments(cfg.BehaviorScatterFeaturesSpec)
-			}
-		}
-		return m.GetBehaviorScatterSegments("")
-	case expandedBehaviorScatterPredictorControlMode:
-		return behaviorScatterPredictorControlModes
-	case expandedSourcePlotCondition:
-		return m.GetSourcePlotConditions()
-	case expandedSourcePlotBands:
-		return m.GetSourcePlotBands()
+
 	case expandedFmriSecondLevelContrastNames:
 		contrasts := m.GetFmriSecondLevelDiscoveredContrastNames()
 		if len(contrasts) == 0 {
@@ -578,8 +461,7 @@ func (m Model) getExpandedListItems() []string {
 			return []string{"(type manually)"}
 		}
 		return values
-	case expandedTemporalTopomapsFeatureDir:
-		return m.temporalTopomapsStatsFeatureFolders
+
 	case expandedPredictorResidualCrossfitGroupColumn:
 		items := []string{"(default: run column)"}
 		cols := m.GetAvailableColumns()
@@ -634,120 +516,19 @@ func (m Model) isColumnValueSelected(value string) bool {
 		selectedValues = m.temporalConditionValues
 	case expandedClusterConditionValues:
 		selectedValues = m.clusterConditionValues
-	case expandedPlotComparisonValues:
-		// Check plot-specific config first
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.ComparisonValuesSpec
-			}
-		}
-		if selectedValues == "" {
-			selectedValues = m.plotComparisonValuesSpec
-		}
-	case expandedPlotComparisonWindows:
-		// Check plot-specific config first
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				switch m.editingPlotField {
-				case plotItemConfigFieldComparisonSegment:
-					selectedValues = cfg.ComparisonSegment
-				case plotItemConfigFieldSourceSegment:
-					selectedValues = cfg.SourceSegment
-				case plotItemConfigFieldDoseResponseSegment:
-					selectedValues = cfg.DoseResponseSegment
-				case plotItemConfigFieldTopomapWindow:
-					selectedValues = cfg.TopomapWindowsSpec
-				default:
-					selectedValues = cfg.ComparisonWindowsSpec
-				}
-			}
-		}
-		if selectedValues == "" {
-			selectedValues = m.plotComparisonWindowsSpec
-		}
-	case expandedPlotComparisonROIs:
-		// Check plot-specific config first
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.ComparisonROIsSpec
-			}
-		}
+
 	case expandedItpcConditionValues:
 		selectedValues = m.itpcConditionValues
 	case expandedConnConditionValues:
 		selectedValues = m.connConditionValues
 	case expandedFmriTrialSigGroupValues:
 		selectedValues = m.fmriTrialSigGroupValuesSpec
-	case expandedBehaviorScatterFeatures:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.BehaviorScatterFeaturesSpec
-			}
-		}
-	case expandedBehaviorScatterColumns:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.BehaviorScatterColumnsSpec
-			}
-		}
-	case expandedBehaviorScatterAggregation:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.BehaviorScatterAggregationModesSpec
-			}
-		}
-	case expandedBehaviorScatterSegment:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.BehaviorScatterSegmentSpec
-			}
-		}
-	case expandedBehaviorScatterPredictorControlMode:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.BehaviorScatterPredictorControlMode
-			}
-		}
-	case expandedSourcePlotCondition:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.SourceCondition
-			}
-		}
-	case expandedSourcePlotBands:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.SourceBandsSpec
-			}
-		}
+
 	case expandedFmriSecondLevelContrastNames:
 		selectedValues = m.fmriSecondLevelContrastNames
 	case expandedFmriSecondLevelCovariateColumns:
 		selectedValues = m.fmriSecondLevelCovariateColumns
-	case expandedDoseResponseBands:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.DoseResponseBandsSpec
-			}
-		}
-	case expandedDoseResponseROIs:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.DoseResponseROIsSpec
-			}
-		}
-	case expandedDoseResponseScopes:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.DoseResponseScopesSpec
-			}
-		}
-	case expandedDoseResponseStat:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.DoseResponseStat
-			}
-		}
+
 	case expandedMLFeatureFamilies:
 		selectedValues = m.mlFeatureFamiliesSpec
 	case expandedMLFeatureBands:
@@ -758,12 +539,7 @@ func (m Model) isColumnValueSelected(value string) bool {
 		selectedValues = m.mlFeatureScopesSpec
 	case expandedMLFeatureStats:
 		selectedValues = m.mlFeatureStatsSpec
-	case expandedPlotComparisonColumn:
-		if m.editingPlotID != "" && m.editingPlotField == plotItemConfigFieldDoseResponseResponseColumn {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				selectedValues = cfg.DoseResponseResponseColumn
-			}
-		}
+
 	default:
 		return false
 	}
@@ -826,102 +602,6 @@ func (m *Model) handleExpandedListToggle() {
 
 	case expandedClusterConditionValues:
 		m.toggleColumnValue(selectedItem, &m.clusterConditionValues)
-
-	case expandedPlotComparisonColumn:
-		// Update plot-specific config if editing a plot field, otherwise global
-		if m.editingPlotID != "" {
-			plotID := m.editingPlotID
-			cfg := m.ensurePlotItemConfig(plotID)
-
-			switch m.editingPlotField {
-			case plotItemConfigFieldPsychometricsPredictorColumn:
-				cfg.PsychometricsPredictorColumn = selectedItem
-			case plotItemConfigFieldPsychometricsOutcomeColumn:
-				cfg.PsychometricsOutcomeColumn = selectedItem
-			case plotItemConfigFieldDoseResponseDoseColumn:
-				cfg.DoseResponseDoseColumn = selectedItem
-			case plotItemConfigFieldDoseResponseResponseColumn:
-				// Multi-select feature categories (space-separated)
-				m.toggleSpaceValue(selectedItem, &cfg.DoseResponseResponseColumn)
-				m.plotItemConfigs[plotID] = cfg
-				return
-			case plotItemConfigFieldDoseResponseBinaryOutcomeColumn:
-				cfg.DoseResponseBinaryOutcomeColumn = selectedItem
-			default:
-				cfg.ComparisonColumn = selectedItem
-				cfg.ComparisonValuesSpec = "" // Reset values when column changes
-			}
-
-			m.plotItemConfigs[plotID] = cfg
-			m.editingPlotID = ""
-			m.editingPlotField = plotItemConfigFieldNone
-		} else {
-			m.plotComparisonColumn = selectedItem
-			m.plotComparisonValuesSpec = "" // Reset values when column changes
-		}
-		m.expandedOption = expandedNone
-		m.subCursor = 0
-
-	case expandedPlotComparisonValues:
-		// Update plot-specific config if editing a plot field, otherwise global
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.ComparisonValuesSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		} else {
-			m.toggleSpaceValue(selectedItem, &m.plotComparisonValuesSpec)
-		}
-
-	case expandedPlotComparisonWindows:
-		// Update plot-specific config if editing a plot field, otherwise global
-		if m.editingPlotID != "" {
-			plotID := m.editingPlotID
-			cfg := m.ensurePlotItemConfig(plotID)
-			switch m.editingPlotField {
-			case plotItemConfigFieldComparisonSegment:
-				// Segment is single-select
-				cfg.ComparisonSegment = selectedItem
-				m.plotItemConfigs[plotID] = cfg
-				m.editingPlotID = ""
-				m.editingPlotField = plotItemConfigFieldNone
-				m.expandedOption = expandedNone
-				m.subCursor = 0
-			case plotItemConfigFieldSourceSegment:
-				// Source segment is single-select
-				cfg.SourceSegment = selectedItem
-				m.plotItemConfigs[plotID] = cfg
-				m.editingPlotID = ""
-				m.editingPlotField = plotItemConfigFieldNone
-				m.expandedOption = expandedNone
-				m.subCursor = 0
-			case plotItemConfigFieldDoseResponseSegment:
-				// Dose-response segment is single-select
-				cfg.DoseResponseSegment = selectedItem
-				m.plotItemConfigs[plotID] = cfg
-				m.editingPlotID = ""
-				m.editingPlotField = plotItemConfigFieldNone
-				m.expandedOption = expandedNone
-				m.subCursor = 0
-			case plotItemConfigFieldTopomapWindow:
-				// TopomapWindowsSpec is multi-select
-				m.toggleSpaceValue(selectedItem, &cfg.TopomapWindowsSpec)
-				m.plotItemConfigs[plotID] = cfg
-			default:
-				// Windows is multi-select
-				m.toggleSpaceValue(selectedItem, &cfg.ComparisonWindowsSpec)
-				m.plotItemConfigs[plotID] = cfg
-			}
-		} else {
-			m.toggleSpaceValue(selectedItem, &m.plotComparisonWindowsSpec)
-		}
-
-	case expandedPlotComparisonROIs:
-		// Update plot-specific config - ROIs is multi-select
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.ComparisonROIsSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		}
 
 	case expandedRunAdjustmentColumn:
 		m.runAdjustmentColumn = selectedItem
@@ -1328,64 +1008,6 @@ func (m *Model) handleExpandedListToggle() {
 		m.expandedOption = expandedNone
 		m.subCursor = 0
 
-	case expandedBehaviorScatterFeatures:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.BehaviorScatterFeaturesSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		}
-
-	case expandedBehaviorScatterColumns:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.BehaviorScatterColumnsSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		}
-
-	case expandedBehaviorScatterAggregation:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.BehaviorScatterAggregationModesSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		}
-
-	case expandedBehaviorScatterSegment:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			// Segment is single-select
-			cfg.BehaviorScatterSegmentSpec = selectedItem
-			m.plotItemConfigs[m.editingPlotID] = cfg
-			m.editingPlotID = ""
-			m.editingPlotField = plotItemConfigFieldNone
-			m.expandedOption = expandedNone
-			m.subCursor = 0
-		}
-	case expandedBehaviorScatterPredictorControlMode:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			cfg.BehaviorScatterPredictorControlMode = selectedItem
-			m.plotItemConfigs[m.editingPlotID] = cfg
-			m.editingPlotID = ""
-			m.editingPlotField = plotItemConfigFieldNone
-			m.expandedOption = expandedNone
-			m.subCursor = 0
-		}
-	case expandedSourcePlotCondition:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			cfg.SourceCondition = selectedItem
-			m.plotItemConfigs[m.editingPlotID] = cfg
-			m.editingPlotID = ""
-			m.editingPlotField = plotItemConfigFieldNone
-			m.expandedOption = expandedNone
-			m.subCursor = 0
-		}
-	case expandedSourcePlotBands:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.SourceBandsSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		}
 	case expandedFmriSecondLevelContrastNames:
 		if selectedItem == "(type manually)" {
 			m.expandedOption = expandedNone
@@ -1453,44 +1075,7 @@ func (m *Model) handleExpandedListToggle() {
 			m.expandedOption = expandedNone
 			m.subCursor = 0
 		}
-	case expandedTemporalTopomapsFeatureDir:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			cfg.BehaviorTemporalStatsFeatureFolder = selectedItem
-			m.plotItemConfigs[m.editingPlotID] = cfg
-			m.editingPlotID = ""
-			m.editingPlotField = plotItemConfigFieldNone
-			m.expandedOption = expandedNone
-			m.subCursor = 0
-		}
-	case expandedDoseResponseBands:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.DoseResponseBandsSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		}
-	case expandedDoseResponseROIs:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.DoseResponseROIsSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		}
-	case expandedDoseResponseScopes:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			m.toggleSpaceValue(selectedItem, &cfg.DoseResponseScopesSpec)
-			m.plotItemConfigs[m.editingPlotID] = cfg
-		}
-	case expandedDoseResponseStat:
-		if m.editingPlotID != "" {
-			cfg := m.ensurePlotItemConfig(m.editingPlotID)
-			cfg.DoseResponseStat = selectedItem
-			m.plotItemConfigs[m.editingPlotID] = cfg
-			m.editingPlotID = ""
-			m.editingPlotField = plotItemConfigFieldNone
-			m.expandedOption = expandedNone
-			m.subCursor = 0
-		}
+
 	case expandedPredictorResidualCrossfitGroupColumn:
 		switch selectedItem {
 		case "(default: run column)":
@@ -1541,12 +1126,7 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optClusterConditionColumn
 	case expandedClusterConditionValues:
 		return opt == optClusterConditionValues
-	case expandedPlotComparisonColumn:
-		return opt == optPlotComparisonColumn
-	case expandedPlotComparisonValues:
-		return opt == optPlotComparisonValues
-	case expandedPlotComparisonWindows:
-		return opt == optPlotComparisonWindows
+
 	case expandedRunAdjustmentColumn:
 		return opt == optRunAdjustmentColumn
 	case expandedBehaviorOutcomeColumn:
@@ -1666,14 +1246,7 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.temporalConditionColumn == item
 	case expandedClusterConditionColumn:
 		return m.clusterConditionColumn == item
-	case expandedPlotComparisonColumn:
-		// Check plot-specific config first
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok && cfg.ComparisonColumn != "" {
-				return cfg.ComparisonColumn == item
-			}
-		}
-		return m.plotComparisonColumn == item
+
 	case expandedRunAdjustmentColumn:
 		return m.runAdjustmentColumn == item
 	case expandedBehaviorOutcomeColumn:
@@ -1860,21 +1433,7 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		expandedPlotComparisonWindows, expandedItpcConditionValues, expandedConnConditionValues,
 		expandedFmriTrialSigGroupValues, expandedDoseResponseBands, expandedDoseResponseROIs, expandedDoseResponseScopes, expandedDoseResponseStat:
 		return m.isColumnValueSelected(item)
-	case expandedBehaviorScatterSegment:
-		// Check plot-specific config
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				return cfg.BehaviorScatterSegmentSpec == item
-			}
-		}
-		return false
-	case expandedSourcePlotCondition:
-		if m.editingPlotID != "" {
-			if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-				return cfg.SourceCondition == item
-			}
-		}
-		return false
+
 	case expandedFmriSecondLevelContrastNames:
 		for _, contrast := range splitSpaceList(m.fmriSecondLevelContrastNames) {
 			if contrast == item {
@@ -1972,18 +1531,6 @@ func (m *Model) toggleSpaceValue(value string, target *string) {
 	}
 
 	*target = strings.Join(newValues, " ")
-}
-
-func (m Model) getDoseResponseCategoriesForEditingPlot() []string {
-	if m.editingPlotID != "" {
-		if cfg, ok := m.plotItemConfigs[m.editingPlotID]; ok {
-			cats := splitSpaceList(cfg.DoseResponseResponseColumn)
-			if len(cats) > 0 {
-				return cats
-			}
-		}
-	}
-	return m.GetTrialTableFeatureCategories()
 }
 
 ///////////////////////////////////////////////////////////////////

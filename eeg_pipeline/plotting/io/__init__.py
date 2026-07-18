@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from .collections import collect_significant_plots
 from .figures import (
     build_footer,
     unwrap_figure,
-    get_behavior_footer,
     get_band_color,
     logratio_to_pct,
     pct_to_logratio,
@@ -21,7 +19,6 @@ from .figures import (
 __all__ = [
     "build_footer",
     "unwrap_figure",
-    "get_behavior_footer",
     "get_band_color",
     "logratio_to_pct",
     "pct_to_logratio",
@@ -33,5 +30,4 @@ __all__ = [
     "log_if_present",
     "get_default_config",
     "save_fig",
-    "collect_significant_plots",
 ]

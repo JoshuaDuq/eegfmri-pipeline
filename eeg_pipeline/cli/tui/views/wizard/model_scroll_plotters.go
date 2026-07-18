@@ -1,16 +1,10 @@
 package wizard
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-
 	"github.com/eeg-pipeline/tui/types"
 )
 
-// Scroll calculations, plotting availability summaries, and plotter discovery.
+// Scroll calculations for wizard option lists.
 
 func (m Model) advancedRenderedLines(options []optionType, shouldRender func(optionType) bool) (totalLines, cursorLine int) {
 	lineIdx := 0
@@ -86,11 +80,6 @@ func (m *Model) UpdateAdvancedOffset() {
 			}
 		}
 
-	case types.PipelinePlotting:
-		lines, focusedLine := m.buildPlottingAdvancedLines()
-		totalLines = len(lines)
-		cursorLine = focusedLine
-
 	case types.PipelinePreprocessing:
 		options := m.getPreprocessingOptions()
 		totalLines, cursorLine = m.advancedRenderedLines(options, func(optionType) bool { return true })
@@ -126,99 +115,6 @@ func (m *Model) UpdateAdvancedOffset() {
 	)
 }
 
-// UpdatePlotOffset calculates and updates the scrolling offset for the plots list
-func (m *Model) UpdatePlotOffset() {
-	lines, cursorLine, _, _ := m.plotSelectionLines()
-	if cursorLine == -1 || len(lines) == 0 {
-		m.plotOffset = 0
-		return
-	}
-
-	maxLines := m.plotSelectionVisibleRows(len(lines))
-	m.plotOffset = calculateScrollOffset(
-		cursorLine,
-		m.plotOffset,
-		len(lines),
-		maxLines,
-	)
-}
-
-func (m Model) selectedFeaturePlotterCategories() []string {
-	var ordered []string
-	seen := make(map[string]bool)
-	for i, plot := range m.plotItems {
-		if !m.plotSelected[i] || !m.IsPlotVisibleForSelection(plot) {
-			continue
-		}
-		if plot.Group != "features" {
-			continue
-		}
-		id := strings.TrimSpace(plot.ID)
-		if !strings.HasPrefix(id, "features_") {
-			continue
-		}
-		cat := strings.TrimPrefix(id, "features_")
-		if cat == "" || seen[cat] {
-			continue
-		}
-		seen[cat] = true
-		ordered = append(ordered, cat)
-	}
-	return ordered
-}
-
-func (m Model) featurePlotterItems() []PlotterInfo {
-	if m.featurePlotters == nil {
-		return nil
-	}
-	var items []PlotterInfo
-	for _, category := range m.selectedFeaturePlotterCategories() {
-		items = append(items, m.featurePlotters[category]...)
-	}
-	return items
-}
-
-func (m *Model) UpdateFeaturePlotterOffset() {
-	// Match overhead with renderFeaturePlotterSelection (10 lines)
-	overheadLines := 10
-	maxLines := m.height - overheadLines
-	if maxLines < minVisibleLines {
-		maxLines = minVisibleLines
-	}
-
-	items := m.featurePlotterItems()
-	if len(items) == 0 {
-		m.featurePlotterOffset = 0
-		return
-	}
-
-	currentCategory := ""
-	lineIdx := 0
-	cursorLine := -1
-	for i, p := range items {
-		if p.Category != currentCategory {
-			lineIdx++
-			currentCategory = p.Category
-		}
-		if i == m.featurePlotterCursor {
-			cursorLine = lineIdx
-		}
-		lineIdx++
-	}
-	if cursorLine < 0 {
-		return
-	}
-
-	m.featurePlotterOffset = calculateScrollOffset(
-		cursorLine,
-		m.featurePlotterOffset,
-		lineIdx,
-		maxLines,
-	)
-}
-
-// calculateScrollOffset computes the scroll offset to keep the cursor visible.
-// It ensures the cursor stays within the visible area when scrolling.
 func calculateScrollOffset(cursorLine, currentOffset, totalLines, maxVisibleLines int) int {
 	if totalLines <= 0 {
 		return 0
@@ -257,116 +153,3 @@ func calculateScrollOffset(cursorLine, currentOffset, totalLines, maxVisibleLine
 
 	return currentOffset
 }
-
-func (m Model) plotCountsForGroup(group string) (total int, selected int) {
-	for i, plot := range m.plotItems {
-		if strings.EqualFold(plot.Group, group) {
-			total++
-			if m.plotSelected[i] {
-				selected++
-			}
-		}
-	}
-	return total, selected
-}
-
-func (m Model) plotAvailabilitySummary(plot PlotItem) (int, int, map[string]int) {
-	missing := make(map[string]int)
-	total := 0
-	available := 0
-
-	for _, s := range m.subjects {
-		if !m.subjectSelected[s.ID] {
-			continue
-		}
-		total++
-
-		hasEpochs := !plot.RequiresEpochs || s.HasEpochs
-		hasFeatures := !plot.RequiresFeatures || s.HasFeatures
-		hasStats := !plot.RequiresStats || s.HasStats
-		isAvailable := hasEpochs && hasFeatures && hasStats
-
-		if !hasEpochs {
-			missing["epochs"]++
-		}
-		if !hasFeatures {
-			missing["features"]++
-		}
-		if !hasStats {
-			missing["stats"]++
-		}
-
-		if isAvailable {
-			available++
-		}
-	}
-
-	return available, total, missing
-}
-
-func (m Model) discoverTemporalTopomapsStatsFeatureFolders() ([]string, error) {
-	derivRoot := strings.TrimSpace(m.derivRoot)
-	if derivRoot == "" {
-		return nil, fmt.Errorf("deriv_root is not set")
-	}
-
-	selectedSubjects := make([]string, 0, len(m.subjects))
-	for _, s := range m.subjects {
-		if m.subjectSelected[s.ID] {
-			selectedSubjects = append(selectedSubjects, s.ID)
-		}
-	}
-	if len(selectedSubjects) == 0 {
-		return nil, fmt.Errorf("no subjects selected")
-	}
-
-	var intersection map[string]struct{}
-	for _, subjID := range selectedSubjects {
-		statsDir := filepath.Join(derivRoot, fmt.Sprintf("sub-%s", subjID), "eeg", "stats")
-		kindDirs, _ := filepath.Glob(filepath.Join(statsDir, "temporal_correlations*"))
-		perSubject := make(map[string]struct{})
-
-		for _, kindDir := range kindDirs {
-			entries, err := os.ReadDir(kindDir)
-			if err != nil {
-				continue
-			}
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				featureFolder := entry.Name()
-				featureDir := filepath.Join(kindDir, featureFolder)
-				matches, _ := filepath.Glob(filepath.Join(featureDir, "temporal_correlations_by_condition*.npz"))
-				if len(matches) > 0 {
-					perSubject[featureFolder] = struct{}{}
-				}
-			}
-		}
-
-		if intersection == nil {
-			intersection = perSubject
-			continue
-		}
-		for k := range intersection {
-			if _, ok := perSubject[k]; !ok {
-				delete(intersection, k)
-			}
-		}
-	}
-
-	if len(intersection) == 0 {
-		return nil, fmt.Errorf("no temporal_correlations feature folders found (expected NPZ in stats/temporal_correlations*/<feature>/)")
-	}
-
-	out := make([]string, 0, len(intersection))
-	for k := range intersection {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-///////////////////////////////////////////////////////////////////
-// Setters
-///////////////////////////////////////////////////////////////////

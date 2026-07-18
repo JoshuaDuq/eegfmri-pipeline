@@ -19,7 +19,6 @@ __all__ = [
     "FREQUENCY_BANDS",
     "BEHAVIOR_COMPUTATIONS",
     "FEATURE_VISUALIZE_CATEGORIES",
-    "BEHAVIOR_VISUALIZE_CATEGORIES",
 ]
 
 
@@ -59,15 +58,4 @@ FEATURE_VISUALIZE_CATEGORIES: List[str] = [
     "ratios",
     "asymmetry",
     "microstates",
-]
-
-
-BEHAVIOR_VISUALIZE_CATEGORIES: List[str] = [
-    "psychometrics",
-    "power",
-    "aperiodic",
-    "connectivity",
-    "itpc",
-    "temporal",
-    "dose_response",
 ]

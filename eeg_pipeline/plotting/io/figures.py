@@ -65,43 +65,6 @@ def unwrap_figure(obj: Any) -> Any:
     return obj[0] if isinstance(obj, list) else obj
 
 
-def _format_baseline_string(config: Dict[str, Any]) -> str:
-    """Format baseline window string from configuration."""
-    baseline_window = tuple(config.get("time_frequency_analysis.baseline_window"))
-    start_time = float(baseline_window[0])
-    end_time = float(baseline_window[1])
-    return f"Baseline: [{start_time:.2f}, {end_time:.2f}] s"
-
-
-def get_behavior_footer(
-    config: Dict[str, Any],
-    *,
-    inference: Optional[str] = None,
-    alpha: Optional[float] = None,
-) -> str:
-    """Build footer string for behavioral analysis plots.
-    
-    Args:
-        config: Configuration dictionary.
-        inference: Optional inference method name.
-        alpha: Optional significance level.
-        
-    Returns:
-        Formatted footer string with baseline and significance information.
-    """
-    baseline_str = _format_baseline_string(config)
-    
-    if inference is None:
-        fdr_alpha = config.get("behavior_analysis.statistics.fdr_alpha")
-        return f"{baseline_str} | Significance: BH-FDR α={fdr_alpha}"
-
-    if alpha is not None and np.isfinite(alpha):
-        alpha_str = f" (α={float(alpha):.3g})"
-        return f"{baseline_str} | {inference}{alpha_str}"
-    
-    return f"{baseline_str} | {inference}"
-
-
 def get_band_color(band: str, config: Optional[Dict[str, Any]] = None) -> str:
     """Get color for frequency band from configuration.
     
@@ -697,7 +660,6 @@ def save_fig(
 __all__ = [
     "build_footer",
     "unwrap_figure",
-    "get_behavior_footer",
     "get_band_color",
     "logratio_to_pct",
     "pct_to_logratio",

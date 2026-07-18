@@ -214,4 +214,3 @@ func TestSaveWizardConfig_PersistsBandsROIsSpatialAndPipelineConfig(t *testing.T
 		t.Fatal("expected pipeline config to be persisted")
 	}
 }
-

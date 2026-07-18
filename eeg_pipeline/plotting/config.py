@@ -72,7 +72,6 @@ class LineStyle:
 class HistogramStyle:
     """Histogram styling."""
     bins: int = 30
-    bins_behavioral: int = 15
     bins_residual: int = 20
     bins_tfr: int = 50
     edgecolor: str = "white"
@@ -201,12 +200,7 @@ class PlotConfig:
     def _build_plot_type_configs(plotting: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """Build plot type configurations dictionary."""
         plots_config = plotting.get("plots", {})
-        behavioral_config = plotting.get("behavioral", {})
-        
         plot_types = dict(plots_config) if isinstance(plots_config, dict) else {}
-        if isinstance(behavioral_config, dict) and behavioral_config:
-            plot_types["behavioral"] = behavioral_config
-        
         return plot_types
     
     @staticmethod
@@ -355,7 +349,6 @@ class PlotConfig:
         hist_dict = styling.get("histogram", {})
         return HistogramStyle(
             bins=hist_dict.get("bins", 30),
-            bins_behavioral=hist_dict.get("bins_behavioral", 15),
             bins_residual=hist_dict.get("bins_residual", 20),
             bins_tfr=hist_dict.get("bins_tfr", 50),
             edgecolor=hist_dict.get("edgecolor", "white"),
@@ -533,14 +526,12 @@ class PlotConfig:
         """Get histogram bins based on plot type.
         
         Args:
-            plot_type: Plot type (e.g., "behavioral", "tfr")
+            plot_type: Plot type (e.g., "tfr")
         
         Returns:
             Number of bins
         """
-        if plot_type == "behavioral":
-            return self.style.histogram.bins_behavioral
-        elif plot_type == "tfr":
+        if plot_type == "tfr":
             return self.style.histogram.bins_tfr
         elif plot_type == "residual":
             return self.style.histogram.bins_residual
@@ -566,15 +557,6 @@ class PlotConfig:
         """
         return self.gridspec_params.copy()
     
-    def get_behavioral_config(self) -> Dict[str, Any]:
-        """Get behavioral plotting configuration.
-        
-        Returns:
-            Dictionary containing behavioral plot configuration parameters.
-        """
-        return self.plot_type_configs.get("behavioral", {})
-
-
 ###################################################################
 # Config Loading
 ###################################################################

@@ -65,9 +65,6 @@ Examples:
   python -m eeg_pipeline.cli.main features compute --subject 0001
   python -m eeg_pipeline.cli.main features visualize --subject 0001
 
-  # Plotting: TFR visualization
-  python -m eeg_pipeline.cli.main plotting tfr --subject 0001
-
   # Machine Learning: run analysis
   python -m eeg_pipeline.cli.main ml --subject 0001 --subject 0002
 

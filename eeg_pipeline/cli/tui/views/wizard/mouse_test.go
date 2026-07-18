@@ -127,32 +127,6 @@ func TestUpdate_MouseMotionHighlightsMLScope(t *testing.T) {
 	}
 }
 
-func TestUpdate_MouseMotionHighlightsPlottingScope(t *testing.T) {
-	m := New(types.PipelinePlotting, "")
-	m.CurrentStep = types.StepSelectSubjects
-	m.width = 140
-	m.height = 40
-	m.plottingScope = PlottingScopeSubject
-
-	line := wizardStripANSI(m.viewLineAt(wizardLineIndex(t, m.View(), "Level:")))
-	x := strings.Index(line, "Group")
-	if x < 0 {
-		t.Fatalf("could not find plotting scope label in:\n%s", line)
-	}
-
-	updated, _ := m.Update(tea.MouseMsg{
-		X:      x + 1,
-		Y:      wizardLineIndex(t, m.View(), "Level:"),
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionMotion,
-	})
-	got := updated.(Model)
-
-	if got.plottingScope != PlottingScopeGroup {
-		t.Fatalf("expected hover to move plotting scope to group, got %v", got.plottingScope)
-	}
-}
-
 func TestUpdate_MouseClickStartsSubjectFiltering(t *testing.T) {
 	m := New(types.PipelineBehavior, "")
 	m.CurrentStep = types.StepSelectSubjects
@@ -171,27 +145,6 @@ func TestUpdate_MouseClickStartsSubjectFiltering(t *testing.T) {
 
 	if !got.filteringSubject {
 		t.Fatalf("expected click to enter subject filtering mode")
-	}
-}
-
-func TestUpdate_MouseClickTogglesGlobalStylingGroup(t *testing.T) {
-	m := New(types.PipelinePlotting, "")
-	m.CurrentStep = types.StepSelectPlotCategories
-	m.width = 140
-	m.height = 40
-	m.showGlobalStyling = true
-
-	idx := wizardLineIndex(t, m.View(), "Defaults & Output")
-	updated, _ := m.handleMouse(tea.MouseMsg{
-		X:      0,
-		Y:      idx,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
-	})
-	got := updated.(Model)
-
-	if !got.plotGroupDefaultsExpanded {
-		t.Fatalf("expected click to expand the defaults group")
 	}
 }
 
@@ -340,50 +293,5 @@ func TestUpdate_MouseMotionHighlightsComputationSelection(t *testing.T) {
 
 	if got.computationCursor != 3 {
 		t.Fatalf("expected hover to move regression cursor to 3, got %d", got.computationCursor)
-	}
-}
-
-func TestUpdate_MouseMotionHighlightsExpandedDropdownItem(t *testing.T) {
-	m := New(types.PipelinePlotting, "")
-	m.CurrentStep = types.StepAdvancedConfig
-	m.width = 140
-	m.height = 40
-	m.discoveredColumns = []string{"alpha", "beta"}
-	m.plotItemConfigExpanded["behavior_scatter"] = true
-
-	rows := m.getPlottingAdvancedRows()
-	targetRow := -1
-	for i, row := range rows {
-		if row.kind == plottingRowPlotField &&
-			row.plotID == "behavior_scatter" &&
-			row.plotField == plotItemConfigFieldBehaviorScatterColumns {
-			targetRow = i
-			break
-		}
-	}
-	if targetRow < 0 {
-		t.Fatalf("could not find behavior_scatter columns row")
-	}
-
-	m.advancedCursor = targetRow
-	m.togglePlottingAdvancedOption()
-	if m.expandedOption != expandedBehaviorScatterColumns {
-		t.Fatalf("expected behavior_scatter columns dropdown to open, got %d", m.expandedOption)
-	}
-
-	idx := wizardLineIndex(t, m.View(), "alpha")
-	updated, _ := m.handleMouse(tea.MouseMsg{
-		X:      0,
-		Y:      idx,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionMotion,
-	})
-	got := updated.(Model)
-
-	if got.advancedCursor != targetRow {
-		t.Fatalf("expected hover to keep parent cursor at %d, got %d", targetRow, got.advancedCursor)
-	}
-	if got.subCursor != 0 {
-		t.Fatalf("expected hover to move dropdown cursor to 0, got %d", got.subCursor)
 	}
 }

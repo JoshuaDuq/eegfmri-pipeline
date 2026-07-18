@@ -1010,7 +1010,6 @@ visualization:
     cap: 0.25
   
   footer_templates:
-    behavior: "Method: {method} | FDR α={fdr_alpha:.2f}"
     preprocessing: "Pipeline: {pipeline} | Reference: {reference}"
 
 # New Orchestrated Plotting Config
@@ -1171,30 +1170,6 @@ plotting:
         bands: []
         source_condition_a: null
         source_condition_b: null
-    behavior:
-      scatter:
-        features: ["power"]
-        columns: ["outcome"]
-        aggregation_modes: ["roi", "global"]
-        segment: null
-        control_predictor: null
-        control_trial_order: null
-        predictor_control_mode: ""
-      temporal_topomaps:
-        stats_feature_folder: null
-      dose_response:
-        dose_column: ""
-        response_column: []
-        binary_outcome_column: ""
-        segment: ""
-        bands: []
-        rois: []
-        scopes: []
-        stat: ""
-      psychometrics:
-        predictor_column: ""
-        outcome_column: ""
-
 ###################################################################
 io:
   constants:

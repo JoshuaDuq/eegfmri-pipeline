@@ -6,13 +6,9 @@ Submodules:
 - erp: Event-related potential plots
 - features: Feature distribution plots
 - tfr: Time-frequency representation plots
-- behavioral: Brain-behavior correlation plots
 
 Usage:
-    # Import specific functions from submodules
-    from eeg_pipeline.plotting.behavioral import visualize_behavior_for_subjects
-
-    # Or use high-level visualizers
+    # Import high-level visualizers
     from eeg_pipeline.plotting import visualize_tfr_for_subjects
 
 Lazy Imports:
@@ -27,8 +23,6 @@ __all__ = [
     "PlotConfig",
     "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
-    "visualize_subject_behavior",
-    "visualize_behavior_for_subjects",
 ]
 
 
@@ -66,11 +60,6 @@ def __getattr__(name: str):
         "plot_temporal_topomaps_allbands_active": "tfr",
         "visualize_subject_tfr": "tfr",
         "visualize_tfr_for_subjects": "tfr",
-        "generate_correlation_scatter": "behavioral",
-        "plot_psychometrics": "behavioral",
-        "plot_temporal_correlation_topomaps_by_condition": "behavioral",
-        "visualize_subject_behavior": "behavioral",
-        "visualize_behavior_for_subjects": "behavioral",
     }
 
     if name in _module_map:

@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/eeg-pipeline/tui/messages"
-	"github.com/eeg-pipeline/tui/types"
-	"github.com/eeg-pipeline/tui/views/wizard"
 )
 
 func TestFindRepoRootFromPath(t *testing.T) {
@@ -82,9 +80,9 @@ func TestMessageConverters(t *testing.T) {
 	m := Model{}
 	subjects := m.convertSubjects([]messages.SubjectInfo{
 		{
-			ID:            "sub-01",
-			HasEpochs:     true,
-			HasFeatures:   true,
+			ID:             "sub-01",
+			HasEpochs:      true,
+			HasFeatures:    true,
 			AvailableBands: []string{"alpha"},
 			FeatureAvailability: &messages.FeatureAvailability{
 				Features: map[string]messages.AvailabilityInfo{
@@ -116,28 +114,5 @@ func TestMessageConverters(t *testing.T) {
 	}
 	if got := m.convertAvailabilityInfo(messages.AvailabilityInfo{Available: true, LastModified: &lastModified}); got.LastModified != lastModified {
 		t.Fatalf("unexpected availability info: %+v", got)
-	}
-
-	plotters := m.convertPlotters(map[string][]messages.PlotterInfo{
-		"features": []messages.PlotterInfo{{ID: "p1", Category: "features", Name: "Plot 1"}},
-	})
-	if len(plotters["features"]) != 1 || plotters["features"][0].ID != "p1" {
-		t.Fatalf("unexpected converted plotters: %+v", plotters)
-	}
-}
-
-func TestHandleSubjectsLoadedRoutesDiscovery(t *testing.T) {
-	m := Model{
-		selectedPipeline: types.PipelinePlotting,
-		repoRoot:         t.TempDir(),
-		task:             "task",
-		wizard:           wizard.New(types.PipelinePlotting, "."),
-	}
-
-	_, cmd := m.handleSubjectsLoaded(messages.SubjectsLoadedMsg{
-		Subjects: []messages.SubjectInfo{{ID: "sub-01"}},
-	})
-	if cmd == nil {
-		t.Fatal("expected plotting subjects load to trigger follow-up discovery")
 	}
 }

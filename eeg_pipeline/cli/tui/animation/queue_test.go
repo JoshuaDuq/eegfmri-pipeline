@@ -69,4 +69,3 @@ func TestLoopFactories(t *testing.T) {
 		t.Fatalf("unexpected progress pulse loop: %+v", got)
 	}
 }
-

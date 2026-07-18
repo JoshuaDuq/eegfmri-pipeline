@@ -8,71 +8,58 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 )
 
-func TestPlottingAdvancedUnknownEntriesDoNotPanic(t *testing.T) {
-	m := New(types.PipelinePlotting, ".")
-	m.contentWidth = 100
-
-	t.Run("unknown-row-kind", func(t *testing.T) {
-		lines := m.renderRow(plottingAdvancedRow{kind: plottingAdvancedRowKind(-1)}, map[string]PlotItem{}, 24, false)
-		rendered := flattenRenderLines(lines)
-		if !strings.Contains(rendered, "Unknown plotting row") {
-			t.Fatalf("expected unknown row fallback text, got %q", rendered)
-		}
-	})
-
-	t.Run("unknown-plot-field", func(t *testing.T) {
-		lines := m.renderPlotField(
-			plottingAdvancedRow{
-				kind:      plottingRowPlotField,
-				plotID:    "missing",
-				plotField: plotItemConfigField(-1),
-			},
-			24,
-			false,
-		)
-		rendered := flattenRenderLines(lines)
-		if !strings.Contains(rendered, "Unknown plotting field") {
-			t.Fatalf("expected unknown field fallback text, got %q", rendered)
-		}
-	})
-
-	t.Run("unknown-option", func(t *testing.T) {
-		lines := m.renderOption(optionType(-1), 24, false)
-		rendered := flattenRenderLines(lines)
-		if !strings.Contains(rendered, "Unknown plotting option") {
-			t.Fatalf("expected unknown option fallback text, got %q", rendered)
-		}
-	})
-}
-
 func TestAdvancedRenderers_DoNotStartWithLeadingBlankLine(t *testing.T) {
 	tests := []struct {
 		name     string
 		rendered string
 	}{
 		{
-			name:     "features",
-			rendered: func() string { m := New(types.PipelineFeatures, "."); m.contentWidth = 100; return m.renderFeaturesAdvancedConfig() }(),
+			name: "features",
+			rendered: func() string {
+				m := New(types.PipelineFeatures, ".")
+				m.contentWidth = 100
+				return m.renderFeaturesAdvancedConfig()
+			}(),
 		},
 		{
-			name:     "behavior",
-			rendered: func() string { m := New(types.PipelineBehavior, "."); m.contentWidth = 100; return m.renderBehaviorAdvancedConfig() }(),
+			name: "behavior",
+			rendered: func() string {
+				m := New(types.PipelineBehavior, ".")
+				m.contentWidth = 100
+				return m.renderBehaviorAdvancedConfig()
+			}(),
 		},
 		{
-			name:     "machine learning",
-			rendered: func() string { m := New(types.PipelineML, "."); m.contentWidth = 100; return m.renderMLAdvancedConfig() }(),
+			name: "machine learning",
+			rendered: func() string {
+				m := New(types.PipelineML, ".")
+				m.contentWidth = 100
+				return m.renderMLAdvancedConfig()
+			}(),
 		},
 		{
-			name:     "preprocessing",
-			rendered: func() string { m := New(types.PipelinePreprocessing, "."); m.contentWidth = 100; return m.renderPreprocessingAdvancedConfig() }(),
+			name: "preprocessing",
+			rendered: func() string {
+				m := New(types.PipelinePreprocessing, ".")
+				m.contentWidth = 100
+				return m.renderPreprocessingAdvancedConfig()
+			}(),
 		},
 		{
-			name:     "fMRI",
-			rendered: func() string { m := New(types.PipelineFmri, "."); m.contentWidth = 100; return m.renderFmriAdvancedConfig() }(),
+			name: "fMRI",
+			rendered: func() string {
+				m := New(types.PipelineFmri, ".")
+				m.contentWidth = 100
+				return m.renderFmriAdvancedConfig()
+			}(),
 		},
 		{
-			name:     "fMRI analysis",
-			rendered: func() string { m := New(types.PipelineFmriAnalysis, "."); m.contentWidth = 100; return m.renderFmriAnalysisAdvancedConfig() }(),
+			name: "fMRI analysis",
+			rendered: func() string {
+				m := New(types.PipelineFmriAnalysis, ".")
+				m.contentWidth = 100
+				return m.renderFmriAnalysisAdvancedConfig()
+			}(),
 		},
 	}
 
@@ -229,228 +216,6 @@ func TestBehaviorAdvancedExpandedListFitsVisibleFrame(t *testing.T) {
 	}
 }
 
-func TestPlottingGlobalOptionsAreRendered(t *testing.T) {
-	m := New(types.PipelinePlotting, ".")
-	m.plotGroupDefaultsExpanded = true
-	m.plotGroupFontsExpanded = true
-	m.plotGroupLayoutExpanded = true
-	m.plotGroupFigureSizesExpanded = true
-	m.plotGroupColorsExpanded = true
-	m.plotGroupAlphaExpanded = true
-	m.plotGroupTopomapExpanded = true
-	m.plotGroupTFRExpanded = true
-	m.plotGroupSourceLocExpanded = true
-
-	for _, opt := range m.getGlobalStylingOptions() {
-		rendered := flattenRenderLines(m.renderOption(opt, 24, false))
-		if strings.Contains(rendered, "(unwired)") {
-			t.Fatalf("plotting option %v rendered as unwired: %s", opt, rendered)
-		}
-	}
-}
-
-func TestPlottingPerPlotFieldsAreRendered(t *testing.T) {
-	m := New(types.PipelinePlotting, ".")
-
-	for _, plot := range defaultPlotItems {
-		for _, field := range m.plotConfigFields(plot) {
-			row := plottingAdvancedRow{
-				kind:      plottingRowPlotField,
-				plotID:    plot.ID,
-				plotField: field,
-			}
-			rendered := flattenRenderLines(m.renderPlotField(row, 24, false))
-			if strings.Contains(rendered, "Unknown plot field") {
-				t.Fatalf("plot %q field %v is not rendered: %s", plot.ID, field, rendered)
-			}
-		}
-	}
-}
-
-func TestPlotSelectionScrollsLongLists(t *testing.T) {
-	m := New(types.PipelinePlotting, ".")
-	m.height = 14
-	m.contentWidth = 120
-
-	lastVisible := -1
-	for i, plot := range m.plotItems {
-		if m.IsPlotVisibleForSelection(plot) {
-			lastVisible = i
-		}
-	}
-	if lastVisible < 0 {
-		t.Fatal("expected at least one visible plot")
-	}
-
-	m.plotCursor = lastVisible
-	m.UpdatePlotOffset()
-	if m.plotOffset == 0 {
-		t.Fatalf("expected non-zero plot offset with cursor at %d", lastVisible)
-	}
-
-	rendered := m.renderPlotSelection()
-	if !strings.Contains(rendered, "more") {
-		t.Fatalf("expected scroll-up indicator in plot selection render, got:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "behavior_binary_outcome_probability") {
-		t.Fatalf("expected focused tail item to remain visible, got:\n%s", rendered)
-	}
-	if strings.Contains(rendered, "power_by_condition") {
-		t.Fatalf("expected offscreen head item to be clipped after scrolling, got:\n%s", rendered)
-	}
-}
-
-func TestPlotSelectionFitsVisibleContentFrame(t *testing.T) {
-	m := New(types.PipelinePlotting, ".")
-	m.width = 120
-	m.height = 28
-	m.contentWidth = 100
-
-	lastVisible := -1
-	for i, plot := range m.plotItems {
-		if m.IsPlotVisibleForSelection(plot) {
-			lastVisible = i
-		}
-	}
-	if lastVisible < 0 {
-		t.Fatal("expected at least one visible plot")
-	}
-
-	m.plotCursor = lastVisible
-	m.UpdatePlotOffset()
-
-	rendered := m.renderPlotSelection()
-	renderedLines := strings.Count(rendered, "\n")
-	maxLines := m.availableMainContentHeight()
-	if renderedLines > maxLines {
-		t.Fatalf("expected plot selection to fit visible frame (%d), got %d lines:\n%s", maxLines, renderedLines, rendered)
-	}
-}
-
-func TestPlottingAdvancedExpandedListScrollsOnCursorMove(t *testing.T) {
-	m := New(types.PipelinePlotting, ".")
-	m.width = 120
-	m.height = 24
-	m.contentWidth = 100
-	m.CurrentStep = types.StepAdvancedConfig
-	m.plotItemConfigExpanded["behavior_scatter"] = true
-	m.discoveredColumns = []string{
-		"col1", "col2", "col3", "col4", "col5", "col6", "col7", "col8", "col9", "col10",
-	}
-
-	rows := m.getPlottingAdvancedRows()
-	targetRow := -1
-	for i, row := range rows {
-		if row.kind == plottingRowPlotField &&
-			row.plotID == "behavior_scatter" &&
-			row.plotField == plotItemConfigFieldBehaviorScatterColumns {
-			targetRow = i
-			break
-		}
-	}
-	if targetRow < 0 {
-		t.Fatal("expected behavior_scatter columns row in plotting advanced config")
-	}
-
-	m.advancedCursor = targetRow
-	m.expandedOption = expandedBehaviorScatterColumns
-	m.editingPlotID = "behavior_scatter"
-	m.editingPlotField = plotItemConfigFieldBehaviorScatterColumns
-	m.subCursor = 0
-	m.UpdateAdvancedOffset()
-
-	before := m.renderPlottingAdvancedConfigV2()
-	if !strings.Contains(before, "col1") {
-		t.Fatalf("expected initial expanded item to be visible, got:\n%s", before)
-	}
-
-	for i := 0; i < 7; i++ {
-		m.handleDown()
-	}
-
-	if m.subCursor != 7 {
-		t.Fatalf("expected subCursor=7 after moving down, got %d", m.subCursor)
-	}
-	if m.advancedOffset == 0 {
-		t.Fatalf("expected advanced offset to move for plotting expanded list, got 0")
-	}
-
-	after := m.renderPlottingAdvancedConfigV2()
-	if !strings.Contains(after, "col8") {
-		t.Fatalf("expected scrolled plotting dropdown to include focused item, got:\n%s", after)
-	}
-}
-
-func TestPlottingAdvancedIncludesPsychometricsEventColumnRows(t *testing.T) {
-	m := New(types.PipelinePlotting, ".")
-	m.width = 120
-	m.height = 24
-	m.contentWidth = 100
-	m.CurrentStep = types.StepAdvancedConfig
-	m.plotItemConfigExpanded["behavior_psychometrics"] = true
-
-	rows := m.getPlottingAdvancedRows()
-	foundPredictor := false
-	foundOutcome := false
-	for _, row := range rows {
-		if row.kind != plottingRowPlotField || row.plotID != "behavior_psychometrics" {
-			continue
-		}
-		if row.plotField == plotItemConfigFieldPsychometricsPredictorColumn {
-			foundPredictor = true
-		}
-		if row.plotField == plotItemConfigFieldPsychometricsOutcomeColumn {
-			foundOutcome = true
-		}
-	}
-
-	if !foundPredictor || !foundOutcome {
-		t.Fatalf("expected psychometrics predictor/outcome rows, got predictor=%v outcome=%v", foundPredictor, foundOutcome)
-	}
-}
-
-func TestPlottingAdvancedIncludesTemporalTopomapConditionLabelsRow(t *testing.T) {
-	m := New(types.PipelinePlotting, ".")
-	m.width = 120
-	m.height = 24
-	m.contentWidth = 100
-	m.CurrentStep = types.StepAdvancedConfig
-	m.plotItemConfigExpanded["behavior_temporal_topomaps"] = true
-
-	rows := m.getPlottingAdvancedRows()
-	foundColumn := false
-	foundValues := false
-	foundLabels := false
-	foundFeatureFolder := false
-	for _, row := range rows {
-		if row.kind != plottingRowPlotField || row.plotID != "behavior_temporal_topomaps" {
-			continue
-		}
-		if row.plotField == plotItemConfigFieldComparisonColumn {
-			foundColumn = true
-		}
-		if row.plotField == plotItemConfigFieldComparisonValues {
-			foundValues = true
-		}
-		if row.plotField == plotItemConfigFieldComparisonLabels {
-			foundLabels = true
-		}
-		if row.plotField == plotItemConfigFieldBehaviorTemporalStatsFeatureFolder {
-			foundFeatureFolder = true
-		}
-	}
-
-	if !foundColumn || !foundValues || !foundLabels || !foundFeatureFolder {
-		t.Fatalf(
-			"expected temporal topomap comparison rows, got column=%v values=%v labels=%v feature_folder=%v",
-			foundColumn,
-			foundValues,
-			foundLabels,
-			foundFeatureFolder,
-		)
-	}
-}
-
 // TestAdvancedConfigScrollWindowFitsContentFrame verifies that the scroll window
 // used by advanced config renderers never exceeds the lines actually available
 // after accounting for the fixed overhead (step header + info hint).
@@ -481,12 +246,4 @@ func TestAdvancedConfigScrollWindowFitsContentFrame(t *testing.T) {
 				pipeline, advancedContentOverhead, frameSize-windowSize)
 		}
 	}
-}
-
-func flattenRenderLines(lines []renderLine) string {
-	parts := make([]string, 0, len(lines))
-	for _, line := range lines {
-		parts = append(parts, line.text)
-	}
-	return strings.Join(parts, "\n")
 }

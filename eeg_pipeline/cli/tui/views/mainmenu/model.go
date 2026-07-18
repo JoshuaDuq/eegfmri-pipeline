@@ -107,7 +107,6 @@ type utilityItem struct {
 
 const (
 	UtilityGlobalSetup = iota
-	UtilityPlotting
 	UtilityPipelineSmokeTest
 )
 
@@ -122,18 +121,6 @@ var utilities = []utilityItem{
 			"Persist overrides for the rest of the TUI",
 		},
 		pipelineIdx: -1,
-	},
-	{
-		name:        "Plotting",
-		description: "Curate and export visualization suites",
-		scope:       "All derived outputs",
-		command:     "eeg-pipeline plotting",
-		focusAreas: []string{
-			"Choose plot categories, plotters, and output formats",
-			"Adjust global styling and per-plot overrides",
-			"Resume saved selections when reopening the wizard",
-		},
-		pipelineIdx: int(types.PipelinePlotting),
 	},
 	{
 		name:        "Pipeline Smoke Test",
@@ -230,11 +217,6 @@ func (m *Model) SetCursor(idx int) {
 			m.analysisCursor = i
 			return
 		}
-	}
-	if idx == int(types.PipelinePlotting) {
-		m.currentSection = SectionUtilities
-		m.utilityCursor = UtilityPlotting
-		return
 	}
 }
 
@@ -458,9 +440,6 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		switch m.utilityCursor {
 		case UtilityGlobalSetup:
 			m.SelectedUtility = UtilityGlobalSetup
-			return m, nil
-		case UtilityPlotting:
-			m.SelectedPipeline = int(types.PipelinePlotting)
 			return m, nil
 		case UtilityPipelineSmokeTest:
 			m.SelectedUtility = UtilityPipelineSmokeTest

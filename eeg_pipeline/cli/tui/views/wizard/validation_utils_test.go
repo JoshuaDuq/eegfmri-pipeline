@@ -125,15 +125,6 @@ func TestValidationHelpers(t *testing.T) {
 				}(),
 				want: "Select at least one preprocessing stage",
 			},
-			{
-				name: "plot-config",
-				got: func() []string {
-					m := New(types.PipelinePlotting, ".")
-					m.plotFormatSelected = make(map[string]bool)
-					return m.validatePlotConfigStep()
-				}(),
-				want: "Select at least one output format (PNG, SVG, or PDF)",
-			},
 		}
 
 		for _, tc := range cases {
@@ -142,33 +133,6 @@ func TestValidationHelpers(t *testing.T) {
 					t.Fatalf("unexpected validation errors: %#v", tc.got)
 				}
 			})
-		}
-	})
-
-	t.Run("plot validators", func(t *testing.T) {
-		m := New(types.PipelinePlotting, ".")
-		m.plotItems = []PlotItem{{ID: "plot-1", Group: "power"}}
-		m.plotSelected = map[int]bool{0: false}
-		if got := m.validatePlotSelectionStep(); len(got) != 1 || got[0] != "Select at least one plot to generate" {
-			t.Fatalf("unexpected plot validation errors: %#v", got)
-		}
-
-		m = New(types.PipelineFeatures, ".")
-		m.plotItems = []PlotItem{{ID: "features_power", Group: "features"}}
-		m.plotSelected = map[int]bool{0: true}
-		m.featurePlotterError = ""
-		if got := m.validateFeaturePlotterSelectionStep(); len(got) != 1 || got[0] != "Feature plot list is still loading" {
-			t.Fatalf("unexpected loading validation errors: %#v", got)
-		}
-
-		m.featurePlotters = map[string][]PlotterInfo{
-			"power": {
-				{ID: "power.topo", Category: "power", Name: "Power Topography"},
-			},
-		}
-		m.featurePlotterSelected = map[string]bool{}
-		if got := m.validateFeaturePlotterSelectionStep(); len(got) != 1 || got[0] != "Select at least one feature plot" {
-			t.Fatalf("unexpected feature plotter validation errors: %#v", got)
 		}
 	})
 

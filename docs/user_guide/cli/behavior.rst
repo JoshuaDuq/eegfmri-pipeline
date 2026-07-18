@@ -151,9 +151,6 @@ Examples
    # Inspect the stage DAG without running
    eeg-pipeline behavior compute --subject 0001 --list-stages
 
-   # Visualize from existing results
-   eeg-pipeline behavior visualize --subject 0001
-
 .. seealso::
 
    :doc:`../../methods/eeg/behavior`

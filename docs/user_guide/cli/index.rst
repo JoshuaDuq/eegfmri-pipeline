@@ -65,8 +65,8 @@ Most analysis commands accept these subject-selection and runtime flags:
 
 .. note::
 
-   The **fMRI** commands (``fmri``, ``fmri-analysis``) and the **plotting**
-   command are **still under active development**. Expect evolving options and
+   The **fMRI** commands (``fmri``, ``fmri-analysis``) are **still under active
+   development**. Expect evolving options and
    outputs; pin a release or check the changelog when upgrading.
 
 .. toctree::
@@ -79,7 +79,6 @@ Most analysis commands accept these subject-selection and runtime flags:
    ml
    fmri_preprocessing
    fmri_analysis
-   plotting
    validation
    stats_info
 
@@ -100,8 +99,8 @@ Command Matrix
      - ``compute`` · ``visualize``
      - Extract 16 EEG feature families or visualize existing tables.
    * - ``behavior``
-     - ``compute`` · ``visualize``
-     - Behavioral statistics and plots derived from trial tables.
+     - ``compute``
+     - Behavioral statistics derived from trial tables.
    * - ``ml``
      - ``regression`` · ``classify`` · ``timegen`` · ``model_comparison`` · ``incremental_validity`` · ``uncertainty`` · ``shap`` · ``permutation``
      - Trial-level predictive modeling and feature attribution.
@@ -111,14 +110,11 @@ Command Matrix
    * - ``fmri-analysis``
      - ``first-level`` · ``second-level`` · ``beta-series`` · ``lss`` · ``rest``
      - Event-related GLM, group inference, trial-wise betas, and resting-state connectivity.
-   * - ``plotting``
-     - ``visualize`` · ``tfr``
-     - Render the curated plot catalog and TFR outputs.
    * - ``validate``
      - ``quick`` · ``all`` · ``epochs`` · ``features`` · ``behavior`` · ``bids``
      - Validate data integrity and schema consistency.
    * - ``info``
-     - ``subjects`` · ``features`` · ``config`` · ``version`` · ``plotters`` · ``discover`` · ``rois`` · ``fmri-conditions`` · ``fmri-columns`` · ``multigroup-stats`` · ``ml-feature-space``
+     - ``subjects`` · ``features`` · ``config`` · ``version`` · ``discover`` · ``rois`` · ``fmri-conditions`` · ``fmri-columns`` · ``multigroup-stats`` · ``ml-feature-space``
      - Read-only discovery for data availability, configuration, and feature-space structure.
    * - ``stats``
      - ``summary`` · ``subjects`` · ``features`` · ``storage`` · ``timeline``
@@ -140,7 +136,7 @@ Command Matrix
       :link: features
       :link-type: doc
 
-      ``compute`` · ``visualize``
+      ``compute``
 
       Category selection, spatial transforms, IAF mode, analysis mode.
 
@@ -175,14 +171,6 @@ Command Matrix
       ``first-level`` · ``second-level`` · ``beta-series`` · ``lss`` · ``rest``
 
       GLM specification, confound strategy, beta estimation, connectivity.
-
-   .. grid-item-card:: Plotting
-      :link: plotting
-      :link-type: doc
-
-      ``visualize`` · ``tfr``
-
-      40+ plot types, format flags, group vs. subject mode, style overrides.
 
    .. grid-item-card:: Validation
       :link: validation

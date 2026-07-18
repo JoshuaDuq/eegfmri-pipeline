@@ -13,7 +13,6 @@ from eeg_pipeline.cli.commands.info_helpers import (
     MODE_FMRI_CONDITIONS,
     MODE_ML_FEATURE_SPACE,
     MODE_MULTIGROUP_STATS,
-    MODE_PLOTTERS,
     MODE_ROIS,
     MODE_SUBJECTS,
     MODE_VERSION,
@@ -35,7 +34,7 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER, MODE_ROIS, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS, MODE_MULTIGROUP_STATS, MODE_ML_FEATURE_SPACE],
+        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_DISCOVER, MODE_ROIS, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS, MODE_MULTIGROUP_STATS, MODE_ML_FEATURE_SPACE],
         help="What to show: subjects, features, config, version, discover columns, rois, fmri-conditions, fmri-columns, or multigroup-stats",
     )
     parser.add_argument(
