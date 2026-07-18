@@ -49,14 +49,6 @@ func TestPipelineMetadata(t *testing.T) {
 			wantFeatures:   true,
 		},
 		{
-			name:           "plotting",
-			pipeline:       PipelinePlotting,
-			wantName:       "Plotting",
-			wantCommand:    "plotting",
-			wantDesc:       "Generate curated visualization suites",
-			wantDataSource: "all",
-		},
-		{
 			name:           "fmri",
 			pipeline:       PipelineFmri,
 			wantName:       "fMRI",
@@ -102,6 +94,17 @@ func TestPipelineMetadata(t *testing.T) {
 				t.Fatalf("RequiresFeatures() = %v, want %v", got, tc.wantFeatures)
 			}
 		})
+	}
+}
+
+func TestPipelineMetadataDoesNotExposePlotting(t *testing.T) {
+	for pipeline := Pipeline(0); pipeline < pipelineCount; pipeline++ {
+		if got := pipeline.String(); got == "Plotting" {
+			t.Fatalf("pipeline %d exposes removed name %q", pipeline, got)
+		}
+		if got := pipeline.CLICommand(); got == "plotting" {
+			t.Fatalf("pipeline %d exposes removed command %q", pipeline, got)
+		}
 	}
 }
 

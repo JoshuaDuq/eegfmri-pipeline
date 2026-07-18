@@ -30,21 +30,14 @@ func normalizeWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func TestHandleEnter_SelectsPlottingPipelineFromUtilities(t *testing.T) {
-	m := New()
-	m.currentSection = SectionUtilities
-	m.utilityCursor = UtilityPlotting
-
-	next, _ := m.handleEnter()
-	updated, ok := next.(Model)
-	if !ok {
-		t.Fatalf("expected Model, got %T", next)
-	}
-	if updated.SelectedPipeline != int(types.PipelinePlotting) {
-		t.Fatalf("expected SelectedPipeline=%d, got %d", int(types.PipelinePlotting), updated.SelectedPipeline)
-	}
-	if updated.SelectedUtility != -1 {
-		t.Fatalf("expected no utility selection, got %d", updated.SelectedUtility)
+func TestUtilitiesDoNotExposePlottingCommand(t *testing.T) {
+	for _, utility := range utilities {
+		if utility.name == "Plotting" {
+			t.Fatalf("utility exposes removed name %q", utility.name)
+		}
+		if utility.command == "eeg-pipeline plotting" {
+			t.Fatalf("utility %q exposes removed command %q", utility.name, utility.command)
+		}
 	}
 }
 
@@ -63,19 +56,6 @@ func TestHandleEnter_SelectsPipelineSmokeUtility(t *testing.T) {
 	}
 	if updated.SelectedPipeline != -1 {
 		t.Fatalf("expected no pipeline selection, got %d", updated.SelectedPipeline)
-	}
-}
-
-func TestSetCursor_PlottingPipelineTargetsUtilitiesSection(t *testing.T) {
-	m := New()
-
-	m.SetCursor(int(types.PipelinePlotting))
-
-	if m.currentSection != SectionUtilities {
-		t.Fatalf("expected currentSection=%d, got %d", SectionUtilities, m.currentSection)
-	}
-	if m.utilityCursor != UtilityPlotting {
-		t.Fatalf("expected utilityCursor=%d, got %d", UtilityPlotting, m.utilityCursor)
 	}
 }
 
@@ -339,7 +319,7 @@ func TestView_TallMidWidthLayoutUsesWidePreviewPane(t *testing.T) {
 	m.width = 98
 	m.height = 54
 	m.currentSection = SectionUtilities
-	m.utilityCursor = UtilityPlotting
+	m.utilityCursor = UtilityPipelineSmokeTest
 	m.SetConfigSummary(HomeConfigSummary{
 		Task:      "thermalactive",
 		DerivRoot: "/tmp/project/derivatives",
@@ -450,7 +430,7 @@ func TestView_SmallWindowRendersEditorialPanels(t *testing.T) {
 	m.width = 60
 	m.height = 20
 	m.currentSection = SectionUtilities
-	m.utilityCursor = UtilityPlotting
+	m.utilityCursor = UtilityPipelineSmokeTest
 
 	view := stripANSI(m.View())
 
