@@ -2,11 +2,17 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove the dedicated TUI Plotting workflow, its Python CLI command/catalog, and EEG-pipeline behavior plots while preserving feature visualization and every study-owned or explicitly protected plot.
+**Goal:** Remove the dedicated TUI Plotting workflow, its Python CLI command/catalog, EEG behavior plots, and EEG feature plots while preserving every study-owned or explicitly protected plot.
 
-**Architecture:** Trace `eeg_pipeline/plotting/plot_catalog.json` through the dedicated TUI and CLI, deleting nodes with no preserved consumer, plus the explicitly removed EEG behavior-plot tree. Retain feature visualization and protected preprocessing, scanner, component-TFR, ML, fMRI, and study plotting as independent roots. Do not leave compatibility aliases, empty screens, or ignored stale calls.
+**Architecture:** Delete the dedicated plotting surfaces and their EEG behavior/feature implementation trees. Retain preprocessing, scanner, component-TFR, ML, fMRI, and study plotting as independent roots. Do not leave compatibility aliases, empty screens, or ignored stale calls.
 
 **Tech Stack:** Python 3.11+, argparse, pytest, Go, Bubble Tea, Ruff, repository architecture gates.
+
+**Scope amendment:** After the original plan was executed, the user explicitly requested
+removal of feature plots too. The final implementation therefore removes `features
+visualize`, `eeg_pipeline/plotting/features`, ERP and generic TFR plotting, and their
+exclusive helpers/tests. Original preservation steps below document the earlier scope and
+are superseded by this amendment.
 
 ---
 

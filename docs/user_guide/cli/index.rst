@@ -96,8 +96,8 @@ Command Matrix
      - ``full`` · ``bad-channels`` · ``ica`` · ``epochs``
      - EEG preprocessing stages from bad-channel detection to epoch creation.
    * - ``features``
-     - ``compute`` · ``visualize``
-     - Extract 16 EEG feature families or visualize existing tables.
+     - ``compute``
+     - Extract 16 EEG feature families.
    * - ``behavior``
      - ``compute``
      - Behavioral statistics derived from trial tables.
@@ -144,7 +144,7 @@ Command Matrix
       :link: behavior
       :link-type: doc
 
-      ``compute`` · ``visualize``
+      ``compute``
 
       Correlation, regression, ICC, and condition comparison flags.
 

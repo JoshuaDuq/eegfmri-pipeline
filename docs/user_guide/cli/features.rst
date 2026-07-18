@@ -21,8 +21,6 @@ Modes
    * - ``compute``
      - Extract features and write derivatives. Parquet by default;
        add ``--also-save-csv`` for a plain-text copy.
-   * - ``visualize``
-     - Render summary plots from already-computed tables.
 
 Feature Families
 ----------------
@@ -163,7 +161,7 @@ The ``--analysis-mode`` flag is critical when features feed ML models.
      - When to use
      - What changes
    * - ``group_stats``
-     - Descriptive analyses, behavioral correlations, group-level plots
+     - Descriptive analyses, behavioral correlations, group-level summaries
      - All cross-trial computations permitted
    * - ``trial_ml_safe``
      - Feature inputs to cross-validated ML pipelines
@@ -202,9 +200,6 @@ Examples
 
    # CSD spatial transform for phase-based families
    eeg-pipeline features compute --subject 0001 --spatial-transform csd
-
-   # Visualize existing feature tables
-   eeg-pipeline features visualize --subject 0001
 
 .. seealso::
 

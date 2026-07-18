@@ -19,7 +19,6 @@ The following are explicitly preserved:
 - preprocessing plots, including native EEG-fMRI correction and scanner-harmonic QC;
 - component-TFR computation and plotting;
 - machine-learning plots and fMRI-analysis plots exposed by their own pipelines;
-- feature visualization reached through `features visualize`;
 - every study-specific figure and plotting module under `studies/`;
 - shared plotting helpers still imported by any preserved plotting path.
 
@@ -60,6 +59,9 @@ component-TFR, scanner-harmonic, and potentially other non-TUI plotting paths.
 The `eeg_pipeline/plotting/behavioral/` implementation tree is deleted because the user
 explicitly removed EEG-pipeline behavior plots. No file under `studies/` is deleted or
 rewritten as part of that removal.
+The user subsequently expanded the scope to remove `features visualize` and all EEG feature,
+ERP, and generic TFR plotting implementations. Preprocessing, scanner-harmonic,
+component-TFR, ML, fMRI, and study plotting remain protected.
 
 ### Configuration and documentation
 
@@ -115,6 +117,7 @@ Verification includes:
 - `eeg-pipeline plotting` is not a registered CLI command.
 - All implementations and support code used only by the TUI-listed plots are removed.
 - EEG-pipeline behavior plots and the `behavior visualize` mode are removed.
+- EEG feature plots and the `features visualize` mode are removed.
 - Preprocessing, component-TFR, and non-TUI plot paths remain intact.
 - Study-owned figures remain intact.
 - No compatibility or fallback behavior masks stale calls.

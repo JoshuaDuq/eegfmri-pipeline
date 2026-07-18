@@ -26,14 +26,22 @@ REMOVED_BEHAVIOR_PLOTS = (
     "eeg_pipeline/plotting/orchestration/behavior.py",
 )
 
+REMOVED_FEATURE_PLOTS = (
+    "eeg_pipeline/plotting/features",
+    "eeg_pipeline/plotting/erp",
+    "eeg_pipeline/plotting/tfr",
+    "eeg_pipeline/plotting/core",
+    "eeg_pipeline/plotting/orchestration/features.py",
+)
+
 
 def test_top_level_plotting_command_is_removed() -> None:
     from eeg_pipeline.cli.commands import get_commands
 
     command_names = {command.name for command in get_commands()}
-    commands_module = (
-        REPO_ROOT / "eeg_pipeline/cli/commands/__init__.py"
-    ).read_text(encoding="utf-8")
+    commands_module = (REPO_ROOT / "eeg_pipeline/cli/commands/__init__.py").read_text(
+        encoding="utf-8"
+    )
     cli_main = (REPO_ROOT / "eeg_pipeline/cli/main.py").read_text(encoding="utf-8")
 
     assert "plotting" not in command_names
@@ -65,4 +73,22 @@ def test_behavior_visualize_is_rejected_by_parser() -> None:
 
 @pytest.mark.parametrize("relative_path", REMOVED_BEHAVIOR_PLOTS)
 def test_behavior_plotting_root_is_removed(relative_path: str) -> None:
-    assert not (REPO_ROOT / relative_path).exists()
+    path = REPO_ROOT / relative_path
+    assert not path.exists() if path.suffix else not any(path.rglob("*.py"))
+
+
+def test_features_visualize_is_rejected_by_parser() -> None:
+    from eeg_pipeline.cli.main import create_argument_parser
+
+    parser = create_argument_parser()
+
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args(["features", "visualize", "--help"])
+
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("relative_path", REMOVED_FEATURE_PLOTS)
+def test_feature_plotting_root_is_removed(relative_path: str) -> None:
+    path = REPO_ROOT / relative_path
+    assert not path.exists() if path.suffix else not any(path.rglob("*.py"))

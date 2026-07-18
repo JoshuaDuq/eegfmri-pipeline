@@ -16,7 +16,6 @@ def _load_discovery_function():
 
     fake_constants = types.ModuleType("eeg_pipeline.pipelines.constants")
     fake_constants.BEHAVIOR_COMPUTATIONS = []
-    fake_constants.FEATURE_VISUALIZE_CATEGORIES = []
     fake_constants.FREQUENCY_BANDS = []
 
     sentinel = object()

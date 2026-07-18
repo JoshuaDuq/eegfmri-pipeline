@@ -18,7 +18,6 @@ __all__ = [
     "FEATURE_CATEGORIES",
     "FREQUENCY_BANDS",
     "BEHAVIOR_COMPUTATIONS",
-    "FEATURE_VISUALIZE_CATEGORIES",
 ]
 
 
@@ -42,20 +41,4 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "temporal",
     "cluster",
     "multilevel_correlations",
-]
-
-
-FEATURE_VISUALIZE_CATEGORIES: List[str] = [
-    "power",
-    "connectivity",
-    "aperiodic",
-    "itpc",
-    "pac",
-    "quality",
-    "erds",
-    "complexity",
-    "spectral",
-    "ratios",
-    "asymmetry",
-    "microstates",
 ]

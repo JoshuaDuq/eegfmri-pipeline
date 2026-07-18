@@ -18,8 +18,8 @@ class TestPipelineBaseMetadata(unittest.TestCase):
         fake_logging.get_logger = lambda *_args, **_kwargs: Mock()
         fake_logging.get_subject_logger = lambda *_args, **_kwargs: Mock()
 
-        fake_figures = types.ModuleType("eeg_pipeline.plotting.io.figures")
-        fake_figures.setup_matplotlib = lambda *_args, **_kwargs: None
+        fake_matplotlib = types.ModuleType("eeg_pipeline.infra.matplotlib")
+        fake_matplotlib.setup_matplotlib = lambda *_args, **_kwargs: None
 
         fake_paths = types.ModuleType("eeg_pipeline.infra.paths")
         fake_paths.ensure_derivatives_dataset_description = lambda **_kwargs: None
@@ -36,8 +36,6 @@ class TestPipelineBaseMetadata(unittest.TestCase):
             "eeg_pipeline.utils": types.ModuleType("eeg_pipeline.utils"),
             "eeg_pipeline.utils.config": types.ModuleType("eeg_pipeline.utils.config"),
             "eeg_pipeline.infra": types.ModuleType("eeg_pipeline.infra"),
-            "eeg_pipeline.plotting": types.ModuleType("eeg_pipeline.plotting"),
-            "eeg_pipeline.plotting.io": types.ModuleType("eeg_pipeline.plotting.io"),
         }
         for module in fake_packages.values():
             module.__path__ = []  # type: ignore[attr-defined]
@@ -51,7 +49,7 @@ class TestPipelineBaseMetadata(unittest.TestCase):
                 **fake_packages,
                 "eeg_pipeline.utils.config.loader": fake_loader,
                 "eeg_pipeline.infra.logging": fake_logging,
-                "eeg_pipeline.plotting.io.figures": fake_figures,
+                "eeg_pipeline.infra.matplotlib": fake_matplotlib,
                 "eeg_pipeline.infra.paths": fake_paths,
                 "eeg_pipeline.utils.progress": fake_progress,
             },

@@ -1864,7 +1864,7 @@ func TestBuildBehaviorAdvancedArgs_EmitsTemporalTopomapWindowOverride(t *testing
 
 func TestBuildCommand_BehaviorComputeIncludesSelectedBands(t *testing.T) {
 	m := New(types.PipelineBehavior, ".")
-	m.modeOptions = []string{"compute", "visualize"}
+	m.modeOptions = []string{"compute"}
 	m.modeIndex = 0
 	m.useDefaultAdvanced = true
 

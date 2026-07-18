@@ -59,7 +59,7 @@ func TestModelHelpers(t *testing.T) {
 		t.Fatal("expected out-of-range pipeline indices to be rejected")
 	}
 
-	if gotPipeline, gotMode := m.extractCommandParts("eeg-pipeline features visualize"); gotPipeline != "features" || gotMode != "visualize" {
+	if gotPipeline, gotMode := m.extractCommandParts("eeg-pipeline features compute"); gotPipeline != "features" || gotMode != "compute" {
 		t.Fatalf("extractCommandParts() = %q %q", gotPipeline, gotMode)
 	}
 	if gotPipeline, gotMode := m.extractCommandParts("invalid"); gotPipeline != "unknown" || gotMode != "" {

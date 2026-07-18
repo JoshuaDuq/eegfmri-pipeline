@@ -17,17 +17,17 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     """Configure the features command parser."""
     parser = subparsers.add_parser(
         "features",
-        help="Features analysis: extract or visualize",
-        description="Features pipeline: extract features or visualize",
+        help="Compute EEG features",
+        description="Compute EEG feature tables",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("mode", choices=["compute", "visualize"], help="Pipeline mode")
+    parser.add_argument("mode", choices=["compute"], help="Pipeline mode")
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
 
     # Core arguments
-    parser.add_argument("--categories", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None, metavar="CATEGORY", help="Feature categories to process (some are compute-only or visualize-only)")
+    parser.add_argument("--categories", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None, metavar="CATEGORY", help="Feature categories to compute")
     parser.add_argument("--bands", nargs="+", default=None, help="Frequency bands to compute (default: all)")
     parser.add_argument("--frequency-bands", nargs="+", default=None, metavar="BAND_DEF", help="Custom frequency band definitions in format 'name:low:high' (e.g., delta:1.0:3.9 theta:4.0:7.9)")
     parser.add_argument("--rois", nargs="+", default=None, metavar="ROI_DEF", help="Custom ROI definitions in format 'name:ch1,ch2,...' (e.g., 'Frontal:Fp1,Fp2,F3,F4')")

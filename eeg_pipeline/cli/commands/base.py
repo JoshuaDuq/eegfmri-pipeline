@@ -13,8 +13,6 @@ from eeg_pipeline.cli.commands.base_feature_availability import (
     detect_feature_inventory,
     detect_feature_availability,
 )
-from eeg_pipeline.pipelines.constants import FEATURE_VISUALIZE_CATEGORIES
-
 __all__ = [
     "detect_available_bands",
     "detect_feature_inventory",
@@ -24,6 +22,5 @@ __all__ = [
     "discover_trial_table_columns",
     "discover_condition_effects_columns",
     "BEHAVIOR_COMPUTATIONS",
-    "FEATURE_VISUALIZE_CATEGORIES",
     "FREQUENCY_BANDS",
 ]

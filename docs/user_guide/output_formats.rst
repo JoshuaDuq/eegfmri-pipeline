@@ -18,11 +18,6 @@ Outputs & Advanced Workflows
       optional auxiliary tables (for example PAC trial/time tables), each with
       metadata sidecars.
 
-   .. grid-item-card:: Plot Exports
-
-      Format set comes from ``plotting.defaults.formats`` (default config:
-      PNG + SVG) · override with ``--formats``.
-
    .. grid-item-card:: EEG–fMRI Fusion
 
       Trial-wise EEG → fMRI signature prediction using beta-series or LSS.

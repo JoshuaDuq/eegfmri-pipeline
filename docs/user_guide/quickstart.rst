@@ -357,8 +357,6 @@ Use the tabs below for the full command matrix and focused examples.
            - Purpose
          * - ``compute``
            - Extract features and write derivative tables.
-         * - ``visualize``
-           - Render summary plots from already-computed feature tables.
 
       Feature families:
 
@@ -422,7 +420,6 @@ Use the tabs below for the full command matrix and focused examples.
          eeg-pipeline features compute --subject 0001 --categories power connectivity aperiodic
          eeg-pipeline features compute --subject 0001 --analysis-mode trial_ml_safe
          eeg-pipeline features compute --subject 0001 --iaf-enabled
-         eeg-pipeline features visualize --subject 0001
 
       See :doc:`../methods/eeg/features` for formulas, spatial modes, and
       CV hygiene details.
@@ -448,8 +445,6 @@ Use the tabs below for the full command matrix and focused examples.
            - Purpose
          * - ``compute``
            - Run the behavioral analysis DAG and write numerical outputs.
-         * - ``visualize``
-           - Render standardized plots from computed results.
 
       Analysis stages (``--computations`` selects a subset):
 
