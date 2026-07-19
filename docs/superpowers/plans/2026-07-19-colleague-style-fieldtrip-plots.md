@@ -81,6 +81,7 @@ Expected: future full runs produce component and sensor outputs together.
 - Create: `studies/pain_study/fieldtrip_tfr/plot_ICA_TFR_sub0015.m`
 - Delete: `studies/pain_study/fieldtrip_tfr/plot_all_component_TFRs_sub0015.m`
 - Delete: `studies/pain_study/fieldtrip_tfr/plot_BrainVision_Analyzer_TFR_sub0015.m`
+- Delete: `studies/pain_study/fieldtrip_tfr/plot_FieldTrip_TFR.m`
 
 - [ ] **Step 1: Define the exact plot registry**
 
@@ -141,7 +142,7 @@ Do not rerun ICA or component TFRs.
 - [ ] **Step 3: Verify the sensor output contract**
 
 Load `data` and representative raw, dB, and contrast results. Assert 59 trials, 63 channels,
-frequencies `1:100`, times `-5:0.1:14.5`, finite power, and all 22 registry fields.
+frequencies `1:100`, times `-5:0.1:14.4`, finite power, and all 22 registry fields.
 
 - [ ] **Step 4: Render one invisible component grid and one sensor multiplot**
 

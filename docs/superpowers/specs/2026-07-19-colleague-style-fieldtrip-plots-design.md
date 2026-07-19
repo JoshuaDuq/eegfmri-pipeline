@@ -16,7 +16,8 @@ First create four ICA scalp-map figures with components 1-16, 17-32, 33-48, and 
 `ft_topoplotIC` and the `turbo` colormap. Then, for each of the 22 saved TFR result variables,
 create four 4-by-4 figures containing the same component groups. Each tile uses `imagesc`,
 `axis xy`, `turbo`, an individual colorbar, the component number, and the configured time and
-frequency limits. Signed dB results and contrasts use symmetric limits around zero; strictly
+frequency limits. The last TFR center is 14.4 s so the one-second window remains strictly
+inside the -7 to 15 s epochs. Signed dB results and contrasts use symmetric limits around zero; strictly
 nonnegative raw-power results use limits from zero to their component maximum.
 
 Do not repeat topomaps inside condition figures. ICA topographies remain fixed within each
@@ -51,15 +52,15 @@ Remove the redundant sub-0015 plotting scripts:
 
 - `plot_all_component_TFRs_sub0015.m`
 - `plot_BrainVision_Analyzer_TFR_sub0015.m`
+- `plot_FieldTrip_TFR.m`
 
-Leave the generic `plot_FieldTrip_TFR.m` unchanged. Add the sensor computation to the existing
-sub-0015 runner after band-specific TFR computation so future full runs generate both output
-families.
+Add the sensor computation to the existing sub-0015 runner after band-specific TFR computation
+so future full runs generate both output families. Keep no obsolete plotting implementation.
 
 ## Validation and Errors
 
 Fail on missing files or variables, invalid band names, incompatible component ordering,
 missing electrode geometry, more than 64 components, non-finite power/topography values, or
 constant plot values. Run MATLAB Code Analyzer on all new or modified MATLAB files. Verify the
-sensor output contains 59 trials, 63 EEG channels, frequencies 1-100 Hz, times -5 to 14.5 s,
+sensor output contains 59 trials, 63 EEG channels, frequencies 1-100 Hz, times -5 to 14.4 s,
 and all 22 declared results before plotting.
