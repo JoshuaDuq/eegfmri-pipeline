@@ -505,7 +505,6 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["prepICALFreq"] = m.prepICALFreq
 	cfg["prepICARejThresh"] = m.prepICARejThresh
 	cfg["prepProbThresh"] = m.prepProbThresh
-	cfg["prepKeepMnebidsBads"] = m.prepKeepMnebidsBads
 	cfg["prepConditions"] = m.prepConditions
 	cfg["prepEpochsTmin"] = m.prepEpochsTmin
 	cfg["prepEpochsTmax"] = m.prepEpochsTmax
@@ -1464,7 +1463,6 @@ func (m *Model) importConfigInner(cfg map[string]interface{}, restoreSelections 
 	m.prepICALFreq = getFloat("prepICALFreq", m.prepICALFreq)
 	m.prepICARejThresh = getFloat("prepICARejThresh", m.prepICARejThresh)
 	m.prepProbThresh = getFloat("prepProbThresh", m.prepProbThresh)
-	m.prepKeepMnebidsBads = getBool("prepKeepMnebidsBads", m.prepKeepMnebidsBads)
 	m.prepConditions = getString("prepConditions", m.prepConditions)
 	m.prepEpochsTmin = getFloat("prepEpochsTmin", m.prepEpochsTmin)
 	m.prepEpochsTmax = getFloat("prepEpochsTmax", m.prepEpochsTmax)

@@ -26,7 +26,7 @@ EEG Preprocessing
 
    .. grid-item-card:: CLI
 
-      ``eeg-pipeline preprocessing [full | bad-channels | ica | epochs]``
+      ``eeg-pipeline preprocessing [bad-channels | ica | epochs]``
 
    .. grid-item-card:: Config
 
@@ -98,10 +98,10 @@ clean epochs and derivatives are written.
      - Only runs when ``pyprep.bad_channel_sync_policy: "subject_union"``. Default ``"per_run"`` keeps each run's bads independent. When enabled, takes the union of bads across runs per subject and writes it back to every run's ``channels.tsv`` before ICA
    * - 3
      - MNE-BIDS-Pipeline (ICA fit)
-     - Subprocess: ``init`` → ``_01`` → ``_04`` → ``_05`` → ``_06a1`` — bandpass, artifact regression, extended Infomax ICA
+     - Subprocess: ``init`` → ``_01`` → ``_04`` → ``_05`` → ``_06a1`` → ``_06a2`` — bandpass, artifact regression, near-rank extended Infomax ICA, and native artifact classification
    * - 4
-     - ``run_ica_label`` / ICLabel
-     - Probabilistic component classes; exclude when :math:`p > 0.8` and class not in ``ica.labels_to_keep`` (default retain brain + other)
+     - MNE-BIDS-Pipeline / ICLabel review
+     - Native ICLabel probabilities and exclusion candidates are written to the component table for manual review before epoching
    * - 5
      - MNE-BIDS-Pipeline (epochs)
      - ``_07`` → ``_08a`` → ``_09`` — make epochs, apply ICA, PTP / autoreject
@@ -295,8 +295,8 @@ Configuration
      - ``"extended_infomax"``
      - ICA algorithm. Options: ``"extended_infomax"``, ``"picard"``, ``"fastica"``
    * - ``ica.n_components``
-     - ``0.99``
-     - Component count: float = variance explained; int = exact count
+     - ``null``
+     - Near-rank decomposition; float = variance explained; int = exact count
    * - ``ica.l_freq``
      - ``1.0``
      - High-pass cutoff for ICA fitting epochs (Hz)
@@ -321,24 +321,24 @@ Configuration
 Step 4 — ICA Component Labeling
 ---------------------------------
 
-.. container:: module-ref
-
-   Module: ``preprocessing/pipeline/ica.py`` → ``run_ica_label()``
-
-Automated classification of :term:`ICA` components using MNE-ICAlabel, which wraps the
-:term:`ICLabel` deep learning classifier.
+MNE-BIDS-Pipeline's native MNE-ICLabel integration classifies components and
+writes the standard ``*_proc-ica_components.tsv`` table. Epoch creation remains
+blocked until that table has been reviewed and
+``ica.manual_review_complete: true`` has been set.
 
 Method
 ~~~~~~
 
-1. Load the fitted ICA object and its epochs.
-2. Apply average reference to the epochs (required by ICLabel).
-3. Classify each component via ``label_components(epochs, ica, method="iclabel")``.
-   :term:`ICLabel` assigns each component a probability :math:`p_k` over 7 classes.
-4. Exclude component :math:`i` when :math:`\max_k p_k > 0.8` **and**
-   :math:`\arg\max_k p_k \notin` ``ica.labels_to_keep``.
-5. Write component status to ``*_proc-ica_components.tsv``.
-6. Save the updated ICA object with ``ica.exclude`` set.
+1. Fit ICA on average-referenced, 1–100 Hz data.
+2. Assign a probability to every ICLabel class for every component.
+3. Flag a component when a non-retained class reaches its configured exclusion
+   threshold (default 0.8) and neither retained class reaches MNE-BIDS-Pipeline's
+   class threshold.
+4. Add Analyzer-marker CTPS scores as diagnostic columns without changing
+   component status.
+5. Review and edit ``*_proc-ica_components.tsv``.
+6. Set ``ica.manual_review_complete: true`` and run ``epochs`` to apply the
+   reviewed exclusions.
 
 ICLabel Classes
 ~~~~~~~~~~~~~~~
@@ -537,14 +537,12 @@ Execution Modes
 
    * - Mode
      - Steps executed
-   * - ``full``
-     - Bad channels → ICA fit → ICA label → Epochs → Statistics
    * - ``bad-channels``
      - Bad channel detection only
    * - ``ica``
      - ICA fitting + ICA labeling only
    * - ``epochs``
-     - Epoch creation + statistics (requires ICA already fitted)
+     - Epoch creation + statistics (requires reviewed ICA and explicit acknowledgement)
 
 Output Structure
 ----------------
@@ -554,10 +552,10 @@ Output Structure
    derivatives/preprocessed/eeg/
    ├── sub-XXXX/
    │   └── eeg/
-   │       ├── sub-XXXX_task-<task>_proc-icafit_ica.fif
-   │       ├── sub-XXXX_task-<task>_proc-icafit_epo.fif
-   │       ├── sub-XXXX_task-<task>_proc-ica_ica.fif
-   │       ├── sub-XXXX_task-<task>_proc-ica_components.tsv
+   │       ├── sub-XXXX_proc-icafit_ica.fif
+   │       ├── sub-XXXX_proc-icafit_epo.fif
+   │       ├── sub-XXXX_proc-ica_ica.fif
+   │       ├── sub-XXXX_proc-ica_components.tsv
    │       ├── sub-XXXX_task-<task>_proc-clean_epo.fif
    │       ├── sub-XXXX_task-<task>_proc-clean_events.tsv     # event-related mode
    │       ├── sub-XXXX_task-<task>_bads.tsv
@@ -568,6 +566,5 @@ Output Structure
    │       ├── sub-XXXX_task-<task>_power+<cond>_avg-tfr.h5     # (optional, per-condition average when average=True)
    │       └── sub-XXXX_task-<task>_itc+<cond>_avg-tfr.h5       # (optional, per-condition ITC when average=True)
    ├── pyprep_task_<task>_log.csv
-   ├── icalabel_task_<task>_log.csv
    ├── task_<task>_preprocessing_stats.tsv
    └── task_<task>_preprocessing_stats_desc.tsv

@@ -9,12 +9,11 @@ Pipeline class for EEG preprocessing orchestration:
 
 Usage:
     pipeline = PreprocessingPipeline(config=config)
-    pipeline.run_batch(subjects, task="task", mode="full")
+    pipeline.run_batch(subjects, task="task", mode="ica")
 
 Modes:
-- full: Complete preprocessing (bad channels → ICA → epochs)
 - bad-channels: Only bad channel detection
-- ica: Only ICA fitting and labeling
+- ica: ICA fitting and native MNE-BIDS artifact classification
 - epochs: Only epoch creation and cleaning
 """
 
@@ -35,10 +34,12 @@ from eeg_pipeline.utils.config.roots import resolve_eeg_bids_root, resolve_eeg_d
 
 STEP_BAD_CHANNELS = "bad-channels"
 STEP_ICA_FIT = "ica-fit"
-STEP_ICA_LABEL = "ica-label"
 STEP_EPOCHS = "epochs"
 STEP_STATS = "stats"
 STEP_SCANNER_HARMONIC_QC = "scanner-harmonic-qc"
+STEP_PULSE_MARKER_QC = "pulse-marker-qc"
+STEP_ICA_CARDIAC_QC = "ica-cardiac-qc"
+STEP_CARDIAC_ATTENUATION_QC = "cardiac-attenuation-qc"
 
 
 def _is_events_tsv(path: Path) -> bool:
@@ -95,7 +96,7 @@ class PreprocessingPipeline(PipelineBase):
         self,
         task: Optional[str],
         kwargs: Dict[str, Any],
-    ) -> tuple[Optional[str], str, bool, bool, bool, int, Any]:
+    ) -> tuple[Optional[str], str, bool, bool, int, Any]:
         """Extract and normalize preprocessing parameters from kwargs.
 
         Returns:
@@ -103,7 +104,6 @@ class PreprocessingPipeline(PipelineBase):
                 resolved_task,
                 mode,
                 use_pyprep,
-                use_icalabel,
                 task_is_rest,
                 n_jobs,
                 progress,
@@ -111,9 +111,8 @@ class PreprocessingPipeline(PipelineBase):
         """
         task_is_rest = self._resolve_task_is_rest(kwargs.get("task_is_rest"))
         resolved_task = self._resolve_requested_task(task, task_is_rest)
-        mode = kwargs.get("mode", "full")
+        mode = kwargs.get("mode", "ica")
         use_pyprep = kwargs.get("use_pyprep", True)
-        use_icalabel = kwargs.get("use_icalabel", True)
         n_jobs = kwargs.get("n_jobs", 1)
         progress = ensure_progress_reporter(kwargs.get("progress"))
 
@@ -121,7 +120,6 @@ class PreprocessingPipeline(PipelineBase):
             resolved_task,
             mode,
             use_pyprep,
-            use_icalabel,
             task_is_rest,
             n_jobs,
             progress,
@@ -161,13 +159,12 @@ class PreprocessingPipeline(PipelineBase):
             subject: Subject ID without 'sub-' prefix
             task: Task name (defaults to config value)
             **kwargs: Additional options:
-                - mode: 'full', 'bad-channels', 'ica', or 'epochs'
-                - use_icalabel: Whether to use mne-icalabel
+                - mode: 'bad-channels', 'ica', or 'epochs'
                 - task_is_rest: Override config to enable/disable resting-state preprocessing
                 - n_jobs: Number of parallel jobs
                 - progress: ProgressReporter for TUI feedback
         """
-        resolved_task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = (
+        resolved_task, mode, use_pyprep, task_is_rest, n_jobs, progress = (
             self._extract_preprocessing_params(task, kwargs)
         )
         self._refresh_processing_roots_if_initialized(task_is_rest)
@@ -182,7 +179,6 @@ class PreprocessingPipeline(PipelineBase):
                 subjects=[subject],
                 task=resolved_task,
                 use_pyprep=use_pyprep,
-                use_icalabel=use_icalabel,
                 task_is_rest=task_is_rest,
                 n_jobs=n_jobs,
                 progress=progress,
@@ -205,8 +201,7 @@ class PreprocessingPipeline(PipelineBase):
             subjects: List of subject IDs
             task: Task name
             **kwargs: Preprocessing options:
-                - mode: 'full', 'bad-channels', 'ica', or 'epochs'
-                - use_icalabel: Whether to use mne-icalabel
+                - mode: 'bad-channels', 'ica', or 'epochs'
                 - task_is_rest: Override config to enable/disable resting-state preprocessing
                 - n_jobs: Number of parallel jobs
                 - progress: ProgressReporter for TUI feedback
@@ -214,7 +209,7 @@ class PreprocessingPipeline(PipelineBase):
         Returns:
             List of per-subject status dictionaries
         """
-        resolved_task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = (
+        resolved_task, mode, use_pyprep, task_is_rest, n_jobs, progress = (
             self._extract_preprocessing_params(task, kwargs)
         )
         self._refresh_processing_roots_if_initialized(task_is_rest)
@@ -239,7 +234,6 @@ class PreprocessingPipeline(PipelineBase):
                 subjects=subjects,
                 task=resolved_task,
                 use_pyprep=use_pyprep,
-                use_icalabel=use_icalabel,
                 task_is_rest=task_is_rest,
                 n_jobs=n_jobs,
                 progress=progress,
@@ -295,11 +289,20 @@ class PreprocessingPipeline(PipelineBase):
     def _get_steps_for_mode(self, mode: str) -> List[str]:
         """Get preprocessing steps for the given mode."""
         mode_steps = {
-            "full": [STEP_BAD_CHANNELS, STEP_ICA_FIT, STEP_ICA_LABEL, STEP_EPOCHS, STEP_STATS],
+            "full": [STEP_BAD_CHANNELS, STEP_ICA_FIT, STEP_EPOCHS, STEP_STATS],
             "bad-channels": [STEP_BAD_CHANNELS],
-            "ica": [STEP_ICA_FIT, STEP_ICA_LABEL],
+            "ica": [STEP_ICA_FIT],
             "epochs": [STEP_EPOCHS, STEP_STATS],
         }
+
+        manual_review_required = bool(self.config.get("ica.require_manual_review", False))
+        manual_review_complete = bool(self.config.get("ica.manual_review_complete", False))
+        if mode in {"full", "epochs"} and manual_review_required and not manual_review_complete:
+            raise ValueError(
+                "Epoch creation is blocked because manual ICA review is required. Run "
+                "mode='ica', review *_proc-ica_components.tsv, then set "
+                "ica.manual_review_complete=true before running mode='epochs'."
+            )
 
         if mode not in mode_steps:
             raise ValueError(f"Unknown preprocessing mode: {mode}")
@@ -309,8 +312,17 @@ class PreprocessingPipeline(PipelineBase):
     def _get_steps_for_run(self, mode: str, task_is_rest: bool) -> List[str]:
         """Append cohort QC only when task epoch outputs are produced."""
         steps = self._get_steps_for_mode(mode)
-        if not task_is_rest and mode in {"full", "epochs"}:
-            steps.append(STEP_SCANNER_HARMONIC_QC)
+        analyzer_enabled = bool(
+            self.config.get("preprocessing.brainvision_analyzer.enabled", False)
+        )
+        if analyzer_enabled:
+            steps.insert(0, STEP_PULSE_MARKER_QC)
+            if mode == "ica":
+                steps.append(STEP_ICA_CARDIAC_QC)
+            if mode == "epochs":
+                steps.append(STEP_CARDIAC_ATTENUATION_QC)
+                if not task_is_rest:
+                    steps.append(STEP_SCANNER_HARMONIC_QC)
         return steps
 
     def _execute_steps(
@@ -319,7 +331,6 @@ class PreprocessingPipeline(PipelineBase):
         subjects: List[str],
         task: Optional[str],
         use_pyprep: bool,
-        use_icalabel: bool,
         task_is_rest: bool,
         n_jobs: int,
         progress: Any,
@@ -332,7 +343,26 @@ class PreprocessingPipeline(PipelineBase):
             progress.step(step, current=i, total=total_steps)
             self.logger.info("Running step: %s", step)
 
-            if step == STEP_BAD_CHANNELS:
+            if step == STEP_PULSE_MARKER_QC:
+                output_path = self._run_pulse_marker_qc(
+                    subjects=subjects,
+                    task=task,
+                )
+                outputs["pulse_marker_qc_tsv"] = str(output_path)
+            elif step == STEP_ICA_CARDIAC_QC:
+                output_path = self._run_marker_ctps_qc(
+                    subjects=subjects,
+                    task=task,
+                )
+                outputs["marker_ctps_qc_tsv"] = str(output_path)
+            elif step == STEP_CARDIAC_ATTENUATION_QC:
+                output_path = self._run_cardiac_attenuation_qc(
+                    subjects=subjects,
+                    task=task,
+                )
+                outputs["cardiac_attenuation_qc_tsv"] = str(output_path)
+                outputs["cardiac_attenuation_qc_png"] = str(output_path.with_suffix(".png"))
+            elif step == STEP_BAD_CHANNELS:
                 if not use_pyprep:
                     self.logger.info("Skipping bad channel detection (PyPREP disabled)")
                     continue
@@ -345,15 +375,8 @@ class PreprocessingPipeline(PipelineBase):
                 self._run_ica_fitting(
                     subjects=subjects,
                     task=task,
-                    use_icalabel=use_icalabel,
                     task_is_rest=task_is_rest,
                 )
-            elif step == STEP_ICA_LABEL:
-                if use_icalabel:
-                    self._run_ica_labeling(
-                        subjects=subjects,
-                        task=task,
-                    )
             elif step == STEP_EPOCHS:
                 self._run_epoch_creation(
                     subjects=subjects,
@@ -375,6 +398,123 @@ class PreprocessingPipeline(PipelineBase):
                 raise ValueError(f"Unknown preprocessing step: {step}")
 
         return outputs
+
+    def _run_pulse_marker_qc(
+        self,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> Path:
+        """Validate preserved Analyzer R markers before preprocessing."""
+        from mne_bids import BIDSPath, read_raw_bids
+
+        from eeg_pipeline.preprocessing.pulse_artifact_qc import (
+            PulseMarkerCriteria,
+            validate_pulse_marker_recordings,
+        )
+
+        qc_config = self.config.get("preprocessing.brainvision_analyzer.pulse_artifact_qc")
+        if not qc_config:
+            raise ValueError(
+                "Missing required config mapping: "
+                "preprocessing.brainvision_analyzer.pulse_artifact_qc"
+            )
+
+        selected_subjects = [None] if subjects == ["all"] else subjects
+        bids_paths = []
+        for subject in selected_subjects:
+            bids_paths.extend(
+                BIDSPath(
+                    root=self.bids_root,
+                    subject=subject,
+                    task=task,
+                    datatype="eeg",
+                    suffix="eeg",
+                    extension=self.config.get("pyprep.file_extension"),
+                    check=True,
+                ).match()
+            )
+        visible_paths = {
+            str(path.fpath): path
+            for path in bids_paths
+            if path.fpath.is_file() and not path.fpath.name.startswith("._")
+        }
+        bids_paths = [visible_paths[key] for key in sorted(visible_paths)]
+        if not bids_paths:
+            raise FileNotFoundError(
+                f"No BIDS EEG recordings found for pulse-marker QC under {self.bids_root}."
+            )
+
+        recordings = [
+            (
+                path.fpath.stem,
+                read_raw_bids(path, extra_params={"preload": False}, verbose=False),
+            )
+            for path in bids_paths
+        ]
+        criteria = PulseMarkerCriteria(
+            minimum_bpm=float(qc_config["minimum_bpm"]),
+            maximum_bpm=float(qc_config["maximum_bpm"]),
+            minimum_marker_fraction=float(qc_config["minimum_marker_fraction"]),
+            minimum_recording_coverage=float(qc_config["minimum_recording_coverage"]),
+        )
+        task_entity = f"task-{task}_" if task is not None else ""
+        output_path = (
+            self.deriv_root
+            / "preprocessed"
+            / "eeg"
+            / "qc"
+            / f"{task_entity}desc-pulsemarkers_qc.tsv"
+        )
+        return validate_pulse_marker_recordings(
+            recordings,
+            criteria,
+            output_path=output_path,
+        )
+
+    def _get_analyzer_cardiac_qc_config(self) -> Any:
+        config = self.config.get("preprocessing.brainvision_analyzer.cardiac_artifact_qc")
+        if not config:
+            raise ValueError(
+                "Missing required config mapping: "
+                "preprocessing.brainvision_analyzer.cardiac_artifact_qc"
+            )
+        return config
+
+    def _run_marker_ctps_qc(
+        self,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> Path:
+        """Add marker-based CTPS evidence to native ICA component metadata."""
+        from eeg_pipeline.preprocessing.cardiac_artifact_qc import run_marker_ctps_qc
+
+        config = self._get_analyzer_cardiac_qc_config()
+        return run_marker_ctps_qc(
+            pipeline_root=self.deriv_root / "preprocessed" / "eeg",
+            subjects=subjects,
+            task=task,
+            threshold=float(config["ctps_threshold"]),
+            epoch_window=tuple(config["ctps_epoch_window"]),
+        )
+
+    def _run_cardiac_attenuation_qc(
+        self,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> Path:
+        """Measure marker-locked EEG attenuation after ICA application."""
+        from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
+            run_cardiac_attenuation_qc,
+        )
+
+        config = self._get_analyzer_cardiac_qc_config()
+        return run_cardiac_attenuation_qc(
+            pipeline_root=self.deriv_root / "preprocessed" / "eeg",
+            subjects=subjects,
+            task=task,
+            baseline=tuple(config["baseline"]),
+            measurement_window=tuple(config["measurement_window"]),
+        )
 
     def _run_bad_channel_detection(
         self,
@@ -445,20 +585,18 @@ class PreprocessingPipeline(PipelineBase):
             )
         return str(bad_channel_sync_policy)
 
-    def _get_ica_fitting_steps(self, use_icalabel: bool) -> str:
+    def _get_ica_fitting_steps(self) -> str:
         """Get MNE-BIDS pipeline steps for ICA fitting."""
-        base_steps = [
-            "init",
-            "preprocessing/_01_data_quality",
-            "preprocessing/_04_frequency_filter",
-            "preprocessing/_05_regress_artifact",
-            "preprocessing/_06a1_fit_ica",
-        ]
-
-        if not use_icalabel:
-            base_steps.append("preprocessing/_06a2_find_ica_artifacts")
-
-        return ",".join(base_steps)
+        return ",".join(
+            [
+                "init",
+                "preprocessing/_01_data_quality",
+                "preprocessing/_04_frequency_filter",
+                "preprocessing/_05_regress_artifact",
+                "preprocessing/_06a1_fit_ica",
+                "preprocessing/_06a2_find_ica_artifacts",
+            ]
+        )
 
     def _get_ica_preparation_steps(self) -> str:
         """Get MNE-BIDS steps that produce filtered raw files for ICA."""
@@ -471,18 +609,14 @@ class PreprocessingPipeline(PipelineBase):
             ]
         )
 
-    def _get_ica_decomposition_steps(self, use_icalabel: bool) -> str:
+    def _get_ica_decomposition_steps(self) -> str:
         """Get MNE-BIDS steps that concatenate epochs and fit ICA."""
-        steps = ["preprocessing/_06a1_fit_ica"]
-        if not use_icalabel:
-            steps.append("preprocessing/_06a2_find_ica_artifacts")
-        return ",".join(steps)
+        return "preprocessing/_06a1_fit_ica,preprocessing/_06a2_find_ica_artifacts"
 
     def _run_ica_fitting(
         self,
         subjects: List[str],
         task: Optional[str],
-        use_icalabel: bool = True,
         task_is_rest: Optional[bool] = None,
     ) -> None:
         """Run ICA fitting via MNE-BIDS pipeline."""
@@ -494,7 +628,7 @@ class PreprocessingPipeline(PipelineBase):
         )
         self._harmonize_filtered_raw_bads_for_mne_concat(subjects, task)
         self._run_mne_bids_pipeline(
-            self._get_ica_decomposition_steps(use_icalabel),
+            self._get_ica_decomposition_steps(),
             subjects=subjects,
             task=task,
             task_is_rest=task_is_rest,
@@ -723,34 +857,6 @@ class PreprocessingPipeline(PipelineBase):
             tmp_path.replace(path)
         finally:
             tmp_path.unlink(missing_ok=True)
-
-    def _run_ica_labeling(
-        self,
-        subjects: List[str],
-        task: Optional[str],
-    ) -> None:
-        """Run ICA component labeling using mne-icalabel."""
-        from eeg_pipeline.preprocessing.pipeline.ica import run_ica_label
-
-        normalized_subjects = self._normalize_subjects(subjects)
-        subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
-        self.logger.info("Running ICA labeling for %s subject(s)", subject_count)
-
-        icalabel_cfg = self.config.get("icalabel", {})
-        run_ica_label(
-            pipeline_path=str(self.deriv_root / "preprocessed" / "eeg"),
-            task=task,
-            subjects=normalized_subjects,
-            prob_threshold=icalabel_cfg.get(
-                "prob_threshold", self.config.get("ica.probability_threshold", 0.8)
-            ),
-            labels_to_keep=icalabel_cfg.get(
-                "labels_to_keep", self.config.get("ica.labels_to_keep", ["brain", "other"])
-            ),
-            keep_mnebids_bads=icalabel_cfg.get("keep_mnebids_bads", False),
-        )
-
-        self.logger.info("ICA labeling complete")
 
     def _run_epoch_creation(
         self,
@@ -1155,19 +1261,52 @@ class PreprocessingPipeline(PipelineBase):
             lines.append(f'ica_algorithm = "{ica_algorithm}"')
 
         # ICA n_components
-        ica_n_components = self.config.get("ica.n_components", 0.99)
-        if ica_n_components is not None:
-            lines.append(f"ica_n_components = {ica_n_components}")
+        ica_n_components = self.config.get("ica.n_components")
+        lines.append(f"ica_n_components = {ica_n_components!r}")
 
         # ICA l_freq
         ica_l_freq = self.config.get("ica.l_freq", 1.0)
         if ica_l_freq is not None:
             lines.append(f"ica_l_freq = {ica_l_freq}")
 
+        ica_h_freq = self.config.get("ica.h_freq")
+        if ica_h_freq is not None:
+            lines.append(f"ica_h_freq = {ica_h_freq}")
+
         # ICA reject
         ica_reject = self.config.get("ica.reject")
         if ica_reject is not None:
-            lines.append(f"ica_reject = {ica_reject}")
+            lines.append(f"ica_reject = {ica_reject!r}")
+
+        use_icalabel = bool(self.config.get("ica.use_icalabel"))
+        use_ecg_detection = bool(self.config.get("ica.use_ecg_detection"))
+        use_eog_detection = bool(self.config.get("ica.use_eog_detection"))
+        lines.append(f"ica_use_icalabel = {use_icalabel}")
+        lines.append(f"ica_use_ecg_detection = {use_ecg_detection}")
+        lines.append(f"ica_use_eog_detection = {use_eog_detection}")
+
+        if use_icalabel:
+            labels_to_keep = tuple(self.config.get("ica.labels_to_keep", []))
+            if not labels_to_keep:
+                raise ValueError("ica.labels_to_keep must contain at least one ICLabel class.")
+            lines.append(f"ica_icalabel_include = {labels_to_keep!r}")
+
+            probability_threshold = float(self.config.get("ica.probability_threshold"))
+            artifact_labels = (
+                "muscle artifact",
+                "eye blink",
+                "heart beat",
+                "line noise",
+                "channel noise",
+            )
+            exclusion_thresholds = {
+                label: probability_threshold
+                for label in artifact_labels
+                if label not in labels_to_keep
+            }
+            lines.append(f"ica_exclusion_thresholds = {exclusion_thresholds!r}")
+        process_raw_clean = bool(self.config.get("ica.process_raw_clean"))
+        lines.append(f"process_raw_clean = {process_raw_clean}")
 
         lines.append("")
         lines.append("# Epochs")

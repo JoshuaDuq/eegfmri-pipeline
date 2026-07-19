@@ -566,7 +566,7 @@ func TestGetBehaviorOptions_RegressionOnlyHidesCorrelationSpecificGlobalControls
 }
 
 func TestGetPreprocessingOptions_HidesAlignmentAndEventMappingRows(t *testing.T) {
-	m := Model{modeIndex: 0}
+	m := New(types.PipelinePreprocessing, ".")
 
 	opts := m.getPreprocessingOptions()
 

@@ -1,7 +1,7 @@
 Preprocessing
 =============
 
-Automated EEG preprocessing: bad-channel detection, ICA, and epoching.
+Automated EEG preprocessing: bad-channel detection, ICA review, and epoching.
 
 .. code-block:: bash
 
@@ -16,17 +16,14 @@ Modes
 
    * - Mode
      - What it runs
-   * - ``full``
-     - Bad-channel detection → ICA fitting → ICA labeling → epoch creation,
-       in sequence. Use for a fresh subject.
    * - ``bad-channels``
      - PyPREP bad-channel detection only (deviation + correlation, optional RANSAC).
        Updates ``channels.tsv``. Cross-run synchronization is optional via
        ``pyprep.bad_channel_sync_policy=subject_union``.
    * - ``ica``
-     - Fits ICA (extended Infomax, 99% variance, 1 Hz high-pass) via
-       MNE-BIDS-Pipeline, then labels components with ICLabel
-       (threshold ``p > 0.8``; keeps ``brain`` and ``other`` labels).
+     - Fits a near-rank ICA decomposition via MNE-BIDS-Pipeline and labels
+       components with its native ICLabel integration. Review the generated
+       component table before running ``epochs``.
    * - ``epochs``
      - Creates epochs from the ICA-cleaned signal. Default window:
        ``tmin = −7 s``, ``tmax = 15 s``, baseline ``[−0.2, 0] s``,
@@ -55,9 +52,6 @@ Key Options
    * - ``--reject-method``
      - Epoch rejection strategy: ``none``, ``autoreject_local``, or ``autoreject_global``
      - ``autoreject_local``
-   * - ``--no-icalabel``
-     - Skip ICLabel; fall back to MNE-BIDS heuristic component labeling
-     - disabled
    * - ``--no-pyprep``
      - Skip PyPREP bad-channel detection entirely
      - disabled
@@ -66,7 +60,7 @@ Key Options
      - from config (default: ``extended_infomax``)
    * - ``--ica-components``
      - Number of ICA components (int) or explained-variance fraction (float < 1)
-     - from config (default: ``0.99``)
+     - from config (default: near data rank)
    * - ``--ica-l-freq``
      - High-pass filter applied before ICA fitting (Hz)
      - from config (default: ``1.0``)
@@ -108,39 +102,50 @@ Examples
 
 .. code-block:: bash
 
-   # End-to-end preprocessing for a single subject
-   eeg-pipeline preprocessing full --subject 0001
-
-   # Full preprocessing across all subjects (in parallel at the subject level)
-   eeg-pipeline preprocessing full --all-subjects
-
    # Bad-channel detection with RANSAC (slower but more sensitive)
    eeg-pipeline preprocessing bad-channels --subject 0001 --ransac
 
-   # ICA only (assumes bad-channels was already run)
+   # Fit and label ICA (assumes bad-channels was already run)
    eeg-pipeline preprocessing ica --subject 0001
+
+   # Review the MNE-BIDS component table, then acknowledge review and create epochs
+   eeg-pipeline preprocessing epochs --subject 0001 \
+     --set ica.manual_review_complete=true
 
    # Custom epoch window
    eeg-pipeline preprocessing epochs --subject 0001 \
-     --tmin -7.0 --tmax 15.0 --reject-method autoreject_local
-
-   # Skip ICLabel (use heuristic ICA classification)
-   eeg-pipeline preprocessing full --subject 0001 --no-icalabel
-
-   # SSP instead of ICA for artifact removal
-   eeg-pipeline preprocessing full --subject 0001 --spatial-filter ssp
+     --tmin -7.0 --tmax 15.0 --reject-method autoreject_local \
+     --set ica.manual_review_complete=true
 
    # Resting-state mode (fixed-length epochs; no events.tsv conditions required)
-   eeg-pipeline preprocessing full --subject 0001 --task-is-rest
+   eeg-pipeline preprocessing ica --subject 0001 --task-is-rest
+   # Review components before continuing.
+   eeg-pipeline preprocessing epochs --subject 0001 --task-is-rest \
+     --set ica.manual_review_complete=true
 
    # Simultaneous EEG–fMRI: align EEG onset to first fMRI volume
-   eeg-pipeline preprocessing epochs --subject 0001 --trim-to-first-volume
+   eeg-pipeline preprocessing epochs --subject 0001 --trim-to-first-volume \
+     --set ica.manual_review_complete=true
 
 .. note::
 
-   The ``full`` mode runs all stages in order. If a stage fails mid-way,
-   re-run only the failed mode (e.g., ``ica`` or ``epochs``) after fixing
-   the issue. Each mode is idempotent and will overwrite its own outputs.
+   ``ica`` and ``epochs`` are intentionally separate so artifact-component
+   exclusions can be reviewed before ICA is applied. When
+   ``ica.require_manual_review`` is enabled, ``epochs`` fails until
+   ``ica.manual_review_complete`` is explicitly set to ``true``. Each mode is
+   idempotent and overwrites its own outputs.
+
+BrainVision Analyzer inputs
+---------------------------
+
+Set ``preprocessing.brainvision_analyzer.enabled: true`` when scanner-gradient
+and pulse artifacts were corrected in BrainVision Analyzer before BIDS import.
+This enables strict validation of the preserved ``Pulse Artifact/R`` markers,
+marker-locked CTPS diagnostics, cardiac attenuation QC, and scanner-harmonic QC.
+
+Set it to ``false`` for ordinary EEG or for data that enters the native MNE
+EEG-fMRI correction workflow without prior Analyzer processing. The additional
+Analyzer-specific validation and QC steps are then omitted.
 
 .. seealso::
 

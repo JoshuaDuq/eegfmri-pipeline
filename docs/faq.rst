@@ -206,8 +206,8 @@ Preprocessing
 .. dropdown:: Bad channels detected in one run are not propagated to other runs.
    :animate: fade-in
 
-   The ``full`` and ``bad-channels`` modes synchronize bads across runs by
-   default (union of bads per subject and task). If you re-run only ``epochs``
+   The ``bad-channels`` mode synchronizes bads across runs by default (union of
+   bads per subject and task). If you re-run only ``epochs``
    after modifying ``channels.tsv`` manually, run ``bad-channels`` first to
    trigger re-synchronization.
 
@@ -240,7 +240,10 @@ Feature Extraction
 
    .. code-block:: bash
 
-      eeg-pipeline preprocessing full --subject 0001 --task-is-rest
+      eeg-pipeline preprocessing ica --subject 0001 --task-is-rest
+      # Review component exclusions before continuing.
+      eeg-pipeline preprocessing epochs --subject 0001 --task-is-rest \
+        --set ica.manual_review_complete=true
       eeg-pipeline features compute --subject 0001 \
         --categories power connectivity aperiodic spectral complexity
 

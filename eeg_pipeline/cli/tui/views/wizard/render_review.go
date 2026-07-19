@@ -498,7 +498,7 @@ func (m Model) reviewSelectionRows() []reviewRow {
 		}
 	case types.PipelinePreprocessing:
 		return []reviewRow{
-			{label: "Stages", value: countLabel(countSelectedItems(m.prepStageSelected), len(m.prepStages))},
+			{label: "Mode", value: m.modeOptions[m.modeIndex]},
 		}
 	default:
 		return nil

@@ -93,7 +93,7 @@ Command Matrix
      - Modes
      - Purpose
    * - ``preprocessing``
-     - ``full`` · ``bad-channels`` · ``ica`` · ``epochs``
+     - ``bad-channels`` · ``ica`` · ``epochs``
      - EEG preprocessing stages from bad-channel detection to epoch creation.
    * - ``features``
      - ``compute``
@@ -128,7 +128,7 @@ Command Matrix
       :link: preprocessing
       :link-type: doc
 
-      ``full`` · ``bad-channels`` · ``ica`` · ``epochs``
+      ``bad-channels`` · ``ica`` · ``epochs``
 
       Filtering, resampling, resting-state mode, PyPREP and ICLabel options.
 

@@ -284,8 +284,11 @@ python studies/pain_study/scripts/run_paradigm_specific.py merge-psychopy \
   --bids-root data/bids_output/eeg \
   --task task
 
-# 4. Run downstream analysis (TUI or CLI)
-eeg-pipeline preprocessing full --subject 0001 --subject 0002 --task task
+# 4. Fit ICA, review component exclusions, then create epochs
+eeg-pipeline preprocessing ica --subject 0001 --subject 0002 --task task
+# Review the generated MNE-BIDS component tables before continuing.
+eeg-pipeline preprocessing epochs --subject 0001 --subject 0002 --task task \
+  --set ica.manual_review_complete=true
 eeg-pipeline features compute --subject 0001 --subject 0002 --task task
 eeg-pipeline behavior compute --subject 0001 --subject 0002 --task task
 eeg-pipeline fmri preprocess --subject 0001 --subject 0002 --task task

@@ -198,6 +198,13 @@ func TestUpdate_MouseClickCyclesICAMethod(t *testing.T) {
 	m.CurrentStep = types.StepPreprocessingICA
 	m.width = 140
 	m.height = 40
+	view := wizardStripANSI(m.View())
+	if !strings.Contains(view, "extended_infomax") {
+		t.Fatalf("expected default ICA method in view, got:\n%s", view)
+	}
+	if !strings.Contains(view, "preprocessing ica") {
+		t.Fatalf("expected reviewable ICA command in view, got:\n%s", view)
+	}
 
 	idx := wizardLineIndex(t, m.View(), "ICA Method")
 	updated, _ := m.handleMouse(tea.MouseMsg{
@@ -210,6 +217,9 @@ func TestUpdate_MouseClickCyclesICAMethod(t *testing.T) {
 
 	if got.prepICAAlgorithm != 1 {
 		t.Fatalf("expected ICA method to cycle to 1, got %d", got.prepICAAlgorithm)
+	}
+	if view := wizardStripANSI(got.View()); !strings.Contains(view, "fastica") {
+		t.Fatalf("expected cycled ICA method in view, got:\n%s", view)
 	}
 }
 

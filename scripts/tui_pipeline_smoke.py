@@ -29,17 +29,29 @@ def _cases(task: str) -> List[SmokeCase]:
     # Help checks cover parser wiring for each pipeline family.
     # A single runtime check validates command dispatch end-to-end.
     return [
-        SmokeCase("preprocessing", ["-m", "eeg_pipeline.cli.main", "preprocessing", "full", "--help"]),
+        SmokeCase(
+            "preprocessing", ["-m", "eeg_pipeline.cli.main", "preprocessing", "ica", "--help"]
+        ),
         SmokeCase("features", ["-m", "eeg_pipeline.cli.main", "features", "compute", "--help"]),
         SmokeCase("behavior", ["-m", "eeg_pipeline.cli.main", "behavior", "compute", "--help"]),
-        SmokeCase("machine_learning", ["-m", "eeg_pipeline.cli.main", "ml", "regression", "--help"]),
+        SmokeCase(
+            "machine_learning", ["-m", "eeg_pipeline.cli.main", "ml", "regression", "--help"]
+        ),
         SmokeCase("plotting", ["-m", "eeg_pipeline.cli.main", "plotting", "visualize", "--help"]),
-        SmokeCase("fmri_preprocessing", ["-m", "eeg_pipeline.cli.main", "fmri", "preprocess", "--help"]),
-        SmokeCase("fmri_analysis", ["-m", "eeg_pipeline.cli.main", "fmri-analysis", "first-level", "--help"]),
+        SmokeCase(
+            "fmri_preprocessing", ["-m", "eeg_pipeline.cli.main", "fmri", "preprocess", "--help"]
+        ),
+        SmokeCase(
+            "fmri_analysis",
+            ["-m", "eeg_pipeline.cli.main", "fmri-analysis", "first-level", "--help"],
+        ),
         SmokeCase("validate", ["-m", "eeg_pipeline.cli.main", "validate", "quick", "--help"]),
         SmokeCase("info", ["-m", "eeg_pipeline.cli.main", "info", "subjects", "--help"]),
         SmokeCase("stats", ["-m", "eeg_pipeline.cli.main", "stats", "--help"]),
-        SmokeCase("runtime_version", ["-m", "eeg_pipeline.cli.main", "info", "version", "--json", "--task", task]),
+        SmokeCase(
+            "runtime_version",
+            ["-m", "eeg_pipeline.cli.main", "info", "version", "--json", "--task", task],
+        ),
     ]
 
 
@@ -91,7 +103,9 @@ def _preview_output(text: str, max_lines: int = 6) -> str:
     return " | ".join(preview) + suffix
 
 
-def _candidate_python_commands(repo_root: Path, *, os_name: Optional[str] = None) -> List[List[str]]:
+def _candidate_python_commands(
+    repo_root: Path, *, os_name: Optional[str] = None
+) -> List[List[str]]:
     os_name = os_name or os.name
     bin_dir = "Scripts" if os_name == "nt" else "bin"
     executable = "python.exe" if os_name == "nt" else "python"
@@ -144,7 +158,9 @@ def _resolve_python_command(repo_root: Path, *, os_name: Optional[str] = None) -
     return [sys.executable] if sys.executable else ["python3"]
 
 
-def _run_case(case: SmokeCase, *, python_cmd: List[str], repo_root: Path, timeout_s: float) -> subprocess.CompletedProcess[str]:
+def _run_case(
+    case: SmokeCase, *, python_cmd: List[str], repo_root: Path, timeout_s: float
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [*python_cmd, *case.argv],
         cwd=str(repo_root),
@@ -155,7 +171,9 @@ def _run_case(case: SmokeCase, *, python_cmd: List[str], repo_root: Path, timeou
     )
 
 
-def run(progress_json: bool, task: str, timeout_s: float, pipelines: Optional[List[str]] = None) -> int:
+def run(
+    progress_json: bool, task: str, timeout_s: float, pipelines: Optional[List[str]] = None
+) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     python_cmd = _resolve_python_command(repo_root)
     all_cases = _cases(task)
@@ -196,7 +214,7 @@ def run(progress_json: bool, task: str, timeout_s: float, pipelines: Optional[Li
         _emit_log(
             progress_json,
             "Missing required Python dependency 'yaml' for CLI bootstrap. "
-            "Install project dependencies (for example: pip install -e \".[dev]\").",
+            'Install project dependencies (for example: pip install -e ".[dev]").',
             level="error",
         )
         return 2
@@ -213,7 +231,12 @@ def run(progress_json: bool, task: str, timeout_s: float, pipelines: Optional[Li
             proc = _run_case(case, python_cmd=python_cmd, repo_root=repo_root, timeout_s=timeout_s)
         except subprocess.TimeoutExpired:
             failures.append(case.name)
-            _emit_log(progress_json, f"[fail] {case.name}: timed out after {timeout_s:.0f}s", subject=case.name, level="error")
+            _emit_log(
+                progress_json,
+                f"[fail] {case.name}: timed out after {timeout_s:.0f}s",
+                subject=case.name,
+                level="error",
+            )
             _emit_subject_done(progress_json, case.name, False)
             continue
 
