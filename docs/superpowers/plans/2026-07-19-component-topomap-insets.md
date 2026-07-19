@@ -23,9 +23,11 @@ Build `icaFile` under `ica/<band>/sub-0015/eeg`, require it to exist, and load
 - [ ] **Step 2: Validate the plotting contract**
 
 Require `componentFit.label`, `componentFit.topo`, `componentFit.topolabel`, and electrode
-geometry. Before plotting each TFR result, require exact equality between
-`string(power.label)` and `string(componentFit.label)` so a topomap cannot be attached to the
-wrong component.
+geometry. Require the TFR's saved broadband components to share the fitted model's ordered
+unmixing matrix and topography-channel labels. Before plotting each TFR result, require exact
+equality between `string(power.label)` and `string(comp.label)` plus an equal fitted-map count,
+so a topomap cannot be attached to the wrong component. FieldTrip intentionally names the
+fitted and applied components `runica###` and `component###`, respectively.
 
 - [ ] **Step 3: Prepare the electrode layout once**
 
@@ -87,8 +89,8 @@ Expected: no Code Analyzer findings.
 
 - [ ] **Step 2: Validate saved alpha data without opening figures**
 
-Load the alpha ICA and TFR MAT files and assert exact component-label equality, 62 component
-maps, 63 topography channels, and finite topography values.
+Load the alpha ICA and TFR MAT files and assert identical ordered unmixing matrices, matching
+TFR/broadband labels, 62 component maps, 63 topography channels, and finite topography values.
 
 Expected: MATLAB exits successfully and prints the validated component and channel counts.
 

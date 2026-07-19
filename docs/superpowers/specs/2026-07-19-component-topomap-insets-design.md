@@ -21,9 +21,13 @@ ica/<band>/sub-0015/eeg/
 sub-0015_task-thermalactive_desc-fieldtripica_components.mat
 ```
 
-Require identical component labels and counts between `componentFit` and every plotted TFR.
-Do not reinterpret ICA maps as condition-specific: the inset remains fixed within a band,
-while the surrounding TFR changes with the selected condition or contrast.
+Require the fitted ICA maps and broadband components to share the same ordered unmixing matrix
+and topography-channel labels. Require every plotted TFR to match the broadband component
+labels and the fitted map count. FieldTrip uses different names for the same ordered rows
+(`runica###` for fitted maps and `component###` after broadband application), so direct label
+equality between those two namespaces is not expected. Do not reinterpret ICA maps as
+condition-specific: the inset remains fixed within a band, while the surrounding TFR changes
+with the selected condition or contrast.
 
 ## Figure Layout
 
