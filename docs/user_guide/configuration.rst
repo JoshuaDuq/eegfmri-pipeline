@@ -275,18 +275,21 @@ ICA
    * - ``ica.band_specific_report.fit_decim``
      - ``2``
      - Temporal decimation used only while fitting the additional diagnostic ICAs
-   * - ``ica.band_specific_report.tfr_frequency_count``
-     - ``24``
-     - Number of DPSS multitaper frequencies displayed within each report band
-   * - ``ica.band_specific_report.tfr_decim``
-     - ``5``
-     - Temporal decimation used for component TFR figures
-   * - ``ica.band_specific_report.tfr_window_seconds``
-     - ``2.0``
-     - Fixed DPSS multitaper window duration in seconds
-   * - ``ica.band_specific_report.tfr_frequency_smoothing_hz``
-     - ``1.5``
-     - Full frequency smoothing bandwidth in Hz
+   * - ``ica.band_specific_report.tfr.frequency_step_hz``
+     - ``1.0``
+     - FieldTrip-style frequency spacing
+   * - ``ica.band_specific_report.tfr.time_min_s`` / ``time_max_s``
+     - ``-5.0`` / ``14.4``
+     - Displayed TFR interval
+   * - ``ica.band_specific_report.tfr.time_step_s``
+     - ``0.1``
+     - TFR output time spacing
+   * - ``ica.band_specific_report.tfr.baseline_tmin_s`` / ``baseline_tmax_s``
+     - ``-5.0`` / ``-0.01``
+     - Baseline used for decibel normalization
+   * - ``ica.band_specific_report.comparisons``
+     - ``[]``
+     - Optional clean-events metadata columns and value groups for condition contrasts
 
 .. _configuration-epochs:
 

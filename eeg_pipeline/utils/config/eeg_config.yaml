@@ -302,10 +302,14 @@ ica:
   band_specific_report:
     enabled: false
     fit_decim: 2
-    tfr_frequency_count: 24
-    tfr_decim: 5
-    tfr_window_seconds: 2.0
-    tfr_frequency_smoothing_hz: 1.5
+    tfr:
+      frequency_step_hz: 1.0
+      time_min_s: -5.0
+      time_max_s: 14.4
+      time_step_s: 0.1
+      baseline_tmin_s: -5.0
+      baseline_tmax_s: -0.01
+    comparisons: []
 
 epochs:
   # IMPORTANT: Keep epochs.tmin earlier than the earliest baseline time window.

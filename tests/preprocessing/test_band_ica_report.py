@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from eeg_pipeline.preprocessing.band_ica_report import (
@@ -27,12 +28,85 @@ def test_band_definitions_match_requested_report_sections() -> None:
 def test_band_report_settings_fail_fast_on_invalid_values() -> None:
     with pytest.raises(ValueError, match="fit_decim"):
         BandIcaReportSettings.from_mapping({"fit_decim": 0})
-    with pytest.raises(ValueError, match="tfr_frequency_count"):
-        BandIcaReportSettings.from_mapping({"tfr_frequency_count": 1})
-    with pytest.raises(ValueError, match="tfr_window_seconds"):
-        BandIcaReportSettings.from_mapping({"tfr_window_seconds": 0})
-    with pytest.raises(ValueError, match="tfr_frequency_smoothing_hz"):
-        BandIcaReportSettings.from_mapping({"tfr_frequency_smoothing_hz": 0})
+    with pytest.raises(ValueError, match="frequency_step_hz"):
+        BandIcaReportSettings.from_mapping({"tfr": {"frequency_step_hz": 0}})
+    with pytest.raises(ValueError, match="time_step_s"):
+        BandIcaReportSettings.from_mapping({"tfr": {"time_step_s": 0}})
+
+
+def test_band_report_settings_parse_metadata_comparison() -> None:
+    settings = BandIcaReportSettings.from_mapping(
+        {
+            "comparisons": [
+                {
+                    "name": "high_vs_low",
+                    "column": "stimulus_temp",
+                    "group_a": {"label": "High", "values": [48.3, 49.3]},
+                    "group_b": {"label": "Low", "values": [44.3, 45.3]},
+                }
+            ]
+        }
+    )
+
+    comparison = settings.comparisons[0]
+    assert comparison.name == "high_vs_low"
+    assert comparison.column == "stimulus_temp"
+    assert comparison.group_a.values == (48.3, 49.3)
+
+
+def test_comparison_masks_select_configured_clean_event_values() -> None:
+    from eeg_pipeline.preprocessing.band_ica_report import _comparison_masks
+
+    settings = BandIcaReportSettings.from_mapping(
+        {
+            "comparisons": [
+                {
+                    "name": "pain",
+                    "column": "pain_binary_coded",
+                    "group_a": {"label": "Painful", "values": [1]},
+                    "group_b": {"label": "Non-painful", "values": [0]},
+                }
+            ]
+        }
+    )
+    metadata = pd.DataFrame({"pain_binary_coded": [0, 1, 1, 0]})
+
+    group_a, group_b = _comparison_masks(metadata, settings.comparisons[0])
+
+    np.testing.assert_array_equal(group_a, [False, True, True, False])
+    np.testing.assert_array_equal(group_b, [True, False, False, True])
+
+
+@pytest.mark.parametrize(
+    ("band_index", "window_seconds", "smoothing_hz"),
+    [(0, 3.0, 1.0), (1, 2.0, 1.5), (2, 2.0, 2.5), (3, 1.0, 5.0)],
+)
+def test_fieldtrip_tfr_uses_requested_band_parameters(
+    band_index: int,
+    window_seconds: float,
+    smoothing_hz: float,
+) -> None:
+    from eeg_pipeline.preprocessing.band_ica_report import _fieldtrip_tfr
+
+    band = BAND_ICA_DEFINITIONS[band_index]
+    frequencies = np.arange(band.fmin, band.fmax + 0.5)
+    power = np.ones((2, len(frequencies), 221))
+    with patch(
+        "eeg_pipeline.preprocessing.band_ica_report.mne.time_frequency.tfr_array_multitaper",
+        return_value=power,
+    ) as multitaper:
+        _fieldtrip_tfr(
+            data=np.ones((4, 2, 2201)),
+            sfreq=100.0,
+            times=np.linspace(-7.0, 15.0, 2201),
+            band=band,
+            settings=BandIcaReportSettings(),
+        )
+
+    kwargs = multitaper.call_args.kwargs
+    np.testing.assert_allclose(kwargs["n_cycles"], frequencies * window_seconds)
+    assert kwargs["time_bandwidth"] == 2.0 * window_seconds * smoothing_hz
+    assert kwargs["decim"] == 10
 
 
 def test_generate_band_report_writes_each_band_as_exploratory_outputs(tmp_path) -> None:
@@ -140,20 +214,20 @@ def test_source_diagnostics_include_misc_typed_ica_sources() -> None:
 
     with patch(
         "eeg_pipeline.preprocessing.band_ica_report.mne.time_frequency.tfr_array_multitaper",
-        return_value=np.ones((2, 4, 10)),
+        return_value=np.ones((2, 6, 10)),
     ) as multitaper:
         _source_diagnostics(
             ica=ica,
             epochs=SimpleNamespace(),
             band=BAND_ICA_DEFINITIONS[1],
-            settings=BandIcaReportSettings(tfr_frequency_count=4, tfr_decim=2),
+            settings=BandIcaReportSettings(time_step_s=0.02),
         )
 
     assert sources.compute_psd.call_args.kwargs["picks"] == "all"
-    assert multitaper.call_args.kwargs["time_bandwidth"] == 3.0
+    assert multitaper.call_args.kwargs["time_bandwidth"] == 6.0
     np.testing.assert_allclose(
         multitaper.call_args.kwargs["n_cycles"],
-        np.linspace(8.0, 13.0, 4) * 2.0,
+        np.arange(8.0, 14.0) * 2.0,
     )
 
 

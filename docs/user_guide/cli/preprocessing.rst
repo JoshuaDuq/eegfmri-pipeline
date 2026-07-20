@@ -154,10 +154,47 @@ sections to each subject's existing MNE HTML report:
 
 Each section comes from an independent extended-infomax ICA fitted to epochs
 filtered to that range. Every component has a topomap, MNE Welch power spectrum,
-DPSS multitaper time-frequency representation (2-second windows, 1.5 Hz full
-frequency smoothing), and an exploratory ICLabel class and probability. The
-fitted ICA and component table are also written beneath the subject EEG
+FieldTrip-style DPSS multitaper time-frequency representation, and an
+exploratory ICLabel class and probability. TFRs use baseline-relative dB,
+``turbo`` colors, symmetric limits, 1 Hz frequency spacing, and 100 ms time
+spacing. Windows and smoothing are 3 seconds / ±1 Hz for delta-theta, 2 seconds
+/ ±1.5 Hz for alpha, 2 seconds / ±2.5 Hz for beta, and 1 second / ±5 Hz for
+gamma. The fitted ICA and component table are written beneath the subject EEG
 derivative's ``band-specific-ica/`` directory.
+
+Metadata comparisons
+~~~~~~~~~~~~~~~~~~~~
+
+Condition comparisons are appended during ``epochs``, after the clean trial
+mask and ``proc-clean_events.tsv`` are available. Each entry names one metadata
+column and the values assigned to group A and group B:
+
+.. code-block:: yaml
+
+   ica:
+     band_specific_report:
+       enabled: true
+       comparisons:
+         - name: high_vs_low_temperature
+           column: stimulus_temp
+           group_a:
+             label: High temperature
+             values: [48.3, 49.3]
+           group_b:
+             label: Low temperature
+             values: [44.3, 45.3]
+         - name: painful_vs_nonpainful
+           column: pain_binary_coded
+           group_a:
+             label: Painful
+             values: [1]
+           group_b:
+             label: Non-painful
+             values: [0]
+
+The report shows group A, group B, and group A minus group B for every component
+and band. A missing column, missing configured value, empty group, or overlapping
+group definition stops the run instead of silently omitting the comparison.
 
 The standard 1–100 Hz ICA remains authoritative for artifact removal. Band-
 specific component numbers do not correspond across sections, their ICLabel

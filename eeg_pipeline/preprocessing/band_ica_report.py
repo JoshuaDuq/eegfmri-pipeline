@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 import matplotlib.pyplot as plt
 import mne
 import numpy as np
+import pandas as pd
 
 
 @dataclass(frozen=True)
@@ -31,41 +32,71 @@ class ComponentLabel:
 
 
 @dataclass(frozen=True)
+class TfrBandParameters:
+    """FieldTrip-style DPSS parameters for one frequency interval."""
+
+    fmin: float
+    fmax: float
+    window_seconds: float
+    smoothing_hz: float
+
+
+@dataclass(frozen=True)
+class ConditionGroup:
+    """One configured set of metadata values."""
+
+    label: str
+    values: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class ConditionComparison:
+    """A configured group-A minus group-B comparison."""
+
+    name: str
+    column: str
+    group_a: ConditionGroup
+    group_b: ConditionGroup
+
+
+@dataclass(frozen=True)
 class BandIcaReportSettings:
     """Runtime controls for the computationally expensive report."""
 
     fit_decim: int = 2
-    tfr_frequency_count: int = 24
-    tfr_decim: int = 5
-    tfr_window_seconds: float = 2.0
-    tfr_frequency_smoothing_hz: float = 1.5
+    frequency_step_hz: float = 1.0
+    time_min_s: float = -5.0
+    time_max_s: float = 14.4
+    time_step_s: float = 0.1
+    baseline_tmin_s: float = -5.0
+    baseline_tmax_s: float = -0.01
+    comparisons: tuple[ConditionComparison, ...] = ()
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> BandIcaReportSettings:
+        tfr_values = values.get("tfr", {})
+        if not isinstance(tfr_values, Mapping):
+            raise TypeError("ica.band_specific_report.tfr must be a mapping.")
         settings = cls(
             fit_decim=int(values.get("fit_decim", cls.fit_decim)),
-            tfr_frequency_count=int(values.get("tfr_frequency_count", cls.tfr_frequency_count)),
-            tfr_decim=int(values.get("tfr_decim", cls.tfr_decim)),
-            tfr_window_seconds=float(values.get("tfr_window_seconds", cls.tfr_window_seconds)),
-            tfr_frequency_smoothing_hz=float(
-                values.get(
-                    "tfr_frequency_smoothing_hz",
-                    cls.tfr_frequency_smoothing_hz,
-                )
-            ),
+            frequency_step_hz=float(tfr_values.get("frequency_step_hz", cls.frequency_step_hz)),
+            time_min_s=float(tfr_values.get("time_min_s", cls.time_min_s)),
+            time_max_s=float(tfr_values.get("time_max_s", cls.time_max_s)),
+            time_step_s=float(tfr_values.get("time_step_s", cls.time_step_s)),
+            baseline_tmin_s=float(tfr_values.get("baseline_tmin_s", cls.baseline_tmin_s)),
+            baseline_tmax_s=float(tfr_values.get("baseline_tmax_s", cls.baseline_tmax_s)),
+            comparisons=_parse_comparisons(values.get("comparisons", [])),
         )
         if settings.fit_decim < 1:
             raise ValueError("ica.band_specific_report.fit_decim must be at least 1.")
-        if settings.tfr_frequency_count < 2:
-            raise ValueError("ica.band_specific_report.tfr_frequency_count must be at least 2.")
-        if settings.tfr_decim < 1:
-            raise ValueError("ica.band_specific_report.tfr_decim must be at least 1.")
-        if settings.tfr_window_seconds <= 0:
-            raise ValueError("ica.band_specific_report.tfr_window_seconds must be positive.")
-        if settings.tfr_frequency_smoothing_hz <= 0:
-            raise ValueError(
-                "ica.band_specific_report.tfr_frequency_smoothing_hz must be positive."
-            )
+        if settings.frequency_step_hz <= 0:
+            raise ValueError("ica.band_specific_report.tfr.frequency_step_hz must be positive.")
+        if settings.time_step_s <= 0:
+            raise ValueError("ica.band_specific_report.tfr.time_step_s must be positive.")
+        if settings.time_min_s >= settings.time_max_s:
+            raise ValueError("TFR time_min_s must be earlier than time_max_s.")
+        if settings.baseline_tmin_s >= settings.baseline_tmax_s:
+            raise ValueError("TFR baseline_tmin_s must be earlier than baseline_tmax_s.")
         return settings
 
 
@@ -78,6 +109,13 @@ BAND_ICA_DEFINITIONS = (
     BandIcaDefinition("broadband30to100", "Broadband 30–100 Hz", 30.0, 100.0),
 )
 
+_TFR_PARAMETERS = (
+    TfrBandParameters(1.0, 8.0, 3.0, 1.0),
+    TfrBandParameters(8.0, 13.0, 2.0, 1.5),
+    TfrBandParameters(13.0, 30.0, 2.0, 2.5),
+    TfrBandParameters(30.0, 100.0, 1.0, 5.0),
+)
+
 _ICLABEL_CLASSES = (
     "brain",
     "muscle artifact",
@@ -87,6 +125,50 @@ _ICLABEL_CLASSES = (
     "channel noise",
     "other",
 )
+
+
+def _parse_group(values: Any, *, comparison_name: str, group_name: str) -> ConditionGroup:
+    if not isinstance(values, Mapping):
+        raise TypeError(f"Comparison {comparison_name!r} {group_name} must be a mapping.")
+    label = str(values.get("label", "")).strip()
+    group_values = values.get("values")
+    if not label:
+        raise ValueError(f"Comparison {comparison_name!r} {group_name}.label must not be empty.")
+    if not isinstance(group_values, list) or not group_values:
+        raise ValueError(
+            f"Comparison {comparison_name!r} {group_name}.values must be a non-empty list."
+        )
+    return ConditionGroup(label=label, values=tuple(group_values))
+
+
+def _parse_comparisons(values: Any) -> tuple[ConditionComparison, ...]:
+    if not isinstance(values, list):
+        raise TypeError("ica.band_specific_report.comparisons must be a list.")
+    comparisons = []
+    names = set()
+    for value in values:
+        if not isinstance(value, Mapping):
+            raise TypeError("Each band-specific TFR comparison must be a mapping.")
+        name = str(value.get("name", "")).strip()
+        column = str(value.get("column", "")).strip()
+        if not name or not column:
+            raise ValueError("Each band-specific TFR comparison requires name and column.")
+        if name in names:
+            raise ValueError(f"Duplicate band-specific TFR comparison name: {name}")
+        names.add(name)
+        comparisons.append(
+            ConditionComparison(
+                name=name,
+                column=column,
+                group_a=_parse_group(
+                    value.get("group_a"), comparison_name=name, group_name="group_a"
+                ),
+                group_b=_parse_group(
+                    value.get("group_b"), comparison_name=name, group_name="group_b"
+                ),
+            )
+        )
+    return tuple(comparisons)
 
 
 def _fit_band_ica(
@@ -177,26 +259,94 @@ def _source_diagnostics(
     )
     power_db = 10.0 * np.log10(np.maximum(power, np.finfo(float).tiny))
 
-    tfr_frequencies = np.linspace(
-        band.fmin,
-        band.fmax,
-        settings.tfr_frequency_count,
-    )
-    n_cycles = tfr_frequencies * settings.tfr_window_seconds
-    time_bandwidth = settings.tfr_window_seconds * settings.tfr_frequency_smoothing_hz
-    tfr = mne.time_frequency.tfr_array_multitaper(
-        sources.get_data(copy=False),
+    tfr_frequencies, tfr_times, tfr = _fieldtrip_tfr(
+        data=sources.get_data(copy=False),
         sfreq=float(sources.info["sfreq"]),
-        freqs=tfr_frequencies,
-        n_cycles=n_cycles,
-        time_bandwidth=time_bandwidth,
-        output="avg_power",
-        decim=settings.tfr_decim,
-        n_jobs=1,
-        verbose="ERROR",
+        times=sources.times,
+        band=band,
+        settings=settings,
     )
-    tfr_times = sources.times[:: settings.tfr_decim][: tfr.shape[-1]]
     return frequencies, power_db, tfr_frequencies, tfr_times, tfr
+
+
+def _fieldtrip_tfr(
+    *,
+    data: np.ndarray,
+    sfreq: float,
+    times: np.ndarray,
+    band: BandIcaDefinition,
+    settings: BandIcaReportSettings,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    decim = int(round(settings.time_step_s * sfreq))
+    if decim < 1 or not np.isclose(decim / sfreq, settings.time_step_s):
+        raise ValueError(
+            f"TFR time step {settings.time_step_s:g} s is incompatible with {sfreq:g} Hz data."
+        )
+
+    frequency_parts = []
+    power_parts = []
+    band_frequencies = np.arange(
+        band.fmin,
+        band.fmax + settings.frequency_step_hz / 2.0,
+        settings.frequency_step_hz,
+    )
+    narrow_band_parameters = {
+        "deltatheta": _TFR_PARAMETERS[0],
+        "alpha": _TFR_PARAMETERS[1],
+        "beta": _TFR_PARAMETERS[2],
+        "gamma": _TFR_PARAMETERS[3],
+    }
+    if band.slug in narrow_band_parameters:
+        parameter_groups = ((narrow_band_parameters[band.slug], band_frequencies),)
+    else:
+        groups = []
+        for index, parameters in enumerate(_TFR_PARAMETERS):
+            upper_inclusive = index == len(_TFR_PARAMETERS) - 1
+            frequency_mask = band_frequencies >= parameters.fmin
+            if upper_inclusive:
+                frequency_mask &= band_frequencies <= parameters.fmax
+            else:
+                frequency_mask &= band_frequencies < parameters.fmax
+            groups.append((parameters, band_frequencies[frequency_mask]))
+        parameter_groups = tuple(groups)
+    for parameters, frequencies in parameter_groups:
+        if not len(frequencies):
+            continue
+        power = mne.time_frequency.tfr_array_multitaper(
+            data,
+            sfreq=sfreq,
+            freqs=frequencies,
+            n_cycles=frequencies * parameters.window_seconds,
+            time_bandwidth=2.0 * parameters.window_seconds * parameters.smoothing_hz,
+            output="avg_power",
+            decim=decim,
+            n_jobs=1,
+            verbose="ERROR",
+        )
+        frequency_parts.append(frequencies)
+        power_parts.append(power)
+
+    frequencies = np.concatenate(frequency_parts)
+    power = np.concatenate(power_parts, axis=1)
+    decimated_times = times[::decim][: power.shape[-1]]
+
+    time_tolerance = settings.time_step_s / 100.0
+    baseline_mask = (decimated_times >= settings.baseline_tmin_s - time_tolerance) & (
+        decimated_times <= settings.baseline_tmax_s + time_tolerance
+    )
+    if not np.any(baseline_mask):
+        raise ValueError("No TFR samples fall inside the configured baseline window.")
+    baseline_power = power[..., baseline_mask].mean(axis=-1, keepdims=True)
+    power_db = 10.0 * np.log10(
+        np.maximum(power, np.finfo(float).tiny) / np.maximum(baseline_power, np.finfo(float).tiny)
+    )
+
+    time_mask = (decimated_times >= settings.time_min_s - time_tolerance) & (
+        decimated_times <= settings.time_max_s + time_tolerance
+    )
+    if not np.any(time_mask):
+        raise ValueError("No TFR samples fall inside the configured display time range.")
+    return frequencies, decimated_times[time_mask], power_db[..., time_mask]
 
 
 def _build_component_figures(
@@ -217,6 +367,9 @@ def _build_component_figures(
         raise ValueError("ICLabel result count does not match the band-specific ICA components.")
 
     figures = []
+    color_limit = float(np.nanmax(np.abs(tfr)))
+    if not np.isfinite(color_limit) or color_limit <= 0:
+        raise ValueError("Band-specific TFR has no finite non-zero values.")
     for component, label in enumerate(labels):
         figure, axes = plt.subplots(1, 3, figsize=(14, 4), layout="constrained")
         ica.plot_components(
@@ -238,16 +391,19 @@ def _build_component_figures(
         image = axes[2].pcolormesh(
             tfr_times,
             tfr_frequencies,
-            10.0 * np.log10(np.maximum(tfr[component], np.finfo(float).tiny)),
+            tfr[component],
             shading="auto",
-            cmap="magma",
+            cmap="turbo",
+            vmin=-color_limit,
+            vmax=color_limit,
         )
+        axes[2].axvline(0.0, color="black", linestyle="--", linewidth=0.75)
         axes[2].set(
             title="Source time-frequency power",
             xlabel="Time (s)",
             ylabel="Frequency (Hz)",
         )
-        figure.colorbar(image, ax=axes[2], label="Power (dB)")
+        figure.colorbar(image, ax=axes[2], label="Baseline-relative power (dB)")
         figure.suptitle(
             f"{band.title} · ICA{component:03d} · exploratory ICLabel: "
             f"{label.label} ({label.probability:.3f})"
@@ -278,6 +434,158 @@ def _write_component_table(
                     "interpretation": "exploratory",
                 }
             )
+
+
+def _comparison_masks(
+    metadata: pd.DataFrame,
+    comparison: ConditionComparison,
+) -> tuple[np.ndarray, np.ndarray]:
+    if comparison.column not in metadata.columns:
+        raise ValueError(
+            f"Comparison {comparison.name!r} requires missing clean-events column "
+            f"{comparison.column!r}."
+        )
+    values = metadata[comparison.column]
+    group_a_mask = values.isin(comparison.group_a.values).to_numpy()
+    group_b_mask = values.isin(comparison.group_b.values).to_numpy()
+    if not group_a_mask.any():
+        raise ValueError(
+            f"Comparison {comparison.name!r} has no retained trials for "
+            f"{comparison.group_a.label!r}."
+        )
+    if not group_b_mask.any():
+        raise ValueError(
+            f"Comparison {comparison.name!r} has no retained trials for "
+            f"{comparison.group_b.label!r}."
+        )
+    if np.any(group_a_mask & group_b_mask):
+        raise ValueError(f"Comparison {comparison.name!r} groups overlap.")
+    return group_a_mask, group_b_mask
+
+
+def _build_comparison_figures(
+    *,
+    group_a_tfr: np.ndarray,
+    group_b_tfr: np.ndarray,
+    frequencies: np.ndarray,
+    times: np.ndarray,
+    comparison: ConditionComparison,
+    band: BandIcaDefinition,
+) -> list[plt.Figure]:
+    contrast = group_a_tfr - group_b_tfr
+    color_limit = float(
+        np.nanmax(np.abs(np.concatenate((group_a_tfr, group_b_tfr, contrast), axis=0)))
+    )
+    if not np.isfinite(color_limit) or color_limit <= 0:
+        raise ValueError(f"Comparison {comparison.name!r} has no finite non-zero TFR values.")
+
+    figures = []
+    titles = (
+        comparison.group_a.label,
+        comparison.group_b.label,
+        f"{comparison.group_a.label} − {comparison.group_b.label}",
+    )
+    for component in range(group_a_tfr.shape[0]):
+        figure, axes = plt.subplots(1, 3, figsize=(15, 4), layout="constrained")
+        for axis, title, power in zip(
+            axes,
+            titles,
+            (group_a_tfr[component], group_b_tfr[component], contrast[component]),
+        ):
+            image = axis.pcolormesh(
+                times,
+                frequencies,
+                power,
+                shading="auto",
+                cmap="turbo",
+                vmin=-color_limit,
+                vmax=color_limit,
+            )
+            axis.axvline(0.0, color="black", linestyle="--", linewidth=0.75)
+            axis.set(title=title, xlabel="Time (s)", ylabel="Frequency (Hz)")
+            figure.colorbar(image, ax=axis, label="Baseline-relative power (dB)")
+        figure.suptitle(f"{band.title} · ICA{component:03d} · {comparison.name}")
+        plt.close(figure)
+        figures.append(figure)
+    return figures
+
+
+def append_condition_tfr_report(
+    *,
+    pre_ica_epochs_path: Path,
+    clean_epochs_path: Path,
+    clean_events_path: Path,
+    report_path: Path,
+    output_dir: Path,
+    output_prefix: str,
+    settings: BandIcaReportSettings,
+) -> None:
+    """Append FieldTrip-style clean-trial condition comparisons to a report."""
+    if not settings.comparisons:
+        return
+    pre_ica_epochs = mne.read_epochs(pre_ica_epochs_path, preload=True, verbose="ERROR")
+    clean_epochs = mne.read_epochs(clean_epochs_path, preload=False, verbose="ERROR")
+    clean_events = pd.read_csv(clean_events_path, sep="\t")
+    if len(clean_events) != len(clean_epochs):
+        raise ValueError(
+            "Clean events and clean epochs must have identical row counts for TFR comparisons."
+        )
+    expected_epoch_indices = np.arange(len(clean_events))
+    if "epoch_index" not in clean_events.columns or not np.array_equal(
+        clean_events["epoch_index"].to_numpy(), expected_epoch_indices
+    ):
+        raise ValueError("Clean events require contiguous zero-based epoch_index values.")
+    if np.max(clean_epochs.selection) >= len(pre_ica_epochs):
+        raise ValueError("Clean epoch selection exceeds the saved pre-ICA task epochs.")
+    retained_epochs = pre_ica_epochs[clean_epochs.selection]
+    if len(retained_epochs) != len(clean_events):
+        raise ValueError("Retained pre-ICA epochs do not align with clean events.")
+
+    report = mne.open_report(report_path)
+    for band in BAND_ICA_DEFINITIONS:
+        ica_path = output_dir / f"{output_prefix}_desc-{band.slug}_ica.fif"
+        if not ica_path.is_file():
+            raise FileNotFoundError(f"Band-specific ICA does not exist: {ica_path}")
+        ica = mne.preprocessing.read_ica(ica_path, verbose="ERROR")
+        sources = ica.get_sources(_band_epochs(retained_epochs, band))
+        source_data = sources.get_data(copy=False)
+        for comparison in settings.comparisons:
+            group_a_mask, group_b_mask = _comparison_masks(clean_events, comparison)
+            frequencies, times, group_a_tfr = _fieldtrip_tfr(
+                data=source_data[group_a_mask],
+                sfreq=float(sources.info["sfreq"]),
+                times=sources.times,
+                band=band,
+                settings=settings,
+            )
+            _, _, group_b_tfr = _fieldtrip_tfr(
+                data=source_data[group_b_mask],
+                sfreq=float(sources.info["sfreq"]),
+                times=sources.times,
+                band=band,
+                settings=settings,
+            )
+            figures = _build_comparison_figures(
+                group_a_tfr=group_a_tfr,
+                group_b_tfr=group_b_tfr,
+                frequencies=frequencies,
+                times=times,
+                comparison=comparison,
+                band=band,
+            )
+            section = f"Band-specific ICA comparison: {band.title} · {comparison.name}"
+            report.add_figure(
+                fig=figures,
+                title=(
+                    f"{comparison.group_a.label}, {comparison.group_b.label}, and "
+                    f"{comparison.group_a.label} − {comparison.group_b.label}"
+                ),
+                section=section,
+                tags=("ica", "band-specific-ica", "condition-tfr", band.slug),
+                replace=True,
+            )
+            report.save(report_path, overwrite=True, open_browser=False)
+            report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
 
 
 def generate_band_ica_report(

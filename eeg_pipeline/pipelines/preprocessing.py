@@ -945,7 +945,67 @@ class PreprocessingPipeline(PipelineBase):
         elif bool(self.config.get("preprocessing.write_clean_events", True)):
             self._write_clean_events_tsv(subjects=subjects, task=task)
 
+        band_report_config = self.config.get("ica.band_specific_report", {})
+        if bool(band_report_config.get("enabled", False)) and band_report_config.get("comparisons"):
+            self._append_band_ica_condition_tfrs(subjects=subjects, task=task)
+
         self.logger.info("Epoch creation complete")
+
+    def _append_band_ica_condition_tfrs(
+        self,
+        *,
+        subjects: List[str],
+        task: str,
+    ) -> None:
+        """Append clean-trial metadata comparisons to band-specific ICA reports."""
+        from eeg_pipeline.preprocessing.band_ica_report import (
+            BandIcaReportSettings,
+            append_condition_tfr_report,
+        )
+
+        settings = BandIcaReportSettings.from_mapping(
+            self.config.get("ica.band_specific_report", {})
+        )
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            subject_dir = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
+            clean_epochs_paths = sorted(
+                path
+                for path in subject_dir.rglob(f"sub-{subject}*_task-{task}_proc-clean_epo.fif")
+                if not path.name.startswith("._")
+            )
+            if not clean_epochs_paths:
+                raise FileNotFoundError(
+                    f"No clean epochs found for band-specific comparisons: sub-{subject}"
+                )
+            for clean_epochs_path in clean_epochs_paths:
+                entity_prefix = clean_epochs_path.name.removesuffix(
+                    f"_task-{task}_proc-clean_epo.fif"
+                )
+                pre_ica_epochs_path = clean_epochs_path.with_name(
+                    f"{entity_prefix}_task-{task}_epo.fif"
+                )
+                clean_events_path = clean_epochs_path.with_name(
+                    f"{entity_prefix}_task-{task}_proc-clean_events.tsv"
+                )
+                report_path = clean_epochs_path.with_name(f"{entity_prefix}_report.h5")
+                for required_path in (
+                    pre_ica_epochs_path,
+                    clean_events_path,
+                    report_path,
+                ):
+                    if not required_path.is_file():
+                        raise FileNotFoundError(
+                            f"Band-specific comparison input does not exist: {required_path}"
+                        )
+                append_condition_tfr_report(
+                    pre_ica_epochs_path=pre_ica_epochs_path,
+                    clean_epochs_path=clean_epochs_path,
+                    clean_events_path=clean_events_path,
+                    report_path=report_path,
+                    output_dir=clean_epochs_path.parent / "band-specific-ica",
+                    output_prefix=entity_prefix,
+                    settings=settings,
+                )
 
     def _resolve_epoch_conditions(self, task: Optional[str] = None) -> list[str] | None:
         conditions = self.config.get("epochs.conditions")

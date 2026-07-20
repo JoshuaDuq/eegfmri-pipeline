@@ -348,8 +348,16 @@ fits independent extended-infomax decompositions to 1–8, 8–13, 13–30, 30�
 1–30, and 30–100 Hz copies of the ICA-fitting epochs. For every component, the
 MNE report displays the band-derived topography, Welch source power spectrum,
 DPSS multitaper source TFR, and the maximum ICLabel class probability. The TFR
-uses fixed 2-second windows and 1.5 Hz full-bandwidth frequency smoothing
-(``time_bandwidth = 3``).
+reproduces the FieldTrip ``mtmconvol`` convention with 1 Hz frequency spacing,
+100 ms time spacing, a −5 to −0.01 second dB baseline, and band-specific windows
+and half-bandwidth smoothing: 3 seconds / ±1 Hz for 1–8 Hz, 2 seconds / ±1.5 Hz
+for alpha, 2 seconds / ±2.5 Hz for beta, and 1 second / ±5 Hz for gamma.
+
+Configured ``ica.band_specific_report.comparisons`` are evaluated after epoch
+rejection. The final clean-epoch selection indexes the saved pre-ICA task epochs,
+and the aligned ``proc-clean_events.tsv`` supplies the requested metadata column.
+Each comparison displays group A, group B, and baseline-normalized group A minus
+group B. Missing columns, values, or retained trials are hard errors.
 
 These decompositions are diagnostic only. A spatial topography is not itself
 frequency-filtered; it is the mixing pattern estimated from band-filtered data.
