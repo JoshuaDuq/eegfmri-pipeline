@@ -172,12 +172,59 @@ def test_generate_band_report_writes_each_band_as_exploratory_outputs(tmp_path) 
     assert len(fitted_icas) == len(BAND_ICA_DEFINITIONS)
     assert all(ica.exclude == [] for ica in fitted_icas)
     assert report.add_figure.call_count == len(BAND_ICA_DEFINITIONS)
+    legacy_titles = [
+        call.kwargs["title"]
+        for call in report.remove.call_args_list
+        if call.kwargs["title"] != "Condition comparison configuration"
+    ]
+    assert legacy_titles == [
+        f"{band.title}: component topomaps, spectra, and TFRs" for band in BAND_ICA_DEFINITIONS
+    ]
     sections = [call.kwargs["section"] for call in report.add_figure.call_args_list]
     assert sections == [f"Band-specific ICA: {band.title}" for band in BAND_ICA_DEFINITIONS]
     assert report.save.call_count == 2 * len(BAND_ICA_DEFINITIONS)
     for index in range(0, report.save.call_count, 2):
         assert report.save.call_args_list[index].args == (report_path,)
         assert report.save.call_args_list[index + 1].args == (report_path.with_suffix(".html"),)
+
+
+def test_generate_band_report_makes_empty_comparison_configuration_explicit(tmp_path) -> None:
+    epochs = SimpleNamespace(info={"sfreq": 250.0})
+    report = Mock()
+    report_path = tmp_path / "sub-0001_report.h5"
+    report_path.write_text("report", encoding="utf-8")
+    ica = SimpleNamespace(n_components_=1, exclude=[], save=Mock())
+
+    with (
+        patch("eeg_pipeline.preprocessing.band_ica_report.mne.read_epochs", return_value=epochs),
+        patch("eeg_pipeline.preprocessing.band_ica_report.mne.open_report", return_value=report),
+        patch("eeg_pipeline.preprocessing.band_ica_report._band_epochs", return_value=epochs),
+        patch("eeg_pipeline.preprocessing.band_ica_report._fit_band_ica", return_value=ica),
+        patch(
+            "eeg_pipeline.preprocessing.band_ica_report._label_band_components",
+            return_value=[SimpleNamespace(label="brain", probability=0.9)],
+        ),
+        patch(
+            "eeg_pipeline.preprocessing.band_ica_report._build_component_figures",
+            return_value=[Mock()],
+        ),
+    ):
+        generate_band_ica_report(
+            epochs_path=tmp_path / "sub-0001_proc-icafit_epo.fif",
+            report_path=report_path,
+            output_dir=tmp_path / "band-specific-ica",
+            output_prefix="sub-0001",
+            random_state=42,
+            settings=BandIcaReportSettings(),
+        )
+
+    comparison_calls = [
+        call
+        for call in report.add_html.call_args_list
+        if call.kwargs["section"] == "TFR comparisons"
+    ]
+    assert len(comparison_calls) == 1
+    assert "No condition comparisons configured" in comparison_calls[0].kwargs["html"]
 
 
 def test_component_diagnostics_use_only_requested_frequency_range() -> None:

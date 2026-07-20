@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import html
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -369,6 +370,55 @@ def _tfr_configuration_title(
     )
 
 
+def _comparison_configuration_html(
+    settings: BandIcaReportSettings,
+    *,
+    status: str = "Pending clean epochs",
+) -> str:
+    if not settings.comparisons:
+        return (
+            "<p><strong>No condition comparisons configured.</strong> Add entries under "
+            "<code>ica.band_specific_report.comparisons</code>; comparison TFRs are computed "
+            "after clean epoch creation.</p>"
+        )
+    rows = []
+    for comparison in settings.comparisons:
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(comparison.name)}</td>"
+            f"<td>{html.escape(comparison.column)}</td>"
+            f"<td>{html.escape(comparison.group_a.label)}: "
+            f"{html.escape(str(list(comparison.group_a.values)))}</td>"
+            f"<td>{html.escape(comparison.group_b.label)}: "
+            f"{html.escape(str(list(comparison.group_b.values)))}</td>"
+            f"<td>{html.escape(status)}</td>"
+            "</tr>"
+        )
+    return (
+        "<p>Configured comparisons are computed from retained pre-ICA task epochs and aligned "
+        "<code>proc-clean_events.tsv</code> metadata during the <code>epochs</code> stage.</p>"
+        "<table><thead><tr><th>Name</th><th>Column</th><th>Group A</th><th>Group B</th>"
+        f"<th>Status</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _add_comparison_configuration(
+    report: mne.Report,
+    settings: BandIcaReportSettings,
+    *,
+    status: str = "Pending clean epochs",
+) -> None:
+    title = "Condition comparison configuration"
+    report.remove(title=title, remove_all=True)
+    report.add_html(
+        title=title,
+        html=_comparison_configuration_html(settings, status=status),
+        section="TFR comparisons",
+        tags=("ica", "band-specific-ica", "condition-tfr-configuration"),
+        replace=True,
+    )
+
+
 def _build_component_figures(
     *,
     ica: mne.preprocessing.ICA,
@@ -621,6 +671,9 @@ def append_condition_tfr_report(
             )
             report.save(report_path, overwrite=True, open_browser=False)
             report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
+    _add_comparison_configuration(report, settings, status="Completed")
+    report.save(report_path, overwrite=True, open_browser=False)
+    report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
 
 
 def generate_band_ica_report(
@@ -644,6 +697,7 @@ def generate_band_ica_report(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     report = mne.open_report(report_path)
+    _add_comparison_configuration(report, settings)
     generated_paths = []
     for band in BAND_ICA_DEFINITIONS:
         filtered_epochs = _band_epochs(epochs, band)
@@ -670,6 +724,10 @@ def generate_band_ica_report(
         generated_paths.extend((ica_path, table_path))
 
         section = f"Band-specific ICA: {band.title}"
+        report.remove(
+            title=f"{band.title}: component topomaps, spectra, and TFRs",
+            remove_all=True,
+        )
         report.add_html(
             title="Interpretation",
             html=(
