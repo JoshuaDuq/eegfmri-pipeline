@@ -615,11 +615,67 @@ Use the tabs below for the full command matrix and focused examples.
 6. Typical Full Workflow
 ------------------------
 
-A complete subject-level run from raw BIDS data to ML-ready features:
+For the pain-study BrainVision recordings, the typical preprocessing sequence
+starts with the Analyzer-processed 1 kHz triplets and merges PsychoPy before any
+MNE cleaning. Preserve all annotations so volume and pulse markers remain
+available for EEG-fMRI QC.
 
 .. code-block:: bash
 
-   # 1. Validate inputs and confirm subject discovery
+   # 1. BrainVision Analyzer 1 kHz source -> BIDS
+   python studies/pain_study/scripts/run_paradigm_specific.py eeg-raw-to-bids \
+     --source-root /path/to/source_data \
+     --bids-root /path/to/bids_output/eeg \
+     --task thermalactive \
+     --subject 0014 \
+     --trim-to-first-volume \
+     --keep-all-annotations
+
+   # 2. Validate PsychoPy alignment without writing, then merge it
+   python studies/pain_study/scripts/run_paradigm_specific.py merge-psychopy \
+     --source-root /path/to/source_data \
+     --bids-root /path/to/bids_output/eeg \
+     --task thermalactive --subject 0014 --dry-run
+   python studies/pain_study/scripts/run_paradigm_specific.py merge-psychopy \
+     --source-root /path/to/source_data \
+     --bids-root /path/to/bids_output/eeg \
+     --task thermalactive --subject 0014
+
+   # 3. Detect bad channels and use one channel set for the shared cross-run ICA
+   eeg-pipeline preprocessing bad-channels \
+     --subject 0014 --task thermalactive \
+     --bids-root /path/to/bids_output/eeg \
+     --deriv-root /path/to/derivatives \
+     --set preprocessing.brainvision_analyzer.enabled=true \
+     --set pyprep.bad_channel_sync_policy=subject_union
+
+   # 4. Fit authoritative ICA and optional exploratory band-specific ICAs
+   eeg-pipeline preprocessing ica \
+     --subject 0014 --task thermalactive \
+     --bids-root /path/to/bids_output/eeg \
+     --deriv-root /path/to/derivatives \
+     --set preprocessing.brainvision_analyzer.enabled=true \
+     --set pyprep.bad_channel_sync_policy=subject_union \
+     --set ica.band_specific_report.enabled=true
+
+   # 5. Review the HTML report and *_proc-ica_components.tsv, then create epochs
+   eeg-pipeline preprocessing epochs \
+     --subject 0014 --task thermalactive \
+     --bids-root /path/to/bids_output/eeg \
+     --deriv-root /path/to/derivatives \
+     --set preprocessing.brainvision_analyzer.enabled=true \
+     --set pyprep.bad_channel_sync_policy=subject_union \
+     --set ica.manual_review_complete=true
+
+The Analyzer-specific option fails when preserved post-trim R-peak markers are
+missing or invalid. Do not silently disable it unless the run is intentionally
+being processed without marker-dependent cardiac QC.
+
+A complete downstream run from BIDS data to ML-ready features is:
+
+.. code-block:: bash
+
+   # 1. Validate BIDS inputs and confirm subject discovery
    eeg-pipeline validate quick
    eeg-pipeline info subjects
 

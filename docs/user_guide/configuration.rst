@@ -269,6 +269,18 @@ ICA
    * - ``ica.labels_to_keep``
      - ``["brain", "other"]``
      - ICLabel classes to retain as clean components
+   * - ``ica.band_specific_report.enabled``
+     - ``false``
+     - Append six exploratory band-specific ICA diagnostic sections to the MNE report
+   * - ``ica.band_specific_report.fit_decim``
+     - ``2``
+     - Temporal decimation used only while fitting the additional diagnostic ICAs
+   * - ``ica.band_specific_report.tfr_frequency_count``
+     - ``24``
+     - Number of Morlet frequencies displayed within each report band
+   * - ``ica.band_specific_report.tfr_decim``
+     - ``5``
+     - Temporal decimation used for component TFR figures
 
 .. _configuration-epochs:
 

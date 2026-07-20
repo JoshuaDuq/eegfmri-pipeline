@@ -108,6 +108,10 @@ Examples
    # Fit and label ICA (assumes bad-channels was already run)
    eeg-pipeline preprocessing ica --subject 0001
 
+   # Also append exploratory band-specific ICA diagnostics to the MNE report
+   eeg-pipeline preprocessing ica --subject 0001 \
+     --set ica.band_specific_report.enabled=true
+
    # Review the MNE-BIDS component table, then acknowledge review and create epochs
    eeg-pipeline preprocessing epochs --subject 0001 \
      --set ica.manual_review_complete=true
@@ -134,6 +138,32 @@ Examples
    ``ica.require_manual_review`` is enabled, ``epochs`` fails until
    ``ica.manual_review_complete`` is explicitly set to ``true``. Each mode is
    idempotent and overwrites its own outputs.
+
+Band-specific ICA report
+------------------------
+
+Set ``ica.band_specific_report.enabled: true`` to append six exploratory
+sections to each subject's existing MNE HTML report:
+
+* delta + theta (1–8 Hz);
+* alpha (8–13 Hz);
+* beta (13–30 Hz);
+* gamma (30–100 Hz);
+* broadband 1–30 Hz;
+* broadband 30–100 Hz.
+
+Each section comes from an independent extended-infomax ICA fitted to epochs
+filtered to that range. Every component has a topomap, MNE Welch power spectrum,
+Morlet time-frequency representation, and an exploratory ICLabel class and
+probability. The fitted ICA and component table are also written beneath the
+subject EEG derivative's ``band-specific-ica/`` directory.
+
+The standard 1–100 Hz ICA remains authoritative for artifact removal. Band-
+specific component numbers do not correspond across sections, their ICLabel
+results are outside ICLabel's validated broadband use, and they never update
+``*_proc-ica_components.tsv`` or control exclusions. This option is disabled by
+default because fitting six additional decompositions is computationally
+expensive.
 
 BrainVision Analyzer inputs
 ---------------------------

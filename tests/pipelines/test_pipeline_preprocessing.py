@@ -1037,6 +1037,54 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         )
         mock_harmonize.assert_called_once_with(["0001"], "t")
 
+    def test_ica_fitting_runs_band_report_when_enabled(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig({"ica": {"band_specific_report": {"enabled": True}}})
+
+        with (
+            patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
+            patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_run_band_specific_ica_report") as report,
+        ):
+            p._run_ica_fitting(["0001"], "pain")
+
+        report.assert_called_once_with(subjects=["0001"], task="pain")
+
+    def test_ica_fitting_skips_band_report_when_disabled(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig({"ica": {"band_specific_report": {"enabled": False}}})
+
+        with (
+            patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
+            patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_run_band_specific_ica_report") as report,
+        ):
+            p._run_ica_fitting(["0001"], "pain")
+
+        report.assert_not_called()
+
+    def test_band_report_input_discovery_preserves_session_entities(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.deriv_root = Path(tempfile.mkdtemp())
+        eeg_dir = p.deriv_root / "preprocessed" / "eeg" / "sub-0001" / "ses-02" / "eeg"
+        eeg_dir.mkdir(parents=True)
+        epochs_path = eeg_dir / "sub-0001_ses-02_proc-icafit_epo.fif"
+        report_path = eeg_dir / "sub-0001_ses-02_report.h5"
+        epochs_path.write_text("epochs", encoding="utf-8")
+        report_path.write_text("report", encoding="utf-8")
+
+        assert p._find_band_ica_report_inputs("0001") == [
+            (epochs_path, report_path, "sub-0001_ses-02")
+        ]
+
     def test_preprocessing_init_uses_rest_bids_root_in_rest_mode(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 

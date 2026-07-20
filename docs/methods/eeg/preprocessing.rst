@@ -340,6 +340,22 @@ Method
 6. Set ``ica.manual_review_complete: true`` and run ``epochs`` to apply the
    reviewed exclusions.
 
+Exploratory Band-Specific ICA Report
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``ica.band_specific_report.enabled`` is true, the pipeline additionally
+fits independent extended-infomax decompositions to 1–8, 8–13, 13–30, 30–100,
+1–30, and 30–100 Hz copies of the ICA-fitting epochs. For every component, the
+MNE report displays the band-derived topography, Welch source power spectrum,
+Morlet source TFR, and the maximum ICLabel class probability.
+
+These decompositions are diagnostic only. A spatial topography is not itself
+frequency-filtered; it is the mixing pattern estimated from band-filtered data.
+ICLabel was developed for conventional broadband decompositions, so its
+narrow-band results are explicitly labeled exploratory and never modify the
+authoritative 1–100 Hz component table or the components applied during epoch
+creation.
+
 ICLabel Classes
 ~~~~~~~~~~~~~~~
 

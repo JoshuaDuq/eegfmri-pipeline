@@ -634,7 +634,72 @@ class PreprocessingPipeline(PipelineBase):
             task_is_rest=task_is_rest,
         )
 
+        if bool(self.config.get("ica.band_specific_report.enabled", False)):
+            self._run_band_specific_ica_report(subjects=subjects, task=task)
+
         self.logger.info("ICA fitting complete")
+
+    def _run_band_specific_ica_report(
+        self,
+        *,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> None:
+        """Append exploratory frequency-specific ICA diagnostics to subject reports."""
+        from eeg_pipeline.preprocessing.band_ica_report import (
+            BandIcaReportSettings,
+            generate_band_ica_report,
+        )
+
+        settings = BandIcaReportSettings.from_mapping(
+            self.config.get("ica.band_specific_report", {})
+        )
+        random_state = int(self.config.get("project.random_state", 42))
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            for epochs_path, report_path, output_prefix in self._find_band_ica_report_inputs(
+                subject
+            ):
+                generate_band_ica_report(
+                    epochs_path=epochs_path,
+                    report_path=report_path,
+                    output_dir=epochs_path.parent / "band-specific-ica",
+                    output_prefix=output_prefix,
+                    random_state=random_state,
+                    settings=settings,
+                )
+            self.logger.info(
+                "Added exploratory band-specific ICA diagnostics for sub-%s, task=%s",
+                subject,
+                task,
+            )
+
+    def _find_band_ica_report_inputs(
+        self,
+        subject: str,
+    ) -> List[tuple[Path, Path, str]]:
+        """Find session-aware ICA epochs and their corresponding MNE reports."""
+        subject_dir = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
+        epochs_paths = sorted(
+            path
+            for path in subject_dir.rglob(f"sub-{subject}*_proc-icafit_epo.fif")
+            if path.is_file() and not path.name.startswith("._")
+        )
+        if not epochs_paths:
+            raise FileNotFoundError(
+                f"No ICA-fitting epochs found for band-specific report: sub-{subject}"
+            )
+
+        inputs = []
+        suffix = "_proc-icafit_epo.fif"
+        for epochs_path in epochs_paths:
+            output_prefix = epochs_path.name.removesuffix(suffix)
+            report_path = epochs_path.with_name(f"{output_prefix}_report.h5")
+            if not report_path.is_file():
+                raise FileNotFoundError(
+                    f"Band-specific ICA report input does not exist: {report_path}"
+                )
+            inputs.append((epochs_path, report_path, output_prefix))
+        return inputs
 
     def _harmonize_filtered_raw_bads_for_mne_concat(
         self,
