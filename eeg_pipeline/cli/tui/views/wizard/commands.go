@@ -422,17 +422,7 @@ func (m Model) BuildCommandArgs() []string {
 			parts = append(parts, "--bands")
 			parts = append(parts, bands...)
 		}
-	} else if m.Pipeline == types.PipelinePreprocessing {
-		mode := m.modeOptions[m.modeIndex]
-		if mode == "partial" {
-			stages := m.SelectedPreprocessingStages()
-			if len(stages) > 0 {
-				parts = append(parts, stages...)
-			} else {
-				parts[len(parts)-1] = "full"
-			}
-		}
-	} else {
+	} else if m.Pipeline != types.PipelinePreprocessing {
 		cats := m.SelectedCategories()
 		if len(cats) > 0 && len(cats) < len(m.categories) {
 			parts = append(parts, "--categories")

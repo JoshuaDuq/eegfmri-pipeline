@@ -147,15 +147,21 @@ def _update_alignment_event_config(args: argparse.Namespace, config: Any) -> Non
         )
 
     if args.event_col_predictor:
-        event_cols["predictor"] = [str(v).strip() for v in args.event_col_predictor if str(v).strip()]
+        event_cols["predictor"] = [
+            str(v).strip() for v in args.event_col_predictor if str(v).strip()
+        ]
     if args.event_col_outcome:
         event_cols["outcome"] = [str(v).strip() for v in args.event_col_outcome if str(v).strip()]
     if args.event_col_binary_outcome:
-        event_cols["binary_outcome"] = [str(v).strip() for v in args.event_col_binary_outcome if str(v).strip()]
+        event_cols["binary_outcome"] = [
+            str(v).strip() for v in args.event_col_binary_outcome if str(v).strip()
+        ]
     if args.event_col_required:
         event_cols["required"] = [str(v).strip() for v in args.event_col_required if str(v).strip()]
     if args.event_col_condition:
-        event_cols["condition"] = [str(v).strip() for v in args.event_col_condition if str(v).strip()]
+        event_cols["condition"] = [
+            str(v).strip() for v in args.event_col_condition if str(v).strip()
+        ]
     if args.condition_preferred_prefixes:
         preprocessing_cfg["condition_preferred_prefixes"] = [
             str(v).strip() for v in args.condition_preferred_prefixes if str(v).strip()
@@ -215,11 +221,9 @@ def _update_pyprep_config(args: argparse.Namespace, config: Any) -> None:
 
 def _update_icalabel_config(args: argparse.Namespace, config: Any) -> None:
     """Update config with ICALabel parameter overrides."""
-    icalabel_config = config.setdefault("icalabel", {})
+    icalabel_config = config.setdefault("ica", {})
 
     if args.prob_threshold:
-        icalabel_config["prob_threshold"] = args.prob_threshold
+        icalabel_config["probability_threshold"] = args.prob_threshold
     if args.ica_labels_to_keep:
         icalabel_config["labels_to_keep"] = args.ica_labels_to_keep
-    if args.keep_mnebids_bads:
-        icalabel_config["keep_mnebids_bads"] = True

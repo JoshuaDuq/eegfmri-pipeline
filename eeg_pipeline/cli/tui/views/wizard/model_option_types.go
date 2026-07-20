@@ -537,7 +537,6 @@ const (
 	optPrepICALFreq
 	optPrepICARejThresh
 	optPrepProbThresh
-	optPrepKeepMnebidsBads
 	optIcaLabelsToKeep
 	// Epoching options
 	optPrepConditions

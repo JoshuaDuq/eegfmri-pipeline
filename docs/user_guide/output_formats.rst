@@ -156,7 +156,10 @@ Outputs & Advanced Workflows
 
       .. code-block:: bash
 
-         eeg-pipeline preprocessing full --subject 0001 --task-is-rest
+         eeg-pipeline preprocessing ica --subject 0001 --task-is-rest
+         # Review component exclusions before continuing.
+         eeg-pipeline preprocessing epochs --subject 0001 --task-is-rest \
+           --set ica.manual_review_complete=true
 
          eeg-pipeline features compute --subject 0001 \
            --categories power connectivity aperiodic spectral

@@ -46,7 +46,6 @@ def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any
         task=task,
         mode=args.mode,
         use_pyprep=args.use_pyprep,
-        use_icalabel=args.use_icalabel,
         n_jobs=n_jobs,
         progress=progress,
     )

@@ -1775,13 +1775,12 @@ type Model struct {
 	prepRenameAnotDict       string // Dictionary to rename annotations (config-only)
 	prepCustomBadDict        string // Dictionary of custom bad channels (config-only)
 	// ICA options
-	prepSpatialFilter   int     // 0: ica, 1: ssp
-	prepICAAlgorithm    int     // 0: extended_infomax, 1: fastica, 2: infomax, 3: picard
-	prepICAComp         float64 // ICA components (variance fraction)
-	prepICALFreq        float64 // ICA high-pass filter frequency
-	prepICARejThresh    float64 // ICA rejection threshold (µV)
-	prepProbThresh      float64 // ICA label probability threshold
-	prepKeepMnebidsBads bool    // Keep MNE-BIDS flagged bad ICAs
+	prepSpatialFilter int     // 0: ica, 1: ssp
+	prepICAAlgorithm  int     // 0: extended_infomax, 1: fastica, 2: infomax, 3: picard
+	prepICAComp       float64 // ICA components (variance fraction)
+	prepICALFreq      float64 // ICA high-pass filter frequency
+	prepICARejThresh  float64 // ICA rejection threshold (µV)
+	prepProbThresh    float64 // ICA label probability threshold
 	// Epoching options
 	prepConditions          string // Epoching conditions (comma-separated)
 	prepEpochsTmin          float64
@@ -2580,13 +2579,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		prepRenameAnotDict:       "",
 		prepCustomBadDict:        "",
 		// ICA defaults
-		prepSpatialFilter:   0,
-		prepICAAlgorithm:    0,
-		prepICAComp:         0.99,
-		prepICALFreq:        1.0,
-		prepICARejThresh:    500.0,
-		prepProbThresh:      0.8,
-		prepKeepMnebidsBads: false,
+		prepSpatialFilter: 0,
+		prepICAAlgorithm:  0,
+		prepICAComp:       0.99,
+		prepICALFreq:      1.0,
+		prepICARejThresh:  500.0,
+		prepProbThresh:    0.8,
 		// Epoching defaults
 		prepConditions:           "",
 		prepEpochsTmin:           -5.0,
@@ -2746,10 +2744,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		}
 
 	case types.PipelinePreprocessing:
-		m.modeOptions = []string{"full", "partial"}
+		m.modeOptions = []string{"ica", "epochs", "bad-channels"}
 		m.modeDescriptions = []string{
-			"Run all preprocessing stages",
-			"Select specific preprocessing stages",
+			"Fit and label ICA components for manual review",
+			"Apply reviewed ICA exclusions and create epochs",
+			"Run PyPREP bad-channel detection",
 		}
 		m.prepStages = preprocessingStages
 		m.prepStageSelected = make(map[int]bool)

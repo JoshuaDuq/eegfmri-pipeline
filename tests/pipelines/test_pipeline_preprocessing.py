@@ -251,19 +251,13 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertFalse(p._resolve_task_is_rest(False))
         self.assertEqual(p._normalize_subjects(["all"]), "all")
         self.assertEqual(p._normalize_subjects(["0001"]), ["0001"])
-        self.assertIn(
-            "preprocessing/_06a2_find_ica_artifacts", p._get_ica_fitting_steps(use_icalabel=False)
-        )
-        self.assertNotIn(
-            "preprocessing/_06a2_find_ica_artifacts", p._get_ica_fitting_steps(use_icalabel=True)
-        )
+        self.assertIn("preprocessing/_06a2_find_ica_artifacts", p._get_ica_fitting_steps())
 
         resolved = p._extract_preprocessing_params(
             "task",
             {
                 "mode": "ica",
                 "use_pyprep": False,
-                "use_icalabel": False,
                 "task_is_rest": False,
                 "n_jobs": 4,
                 "progress": _NoopProgress(),
@@ -273,8 +267,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertEqual(resolved[1], "ica")
         self.assertFalse(resolved[2])
         self.assertFalse(resolved[3])
-        self.assertFalse(resolved[4])
-        self.assertEqual(resolved[5], 4)
+        self.assertEqual(resolved[4], 4)
 
         with self.assertRaisesRegex(ValueError, "Unknown preprocessing mode"):
             p._get_steps_for_mode("bogus")
@@ -286,19 +279,179 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         )
 
         pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.config = DotConfig(
+            {
+                "preprocessing": {"brainvision_analyzer": {"enabled": True}},
+                "ica": {
+                    "require_manual_review": True,
+                    "manual_review_complete": True,
+                },
+            }
+        )
 
-        full_steps = pipeline._get_steps_for_run("full", task_is_rest=False)
         epoch_steps = pipeline._get_steps_for_run("epochs", task_is_rest=False)
 
-        self.assertEqual(full_steps[-1], STEP_SCANNER_HARMONIC_QC)
         self.assertEqual(epoch_steps[-1], STEP_SCANNER_HARMONIC_QC)
         self.assertNotIn(
             STEP_SCANNER_HARMONIC_QC,
-            pipeline._get_steps_for_run("full", task_is_rest=True),
-        )
-        self.assertNotIn(
-            STEP_SCANNER_HARMONIC_QC,
             pipeline._get_steps_for_run("ica", task_is_rest=False),
+        )
+
+        pipeline.config["ica"]["manual_review_complete"] = False
+        with self.assertRaisesRegex(ValueError, "manual ICA review"):
+            pipeline._get_steps_for_run("epochs", task_is_rest=False)
+
+    def test_pulse_marker_qc_runs_before_preprocessing(self):
+        from eeg_pipeline.pipelines.preprocessing import (
+            STEP_CARDIAC_ATTENUATION_QC,
+            STEP_ICA_CARDIAC_QC,
+            STEP_PULSE_MARKER_QC,
+            PreprocessingPipeline,
+        )
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.config = DotConfig({"preprocessing": {"brainvision_analyzer": {"enabled": True}}})
+
+        for mode in ("bad-channels", "ica", "epochs"):
+            self.assertEqual(
+                pipeline._get_steps_for_run(mode, task_is_rest=False)[0],
+                STEP_PULSE_MARKER_QC,
+            )
+        self.assertIn(
+            STEP_ICA_CARDIAC_QC,
+            pipeline._get_steps_for_run("ica", task_is_rest=False),
+        )
+        self.assertIn(
+            STEP_CARDIAC_ATTENUATION_QC,
+            pipeline._get_steps_for_run("epochs", task_is_rest=False),
+        )
+
+    def test_analyzer_qc_steps_are_omitted_for_standard_eeg(self):
+        from eeg_pipeline.pipelines.preprocessing import (
+            STEP_CARDIAC_ATTENUATION_QC,
+            STEP_ICA_CARDIAC_QC,
+            STEP_PULSE_MARKER_QC,
+            STEP_SCANNER_HARMONIC_QC,
+            PreprocessingPipeline,
+        )
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.config = DotConfig({"preprocessing": {"brainvision_analyzer": {"enabled": False}}})
+
+        steps = pipeline._get_steps_for_run("epochs", task_is_rest=False)
+
+        self.assertNotIn(STEP_PULSE_MARKER_QC, steps)
+        self.assertNotIn(STEP_ICA_CARDIAC_QC, steps)
+        self.assertNotIn(STEP_CARDIAC_ATTENUATION_QC, steps)
+        self.assertNotIn(STEP_SCANNER_HARMONIC_QC, steps)
+
+    def test_execute_steps_records_pulse_marker_qc_output(self):
+        from eeg_pipeline.pipelines.preprocessing import (
+            STEP_PULSE_MARKER_QC,
+            PreprocessingPipeline,
+        )
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.logger = Mock()
+        pipeline._run_pulse_marker_qc = Mock(return_value=Path("/tmp/pulse-marker-qc.tsv"))
+
+        outputs = pipeline._execute_steps(
+            steps=[STEP_PULSE_MARKER_QC],
+            subjects=["0001"],
+            task="thermalactive",
+            use_pyprep=True,
+            task_is_rest=False,
+            n_jobs=1,
+            progress=_NoopProgress(),
+        )
+
+        self.assertEqual(
+            outputs,
+            {"pulse_marker_qc_tsv": "/tmp/pulse-marker-qc.tsv"},
+        )
+        pipeline._run_pulse_marker_qc.assert_called_once_with(
+            subjects=["0001"],
+            task="thermalactive",
+        )
+
+    def test_execute_steps_records_analyzer_cardiac_qc_outputs(self):
+        from eeg_pipeline.pipelines.preprocessing import (
+            STEP_CARDIAC_ATTENUATION_QC,
+            STEP_ICA_CARDIAC_QC,
+            PreprocessingPipeline,
+        )
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.logger = Mock()
+        pipeline._run_marker_ctps_qc = Mock(return_value=Path("/tmp/ctps.tsv"))
+        pipeline._run_cardiac_attenuation_qc = Mock(return_value=Path("/tmp/attenuation.tsv"))
+
+        outputs = pipeline._execute_steps(
+            steps=[STEP_ICA_CARDIAC_QC, STEP_CARDIAC_ATTENUATION_QC],
+            subjects=["0001"],
+            task="thermalactive",
+            use_pyprep=True,
+            task_is_rest=False,
+            n_jobs=1,
+            progress=_NoopProgress(),
+        )
+
+        self.assertEqual(
+            outputs,
+            {
+                "marker_ctps_qc_tsv": "/tmp/ctps.tsv",
+                "cardiac_attenuation_qc_tsv": "/tmp/attenuation.tsv",
+                "cardiac_attenuation_qc_png": "/tmp/attenuation.png",
+            },
+        )
+
+    def test_analyzer_cardiac_qc_methods_use_dedicated_config(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.deriv_root = Path("/tmp/deriv")
+        pipeline.config = DotConfig(
+            {
+                "preprocessing": {
+                    "brainvision_analyzer": {
+                        "cardiac_artifact_qc": {
+                            "ctps_threshold": 0.1,
+                            "ctps_epoch_window": [-0.25, 0.5],
+                            "baseline": [-0.25, -0.05],
+                            "measurement_window": [-0.05, 0.4],
+                        }
+                    }
+                }
+            }
+        )
+        marker_ctps = Mock(return_value=Path("/tmp/ctps.tsv"))
+        attenuation = Mock(return_value=Path("/tmp/attenuation.tsv"))
+        qc_module = _make_module(
+            "eeg_pipeline.preprocessing.cardiac_artifact_qc",
+            run_marker_ctps_qc=marker_ctps,
+            run_cardiac_attenuation_qc=attenuation,
+        )
+
+        with patch.dict(
+            sys.modules,
+            {"eeg_pipeline.preprocessing.cardiac_artifact_qc": qc_module},
+        ):
+            pipeline._run_marker_ctps_qc(["0001"], "thermalactive")
+            pipeline._run_cardiac_attenuation_qc(["0001"], "thermalactive")
+
+        marker_ctps.assert_called_once_with(
+            pipeline_root=Path("/tmp/deriv/preprocessed/eeg"),
+            subjects=["0001"],
+            task="thermalactive",
+            threshold=0.1,
+            epoch_window=(-0.25, 0.5),
+        )
+        attenuation.assert_called_once_with(
+            pipeline_root=Path("/tmp/deriv/preprocessed/eeg"),
+            subjects=["0001"],
+            task="thermalactive",
+            baseline=(-0.25, -0.05),
+            measurement_window=(-0.05, 0.4),
         )
 
     def test_detect_conditions_from_bids(self):
@@ -338,7 +491,19 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
                     "h_freq": 40.0,
                     "find_breaks": True,
                 },
-                "ica": {"algorithm": "picard", "n_components": 0.99},
+                "ica": {
+                    "algorithm": "extended_infomax",
+                    "n_components": None,
+                    "l_freq": 1.0,
+                    "h_freq": 100.0,
+                    "reject": "autoreject_local",
+                    "use_icalabel": True,
+                    "use_ecg_detection": False,
+                    "use_eog_detection": False,
+                    "labels_to_keep": ["brain", "other"],
+                    "probability_threshold": 0.8,
+                    "process_raw_clean": True,
+                },
                 "epochs": {
                     "baseline": [None, 0],
                     "reject_method": "none",
@@ -354,7 +519,16 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertIn("subjects = ['0001']", cfg)
         self.assertIn("conditions = ['stim']", cfg)
         self.assertIn("baseline = (None, 0)", cfg)
-        self.assertNotIn("reject =", cfg)
+        self.assertNotIn("\nreject =", cfg)
+        self.assertIn("ica_n_components = None", cfg)
+        self.assertIn("ica_reject = 'autoreject_local'", cfg)
+        self.assertIn("ica_h_freq = 100.0", cfg)
+        self.assertIn("ica_use_icalabel = True", cfg)
+        self.assertIn("ica_use_ecg_detection = False", cfg)
+        self.assertIn("ica_use_eog_detection = False", cfg)
+        self.assertIn("process_raw_clean = True", cfg)
+        self.assertIn("ica_icalabel_include = ('brain', 'other')", cfg)
+        self.assertIn("'heart beat': 0.8", cfg)
 
     def test_generate_mne_bids_config_includes_requested_task(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -461,7 +635,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(
                 PreprocessingPipeline,
                 "_extract_preprocessing_params",
-                return_value=("task", "epochs", True, True, False, 1, progress),
+                return_value=("task", "epochs", True, False, 1, progress),
             ),
             patch.object(
                 PreprocessingPipeline,
@@ -675,7 +849,7 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         self.assertIn(stdout, error_message)
         self.assertIn(stderr, error_message)
 
-    def test_run_bad_channel_and_ica_labeling(self):
+    def test_run_bad_channel_detection(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
         p = object.__new__(PreprocessingPipeline)
@@ -686,7 +860,6 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
         p.config = DotConfig(
             {
                 "pyprep": {"bad_channel_sync_policy": "per_run"},
-                "icalabel": {},
                 "eeg": {"montage": "easycap-M1"},
             }
         )
@@ -695,20 +868,15 @@ class TestPreprocessingHelpers(_PreprocessingImportMixin, unittest.TestCase):
             run_bads_detection=Mock(),
             synchronize_bad_channels_across_runs=Mock(),
         )
-        mock_ica = types.SimpleNamespace(run_ica_label=Mock())
-
         with patch.dict(
             sys.modules,
             {
                 "eeg_pipeline.preprocessing.pipeline.preprocess": mock_preproc,
-                "eeg_pipeline.preprocessing.pipeline.ica": mock_ica,
             },
         ):
             p._run_bad_channel_detection(["0001"], "task", n_jobs=2)
-            p._run_ica_labeling(["0001"], "task")
 
         self.assertTrue(mock_preproc.run_bads_detection.called)
-        self.assertTrue(mock_ica.run_ica_label.called)
 
     def test_harmonize_filtered_raw_bads_uses_subject_union(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
@@ -846,9 +1014,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         ):
             p = PreprocessingPipeline(config=cfg)
         self.assertEqual(p.bids_root.as_posix(), "/tmp/bids")
-        self.assertIn(
-            "preprocessing/_06a2_find_ica_artifacts", p._get_ica_fitting_steps(use_icalabel=False)
-        )
+        self.assertIn("preprocessing/_06a2_find_ica_artifacts", p._get_ica_fitting_steps())
 
         p.logger = Mock()
         with (
@@ -858,14 +1024,17 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 "_harmonize_filtered_raw_bads_for_mne_concat",
             ) as mock_harmonize,
         ):
-            p._run_ica_fitting(["0001"], "t", use_icalabel=True)
+            p._run_ica_fitting(["0001"], "t")
         self.assertEqual(mock_run.call_count, 2)
         self.assertEqual(
             mock_run.call_args_list[0].args[0],
             "init,preprocessing/_01_data_quality,preprocessing/_04_frequency_filter,"
             "preprocessing/_05_regress_artifact",
         )
-        self.assertEqual(mock_run.call_args_list[1].args[0], "preprocessing/_06a1_fit_ica")
+        self.assertEqual(
+            mock_run.call_args_list[1].args[0],
+            "preprocessing/_06a1_fit_ica,preprocessing/_06a2_find_ica_artifacts",
+        )
         mock_harmonize.assert_called_once_with(["0001"], "t")
 
     def test_preprocessing_init_uses_rest_bids_root_in_rest_mode(self):
@@ -1058,13 +1227,12 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         fake_cli = types.SimpleNamespace(ProgressReporter=lambda enabled=False: _NoopProgress())
         with patch.dict(sys.modules, {"eeg_pipeline.cli.common": fake_cli}):
-            task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = (
+            task, mode, use_pyprep, task_is_rest, n_jobs, progress = (
                 p._extract_preprocessing_params(None, {})
             )
         self.assertEqual(task, "task")
-        self.assertEqual(mode, "full")
+        self.assertEqual(mode, "ica")
         self.assertTrue(use_pyprep)
-        self.assertTrue(use_icalabel)
         self.assertFalse(task_is_rest)
         self.assertEqual(n_jobs, 1)
         self.assertIsNotNone(progress)
@@ -1075,13 +1243,12 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         p.config = DotConfig({"preprocessing": {"task_is_rest": True}})
         with patch.dict(sys.modules, {"eeg_pipeline.cli.common": fake_cli}):
-            task, mode, use_pyprep, use_icalabel, task_is_rest, n_jobs, progress = (
+            task, mode, use_pyprep, task_is_rest, n_jobs, progress = (
                 p._extract_preprocessing_params(None, {})
             )
         self.assertIsNone(task)
-        self.assertEqual(mode, "full")
+        self.assertEqual(mode, "ica")
         self.assertTrue(use_pyprep)
-        self.assertTrue(use_icalabel)
         self.assertTrue(task_is_rest)
         self.assertEqual(n_jobs, 1)
         self.assertIsNotNone(progress)
@@ -1090,7 +1257,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(
                 PreprocessingPipeline,
                 "_extract_preprocessing_params",
-                return_value=("task", "full", True, True, False, 1, _NoopProgress()),
+                return_value=("task", "full", True, False, 1, _NoopProgress()),
             ),
             patch.object(
                 PreprocessingPipeline, "_get_steps_for_mode", return_value=["bad-channels"]
@@ -1113,7 +1280,7 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             patch.object(
                 PreprocessingPipeline,
                 "_extract_preprocessing_params",
-                return_value=("task", "full", True, True, False, 1, progress),
+                return_value=("task", "full", True, False, 1, progress),
             ),
             patch.object(
                 PreprocessingPipeline,
@@ -1141,31 +1308,23 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         with (
             patch.object(PreprocessingPipeline, "_run_bad_channel_detection") as m1,
             patch.object(PreprocessingPipeline, "_run_ica_fitting") as m2,
-            patch.object(PreprocessingPipeline, "_run_ica_labeling") as m3,
             patch.object(PreprocessingPipeline, "_run_epoch_creation") as m4,
             patch.object(PreprocessingPipeline, "_collect_stats") as m5,
         ):
             p._execute_steps(
-                ["bad-channels", "ica-fit", "ica-label", "epochs", "stats"],
+                ["bad-channels", "ica-fit", "epochs", "stats"],
                 ["0001"],
                 "t",
-                True,
                 True,
                 False,
                 1,
                 _NoopProgress(),
             )
 
-        self.assertTrue(m1.called and m2.called and m3.called and m4.called and m5.called)
-
-        with patch.object(PreprocessingPipeline, "_run_ica_labeling") as m3:
-            p._execute_steps(["ica-label"], ["0001"], "t", True, False, False, 1, _NoopProgress())
-        m3.assert_not_called()
+        self.assertTrue(m1.called and m2.called and m4.called and m5.called)
 
         with patch.object(PreprocessingPipeline, "_run_bad_channel_detection") as m1:
-            p._execute_steps(
-                ["bad-channels"], ["0001"], "t", False, True, False, 1, _NoopProgress()
-            )
+            p._execute_steps(["bad-channels"], ["0001"], "t", False, False, 1, _NoopProgress())
         m1.assert_not_called()
 
     def test_execute_steps_returns_scanner_harmonic_qc_outputs(self):
@@ -1190,7 +1349,6 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 [STEP_SCANNER_HARMONIC_QC],
                 ["0001", "0002"],
                 "thermalactive",
-                True,
                 True,
                 False,
                 1,

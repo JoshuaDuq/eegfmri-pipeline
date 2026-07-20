@@ -129,15 +129,19 @@ class TestAllPipelines(unittest.TestCase):
         pipeline.deriv_root = Path(tempfile.mkdtemp())
         progress = _DummyProgress()
 
-        with patch.object(
-            PreprocessingPipeline,
-            "_extract_preprocessing_params",
-            return_value=("task", "ica", True, True, False, 2, progress),
-        ), patch.object(
-            PreprocessingPipeline,
-            "_get_steps_for_mode",
-            return_value=["ica-fit", "ica-label"],
-        ), patch.object(PreprocessingPipeline, "_execute_steps") as mock_exec:
+        with (
+            patch.object(
+                PreprocessingPipeline,
+                "_extract_preprocessing_params",
+                return_value=("task", "ica", True, False, 2, progress),
+            ),
+            patch.object(
+                PreprocessingPipeline,
+                "_get_steps_for_mode",
+                return_value=["ica-fit"],
+            ),
+            patch.object(PreprocessingPipeline, "_execute_steps") as mock_exec,
+        ):
             result = pipeline.run_batch(["0001", "0002"])
 
         self.assertEqual(result[0]["status"], "success")
@@ -147,8 +151,9 @@ class TestAllPipelines(unittest.TestCase):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
         pipeline = object.__new__(PreprocessingPipeline)
+        pipeline.config = DotConfig({})
         self.assertEqual(pipeline._get_steps_for_mode("bad-channels"), ["bad-channels"])
-        self.assertEqual(pipeline._get_steps_for_mode("ica"), ["ica-fit", "ica-label"])
+        self.assertEqual(pipeline._get_steps_for_mode("ica"), ["ica-fit"])
         with self.assertRaises(ValueError):
             pipeline._get_steps_for_mode("invalid")
 
@@ -201,7 +206,10 @@ class TestAllPipelines(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_behavior_flag_resolution_and_optional_int(self):
-        from eeg_pipeline.pipelines.behavior import _resolve_behavior_computation_flags, _get_optional_int
+        from eeg_pipeline.pipelines.behavior import (
+            _resolve_behavior_computation_flags,
+            _get_optional_int,
+        )
 
         with self.assertRaisesRegex(ValueError, "Unknown behavior computations"):
             _resolve_behavior_computation_flags(["validation", "icc", "unknown"], logger=Mock())
@@ -228,12 +236,15 @@ class TestAllPipelines(unittest.TestCase):
         pipeline.feature_categories = []
 
         fake_result = SimpleNamespace(multilevel_correlations=None)
-        with patch(
-            "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
-            return_value=fake_result,
-        ), patch(
-            "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
-            return_value=Path("/tmp/trials.parquet"),
+        with (
+            patch(
+                "eeg_pipeline.analysis.behavior.orchestration.run_group_level_analysis",
+                return_value=fake_result,
+            ),
+            patch(
+                "eeg_pipeline.analysis.behavior.trial_table_helpers.find_trial_table_path",
+                return_value=Path("/tmp/trials.parquet"),
+            ),
         ):
             out = pipeline.run_group_level(["0001", "0002"])
         self.assertIs(out, fake_result)
@@ -326,9 +337,13 @@ class TestAllPipelines(unittest.TestCase):
         }
 
         fake_executor = Mock(return_value=Path("/tmp/results"))
-        with patch.object(MLPipeline, "_extract_ml_parameters", return_value=params), patch.object(
-            MLPipeline, "_validate_inputs", return_value="task"
-        ), patch.object(MLPipeline, "_get_mode_dispatcher", return_value={"regression": fake_executor}):
+        with (
+            patch.object(MLPipeline, "_extract_ml_parameters", return_value=params),
+            patch.object(MLPipeline, "_validate_inputs", return_value="task"),
+            patch.object(
+                MLPipeline, "_get_mode_dispatcher", return_value={"regression": fake_executor}
+            ),
+        ):
             out = pipeline.run_batch(["0001", "0002"], mode="regression")
         self.assertEqual(out[0]["status"], "success")
         self.assertIn("/tmp/results", out[0]["results_dir"])
@@ -385,7 +400,9 @@ class TestAllPipelines(unittest.TestCase):
         pipeline.deriv_root = tmp / "derivatives"
         pipeline.deriv_root.mkdir(parents=True, exist_ok=True)
 
-        fake_nib = types.SimpleNamespace(save=lambda *_args, **_kwargs: None, load=lambda *_args, **_kwargs: None)
+        fake_nib = types.SimpleNamespace(
+            save=lambda *_args, **_kwargs: None, load=lambda *_args, **_kwargs: None
+        )
         with patch.dict(sys.modules, {"nibabel": fake_nib}):
             pipeline.process_subject(
                 "0001",
@@ -395,7 +412,11 @@ class TestAllPipelines(unittest.TestCase):
             )
 
     def test_fmri_analysis_helpers(self):
-        from fmri_pipeline.pipelines.fmri_analysis import _safe_slug, _contrast_hash, FmriAnalysisPipeline
+        from fmri_pipeline.pipelines.fmri_analysis import (
+            _safe_slug,
+            _contrast_hash,
+            FmriAnalysisPipeline,
+        )
 
         self.assertEqual(_safe_slug("condition a vs b"), "condition_a_vs_b")
         self.assertTrue(len(_contrast_hash(SimpleNamespace(a=1))) == 8)
@@ -428,7 +449,9 @@ class TestAllPipelines(unittest.TestCase):
 
         fake_module = types.SimpleNamespace(
             TrialSignatureExtractionConfig=TrialSignatureExtractionConfig,
-            run_trial_signature_extraction_for_subject=lambda **_kwargs: {"output_dir": str(tmp / "out")},
+            run_trial_signature_extraction_for_subject=lambda **_kwargs: {
+                "output_dir": str(tmp / "out")
+            },
         )
 
         with patch.dict(sys.modules, {"fmri_pipeline.analysis.trial_signatures": fake_module}):
@@ -456,7 +479,9 @@ class TestAllPipelines(unittest.TestCase):
 
         fake_module = types.SimpleNamespace(
             TrialSignatureExtractionConfig=TrialSignatureExtractionConfig,
-            run_trial_signature_extraction_for_subject=lambda **_kwargs: {"output_dir": str(tmp / "out")},
+            run_trial_signature_extraction_for_subject=lambda **_kwargs: {
+                "output_dir": str(tmp / "out")
+            },
         )
 
         with patch.dict(sys.modules, {"fmri_pipeline.analysis.trial_signatures": fake_module}):

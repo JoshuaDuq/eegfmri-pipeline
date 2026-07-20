@@ -21,6 +21,7 @@ from eeg_pipeline.cli.commands.machine_learning_parser import setup_ml
 from eeg_pipeline.cli.commands.preprocessing_overrides import (
     _update_alignment_event_config,
     _update_epochs_config,
+    _update_icalabel_config,
     _update_pyprep_config,
     _update_preprocessing_config,
 )
@@ -36,7 +37,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         args = parser.parse_args(
             [
                 "preprocessing",
-                "full",
+                "ica",
                 "--task-is-rest",
                 "--ecg-channels",
                 "ECG1,ECG2",
@@ -61,9 +62,9 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
                 "Trig_",
                 "Stim_",
                 "--rename-anot-dict",
-                "{\"BAD boundary\":\"BAD_boundary\"}",
+                '{"BAD boundary":"BAD_boundary"}',
                 "--custom-bad-dict",
-                "{\"task\":{\"0001\":[\"TP8\"]}}",
+                '{"task":{"0001":["TP8"]}}',
             ]
         )
         config = ConfigDict({})
@@ -84,7 +85,9 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("event_columns.predictor"), ["temperature", "stim_temp"])
         self.assertEqual(config.get("event_columns.outcome"), ["rating"])
         self.assertEqual(config.get("event_columns.binary_outcome"), ["binary_outcome"])
-        self.assertEqual(config.get("preprocessing.condition_preferred_prefixes"), ["Trig_", "Stim_"])
+        self.assertEqual(
+            config.get("preprocessing.condition_preferred_prefixes"), ["Trig_", "Stim_"]
+        )
         self.assertEqual(config["pyprep"]["rename_anot_dict"]["BAD boundary"], "BAD_boundary")
         self.assertEqual(config["pyprep"]["custom_bad_dict"]["task"]["0001"], ["TP8"])
 
@@ -92,7 +95,7 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers(dest="command")
         setup_preprocessing(subparsers)
-        args = parser.parse_args(["preprocessing", "full", "--no-task-is-rest"])
+        args = parser.parse_args(["preprocessing", "ica", "--no-task-is-rest"])
         config = ConfigDict(
             {
                 "preprocessing": {"task_is_rest": True},
@@ -104,6 +107,25 @@ class TestPreprocessingTUIWiring(unittest.TestCase):
 
         self.assertFalse(config.get("preprocessing.task_is_rest"))
         self.assertFalse(config.get("feature_engineering.task_is_rest"))
+
+    def test_preprocessing_cli_rejects_full_mode_before_manual_ica_review(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_preprocessing(subparsers)
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["preprocessing", "full"])
+
+    def test_icalabel_probability_override_uses_native_config_key(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        setup_preprocessing(subparsers)
+        args = parser.parse_args(["preprocessing", "ica", "--prob-threshold", "0.9"])
+        config = ConfigDict({})
+
+        _update_icalabel_config(args, config)
+
+        self.assertEqual(config.get("ica.probability_threshold"), 0.9)
 
 
 class TestFeaturesTUIWiring(unittest.TestCase):
@@ -268,9 +290,15 @@ class TestFeaturesTUIWiring(unittest.TestCase):
         self.assertEqual(config.get("feature_engineering.erds.laterality_marker_bands"), ["alpha"])
         self.assertEqual(config.get("feature_engineering.erds.laterality_columns"), ["stim_side"])
         self.assertEqual(config.get("feature_engineering.erds.onset_min_threshold_percent"), 12.5)
-        self.assertEqual(config.get("feature_engineering.spatial_transform_per_family.connectivity"), "csd")
-        self.assertEqual(config.get("feature_engineering.spatial_transform_per_family.itpc"), "laplacian")
-        self.assertEqual(config.get("feature_engineering.spatial_transform_per_family.microstates"), "none")
+        self.assertEqual(
+            config.get("feature_engineering.spatial_transform_per_family.connectivity"), "csd"
+        )
+        self.assertEqual(
+            config.get("feature_engineering.spatial_transform_per_family.itpc"), "laplacian"
+        )
+        self.assertEqual(
+            config.get("feature_engineering.spatial_transform_per_family.microstates"), "none"
+        )
 
 
 class TestBehaviorTUIWiring(unittest.TestCase):
@@ -292,11 +320,11 @@ class TestBehaviorTUIWiring(unittest.TestCase):
                 "spline",
                 "--stats-allow-iid-trials",
                 "--feature-registry-files-json",
-                "{\"power\":\"features_power.parquet\"}",
+                '{"power":"features_power.parquet"}',
                 "--feature-registry-patterns-json",
-                "{\"erds\":\"^erds_.*$\"}",
+                '{"erds":"^erds_.*$"}',
                 "--feature-registry-classifiers-json",
-                "[{\"label\":\"power\",\"startswith\":[\"power_\"]}]",
+                '[{"label":"power","startswith":["power_"]}]',
                 "--group-level-target",
                 "predictor_residual",
                 "--group-level-control-predictor",
@@ -349,26 +377,38 @@ class TestBehaviorTUIWiring(unittest.TestCase):
             "predictor_residual",
         )
         self.assertTrue(
-            config.get("behavior_analysis.group_level.multilevel_correlations.control_predictor", False)
+            config.get(
+                "behavior_analysis.group_level.multilevel_correlations.control_predictor", False
+            )
         )
         self.assertFalse(
-            config.get("behavior_analysis.group_level.multilevel_correlations.control_trial_order", True)
+            config.get(
+                "behavior_analysis.group_level.multilevel_correlations.control_trial_order", True
+            )
         )
         self.assertFalse(
-            config.get("behavior_analysis.group_level.multilevel_correlations.control_run_effects", True)
+            config.get(
+                "behavior_analysis.group_level.multilevel_correlations.control_run_effects", True
+            )
         )
         self.assertEqual(
             config.get("behavior_analysis.group_level.multilevel_correlations.max_run_dummies"),
             15,
         )
         self.assertEqual(config.get("behavior_analysis.correlations.min_runs"), 5)
-        self.assertTrue(config.get("behavior_analysis.correlations.prefer_predictor_residual", False))
-        self.assertEqual(config.get("behavior_analysis.correlations.permutation.n_permutations"), 111)
+        self.assertTrue(
+            config.get("behavior_analysis.correlations.prefer_predictor_residual", False)
+        )
+        self.assertEqual(
+            config.get("behavior_analysis.correlations.permutation.n_permutations"), 111
+        )
         self.assertEqual(config.get("behavior_analysis.condition.primary_unit"), "run_mean")
         self.assertEqual(config.get("behavior_analysis.condition.compare_labels"), ["low", "high"])
         self.assertEqual(config.get("behavior_analysis.regression.primary_unit"), "run_mean")
         self.assertEqual(config.get("behavior_analysis.temporal.correction_method"), "cluster")
-        self.assertEqual(config.get("behavior_analysis.icc.unit_columns"), ["predictor", "trial_type"])
+        self.assertEqual(
+            config.get("behavior_analysis.icc.unit_columns"), ["predictor", "trial_type"]
+        )
 
     def test_behavior_parser_accepts_explicit_none_and_loso_disable(self):
         parser = argparse.ArgumentParser()
@@ -517,21 +557,33 @@ class TestMLTUIWiring(unittest.TestCase):
         _update_model_config(args, config)
 
         self.assertEqual(config.get("machine_learning.preprocessing.imputer_strategy"), "mean")
-        self.assertEqual(config.get("machine_learning.preprocessing.power_transformer_method"), "yeo-johnson")
-        self.assertFalse(config.get("machine_learning.preprocessing.power_transformer_standardize", True))
+        self.assertEqual(
+            config.get("machine_learning.preprocessing.power_transformer_method"), "yeo-johnson"
+        )
+        self.assertFalse(
+            config.get("machine_learning.preprocessing.power_transformer_standardize", True)
+        )
         self.assertTrue(config.get("machine_learning.preprocessing.pca.enabled", False))
         self.assertEqual(config.get("machine_learning.preprocessing.pca.n_components"), 0.9)
         self.assertTrue(config.get("machine_learning.preprocessing.pca.whiten", False))
         self.assertEqual(config.get("machine_learning.preprocessing.pca.svd_solver"), "full")
         self.assertEqual(config.get("machine_learning.preprocessing.pca.random_state"), 13)
         self.assertEqual(config.get("machine_learning.models.svm.kernel"), "linear")
-        self.assertEqual(config.get("machine_learning.models.random_forest.min_samples_split_grid"), [2, 5])
+        self.assertEqual(
+            config.get("machine_learning.models.random_forest.min_samples_split_grid"), [2, 5]
+        )
         self.assertFalse(config.get("machine_learning.models.random_forest.bootstrap", True))
         self.assertEqual(config.get("machine_learning.cv.permutation_scheme"), "within_subject")
         self.assertEqual(config.get("machine_learning.evaluation.ci_method"), "fixed_effects")
-        self.assertEqual(config.get("machine_learning.classification.min_subjects_with_auc_for_inference"), 3)
-        self.assertEqual(config.get("machine_learning.classification.max_failed_fold_fraction"), 0.2)
-        self.assertFalse(config.get("machine_learning.targets.strict_regression_target_continuous", True))
+        self.assertEqual(
+            config.get("machine_learning.classification.min_subjects_with_auc_for_inference"), 3
+        )
+        self.assertEqual(
+            config.get("machine_learning.classification.max_failed_fold_fraction"), 0.2
+        )
+        self.assertFalse(
+            config.get("machine_learning.targets.strict_regression_target_continuous", True)
+        )
 
 
 if __name__ == "__main__":

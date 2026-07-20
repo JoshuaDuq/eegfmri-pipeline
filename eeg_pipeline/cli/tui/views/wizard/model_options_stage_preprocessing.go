@@ -3,21 +3,8 @@ package wizard
 // Preprocessing-stage advanced option builders.
 
 func (m Model) getPreprocessingOptions() []optionType {
-	isFull := m.modeIndex == 0 || m.modeOptions[m.modeIndex] == "full"
+	mode := m.modeOptions[m.modeIndex]
 	options := []optionType{optUseDefaults, optConfigSetOverrides}
-
-	// Stage Selection group (only show if not in full mode)
-	if !isFull {
-		options = append(options, optPrepGroupStages)
-		if m.prepGroupStagesExpanded {
-			options = append(options,
-				optPrepStageBadChannels,
-				optPrepStageFiltering,
-				optPrepStageICA,
-				optPrepStageEpoching,
-			)
-		}
-	}
 
 	// General Settings group (montage, jobs, etc.)
 	options = append(options, optPrepGroupGeneral)
@@ -37,7 +24,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 	}
 
 	// Filtering group
-	if isFull || m.prepStageSelected[1] {
+	if mode == "ica" || mode == "epochs" {
 		options = append(options, optPrepGroupFiltering)
 		if m.prepGroupFilteringExpanded {
 			options = append(options,
@@ -52,7 +39,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 	}
 
 	// PyPREP Advanced group (part of bad channel detection if enabled)
-	if (isFull || m.prepStageSelected[0]) && m.prepUsePyprep {
+	if mode == "bad-channels" && m.prepUsePyprep {
 		options = append(options, optPrepGroupPyprep)
 		if m.prepGroupPyprepExpanded {
 			options = append(options,
@@ -74,7 +61,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 	}
 
 	// ICA group
-	if isFull || m.prepStageSelected[2] {
+	if mode == "ica" {
 		options = append(options, optPrepGroupICA)
 		if m.prepGroupICAExpanded {
 			options = append(options,
@@ -84,14 +71,13 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepICALFreq,
 				optPrepICARejThresh,
 				optPrepProbThresh,
-				optPrepKeepMnebidsBads,
 				optIcaLabelsToKeep,
 			)
 		}
 	}
 
 	// Epoching group
-	if isFull || m.prepStageSelected[3] {
+	if mode == "epochs" {
 		options = append(options, optPrepGroupEpoching)
 		if m.prepGroupEpochingExpanded {
 			options = append(options,

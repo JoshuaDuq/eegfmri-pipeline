@@ -465,10 +465,6 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			label = "Prob Thresh"
 			value = probThreshVal
 			hint = "Minimum probability for IC label acceptance"
-		case optPrepKeepMnebidsBads:
-			label = "Keep BIDS"
-			value = m.boolToOnOff(m.prepKeepMnebidsBads)
-			hint = "Keep ICs flagged as bad in MNE-BIDS"
 		case optIcaLabelsToKeep:
 			label = "Labels Keep"
 			value = icaLabelsVal
