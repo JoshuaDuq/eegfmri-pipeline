@@ -349,6 +349,26 @@ def _fieldtrip_tfr(
     return frequencies, decimated_times[time_mask], power_db[..., time_mask]
 
 
+def _tfr_configuration_title(
+    band: BandIcaDefinition,
+    settings: BandIcaReportSettings,
+) -> str:
+    narrow_band_indices = {"deltatheta": (0,), "alpha": (1,), "beta": (2,), "gamma": (3,)}
+    indices = narrow_band_indices.get(
+        band.slug,
+        (0, 1, 2) if band.slug == "broadband1to30" else (3,),
+    )
+    parameter_text = "; ".join(
+        f"{parameters.window_seconds:g} s, ±{parameters.smoothing_hz:g} Hz"
+        for parameters in (_TFR_PARAMETERS[index] for index in indices)
+    )
+    return (
+        f"DPSS {parameter_text} · {settings.frequency_step_hz:g} Hz × "
+        f"{settings.time_step_s:g} s grid · baseline "
+        f"{settings.baseline_tmin_s:g}–{settings.baseline_tmax_s:g} s · relative dB"
+    )
+
+
 def _build_component_figures(
     *,
     ica: mne.preprocessing.ICA,
@@ -405,8 +425,9 @@ def _build_component_figures(
         )
         figure.colorbar(image, ax=axes[2], label="Baseline-relative power (dB)")
         figure.suptitle(
-            f"{band.title} · ICA{component:03d} · exploratory ICLabel: "
-            f"{label.label} ({label.probability:.3f})"
+            f"{band.title} · ICA{component:03d} · grand average · exploratory ICLabel: "
+            f"{label.label} ({label.probability:.3f})\n"
+            f"{_tfr_configuration_title(band, settings)}"
         )
         plt.close(figure)
         figures.append(figure)
@@ -471,26 +492,32 @@ def _build_comparison_figures(
     times: np.ndarray,
     comparison: ConditionComparison,
     band: BandIcaDefinition,
+    settings: BandIcaReportSettings,
+    group_a_count: int,
+    group_b_count: int,
 ) -> list[plt.Figure]:
     contrast = group_a_tfr - group_b_tfr
-    color_limit = float(
-        np.nanmax(np.abs(np.concatenate((group_a_tfr, group_b_tfr, contrast), axis=0)))
+    color_limits = tuple(
+        float(np.nanmax(np.abs(power))) for power in (group_a_tfr, group_b_tfr, contrast)
     )
-    if not np.isfinite(color_limit) or color_limit <= 0:
+    if any(not np.isfinite(limit) or limit <= 0 for limit in color_limits):
         raise ValueError(f"Comparison {comparison.name!r} has no finite non-zero TFR values.")
 
     figures = []
     titles = (
-        comparison.group_a.label,
-        comparison.group_b.label,
-        f"{comparison.group_a.label} − {comparison.group_b.label}",
+        f"{comparison.group_a.label} · {comparison.column} ∈ "
+        f"{list(comparison.group_a.values)} · n={group_a_count}",
+        f"{comparison.group_b.label} · {comparison.column} ∈ "
+        f"{list(comparison.group_b.values)} · n={group_b_count}",
+        f"{comparison.group_a.label} − {comparison.group_b.label} · relative dB difference",
     )
     for component in range(group_a_tfr.shape[0]):
         figure, axes = plt.subplots(1, 3, figsize=(15, 4), layout="constrained")
-        for axis, title, power in zip(
+        for axis, title, power, color_limit in zip(
             axes,
             titles,
             (group_a_tfr[component], group_b_tfr[component], contrast[component]),
+            color_limits,
         ):
             image = axis.pcolormesh(
                 times,
@@ -504,7 +531,10 @@ def _build_comparison_figures(
             axis.axvline(0.0, color="black", linestyle="--", linewidth=0.75)
             axis.set(title=title, xlabel="Time (s)", ylabel="Frequency (Hz)")
             figure.colorbar(image, ax=axis, label="Baseline-relative power (dB)")
-        figure.suptitle(f"{band.title} · ICA{component:03d} · {comparison.name}")
+        figure.suptitle(
+            f"{band.title} · ICA{component:03d} · {comparison.name}\n"
+            f"{_tfr_configuration_title(band, settings)} · each result scaled to ±max|dB|"
+        )
         plt.close(figure)
         figures.append(figure)
     return figures
@@ -572,13 +602,18 @@ def append_condition_tfr_report(
                 times=times,
                 comparison=comparison,
                 band=band,
+                settings=settings,
+                group_a_count=int(group_a_mask.sum()),
+                group_b_count=int(group_b_mask.sum()),
             )
             section = f"Band-specific ICA comparison: {band.title} · {comparison.name}"
             report.add_figure(
                 fig=figures,
                 title=(
-                    f"{comparison.group_a.label}, {comparison.group_b.label}, and "
-                    f"{comparison.group_a.label} − {comparison.group_b.label}"
+                    f"{comparison.name} · column {comparison.column}: "
+                    f"{comparison.group_a.label} {list(comparison.group_a.values)}, "
+                    f"{comparison.group_b.label} {list(comparison.group_b.values)}, and relative "
+                    f"dB difference · {_tfr_configuration_title(band, settings)}"
                 ),
                 section=section,
                 tags=("ica", "band-specific-ica", "condition-tfr", band.slug),
@@ -649,7 +684,10 @@ def generate_band_ica_report(
         )
         report.add_figure(
             fig=figures,
-            title=f"{band.title}: component topomaps, spectra, and TFRs",
+            title=(
+                f"{band.title}: component topomaps, spectra, and grand-average "
+                f"relative TFRs · {_tfr_configuration_title(band, settings)}"
+            ),
             section=section,
             tags=("ica", "band-specific-ica", band.slug),
             replace=True,

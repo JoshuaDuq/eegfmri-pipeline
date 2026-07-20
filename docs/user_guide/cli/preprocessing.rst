@@ -162,6 +162,11 @@ spacing. Windows and smoothing are 3 seconds / ±1 Hz for delta-theta, 2 seconds
 gamma. The fitted ICA and component table are written beneath the subject EEG
 derivative's ``band-specific-ica/`` directory.
 
+Every figure title records the active band, condition or comparison, metadata
+column and values, retained-trial count, DPSS window and smoothing, time/frequency
+grid, and baseline. Color limits use symmetric relative scaling independently
+for each displayed result: ``[-max(abs(dB)), +max(abs(dB))]``.
+
 Metadata comparisons
 ~~~~~~~~~~~~~~~~~~~~
 

@@ -352,6 +352,9 @@ reproduces the FieldTrip ``mtmconvol`` convention with 1 Hz frequency spacing,
 100 ms time spacing, a −5 to −0.01 second dB baseline, and band-specific windows
 and half-bandwidth smoothing: 3 seconds / ±1 Hz for 1–8 Hz, 2 seconds / ±1.5 Hz
 for alpha, 2 seconds / ±2.5 Hz for beta, and 1 second / ±5 Hz for gamma.
+Figures use baseline-relative dB and FieldTrip-style result-relative symmetric
+color scaling. Titles preserve the estimator settings and, for comparisons, the
+metadata column, configured values, and retained-trial counts.
 
 Configured ``ica.band_specific_report.comparisons`` are evaluated after epoch
 rejection. The final clean-epoch selection indexes the saved pre-ICA task epochs,
