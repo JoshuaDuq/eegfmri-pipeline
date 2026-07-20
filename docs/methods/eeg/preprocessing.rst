@@ -356,11 +356,14 @@ Figures use baseline-relative dB and FieldTrip-style result-relative symmetric
 color scaling. Titles preserve the estimator settings and, for comparisons, the
 metadata column, configured values, and retained-trial counts.
 
-Configured ``ica.band_specific_report.comparisons`` are evaluated after epoch
-rejection. The final clean-epoch selection indexes the saved pre-ICA task epochs,
-and the aligned ``proc-clean_events.tsv`` supplies the requested metadata column.
-Each comparison displays group A, group B, and baseline-normalized group A minus
-group B. Missing columns, values, or retained trials are hard errors.
+Configured ``ica.band_specific_report.comparisons`` are evaluated twice. During
+``ica``, step ``_07_make_epochs`` creates pre-ICA task epochs solely for
+provisional component-review TFRs; ICA is not applied and trials are not rejected.
+During ``epochs``, the final clean-epoch selection indexes those saved pre-ICA
+task epochs and the aligned ``proc-clean_events.tsv`` supplies the requested
+metadata column. Each comparison displays group A, group B, and baseline-
+normalized group A minus group B. Missing columns, values, or trials are hard
+errors.
 
 These decompositions are diagnostic only. A spatial topography is not itself
 frequency-filtered; it is the mixing pattern estimated from band-filtered data.

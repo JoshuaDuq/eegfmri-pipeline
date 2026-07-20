@@ -373,13 +373,13 @@ def _tfr_configuration_title(
 def _comparison_configuration_html(
     settings: BandIcaReportSettings,
     *,
-    status: str = "Pending clean epochs",
+    status: str = "Pending provisional task epochs",
 ) -> str:
     if not settings.comparisons:
         return (
             "<p><strong>No condition comparisons configured.</strong> Add entries under "
-            "<code>ica.band_specific_report.comparisons</code>; comparison TFRs are computed "
-            "after clean epoch creation.</p>"
+            "<code>ica.band_specific_report.comparisons</code> to compute provisional "
+            "pre-review TFRs and finalized retained-epoch TFRs.</p>"
         )
     rows = []
     for comparison in settings.comparisons:
@@ -395,8 +395,9 @@ def _comparison_configuration_html(
             "</tr>"
         )
     return (
-        "<p>Configured comparisons are computed from retained pre-ICA task epochs and aligned "
-        "<code>proc-clean_events.tsv</code> metadata during the <code>epochs</code> stage.</p>"
+        "<p>Configured comparisons are first computed from all pre-ICA task epochs for manual "
+        "component review, then replaced after rejection using retained epochs and aligned "
+        "events metadata.</p>"
         "<table><thead><tr><th>Name</th><th>Column</th><th>Group A</th><th>Group B</th>"
         f"<th>Status</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
     )
@@ -406,7 +407,7 @@ def _add_comparison_configuration(
     report: mne.Report,
     settings: BandIcaReportSettings,
     *,
-    status: str = "Pending clean epochs",
+    status: str = "Pending provisional task epochs",
 ) -> None:
     title = "Condition comparison configuration"
     report.remove(title=title, remove_all=True)
@@ -545,6 +546,7 @@ def _build_comparison_figures(
     settings: BandIcaReportSettings,
     group_a_count: int,
     group_b_count: int,
+    analysis_status: str,
 ) -> list[plt.Figure]:
     contrast = group_a_tfr - group_b_tfr
     color_limits = tuple(
@@ -582,7 +584,7 @@ def _build_comparison_figures(
             axis.set(title=title, xlabel="Time (s)", ylabel="Frequency (Hz)")
             figure.colorbar(image, ax=axis, label="Baseline-relative power (dB)")
         figure.suptitle(
-            f"{band.title} · ICA{component:03d} · {comparison.name}\n"
+            f"{band.title} · ICA{component:03d} · {comparison.name} · {analysis_status}\n"
             f"{_tfr_configuration_title(band, settings)} · each result scaled to ±max|dB|"
         )
         plt.close(figure)
@@ -599,6 +601,7 @@ def append_condition_tfr_report(
     output_dir: Path,
     output_prefix: str,
     settings: BandIcaReportSettings,
+    analysis_status: str,
 ) -> None:
     """Append FieldTrip-style clean-trial condition comparisons to a report."""
     if not settings.comparisons:
@@ -655,12 +658,13 @@ def append_condition_tfr_report(
                 settings=settings,
                 group_a_count=int(group_a_mask.sum()),
                 group_b_count=int(group_b_mask.sum()),
+                analysis_status=analysis_status,
             )
             section = f"Band-specific ICA comparison: {band.title} · {comparison.name}"
             report.add_figure(
                 fig=figures,
                 title=(
-                    f"{comparison.name} · column {comparison.column}: "
+                    f"{comparison.name} · {analysis_status} · column {comparison.column}: "
                     f"{comparison.group_a.label} {list(comparison.group_a.values)}, "
                     f"{comparison.group_b.label} {list(comparison.group_b.values)}, and relative "
                     f"dB difference · {_tfr_configuration_title(band, settings)}"
@@ -671,7 +675,7 @@ def append_condition_tfr_report(
             )
             report.save(report_path, overwrite=True, open_browser=False)
             report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
-    _add_comparison_configuration(report, settings, status="Completed")
+    _add_comparison_configuration(report, settings, status=analysis_status)
     report.save(report_path, overwrite=True, open_browser=False)
     report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
 

@@ -170,9 +170,12 @@ for each displayed result: ``[-max(abs(dB)), +max(abs(dB))]``.
 Metadata comparisons
 ~~~~~~~~~~~~~~~~~~~~
 
-Condition comparisons are appended during ``epochs``, after the clean trial
-mask and ``proc-clean_events.tsv`` are available. Each entry names one metadata
-column and the values assigned to group A and group B:
+When comparisons are configured, ``ica`` creates pre-ICA task epochs and appends
+provisional condition TFRs before manual component review. These use every task
+epoch and are labeled ``Provisional — all task epochs``. After review, ``epochs``
+recomputes the same sections from the final retained-trial mask and labels them
+``Finalized — retained epochs``. Each entry names one metadata column and the
+values assigned to group A and group B:
 
 .. code-block:: yaml
 

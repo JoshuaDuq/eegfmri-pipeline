@@ -636,6 +636,21 @@ class PreprocessingPipeline(PipelineBase):
 
         if bool(self.config.get("ica.band_specific_report.enabled", False)):
             self._run_band_specific_ica_report(subjects=subjects, task=task)
+            if self.config.get("ica.band_specific_report.comparisons"):
+                if task_is_rest:
+                    raise ValueError(
+                        "Band-specific condition comparisons require event-related task epochs."
+                    )
+                self._run_mne_bids_pipeline(
+                    "preprocessing/_07_make_epochs",
+                    subjects=subjects,
+                    task=task,
+                    task_is_rest=False,
+                )
+                self._append_provisional_band_ica_condition_tfrs(
+                    subjects=subjects,
+                    task=task,
+                )
 
         self.logger.info("ICA fitting complete")
 
@@ -700,6 +715,58 @@ class PreprocessingPipeline(PipelineBase):
                 )
             inputs.append((epochs_path, report_path, output_prefix))
         return inputs
+
+    def _append_provisional_band_ica_condition_tfrs(
+        self,
+        *,
+        subjects: List[str],
+        task: str,
+    ) -> None:
+        """Append pre-review comparisons from all pre-ICA task epochs."""
+        from eeg_pipeline.preprocessing.band_ica_report import (
+            BandIcaReportSettings,
+            append_condition_tfr_report,
+        )
+        from eeg_pipeline.utils.data.preprocessing import write_clean_events_tsv_for_epochs
+
+        settings = BandIcaReportSettings.from_mapping(
+            self.config.get("ica.band_specific_report", {})
+        )
+        conditions = self._resolve_epoch_conditions(task)
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            subject_dir = self.deriv_root / "preprocessed" / "eeg" / f"sub-{subject}"
+            task_epochs_paths = sorted(
+                path
+                for path in subject_dir.rglob(f"sub-{subject}*_task-{task}_epo.fif")
+                if "_proc-" not in path.name and not path.name.startswith("._")
+            )
+            if not task_epochs_paths:
+                raise FileNotFoundError(
+                    f"No pre-ICA task epochs found for provisional comparisons: sub-{subject}"
+                )
+            for task_epochs_path in task_epochs_paths:
+                entity_prefix = task_epochs_path.name.removesuffix(f"_task-{task}_epo.fif")
+                aligned_events_path = write_clean_events_tsv_for_epochs(
+                    subject=subject,
+                    task=task,
+                    bids_root=self.bids_root,
+                    epochs_path=task_epochs_path,
+                    config=self.config,
+                    conditions=conditions,
+                    overwrite=True,
+                    _logger=self.logger,
+                )
+                report_path = task_epochs_path.with_name(f"{entity_prefix}_report.h5")
+                append_condition_tfr_report(
+                    pre_ica_epochs_path=task_epochs_path,
+                    clean_epochs_path=task_epochs_path,
+                    clean_events_path=aligned_events_path,
+                    report_path=report_path,
+                    output_dir=task_epochs_path.parent / "band-specific-ica",
+                    output_prefix=entity_prefix,
+                    settings=settings,
+                    analysis_status="Provisional — all task epochs",
+                )
 
     def _harmonize_filtered_raw_bads_for_mne_concat(
         self,
@@ -1005,6 +1072,7 @@ class PreprocessingPipeline(PipelineBase):
                     output_dir=clean_epochs_path.parent / "band-specific-ica",
                     output_prefix=entity_prefix,
                     settings=settings,
+                    analysis_status="Finalized — retained epochs",
                 )
 
     def _resolve_epoch_conditions(self, task: Optional[str] = None) -> list[str] | None:
