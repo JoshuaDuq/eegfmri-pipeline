@@ -29,6 +29,10 @@ def test_band_report_settings_fail_fast_on_invalid_values() -> None:
         BandIcaReportSettings.from_mapping({"fit_decim": 0})
     with pytest.raises(ValueError, match="tfr_frequency_count"):
         BandIcaReportSettings.from_mapping({"tfr_frequency_count": 1})
+    with pytest.raises(ValueError, match="tfr_window_seconds"):
+        BandIcaReportSettings.from_mapping({"tfr_window_seconds": 0})
+    with pytest.raises(ValueError, match="tfr_frequency_smoothing_hz"):
+        BandIcaReportSettings.from_mapping({"tfr_frequency_smoothing_hz": 0})
 
 
 def test_generate_band_report_writes_each_band_as_exploratory_outputs(tmp_path) -> None:
@@ -135,9 +139,9 @@ def test_source_diagnostics_include_misc_typed_ica_sources() -> None:
     ica = SimpleNamespace(get_sources=Mock(return_value=sources))
 
     with patch(
-        "eeg_pipeline.preprocessing.band_ica_report.mne.time_frequency.tfr_array_morlet",
+        "eeg_pipeline.preprocessing.band_ica_report.mne.time_frequency.tfr_array_multitaper",
         return_value=np.ones((2, 4, 10)),
-    ):
+    ) as multitaper:
         _source_diagnostics(
             ica=ica,
             epochs=SimpleNamespace(),
@@ -146,6 +150,11 @@ def test_source_diagnostics_include_misc_typed_ica_sources() -> None:
         )
 
     assert sources.compute_psd.call_args.kwargs["picks"] == "all"
+    assert multitaper.call_args.kwargs["time_bandwidth"] == 3.0
+    np.testing.assert_allclose(
+        multitaper.call_args.kwargs["n_cycles"],
+        np.linspace(8.0, 13.0, 4) * 2.0,
+    )
 
 
 def test_component_figures_pair_topomap_spectrum_tfr_and_icalabel() -> None:

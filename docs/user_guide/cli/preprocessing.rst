@@ -154,9 +154,10 @@ sections to each subject's existing MNE HTML report:
 
 Each section comes from an independent extended-infomax ICA fitted to epochs
 filtered to that range. Every component has a topomap, MNE Welch power spectrum,
-Morlet time-frequency representation, and an exploratory ICLabel class and
-probability. The fitted ICA and component table are also written beneath the
-subject EEG derivative's ``band-specific-ica/`` directory.
+DPSS multitaper time-frequency representation (2-second windows, 1.5 Hz full
+frequency smoothing), and an exploratory ICLabel class and probability. The
+fitted ICA and component table are also written beneath the subject EEG
+derivative's ``band-specific-ica/`` directory.
 
 The standard 1–100 Hz ICA remains authoritative for artifact removal. Band-
 specific component numbers do not correspond across sections, their ICLabel

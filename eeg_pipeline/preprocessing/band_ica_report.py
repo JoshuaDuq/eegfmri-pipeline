@@ -37,6 +37,8 @@ class BandIcaReportSettings:
     fit_decim: int = 2
     tfr_frequency_count: int = 24
     tfr_decim: int = 5
+    tfr_window_seconds: float = 2.0
+    tfr_frequency_smoothing_hz: float = 1.5
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> BandIcaReportSettings:
@@ -44,6 +46,13 @@ class BandIcaReportSettings:
             fit_decim=int(values.get("fit_decim", cls.fit_decim)),
             tfr_frequency_count=int(values.get("tfr_frequency_count", cls.tfr_frequency_count)),
             tfr_decim=int(values.get("tfr_decim", cls.tfr_decim)),
+            tfr_window_seconds=float(values.get("tfr_window_seconds", cls.tfr_window_seconds)),
+            tfr_frequency_smoothing_hz=float(
+                values.get(
+                    "tfr_frequency_smoothing_hz",
+                    cls.tfr_frequency_smoothing_hz,
+                )
+            ),
         )
         if settings.fit_decim < 1:
             raise ValueError("ica.band_specific_report.fit_decim must be at least 1.")
@@ -51,6 +60,12 @@ class BandIcaReportSettings:
             raise ValueError("ica.band_specific_report.tfr_frequency_count must be at least 2.")
         if settings.tfr_decim < 1:
             raise ValueError("ica.band_specific_report.tfr_decim must be at least 1.")
+        if settings.tfr_window_seconds <= 0:
+            raise ValueError("ica.band_specific_report.tfr_window_seconds must be positive.")
+        if settings.tfr_frequency_smoothing_hz <= 0:
+            raise ValueError(
+                "ica.band_specific_report.tfr_frequency_smoothing_hz must be positive."
+            )
         return settings
 
 
@@ -167,12 +182,14 @@ def _source_diagnostics(
         band.fmax,
         settings.tfr_frequency_count,
     )
-    n_cycles = np.clip(tfr_frequencies / 2.0, 2.0, 10.0)
-    tfr = mne.time_frequency.tfr_array_morlet(
+    n_cycles = tfr_frequencies * settings.tfr_window_seconds
+    time_bandwidth = settings.tfr_window_seconds * settings.tfr_frequency_smoothing_hz
+    tfr = mne.time_frequency.tfr_array_multitaper(
         sources.get_data(copy=False),
         sfreq=float(sources.info["sfreq"]),
         freqs=tfr_frequencies,
         n_cycles=n_cycles,
+        time_bandwidth=time_bandwidth,
         output="avg_power",
         decim=settings.tfr_decim,
         n_jobs=1,

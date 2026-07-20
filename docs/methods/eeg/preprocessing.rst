@@ -347,7 +347,9 @@ When ``ica.band_specific_report.enabled`` is true, the pipeline additionally
 fits independent extended-infomax decompositions to 1–8, 8–13, 13–30, 30–100,
 1–30, and 30–100 Hz copies of the ICA-fitting epochs. For every component, the
 MNE report displays the band-derived topography, Welch source power spectrum,
-Morlet source TFR, and the maximum ICLabel class probability.
+DPSS multitaper source TFR, and the maximum ICLabel class probability. The TFR
+uses fixed 2-second windows and 1.5 Hz full-bandwidth frequency smoothing
+(``time_bandwidth = 3``).
 
 These decompositions are diagnostic only. A spatial topography is not itself
 frequency-filtered; it is the mixing pattern estimated from band-filtered data.

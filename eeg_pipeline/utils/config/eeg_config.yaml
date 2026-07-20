@@ -304,6 +304,8 @@ ica:
     fit_decim: 2
     tfr_frequency_count: 24
     tfr_decim: 5
+    tfr_window_seconds: 2.0
+    tfr_frequency_smoothing_hz: 1.5
 
 epochs:
   # IMPORTANT: Keep epochs.tmin earlier than the earliest baseline time window.

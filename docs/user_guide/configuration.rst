@@ -277,10 +277,16 @@ ICA
      - Temporal decimation used only while fitting the additional diagnostic ICAs
    * - ``ica.band_specific_report.tfr_frequency_count``
      - ``24``
-     - Number of Morlet frequencies displayed within each report band
+     - Number of DPSS multitaper frequencies displayed within each report band
    * - ``ica.band_specific_report.tfr_decim``
      - ``5``
      - Temporal decimation used for component TFR figures
+   * - ``ica.band_specific_report.tfr_window_seconds``
+     - ``2.0``
+     - Fixed DPSS multitaper window duration in seconds
+   * - ``ica.band_specific_report.tfr_frequency_smoothing_hz``
+     - ``1.5``
+     - Full frequency smoothing bandwidth in Hz
 
 .. _configuration-epochs:
 
