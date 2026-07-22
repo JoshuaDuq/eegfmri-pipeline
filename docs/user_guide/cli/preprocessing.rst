@@ -142,16 +142,15 @@ Examples
 Band-specific ICA report
 ------------------------
 
-Set ``ica.band_specific_report.enabled: true`` to append six authoritative ICA
-component-review sections and six exploratory band-ICA appendix sections to each
+Set ``ica.band_specific_report.enabled: true`` to append five authoritative ICA
+component-review sections and five exploratory band-ICA appendix sections to each
 subject's existing MNE HTML report:
 
 * delta + theta (1–8 Hz);
 * alpha (8–13 Hz);
 * beta (13–30 Hz);
 * gamma (30–100 Hz);
-* broadband 1–30 Hz;
-* broadband 30–100 Hz.
+* broadband 1–30 Hz.
 
 The primary review sections apply the same standard broadband ICA model in every
 band, so a component number always identifies the component that can actually be

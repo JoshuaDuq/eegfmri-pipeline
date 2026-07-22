@@ -138,7 +138,6 @@ BAND_ICA_DEFINITIONS = (
     BandIcaDefinition("beta", "Beta (13–30 Hz)", 13.0, 30.0),
     BandIcaDefinition("gamma", "Gamma (30–100 Hz)", 30.0, 100.0),
     BandIcaDefinition("broadband1to30", "Broadband 1–30 Hz", 1.0, 30.0),
-    BandIcaDefinition("broadband30to100", "Broadband 30–100 Hz", 30.0, 100.0),
 )
 
 _TFR_PARAMETERS = (

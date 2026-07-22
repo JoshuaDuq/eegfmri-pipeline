@@ -21,7 +21,6 @@ def test_band_definitions_match_requested_report_sections() -> None:
         ("beta", 13.0, 30.0),
         ("gamma", 30.0, 100.0),
         ("broadband1to30", 1.0, 30.0),
-        ("broadband30to100", 30.0, 100.0),
     ]
 
 

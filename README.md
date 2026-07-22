@@ -68,9 +68,9 @@ from the original 5 kHz recording instead uses the separate native EEG-fMRI
 artifact-correction workflow before the stages above.
 
 The optional `ica.band_specific_report.enabled=true` setting adds independent
-delta/theta, alpha, beta, gamma, 1–30 Hz, and 30–100 Hz ICA diagnostics to the
-HTML report. These decompositions are exploratory: the standard 1–100 Hz ICA
-and its reviewed component table remain authoritative for cleaning.
+delta/theta, alpha, beta, gamma, and 1–30 Hz ICA diagnostics to the HTML report.
+These decompositions are exploratory: the standard 1–100 Hz ICA and its
+reviewed component table remain authoritative for cleaning.
 
 See the [EEG preprocessing quick start](docs/user_guide/quickstart.rst),
 [CLI reference](docs/user_guide/cli/preprocessing.rst), and

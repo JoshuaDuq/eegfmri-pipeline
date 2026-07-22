@@ -352,9 +352,9 @@ together. ICLabel probability and the current automatic exclusion status remain
 visible in the slide title and caption.
 
 The report also retains independent extended-infomax decompositions fitted to
-1–8, 8–13, 13–30, 30–100, 1–30, and 30–100 Hz copies of the ICA-fitting epochs as
-an exploratory appendix. Component numbers in these independent decompositions
-do not identify the same source across bands and never control artifact removal.
+1–8, 8–13, 13–30, 30–100, and 1–30 Hz copies of the ICA-fitting epochs as an
+exploratory appendix. Component numbers in these independent decompositions do
+not identify the same source across bands and never control artifact removal.
 
 The TFR reproduces the FieldTrip ``mtmconvol`` convention with 1 Hz frequency
 spacing, 100 ms time spacing, a −5 to −0.01 second dB baseline, and band-specific
