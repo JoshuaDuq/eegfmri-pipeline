@@ -649,7 +649,7 @@ available for EEG-fMRI QC.
      --set preprocessing.brainvision_analyzer.enabled=true \
      --set pyprep.bad_channel_sync_policy=subject_union
 
-   # 4. Fit authoritative ICA and optional exploratory band-specific ICAs
+   # 4. Fit ICA and generate pre-review component dossiers plus exploratory band ICAs
    eeg-pipeline preprocessing ica \
      --subject 0014 --task thermalactive \
      --bids-root /path/to/bids_output/eeg \
@@ -658,7 +658,7 @@ available for EEG-fMRI QC.
      --set pyprep.bad_channel_sync_policy=subject_union \
      --set ica.band_specific_report.enabled=true
 
-   # 5. Review the HTML report and *_proc-ica_components.tsv, then create epochs
+   # 5. Review each component dossier and *_proc-ica_components.tsv, then create epochs
    eeg-pipeline preprocessing epochs \
      --subject 0014 --task thermalactive \
      --bids-root /path/to/bids_output/eeg \

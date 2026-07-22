@@ -142,8 +142,9 @@ Examples
 Band-specific ICA report
 ------------------------
 
-Set ``ica.band_specific_report.enabled: true`` to append six exploratory
-sections to each subject's existing MNE HTML report:
+Set ``ica.band_specific_report.enabled: true`` to append six authoritative ICA
+component-review sections and six exploratory band-ICA appendix sections to each
+subject's existing MNE HTML report:
 
 * delta + theta (1–8 Hz);
 * alpha (8–13 Hz);
@@ -152,20 +153,26 @@ sections to each subject's existing MNE HTML report:
 * broadband 1–30 Hz;
 * broadband 30–100 Hz.
 
-Each section comes from an independent extended-infomax ICA fitted to epochs
-filtered to that range. Every component has a topomap, MNE Welch power spectrum,
-FieldTrip-style DPSS multitaper time-frequency representation, and an
-exploratory ICLabel class and probability. TFRs use baseline-relative dB,
+The primary review sections apply the same standard broadband ICA model in every
+band, so a component number always identifies the component that can actually be
+retained or excluded. Each carousel slide keeps its topomap, MNE Welch spectrum,
+grand-average TFR, and configured condition comparisons together. These sections
+appear before MNE's standard ICA component section.
+
+The appendix sections come from independent extended-infomax ICAs fitted to
+epochs filtered to each range. They provide exploratory topomaps, spectra, TFRs,
+and ICLabel probabilities, but their component numbers do not correspond across
+bands or to the authoritative standard ICA. TFRs use baseline-relative dB,
 ``turbo`` colors, symmetric limits, 1 Hz frequency spacing, and 100 ms time
 spacing. Windows and smoothing are 3 seconds / ±1 Hz for delta-theta, 2 seconds
 / ±1.5 Hz for alpha, 2 seconds / ±2.5 Hz for beta, and 1 second / ±5 Hz for
 gamma. The fitted ICA and component table are written beneath the subject EEG
 derivative's ``band-specific-ica/`` directory.
 
-Every figure title records the active band, condition or comparison, metadata
-column and values, retained-trial count, DPSS window and smoothing, time/frequency
-grid, and baseline. Color limits use symmetric relative scaling independently
-for each displayed result: ``[-max(abs(dB)), +max(abs(dB))]``.
+Every dossier records the active band, ICLabel result, automatic component status,
+trial counts, DPSS window and smoothing, time/frequency grid, baseline, and whether
+the evidence is provisional or finalized. Condition A and B share a symmetric
+scale; the A-minus-B difference uses a separate symmetric zero-centred scale.
 
 Metadata comparisons
 ~~~~~~~~~~~~~~~~~~~~

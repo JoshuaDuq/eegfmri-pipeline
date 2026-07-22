@@ -271,7 +271,7 @@ ICA
      - ICLabel classes to retain as clean components
    * - ``ica.band_specific_report.enabled``
      - ``false``
-     - Append six exploratory band-specific ICA diagnostic sections to the MNE report
+     - Add standard-ICA component dossiers by band and exploratory independent band-ICA appendices
    * - ``ica.band_specific_report.fit_decim``
      - ``2``
      - Temporal decimation used only while fitting the additional diagnostic ICAs

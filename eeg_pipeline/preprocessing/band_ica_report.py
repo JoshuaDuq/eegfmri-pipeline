@@ -61,6 +61,37 @@ class ConditionComparison:
 
 
 @dataclass(frozen=True)
+class SourceDiagnostics:
+    """Band-limited source spectrum and time-frequency power."""
+
+    frequencies: np.ndarray
+    power_db: np.ndarray
+    tfr_frequencies: np.ndarray
+    tfr_times: np.ndarray
+    tfr: np.ndarray
+
+
+@dataclass(frozen=True)
+class ConditionTfrResult:
+    """Condition averages for one configured comparison."""
+
+    comparison: ConditionComparison
+    group_a_tfr: np.ndarray
+    group_b_tfr: np.ndarray
+    group_a_count: int
+    group_b_count: int
+
+
+@dataclass(frozen=True)
+class BandReviewData:
+    """All evidence displayed for one authoritative ICA frequency band."""
+
+    band: BandIcaDefinition
+    diagnostics: SourceDiagnostics
+    comparisons: tuple[ConditionTfrResult, ...] = ()
+
+
+@dataclass(frozen=True)
 class BandIcaReportSettings:
     """Runtime controls for the computationally expensive report."""
 
@@ -201,7 +232,7 @@ def _band_epochs(
     )
 
 
-def _label_band_components(
+def _label_components(
     *,
     epochs: mne.BaseEpochs,
     ica: mne.preprocessing.ICA,
@@ -210,11 +241,9 @@ def _label_band_components(
 
     probabilities = iclabel_label_components(inst=epochs, ica=ica, inplace=False)
     if probabilities.shape != (int(ica.n_components_), len(_ICLABEL_CLASSES)):
-        raise ValueError(
-            "ICLabel probability matrix does not match the band-specific ICA components."
-        )
+        raise ValueError("ICLabel probability matrix does not match the ICA components.")
     if not np.isfinite(probabilities).all():
-        raise ValueError("ICLabel returned non-finite band-specific component probabilities.")
+        raise ValueError("ICLabel returned non-finite component probabilities.")
     return [
         ComponentLabel(
             label=_ICLABEL_CLASSES[int(np.argmax(component_probabilities))],
@@ -245,6 +274,26 @@ def _source_diagnostics(
     settings: BandIcaReportSettings,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     sources = ica.get_sources(epochs)
+    diagnostics = _source_diagnostics_from_sources(
+        sources=sources,
+        band=band,
+        settings=settings,
+    )
+    return (
+        diagnostics.frequencies,
+        diagnostics.power_db,
+        diagnostics.tfr_frequencies,
+        diagnostics.tfr_times,
+        diagnostics.tfr,
+    )
+
+
+def _source_diagnostics_from_sources(
+    *,
+    sources: mne.BaseEpochs,
+    band: BandIcaDefinition,
+    settings: BandIcaReportSettings,
+) -> SourceDiagnostics:
     spectrum = sources.compute_psd(
         method="welch",
         fmin=band.fmin,
@@ -267,7 +316,13 @@ def _source_diagnostics(
         band=band,
         settings=settings,
     )
-    return frequencies, power_db, tfr_frequencies, tfr_times, tfr
+    return SourceDiagnostics(
+        frequencies=frequencies,
+        power_db=power_db,
+        tfr_frequencies=tfr_frequencies,
+        tfr_times=tfr_times,
+        tfr=tfr,
+    )
 
 
 def _fieldtrip_tfr(
@@ -403,23 +458,6 @@ def _comparison_configuration_html(
     )
 
 
-def _add_comparison_configuration(
-    report: mne.Report,
-    settings: BandIcaReportSettings,
-    *,
-    status: str = "Pending provisional task epochs",
-) -> None:
-    title = "Condition comparison configuration"
-    report.remove(title=title, remove_all=True)
-    report.add_html(
-        title=title,
-        html=_comparison_configuration_html(settings, status=status),
-        section="TFR comparisons",
-        tags=("ica", "band-specific-ica", "condition-tfr-configuration"),
-        replace=True,
-    )
-
-
 def _build_component_figures(
     *,
     ica: mne.preprocessing.ICA,
@@ -485,27 +523,238 @@ def _build_component_figures(
     return figures
 
 
-def _write_component_table(
+def _comparison_color_limits(
+    group_a_tfr: np.ndarray,
+    group_b_tfr: np.ndarray,
+) -> tuple[float, float]:
+    condition_limit = float(max(np.nanmax(np.abs(group_a_tfr)), np.nanmax(np.abs(group_b_tfr))))
+    difference_limit = float(np.nanmax(np.abs(group_a_tfr - group_b_tfr)))
+    if not np.isfinite(condition_limit) or condition_limit <= 0:
+        raise ValueError("Condition TFRs have no finite non-zero values.")
+    if not np.isfinite(difference_limit) or difference_limit <= 0:
+        raise ValueError("Condition TFR difference has no finite non-zero values.")
+    return condition_limit, difference_limit
+
+
+def _plot_tfr(
     *,
-    path: Path,
-    labels: Sequence[ComponentLabel],
+    axis: plt.Axes,
+    power: np.ndarray,
+    frequencies: np.ndarray,
+    times: np.ndarray,
+    title: str,
+    color_limit: float,
+):
+    image = axis.pcolormesh(
+        times,
+        frequencies,
+        power,
+        shading="auto",
+        cmap="turbo",
+        vmin=-color_limit,
+        vmax=color_limit,
+    )
+    axis.axvline(0.0, color="black", linestyle="--", linewidth=0.75)
+    axis.set(title=title, xlabel="Time (s)", ylabel="Frequency (Hz)")
+    return image
+
+
+def _component_review_status(ica: mne.preprocessing.ICA, component: int) -> str:
+    return "AUTO-MARKED BAD" if component in ica.exclude else "RETAINED"
+
+
+def _plot_dossier_summary(
+    *,
+    figure: plt.Figure,
+    axes: np.ndarray,
+    ica: mne.preprocessing.ICA,
+    review: BandReviewData,
+    component: int,
+    color_limit: float,
 ) -> None:
-    with path.open("w", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=("component", "iclabel", "probability", "interpretation"),
-            delimiter="\t",
+    ica.plot_components(
+        picks=component,
+        axes=[axes[0]],
+        colorbar=False,
+        show=False,
+    )
+    axes[0].set_title(f"ICA{component:03d} topomap")
+    axes[1].plot(
+        review.diagnostics.frequencies,
+        review.diagnostics.power_db[component],
+        color="#276B8A",
+        linewidth=1.5,
+    )
+    axes[1].set(
+        title="Band-limited source spectrum",
+        xlabel="Frequency (Hz)",
+        ylabel="Power (dB)",
+        xlim=(review.band.fmin, review.band.fmax),
+    )
+    image = _plot_tfr(
+        axis=axes[2],
+        power=review.diagnostics.tfr[component],
+        frequencies=review.diagnostics.tfr_frequencies,
+        times=review.diagnostics.tfr_times,
+        title="Grand average",
+        color_limit=color_limit,
+    )
+    figure.colorbar(image, ax=axes[2], label="Baseline-relative power (dB)")
+
+
+def _comparison_titles(result: ConditionTfrResult) -> tuple[str, str, str]:
+    comparison = result.comparison
+    return (
+        f"{comparison.group_a.label} · n={result.group_a_count}\n"
+        f"{comparison.column} ∈ {list(comparison.group_a.values)}",
+        f"{comparison.group_b.label} · n={result.group_b_count}\n"
+        f"{comparison.column} ∈ {list(comparison.group_b.values)}",
+        f"{comparison.name}\n{comparison.group_a.label} − {comparison.group_b.label}",
+    )
+
+
+def _plot_dossier_comparison(
+    *,
+    figure: plt.Figure,
+    axes: np.ndarray,
+    result: ConditionTfrResult,
+    review: BandReviewData,
+    component: int,
+    color_limits: tuple[float, float],
+) -> None:
+    difference = result.group_a_tfr - result.group_b_tfr
+    images = [
+        _plot_tfr(
+            axis=axis,
+            power=power,
+            frequencies=review.diagnostics.tfr_frequencies,
+            times=review.diagnostics.tfr_times,
+            title=title,
+            color_limit=color_limit,
         )
-        writer.writeheader()
-        for component, label in enumerate(labels):
-            writer.writerow(
-                {
-                    "component": component,
-                    "iclabel": label.label,
-                    "probability": f"{label.probability:.6f}",
-                    "interpretation": "exploratory",
-                }
-            )
+        for axis, title, power, color_limit in zip(
+            axes,
+            _comparison_titles(result),
+            (
+                result.group_a_tfr[component],
+                result.group_b_tfr[component],
+                difference[component],
+            ),
+            (color_limits[0], color_limits[0], color_limits[1]),
+        )
+    ]
+    figure.colorbar(
+        images[0],
+        ax=axes[:2],
+        label="Baseline-relative power (dB)",
+    )
+    figure.colorbar(images[2], ax=axes[2], label="Relative dB difference")
+
+
+def _create_component_dossier(
+    *,
+    ica: mne.preprocessing.ICA,
+    review: BandReviewData,
+    label: ComponentLabel,
+    component: int,
+    grand_average_limit: float,
+    comparison_limits: Sequence[tuple[float, float]],
+    settings: BandIcaReportSettings,
+    analysis_status: str,
+) -> plt.Figure:
+    row_count = 1 + len(review.comparisons)
+    figure, axes = plt.subplots(
+        row_count,
+        3,
+        figsize=(16, 3.8 * row_count),
+        squeeze=False,
+        layout="constrained",
+    )
+    _plot_dossier_summary(
+        figure=figure,
+        axes=axes[0],
+        ica=ica,
+        review=review,
+        component=component,
+        color_limit=grand_average_limit,
+    )
+    for row, (result, color_limits) in enumerate(
+        zip(review.comparisons, comparison_limits),
+        start=1,
+    ):
+        _plot_dossier_comparison(
+            figure=figure,
+            axes=axes[row],
+            result=result,
+            review=review,
+            component=component,
+            color_limits=color_limits,
+        )
+    figure.suptitle(
+        f"{review.band.title} · ICA{component:03d} · "
+        f"{label.label} ({label.probability:.3f}) · "
+        f"{_component_review_status(ica, component)}\n"
+        f"{analysis_status} · {_tfr_configuration_title(review.band, settings)}"
+    )
+    plt.close(figure)
+    return figure
+
+
+def _build_standard_component_dossiers(
+    *,
+    ica: mne.preprocessing.ICA,
+    review: BandReviewData,
+    labels: Sequence[ComponentLabel],
+    settings: BandIcaReportSettings,
+    analysis_status: str,
+) -> list[plt.Figure]:
+    """Render one complete manual-review slide per authoritative ICA component."""
+    if len(labels) != int(ica.n_components_):
+        raise ValueError("ICLabel result count does not match the standard ICA components.")
+
+    grand_average_limit = float(np.nanmax(np.abs(review.diagnostics.tfr)))
+    if not np.isfinite(grand_average_limit) or grand_average_limit <= 0:
+        raise ValueError("Grand-average TFR has no finite non-zero values.")
+    comparison_limits = [
+        _comparison_color_limits(result.group_a_tfr, result.group_b_tfr)
+        for result in review.comparisons
+    ]
+
+    return [
+        _create_component_dossier(
+            ica=ica,
+            review=review,
+            label=label,
+            component=component,
+            grand_average_limit=grand_average_limit,
+            comparison_limits=comparison_limits,
+            settings=settings,
+            analysis_status=analysis_status,
+        )
+        for component, label in enumerate(labels)
+    ]
+
+
+def _organize_component_review(report: mne.Report) -> None:
+    """Keep authoritative review sections together before MNE's ICA components."""
+    content = report._content
+    review_indices = [
+        index for index, element in enumerate(content) if "ica-component-review" in element.tags
+    ]
+    if not review_indices:
+        raise ValueError("The report has no authoritative ICA component-review content.")
+    manual_review_indices = [
+        index for index, element in enumerate(content) if element.section == "ICA: components"
+    ]
+    if not manual_review_indices:
+        raise ValueError("The report has no MNE 'ICA: components' section.")
+
+    remaining_indices = [index for index in range(len(content)) if index not in review_indices]
+    insertion_index = remaining_indices.index(manual_review_indices[0])
+    order = (
+        remaining_indices[:insertion_index] + review_indices + remaining_indices[insertion_index:]
+    )
+    report.reorder(order)
 
 
 def _comparison_masks(
@@ -535,77 +784,251 @@ def _comparison_masks(
     return group_a_mask, group_b_mask
 
 
-def _build_comparison_figures(
+def _condition_tfr_results(
     *,
-    group_a_tfr: np.ndarray,
-    group_b_tfr: np.ndarray,
-    frequencies: np.ndarray,
+    source_data: np.ndarray,
+    metadata: pd.DataFrame,
+    sfreq: float,
     times: np.ndarray,
-    comparison: ConditionComparison,
     band: BandIcaDefinition,
     settings: BandIcaReportSettings,
-    group_a_count: int,
-    group_b_count: int,
-    analysis_status: str,
-) -> list[plt.Figure]:
-    contrast = group_a_tfr - group_b_tfr
-    color_limits = tuple(
-        float(np.nanmax(np.abs(power))) for power in (group_a_tfr, group_b_tfr, contrast)
-    )
-    if any(not np.isfinite(limit) or limit <= 0 for limit in color_limits):
-        raise ValueError(f"Comparison {comparison.name!r} has no finite non-zero TFR values.")
-
-    figures = []
-    titles = (
-        f"{comparison.group_a.label} · {comparison.column} ∈ "
-        f"{list(comparison.group_a.values)} · n={group_a_count}",
-        f"{comparison.group_b.label} · {comparison.column} ∈ "
-        f"{list(comparison.group_b.values)} · n={group_b_count}",
-        f"{comparison.group_a.label} − {comparison.group_b.label} · relative dB difference",
-    )
-    for component in range(group_a_tfr.shape[0]):
-        figure, axes = plt.subplots(1, 3, figsize=(15, 4), layout="constrained")
-        for axis, title, power, color_limit in zip(
-            axes,
-            titles,
-            (group_a_tfr[component], group_b_tfr[component], contrast[component]),
-            color_limits,
-        ):
-            image = axis.pcolormesh(
-                times,
-                frequencies,
-                power,
-                shading="auto",
-                cmap="turbo",
-                vmin=-color_limit,
-                vmax=color_limit,
-            )
-            axis.axvline(0.0, color="black", linestyle="--", linewidth=0.75)
-            axis.set(title=title, xlabel="Time (s)", ylabel="Frequency (Hz)")
-            figure.colorbar(image, ax=axis, label="Baseline-relative power (dB)")
-        figure.suptitle(
-            f"{band.title} · ICA{component:03d} · {comparison.name} · {analysis_status}\n"
-            f"{_tfr_configuration_title(band, settings)} · each result scaled to ±max|dB|"
+) -> tuple[ConditionTfrResult, ...]:
+    results = []
+    for comparison in settings.comparisons:
+        group_a_mask, group_b_mask = _comparison_masks(metadata, comparison)
+        _, _, group_a_tfr = _fieldtrip_tfr(
+            data=source_data[group_a_mask],
+            sfreq=sfreq,
+            times=times,
+            band=band,
+            settings=settings,
         )
-        plt.close(figure)
-        figures.append(figure)
-    return figures
+        _, _, group_b_tfr = _fieldtrip_tfr(
+            data=source_data[group_b_mask],
+            sfreq=sfreq,
+            times=times,
+            band=band,
+            settings=settings,
+        )
+        results.append(
+            ConditionTfrResult(
+                comparison=comparison,
+                group_a_tfr=group_a_tfr,
+                group_b_tfr=group_b_tfr,
+                group_a_count=int(group_a_mask.sum()),
+                group_b_count=int(group_b_mask.sum()),
+            )
+        )
+    return tuple(results)
+
+
+def _build_band_review_data(
+    *,
+    ica: mne.preprocessing.ICA,
+    epochs: mne.BaseEpochs,
+    metadata: pd.DataFrame | None,
+    band: BandIcaDefinition,
+    settings: BandIcaReportSettings,
+) -> BandReviewData:
+    band_epochs = _band_epochs(epochs, band)
+    sources = ica.get_sources(band_epochs)
+    diagnostics = _source_diagnostics_from_sources(
+        sources=sources,
+        band=band,
+        settings=settings,
+    )
+    if metadata is None:
+        comparison_results = ()
+    else:
+        source_data = sources.get_data(copy=False)
+        if len(metadata) != source_data.shape[0]:
+            raise ValueError("ICA review epochs and events metadata must have identical lengths.")
+        comparison_results = _condition_tfr_results(
+            source_data=source_data,
+            metadata=metadata,
+            sfreq=float(sources.info["sfreq"]),
+            times=sources.times,
+            band=band,
+            settings=settings,
+        )
+    return BandReviewData(
+        band=band,
+        diagnostics=diagnostics,
+        comparisons=comparison_results,
+    )
+
+
+def _component_captions(
+    ica: mne.preprocessing.ICA,
+    labels: Sequence[ComponentLabel],
+) -> list[str]:
+    return [
+        f"ICA{component:03d} · {label.label} ({label.probability:.3f}) · "
+        f"{_component_review_status(ica, component)}"
+        for component, label in enumerate(labels)
+    ]
+
+
+def _review_context_html(
+    band: BandIcaDefinition,
+    settings: BandIcaReportSettings,
+    analysis_status: str,
+) -> str:
+    return (
+        f"<p><strong>{html.escape(analysis_status)}</strong>. Each slide keeps one "
+        "standard ICA component's topography, band-limited spectrum, grand-average TFR, "
+        "and configured condition comparisons together.</p>"
+        f"<p>{html.escape(_tfr_configuration_title(band, settings))}. Condition A and B "
+        "share one symmetric color scale; their difference uses a separate symmetric "
+        "zero-centred scale.</p>"
+    )
+
+
+def _review_guide_html(
+    settings: BandIcaReportSettings,
+    analysis_status: str,
+) -> str:
+    return (
+        "<p><strong>Authoritative manual-review components.</strong> Component numbers in "
+        "these sections all refer to the same standard broadband ICA model used for "
+        "artifact removal.</p>"
+        "<p>The independently fitted band-specific ICAs remain exploratory: their component "
+        "numbers do not correspond numerically across bands or to the standard ICA.</p>"
+        + _comparison_configuration_html(settings, status=analysis_status)
+    )
+
+
+def _remove_legacy_condition_tfr_entries(report: mne.Report) -> None:
+    legacy_titles = {
+        element.name
+        for element in report._content
+        if "band-specific-ica" in element.tags
+        and {"condition-tfr", "condition-tfr-configuration"}.intersection(element.tags)
+    }
+    for title in legacy_titles:
+        report.remove(
+            title=title,
+            tags=("band-specific-ica",),
+            remove_all=True,
+        )
+
+
+def _add_standard_component_review(
+    *,
+    report: mne.Report,
+    ica: mne.preprocessing.ICA,
+    epochs: mne.BaseEpochs,
+    metadata: pd.DataFrame | None,
+    labels: Sequence[ComponentLabel],
+    settings: BandIcaReportSettings,
+    analysis_status: str,
+) -> None:
+    """Add authoritative, component-centred evidence before MNE's ICA section."""
+    _remove_legacy_condition_tfr_entries(report)
+    guide_title = "How to review ICA component dossiers"
+    report.remove(title=guide_title, remove_all=True)
+    report.add_html(
+        html=_review_guide_html(settings, analysis_status),
+        title=guide_title,
+        section="ICA component review guide",
+        tags=("ica", "ica-component-review", "ica-review-guide"),
+        replace=True,
+    )
+
+    captions = _component_captions(ica, labels)
+    for band in BAND_ICA_DEFINITIONS:
+        review = _build_band_review_data(
+            ica=ica,
+            epochs=epochs,
+            metadata=metadata,
+            band=band,
+            settings=settings,
+        )
+        figures = _build_standard_component_dossiers(
+            ica=ica,
+            review=review,
+            labels=labels,
+            settings=settings,
+            analysis_status=analysis_status,
+        )
+        section = f"ICA component review: {band.title}"
+        report.add_html(
+            html=_review_context_html(band, settings, analysis_status),
+            title="Review context",
+            section=section,
+            tags=("ica", "ica-component-review", band.slug),
+            replace=True,
+        )
+        report.add_figure(
+            fig=figures,
+            title="Component dossiers",
+            caption=captions,
+            section=section,
+            tags=("ica", "ica-component-review", "condition-tfr", band.slug),
+            replace=True,
+        )
+    _organize_component_review(report)
+
+
+def _write_component_table(
+    *,
+    path: Path,
+    labels: Sequence[ComponentLabel],
+) -> None:
+    with path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=("component", "iclabel", "probability", "interpretation"),
+            delimiter="\t",
+        )
+        writer.writeheader()
+        for component, label in enumerate(labels):
+            writer.writerow(
+                {
+                    "component": component,
+                    "iclabel": label.label,
+                    "probability": f"{label.probability:.6f}",
+                    "interpretation": "exploratory",
+                }
+            )
+
+
+def _select_retained_epochs(
+    pre_ica_epochs: mne.BaseEpochs,
+    clean_epochs: mne.BaseEpochs,
+) -> mne.BaseEpochs:
+    """Map retained original-event selections back to pre-ICA row positions."""
+    pre_ica_selection = np.asarray(pre_ica_epochs.selection, dtype=int)
+    clean_selection = np.asarray(clean_epochs.selection, dtype=int)
+    if len(np.unique(pre_ica_selection)) != len(pre_ica_selection):
+        raise ValueError("Pre-ICA epoch selection contains duplicate event indices.")
+    selection_positions = {
+        event_index: position for position, event_index in enumerate(pre_ica_selection.tolist())
+    }
+    missing = sorted(set(clean_selection.tolist()) - selection_positions.keys())
+    if missing:
+        raise ValueError(
+            f"Clean epoch selection contains event indices absent from pre-ICA epochs: {missing}"
+        )
+    retained_positions = [selection_positions[index] for index in clean_selection.tolist()]
+    return pre_ica_epochs[retained_positions]
 
 
 def append_condition_tfr_report(
     *,
+    ica_fit_epochs_path: Path,
+    standard_ica_path: Path,
     pre_ica_epochs_path: Path,
     clean_epochs_path: Path,
     clean_events_path: Path,
     report_path: Path,
-    output_dir: Path,
-    output_prefix: str,
     settings: BandIcaReportSettings,
     analysis_status: str,
 ) -> None:
-    """Append FieldTrip-style clean-trial condition comparisons to a report."""
+    """Replace authoritative component dossiers with condition-aware evidence."""
     if not settings.comparisons:
         return
+    ica_fit_epochs = mne.read_epochs(ica_fit_epochs_path, preload=True, verbose="ERROR")
     pre_ica_epochs = mne.read_epochs(pre_ica_epochs_path, preload=True, verbose="ERROR")
     clean_epochs = mne.read_epochs(clean_epochs_path, preload=False, verbose="ERROR")
     clean_events = pd.read_csv(clean_events_path, sep="\t")
@@ -618,64 +1041,22 @@ def append_condition_tfr_report(
         clean_events["epoch_index"].to_numpy(), expected_epoch_indices
     ):
         raise ValueError("Clean events require contiguous zero-based epoch_index values.")
-    if np.max(clean_epochs.selection) >= len(pre_ica_epochs):
-        raise ValueError("Clean epoch selection exceeds the saved pre-ICA task epochs.")
-    retained_epochs = pre_ica_epochs[clean_epochs.selection]
+    retained_epochs = _select_retained_epochs(pre_ica_epochs, clean_epochs)
     if len(retained_epochs) != len(clean_events):
         raise ValueError("Retained pre-ICA epochs do not align with clean events.")
 
+    standard_ica = mne.preprocessing.read_ica(standard_ica_path, verbose="ERROR")
+    labels = _label_components(epochs=ica_fit_epochs, ica=standard_ica)
     report = mne.open_report(report_path)
-    for band in BAND_ICA_DEFINITIONS:
-        ica_path = output_dir / f"{output_prefix}_desc-{band.slug}_ica.fif"
-        if not ica_path.is_file():
-            raise FileNotFoundError(f"Band-specific ICA does not exist: {ica_path}")
-        ica = mne.preprocessing.read_ica(ica_path, verbose="ERROR")
-        sources = ica.get_sources(_band_epochs(retained_epochs, band))
-        source_data = sources.get_data(copy=False)
-        for comparison in settings.comparisons:
-            group_a_mask, group_b_mask = _comparison_masks(clean_events, comparison)
-            frequencies, times, group_a_tfr = _fieldtrip_tfr(
-                data=source_data[group_a_mask],
-                sfreq=float(sources.info["sfreq"]),
-                times=sources.times,
-                band=band,
-                settings=settings,
-            )
-            _, _, group_b_tfr = _fieldtrip_tfr(
-                data=source_data[group_b_mask],
-                sfreq=float(sources.info["sfreq"]),
-                times=sources.times,
-                band=band,
-                settings=settings,
-            )
-            figures = _build_comparison_figures(
-                group_a_tfr=group_a_tfr,
-                group_b_tfr=group_b_tfr,
-                frequencies=frequencies,
-                times=times,
-                comparison=comparison,
-                band=band,
-                settings=settings,
-                group_a_count=int(group_a_mask.sum()),
-                group_b_count=int(group_b_mask.sum()),
-                analysis_status=analysis_status,
-            )
-            section = f"Band-specific ICA comparison: {band.title} · {comparison.name}"
-            report.add_figure(
-                fig=figures,
-                title=(
-                    f"{comparison.name} · {analysis_status} · column {comparison.column}: "
-                    f"{comparison.group_a.label} {list(comparison.group_a.values)}, "
-                    f"{comparison.group_b.label} {list(comparison.group_b.values)}, and relative "
-                    f"dB difference · {_tfr_configuration_title(band, settings)}"
-                ),
-                section=section,
-                tags=("ica", "band-specific-ica", "condition-tfr", band.slug),
-                replace=True,
-            )
-            report.save(report_path, overwrite=True, open_browser=False)
-            report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
-    _add_comparison_configuration(report, settings, status=analysis_status)
+    _add_standard_component_review(
+        report=report,
+        ica=standard_ica,
+        epochs=retained_epochs,
+        metadata=clean_events,
+        labels=labels,
+        settings=settings,
+        analysis_status=analysis_status,
+    )
     report.save(report_path, overwrite=True, open_browser=False)
     report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
 
@@ -701,7 +1082,20 @@ def generate_band_ica_report(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     report = mne.open_report(report_path)
-    _add_comparison_configuration(report, settings)
+    standard_ica_path = epochs_path.with_name(f"{output_prefix}_proc-ica_ica.fif")
+    if not standard_ica_path.is_file():
+        raise FileNotFoundError(f"Standard ICA does not exist: {standard_ica_path}")
+    standard_ica = mne.preprocessing.read_ica(standard_ica_path, verbose="ERROR")
+    standard_labels = _label_components(epochs=epochs, ica=standard_ica)
+    _add_standard_component_review(
+        report=report,
+        ica=standard_ica,
+        epochs=epochs,
+        metadata=None,
+        labels=standard_labels,
+        settings=settings,
+        analysis_status="Pending provisional task epochs",
+    )
     generated_paths = []
     for band in BAND_ICA_DEFINITIONS:
         filtered_epochs = _band_epochs(epochs, band)
@@ -711,7 +1105,7 @@ def generate_band_ica_report(
             fit_decim=settings.fit_decim,
         )
         ica.exclude = []
-        labels = _label_band_components(epochs=filtered_epochs, ica=ica)
+        labels = _label_components(epochs=filtered_epochs, ica=ica)
         figures = _build_component_figures(
             ica=ica,
             epochs=filtered_epochs,
@@ -737,7 +1131,8 @@ def generate_band_ica_report(
             html=(
                 "<p><strong>Exploratory only.</strong> This ICA was fitted to "
                 f"{band.fmin:g}–{band.fmax:g} Hz data. ICLabel was not validated "
-                "for narrow-band decompositions, and these labels do not control "
+                "for narrow-band decompositions. Component numbers do not correspond "
+                "across bands or to the standard ICA, and these labels do not control "
                 "artifact removal.</p>"
             ),
             section=section,
@@ -754,6 +1149,6 @@ def generate_band_ica_report(
             tags=("ica", "band-specific-ica", band.slug),
             replace=True,
         )
-        report.save(report_path, overwrite=True, open_browser=False)
-        report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
+    report.save(report_path, overwrite=True, open_browser=False)
+    report.save(report_path.with_suffix(".html"), overwrite=True, open_browser=False)
     return generated_paths

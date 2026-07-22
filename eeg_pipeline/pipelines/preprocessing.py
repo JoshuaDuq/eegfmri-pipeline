@@ -757,13 +757,17 @@ class PreprocessingPipeline(PipelineBase):
                     _logger=self.logger,
                 )
                 report_path = task_epochs_path.with_name(f"{entity_prefix}_report.h5")
+                ica_fit_epochs_path = task_epochs_path.with_name(
+                    f"{entity_prefix}_proc-icafit_epo.fif"
+                )
+                standard_ica_path = task_epochs_path.with_name(f"{entity_prefix}_proc-ica_ica.fif")
                 append_condition_tfr_report(
+                    ica_fit_epochs_path=ica_fit_epochs_path,
+                    standard_ica_path=standard_ica_path,
                     pre_ica_epochs_path=task_epochs_path,
                     clean_epochs_path=task_epochs_path,
                     clean_events_path=aligned_events_path,
                     report_path=report_path,
-                    output_dir=task_epochs_path.parent / "band-specific-ica",
-                    output_prefix=entity_prefix,
                     settings=settings,
                     analysis_status="Provisional — all task epochs",
                 )
@@ -1055,22 +1059,28 @@ class PreprocessingPipeline(PipelineBase):
                     f"{entity_prefix}_task-{task}_proc-clean_events.tsv"
                 )
                 report_path = clean_epochs_path.with_name(f"{entity_prefix}_report.h5")
+                ica_fit_epochs_path = clean_epochs_path.with_name(
+                    f"{entity_prefix}_proc-icafit_epo.fif"
+                )
+                standard_ica_path = clean_epochs_path.with_name(f"{entity_prefix}_proc-ica_ica.fif")
                 for required_path in (
+                    ica_fit_epochs_path,
+                    standard_ica_path,
                     pre_ica_epochs_path,
                     clean_events_path,
                     report_path,
                 ):
                     if not required_path.is_file():
                         raise FileNotFoundError(
-                            f"Band-specific comparison input does not exist: {required_path}"
+                            f"ICA component review input does not exist: {required_path}"
                         )
                 append_condition_tfr_report(
+                    ica_fit_epochs_path=ica_fit_epochs_path,
+                    standard_ica_path=standard_ica_path,
                     pre_ica_epochs_path=pre_ica_epochs_path,
                     clean_epochs_path=clean_epochs_path,
                     clean_events_path=clean_events_path,
                     report_path=report_path,
-                    output_dir=clean_epochs_path.parent / "band-specific-ica",
-                    output_prefix=entity_prefix,
                     settings=settings,
                     analysis_status="Finalized — retained epochs",
                 )

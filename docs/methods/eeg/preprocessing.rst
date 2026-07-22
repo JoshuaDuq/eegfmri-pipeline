@@ -340,37 +340,46 @@ Method
 6. Set ``ica.manual_review_complete: true`` and run ``epochs`` to apply the
    reviewed exclusions.
 
-Exploratory Band-Specific ICA Report
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ICA Component Review and Exploratory Band Appendix
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When ``ica.band_specific_report.enabled`` is true, the pipeline additionally
-fits independent extended-infomax decompositions to 1–8, 8–13, 13–30, 30–100,
-1–30, and 30–100 Hz copies of the ICA-fitting epochs. For every component, the
-MNE report displays the band-derived topography, Welch source power spectrum,
-DPSS multitaper source TFR, and the maximum ICLabel class probability. The TFR
-reproduces the FieldTrip ``mtmconvol`` convention with 1 Hz frequency spacing,
-100 ms time spacing, a −5 to −0.01 second dB baseline, and band-specific windows
-and half-bandwidth smoothing: 3 seconds / ±1 Hz for 1–8 Hz, 2 seconds / ±1.5 Hz
-for alpha, 2 seconds / ±2.5 Hz for beta, and 1 second / ±5 Hz for gamma.
-Figures use baseline-relative dB and FieldTrip-style result-relative symmetric
-color scaling. Titles preserve the estimator settings and, for comparisons, the
-metadata column, configured values, and retained-trial counts.
+adds authoritative component-review dossiers before MNE's standard ICA component
+section. Each frequency-band section is a carousel ordered by the standard ICA
+component number. A slide keeps that component's topography, band-limited Welch
+spectrum, grand-average DPSS multitaper TFR, and all configured condition TFRs
+together. ICLabel probability and the current automatic exclusion status remain
+visible in the slide title and caption.
+
+The report also retains independent extended-infomax decompositions fitted to
+1–8, 8–13, 13–30, 30–100, 1–30, and 30–100 Hz copies of the ICA-fitting epochs as
+an exploratory appendix. Component numbers in these independent decompositions
+do not identify the same source across bands and never control artifact removal.
+
+The TFR reproduces the FieldTrip ``mtmconvol`` convention with 1 Hz frequency
+spacing, 100 ms time spacing, a −5 to −0.01 second dB baseline, and band-specific
+windows and half-bandwidth smoothing: 3 seconds / ±1 Hz for 1–8 Hz, 2 seconds /
+±1.5 Hz for alpha, 2 seconds / ±2.5 Hz for beta, and 1 second / ±5 Hz for gamma.
+Figures use baseline-relative dB and symmetric color scaling. Condition A and B
+share one scale so their amplitudes can be compared directly; the A-minus-B
+difference uses its own zero-centred symmetric scale.
 
 Configured ``ica.band_specific_report.comparisons`` are evaluated twice. During
 ``ica``, step ``_07_make_epochs`` creates pre-ICA task epochs solely for
 provisional component-review TFRs; ICA is not applied and trials are not rejected.
-During ``epochs``, the final clean-epoch selection indexes those saved pre-ICA
-task epochs and the aligned ``proc-clean_events.tsv`` supplies the requested
-metadata column. Each comparison displays group A, group B, and baseline-
-normalized group A minus group B. Missing columns, values, or trials are hard
-errors.
+During ``epochs``, original MNE event-selection identities map the retained clean
+epochs back to rows of the saved pre-ICA task epochs, and the aligned
+``proc-clean_events.tsv`` supplies the requested metadata column. Each comparison
+displays group A, group B, and baseline-normalized group A minus group B. Missing
+columns, values, or trials are hard errors. Provisional dossiers are replaced in
+place by the finalized retained-epoch dossiers.
 
-These decompositions are diagnostic only. A spatial topography is not itself
-frequency-filtered; it is the mixing pattern estimated from band-filtered data.
-ICLabel was developed for conventional broadband decompositions, so its
-narrow-band results are explicitly labeled exploratory and never modify the
-authoritative 1–100 Hz component table or the components applied during epoch
-creation.
+The independent appendix decompositions are diagnostic only. A spatial
+topography is not itself frequency-filtered; it is the mixing pattern estimated
+from band-filtered data. ICLabel was developed for conventional broadband
+decompositions, so its narrow-band results are explicitly labeled exploratory
+and never modify the authoritative 1–100 Hz component table or the components
+applied during epoch creation.
 
 ICLabel Classes
 ~~~~~~~~~~~~~~~

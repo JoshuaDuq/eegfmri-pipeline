@@ -1085,6 +1085,116 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
             (epochs_path, report_path, "sub-0001_ses-02")
         ]
 
+    def test_provisional_component_review_uses_standard_ica_paths(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.bids_root = Path(tempfile.mkdtemp())
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "ica": {
+                    "band_specific_report": {
+                        "comparisons": [
+                            {
+                                "name": "pain",
+                                "column": "pain_binary_coded",
+                                "group_a": {"label": "Painful", "values": [1]},
+                                "group_b": {"label": "Non-painful", "values": [0]},
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+        eeg_dir = p.deriv_root / "preprocessed" / "eeg" / "sub-0001" / "eeg"
+        eeg_dir.mkdir(parents=True)
+        task_epochs_path = eeg_dir / "sub-0001_task-pain_epo.fif"
+        task_epochs_path.write_text("epochs", encoding="utf-8")
+        aligned_events_path = eeg_dir / "sub-0001_task-pain_events.tsv"
+        append_report = Mock()
+        settings_class = SimpleNamespace(from_mapping=Mock(return_value=object()))
+        band_report_module = _make_module(
+            "eeg_pipeline.preprocessing.band_ica_report",
+            BandIcaReportSettings=settings_class,
+            append_condition_tfr_report=append_report,
+        )
+        data_module = _make_module(
+            "eeg_pipeline.utils.data.preprocessing",
+            write_clean_events_tsv_for_epochs=Mock(return_value=aligned_events_path),
+        )
+
+        with (
+            patch.object(
+                PreprocessingPipeline,
+                "_resolve_bad_harmonization_subjects",
+                return_value=["0001"],
+            ),
+            patch.object(PreprocessingPipeline, "_resolve_epoch_conditions", return_value=None),
+            patch.dict(
+                sys.modules,
+                {
+                    "eeg_pipeline.preprocessing.band_ica_report": band_report_module,
+                    "eeg_pipeline.utils.data": _make_package("eeg_pipeline.utils.data"),
+                    "eeg_pipeline.utils.data.preprocessing": data_module,
+                },
+            ),
+        ):
+            p._append_provisional_band_ica_condition_tfrs(subjects=["0001"], task="pain")
+
+        kwargs = append_report.call_args.kwargs
+        assert kwargs["ica_fit_epochs_path"] == eeg_dir / "sub-0001_proc-icafit_epo.fif"
+        assert kwargs["standard_ica_path"] == eeg_dir / "sub-0001_proc-ica_ica.fif"
+        assert "output_dir" not in kwargs
+        assert "output_prefix" not in kwargs
+
+    def test_final_component_review_uses_standard_ica_paths(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.deriv_root = Path(tempfile.mkdtemp())
+        p.logger = Mock()
+        p.config = DotConfig({"ica": {"band_specific_report": {"comparisons": []}}})
+        eeg_dir = p.deriv_root / "preprocessed" / "eeg" / "sub-0001" / "eeg"
+        eeg_dir.mkdir(parents=True)
+        paths = {
+            "clean": eeg_dir / "sub-0001_task-pain_proc-clean_epo.fif",
+            "pre": eeg_dir / "sub-0001_task-pain_epo.fif",
+            "events": eeg_dir / "sub-0001_task-pain_proc-clean_events.tsv",
+            "report": eeg_dir / "sub-0001_report.h5",
+            "fit": eeg_dir / "sub-0001_proc-icafit_epo.fif",
+            "ica": eeg_dir / "sub-0001_proc-ica_ica.fif",
+        }
+        for path in paths.values():
+            path.write_text("test", encoding="utf-8")
+        append_report = Mock()
+        settings_class = SimpleNamespace(from_mapping=Mock(return_value=object()))
+        band_report_module = _make_module(
+            "eeg_pipeline.preprocessing.band_ica_report",
+            BandIcaReportSettings=settings_class,
+            append_condition_tfr_report=append_report,
+        )
+
+        with (
+            patch.object(
+                PreprocessingPipeline,
+                "_resolve_bad_harmonization_subjects",
+                return_value=["0001"],
+            ),
+            patch.dict(
+                sys.modules,
+                {"eeg_pipeline.preprocessing.band_ica_report": band_report_module},
+            ),
+        ):
+            p._append_band_ica_condition_tfrs(subjects=["0001"], task="pain")
+
+        kwargs = append_report.call_args.kwargs
+        assert kwargs["ica_fit_epochs_path"] == paths["fit"]
+        assert kwargs["standard_ica_path"] == paths["ica"]
+        assert "output_dir" not in kwargs
+        assert "output_prefix" not in kwargs
+
     def test_preprocessing_init_uses_rest_bids_root_in_rest_mode(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
