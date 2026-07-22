@@ -303,7 +303,7 @@ def _source_diagnostics_from_sources(
     )
     frequencies, power = _component_spectrum(
         frequencies=spectrum.freqs,
-        spectrum=spectrum.get_data().mean(axis=0),
+        spectrum=spectrum.get_data(picks=spectrum.ch_names).mean(axis=0),
         fmin=band.fmin,
         fmax=band.fmax,
     )

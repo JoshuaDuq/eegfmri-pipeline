@@ -278,6 +278,7 @@ def test_source_diagnostics_include_misc_typed_ica_sources() -> None:
     from eeg_pipeline.preprocessing.band_ica_report import _source_diagnostics
 
     spectrum = SimpleNamespace(
+        ch_names=["ICA000", "ICA001"],
         freqs=np.array([8.0, 10.0, 13.0]),
         get_data=Mock(return_value=np.ones((2, 2, 3))),
     )
@@ -301,6 +302,7 @@ def test_source_diagnostics_include_misc_typed_ica_sources() -> None:
         )
 
     assert sources.compute_psd.call_args.kwargs["picks"] == "all"
+    spectrum.get_data.assert_called_once_with(picks=spectrum.ch_names)
     assert multitaper.call_args.kwargs["time_bandwidth"] == 6.0
     np.testing.assert_allclose(
         multitaper.call_args.kwargs["n_cycles"],
