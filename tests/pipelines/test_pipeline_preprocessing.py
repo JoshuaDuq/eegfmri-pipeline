@@ -1115,7 +1115,6 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
     def test_cardiac_review_uses_filtered_runs_and_standard_ica(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
-        from eeg_pipeline.preprocessing.cardiac_artifact_qc import CardiacReviewSettings
 
         p = object.__new__(PreprocessingPipeline)
         p.config = DotConfig(
@@ -1132,8 +1131,23 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         epochs_path = eeg_directory / "sub-0001_proc-icafit_epo.fif"
         report_path = eeg_directory / "sub-0001_report.h5"
         filtered_path = eeg_directory / "sub-0001_task-pain_run-1_proc-filt_raw.fif"
+        settings = object()
+        settings_class = Mock()
+        settings_class.from_mapping.return_value = settings
+        generate = Mock()
+        cardiac_modules = {
+            "eeg_pipeline.preprocessing.ica_cardiac_report": _make_module(
+                "eeg_pipeline.preprocessing.ica_cardiac_report",
+                generate_ica_cardiac_review=generate,
+            ),
+            "eeg_pipeline.preprocessing.ica_cardiac_review": _make_module(
+                "eeg_pipeline.preprocessing.ica_cardiac_review",
+                CardiacReviewSettings=settings_class,
+            ),
+        }
 
         with (
+            patch.dict(sys.modules, cardiac_modules),
             patch.object(
                 PreprocessingPipeline,
                 "_resolve_bad_harmonization_subjects",
@@ -1149,9 +1163,6 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
                 "_find_band_ica_report_inputs",
                 return_value=[(epochs_path, report_path, "sub-0001")],
             ),
-            patch(
-                "eeg_pipeline.preprocessing.cardiac_artifact_qc.generate_ica_cardiac_review"
-            ) as generate,
         ):
             p._run_ica_cardiac_review(subjects=["0001"], task="pain")
 
@@ -1161,9 +1172,8 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
         assert arguments["ica_path"] == eeg_directory / "sub-0001_proc-ica_ica.fif"
         assert arguments["report_path"] == report_path
         assert arguments["output_path"] == (eeg_directory / "sub-0001_desc-icaecg_components.tsv")
-        assert arguments["settings"] == CardiacReviewSettings.from_mapping(
-            {"enabled": True, "ecg_channel": "ECG"}
-        )
+        assert arguments["settings"] is settings
+        settings_class.from_mapping.assert_called_once_with({"enabled": True, "ecg_channel": "ECG"})
 
     def test_band_report_input_discovery_preserves_session_entities(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline

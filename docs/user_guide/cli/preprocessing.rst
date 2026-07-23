@@ -147,6 +147,9 @@ before manual ICA review. The report shows detected R peaks and heart-rate
 continuity for every run, R-locked EEG global field power before and after the
 current provisional ICA exclusions, and a component carousel combining
 topography, R-locked source activity, ECG correlation, and CTPS evidence.
+RR plausibility and ECG-template consistency grade each run. Questionable runs
+remain in the report but do not contribute to component evidence unless their
+exact IDs are listed in ``ica.cardiac_review.accepted_questionable_runs``.
 
 This feature reads the ECG signal directly and does not require Analyzer R
 annotations. It is review-only: no component is automatically excluded. Enabling
@@ -157,8 +160,11 @@ it with a missing or incorrectly typed ECG channel is a hard error.
    eeg-pipeline preprocessing ica --subject 0015 --task thermalactive \
      --set ica.cardiac_review.enabled=true
 
-The component evidence table is written as
-``*_desc-icaecg_components.tsv`` beside the subject report.
+The report writes three tidy tables beside the subject report:
+
+* ``*_desc-icaecg_components.tsv`` — component-level summaries and current ICA status;
+* ``*_desc-icaecg_componentruns.tsv`` — one ECG-correlation and CTPS row per run/component;
+* ``*_desc-icaecg_runs.tsv`` — R-peak quality and correction-quality metrics per run.
 
 Band-specific ICA report
 ------------------------

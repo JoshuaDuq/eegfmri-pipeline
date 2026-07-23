@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import mne
 import numpy as np
 import pandas as pd
 import pytest
 
-from eeg_pipeline.preprocessing import cardiac_artifact_qc as cardiac_qc
+from eeg_pipeline.preprocessing import ica_cardiac_review as cardiac_review
+from eeg_pipeline.preprocessing import ica_cardiac_report as cardiac_report
 from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
     add_marker_ctps_columns,
     compute_cardiac_attenuation,
@@ -18,15 +21,16 @@ from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
 
 
 def test_cardiac_review_settings_are_opt_in_and_validated() -> None:
-    disabled = cardiac_qc.CardiacReviewSettings.from_mapping({})
-    enabled = cardiac_qc.CardiacReviewSettings.from_mapping(
+    disabled = cardiac_review.CardiacReviewSettings.from_mapping({})
+    enabled = cardiac_review.CardiacReviewSettings.from_mapping(
         {
             "enabled": True,
             "ecg_channel": "ECG",
             "epoch_window": [-0.4, 0.6],
             "baseline": [-0.4, -0.1],
             "measurement_window": [0.0, 0.4],
-            "ctps_threshold": 0.25,
+            "ctps_threshold": "auto",
+            "accepted_questionable_runs": ["sub-0001_task-pain_run-2"],
         }
     )
 
@@ -36,12 +40,15 @@ def test_cardiac_review_settings_are_opt_in_and_validated() -> None:
     assert enabled.epoch_window == (-0.4, 0.6)
     assert enabled.baseline == (-0.4, -0.1)
     assert enabled.measurement_window == (0.0, 0.4)
-    assert enabled.ctps_threshold == pytest.approx(0.25)
+    assert enabled.ctps_threshold == "auto"
+    assert enabled.accepted_questionable_runs == ("sub-0001_task-pain_run-2",)
 
     with pytest.raises(ValueError, match="baseline"):
-        cardiac_qc.CardiacReviewSettings.from_mapping(
+        cardiac_review.CardiacReviewSettings.from_mapping(
             {"epoch_window": [-0.4, 0.6], "baseline": [-0.5, -0.1]}
         )
+    with pytest.raises(ValueError, match="ctps_threshold"):
+        cardiac_review.CardiacReviewSettings.from_mapping({"ctps_threshold": "fixed"})
 
 
 def _pulse_locked_raw(*, artifact_scale: float) -> mne.io.RawArray:
@@ -84,51 +91,124 @@ def _signal_detectable_ecg_raw() -> mne.io.RawArray:
 
 
 def test_direct_ecg_detection_does_not_require_analyzer_markers() -> None:
-    settings = cardiac_qc.CardiacReviewSettings.from_mapping({"enabled": True})
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({"enabled": True})
 
-    detection = cardiac_qc.detect_ecg_events(_signal_detectable_ecg_raw(), settings)
+    detection = cardiac_review.detect_ecg_events(_signal_detectable_ecg_raw(), settings)
 
     assert 25 <= len(detection.events) <= 31
     assert detection.average_pulse_bpm == pytest.approx(60.0, abs=3.0)
     assert detection.events.shape[1] == 3
 
 
-def test_standardize_source_epochs_uses_each_component_baseline() -> None:
+def test_standardize_source_epoch_runs_preserves_between_epoch_amplitude() -> None:
     times = np.array([-0.4, -0.2, 0.0, 0.2])
-    data = np.array(
-        [
-            [[1.0, 3.0, 5.0, 7.0], [2.0, 6.0, 10.0, 14.0]],
-            [[2.0, 4.0, 8.0, 10.0], [1.0, 5.0, 9.0, 13.0]],
-        ]
-    )
+    run_1 = np.array([[[1.0, 3.0, 5.0, 7.0]], [[3.0, 1.0, 5.0, 7.0]]])
+    run_2 = np.array([[[1.0, 3.0, 8.0, 12.0]], [[3.0, 1.0, 8.0, 12.0]]])
 
-    standardized = cardiac_qc.standardize_source_epochs(
-        data,
+    standardized = cardiac_review.standardize_source_epoch_runs(
+        [run_1, run_2],
         times=times,
         baseline=(-0.4, -0.2),
     )
 
-    np.testing.assert_allclose(standardized[..., :2].mean(axis=-1), 0.0)
-    np.testing.assert_allclose(standardized[..., :2].std(axis=-1), 1.0)
+    np.testing.assert_allclose(standardized[0][..., :2].mean(axis=-1), 0.0)
+    np.testing.assert_allclose(standardized[1][..., :2].mean(axis=-1), 0.0)
+    assert standardized[1][..., 2:].mean() > standardized[0][..., 2:].mean()
+
+
+def test_ecg_detection_quality_rejects_implausible_rr_intervals() -> None:
+    settings = cardiac_review.CardiacReviewSettings.from_mapping({})
+    peak_times = np.array([0.0, 1.0, 2.0, 4.0, 5.0])
+
+    quality = cardiac_review.assess_ecg_detection_quality(
+        peak_times,
+        template_correlations=np.full(5, 0.9),
+        settings=settings,
+    )
+
+    assert quality.median_heart_rate_bpm == pytest.approx(60.0)
+    assert quality.rr_outlier_fraction == pytest.approx(0.25)
+    assert quality.median_template_correlation == pytest.approx(0.9)
+    assert quality.reliable is False
+    assert "implausible RR intervals" in quality.reason
+
+
+def test_questionable_run_requires_explicit_acceptance() -> None:
+    quality = cardiac_review.EcgDetectionQuality(
+        median_heart_rate_bpm=60.0,
+        rr_outlier_fraction=0.25,
+        abrupt_rr_change_fraction=0.5,
+        median_template_correlation=0.9,
+        reliable=False,
+        reason="implausible RR intervals",
+    )
+
+    assert (
+        cardiac_review.include_run_in_component_review(
+            "sub-0001_task-pain_run-2",
+            quality,
+            cardiac_review.CardiacReviewSettings.from_mapping({}),
+        )
+        is False
+    )
+    assert (
+        cardiac_review.include_run_in_component_review(
+            "sub-0001_task-pain_run-2",
+            quality,
+            cardiac_review.CardiacReviewSettings.from_mapping(
+                {"accepted_questionable_runs": ["sub-0001_task-pain_run-2"]}
+            ),
+        )
+        is True
+    )
 
 
 def test_component_cardiac_evidence_table_is_review_only() -> None:
-    review = cardiac_qc.ComponentCardiacReview(
+    review = cardiac_review.ComponentCardiacReview(
+        run_ids=("run-1", "run-2"),
         times=np.array([-0.1, 0.0, 0.1]),
-        mean_z=np.ones((2, 3)),
-        ci95_z=np.full((2, 3), 0.1),
-        median_abs_correlation=np.array([0.12, 0.72]),
-        ctps_scores=np.array([0.08, 0.31]),
-        correlation_flags=np.array([False, True]),
-        ctps_flags=np.array([False, True]),
-        heartbeat_count=40,
+        run_mean_z=np.ones((2, 2, 3)),
+        abs_correlations=np.array([[0.1, 0.8], [0.2, 0.6]]),
+        ctps_scores=np.array([[0.08, 0.31], [0.07, 0.20]]),
+        correlation_flags=np.array([[False, True], [False, True]]),
+        ctps_flags=np.array([[False, True], [False, False]]),
+        heartbeat_counts=np.array([20, 20]),
     )
 
-    table = cardiac_qc.component_cardiac_evidence_table(review)
+    statuses = pd.DataFrame(
+        {
+            "component": [0, 1],
+            "status": ["bad", "good"],
+            "status_description": ["Auto-detected eye blink", ""],
+        }
+    )
+    table = cardiac_review.component_cardiac_evidence_table(review, statuses=statuses)
+    run_table = cardiac_review.component_run_cardiac_evidence_table(review)
 
     assert table["component"].tolist() == [0, 1]
     assert table["manual_review_recommended"].tolist() == [False, True]
-    assert "status" not in table.columns
+    assert table["correlation_flagged_run_count"].tolist() == [0, 2]
+    assert table["ctps_flagged_run_count"].tolist() == [0, 1]
+    assert table["current_ica_status"].tolist() == ["bad", "good"]
+    assert len(run_table) == 4
+    assert run_table["recording_id"].tolist() == ["run-1", "run-1", "run-2", "run-2"]
+
+
+def test_cardiac_report_entries_use_review_order() -> None:
+    entries = [
+        SimpleNamespace(name="How to review ECG artifacts", tags=("ica-cardiac-review",)),
+        SimpleNamespace(
+            name="ECG detection and provisional correction by run",
+            tags=("ica-cardiac-review",),
+        ),
+        SimpleNamespace(
+            name="ICA components: R-locked cardiac evidence",
+            tags=("ica-cardiac-review",),
+        ),
+        SimpleNamespace(name="ECG run quality summary", tags=("ica-cardiac-review",)),
+    ]
+
+    assert cardiac_report._ordered_cardiac_indices(entries) == [0, 3, 1, 2]
 
 
 def test_pulse_marker_events_use_preserved_analyzer_annotations() -> None:
@@ -235,7 +315,7 @@ def test_write_cardiac_attenuation_qc_writes_run_metrics(tmp_path) -> None:
                 _pulse_locked_raw(artifact_scale=0.25),
             )
         ],
-        output_path=tmp_path / "cardiac_qc.tsv",
+        output_path=tmp_path / "cardiac_review.tsv",
         baseline=(-0.25, -0.05),
         measurement_window=(-0.05, 0.4),
     )

@@ -282,8 +282,20 @@ ICA
      - ``[0.0, 0.4]``
      - Window used to summarize cardiac-locked EEG attenuation after provisional ICA
    * - ``ica.cardiac_review.ctps_threshold``
-     - ``0.25``
-     - MNE CTPS threshold used to flag components for manual review
+     - ``"auto"``
+     - Sampling-aware MNE CTPS threshold; may instead be an explicit number in ``(0, 1]``
+   * - ``ica.cardiac_review.plausible_heart_rate_bpm``
+     - ``[40.0, 160.0]``
+     - Physiological range used to identify implausible beat-to-beat intervals
+   * - ``ica.cardiac_review.max_rr_outlier_fraction``
+     - ``0.05``
+     - Maximum implausible RR fraction for a run to contribute to component evidence
+   * - ``ica.cardiac_review.min_template_correlation``
+     - ``0.80``
+     - Minimum median ECG-template correlation for reliable R-peak detection
+   * - ``ica.cardiac_review.accepted_questionable_runs``
+     - ``[]``
+     - Exact recording IDs manually accepted despite failing ECG quality checks
    * - ``ica.band_specific_report.enabled``
      - ``false``
      - Add standard-ICA component dossiers by band and exploratory independent band-ICA appendices

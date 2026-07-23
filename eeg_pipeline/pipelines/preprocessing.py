@@ -664,10 +664,10 @@ class PreprocessingPipeline(PipelineBase):
         task: Optional[str],
     ) -> None:
         """Append direct ECG detection and component evidence to MNE reports."""
-        from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
-            CardiacReviewSettings,
+        from eeg_pipeline.preprocessing.ica_cardiac_report import (
             generate_ica_cardiac_review,
         )
+        from eeg_pipeline.preprocessing.ica_cardiac_review import CardiacReviewSettings
 
         settings = CardiacReviewSettings.from_mapping(self.config.get("ica.cardiac_review", {}))
         for subject in self._resolve_bad_harmonization_subjects(subjects):
