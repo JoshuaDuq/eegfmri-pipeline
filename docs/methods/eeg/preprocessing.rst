@@ -340,6 +340,23 @@ Method
 6. Set ``ica.manual_review_complete: true`` and run ``epochs`` to apply the
    reviewed exclusions.
 
+Direct ECG and Cardiac ICA Review
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``ica.cardiac_review.enabled`` is true, R peaks are detected directly from
+the configured ECG channel with MNE's ECG detector. This diagnostic therefore
+remains available when BrainVision Analyzer did not preserve or detect every R
+marker. Each run shows a representative ECG segment with detected peaks,
+beat-to-beat heart rate, and R-locked EEG global field power before versus after
+the current provisional ICA exclusions.
+
+The report then presents one carousel slide per standard ICA component. Each
+slide combines the component topography, its baseline-standardized R-locked
+source average with a 95% confidence interval, median absolute ECG correlation,
+and CTPS score. Algorithmic flags identify components that merit manual review;
+they never modify ``ICA.exclude`` or the component TSV status. The evidence is
+placed before the frequency-specific dossiers so it can inform manual review.
+
 ICA Component Review and Exploratory Band Appendix
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

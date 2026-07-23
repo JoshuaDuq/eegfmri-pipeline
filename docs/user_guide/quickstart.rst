@@ -656,6 +656,7 @@ available for EEG-fMRI QC.
      --deriv-root /path/to/derivatives \
      --set preprocessing.brainvision_analyzer.enabled=true \
      --set pyprep.bad_channel_sync_policy=subject_union \
+     --set ica.cardiac_review.enabled=true \
      --set ica.band_specific_report.enabled=true
 
    # 5. Review each component dossier and *_proc-ica_components.tsv, then create epochs

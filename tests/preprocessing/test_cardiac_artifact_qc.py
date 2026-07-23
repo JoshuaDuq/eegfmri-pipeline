@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from eeg_pipeline.preprocessing import cardiac_artifact_qc as cardiac_qc
 from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
     add_marker_ctps_columns,
     compute_cardiac_attenuation,
@@ -14,6 +15,33 @@ from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
     run_marker_ctps_qc,
     write_cardiac_attenuation_qc,
 )
+
+
+def test_cardiac_review_settings_are_opt_in_and_validated() -> None:
+    disabled = cardiac_qc.CardiacReviewSettings.from_mapping({})
+    enabled = cardiac_qc.CardiacReviewSettings.from_mapping(
+        {
+            "enabled": True,
+            "ecg_channel": "ECG",
+            "epoch_window": [-0.4, 0.6],
+            "baseline": [-0.4, -0.1],
+            "measurement_window": [0.0, 0.4],
+            "ctps_threshold": 0.25,
+        }
+    )
+
+    assert disabled.enabled is False
+    assert enabled.enabled is True
+    assert enabled.ecg_channel == "ECG"
+    assert enabled.epoch_window == (-0.4, 0.6)
+    assert enabled.baseline == (-0.4, -0.1)
+    assert enabled.measurement_window == (0.0, 0.4)
+    assert enabled.ctps_threshold == pytest.approx(0.25)
+
+    with pytest.raises(ValueError, match="baseline"):
+        cardiac_qc.CardiacReviewSettings.from_mapping(
+            {"epoch_window": [-0.4, 0.6], "baseline": [-0.5, -0.1]}
+        )
 
 
 def _pulse_locked_raw(*, artifact_scale: float) -> mne.io.RawArray:
@@ -39,6 +67,68 @@ def _pulse_locked_raw(*, artifact_scale: float) -> mne.io.RawArray:
         )
     )
     return raw
+
+
+def _signal_detectable_ecg_raw() -> mne.io.RawArray:
+    sfreq = 200.0
+    times = np.arange(int(30.0 * sfreq)) / sfreq
+    peak_times = np.arange(1.0, 29.5, 1.0)
+    ecg = 0.02e-3 * np.sin(2 * np.pi * 1.0 * times)
+    eeg = np.zeros_like(times)
+    for peak_time in peak_times:
+        qrs = np.exp(-0.5 * ((times - peak_time) / 0.02) ** 2)
+        ecg += 1.0e-3 * qrs
+        eeg += 30e-6 * np.exp(-0.5 * ((times - peak_time - 0.08) / 0.04) ** 2)
+    info = mne.create_info(["Cz", "Pz", "ECG"], sfreq, ["eeg", "eeg", "ecg"])
+    return mne.io.RawArray(np.vstack([eeg, -0.5 * eeg, ecg]), info, verbose=False)
+
+
+def test_direct_ecg_detection_does_not_require_analyzer_markers() -> None:
+    settings = cardiac_qc.CardiacReviewSettings.from_mapping({"enabled": True})
+
+    detection = cardiac_qc.detect_ecg_events(_signal_detectable_ecg_raw(), settings)
+
+    assert 25 <= len(detection.events) <= 31
+    assert detection.average_pulse_bpm == pytest.approx(60.0, abs=3.0)
+    assert detection.events.shape[1] == 3
+
+
+def test_standardize_source_epochs_uses_each_component_baseline() -> None:
+    times = np.array([-0.4, -0.2, 0.0, 0.2])
+    data = np.array(
+        [
+            [[1.0, 3.0, 5.0, 7.0], [2.0, 6.0, 10.0, 14.0]],
+            [[2.0, 4.0, 8.0, 10.0], [1.0, 5.0, 9.0, 13.0]],
+        ]
+    )
+
+    standardized = cardiac_qc.standardize_source_epochs(
+        data,
+        times=times,
+        baseline=(-0.4, -0.2),
+    )
+
+    np.testing.assert_allclose(standardized[..., :2].mean(axis=-1), 0.0)
+    np.testing.assert_allclose(standardized[..., :2].std(axis=-1), 1.0)
+
+
+def test_component_cardiac_evidence_table_is_review_only() -> None:
+    review = cardiac_qc.ComponentCardiacReview(
+        times=np.array([-0.1, 0.0, 0.1]),
+        mean_z=np.ones((2, 3)),
+        ci95_z=np.full((2, 3), 0.1),
+        median_abs_correlation=np.array([0.12, 0.72]),
+        ctps_scores=np.array([0.08, 0.31]),
+        correlation_flags=np.array([False, True]),
+        ctps_flags=np.array([False, True]),
+        heartbeat_count=40,
+    )
+
+    table = cardiac_qc.component_cardiac_evidence_table(review)
+
+    assert table["component"].tolist() == [0, 1]
+    assert table["manual_review_recommended"].tolist() == [False, True]
+    assert "status" not in table.columns
 
 
 def test_pulse_marker_events_use_preserved_analyzer_annotations() -> None:

@@ -634,6 +634,9 @@ class PreprocessingPipeline(PipelineBase):
             task_is_rest=task_is_rest,
         )
 
+        if bool(self.config.get("ica.cardiac_review.enabled", False)):
+            self._run_ica_cardiac_review(subjects=subjects, task=task)
+
         if bool(self.config.get("ica.band_specific_report.enabled", False)):
             self._run_band_specific_ica_report(subjects=subjects, task=task)
             if self.config.get("ica.band_specific_report.comparisons"):
@@ -653,6 +656,43 @@ class PreprocessingPipeline(PipelineBase):
                 )
 
         self.logger.info("ICA fitting complete")
+
+    def _run_ica_cardiac_review(
+        self,
+        *,
+        subjects: List[str],
+        task: Optional[str],
+    ) -> None:
+        """Append direct ECG detection and component evidence to MNE reports."""
+        from eeg_pipeline.preprocessing.cardiac_artifact_qc import (
+            CardiacReviewSettings,
+            generate_ica_cardiac_review,
+        )
+
+        settings = CardiacReviewSettings.from_mapping(self.config.get("ica.cardiac_review", {}))
+        for subject in self._resolve_bad_harmonization_subjects(subjects):
+            filtered_paths = self._find_filtered_raw_run_files(subject, task)
+            for epochs_path, report_path, output_prefix in self._find_band_ica_report_inputs(
+                subject
+            ):
+                session_filtered_paths = [
+                    path
+                    for path in filtered_paths
+                    if path.name.startswith(f"{output_prefix}_task-")
+                ]
+                if not session_filtered_paths:
+                    raise FileNotFoundError(
+                        f"No filtered raw runs match ECG review prefix {output_prefix!r}."
+                    )
+                generate_ica_cardiac_review(
+                    filtered_raw_paths=session_filtered_paths,
+                    ica_path=epochs_path.with_name(f"{output_prefix}_proc-ica_ica.fif"),
+                    report_path=report_path,
+                    output_path=epochs_path.with_name(
+                        f"{output_prefix}_desc-icaecg_components.tsv"
+                    ),
+                    settings=settings,
+                )
 
     def _run_band_specific_ica_report(
         self,

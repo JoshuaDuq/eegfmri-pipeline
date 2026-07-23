@@ -269,6 +269,21 @@ ICA
    * - ``ica.labels_to_keep``
      - ``["brain", "other"]``
      - ICLabel classes to retain as clean components
+   * - ``ica.cardiac_review.enabled``
+     - ``false``
+     - Add direct ECG detection, correction-quality plots, and review-only component evidence
+   * - ``ica.cardiac_review.ecg_channel``
+     - ``"ECG"``
+     - ECG channel used for signal-based R-peak detection
+   * - ``ica.cardiac_review.epoch_window`` / ``baseline``
+     - ``[-0.4, 0.6]`` / ``[-0.4, -0.1]``
+     - R-locked review epoch and source-standardization baseline (seconds)
+   * - ``ica.cardiac_review.measurement_window``
+     - ``[0.0, 0.4]``
+     - Window used to summarize cardiac-locked EEG attenuation after provisional ICA
+   * - ``ica.cardiac_review.ctps_threshold``
+     - ``0.25``
+     - MNE CTPS threshold used to flag components for manual review
    * - ``ica.band_specific_report.enabled``
      - ``false``
      - Add standard-ICA component dossiers by band and exploratory independent band-ICA appendices

@@ -72,6 +72,12 @@ delta/theta, alpha, beta, gamma, and 1–30 Hz ICA diagnostics to the HTML repor
 These decompositions are exploratory: the standard 1–100 Hz ICA and its
 reviewed component table remain authoritative for cleaning.
 
+Set `ica.cardiac_review.enabled=true` to add a manual ECG review before the ICA
+component dossiers. It detects R peaks directly from the ECG channel, plots
+run-level peak and correction-quality diagnostics, and ranks standard ICA
+components with ECG correlation and CTPS evidence. It never excludes a
+component automatically and does not depend on Analyzer R annotations.
+
 See the [EEG preprocessing quick start](docs/user_guide/quickstart.rst),
 [CLI reference](docs/user_guide/cli/preprocessing.rst), and
 [scientific methods](docs/methods/eeg/preprocessing.rst) for commands, outputs,

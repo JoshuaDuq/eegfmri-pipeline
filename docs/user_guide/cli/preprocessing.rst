@@ -139,6 +139,27 @@ Examples
    ``ica.manual_review_complete`` is explicitly set to ``true``. Each mode is
    idempotent and overwrites its own outputs.
 
+Direct ECG review
+-----------------
+
+Set ``ica.cardiac_review.enabled: true`` to add signal-detected ECG diagnostics
+before manual ICA review. The report shows detected R peaks and heart-rate
+continuity for every run, R-locked EEG global field power before and after the
+current provisional ICA exclusions, and a component carousel combining
+topography, R-locked source activity, ECG correlation, and CTPS evidence.
+
+This feature reads the ECG signal directly and does not require Analyzer R
+annotations. It is review-only: no component is automatically excluded. Enabling
+it with a missing or incorrectly typed ECG channel is a hard error.
+
+.. code-block:: bash
+
+   eeg-pipeline preprocessing ica --subject 0015 --task thermalactive \
+     --set ica.cardiac_review.enabled=true
+
+The component evidence table is written as
+``*_desc-icaecg_components.tsv`` beside the subject report.
+
 Band-specific ICA report
 ------------------------
 

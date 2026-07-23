@@ -1069,6 +1069,102 @@ class TestPreprocessingCompletion(_PreprocessingImportMixin, unittest.TestCase):
 
         report.assert_not_called()
 
+    def test_ica_fitting_runs_cardiac_review_only_when_enabled(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+
+        p = object.__new__(PreprocessingPipeline)
+        p.logger = Mock()
+        p.config = DotConfig(
+            {
+                "ica": {
+                    "cardiac_review": {"enabled": True},
+                    "band_specific_report": {"enabled": False},
+                }
+            }
+        )
+
+        with (
+            patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
+            patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(PreprocessingPipeline, "_run_ica_cardiac_review", create=True) as review,
+        ):
+            p._run_ica_fitting(["0001"], "pain")
+
+        review.assert_called_once_with(subjects=["0001"], task="pain")
+
+        p.config = DotConfig(
+            {
+                "ica": {
+                    "cardiac_review": {"enabled": False},
+                    "band_specific_report": {"enabled": False},
+                }
+            }
+        )
+        with (
+            patch.object(PreprocessingPipeline, "_run_mne_bids_pipeline"),
+            patch.object(PreprocessingPipeline, "_harmonize_filtered_raw_bads_for_mne_concat"),
+            patch.object(
+                PreprocessingPipeline,
+                "_run_ica_cardiac_review",
+                create=True,
+            ) as disabled_review,
+        ):
+            p._run_ica_fitting(["0001"], "pain")
+
+        disabled_review.assert_not_called()
+
+    def test_cardiac_review_uses_filtered_runs_and_standard_ica(self):
+        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+        from eeg_pipeline.preprocessing.cardiac_artifact_qc import CardiacReviewSettings
+
+        p = object.__new__(PreprocessingPipeline)
+        p.config = DotConfig(
+            {
+                "ica": {
+                    "cardiac_review": {
+                        "enabled": True,
+                        "ecg_channel": "ECG",
+                    }
+                }
+            }
+        )
+        eeg_directory = Path("/derivatives/sub-0001/eeg")
+        epochs_path = eeg_directory / "sub-0001_proc-icafit_epo.fif"
+        report_path = eeg_directory / "sub-0001_report.h5"
+        filtered_path = eeg_directory / "sub-0001_task-pain_run-1_proc-filt_raw.fif"
+
+        with (
+            patch.object(
+                PreprocessingPipeline,
+                "_resolve_bad_harmonization_subjects",
+                return_value=["0001"],
+            ),
+            patch.object(
+                PreprocessingPipeline,
+                "_find_filtered_raw_run_files",
+                return_value=[filtered_path],
+            ),
+            patch.object(
+                PreprocessingPipeline,
+                "_find_band_ica_report_inputs",
+                return_value=[(epochs_path, report_path, "sub-0001")],
+            ),
+            patch(
+                "eeg_pipeline.preprocessing.cardiac_artifact_qc.generate_ica_cardiac_review"
+            ) as generate,
+        ):
+            p._run_ica_cardiac_review(subjects=["0001"], task="pain")
+
+        generate.assert_called_once()
+        arguments = generate.call_args.kwargs
+        assert arguments["filtered_raw_paths"] == [filtered_path]
+        assert arguments["ica_path"] == eeg_directory / "sub-0001_proc-ica_ica.fif"
+        assert arguments["report_path"] == report_path
+        assert arguments["output_path"] == (eeg_directory / "sub-0001_desc-icaecg_components.tsv")
+        assert arguments["settings"] == CardiacReviewSettings.from_mapping(
+            {"enabled": True, "ecg_channel": "ECG"}
+        )
+
     def test_band_report_input_discovery_preserves_session_entities(self):
         from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
