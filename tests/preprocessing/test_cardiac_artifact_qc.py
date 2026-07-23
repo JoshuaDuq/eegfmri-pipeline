@@ -30,7 +30,6 @@ def test_cardiac_review_settings_are_opt_in_and_validated() -> None:
             "baseline": [-0.4, -0.1],
             "measurement_window": [0.0, 0.4],
             "ctps_threshold": "auto",
-            "accepted_questionable_runs": ["sub-0001_task-pain_run-2"],
         }
     )
 
@@ -41,7 +40,8 @@ def test_cardiac_review_settings_are_opt_in_and_validated() -> None:
     assert enabled.baseline == (-0.4, -0.1)
     assert enabled.measurement_window == (0.0, 0.4)
     assert enabled.ctps_threshold == "auto"
-    assert enabled.accepted_questionable_runs == ("sub-0001_task-pain_run-2",)
+    assert not hasattr(enabled, "accepted_questionable_runs")
+    assert not hasattr(enabled, "plausible_heart_rate_bpm")
 
     with pytest.raises(ValueError, match="baseline"):
         cardiac_review.CardiacReviewSettings.from_mapping(
@@ -49,6 +49,8 @@ def test_cardiac_review_settings_are_opt_in_and_validated() -> None:
         )
     with pytest.raises(ValueError, match="ctps_threshold"):
         cardiac_review.CardiacReviewSettings.from_mapping({"ctps_threshold": "fixed"})
+    with pytest.raises(ValueError, match="Unsupported"):
+        cardiac_review.CardiacReviewSettings.from_mapping({"accepted_questionable_runs": ["run-1"]})
 
 
 def _pulse_locked_raw(*, artifact_scale: float) -> mne.io.RawArray:
@@ -116,63 +118,17 @@ def test_standardize_source_epoch_runs_preserves_between_epoch_amplitude() -> No
     assert standardized[1][..., 2:].mean() > standardized[0][..., 2:].mean()
 
 
-def test_ecg_detection_quality_rejects_implausible_rr_intervals() -> None:
-    settings = cardiac_review.CardiacReviewSettings.from_mapping({})
-    peak_times = np.array([0.0, 1.0, 2.0, 4.0, 5.0])
-
-    quality = cardiac_review.assess_ecg_detection_quality(
-        peak_times,
-        template_correlations=np.full(5, 0.9),
-        settings=settings,
-    )
-
-    assert quality.median_heart_rate_bpm == pytest.approx(60.0)
-    assert quality.rr_outlier_fraction == pytest.approx(0.25)
-    assert quality.median_template_correlation == pytest.approx(0.9)
-    assert quality.reliable is False
-    assert "implausible RR intervals" in quality.reason
-
-
-def test_questionable_run_requires_explicit_acceptance() -> None:
-    quality = cardiac_review.EcgDetectionQuality(
-        median_heart_rate_bpm=60.0,
-        rr_outlier_fraction=0.25,
-        abrupt_rr_change_fraction=0.5,
-        median_template_correlation=0.9,
-        reliable=False,
-        reason="implausible RR intervals",
-    )
-
-    assert (
-        cardiac_review.include_run_in_component_review(
-            "sub-0001_task-pain_run-2",
-            quality,
-            cardiac_review.CardiacReviewSettings.from_mapping({}),
-        )
-        is False
-    )
-    assert (
-        cardiac_review.include_run_in_component_review(
-            "sub-0001_task-pain_run-2",
-            quality,
-            cardiac_review.CardiacReviewSettings.from_mapping(
-                {"accepted_questionable_runs": ["sub-0001_task-pain_run-2"]}
-            ),
-        )
-        is True
-    )
-
-
 def test_component_cardiac_evidence_table_is_review_only() -> None:
     review = cardiac_review.ComponentCardiacReview(
         run_ids=("run-1", "run-2"),
         times=np.array([-0.1, 0.0, 0.1]),
         run_mean_z=np.ones((2, 2, 3)),
-        abs_correlations=np.array([[0.1, 0.8], [0.2, 0.6]]),
+        correlation_scores=np.array([[-0.1, 0.8], [0.2, -0.6]]),
         ctps_scores=np.array([[0.08, 0.31], [0.07, 0.20]]),
         correlation_flags=np.array([[False, True], [False, True]]),
         ctps_flags=np.array([[False, True], [False, False]]),
-        heartbeat_counts=np.array([20, 20]),
+        r_locked_epoch_counts=np.array([20, 20]),
+        run_ecg_z=np.ones((2, 3)),
     )
 
     statuses = pd.DataFrame(
@@ -185,13 +141,25 @@ def test_component_cardiac_evidence_table_is_review_only() -> None:
     table = cardiac_review.component_cardiac_evidence_table(review, statuses=statuses)
     run_table = cardiac_review.component_run_cardiac_evidence_table(review)
 
-    assert table["component"].tolist() == [0, 1]
-    assert table["manual_review_recommended"].tolist() == [False, True]
-    assert table["correlation_flagged_run_count"].tolist() == [0, 2]
-    assert table["ctps_flagged_run_count"].tolist() == [0, 1]
+    assert table.columns.tolist() == [
+        "component",
+        "current_ica_status",
+        "current_status_description",
+    ]
     assert table["current_ica_status"].tolist() == ["bad", "good"]
+    assert "manual_review_recommended" not in table
     assert len(run_table) == 4
     assert run_table["recording_id"].tolist() == ["run-1", "run-1", "run-2", "run-2"]
+    assert run_table.columns.tolist() == [
+        "recording_id",
+        "component",
+        "mne_ecg_correlation_score",
+        "mne_ctps_score",
+        "mne_correlation_flag",
+        "mne_ctps_flag",
+        "r_locked_epoch_count",
+    ]
+    assert run_table["mne_ecg_correlation_score"].tolist() == [-0.1, 0.8, 0.2, -0.6]
 
 
 def test_cardiac_report_entries_use_review_order() -> None:
@@ -205,10 +173,21 @@ def test_cardiac_report_entries_use_review_order() -> None:
             name="ICA components: R-locked cardiac evidence",
             tags=("ica-cardiac-review",),
         ),
-        SimpleNamespace(name="ECG run quality summary", tags=("ica-cardiac-review",)),
+        SimpleNamespace(name="ECG detection summary", tags=("ica-cardiac-review",)),
     ]
 
     assert cardiac_report._ordered_cardiac_indices(entries) == [0, 3, 1, 2]
+
+
+def test_cardiac_review_guide_has_no_custom_classification_language() -> None:
+    html = cardiac_report._cardiac_review_guide_html(
+        cardiac_review.CardiacReviewSettings.from_mapping({})
+    )
+
+    assert "MNE" in html
+    assert "reliable" not in html.lower()
+    assert "recommended" not in html.lower()
+    assert "ranking" not in html.lower()
 
 
 def test_pulse_marker_events_use_preserved_analyzer_annotations() -> None:

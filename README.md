@@ -74,11 +74,10 @@ reviewed component table remain authoritative for cleaning.
 
 Set `ica.cardiac_review.enabled=true` to add a manual ECG review before the ICA
 component dossiers. It detects R peaks directly from the ECG channel, plots
-run-level peak and correction-quality diagnostics, and ranks standard ICA
-components with ECG correlation and CTPS evidence. It never excludes a
-component automatically and does not depend on Analyzer R annotations. Runs
-with implausible RR intervals or inconsistent ECG templates remain visible but
-do not contribute to component rankings unless explicitly accepted in config.
+run-level signals, and shows every standard ICA component with its R-locked
+waveform and MNE ECG-correlation and CTPS outputs. It adds no pipeline-specific
+score, quality label, ranking, recommendation, or automatic exclusion and does
+not depend on Analyzer R annotations.
 
 See the [EEG preprocessing quick start](docs/user_guide/quickstart.rst),
 [CLI reference](docs/user_guide/cli/preprocessing.rst), and

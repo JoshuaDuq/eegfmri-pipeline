@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 
 PULSE_EVENT_ID = 999
-ABRUPT_RR_CHANGE_FRACTION = 0.20
 
 
 def _time_window(values: Any, *, path: str) -> tuple[float, float]:
@@ -33,15 +32,6 @@ def _ctps_threshold(value: Any) -> str | float:
     return threshold
 
 
-def _string_tuple(value: Any, *, path: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-        raise TypeError(f"{path} must be a list of strings.")
-    cleaned = tuple(item.strip() for item in value)
-    if any(not item for item in cleaned) or len(set(cleaned)) != len(cleaned):
-        raise ValueError(f"{path} must contain unique, non-empty recording IDs.")
-    return cleaned
-
-
 @dataclass(frozen=True)
 class CardiacReviewSettings:
     """Configuration for direct ECG detection and manual ICA review evidence."""
@@ -53,15 +43,23 @@ class CardiacReviewSettings:
     measurement_window: tuple[float, float] = (0.0, 0.4)
     ctps_threshold: str | float = "auto"
     representative_window_seconds: float = 10.0
-    plausible_heart_rate_bpm: tuple[float, float] = (40.0, 160.0)
-    max_rr_outlier_fraction: float = 0.05
-    min_template_correlation: float = 0.80
-    accepted_questionable_runs: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> CardiacReviewSettings:
         if not isinstance(values, Mapping):
             raise TypeError("ica.cardiac_review must be a mapping.")
+        supported = {
+            "enabled",
+            "ecg_channel",
+            "epoch_window",
+            "baseline",
+            "measurement_window",
+            "ctps_threshold",
+            "representative_window_seconds",
+        }
+        unsupported = sorted(set(values) - supported)
+        if unsupported:
+            raise ValueError("Unsupported ica.cardiac_review settings: " + ", ".join(unsupported))
         settings = cls(
             enabled=bool(values.get("enabled", cls.enabled)),
             ecg_channel=str(values.get("ecg_channel", cls.ecg_channel)).strip(),
@@ -84,20 +82,6 @@ class CardiacReviewSettings:
                     cls.representative_window_seconds,
                 )
             ),
-            plausible_heart_rate_bpm=_time_window(
-                values.get("plausible_heart_rate_bpm", cls.plausible_heart_rate_bpm),
-                path="ica.cardiac_review.plausible_heart_rate_bpm",
-            ),
-            max_rr_outlier_fraction=float(
-                values.get("max_rr_outlier_fraction", cls.max_rr_outlier_fraction)
-            ),
-            min_template_correlation=float(
-                values.get("min_template_correlation", cls.min_template_correlation)
-            ),
-            accepted_questionable_runs=_string_tuple(
-                values.get("accepted_questionable_runs", list(cls.accepted_questionable_runs)),
-                path="ica.cardiac_review.accepted_questionable_runs",
-            ),
         )
         if not settings.ecg_channel:
             raise ValueError("ica.cardiac_review.ecg_channel must not be empty.")
@@ -110,10 +94,6 @@ class CardiacReviewSettings:
                 raise ValueError(f"ica.cardiac_review.{name} must lie inside epoch_window.")
         if settings.representative_window_seconds <= 0:
             raise ValueError("ica.cardiac_review.representative_window_seconds must be positive.")
-        if not 0 <= settings.max_rr_outlier_fraction <= 1:
-            raise ValueError("ica.cardiac_review.max_rr_outlier_fraction must be in [0, 1].")
-        if not 0 <= settings.min_template_correlation <= 1:
-            raise ValueError("ica.cardiac_review.min_template_correlation must be in [0, 1].")
         return settings
 
 
@@ -123,18 +103,6 @@ class EcgDetection:
 
     events: np.ndarray
     average_pulse_bpm: float
-
-
-@dataclass(frozen=True)
-class EcgDetectionQuality:
-    """Physiological and waveform-consistency checks for one run's R peaks."""
-
-    median_heart_rate_bpm: float
-    rr_outlier_fraction: float
-    abrupt_rr_change_fraction: float
-    median_template_correlation: float
-    reliable: bool
-    reason: str
 
 
 @dataclass(frozen=True)
@@ -148,15 +116,11 @@ class RunCardiacReview:
     rr_times: np.ndarray
     heart_rate_bpm: np.ndarray
     locked_times: np.ndarray
-    locked_ecg_mv: np.ndarray
     before_gfp_uv: np.ndarray
     after_gfp_uv: np.ndarray
-    attenuation_percent: float
-    heartbeat_count: int
+    r_locked_epoch_count: int
     average_pulse_bpm: float
     events: np.ndarray
-    quality: EcgDetectionQuality
-    included_in_component_review: bool
     before_topography_uv: np.ndarray
     after_topography_uv: np.ndarray
     topography_time: float
@@ -169,11 +133,12 @@ class ComponentCardiacReview:
     run_ids: tuple[str, ...]
     times: np.ndarray
     run_mean_z: np.ndarray
-    abs_correlations: np.ndarray
+    correlation_scores: np.ndarray
     ctps_scores: np.ndarray
     correlation_flags: np.ndarray
     ctps_flags: np.ndarray
-    heartbeat_counts: np.ndarray
+    r_locked_epoch_counts: np.ndarray
+    run_ecg_z: np.ndarray
 
 
 def _validate_ecg_channel(raw: mne.io.BaseRaw, channel: str) -> None:
@@ -255,53 +220,6 @@ def standardize_source_epoch_runs(
     return [values / robust_scale[None, :, None] for values in centered_runs]
 
 
-def assess_ecg_detection_quality(
-    peak_times: np.ndarray,
-    *,
-    template_correlations: np.ndarray,
-    settings: CardiacReviewSettings,
-) -> EcgDetectionQuality:
-    """Grade R-peak timing and ECG-template consistency for one run."""
-    peaks = np.asarray(peak_times, dtype=float)
-    correlations = np.asarray(template_correlations, dtype=float)
-    if peaks.ndim != 1 or len(peaks) < 3 or np.any(np.diff(peaks) <= 0):
-        raise ValueError("ECG peak times must be a strictly increasing one-dimensional array.")
-    if correlations.ndim != 1 or len(correlations) != len(peaks):
-        raise ValueError("ECG template correlations must match the detected peak count.")
-    if np.any(~np.isfinite(correlations)):
-        raise ValueError("ECG template correlations contain non-finite values.")
-
-    rr_intervals = np.diff(peaks)
-    heart_rate = 60.0 / rr_intervals
-    minimum_bpm, maximum_bpm = settings.plausible_heart_rate_bpm
-    rr_outliers = (heart_rate < minimum_bpm) | (heart_rate > maximum_bpm)
-    relative_rr_change = np.abs(np.diff(rr_intervals)) / rr_intervals[:-1]
-    rr_outlier_fraction = float(rr_outliers.mean())
-    median_template_correlation = float(np.median(correlations))
-    issues = []
-    if rr_outlier_fraction > settings.max_rr_outlier_fraction:
-        issues.append("implausible RR intervals")
-    if median_template_correlation < settings.min_template_correlation:
-        issues.append("inconsistent ECG templates")
-    return EcgDetectionQuality(
-        median_heart_rate_bpm=float(np.median(heart_rate)),
-        rr_outlier_fraction=rr_outlier_fraction,
-        abrupt_rr_change_fraction=float(np.mean(relative_rr_change > ABRUPT_RR_CHANGE_FRACTION)),
-        median_template_correlation=median_template_correlation,
-        reliable=not issues,
-        reason="; ".join(issues) if issues else "passed configured quality checks",
-    )
-
-
-def include_run_in_component_review(
-    recording_id: str,
-    quality: EcgDetectionQuality,
-    settings: CardiacReviewSettings,
-) -> bool:
-    """Include reliable runs or exact recording IDs explicitly accepted by the user."""
-    return quality.reliable or recording_id in settings.accepted_questionable_runs
-
-
 def component_cardiac_evidence_table(
     review: ComponentCardiacReview,
     *,
@@ -311,7 +229,7 @@ def component_cardiac_evidence_table(
     run_count, component_count, _ = review.run_mean_z.shape
     expected_shape = (run_count, component_count)
     score_arrays = (
-        review.abs_correlations,
+        review.correlation_scores,
         review.ctps_scores,
         review.correlation_flags,
         review.ctps_flags,
@@ -324,29 +242,12 @@ def component_cardiac_evidence_table(
         statuses["component"].to_numpy(), expected_components
     ):
         raise ValueError("ICA component statuses do not align with cardiac evidence.")
-    correlation_count = review.correlation_flags.sum(axis=0)
-    ctps_count = review.ctps_flags.sum(axis=0)
-    evidence = pd.DataFrame(
-        {
-            "component": expected_components,
-            "median_abs_ecg_correlation": np.median(review.abs_correlations, axis=0),
-            "max_abs_ecg_correlation": np.max(review.abs_correlations, axis=0),
-            "correlation_flagged_run_count": correlation_count,
-            "median_ctps_score": np.median(review.ctps_scores, axis=0),
-            "max_ctps_score": np.max(review.ctps_scores, axis=0),
-            "ctps_flagged_run_count": ctps_count,
-            "manual_review_recommended": (correlation_count + ctps_count) > 0,
-            "included_run_count": run_count,
-            "heartbeat_count": int(review.heartbeat_counts.sum()),
-        }
-    )
-    current = statuses[["component", "status", "status_description"]].rename(
+    return statuses[["component", "status", "status_description"]].rename(
         columns={
             "status": "current_ica_status",
             "status_description": "current_status_description",
         }
     )
-    return evidence.merge(current, on="component", validate="one_to_one")
 
 
 def component_run_cardiac_evidence_table(
@@ -360,11 +261,11 @@ def component_run_cardiac_evidence_table(
                 {
                     "recording_id": recording_id,
                     "component": component,
-                    "abs_ecg_correlation": review.abs_correlations[run_index, component],
-                    "ctps_score": review.ctps_scores[run_index, component],
+                    "mne_ecg_correlation_score": review.correlation_scores[run_index, component],
+                    "mne_ctps_score": review.ctps_scores[run_index, component],
                     "mne_correlation_flag": review.correlation_flags[run_index, component],
-                    "ctps_flag": review.ctps_flags[run_index, component],
-                    "heartbeat_count": review.heartbeat_counts[run_index],
+                    "mne_ctps_flag": review.ctps_flags[run_index, component],
+                    "r_locked_epoch_count": review.r_locked_epoch_counts[run_index],
                 }
             )
     return pd.DataFrame(rows)
@@ -423,25 +324,12 @@ def _cardiac_locked_gfp(
     )
 
 
-def _ecg_template_correlations(
-    epochs: mne.BaseEpochs,
-    *,
-    channel: str,
-) -> np.ndarray:
-    template_window = (epochs.times >= -0.1) & (epochs.times <= 0.2)
-    if template_window.sum() < 3:
-        raise ValueError("ECG template window contains fewer than three samples.")
-    waveforms = epochs.get_data(picks=[channel])[:, 0, template_window]
-    waveform_std = waveforms.std(axis=1, keepdims=True)
-    if np.any(~np.isfinite(waveform_std)) or np.any(waveform_std <= 0):
-        raise ValueError("ECG epochs contain a zero or invalid template standard deviation.")
-    standardized = (waveforms - waveforms.mean(axis=1, keepdims=True)) / waveform_std
-    template = np.median(standardized, axis=0)
-    template_std = template.std()
-    if not np.isfinite(template_std) or template_std <= 0:
-        raise ValueError("Median ECG template has a zero or invalid standard deviation.")
-    standardized_template = (template - template.mean()) / template_std
-    return np.mean(standardized * standardized_template[None, :], axis=1)
+def _standardized_average_ecg(epochs: mne.BaseEpochs, *, channel: str) -> np.ndarray:
+    average = epochs.get_data(picks=[channel]).mean(axis=0)[0]
+    scale = float(average.std())
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("Average R-locked ECG has a zero or invalid standard deviation.")
+    return (average - average.mean()) / scale
 
 
 def _representative_ecg(
@@ -496,11 +384,6 @@ def _build_run_cardiac_review(
     )
     if not measurement_mask.any():
         raise ValueError("Cardiac review measurement window contains no samples.")
-    before_rms = float(np.sqrt(np.mean(before_gfp[measurement_mask] ** 2)))
-    after_rms = float(np.sqrt(np.mean(after_gfp[measurement_mask] ** 2)))
-    if before_rms == 0:
-        raise ValueError(f"{recording_id}: pre-ICA cardiac-locked EEG RMS is zero.")
-
     representative_times, representative_ecg, representative_peaks = _representative_ecg(
         raw,
         detection.events,
@@ -517,16 +400,6 @@ def _build_run_cardiac_review(
         ica=ica,
         settings=settings,
     )
-    locked_ecg = ecg_epochs.get_data(picks=[settings.ecg_channel]).mean(axis=0)[0] * 1e3
-    retained_peak_times = (ecg_epochs.events[:, 0] - raw.first_samp) / float(raw.info["sfreq"])
-    quality = assess_ecg_detection_quality(
-        retained_peak_times,
-        template_correlations=_ecg_template_correlations(
-            ecg_epochs,
-            channel=settings.ecg_channel,
-        ),
-        settings=settings,
-    )
     measurement_indices = np.flatnonzero(measurement_mask)
     peak_index = measurement_indices[np.argmax(before_gfp[measurement_mask])]
     return RunCardiacReview(
@@ -537,19 +410,11 @@ def _build_run_cardiac_review(
         rr_times=peak_times[1:],
         heart_rate_bpm=60.0 / rr_intervals,
         locked_times=ecg_epochs.times.copy(),
-        locked_ecg_mv=locked_ecg,
         before_gfp_uv=before_gfp,
         after_gfp_uv=after_gfp,
-        attenuation_percent=100.0 * (1.0 - after_rms / before_rms),
-        heartbeat_count=len(ecg_epochs),
+        r_locked_epoch_count=len(ecg_epochs),
         average_pulse_bpm=detection.average_pulse_bpm,
         events=ecg_epochs.events.copy(),
-        quality=quality,
-        included_in_component_review=include_run_in_component_review(
-            recording_id,
-            quality,
-            settings,
-        ),
         before_topography_uv=before_evoked[:, peak_index],
         after_topography_uv=after_evoked[:, peak_index],
         topography_time=float(before_times[peak_index]),
@@ -563,24 +428,18 @@ def _build_component_cardiac_review(
     ica: mne.preprocessing.ICA,
     settings: CardiacReviewSettings,
 ) -> ComponentCardiacReview:
-    included = [
-        (raw, review)
-        for raw, review in zip(raws, run_reviews, strict=True)
-        if review.included_in_component_review
-    ]
-    if not included:
-        raise ValueError(
-            "No ECG runs passed quality checks or were listed in accepted_questionable_runs."
-        )
+    if len(raws) != len(run_reviews) or not raws:
+        raise ValueError("Raw runs and ECG run reviews must be non-empty and aligned.")
     source_data_runs = []
     run_ids = []
-    heartbeat_counts = []
+    r_locked_epoch_counts = []
     correlation_scores = []
     correlation_flags = []
     ctps_scores = []
     ctps_flags = []
+    ecg_runs = []
     source_times = None
-    for raw, review in included:
+    for raw, review in zip(raws, run_reviews, strict=True):
         epochs = _heartbeat_epochs(raw, review.events, ica=ica, settings=settings)
         correlation_components, run_correlation_scores = ica.find_bads_ecg(
             raw,
@@ -612,12 +471,13 @@ def _build_component_cardiac_review(
         run_ctps_flags = np.zeros(int(ica.n_components_), dtype=bool)
         run_ctps_flags[np.asarray(run_ctps_components, dtype=int)] = True
         run_ids.append(review.recording_id)
-        heartbeat_counts.append(len(epochs))
+        r_locked_epoch_counts.append(len(epochs))
         source_data_runs.append(sources.get_data(copy=False))
-        correlation_scores.append(np.abs(run_correlation_scores))
+        correlation_scores.append(run_correlation_scores)
         correlation_flags.append(run_correlation_flags)
         ctps_scores.append(run_ctps_scores)
         ctps_flags.append(run_ctps_flags)
+        ecg_runs.append(_standardized_average_ecg(epochs, channel=settings.ecg_channel))
 
     standardized_runs = standardize_source_epoch_runs(
         source_data_runs,
@@ -628,11 +488,12 @@ def _build_component_cardiac_review(
         run_ids=tuple(run_ids),
         times=source_times,
         run_mean_z=np.stack([values.mean(axis=0) for values in standardized_runs]),
-        abs_correlations=np.stack(correlation_scores),
+        correlation_scores=np.stack(correlation_scores),
         ctps_scores=np.stack(ctps_scores),
         correlation_flags=np.stack(correlation_flags),
         ctps_flags=np.stack(ctps_flags),
-        heartbeat_counts=np.asarray(heartbeat_counts, dtype=int),
+        r_locked_epoch_counts=np.asarray(r_locked_epoch_counts, dtype=int),
+        run_ecg_z=np.stack(ecg_runs),
     )
 
 
@@ -640,12 +501,9 @@ __all__ = [
     "CardiacReviewSettings",
     "ComponentCardiacReview",
     "EcgDetection",
-    "EcgDetectionQuality",
     "RunCardiacReview",
-    "assess_ecg_detection_quality",
     "component_cardiac_evidence_table",
     "component_run_cardiac_evidence_table",
     "detect_ecg_events",
-    "include_run_in_component_review",
     "standardize_source_epoch_runs",
 ]

@@ -146,10 +146,9 @@ Set ``ica.cardiac_review.enabled: true`` to add signal-detected ECG diagnostics
 before manual ICA review. The report shows detected R peaks and heart-rate
 continuity for every run, R-locked EEG global field power before and after the
 current provisional ICA exclusions, and a component carousel combining
-topography, R-locked source activity, ECG correlation, and CTPS evidence.
-RR plausibility and ECG-template consistency grade each run. Questionable runs
-remain in the report but do not contribute to component evidence unless their
-exact IDs are listed in ``ica.cardiac_review.accepted_questionable_runs``.
+topography, R-locked source activity, normalized ECG timing, and MNE
+ECG-correlation and CTPS outputs. Every run and component is displayed. The
+pipeline adds no custom quality grade, score, ranking, or review recommendation.
 
 This feature reads the ECG signal directly and does not require Analyzer R
 annotations. It is review-only: no component is automatically excluded. Enabling
@@ -162,9 +161,9 @@ it with a missing or incorrectly typed ECG channel is a hard error.
 
 The report writes three tidy tables beside the subject report:
 
-* ``*_desc-icaecg_components.tsv`` — component-level summaries and current ICA status;
+* ``*_desc-icaecg_components.tsv`` — current ICA/ICLabel status for each component;
 * ``*_desc-icaecg_componentruns.tsv`` — one ECG-correlation and CTPS row per run/component;
-* ``*_desc-icaecg_runs.tsv`` — R-peak quality and correction-quality metrics per run.
+* ``*_desc-icaecg_runs.tsv`` — R-locked epoch count and MNE average pulse estimate per run.
 
 Band-specific ICA report
 ------------------------

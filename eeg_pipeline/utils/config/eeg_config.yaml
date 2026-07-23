@@ -309,11 +309,6 @@ ica:
     measurement_window: [0.0, 0.4]
     ctps_threshold: "auto"
     representative_window_seconds: 10.0
-    plausible_heart_rate_bpm: [40.0, 160.0]
-    max_rr_outlier_fraction: 0.05
-    min_template_correlation: 0.80
-    # Exact recording IDs explicitly accepted despite failing ECG quality checks.
-    accepted_questionable_runs: []
   band_specific_report:
     enabled: false
     fit_decim: 2

@@ -20,7 +20,7 @@ from eeg_pipeline.preprocessing.ica_cardiac_review import (
 
 CARDIAC_REPORT_TITLES = (
     "How to review ECG artifacts",
-    "ECG run quality summary",
+    "ECG detection summary",
     "ECG detection and provisional correction by run",
     "ICA components: R-locked cardiac evidence",
 )
@@ -30,7 +30,6 @@ def _plot_run_cardiac_review(
     review: RunCardiacReview,
     *,
     ica: mne.preprocessing.ICA,
-    settings: CardiacReviewSettings,
 ):
     import matplotlib.pyplot as plt
 
@@ -52,9 +51,7 @@ def _plot_run_cardiac_review(
         ylabel="ECG (mV)",
     )
 
-    minimum_bpm, maximum_bpm = settings.plausible_heart_rate_bpm
     heart_rate_axis = axes["heart_rate"]
-    plausible = (review.heart_rate_bpm >= minimum_bpm) & (review.heart_rate_bpm <= maximum_bpm)
     heart_rate_axis.plot(
         review.rr_times,
         review.heart_rate_bpm,
@@ -62,32 +59,18 @@ def _plot_run_cardiac_review(
         linewidth=0.8,
         alpha=0.75,
     )
-    heart_rate_axis.scatter(
-        review.rr_times[plausible],
-        review.heart_rate_bpm[plausible],
-        color="#6B4C9A",
-        s=9,
-    )
-    heart_rate_axis.scatter(
-        review.rr_times[~plausible],
-        review.heart_rate_bpm[~plausible],
-        color="#C23B22",
-        s=14,
-        label=f"Outside {minimum_bpm:g}–{maximum_bpm:g} bpm",
-    )
+    heart_rate_axis.scatter(review.rr_times, review.heart_rate_bpm, color="#6B4C9A", s=9)
     heart_rate_axis.axhline(
-        review.quality.median_heart_rate_bpm,
+        np.median(review.heart_rate_bpm),
         color="0.35",
         linestyle="--",
         linewidth=1.0,
     )
     heart_rate_axis.set(
-        title=f"Beat-to-beat rate · {review.quality.rr_outlier_fraction:.1%} implausible",
+        title="Beat-to-beat heart rate",
         xlabel="Recording time (s)",
         ylabel="Heart rate (bpm)",
     )
-    if (~plausible).any():
-        heart_rate_axis.legend(frameon=False, fontsize=8)
 
     axes["gfp"].plot(
         review.locked_times,
@@ -103,10 +86,7 @@ def _plot_run_cardiac_review(
     )
     axes["gfp"].axvline(0.0, color="0.35", linestyle="--", linewidth=1.0)
     axes["gfp"].set(
-        title=(
-            "R-locked EEG global field power\n"
-            f"{review.attenuation_percent:+.1f}% attenuation in configured window"
-        ),
+        title="R-locked EEG global field power",
         xlabel="Time from R peak (s)",
         ylabel="GFP (µV)",
     )
@@ -136,17 +116,9 @@ def _plot_run_cardiac_review(
         axis = axes[name]
         axis.grid(alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
-    quality_label = "RELIABLE" if review.quality.reliable else "QUESTIONABLE"
-    inclusion_label = (
-        "included in component evidence"
-        if review.included_in_component_review
-        else "excluded from component evidence"
-    )
     figure.suptitle(
-        f"{review.recording_id} · {quality_label}: {review.quality.reason} · "
-        f"{inclusion_label}\n{review.heartbeat_count} retained beats · "
-        f"median {review.quality.median_heart_rate_bpm:.1f} bpm · "
-        f"median template r={review.quality.median_template_correlation:.3f}"
+        f"{review.recording_id} · {review.r_locked_epoch_count} R-locked epochs · "
+        f"MNE average pulse {review.average_pulse_bpm:.1f} bpm"
     )
     plt.close(figure)
     return figure
@@ -161,6 +133,7 @@ def _plot_component_cardiac_review(
     status_description: str,
 ):
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
 
     figure, axes = plt.subplots(1, 3, figsize=(13.5, 3.8), layout="constrained")
     mne.viz.plot_topomap(
@@ -177,17 +150,34 @@ def _plot_component_cardiac_review(
     lower, upper = np.quantile(run_means, [0.16, 0.84], axis=0)
     for run_mean in run_means:
         axes[1].plot(review.times, run_mean, color="#7FA8B8", alpha=0.35, linewidth=0.8)
-    axes[1].plot(review.times, median, color="#276B8A", linewidth=1.8, label="Run median")
+    axes[1].plot(review.times, median, color="#276B8A", linewidth=1.8, label="ICA median")
     axes[1].fill_between(review.times, lower, upper, color="#276B8A", alpha=0.18)
     axes[1].axvline(0.0, color="0.35", linestyle="--", linewidth=1.0)
     axes[1].set(
-        title=f"R-locked run averages (n={len(review.run_ids)} runs)",
+        title=f"R-locked ICA waveform and ECG timing ({len(review.run_ids)} runs)",
         xlabel="Time from R peak (s)",
         ylabel="Baseline-standardized amplitude (z)",
     )
-    axes[1].legend(frameon=False, fontsize=8)
+    ecg_axis = axes[1].twinx()
+    ecg_axis.plot(
+        review.times,
+        np.median(review.run_ecg_z, axis=0),
+        color="0.35",
+        linestyle="--",
+        linewidth=1.2,
+        label="ECG median",
+    )
+    ecg_axis.set_ylabel("Normalized ECG", color="0.35")
+    source_handles, source_labels = axes[1].get_legend_handles_labels()
+    ecg_handles, ecg_labels = ecg_axis.get_legend_handles_labels()
+    axes[1].legend(
+        source_handles + ecg_handles,
+        source_labels + ecg_labels,
+        frameon=False,
+        fontsize=8,
+    )
 
-    correlation = review.abs_correlations[:, component]
+    correlation = review.correlation_scores[:, component]
     ctps = review.ctps_scores[:, component]
     run_positions = np.linspace(-0.16, 0.16, len(review.run_ids))
     run_colors = plt.get_cmap("tab10")(np.linspace(0.0, 0.7, len(review.run_ids)))
@@ -199,8 +189,8 @@ def _plot_component_cardiac_review(
             offset,
             correlation[run_index],
             color=run_colors[run_index],
-            edgecolor=("#C23B22" if review.correlation_flags[run_index, component] else "white"),
-            linewidth=1.8,
+            edgecolor="white",
+            linewidth=0.8,
             s=32,
             label=short_id,
         )
@@ -208,35 +198,41 @@ def _plot_component_cardiac_review(
             1.0 + offset,
             ctps[run_index],
             color=run_colors[run_index],
-            edgecolor="#C23B22" if review.ctps_flags[run_index, component] else "white",
-            linewidth=1.8,
+            edgecolor="white",
+            linewidth=0.8,
             s=32,
         )
-    axes[2].plot([-0.18, 0.18], [np.median(correlation)] * 2, color="0.2", linewidth=1.5)
-    axes[2].plot([0.82, 1.18], [np.median(ctps)] * 2, color="0.2", linewidth=1.5)
+        if review.correlation_flags[run_index, component]:
+            axes[2].scatter(offset, correlation[run_index], color="#C23B22", marker="x", s=52)
+        if review.ctps_flags[run_index, component]:
+            axes[2].scatter(
+                1.0 + offset,
+                ctps[run_index],
+                color="#C23B22",
+                marker="x",
+                s=52,
+            )
+    lower_limit = min(-0.3, 1.15 * float(correlation.min()))
     upper_limit = max(0.3, 1.15 * float(max(correlation.max(), ctps.max())))
     axes[2].set(
-        title="Run-resolved cardiac evidence",
+        title="MNE find_bads_ecg scores by run",
         ylabel="Score",
         xticks=[0, 1],
-        xticklabels=["|ECG correlation|", "CTPS"],
+        xticklabels=["ECG correlation", "CTPS"],
         xlim=(-0.35, 1.35),
-        ylim=(0.0, upper_limit),
+        ylim=(lower_limit, upper_limit),
     )
-    axes[2].legend(frameon=False, fontsize=7, ncol=2)
+    score_handles, score_labels = axes[2].get_legend_handles_labels()
+    score_handles.append(
+        Line2D([], [], color="#C23B22", marker="x", linestyle="none", label="MNE flag")
+    )
+    score_labels.append("MNE flag")
+    axes[2].legend(score_handles, score_labels, frameon=False, fontsize=7, ncol=2)
     for axis in axes[1:]:
         axis.grid(axis="y", alpha=0.2)
         axis.spines[["top", "right"]].set_visible(False)
-    correlation_count = int(review.correlation_flags[:, component].sum())
-    ctps_count = int(review.ctps_flags[:, component].sum())
-    recommendation = "REVIEW" if correlation_count + ctps_count else "not ECG-flagged"
     description = status_description or "No exclusion reason recorded"
-    figure.suptitle(
-        f"ICA{component:03d} · ECG: {recommendation} "
-        f"(correlation {correlation_count}/{len(review.run_ids)}, "
-        f"CTPS {ctps_count}/{len(review.run_ids)}) · "
-        f"Current ICA status: {status} — {description}"
-    )
+    figure.suptitle(f"ICA{component:03d} · Current ICA status: {status} — {description}")
     plt.close(figure)
     return figure
 
@@ -268,20 +264,26 @@ def _organize_cardiac_review(report: mne.Report) -> None:
     report.reorder(remaining[:insertion_index] + cardiac_indices + remaining[insertion_index:])
 
 
+def _clear_cardiac_review(report: mne.Report) -> None:
+    titles = {element.name for element in report._content if "ica-cardiac-review" in element.tags}
+    for title in titles:
+        report.remove(title=title, tags=("ica-cardiac-review",), remove_all=True)
+
+
 def _cardiac_review_guide_html(settings: CardiacReviewSettings) -> str:
     ctps_threshold = str(settings.ctps_threshold)
     return (
         "<p><strong>Manual ECG review; no components are excluded here.</strong> "
         "R peaks are detected directly from the configured ECG signal, so this review does "
         "not depend on BrainVision Analyzer R markers.</p>"
-        "<p>Inspect each run for plausible peak placement and heart-rate continuity. Then "
-        "review components with converging scalp, R-locked, ECG-correlation, and CTPS "
-        "evidence. Red score bars indicate an MNE algorithmic flag and are evidence for "
-        "manual judgment, not an automatic rejection.</p>"
+        "<p>Inspect the detected peaks, beat-to-beat heart rate, R-locked EEG, component "
+        "topography, and R-locked component waveform directly. Correlation and CTPS scores "
+        "and red × markers come from MNE <code>find_bads_ecg</code>. They are displayed "
+        "without additional pipeline classification or recommendation.</p>"
         f"<p>R-locked epoch: {settings.epoch_window[0]:g} to "
         f"{settings.epoch_window[1]:g} s; baseline: {settings.baseline[0]:g} to "
-        f"{settings.baseline[1]:g} s; CTPS threshold: {ctps_threshold}. "
-        "Only reliable or explicitly accepted runs contribute to component evidence.</p>"
+        f"{settings.baseline[1]:g} s; MNE CTPS threshold: {ctps_threshold}. "
+        "All runs contribute to the component displays.</p>"
     )
 
 
@@ -298,21 +300,13 @@ def _component_statuses(path: Path, *, component_count: int) -> pd.DataFrame:
 
 
 def run_cardiac_review_table(run_reviews: list[RunCardiacReview]) -> pd.DataFrame:
-    """Create run-level R-peak reliability and provisional attenuation QC."""
+    """Create a neutral summary of MNE ECG detection outputs by run."""
     return pd.DataFrame(
         [
             {
                 "recording_id": review.recording_id,
-                "detected_heartbeat_count": review.heartbeat_count,
-                "average_pulse_bpm": review.average_pulse_bpm,
-                "median_heart_rate_bpm": review.quality.median_heart_rate_bpm,
-                "rr_outlier_fraction": review.quality.rr_outlier_fraction,
-                "abrupt_rr_change_fraction": review.quality.abrupt_rr_change_fraction,
-                "median_template_correlation": review.quality.median_template_correlation,
-                "detection_quality": "reliable" if review.quality.reliable else "questionable",
-                "quality_reason": review.quality.reason,
-                "included_in_component_review": review.included_in_component_review,
-                "cardiac_gfp_attenuation_percent": review.attenuation_percent,
+                "r_locked_epoch_count": review.r_locked_epoch_count,
+                "mne_average_pulse_bpm": review.average_pulse_bpm,
             }
             for review in run_reviews
         ]
@@ -379,6 +373,7 @@ def generate_ica_cardiac_review(
     )
 
     report = mne.open_report(report_path)
+    _clear_cardiac_review(report)
     section = "ICA cardiac artifact review"
     report.add_html(
         html=_cardiac_review_guide_html(settings),
@@ -394,15 +389,13 @@ def generate_ica_cardiac_review(
             border=0,
             classes="table table-striped table-sm",
         ),
-        title="ECG run quality summary",
+        title="ECG detection summary",
         section=section,
-        tags=("ica", "ecg", "ica-cardiac-review", "ecg-run-quality"),
+        tags=("ica", "ecg", "ica-cardiac-review", "ecg-detection-summary"),
         replace=True,
     )
     report.add_figure(
-        fig=[
-            _plot_run_cardiac_review(review, ica=ica, settings=settings) for review in run_reviews
-        ],
+        fig=[_plot_run_cardiac_review(review, ica=ica) for review in run_reviews],
         title="ECG detection and provisional correction by run",
         caption=[review.recording_id for review in run_reviews],
         section=section,

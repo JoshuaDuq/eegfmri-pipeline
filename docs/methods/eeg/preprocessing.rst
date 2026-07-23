@@ -348,20 +348,20 @@ the configured ECG channel with MNE's ECG detector. This diagnostic therefore
 remains available when BrainVision Analyzer did not preserve or detect every R
 marker. Each run shows a representative ECG segment with detected peaks,
 beat-to-beat heart rate, and R-locked EEG global field power before versus after
-the current provisional ICA exclusions. RR plausibility and heartbeat-template
-consistency grade every run. Questionable runs remain visible but are excluded
-from component evidence unless their exact recording IDs are listed in
-``accepted_questionable_runs``.
+the current provisional ICA exclusions. All runs remain visible and contribute
+to the component display; the pipeline does not assign a run-quality grade.
 
 The report then presents one carousel slide per standard ICA component. Each
 slide combines the component topography, run-level R-locked source averages,
-and run-resolved ECG-correlation and CTPS scores. The median curve and 16th–84th
+normalized ECG timing, and MNE run-resolved ECG-correlation and CTPS outputs. The
+median curve and 16th–84th
 percentile band summarize variation between runs rather than treating individual
 heartbeats as independent subjects. CTPS uses MNE's sampling-aware automatic
-threshold by default. Algorithmic flags identify components that merit manual
-review; they never modify ``ICA.exclude`` or the component TSV status. The slide
-also states the component's current ICA status and exclusion reason. The evidence
-is placed before the frequency-specific dossiers so it can inform manual review.
+threshold by default. MNE flags are displayed without a pipeline-specific score,
+classification, ranking, or recommendation and never modify ``ICA.exclude`` or
+the component TSV status. The slide also states the component's current ICA status
+and exclusion reason. The evidence is placed before the frequency-specific
+dossiers so it can inform manual review.
 
 ICA Component Review and Exploratory Band Appendix
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
