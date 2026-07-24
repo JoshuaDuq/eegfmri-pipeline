@@ -18,7 +18,7 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 		args = append(args, "--no-pyprep")
 	}
 	if !m.prepUseIcalabel {
-		args = append(args, "--no-icalabel")
+		appendSetOverride("ica.use_icalabel", false)
 	}
 	if m.prepNJobs != 1 {
 		args = append(args, "--n-jobs", fmt.Sprintf("%d", m.prepNJobs))
@@ -86,9 +86,6 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if strings.TrimSpace(m.icaLabelsToKeep) != "" && m.icaLabelsToKeep != "brain,other" {
 		args = append(args, "--ica-labels-to-keep")
 		args = append(args, splitCSVList(m.icaLabelsToKeep)...)
-	}
-	if m.prepKeepMnebidsBads {
-		args = append(args, "--keep-mnebids-bads")
 	}
 
 	// PyPREP advanced options

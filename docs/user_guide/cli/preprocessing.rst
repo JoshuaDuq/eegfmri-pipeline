@@ -1,7 +1,7 @@
 Preprocessing
 =============
 
-Automated EEG preprocessing: bad-channel detection, ICA, and epoching.
+Automated EEG preprocessing: bad-channel detection, ICA review, and epoching.
 
 .. code-block:: bash
 
@@ -16,17 +16,14 @@ Modes
 
    * - Mode
      - What it runs
-   * - ``full``
-     - Bad-channel detection → ICA fitting → ICA labeling → epoch creation,
-       in sequence. Use for a fresh subject.
    * - ``bad-channels``
      - PyPREP bad-channel detection only (deviation + correlation, optional RANSAC).
        Updates ``channels.tsv``. Cross-run synchronization is optional via
        ``pyprep.bad_channel_sync_policy=subject_union``.
    * - ``ica``
-     - Fits ICA (extended Infomax, 99% variance, 1 Hz high-pass) via
-       MNE-BIDS-Pipeline, then labels components with ICLabel
-       (threshold ``p > 0.8``; keeps ``brain`` and ``other`` labels).
+     - Fits a near-rank ICA decomposition via MNE-BIDS-Pipeline and labels
+       components with its native ICLabel integration. Review the generated
+       component table before running ``epochs``.
    * - ``epochs``
      - Creates epochs from the ICA-cleaned signal. Default window:
        ``tmin = −7 s``, ``tmax = 15 s``, baseline ``[−0.2, 0] s``,
@@ -55,9 +52,6 @@ Key Options
    * - ``--reject-method``
      - Epoch rejection strategy: ``none``, ``autoreject_local``, or ``autoreject_global``
      - ``autoreject_local``
-   * - ``--no-icalabel``
-     - Skip ICLabel; fall back to MNE-BIDS heuristic component labeling
-     - disabled
    * - ``--no-pyprep``
      - Skip PyPREP bad-channel detection entirely
      - disabled
@@ -66,7 +60,7 @@ Key Options
      - from config (default: ``extended_infomax``)
    * - ``--ica-components``
      - Number of ICA components (int) or explained-variance fraction (float < 1)
-     - from config (default: ``0.99``)
+     - from config (default: near data rank)
    * - ``--ica-l-freq``
      - High-pass filter applied before ICA fitting (Hz)
      - from config (default: ``1.0``)
@@ -108,39 +102,158 @@ Examples
 
 .. code-block:: bash
 
-   # End-to-end preprocessing for a single subject
-   eeg-pipeline preprocessing full --subject 0001
-
-   # Full preprocessing across all subjects (in parallel at the subject level)
-   eeg-pipeline preprocessing full --all-subjects
-
    # Bad-channel detection with RANSAC (slower but more sensitive)
    eeg-pipeline preprocessing bad-channels --subject 0001 --ransac
 
-   # ICA only (assumes bad-channels was already run)
+   # Fit and label ICA (assumes bad-channels was already run)
    eeg-pipeline preprocessing ica --subject 0001
+
+   # Also append exploratory band-specific ICA diagnostics to the MNE report
+   eeg-pipeline preprocessing ica --subject 0001 \
+     --set ica.band_specific_report.enabled=true
+
+   # Review the MNE-BIDS component table, then acknowledge review and create epochs
+   eeg-pipeline preprocessing epochs --subject 0001 \
+     --set ica.manual_review_complete=true
 
    # Custom epoch window
    eeg-pipeline preprocessing epochs --subject 0001 \
-     --tmin -7.0 --tmax 15.0 --reject-method autoreject_local
-
-   # Skip ICLabel (use heuristic ICA classification)
-   eeg-pipeline preprocessing full --subject 0001 --no-icalabel
-
-   # SSP instead of ICA for artifact removal
-   eeg-pipeline preprocessing full --subject 0001 --spatial-filter ssp
+     --tmin -7.0 --tmax 15.0 --reject-method autoreject_local \
+     --set ica.manual_review_complete=true
 
    # Resting-state mode (fixed-length epochs; no events.tsv conditions required)
-   eeg-pipeline preprocessing full --subject 0001 --task-is-rest
+   eeg-pipeline preprocessing ica --subject 0001 --task-is-rest
+   # Review components before continuing.
+   eeg-pipeline preprocessing epochs --subject 0001 --task-is-rest \
+     --set ica.manual_review_complete=true
 
    # Simultaneous EEG–fMRI: align EEG onset to first fMRI volume
-   eeg-pipeline preprocessing epochs --subject 0001 --trim-to-first-volume
+   eeg-pipeline preprocessing epochs --subject 0001 --trim-to-first-volume \
+     --set ica.manual_review_complete=true
 
 .. note::
 
-   The ``full`` mode runs all stages in order. If a stage fails mid-way,
-   re-run only the failed mode (e.g., ``ica`` or ``epochs``) after fixing
-   the issue. Each mode is idempotent and will overwrite its own outputs.
+   ``ica`` and ``epochs`` are intentionally separate so artifact-component
+   exclusions can be reviewed before ICA is applied. When
+   ``ica.require_manual_review`` is enabled, ``epochs`` fails until
+   ``ica.manual_review_complete`` is explicitly set to ``true``. Each mode is
+   idempotent and overwrites its own outputs.
+
+Direct ECG review
+-----------------
+
+Set ``ica.cardiac_review.enabled: true`` to add signal-detected ECG diagnostics
+before manual ICA review. The report shows detected R peaks and heart-rate
+continuity for every run, R-locked EEG global field power before and after the
+current provisional ICA exclusions, and a component carousel combining
+topography, R-locked source activity, normalized ECG timing, and MNE
+ECG-correlation and CTPS outputs. Every run and component is displayed. The
+pipeline adds no custom quality grade, score, ranking, or review recommendation.
+
+This feature reads the ECG signal directly and does not require Analyzer R
+annotations. It is review-only: no component is automatically excluded. Enabling
+it with a missing or incorrectly typed ECG channel is a hard error.
+
+.. code-block:: bash
+
+   eeg-pipeline preprocessing ica --subject 0015 --task thermalactive \
+     --set ica.cardiac_review.enabled=true
+
+The report writes three tidy tables beside the subject report:
+
+* ``*_desc-icaecg_components.tsv`` — current ICA/ICLabel status for each component;
+* ``*_desc-icaecg_componentruns.tsv`` — one ECG-correlation and CTPS row per run/component;
+* ``*_desc-icaecg_runs.tsv`` — R-locked epoch count and MNE average pulse estimate per run.
+
+Band-specific ICA report
+------------------------
+
+Set ``ica.band_specific_report.enabled: true`` to append five authoritative ICA
+component-review sections and five exploratory band-ICA appendix sections to each
+subject's existing MNE HTML report:
+
+* delta + theta (1–8 Hz);
+* alpha (8–13 Hz);
+* beta (13–30 Hz);
+* gamma (30–100 Hz);
+* broadband 1–30 Hz.
+
+The primary review sections apply the same standard broadband ICA model in every
+band, so a component number always identifies the component that can actually be
+retained or excluded. Each carousel slide keeps its topomap, MNE Welch spectrum,
+grand-average TFR, and configured condition comparisons together. These sections
+appear before MNE's standard ICA component section.
+
+The appendix sections come from independent extended-infomax ICAs fitted to
+epochs filtered to each range. They provide exploratory topomaps, spectra, TFRs,
+and ICLabel probabilities, but their component numbers do not correspond across
+bands or to the authoritative standard ICA. TFRs use baseline-relative dB,
+``turbo`` colors, symmetric limits, 1 Hz frequency spacing, and 100 ms time
+spacing. Windows and smoothing are 3 seconds / ±1 Hz for delta-theta, 2 seconds
+/ ±1.5 Hz for alpha, 2 seconds / ±2.5 Hz for beta, and 1 second / ±5 Hz for
+gamma. The fitted ICA and component table are written beneath the subject EEG
+derivative's ``band-specific-ica/`` directory.
+
+Every dossier records the active band, ICLabel result, automatic component status,
+trial counts, DPSS window and smoothing, time/frequency grid, baseline, and whether
+the evidence is provisional or finalized. Condition A and B share a symmetric
+scale; the A-minus-B difference uses a separate symmetric zero-centred scale.
+
+Metadata comparisons
+~~~~~~~~~~~~~~~~~~~~
+
+When comparisons are configured, ``ica`` creates pre-ICA task epochs and appends
+provisional condition TFRs before manual component review. These use every task
+epoch and are labeled ``Provisional — all task epochs``. After review, ``epochs``
+recomputes the same sections from the final retained-trial mask and labels them
+``Finalized — retained epochs``. Each entry names one metadata column and the
+values assigned to group A and group B:
+
+.. code-block:: yaml
+
+   ica:
+     band_specific_report:
+       enabled: true
+       comparisons:
+         - name: high_vs_low_temperature
+           column: stimulus_temp
+           group_a:
+             label: High temperature
+             values: [48.3, 49.3]
+           group_b:
+             label: Low temperature
+             values: [44.3, 45.3]
+         - name: painful_vs_nonpainful
+           column: pain_binary_coded
+           group_a:
+             label: Painful
+             values: [1]
+           group_b:
+             label: Non-painful
+             values: [0]
+
+The report shows group A, group B, and group A minus group B for every component
+and band. A missing column, missing configured value, empty group, or overlapping
+group definition stops the run instead of silently omitting the comparison.
+
+The standard 1–100 Hz ICA remains authoritative for artifact removal. Band-
+specific component numbers do not correspond across sections, their ICLabel
+results are outside ICLabel's validated broadband use, and they never update
+``*_proc-ica_components.tsv`` or control exclusions. This option is disabled by
+default because fitting six additional decompositions is computationally
+expensive.
+
+BrainVision Analyzer inputs
+---------------------------
+
+Set ``preprocessing.brainvision_analyzer.enabled: true`` when scanner-gradient
+and pulse artifacts were corrected in BrainVision Analyzer before BIDS import.
+This enables strict validation of the preserved ``Pulse Artifact/R`` markers,
+marker-locked CTPS diagnostics, cardiac attenuation QC, and scanner-harmonic QC.
+
+Set it to ``false`` for ordinary EEG or for data that enters the native MNE
+EEG-fMRI correction workflow without prior Analyzer processing. The additional
+Analyzer-specific validation and QC steps are then omitted.
 
 .. seealso::
 

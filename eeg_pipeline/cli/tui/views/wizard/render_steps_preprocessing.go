@@ -101,7 +101,7 @@ func (m Model) renderPreprocessingICA() string {
 
 	labelWidth := defaultLabelWidth
 
-	methods := []string{"fastica", "infomax", "picard"}
+	methods := []string{"extended_infomax", "fastica", "infomax", "picard"}
 	methodVal := methods[m.prepICAAlgorithm]
 
 	compVal := fmt.Sprintf("%.2f", m.prepICAComp)
@@ -136,10 +136,9 @@ func (m Model) renderPreprocessingICA() string {
 		{"Use ICALabel", m.boolToOnOff(m.prepUseIcalabel), "Auto-label components"},
 		{"Prob Threshold", probThreshVal, "Label probability threshold"},
 		{"Labels to Keep", labelsVal, "Comma-separated (e.g., brain,other)"},
-		{"Keep MNE-BIDS Bads", m.boolToOnOff(m.prepKeepMnebidsBads), "Keep MNE-BIDS flagged components"},
 	}
 
-	// flatten with section offsets matching advancedCursor indices (0=UseICALabel,1=Method,2=Comp,3=ProbThresh,4=Labels,5=KeepBads)
+	// Flatten with section offsets matching advancedCursor indices.
 	allOptions := []struct {
 		label string
 		value string
@@ -150,7 +149,6 @@ func (m Model) renderPreprocessingICA() string {
 		{labelOptions[0].label, labelOptions[0].value, labelOptions[0].hint},
 		{labelOptions[1].label, labelOptions[1].value, labelOptions[1].hint},
 		{labelOptions[2].label, labelOptions[2].value, labelOptions[2].hint},
-		{labelOptions[3].label, labelOptions[3].value, labelOptions[3].hint},
 	}
 
 	b.WriteString(styles.RenderPreviewSubHeader("DECOMPOSITION") + "\n")
@@ -162,9 +160,7 @@ func (m Model) renderPreprocessingICA() string {
 	b.WriteString("\n" + styles.RenderPreviewSubHeader("LABELING") + "\n")
 	for i := 2; i < len(allOptions); i++ {
 		opt := allOptions[i]
-		// cursor mapping: UseICALabel=0, Method=1, Comp=2, ProbThresh=3, Labels=4, KeepBads=5 — but original order in m.advancedCursor is 0-5
-		// preserve original cursor indices from the original flat list
-		cursorIdx := []int{0, 3, 4, 5}[i-2]
+		cursorIdx := []int{0, 3, 4}[i-2]
 		isFocused := cursorIdx == m.advancedCursor
 		b.WriteString(m.renderConfigRow(opt.label, opt.value, opt.hint, isFocused, labelWidth) + "\n")
 	}

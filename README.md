@@ -46,6 +46,44 @@ MNE-Python, Nilearn, NumPy, SciPy, pandas, and scikit-learn.
 - Native simultaneous EEG-fMRI gradient and pulse-artifact correction from original 5 kHz recordings
 - Scriptable CLI commands and guided terminal UI workflows
 
+## Typical EEG Preprocessing
+
+The maintained MNE workflow separates fitting, manual review, and cleaning so
+ICA decisions remain inspectable:
+
+1. Convert EEG to BIDS and merge behavioral events.
+2. Detect bad channels with PyPREP. For a shared cross-run ICA, set
+   `pyprep.bad_channel_sync_policy=subject_union`.
+3. Run `eeg-pipeline preprocessing ica`, inspect the MNE HTML report and
+   `*_proc-ica_components.tsv`, and record any manual exclusions.
+4. Run `eeg-pipeline preprocessing epochs` with
+   `ica.manual_review_complete=true` to apply the reviewed ICA and reject bad
+   epochs.
+
+For BrainVision Analyzer-corrected 1 kHz EEG, preserve the volume and R-peak
+annotations during BIDS conversion and set
+`preprocessing.brainvision_analyzer.enabled=true`. This enables strict
+marker-dependent cardiac and scanner-artifact quality checks. Data entering
+from the original 5 kHz recording instead uses the separate native EEG-fMRI
+artifact-correction workflow before the stages above.
+
+The optional `ica.band_specific_report.enabled=true` setting adds independent
+delta/theta, alpha, beta, gamma, and 1–30 Hz ICA diagnostics to the HTML report.
+These decompositions are exploratory: the standard 1–100 Hz ICA and its
+reviewed component table remain authoritative for cleaning.
+
+Set `ica.cardiac_review.enabled=true` to add a manual ECG review before the ICA
+component dossiers. It detects R peaks directly from the ECG channel, plots
+run-level signals, and shows every standard ICA component with its R-locked
+waveform and MNE ECG-correlation and CTPS outputs. It adds no pipeline-specific
+score, quality label, ranking, recommendation, or automatic exclusion and does
+not depend on Analyzer R annotations.
+
+See the [EEG preprocessing quick start](docs/user_guide/quickstart.rst),
+[CLI reference](docs/user_guide/cli/preprocessing.rst), and
+[scientific methods](docs/methods/eeg/preprocessing.rst) for commands, outputs,
+and interpretation guidance.
+
 ## Study-Specific Guides
 
 - [Native EEG-fMRI artifact correction](docs/native_eeg_fmri_artifact_correction.md) for the fixed

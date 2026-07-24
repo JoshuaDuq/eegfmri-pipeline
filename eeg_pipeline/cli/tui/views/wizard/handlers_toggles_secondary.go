@@ -377,9 +377,6 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optPrepICAAlgorithm:
 		m.prepICAAlgorithm = (m.prepICAAlgorithm + 1) % 4
 		m.useDefaultAdvanced = false
-	case optPrepKeepMnebidsBads:
-		m.prepKeepMnebidsBads = !m.prepKeepMnebidsBads
-		m.useDefaultAdvanced = false
 	case optIcaLabelsToKeep:
 		m.startTextEdit(textFieldIcaLabelsToKeep)
 		m.useDefaultAdvanced = false

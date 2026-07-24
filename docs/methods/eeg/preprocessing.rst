@@ -26,7 +26,7 @@ EEG Preprocessing
 
    .. grid-item-card:: CLI
 
-      ``eeg-pipeline preprocessing [full | bad-channels | ica | epochs]``
+      ``eeg-pipeline preprocessing [bad-channels | ica | epochs]``
 
    .. grid-item-card:: Config
 
@@ -98,10 +98,10 @@ clean epochs and derivatives are written.
      - Only runs when ``pyprep.bad_channel_sync_policy: "subject_union"``. Default ``"per_run"`` keeps each run's bads independent. When enabled, takes the union of bads across runs per subject and writes it back to every run's ``channels.tsv`` before ICA
    * - 3
      - MNE-BIDS-Pipeline (ICA fit)
-     - Subprocess: ``init`` → ``_01`` → ``_04`` → ``_05`` → ``_06a1`` — bandpass, artifact regression, extended Infomax ICA
+     - Subprocess: ``init`` → ``_01`` → ``_04`` → ``_05`` → ``_06a1`` → ``_06a2`` — bandpass, artifact regression, near-rank extended Infomax ICA, and native artifact classification
    * - 4
-     - ``run_ica_label`` / ICLabel
-     - Probabilistic component classes; exclude when :math:`p > 0.8` and class not in ``ica.labels_to_keep`` (default retain brain + other)
+     - MNE-BIDS-Pipeline / ICLabel review
+     - Native ICLabel probabilities and exclusion candidates are written to the component table for manual review before epoching
    * - 5
      - MNE-BIDS-Pipeline (epochs)
      - ``_07`` → ``_08a`` → ``_09`` — make epochs, apply ICA, PTP / autoreject
@@ -295,8 +295,8 @@ Configuration
      - ``"extended_infomax"``
      - ICA algorithm. Options: ``"extended_infomax"``, ``"picard"``, ``"fastica"``
    * - ``ica.n_components``
-     - ``0.99``
-     - Component count: float = variance explained; int = exact count
+     - ``null``
+     - Near-rank decomposition; float = variance explained; int = exact count
    * - ``ica.l_freq``
      - ``1.0``
      - High-pass cutoff for ICA fitting epochs (Hz)
@@ -321,24 +321,88 @@ Configuration
 Step 4 — ICA Component Labeling
 ---------------------------------
 
-.. container:: module-ref
-
-   Module: ``preprocessing/pipeline/ica.py`` → ``run_ica_label()``
-
-Automated classification of :term:`ICA` components using MNE-ICAlabel, which wraps the
-:term:`ICLabel` deep learning classifier.
+MNE-BIDS-Pipeline's native MNE-ICLabel integration classifies components and
+writes the standard ``*_proc-ica_components.tsv`` table. Epoch creation remains
+blocked until that table has been reviewed and
+``ica.manual_review_complete: true`` has been set.
 
 Method
 ~~~~~~
 
-1. Load the fitted ICA object and its epochs.
-2. Apply average reference to the epochs (required by ICLabel).
-3. Classify each component via ``label_components(epochs, ica, method="iclabel")``.
-   :term:`ICLabel` assigns each component a probability :math:`p_k` over 7 classes.
-4. Exclude component :math:`i` when :math:`\max_k p_k > 0.8` **and**
-   :math:`\arg\max_k p_k \notin` ``ica.labels_to_keep``.
-5. Write component status to ``*_proc-ica_components.tsv``.
-6. Save the updated ICA object with ``ica.exclude`` set.
+1. Fit ICA on average-referenced, 1–100 Hz data.
+2. Assign a probability to every ICLabel class for every component.
+3. Flag a component when a non-retained class reaches its configured exclusion
+   threshold (default 0.8) and neither retained class reaches MNE-BIDS-Pipeline's
+   class threshold.
+4. Add Analyzer-marker CTPS scores as diagnostic columns without changing
+   component status.
+5. Review and edit ``*_proc-ica_components.tsv``.
+6. Set ``ica.manual_review_complete: true`` and run ``epochs`` to apply the
+   reviewed exclusions.
+
+Direct ECG and Cardiac ICA Review
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``ica.cardiac_review.enabled`` is true, R peaks are detected directly from
+the configured ECG channel with MNE's ECG detector. This diagnostic therefore
+remains available when BrainVision Analyzer did not preserve or detect every R
+marker. Each run shows a representative ECG segment with detected peaks,
+beat-to-beat heart rate, and R-locked EEG global field power before versus after
+the current provisional ICA exclusions. All runs remain visible and contribute
+to the component display; the pipeline does not assign a run-quality grade.
+
+The report then presents one carousel slide per standard ICA component. Each
+slide combines the component topography, run-level R-locked source averages,
+normalized ECG timing, and MNE run-resolved ECG-correlation and CTPS outputs. The
+median curve and 16th–84th
+percentile band summarize variation between runs rather than treating individual
+heartbeats as independent subjects. CTPS uses MNE's sampling-aware automatic
+threshold by default. MNE flags are displayed without a pipeline-specific score,
+classification, ranking, or recommendation and never modify ``ICA.exclude`` or
+the component TSV status. The slide also states the component's current ICA status
+and exclusion reason. The evidence is placed before the frequency-specific
+dossiers so it can inform manual review.
+
+ICA Component Review and Exploratory Band Appendix
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``ica.band_specific_report.enabled`` is true, the pipeline additionally
+adds authoritative component-review dossiers before MNE's standard ICA component
+section. Each frequency-band section is a carousel ordered by the standard ICA
+component number. A slide keeps that component's topography, band-limited Welch
+spectrum, grand-average DPSS multitaper TFR, and all configured condition TFRs
+together. ICLabel probability and the current automatic exclusion status remain
+visible in the slide title and caption.
+
+The report also retains independent extended-infomax decompositions fitted to
+1–8, 8–13, 13–30, 30–100, and 1–30 Hz copies of the ICA-fitting epochs as an
+exploratory appendix. Component numbers in these independent decompositions do
+not identify the same source across bands and never control artifact removal.
+
+The TFR reproduces the FieldTrip ``mtmconvol`` convention with 1 Hz frequency
+spacing, 100 ms time spacing, a −5 to −0.01 second dB baseline, and band-specific
+windows and half-bandwidth smoothing: 3 seconds / ±1 Hz for 1–8 Hz, 2 seconds /
+±1.5 Hz for alpha, 2 seconds / ±2.5 Hz for beta, and 1 second / ±5 Hz for gamma.
+Figures use baseline-relative dB and symmetric color scaling. Condition A and B
+share one scale so their amplitudes can be compared directly; the A-minus-B
+difference uses its own zero-centred symmetric scale.
+
+Configured ``ica.band_specific_report.comparisons`` are evaluated twice. During
+``ica``, step ``_07_make_epochs`` creates pre-ICA task epochs solely for
+provisional component-review TFRs; ICA is not applied and trials are not rejected.
+During ``epochs``, original MNE event-selection identities map the retained clean
+epochs back to rows of the saved pre-ICA task epochs, and the aligned
+``proc-clean_events.tsv`` supplies the requested metadata column. Each comparison
+displays group A, group B, and baseline-normalized group A minus group B. Missing
+columns, values, or trials are hard errors. Provisional dossiers are replaced in
+place by the finalized retained-epoch dossiers.
+
+The independent appendix decompositions are diagnostic only. A spatial
+topography is not itself frequency-filtered; it is the mixing pattern estimated
+from band-filtered data. ICLabel was developed for conventional broadband
+decompositions, so its narrow-band results are explicitly labeled exploratory
+and never modify the authoritative 1–100 Hz component table or the components
+applied during epoch creation.
 
 ICLabel Classes
 ~~~~~~~~~~~~~~~
@@ -537,14 +601,12 @@ Execution Modes
 
    * - Mode
      - Steps executed
-   * - ``full``
-     - Bad channels → ICA fit → ICA label → Epochs → Statistics
    * - ``bad-channels``
      - Bad channel detection only
    * - ``ica``
      - ICA fitting + ICA labeling only
    * - ``epochs``
-     - Epoch creation + statistics (requires ICA already fitted)
+     - Epoch creation + statistics (requires reviewed ICA and explicit acknowledgement)
 
 Output Structure
 ----------------
@@ -554,10 +616,10 @@ Output Structure
    derivatives/preprocessed/eeg/
    ├── sub-XXXX/
    │   └── eeg/
-   │       ├── sub-XXXX_task-<task>_proc-icafit_ica.fif
-   │       ├── sub-XXXX_task-<task>_proc-icafit_epo.fif
-   │       ├── sub-XXXX_task-<task>_proc-ica_ica.fif
-   │       ├── sub-XXXX_task-<task>_proc-ica_components.tsv
+   │       ├── sub-XXXX_proc-icafit_ica.fif
+   │       ├── sub-XXXX_proc-icafit_epo.fif
+   │       ├── sub-XXXX_proc-ica_ica.fif
+   │       ├── sub-XXXX_proc-ica_components.tsv
    │       ├── sub-XXXX_task-<task>_proc-clean_epo.fif
    │       ├── sub-XXXX_task-<task>_proc-clean_events.tsv     # event-related mode
    │       ├── sub-XXXX_task-<task>_bads.tsv
@@ -568,6 +630,5 @@ Output Structure
    │       ├── sub-XXXX_task-<task>_power+<cond>_avg-tfr.h5     # (optional, per-condition average when average=True)
    │       └── sub-XXXX_task-<task>_itc+<cond>_avg-tfr.h5       # (optional, per-condition ITC when average=True)
    ├── pyprep_task_<task>_log.csv
-   ├── icalabel_task_<task>_log.csv
    ├── task_<task>_preprocessing_stats.tsv
    └── task_<task>_preprocessing_stats_desc.tsv

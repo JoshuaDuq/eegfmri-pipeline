@@ -333,7 +333,6 @@ func (m Model) matchPreprocessingICALine(line string) int {
 		"Components",
 		"Prob Threshold",
 		"Labels to Keep",
-		"Keep MNE-BIDS Bads",
 	}
 	return indexOfContains(line, labels)
 }
@@ -369,9 +368,6 @@ func (m *Model) handlePreprocessingICAMouse(line string) bool {
 	case strings.Contains(label, "Labels to Keep"):
 		m.advancedCursor = 4
 		m.startTextEdit(textFieldIcaLabelsToKeep)
-		return true
-	case strings.Contains(label, "Keep MNE-BIDS Bads"):
-		m.prepKeepMnebidsBads = !m.prepKeepMnebidsBads
 		return true
 	default:
 		return false

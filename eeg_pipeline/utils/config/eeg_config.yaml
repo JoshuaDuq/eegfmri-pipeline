@@ -250,6 +250,19 @@ preprocessing:
       channels: ["Fp1", "Fp2", "FT9", "FT10", "TP9", "TP10"]
       band: [30.0, 45.0]
       window: *active_window
+  brainvision_analyzer:
+    # Enable only when BrainVision Analyzer scanner/pulse correction precedes MNE.
+    enabled: true
+    pulse_artifact_qc:
+      minimum_bpm: 45.0
+      maximum_bpm: 80.0
+      minimum_marker_fraction: 0.8
+      minimum_recording_coverage: 0.8
+    cardiac_artifact_qc:
+      ctps_threshold: 0.1
+      ctps_epoch_window: [-0.25, 0.5]
+      baseline: [-0.25, -0.05]
+      measurement_window: [-0.05, 0.4]
   scanner_harmonic_qc:
     frequency_range_hz: [15.0, 90.0]
     welch_duration_seconds: 4.0
@@ -274,10 +287,39 @@ pyprep:
 ica:
   algorithm: "extended_infomax"
   method: "extended_infomax"
-  n_components: 0.99
+  n_components: null
   l_freq: 1.0
+  h_freq: 100.0
+  reject: "autoreject_local"
+  use_icalabel: true
+  use_ecg_detection: false
+  use_eog_detection: false
+  require_manual_review: true
+  manual_review_complete: false  # Set true only after reviewing *_proc-ica_components.tsv.
+  process_raw_clean: true
   probability_threshold: 0.8
   labels_to_keep: ["brain", "other"]
+  # Optional manual-review evidence for residual cardiac artifact. R peaks are
+  # detected from the ECG signal and do not require Analyzer R annotations.
+  cardiac_review:
+    enabled: false
+    ecg_channel: "ECG"
+    epoch_window: [-0.4, 0.6]
+    baseline: [-0.4, -0.1]
+    measurement_window: [0.0, 0.4]
+    ctps_threshold: "auto"
+    representative_window_seconds: 10.0
+  band_specific_report:
+    enabled: false
+    fit_decim: 2
+    tfr:
+      frequency_step_hz: 1.0
+      time_min_s: -5.0
+      time_max_s: 14.4
+      time_step_s: 0.1
+      baseline_tmin_s: -5.0
+      baseline_tmax_s: -0.01
+    comparisons: []
 
 epochs:
   # IMPORTANT: Keep epochs.tmin earlier than the earliest baseline time window.

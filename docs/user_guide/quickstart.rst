@@ -44,7 +44,7 @@ join EEG features, fMRI betas, and behavioral targets.
       **In:** BIDS EEG (``.vhdr`` · ``.edf`` · ``.fif``) + ``events.tsv`` (event-related mode)
 
       PyPREP bad-channel detection (3 iterations, optional RANSAC) ·
-      extended Infomax ICA (99% variance, 1 Hz HP) · ICLabel (p > 0.8) ·
+      near-rank extended Infomax ICA (1 Hz HP) · ICLabel (p > 0.8) ·
       epoching ``[−7, 15] s``, baseline ``[−0.2, 0] s``, autoreject.
 
       **Out:** ``proc-clean_epo.fif`` · ``proc-clean_events.tsv`` (event-related mode) · ICA logs
@@ -296,11 +296,11 @@ Use the tabs below for the full command matrix and focused examples.
 
    .. tab-item:: EEG Preprocessing
 
-      Operates on BIDS EEG data and writes clean epochs and ICA logs
+      Operates on BIDS EEG data and writes clean epochs and ICA metadata
       to ``derivatives/preprocessed/eeg/``.
 
       **Output:** ``*_proc-clean_epo.fif``, ``*_proc-clean_events.tsv`` (event-related mode),
-      ``icalabel_task_*_log.csv``, ``pyprep_task_*_log.csv``.
+      ``*_proc-ica_components.tsv``, ``pyprep_task_*_log.csv``.
 
       Modes:
 
@@ -310,17 +310,13 @@ Use the tabs below for the full command matrix and focused examples.
 
          * - Mode
            - What it does
-         * - ``full``
-           - Runs bad-channel detection, ICA fitting, ICA labeling, and epoch
-             creation in sequence. Use this for a fresh subject.
          * - ``bad-channels``
            - PyPREP bad-channel detection only (deviation + correlation, optional
              RANSAC). Updates ``channels.tsv``. Cross-run synchronization is
              optional via ``pyprep.bad_channel_sync_policy=subject_union``.
          * - ``ica``
-           - Fits ICA (extended Infomax, 99% variance, 1 Hz high-pass) via
-             MNE-BIDS-Pipeline, then labels components with ICLabel
-             (threshold ``p > 0.8``; keeps ``brain`` and ``other``).
+           - Fits near-rank ICA via MNE-BIDS-Pipeline and labels components
+             with native ICLabel. Review the component table before epoching.
          * - ``epochs``
            - Creates epochs from clean ICA-applied data. Default window:
              ``tmin = -7.0 s``, ``tmax = 15.0 s``, baseline ``[-0.2, 0.0] s``,
@@ -330,11 +326,11 @@ Use the tabs below for the full command matrix and focused examples.
 
       .. code-block:: bash
 
-         eeg-pipeline preprocessing full --subject 0001
-         eeg-pipeline preprocessing full --all-subjects
          eeg-pipeline preprocessing bad-channels --subject 0001 --ransac
          eeg-pipeline preprocessing ica --subject 0001
-         eeg-pipeline preprocessing epochs --subject 0001 --tmin -7.0 --tmax 15.0
+         # Review component exclusions before continuing.
+         eeg-pipeline preprocessing epochs --subject 0001 --tmin -7.0 --tmax 15.0 \
+           --set ica.manual_review_complete=true
 
       See :doc:`../methods/eeg/preprocessing` for algorithm details and
       default parameter values.
@@ -619,27 +615,88 @@ Use the tabs below for the full command matrix and focused examples.
 6. Typical Full Workflow
 ------------------------
 
-A complete subject-level run from raw BIDS data to ML-ready features:
+For the pain-study BrainVision recordings, the typical preprocessing sequence
+starts with the Analyzer-processed 1 kHz triplets and merges PsychoPy before any
+MNE cleaning. Preserve all annotations so volume and pulse markers remain
+available for EEG-fMRI QC.
 
 .. code-block:: bash
 
-   # 1. Validate inputs and confirm subject discovery
+   # 1. BrainVision Analyzer 1 kHz source -> BIDS
+   python studies/pain_study/scripts/run_paradigm_specific.py eeg-raw-to-bids \
+     --source-root /path/to/source_data \
+     --bids-root /path/to/bids_output/eeg \
+     --task thermalactive \
+     --subject 0014 \
+     --trim-to-first-volume \
+     --keep-all-annotations
+
+   # 2. Validate PsychoPy alignment without writing, then merge it
+   python studies/pain_study/scripts/run_paradigm_specific.py merge-psychopy \
+     --source-root /path/to/source_data \
+     --bids-root /path/to/bids_output/eeg \
+     --task thermalactive --subject 0014 --dry-run
+   python studies/pain_study/scripts/run_paradigm_specific.py merge-psychopy \
+     --source-root /path/to/source_data \
+     --bids-root /path/to/bids_output/eeg \
+     --task thermalactive --subject 0014
+
+   # 3. Detect bad channels and use one channel set for the shared cross-run ICA
+   eeg-pipeline preprocessing bad-channels \
+     --subject 0014 --task thermalactive \
+     --bids-root /path/to/bids_output/eeg \
+     --deriv-root /path/to/derivatives \
+     --set preprocessing.brainvision_analyzer.enabled=true \
+     --set pyprep.bad_channel_sync_policy=subject_union
+
+   # 4. Fit ICA and generate pre-review component dossiers plus exploratory band ICAs
+   eeg-pipeline preprocessing ica \
+     --subject 0014 --task thermalactive \
+     --bids-root /path/to/bids_output/eeg \
+     --deriv-root /path/to/derivatives \
+     --set preprocessing.brainvision_analyzer.enabled=true \
+     --set pyprep.bad_channel_sync_policy=subject_union \
+     --set ica.cardiac_review.enabled=true \
+     --set ica.band_specific_report.enabled=true
+
+   # 5. Review each component dossier and *_proc-ica_components.tsv, then create epochs
+   eeg-pipeline preprocessing epochs \
+     --subject 0014 --task thermalactive \
+     --bids-root /path/to/bids_output/eeg \
+     --deriv-root /path/to/derivatives \
+     --set preprocessing.brainvision_analyzer.enabled=true \
+     --set pyprep.bad_channel_sync_policy=subject_union \
+     --set ica.manual_review_complete=true
+
+The Analyzer-specific option fails when preserved post-trim R-peak markers are
+missing or invalid. Do not silently disable it unless the run is intentionally
+being processed without marker-dependent cardiac QC.
+
+A complete downstream run from BIDS data to ML-ready features is:
+
+.. code-block:: bash
+
+   # 1. Validate BIDS inputs and confirm subject discovery
    eeg-pipeline validate quick
    eeg-pipeline info subjects
 
-   # 2. Preprocess all subjects (bad channels → ICA → epochs)
-   eeg-pipeline preprocessing full --all-subjects
+   # 2. Fit ICA and review the generated component tables
+   eeg-pipeline preprocessing ica --all-subjects
 
-   # 3. Extract features in ML-safe mode
+   # 3. After component review, apply ICA and create epochs
+   eeg-pipeline preprocessing epochs --all-subjects \
+     --set ica.manual_review_complete=true
+
+   # 4. Extract features in ML-safe mode
    eeg-pipeline features compute --all-subjects \
      --analysis-mode trial_ml_safe \
      --categories power connectivity aperiodic erp erds itpc pac
 
-   # 4. Run behavioral statistics (correlations + temporal)
+   # 5. Run behavioral statistics (correlations + temporal)
    eeg-pipeline behavior compute --all-subjects \
      --computations correlations temporal
 
-   # 5. Run cross-subject regression and feature importance
+   # 6. Run cross-subject regression and feature importance
    eeg-pipeline ml regression --all-subjects
    eeg-pipeline ml shap --all-subjects
 

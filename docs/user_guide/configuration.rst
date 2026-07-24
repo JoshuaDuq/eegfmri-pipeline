@@ -269,6 +269,42 @@ ICA
    * - ``ica.labels_to_keep``
      - ``["brain", "other"]``
      - ICLabel classes to retain as clean components
+   * - ``ica.cardiac_review.enabled``
+     - ``false``
+     - Add direct ECG, R-locked EEG, and MNE component evidence for manual review
+   * - ``ica.cardiac_review.ecg_channel``
+     - ``"ECG"``
+     - ECG channel used for signal-based R-peak detection
+   * - ``ica.cardiac_review.epoch_window`` / ``baseline``
+     - ``[-0.4, 0.6]`` / ``[-0.4, -0.1]``
+     - R-locked review epoch and source-standardization baseline (seconds)
+   * - ``ica.cardiac_review.measurement_window``
+     - ``[0.0, 0.4]``
+     - Window used to select the displayed R-locked EEG topography
+   * - ``ica.cardiac_review.ctps_threshold``
+     - ``"auto"``
+     - Sampling-aware MNE CTPS threshold; may instead be an explicit number in ``(0, 1]``
+   * - ``ica.band_specific_report.enabled``
+     - ``false``
+     - Add standard-ICA component dossiers by band and exploratory independent band-ICA appendices
+   * - ``ica.band_specific_report.fit_decim``
+     - ``2``
+     - Temporal decimation used only while fitting the additional diagnostic ICAs
+   * - ``ica.band_specific_report.tfr.frequency_step_hz``
+     - ``1.0``
+     - FieldTrip-style frequency spacing
+   * - ``ica.band_specific_report.tfr.time_min_s`` / ``time_max_s``
+     - ``-5.0`` / ``14.4``
+     - Displayed TFR interval
+   * - ``ica.band_specific_report.tfr.time_step_s``
+     - ``0.1``
+     - TFR output time spacing
+   * - ``ica.band_specific_report.tfr.baseline_tmin_s`` / ``baseline_tmax_s``
+     - ``-5.0`` / ``-0.01``
+     - Baseline used for decibel normalization
+   * - ``ica.band_specific_report.comparisons``
+     - ``[]``
+     - Optional clean-events metadata columns and value groups for condition contrasts
 
 .. _configuration-epochs:
 
