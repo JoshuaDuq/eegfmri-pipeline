@@ -1,15 +1,34 @@
-"""Configurable thresholds for the subject HTML report.
+"""Configurable settings for the subject HTML report.
 
-Every value here decides what the report *flags*, not what the pipeline computes, so a
+Two kinds of value live here, and the distinction decides what belongs.
+
+Thresholds and display choices decide what the report *flags* and how it draws, so a
 site can tune the warnings to its montage and acquisition without touching a derivative.
-Defaults match the module-level constants the report used before these became
-configurable.
+
+Acquisition descriptions decide what the report can *find*. Marker labels, montage
+naming, and the window an evoked response occupies are properties of a recording setup,
+not of this pipeline, and a report that hardcoded them would silently omit a panel on any
+dataset that spells them differently. Defaults match this project's own acquisition.
+
+Values that define a *method* rather than a setup stay as module constants where they are
+used — the harmonic peak and background fractions, the residual quantile the aperiodic
+fit trims at, the minimum counts below which a measurement is not attempted. Exposing
+those would invite tuning an estimator per subject.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
+
+from eeg_pipeline.preprocessing.report.aperiodic import DEFAULT_FIT_RANGE_HZ
+from eeg_pipeline.preprocessing.report.preservation import (
+    ALPHA_BAND_HZ,
+    DEFAULT_RESPONSE_WINDOW_S,
+    POSTERIOR_PATTERN,
+)
+from eeg_pipeline.preprocessing.report.scanner import VOLUME_MARKER_DESCRIPTION
+from eeg_pipeline.preprocessing.pulse_artifact_qc import PULSE_MARKER_DESCRIPTION
 
 
 def _optional_float(block: Mapping[str, Any], key: str) -> float | None:
@@ -59,6 +78,24 @@ class ReportSettings:
     comb_welch_seconds: float = 8.0
     #: Window over which time-resolved amplitude is pooled.
     continuity_window_seconds: float = 1.0
+    #: Band the aperiodic background is fitted over. Keep it below the line-noise
+    #: fundamental so the notch and its skirts cannot tilt the slope.
+    aperiodic_fit_range_hz: tuple[float, float] = DEFAULT_FIT_RANGE_HZ
+    #: Annotation marking each scanner volume. A dataset that spells it differently, or
+    #: has none, simply gets no gradient section.
+    volume_marker_description: str = VOLUME_MARKER_DESCRIPTION
+    #: Annotation marking each detected heartbeat.
+    pulse_marker_description: str = PULSE_MARKER_DESCRIPTION
+    #: Window the evoked split halves are correlated over, in seconds from onset. A
+    #: paradigm whose response falls outside it reports a reliability near zero for a
+    #: sound recording, so this must match the paradigm rather than the other way round.
+    response_window_s: tuple[float, float] = DEFAULT_RESPONSE_WINDOW_S
+    #: Band searched for the posterior rhythm used as preservation evidence.
+    alpha_band_hz: tuple[float, float] = ALPHA_BAND_HZ
+    #: Regular expression selecting the posterior sensors that rhythm is expected over.
+    #: Montage-dependent: a non-10-20 naming scheme needs its own pattern, or the
+    #: preservation panel finds no channels to measure.
+    posterior_channel_pattern: str = POSTERIOR_PATTERN
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any] | None) -> ReportSettings:

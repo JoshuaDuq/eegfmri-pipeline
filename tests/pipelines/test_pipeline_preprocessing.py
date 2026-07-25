@@ -87,10 +87,6 @@ def _preprocessing_import_stubs() -> dict[str, types.ModuleType]:
             get_condition_column_candidates=lambda config: (
                 config.get("event_columns.condition", []) if hasattr(config, "get") else []
             ),
-            # eeg_pipeline.infra.paths imports this at module scope. Leaving it off the
-            # stub made every test that reaches infra.paths depend on whether some
-            # earlier test had already imported it for real.
-            ConfigDict=dict,
         ),
         "eeg_pipeline.utils.config.roots": _make_module(
             "eeg_pipeline.utils.config.roots",
